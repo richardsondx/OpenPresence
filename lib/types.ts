@@ -44,6 +44,7 @@ export interface Bridge {
   capabilities: ConnectorCapabilities;
   credentialId?: string;
   keyPrefix?: string;
+  credentialRevokedAt?: string;
   lastSeenAt?: string;
   lastSyncAt?: string;
   coverage?: string;
@@ -83,6 +84,26 @@ export interface MirrorEvent {
 }
 
 export interface BridgeSyncState { bridgeId: string; cursor?: string; lastSyncAt?: string; status: "idle" | "syncing" | "healthy" | "degraded" | "offline"; error?: string; }
+
+export interface NativeChannelConnection {
+  id: string;
+  presenceId: string;
+  channelId: ChannelId;
+  kind: "x";
+  status: "connected" | "needs-attention";
+  access: "read" | "read-write";
+  account?: { id: string; username: string; name: string };
+  updatedAt: string;
+  createdAt: string;
+}
+
+export interface GhostProfile {
+  subject: string;
+  priorities: string;
+  preferences: string;
+  voice: string;
+  boundaries: string;
+}
 
 export interface ChannelCapability { id: string; label: string; description: string; }
 
@@ -142,10 +163,17 @@ export type ModelQuality = "low" | "medium" | "high" | "local";
 export interface AgentModelProfile { id: string; agentId: string; provider: ModelProvider; model: string; quality?: ModelQuality; connectionId?: string; capabilities: ModelRuntimeCapabilities; updatedAt: string; }
 export interface ProviderConnection { id: string; provider: ModelProvider; label: string; status: "available" | "needs-configuration" | "local"; endpoint?: string; secretConfigured?: boolean; createdAt: string; }
 export interface AgentToolBinding { id: string; agentId: string; toolId: string; provider?: string; model?: string; connectionId?: string; config?: Record<string, JsonValue>; }
+export interface AgentToolDefinition { id: string; name: string; description: string; scope: "agent" | "presence"; }
+export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
+  { id: "web.search", name: "Web search", description: "Retrieve public sources when an idea needs current evidence.", scope: "agent" },
+  { id: "asset.inspect", name: "Asset inspection", description: "Read operator-provided images and documents when they are relevant.", scope: "agent" },
+  { id: "chart.render", name: "Chart rendering", description: "Turn structured evidence into a visual explanation.", scope: "agent" },
+  { id: "channel.execute", name: "Channel execution", description: "Hand an approved Social Intent to the selected Presence connector.", scope: "presence" },
+];
 
 export interface ExecutionEnvelope { presenceId: string; affordances: Record<string, { mode: ExecutionMode }>; pacingProfile: "recommended" | "custom"; customPacing?: Record<string, JsonValue>; accountProtection: "guidance" | "auto-protect"; }
-export interface PresenceContext { presenceId: string; channel: ChannelId; publicIdentity: { displayName: string; handle?: string; mode: PresenceMode }; audienceContext?: string; voiceAdaptation?: string; availableAffordances: string[]; relevantRelationshipContext?: string; }
-export interface Presence { id: string; channel: ChannelId; handle: string; mode: PresenceMode; status: "live" | "paused" | "disconnected"; accent: string; capabilities: ChannelCapability[]; execution: Record<string, ExecutionMode>; executionEnvelope: ExecutionEnvelope; context: PresenceContext; pacing: "recommended" | "gentle" | "custom"; accountHealth: "healthy" | "elevated"; }
+export interface PresenceContext { presenceId: string; channel: ChannelId; publicIdentity: { displayName: string; handle?: string; mode: PresenceMode }; audienceContext?: string; voiceAdaptation?: string; availableAffordances: string[]; relevantRelationshipContext?: string; ghostProfile?: GhostProfile; }
+export interface Presence { id: string; channel: ChannelId; handle: string; mode: PresenceMode; status: "live" | "paused" | "disconnected"; accent: string; capabilities: ChannelCapability[]; execution: Record<string, ExecutionMode>; executionEnvelope: ExecutionEnvelope; context: PresenceContext; ghostProfile?: GhostProfile; pacing: "recommended" | "gentle" | "custom"; accountHealth: "healthy" | "elevated"; }
 
 export interface ChatMessage { id: string; role: "agent" | "operator"; content: string; timestamp: string; change?: string; }
 export interface Conversation { id: string; title: string; createdAt: string; updatedAt: string; messages: ChatMessage[]; }
@@ -155,7 +183,7 @@ export interface StandingIntent { id: string; agentId: string; presenceId?: stri
 export interface EntityRef { type: string; id: string; }
 export interface Publication { id: string; format: string; payload: JsonValue; assetIds: string[]; links: { url: string; label?: string }[]; createdAt: string; }
 export interface SocialIntent { id: string; agentId: string; presenceId: string; affordance: string; target?: EntityRef; publicationId?: string; priority: number; validity: { expiresAt?: string; staleAfterMs?: number }; state: "active" | "withdrawn" | "expired"; formedAt: string; updatedAt: string; standingIntentId?: string; }
-export interface Execution { id: string; socialIntentId: string; presenceId: string; affordance: string; mode: Exclude<ExecutionMode, "off">; status: ExecutionStatus; attempts: number; bridgeId?: string; idempotencyKey: string; target?: EntityRef; publication?: Publication; lease?: { executorId: string; claimedAt: string; expiresAt: string }; externalRef?: EntityRef; failure?: { code?: string; message: string; retryable?: boolean }; createdAt: string; updatedAt: string; executedAt?: string; }
+export interface Execution { id: string; socialIntentId: string; presenceId: string; affordance: string; mode: Exclude<ExecutionMode, "off">; status: ExecutionStatus; attempts: number; bridgeId?: string; connector?: ConnectorKind; idempotencyKey: string; target?: EntityRef; publication?: Publication; lease?: { executorId: string; claimedAt: string; expiresAt: string }; externalRef?: EntityRef; failure?: { code?: string; message: string; retryable?: boolean }; createdAt: string; updatedAt: string; executedAt?: string; }
 export interface Outcome { id: string; socialIntentId: string; executionId?: string; presenceId: string; status: "succeeded" | "failed" | "unknown"; observedAt: string; metrics: Record<string, number>; evidence?: EntityRef[]; }
 export interface LibrarySource { id: string; agentId: string; type: "local-folder" | "remote" | "url-collection" | "content-drop"; location: string; access: "read"; status: "available" | "indexing" | "failed"; }
 export interface Asset { id: string; agentId: string; sourceId?: string; type: "image" | "video" | "gif" | "audio" | "pdf" | "document" | "chart"; storagePath?: string; status: "queued" | "processing" | "ready" | "failed"; provenance: { origin: string; sourceUrl?: string; importedAt: string }; mimeType?: string; sizeBytes?: number; dimensions?: { width: number; height: number }; durationMs?: number; description?: string; topics?: string[]; transcript?: string; usageNotes?: string; createdAt: string; updatedAt: string; }
@@ -165,6 +193,14 @@ export interface ContentDrop { id: string; agentId: string; origin: string; brie
 
 export interface LiveEvent { id: string; type: "decision" | "execution" | "learning" | "memory" | "system"; title: string; detail: string; time: string; tone: EventTone; presenceId?: string; intentId?: string; executionId?: string; outcomeId?: string; }
 export interface CalendarSlot { id: string; label: string; instruction: string; day: string; time: string; objective: string; presence: string; mode: ExecutionMode; enabled: boolean; executionWindow: string; standingIntentId?: string; }
+export interface ActivitySummary {
+  current: { label: string; detail: string; tone: EventTone };
+  lastPulseAt?: string;
+  nextAttention: { label: string; detail: string };
+  nextIntent: { label: string; detail: string };
+  needsAttention: { count: number; label: string; detail: string };
+  rhythm: { attention: string; publishing: string; replies: string; quietHours: string };
+}
 /** Legacy projection kept for the first UI and older local databases. */
 export interface ActionRecord { id: string; intent: "post" | "reply" | "like" | "repost" | "quote" | "no_op"; target?: string; summary: string; status: "queued" | "review" | "executed" | "skipped" | "failed"; reason: string; createdAt: string; expiresAt?: string; socialIntentId?: string; executionId?: string; outcomeId?: string; }
 
@@ -172,7 +208,7 @@ export interface AgentWorkspaceSnapshot {
   onboarded: boolean; agent: Agent | null; presence: Presence | null; presences: Presence[]; activePresenceId: string | null;
   files: AgentFile[]; proposals: FileProposal[]; messages: ChatMessage[]; conversations: Conversation[]; activeConversationId: string | null;
   events: LiveEvent[]; calendar: CalendarSlot[]; actions: ActionRecord[]; metrics: { qualifiedFollows: number; conversations: number; opportunitiesIgnored: number; audienceHealth: number };
-  modelProfiles: AgentModelProfile[]; providerConnections: ProviderConnection[]; toolBindings: AgentToolBinding[]; changeSets: ChangeSet[]; standingIntents: StandingIntent[]; socialIntents: SocialIntent[]; executions: Execution[]; outcomes: Outcome[]; publications: Publication[]; librarySources: LibrarySource[]; assets: Asset[]; skills: Skill[]; agentSkills: AgentSkill[]; contentDrops: ContentDrop[]; channelDefinitions: ChannelDefinition[]; bridges: Bridge[]; mirrorObjects: MirrorObject[]; mirrorEvents: MirrorEvent[]; bridgeSync: BridgeSyncState[];
+  modelProfiles: AgentModelProfile[]; providerConnections: ProviderConnection[]; toolBindings: AgentToolBinding[]; changeSets: ChangeSet[]; standingIntents: StandingIntent[]; socialIntents: SocialIntent[]; executions: Execution[]; outcomes: Outcome[]; publications: Publication[]; librarySources: LibrarySource[]; assets: Asset[]; skills: Skill[]; agentSkills: AgentSkill[]; contentDrops: ContentDrop[]; channelDefinitions: ChannelDefinition[]; nativeConnections: NativeChannelConnection[]; bridges: Bridge[]; mirrorObjects: MirrorObject[]; mirrorEvents: MirrorEvent[]; bridgeSync: BridgeSyncState[];
 }
 
 export interface OpenPresenceState extends AgentWorkspaceSnapshot {
@@ -182,4 +218,4 @@ export interface OpenPresenceState extends AgentWorkspaceSnapshot {
 export interface CreateAgentInput { name: string; description: string; audience?: string; mode: PresenceMode; handle: string; accent: string; }
 export interface CreatePresenceInput { channel: ChannelId; handle: string; mode: PresenceMode; accent: string; channelDefinition?: ChannelDefinition; }
 export type Operation =
-  | { type: "reset" } | { type: "createAgent"; input: CreateAgentInput } | { type: "createAdditionalAgent"; input: CreateAgentInput } | { type: "selectAgent"; id: string } | { type: "createPresence"; input: CreatePresenceInput } | { type: "createChannel"; definition: ChannelDefinition } | { type: "createBridge"; input: { presenceId: string; name: string; kind: ConnectorKind; capabilities: ConnectorCapabilities } } | { type: "rotateBridgeKey"; id: string } | { type: "revokeBridge"; id: string } | { type: "markManualExecution"; id: string; externalRef: EntityRef } | { type: "selectPresence"; id: string } | { type: "selectConversation"; id: string } | { type: "newConversation" } | { type: "sendMessage"; content: string; conversationId?: string } | { type: "saveFile"; kind: FileKind; content: string } | { type: "resolveProposal"; id: string; decision: "approve" | "reject" } | { type: "addSlot"; instruction: string; day: string; time: string; objective: string; executionWindow: string; presenceId?: string } | { type: "editSlot"; id: string; instruction: string; day: string; time: string; objective: string; executionWindow: string } | { type: "createSkill"; name: string; description: string } | { type: "editSkill"; id: string; name: string; description: string } | { type: "configureProvider"; provider: ModelProvider; label: string; endpoint?: string; hasSecret?: boolean } | { type: "runPulse"; presenceId?: string } | { type: "setModel"; model: string; provider?: ModelProvider; quality?: ModelQuality } | { type: "runSlot"; id: string } | { type: "approveExecution"; id: string } | { type: "executeIntent"; id: string } | { type: "setPresence"; patch: Partial<Pick<Presence, "mode" | "status" | "pacing" | "execution">> };
+  | { type: "reset" } | { type: "createAgent"; input: CreateAgentInput } | { type: "createAdditionalAgent"; input: CreateAgentInput } | { type: "selectAgent"; id: string } | { type: "createPresence"; input: CreatePresenceInput } | { type: "createChannel"; definition: ChannelDefinition } | { type: "createBridge"; input: { presenceId: string; name: string; kind: ConnectorKind; capabilities: ConnectorCapabilities } } | { type: "rotateBridgeKey"; id: string } | { type: "revokeBridge"; id: string } | { type: "removeBridge"; id: string } | { type: "markManualExecution"; id: string; externalRef: EntityRef } | { type: "selectPresence"; id: string } | { type: "selectConversation"; id: string } | { type: "newConversation" } | { type: "sendMessage"; content: string; conversationId?: string } | { type: "saveFile"; kind: FileKind; content: string } | { type: "resolveProposal"; id: string; decision: "approve" | "reject" } | { type: "addSlot"; instruction: string; day: string; time: string; objective: string; executionWindow: string; presenceId?: string } | { type: "editSlot"; id: string; instruction: string; day: string; time: string; objective: string; executionWindow: string } | { type: "createSkill"; name: string; description: string } | { type: "editSkill"; id: string; name: string; description: string } | { type: "configureProvider"; provider: ModelProvider; label: string; endpoint?: string; hasSecret?: boolean; secret?: string } | { type: "runPulse"; presenceId?: string } | { type: "setModel"; model: string; provider?: ModelProvider; quality?: ModelQuality } | { type: "runSlot"; id: string } | { type: "approveExecution"; id: string } | { type: "executeIntent"; id: string } | { type: "setPresence"; patch: Partial<Pick<Presence, "mode" | "status" | "pacing" | "execution" | "ghostProfile">> };

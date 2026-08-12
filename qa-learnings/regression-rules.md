@@ -1,5 +1,149 @@
 # Regression rules
 
+## Rule: Agent tools must be discoverable at Agent scope
+
+**Defect class:** Information architecture / capability provenance
+
+**General principle:** A capability count is not useful unless the operator can see what is bound, why it exists, and which layer controls its authorization.
+
+**Project-specific risk:** Chat exposed “Tools available: 4” without naming the four capabilities or identifying where they were configured. This made Agent-owned mechanics look like hidden Presence settings and blurred the difference between a bound tool and an authorized channel action.
+
+**Project enforcement:** Manage Agent lists the named tool bindings with descriptions and scope. Chat uses “Tools bound” for the summary count. Presence settings remain the place for channel execution modes such as off, manual, review, and auto.
+
+**Executable protection:** `tests/runtime.test.ts` verifies the four seeded bindings are Agent-owned. `tests/e2e/openpresence.spec.ts` verifies all four are visible in Manage Agent and that Chat no longer says “Tools available”.
+
+**Apply when:** Adding or changing tools, skills, runtime capabilities, Chat provenance summaries, or Presence execution permissions.
+
+**Added:** 2026-08-12
+
+## Rule: Activity must expose current work, next attention, and rhythm
+
+**Defect class:** Operational visibility / false scheduler implication
+
+**General principle:** Live is an operational social stream, not analytics. The operator must be able to tell what the Presence is doing now, what will happen next, and what needs review; idle and paused states must be explicit.
+
+**Project-specific risk:** The former Live page showed historical events and aggregate counters but did not explain whether Jenny was currently doing anything, when she would look again, or whether a review item was waiting. That made a connected Presence appear inert and encouraged the UI to imply background cognition that the local runtime did not provide.
+
+**Project enforcement:** Activity derives a current state from Presence status, pulses, intents, and executions; shows the next standing intent or explicitly says attention is on demand; separates attention cadence from publishing/reply modes; and labels the native X mirror as connected but not yet observed when no observation loop has run.
+
+**Executable protection:** `tests/runtime.test.ts` covers idle, pulse, paused, and standing-intent summaries. `tests/e2e/openpresence.spec.ts` verifies the visible Now/Next/rhythm summary and a completed pulse. The implementation must not invent automatic scan times without a real scheduler source.
+
+**Apply when:** Changing Activity/Live, pulse behavior, schedules, execution review, channel observation, or Presence rhythm settings.
+
+**Added:** 2026-08-12
+
+## Rule: Ghost identity must be Presence-scoped, explicit, and reviewable
+
+**Defect class:** Agent identity boundary / AI grounding / operator control
+
+**General principle:** A Ghost should extend an operator or organization through context the operator explicitly provides and can inspect. The Agent must not fill missing operator preferences from its own identity, stale transcript, or private implementation context.
+
+**Project-specific risk:** Selecting “Me / my organization” previously changed only a mode flag. The UI gave the operator no place to define what the Ghost represented and no way to review the interpretation that would shape its replies.
+
+**Project enforcement:** Ghost profiles live on the individual Presence, are shown and edited in Presence settings, and are compiled into cognition only while that Presence is in Ghost mode. Empty fields remain explicitly unknown; Agent-wide meaning files are not rewritten.
+
+**Executable protection:** `tests/runtime.test.ts` verifies Presence-scoped storage, empty-field behavior, mode isolation, and protected Soul preservation. `tests/e2e/openpresence.spec.ts` verifies editing, review status, reload persistence, and Chat acknowledgment. A live browser cognition check verifies the selected Ghost profile is reflected in the next response.
+
+**Why QA missed it:** The previous Ghost implementation treated identity as a binary mode without an operator-owned representation profile or an inspectable cognition boundary.
+
+**Apply when:** Adding or changing Ghost mode, operator/organization identity, profile/preferences context, Agent prompt assembly, or identity review UI.
+
+**Added:** 2026-08-12
+
+## Rule: Navigation labels must distinguish destinations from state controls
+
+**Defect class:** Information architecture / state semantics
+
+**General principle:** A navigation label should describe the destination’s purpose, while buttons should describe the state transition they perform. Avoid using the same word for a page and an action/status concept when it creates ambiguity.
+
+**Project-specific risk:** “Live” was both the sidebar destination and a state label, while Settings exposed “Resume Presence”; users could not tell whether these were duplicate controls or different views.
+
+**Learned from:** Human-reported Presence settings and Live screenshots on 2026-08-12.
+
+**Project enforcement:** The `live` view is presented as “Activity” in navigation and the topbar; the Activity page retains “live/paused” as Presence state, and Settings retains Pause/Resume as the state-changing control.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts`, `tests/e2e/x-connection.spec.ts`, and `tests/e2e/small-desktop.spec.ts` navigate through the Activity label and verify the state lifecycle.
+
+**Apply when:** Renaming navigation, changing page purpose, adding state controls, or revising status language.
+
+## Rule: Workspace content must fill the usable app column
+
+**Defect class:** Responsive layout / flex sizing
+
+**General principle:** A flex child with auto margins must declare its intended width; otherwise the browser may shrink it to its content size and create unexplained whitespace around the primary task.
+
+**Project-specific risk:** The main OpenPresence pages rendered as a narrow centered column even on wide desktop screens, leaving the left and right sides of the workspace unused.
+
+**Learned from:** Human-reported desktop screenshots showing excessive whitespace around Live, Calendar, Settings, Chat, and Manage Agent on 2026-08-12.
+
+**Project enforcement:** `.workspace-content` uses an explicit responsive width, bounded maximum, and border-box sizing so page layouts receive the full usable workspace column; mobile retains its existing 20px gutters.
+
+**Executable protection:** `tests/e2e/small-desktop.spec.ts` verifies every primary page aligns the content frame with the workspace edges without horizontal overflow.
+
+**Apply when:** Changing shell sizing, page gutters, responsive breakpoints, or any flex/grid layout that owns the primary workspace.
+
+## Rule: Only Chat owns a locked viewport
+
+**Defect class:** Responsive layout / scroll ownership
+
+**General principle:** A fixed composer or internal transcript scroll must not impose `overflow: hidden` on unrelated pages. Scroll ownership should be scoped to the surface that needs it; long settings and planning pages must retain normal document scrolling.
+
+**Project-specific risk:** The shell’s Chat viewport rule was applied to every page, clipping the lower Presence settings capability rows and preventing page scrolling.
+
+**Learned from:** Human-reported Presence settings screenshots where vertical scrolling was unavailable on 2026-08-12.
+
+**Project enforcement:** `workspace-chat` receives the locked viewport and internal Chat history scroll; non-Chat `.workspace` and `.workspace-content` retain visible overflow and natural document height.
+
+**Executable protection:** `tests/e2e/small-desktop.spec.ts` verifies Settings creates document scroll and visible workspace overflow; existing Chat tests verify transcript-only scrolling and no document overflow.
+
+**Apply when:** Changing the shell, Chat composer, page scrolling, responsive viewport sizing, or adding long settings/planning content.
+
+## Rule: Native channel credentials must be Presence-scoped and usable
+
+**Defect class:** Integration architecture / secret handling / dead-end configuration
+
+**General principle:** A channel connection is different from an Agent model provider. Official channel credentials belong to the specific Presence, must be encrypted at rest, must be tested before activation, and must produce a real connector path for the capabilities the credential grants.
+
+**Project-specific enforcement:** X uses the Official X API section in Presence settings, stores raw credentials only in the encrypted `channel_credentials` table, exposes read-only versus read-write access from the tested account context, and routes native post delivery through `/api/state` and the execution ledger. Bridges remain a separate fallback connector.
+
+**Executable protection:** `tests/x-connection.test.ts` verifies encrypted storage, no raw secret in API state, read-only/read-write detection, OAuth 1.0a signing, disconnect cleanup, provider-vault storage, and native delivery. `tests/e2e/x-connection.spec.ts` verifies desktop/mobile test → save → reload persistence and a native X publication without creating a Bridge.
+
+**Why QA missed it:** The previous implementation presented provider configuration as if it stored usable credentials and treated a generic Bridge as the only live channel path; no test exercised a real channel credential lifecycle.
+
+**Apply when:** Adding or changing channel connectors, OAuth/API credential forms, secret storage, provider access, or external execution paths.
+
+**Added:** 2026-08-12
+
+## Rule: Revoked Bridge credentials must be identifiable and removable
+
+**Defect class:** Credential lifecycle / stale connector record
+
+**General principle:** Revocation must invalidate the secret while leaving enough redacted metadata for an operator to identify the affected credential; a disconnected connector should not become an undeletable tombstone.
+
+**Project-specific enforcement:** Bridge settings show only the credential prefix and revocation time when that audit record exists, explicitly state that the secret value is not recoverable, and offer Remove Bridge only after disconnection. Removal deletes the credential-vault row and Bridge/sync projection, preserves mirror history, records a removal event, and does not restore authentication. Legacy rows without a surviving credential record are labeled honestly as metadata-unavailable.
+
+**Executable protection:** `tests/runtime.test.ts` covers metadata hydration, secret non-recovery, vault deletion, and audit state; `tests/e2e/openpresence.spec.ts` covers the visible prefix, removal action, and post-removal UI.
+
+**Apply when:** Changing Bridge revocation, credential rotation, connector cleanup, audit events, or external adapter onboarding.
+
+**Added:** 2026-08-12
+
+## Rule: External credential failures must explain the next action
+
+**Defect class:** Third-party integration error handling / misleading toast
+
+**General principle:** External API failures should preserve the provider’s meaning while translating it into a safe, actionable product message; expected provider rejection should not look like an unhandled application crash.
+
+**Project-specific enforcement:** `lib/x.ts` maps exhausted credits, invalid credentials, permissions, and rate limits to user-facing guidance; `/api/x/manage` logs expected rejections without a stack trace. The X form links directly to the Developer Console and explains where Access Token and Secret come from.
+
+**Executable protection:** `tests/x-connection.test.ts` stubs a 402 `credits depleted` response and asserts the returned message names the X credit balance and next action. `tests/e2e/x-connection.spec.ts` asserts the normalized credential fields have equal rendered widths on desktop and mobile.
+
+**Why QA missed it:** The previous QA path only used the local X mock, so it covered success but not a real provider rejection or the resulting visual form state.
+
+**Apply when:** Handling OAuth/API failures, billing/rate limits, permission errors, or adding credential forms for external providers.
+
+**Added:** 2026-08-12
+
 ## Rule: Dialogs must center within the usable workspace
 
 **Defect class:** Modal layout / visual alignment
@@ -317,6 +461,86 @@
 **Apply when:** Changing execution envelopes, review queues, manual relay, Bridge delivery, or Live activity.
 
 **Added:** 2026-08-12
+
+## Rule: Chat must reveal the newest exchange after state changes
+
+**Defect class:** Chat UX / scroll state
+
+**General principle:** A conversational surface should open at the latest exchange and keep the latest user/Agent response visible after new content arrives. The composer remains outside the transcript’s scroll container.
+
+**Project-specific risk:** The transcript began at its historical top, leaving new Ollama responses below the fold despite the composer being visible.
+
+**Learned from:** Human-reported ChatGPT-style scrolling request on 2026-08-12.
+
+**Project enforcement:** `ContextChatView` scrolls a bottom sentinel into view whenever the active conversation or message count changes; `.chat-history` remains the sole scroll owner.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts` asserts the transcript scroll gap, composer placement, and no page-level overflow for desktop and mobile.
+
+**Apply when:** Changing conversation rendering, streaming/response updates, composer placement, or viewport sizing.
+
+## Rule: Provider model choices must come from the provider’s capabilities
+
+**Defect class:** AI runtime configuration / false availability
+
+**General principle:** A model picker must represent what the configured provider can actually run. Friendly labels may be used for discovery, but the persisted runtime value must be the provider’s exact identifier; unsupported capability classes must not be presented as valid choices.
+
+**Project-specific risk:** Brain exposed only three hard-coded Ollama names and omitted installed models. It also offered an image-only model to a text Chat surface.
+
+**Learned from:** Human-reported Ollama model catalog screenshot on 2026-08-12.
+
+**Project enforcement:** `/api/ollama/models` reads the connected Ollama catalog; Brain displays completion-capable models and persists their exact tags; Chat resolves friendly base names against that catalog before inference.
+
+**Executable protection:** `tests/x-connection.test.ts` verifies catalog filtering and tag resolution; `tests/e2e/openpresence.spec.ts` verifies model discovery through the visible Brain workflow.
+
+**Apply when:** Adding provider/model selectors, supporting new Ollama capabilities, or changing runtime dispatch.
+
+## Rule: Local model selectors must resolve against the installed model catalog
+
+**Defect class:** Local AI runtime / responsive interaction
+
+**General principle:** A friendly model selector may use a stable base name, but the runtime must resolve it against the provider’s actual installed identifiers before inference. Provider-specific errors must identify the missing model and available next actions.
+
+**Project-specific risk:** The selector sent `qwen2.5` while Ollama had `qwen2.5:7b-instruct`, producing repeated 404 responses. Chat also allowed the page itself to grow instead of reserving the viewport for the composer.
+
+**Learned from:** Human-reported Ollama error and Chat layout screenshots on 2026-08-12.
+
+**Project enforcement:** `lib/ai.ts` reads `/api/tags`, resolves exact or base-tag matches, and reports the installed catalog when no match exists. The Chat viewport uses a bounded workspace and gives scroll ownership to `.chat-history`.
+
+**Executable protection:** `tests/x-connection.test.ts` verifies tag resolution; `tests/e2e/openpresence.spec.ts` verifies transcript-only scrolling, composer placement, and no document overflow at desktop and mobile sizes.
+
+**Apply when:** Changing Ollama integration, model selectors, chat viewport sizing, or composer placement.
+
+## Rule: Agent chat must use the configured runtime or explain why it cannot
+
+**Defect class:** AI integration / false-success UX
+
+**General principle:** A conversational surface must not return a canned success response when no model request occurred. The selected provider and model must be invoked server-side, while missing credentials or unreachable local runtimes must produce actionable guidance.
+
+**Project-specific risk:** Chat displayed the selected Brain model but `sendMessage` returned a deterministic placeholder, making the app appear AI-enabled without using AI.
+
+**Learned from:** Human-reported chat screenshot on 2026-08-12.
+
+**Project enforcement:** `app/api/state/route.ts` sends `sendMessage` through `lib/ai.ts`; provider secrets are read only from the encrypted vault, and failures are written as explicit setup/runtime guidance.
+
+**Executable protection:** `tests/x-connection.test.ts` asserts the provider request, authorization boundary, model mapping, generated reply, and missing-provider behavior; `tests/e2e/openpresence.spec.ts` asserts a browser-visible runtime reply.
+
+**Apply when:** Changing Chat, Brain model selection, provider connections, or AI request adapters.
+
+## Rule: Live Presence state must override stale conversation history
+
+**Defect class:** Agent cognition / state synchronization
+
+**General principle:** Changes made in Presence settings are durable runtime state, not merely UI state. The next Agent response must use the live snapshot at request time even if an older message says something different.
+
+**Project-specific risk:** An Agent-owned Presence still answered that it was in Ghost mode because the transcript contained stale Ghost replies and the AI prompt did not define a precedence rule.
+
+**Learned from:** Human-reported Ghost → Agent-owned change not being recognized in Chat on 2026-08-12.
+
+**Project enforcement:** `app/api/state/route.ts` writes a visible acknowledgment for Presence setting changes, and `lib/ai.ts` includes an authoritative live Presence snapshot that explicitly overrides contradictory transcript history.
+
+**Executable protection:** `tests/x-connection.test.ts` verifies both the visible mode-change acknowledgment and the authoritative mode sent to the provider.
+
+**Apply when:** Changing Presence settings, Chat context construction, runtime prompt assembly, or persisted conversation state.
 
 ## Rule: Bridge mirror deletion and acknowledgement identity must be explicit
 

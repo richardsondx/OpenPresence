@@ -1,4 +1,4 @@
-import type { AgentFile, AgentModelProfile, AgentToolBinding, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, Execution, ExecutionEnvelope, FileKind, FileProposal, LiveEvent, OpenPresenceState, Operation, Outcome, Presence, PresenceContext, Publication, SocialIntent, StandingIntent } from "./types";
+import type { ActivitySummary, AgentFile, AgentModelProfile, AgentToolBinding, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, Execution, ExecutionEnvelope, FileKind, FileProposal, GhostProfile, LiveEvent, OpenPresenceState, Operation, Outcome, Presence, PresenceContext, Publication, SocialIntent, StandingIntent } from "./types";
 import { CHANNEL_CAPABILITIES, CHANNEL_EXTENSIONS } from "./types";
 
 const now = () => new Date().toISOString();
@@ -45,7 +45,7 @@ const fileContent = (kind: FileKind, input: CreateAgentInput, presence?: Presenc
 };
 
 export function initialState(): OpenPresenceState {
-  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, events: [], calendar: [], actions: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], toolBindings: [], changeSets: [], standingIntents: [], socialIntents: [], executions: [], outcomes: [], publications: [], librarySources: [], assets: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
+  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, events: [], calendar: [], actions: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], toolBindings: [], changeSets: [], standingIntents: [], socialIntents: [], executions: [], outcomes: [], publications: [], librarySources: [], assets: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
 }
 
 function makeFiles(input: CreateAgentInput, presence: Presence): AgentFile[] { return (Object.keys(fileMeta) as FileKind[]).map((kind) => ({ kind, ...fileMeta[kind], content: fileContent(kind, input, presence), revision: 1, updatedAt: now() })); }
@@ -53,8 +53,73 @@ function event(type: LiveEvent["type"], title: string, detail: string, tone: Liv
 
 export function compilePresenceContext(presence: Presence): PresenceContext {
   const affordances = presence.capabilities ?? CHANNEL_CAPABILITIES[presence.channel as keyof typeof CHANNEL_CAPABILITIES] ?? [];
-  return { presenceId: presence.id, channel: presence.channel, publicIdentity: { displayName: presence.context?.publicIdentity?.displayName || presence.handle, handle: presence.handle, mode: presence.mode }, audienceContext: presence.context?.audienceContext, voiceAdaptation: presence.context?.voiceAdaptation, availableAffordances: affordances.map((item) => item.id), relevantRelationshipContext: presence.context?.relevantRelationshipContext };
+  return { presenceId: presence.id, channel: presence.channel, publicIdentity: { displayName: presence.context?.publicIdentity?.displayName || presence.handle, handle: presence.handle, mode: presence.mode }, audienceContext: presence.context?.audienceContext, voiceAdaptation: presence.context?.voiceAdaptation, availableAffordances: affordances.map((item) => item.id), relevantRelationshipContext: presence.context?.relevantRelationshipContext, ghostProfile: presence.mode === "ghost" ? presence.ghostProfile : undefined };
 }
+
+const activityModeLabel = (mode: string | undefined) => mode ? mode.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) : "Off";
+
+/**
+ * Derive the small amount of operational state Activity can show without
+ * pretending that the local runtime has a hidden scheduler or background
+ * observation loop.
+ */
+export function deriveActivitySummary(source: OpenPresenceState, presenceId?: string): ActivitySummary {
+  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  const presence = state.presences.find((item) => item.id === (presenceId ?? state.activePresenceId)) ?? state.presence;
+  const events = state.events.filter((item) => !presence || item.presenceId === presence.id);
+  const executions = state.executions
+    .filter((item) => !presence || item.presenceId === presence.id)
+    .sort((a, b) => new Date(b.createdAt).getTime() - new Date(a.createdAt).getTime());
+  const latestExecution = executions[0];
+  const reviewCount = executions.filter((item) => item.status === "awaiting-review").length;
+  const pulseEvent = events.find((item) => item.title === "Pulse completed");
+  const nativeConnection = state.nativeConnections.find((item) => item.presenceId === presence?.id && item.status === "connected");
+  const standingSlots = state.calendar
+    .filter((slot) => slot.presence === presence?.id && slot.enabled)
+    .sort((a, b) => a.day.localeCompare(b.day) || a.time.localeCompare(b.time));
+  const nextSlot = standingSlots[0];
+
+  let current: ActivitySummary["current"] = {
+    label: "Waiting for the next meaningful event",
+    detail: "Nothing is running right now. Jenny will look again when you run one pulse or a standing intent is invoked.",
+    tone: "neutral",
+  };
+  if (!presence) {
+    current = { label: "No Presence selected", detail: "Select a Presence to see its operating state.", tone: "neutral" };
+  } else if (presence.status === "paused") {
+    current = { label: "Paused", detail: "Automatic observation and external actions are stopped until you resume this Presence.", tone: "warning" };
+  } else if (presence.status === "disconnected") {
+    current = { label: "Disconnected", detail: "This Presence cannot observe or embody actions until its channel connection is restored.", tone: "warning" };
+  } else if (reviewCount > 0) {
+    current = { label: "Waiting for review", detail: `${reviewCount} social intent${reviewCount === 1 ? "" : "s"} ${reviewCount === 1 ? "is" : "are"} ready for your decision.`, tone: "warning" };
+  } else if (latestExecution && ["queued", "claimed", "executing", "approved"].includes(latestExecution.status)) {
+    current = { label: "Preparing to act", detail: `A ${latestExecution.affordance} intent is moving through the execution envelope.`, tone: "positive" };
+  } else if (latestExecution?.status === "succeeded") {
+    current = { label: "Action completed", detail: `The latest ${latestExecution.affordance} was delivered and remains visible in the execution ledger.`, tone: "positive" };
+  } else if (events.some((item) => item.title === "Silence was the right action")) {
+    current = { label: "Waiting for a better moment", detail: "The last pulse observed activity but found nothing worth forcing into the channel.", tone: "quiet" };
+  } else if (nativeConnection) {
+    current = { label: `Ready to observe ${nativeConnection.account?.username ? `@${nativeConnection.account.username}` : channelName(presence.channel)}`, detail: "The native channel is connected. Observation begins when a pulse or standing intent is invoked.", tone: "positive" };
+  }
+
+  const nextAttention = presence?.status === "paused"
+    ? { label: "After resume", detail: "Run one pulse to ask Jenny to observe and decide." }
+    : nextSlot
+      ? { label: "Next standing intent", detail: `${nextSlot.day} at ${nextSlot.time} · ${nextSlot.label}` }
+      : { label: "On demand", detail: "No automatic scan is scheduled in this local runtime." };
+  const nextIntent = nextSlot
+    ? { label: nextSlot.label, detail: `${nextSlot.day} at ${nextSlot.time} · ${nextSlot.executionWindow}` }
+    : { label: "No standing intent scheduled", detail: "Calendar is optional; Jenny can still be asked to look with one pulse." };
+  const rhythm = {
+    attention: presence?.status === "paused" ? "Paused" : "On demand",
+    publishing: activityModeLabel(presence?.execution.post),
+    replies: activityModeLabel(presence?.execution.reply ?? presence?.execution.comment),
+    quietHours: "Not configured",
+  };
+  return { current, lastPulseAt: pulseEvent?.time, nextAttention, nextIntent, needsAttention: { count: reviewCount, label: reviewCount ? "Needs review" : "No review items", detail: reviewCount ? `${reviewCount} action${reviewCount === 1 ? "" : "s"} waiting for approval.` : "Nothing is waiting for your decision." }, rhythm };
+}
+
+const defaultGhostProfile = (): GhostProfile => ({ subject: "Me / my organization", priorities: "", preferences: "", voice: "", boundaries: "" });
 
 function makeEnvelope(presenceId: string, capabilities: { id: string }[], execution: Record<string, import("./types").ExecutionMode>): ExecutionEnvelope { return { presenceId, affordances: Object.fromEntries(capabilities.map((item) => [item.id, { mode: execution[item.id] ?? "off" }])), pacingProfile: "recommended", accountProtection: "guidance" }; }
 function makePresence(input: CreatePresenceInput, displayName = input.handle, definition?: ChannelDefinition): Presence {
@@ -62,7 +127,7 @@ function makePresence(input: CreatePresenceInput, displayName = input.handle, de
   const capabilities = definition?.affordances ?? CHANNEL_CAPABILITIES[input.channel as keyof typeof CHANNEL_CAPABILITIES] ?? [];
   const execution = Object.fromEntries(capabilities.map((capability) => [capability.id, capability.id === "post" ? "auto" : capability.id === "reply" || capability.id === "comment" ? "review" : "off"])) as Presence["execution"];
   const context: PresenceContext = { presenceId, channel: input.channel, publicIdentity: { displayName, handle: input.handle.trim(), mode: input.mode }, audienceContext: "People who may find this Presence useful.", voiceAdaptation: `Adapt the Agent's point of view to ${channelName(input.channel)} without flattening it.`, availableAffordances: capabilities.map((item) => item.id) };
-  const presence = { id: presenceId, channel: input.channel, handle: input.handle.trim(), mode: input.mode, status: "live" as const, accent: input.accent, capabilities, execution, executionEnvelope: makeEnvelope(presenceId, capabilities, execution), context, pacing: "recommended" as const, accountHealth: "healthy" as const };
+  const presence = { id: presenceId, channel: input.channel, handle: input.handle.trim(), mode: input.mode, status: "live" as const, accent: input.accent, capabilities, execution, executionEnvelope: makeEnvelope(presenceId, capabilities, execution), context, ghostProfile: input.mode === "ghost" ? defaultGhostProfile() : undefined, pacing: "recommended" as const, accountHealth: "healthy" as const };
   presence.context = compilePresenceContext(presence);
   return presence;
 }
@@ -94,7 +159,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   const calendar = (state.calendar ?? []).map((slot) => ({ ...slot, instruction: slot.instruction || slot.label || "Evaluate a useful idea for the audience", executionWindow: slot.executionWindow || "08:00–11:00" }));
   const base = initialState();
   const skills = (state.skills ?? []).map((skill) => ({ ...skill, name: skill.name ?? skill.id.replaceAll("-", " ") }));
-  return { ...base, ...state, agents, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], presence, presences, activePresenceId, conversations, activeConversationId, calendar, messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections: state.providerConnections ?? [], toolBindings: state.toolBindings ?? [], changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], skills, agentSkills: state.agentSkills ?? [], contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [] };
+  return { ...base, ...state, agents, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], presence, presences, activePresenceId, conversations, activeConversationId, calendar, messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections: state.providerConnections ?? [], toolBindings: state.toolBindings ?? [], changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], skills, agentSkills: state.agentSkills ?? [], contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [] };
 }
 
 function hydratePresence(raw: Presence): Presence {
@@ -103,7 +168,8 @@ function hydratePresence(raw: Presence): Presence {
   const idValue = raw.id || id("presence");
   const context = raw.context ?? { presenceId: idValue, channel: raw.channel ?? "x", publicIdentity: { displayName: raw.handle, handle: raw.handle, mode: raw.mode ?? "agent" }, availableAffordances: capabilities.map((item) => item.id) };
   const executionEnvelope = raw.executionEnvelope ?? makeEnvelope(idValue, capabilities, execution);
-  return { ...raw, id: idValue, channel: raw.channel ?? "x", capabilities, execution, executionEnvelope: { ...executionEnvelope, presenceId: idValue, affordances: Object.fromEntries(capabilities.map((item) => [item.id, { mode: execution[item.id] ?? executionEnvelope.affordances?.[item.id]?.mode ?? "off" }])) }, context: compilePresenceContext({ ...raw, id: idValue, capabilities, execution, executionEnvelope, context } as Presence), pacing: raw.pacing ?? "recommended", accountHealth: raw.accountHealth ?? "healthy" };
+  const ghostProfile = raw.ghostProfile ?? (raw.mode === "ghost" ? defaultGhostProfile() : undefined);
+  return { ...raw, id: idValue, channel: raw.channel ?? "x", capabilities, execution, ghostProfile, executionEnvelope: { ...executionEnvelope, presenceId: idValue, affordances: Object.fromEntries(capabilities.map((item) => [item.id, { mode: execution[item.id] ?? executionEnvelope.affordances?.[item.id]?.mode ?? "off" }])) }, context: compilePresenceContext({ ...raw, id: idValue, capabilities, execution, ghostProfile, executionEnvelope, context } as Presence), pacing: raw.pacing ?? "recommended", accountHealth: raw.accountHealth ?? "healthy" };
 }
 
 function snapshotWorkspace(state: OpenPresenceState): import("./types").AgentWorkspaceSnapshot {
@@ -148,23 +214,42 @@ function addSocialEvaluation(state: OpenPresenceState, standing: StandingIntent,
   const mode = slot.mode;
   if (mode !== "off") {
     const bridge = bridgeFor(state, presence.id, "post");
-    const simulated = !bridge && presence.channel === "x";
-    const status = simulated ? (mode === "auto" ? "succeeded" : mode === "review" ? "awaiting-review" : "awaiting-manual") : mode === "auto" ? (bridge ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
-    const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance, mode: mode as Exclude<import("./types").ExecutionMode, "off">, status, attempts: simulated && mode === "auto" ? 1 : 0, bridgeId: bridge?.id, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, createdAt: formedAt, updatedAt: formedAt, executedAt: simulated && mode === "auto" ? formedAt : undefined };
+    const nativeX = presence.channel === "x" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.status === "connected" && connection.access === "read-write") : undefined;
+    const simulated = !bridge && !nativeX && presence.channel === "x" && process.env.OPENPRESENCE_TEST_MODE === "1";
+    const connector = nativeX ? "native" as const : bridge ? bridge.kind : simulated ? "simulated" as const : undefined;
+    const status = simulated ? (mode === "auto" ? "succeeded" : mode === "review" ? "awaiting-review" : "awaiting-manual") : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
+    const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance, mode: mode as Exclude<import("./types").ExecutionMode, "off">, status, attempts: simulated && mode === "auto" ? 1 : 0, bridgeId: bridge?.id, connector, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, createdAt: formedAt, updatedAt: formedAt, executedAt: simulated && mode === "auto" ? formedAt : undefined };
     state.executions.unshift(execution);
     if (simulated && mode === "auto") {
       const outcome: Outcome = { id: id("outcome"), socialIntentId: socialIntent.id, executionId: execution.id, presenceId: presence.id, status: "succeeded", observedAt: formedAt, metrics: { qualifiedFollows: 3 }, evidence: [] };
       state.outcomes.unshift(outcome); state.metrics.qualifiedFollows += 3; execution.status = "succeeded"; execution.updatedAt = now();
       state.events.unshift(event("execution", "Standing intent evaluated", `${slot.label} was evaluated on ${channelName(presence.channel)}. The social intention expires in 45 minutes; its outcome is now learning material.`, "positive", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, outcomeId: outcome.id }));
     } else {
-      const detail = status === "awaiting-connector" ? `${slot.label} is waiting for a Bridge connection.` : status === "queued" ? `${slot.label} is ready for its Bridge executor.` : `${slot.label} formed a social intention that expires in 45 minutes.`;
-      state.events.unshift(event("execution", status === "queued" ? "Queued for Bridge" : "Waiting for review", detail, "neutral", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id }));
+      const detail = status === "awaiting-connector" ? `${slot.label} is waiting for an authorized channel connection.` : status === "queued" ? `${slot.label} is ready for its native X connector.` : `${slot.label} formed a social intention that expires in 45 minutes.`;
+      state.events.unshift(event("execution", status === "queued" ? (connector === "native" ? "Queued for X" : "Queued for Bridge") : "Waiting for review", detail, "neutral", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id }));
     }
     state.actions.unshift({ id: id("act"), intent: "post", summary: slot.instruction, status: simulated && mode === "auto" ? "executed" : mode === "review" ? "review" : "queued", reason: `Evaluated standing intent: ${slot.instruction}`, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
   } else {
     state.actions.unshift({ id: id("act"), intent: "post", summary: slot.instruction, status: "skipped", reason: "This affordance is off in the operator's execution envelope.", createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id });
     state.events.unshift(event("decision", "Intention held", "Jenny formed a social intention; the operator's envelope leaves this affordance off.", "quiet", { presenceId: presence.id, intentId: socialIntent.id }));
   }
+}
+
+export function completeNativeExecution(source: OpenPresenceState, executionId: string, externalRef: import("./types").EntityRef) {
+  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  const execution = state.executions.find((item) => item.id === executionId && item.connector === "native");
+  if (!execution) throw new Error("Native execution not found.");
+  execution.status = "succeeded";
+  execution.attempts += 1;
+  execution.externalRef = externalRef;
+  execution.executedAt = now();
+  execution.updatedAt = now();
+  const outcome: Outcome = { id: id("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, status: "succeeded", observedAt: now(), metrics: {}, evidence: [externalRef] };
+  state.outcomes.unshift(outcome);
+  const action = state.actions.find((item) => item.executionId === execution.id);
+  if (action) { action.status = "executed"; action.outcomeId = outcome.id; }
+  state.events.unshift(event("execution", "Published on X", "The native X connector delivered the approved action and returned an external reference.", "positive", { presenceId: execution.presenceId, executionId: execution.id, outcomeId: outcome.id }));
+  return state;
 }
 
 export function applyOperation(source: OpenPresenceState, operation: Operation): OpenPresenceState {
@@ -197,6 +282,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation):
     case "createBridge": { const presence = state.presences.find((item) => item.id === operation.input.presenceId); if (!presence) return state; const existing = state.bridges.find((bridge) => bridge.presenceId === presence.id && bridge.state !== "offline" && operation.input.capabilities.affordances.some((affordance) => bridge.capabilities.affordances.includes(affordance))); if (existing) return state; const timestamp = now(); const bridge: Bridge = { id: id("bridge"), presenceId: presence.id, channelId: presence.channel, name: operation.input.name.trim() || "External Bridge", kind: operation.input.kind, state: operation.input.kind === "manual" ? "online" : "offline", capabilities: normalizedCapabilities(operation.input.capabilities), createdAt: timestamp, updatedAt: timestamp }; state.bridges.unshift(bridge); state.bridgeSync.unshift({ bridgeId: bridge.id, status: bridge.state === "online" ? "healthy" : "offline" }); state.events.unshift(event("system", `${bridge.name} added`, bridge.kind === "manual" ? "Manual relay is ready." : "Connect the executor to begin syncing.", "positive")); return state; }
     case "rotateBridgeKey": { const bridge = state.bridges.find((item) => item.id === operation.id); if (bridge) { bridge.updatedAt = now(); bridge.state = "offline"; state.events.unshift(event("system", "Bridge key rotated", `${bridge.name} is offline until the new key is connected.`, "warning")); } return state; }
     case "revokeBridge": { const bridge = state.bridges.find((item) => item.id === operation.id); if (bridge) { bridge.state = "offline"; bridge.updatedAt = now(); state.events.unshift(event("system", "Bridge disconnected", `${bridge.name} can no longer receive work.`, "warning")); } return state; }
+    case "removeBridge": { const bridge = state.bridges.find((item) => item.id === operation.id); if (!bridge || bridge.state !== "offline") return state; state.bridges = state.bridges.filter((item) => item.id !== operation.id); state.bridgeSync = state.bridgeSync.filter((item) => item.bridgeId !== operation.id); state.events.unshift(event("system", "Bridge removed", `${bridge.name} was removed from the active connector list. Historical mirror data was retained.`, "warning")); return state; }
     case "selectPresence": { const selected = state.presences.find((item) => item.id === operation.id); if (!selected) return state; state.activePresenceId = selected.id; state.presence = selected; return state; }
     case "selectConversation": { if (!state.conversations.some((conversation) => conversation.id === operation.id)) return state; state.activeConversationId = operation.id; syncMessages(state); return state; }
     case "newConversation": { const conversation = makeConversation(); state.conversations.unshift(conversation); state.activeConversationId = conversation.id; syncMessages(state); return state; }
@@ -221,8 +307,8 @@ export function applyOperation(source: OpenPresenceState, operation: Operation):
     case "executeIntent": { const intent = state.socialIntents.find((item) => item.id === operation.id); if (!intent) return state; const execution = state.executions.find((item) => item.socialIntentId === intent.id); if (!execution || intent.state !== "active") return state; if (["awaiting-review", "awaiting-manual", "awaiting-connector", "claimed", "executing", "succeeded"].includes(execution.status)) { if (execution.status === "approved" && execution.bridgeId) execution.status = "queued"; else return state; } if (intent.validity.expiresAt && new Date(intent.validity.expiresAt).getTime() <= Date.now()) { intent.state = "expired"; execution.status = "expired"; execution.updatedAt = now(); state.events.unshift(event("decision", "Intent expired", "The social moment passed before execution.", "quiet", { intentId: intent.id, executionId: execution.id })); return state; } if (execution.bridgeId) { execution.status = "queued"; execution.updatedAt = now(); state.events.unshift(event("execution", "Queued for Bridge", "The execution is ready for an external executor.", "positive", { intentId: intent.id, executionId: execution.id })); return state; } execution.status = "succeeded"; execution.attempts += 1; execution.updatedAt = now(); execution.executedAt = now(); const outcome = { id: id("outcome"), socialIntentId: intent.id, executionId: execution.id, presenceId: intent.presenceId, status: "succeeded" as const, observedAt: now(), metrics: {} }; state.outcomes.unshift(outcome); state.events.unshift(event("execution", "Execution completed", "The simulated channel accepted the action.", "positive", { intentId: intent.id, executionId: execution.id, outcomeId: outcome.id })); return state; }
     case "markManualExecution": { const execution = state.executions.find((item) => item.id === operation.id); if (!execution || execution.status !== "awaiting-manual") return state; execution.status = "succeeded"; execution.externalRef = operation.externalRef; execution.attempts += 1; execution.executedAt = now(); execution.updatedAt = now(); const outcome: Outcome = { id: id("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, status: "succeeded", observedAt: now(), metrics: {}, evidence: [operation.externalRef] }; state.outcomes.unshift(outcome); state.events.unshift(event("execution", "Manual relay completed", "The operator marked the external action as posted.", "positive", { executionId: execution.id, outcomeId: outcome.id })); return state; }
     case "setModel": { const profile = state.modelProfiles.find((item) => item.agentId === state.agent?.id); if (profile && operation.model.trim()) { profile.model = operation.model.trim(); if (operation.provider) profile.provider = operation.provider; if (operation.quality) profile.quality = operation.quality; const connection = state.providerConnections.find((item) => item.provider === profile.provider && item.status !== "needs-configuration"); if (connection) profile.connectionId = connection.id; profile.updatedAt = now(); } return state; }
-    case "runPulse": { const pulsePresence = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence; if (!pulsePresence || pulsePresence.status !== "live") return state; state.actions.unshift({ id: id("act"), intent: "no_op", target: `${pulsePresence.channel}_stream`, summary: "Stayed quiet on 36 observed opportunities", status: "skipped", reason: "Nothing met the relevance, usefulness, and taste threshold today.", createdAt: now() }); state.events.unshift(event("decision", "Silence was the right action", "36 conversations observed · 2 worth saving · 0 worth forcing.", "quiet", { presenceId: pulsePresence.id })); state.events.splice(6); state.metrics.opportunitiesIgnored += 36; state.metrics.conversations += 2; state.metrics.audienceHealth = Math.max(0, state.metrics.audienceHealth - 1); state.events.unshift(event("learning", "A small learning was recorded", "Technical conversations with a distinct point are worth revisiting.", "positive", { presenceId: pulsePresence.id })); return state; }
-    case "setPresence": { if (state.presence) { const updated = { ...state.presence, ...operation.patch, execution: operation.patch.execution ? { ...state.presence.execution, ...operation.patch.execution } : state.presence.execution }; updated.executionEnvelope = { ...state.presence.executionEnvelope, affordances: Object.fromEntries(channelCapabilities(state, updated.channel).map((item) => [item.id, { mode: updated.execution[item.id] ?? "off" }])) }; updated.context = compilePresenceContext(updated); state.presence = updated; state.presences = state.presences.map((item) => item.id === updated.id ? updated : item); } state.events.unshift(event("system", "Presence settings updated", state.presence?.status === "paused" ? "All external actions are paused." : "The new execution envelope is active.", state.presence?.status === "paused" ? "warning" : "positive")); return state; }
+    case "runPulse": { const pulsePresence = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence; if (!pulsePresence || pulsePresence.status !== "live") return state; state.actions.unshift({ id: id("act"), intent: "no_op", target: `${pulsePresence.channel}_stream`, summary: "Stayed quiet on 36 observed opportunities", status: "skipped", reason: "Nothing met the relevance, usefulness, and taste threshold today.", createdAt: now() }); state.events.unshift(event("decision", "Silence was the right action", "36 conversations observed · 2 worth saving · 0 worth forcing.", "quiet", { presenceId: pulsePresence.id })); state.events.unshift(event("system", "Pulse completed", "Observed the selected channel, considered what was worth doing, and stopped without forcing an action.", "positive", { presenceId: pulsePresence.id })); state.events.splice(7); state.metrics.opportunitiesIgnored += 36; state.metrics.conversations += 2; state.metrics.audienceHealth = Math.max(0, state.metrics.audienceHealth - 1); state.events.unshift(event("learning", "A small learning was recorded", "Technical conversations with a distinct point are worth revisiting.", "positive", { presenceId: pulsePresence.id })); return state; }
+    case "setPresence": { if (state.presence) { const updated = { ...state.presence, ...operation.patch, ghostProfile: operation.patch.ghostProfile ?? state.presence.ghostProfile ?? (operation.patch.mode === "ghost" ? defaultGhostProfile() : undefined), execution: operation.patch.execution ? { ...state.presence.execution, ...operation.patch.execution } : state.presence.execution }; updated.executionEnvelope = { ...state.presence.executionEnvelope, affordances: Object.fromEntries(channelCapabilities(state, updated.channel).map((item) => [item.id, { mode: updated.execution[item.id] ?? "off" }])) }; updated.context = compilePresenceContext(updated); state.presence = updated; state.presences = state.presences.map((item) => item.id === updated.id ? updated : item); } state.events.unshift(event("system", "Presence settings updated", state.presence?.status === "paused" ? "All external actions are paused." : "The new execution envelope is active.", state.presence?.status === "paused" ? "warning" : "positive", { presenceId: state.presence?.id })); return state; }
   }
 }
 

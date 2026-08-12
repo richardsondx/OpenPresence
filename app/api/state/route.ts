@@ -1,7 +1,9 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { readState, writeState } from "@/lib/db";
-import { applyOperation } from "@/lib/runtime";
+import { readState, saveProviderSecret, writeState } from "@/lib/db";
+import { generateAgentReply } from "@/lib/ai";
+import { applyOperation, completeNativeExecution } from "@/lib/runtime";
+import { publishXPost, readNativeXCredentials } from "@/lib/x";
 import type { Operation } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -41,13 +43,13 @@ const operation: z.ZodType<Operation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("editSlot"), id: z.string().min(1), instruction: z.string().trim().min(1).max(1000), day: z.string().min(1).max(20), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), objective: z.string().min(1).max(100), executionWindow: z.string().min(1).max(40) }),
   z.object({ type: z.literal("createSkill"), name: z.string().trim().min(1).max(100), description: z.string().trim().min(1).max(500) }),
   z.object({ type: z.literal("editSkill"), id: z.string().min(1), name: z.string().trim().min(1).max(100), description: z.string().trim().min(1).max(500) }),
-  z.object({ type: z.literal("configureProvider"), provider: z.enum(["openai", "anthropic", "gemini", "openrouter", "ollama", "custom"]), label: z.string().trim().min(1).max(120), endpoint: z.string().url().optional(), hasSecret: z.boolean().optional() }),
+  z.object({ type: z.literal("configureProvider"), provider: z.enum(["openai", "anthropic", "gemini", "openrouter", "ollama", "custom"]), label: z.string().trim().min(1).max(120), endpoint: z.string().url().optional(), hasSecret: z.boolean().optional(), secret: z.string().max(4000).optional() }),
   z.object({ type: z.literal("runPulse"), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("setModel"), model: z.string().trim().min(1).max(80), provider: z.enum(["openai", "anthropic", "gemini", "openrouter", "ollama", "custom"]).optional(), quality: z.enum(["low", "medium", "high", "local"]).optional() }),
   z.object({ type: z.literal("runSlot"), id: z.string().min(1) }),
   z.object({ type: z.literal("approveExecution"), id: z.string().min(1) }),
   z.object({ type: z.literal("executeIntent"), id: z.string().min(1) }),
-  z.object({ type: z.literal("setPresence"), patch: z.object({ mode: z.enum(["agent", "ghost"]).optional(), status: z.enum(["live", "paused", "disconnected"]).optional(), pacing: z.enum(["recommended", "gentle", "custom"]).optional(), execution: z.record(executionMode).optional() }) }),
+  z.object({ type: z.literal("setPresence"), patch: z.object({ mode: z.enum(["agent", "ghost"]).optional(), status: z.enum(["live", "paused", "disconnected"]).optional(), pacing: z.enum(["recommended", "gentle", "custom"]).optional(), execution: z.record(executionMode).optional(), ghostProfile: z.object({ subject: z.string().trim().min(1).max(160), priorities: z.string().trim().max(2000), preferences: z.string().trim().max(2000), voice: z.string().trim().max(2000), boundaries: z.string().trim().max(2000) }).optional() }) }),
 ]);
 
 export async function GET() { return NextResponse.json(readState()); }
@@ -56,7 +58,86 @@ export async function POST(request: Request) {
   try {
     const parsed = operation.parse(await request.json());
     if (parsed.type === "reset" && process.env.OPENPRESENCE_TEST_MODE !== "1") throw new Error("Reset is available only in test mode.");
-    const next = applyOperation(readState(), parsed);
+    const current = readState();
+    if (parsed.type === "executeIntent") {
+      const execution = current.executions.find((item) => item.socialIntentId === parsed.id && item.connector === "native");
+      if (execution) {
+        const intent = current.socialIntents.find((item) => item.id === execution.socialIntentId);
+        const connection = current.nativeConnections.find((item) => item.id && item.presenceId === execution.presenceId && item.access === "read-write" && item.status === "connected");
+        if (!intent || !connection) throw new Error("This X Presence no longer has a write-enabled connection.");
+        const credentials = readNativeXCredentials(connection.id);
+        const text = typeof intent.publicationId === "string" ? current.publications.find((item) => item.id === intent.publicationId)?.payload : undefined;
+        const postText = text && typeof text === "object" && "text" in text && typeof text.text === "string" ? text.text : undefined;
+        if (!credentials || !postText) throw new Error("The approved X action is missing its protected credential or publication text.");
+        const externalRef = await publishXPost(credentials, postText, execution.target?.type === "x.post" ? execution.target.id : undefined);
+        const next = completeNativeExecution(current, execution.id, externalRef);
+        writeState(next);
+        return NextResponse.json(next);
+      }
+    }
+    let next = applyOperation(current, parsed);
+    if (parsed.type === "sendMessage") {
+      const conversation = next.conversations.find((item) => item.id === (parsed.conversationId ?? next.activeConversationId)) ?? next.conversations[0];
+      const reply = await generateAgentReply(next, parsed.content, parsed.conversationId).catch((error: unknown) => {
+        const message = error instanceof Error ? error.message : "The selected AI provider could not answer.";
+        console.warn("Agent runtime unavailable", message);
+        return `I’m not able to answer yet. ${message}`;
+      });
+      const lastMessage = conversation?.messages.at(-1);
+      if (lastMessage?.role === "agent") lastMessage.content = reply;
+      if (conversation) conversation.updatedAt = new Date().toISOString();
+      next.messages = conversation?.messages ?? next.messages;
+      writeState(next);
+      return NextResponse.json(next);
+    }
+    if (parsed.type === "setPresence") {
+      const before = current.presence;
+      const after = next.presence;
+      const modeChanged = before?.mode !== after?.mode;
+      const ghostProfileChanged = JSON.stringify(before?.ghostProfile ?? null) !== JSON.stringify(after?.ghostProfile ?? null);
+      const stateChanged = Boolean(before && after && (
+        modeChanged ||
+        ghostProfileChanged ||
+        before.status !== after.status ||
+        before.pacing !== after.pacing ||
+        JSON.stringify(before.execution) !== JSON.stringify(after.execution)
+      ));
+      const conversation = next.conversations.find((item) => item.id === next.activeConversationId) ?? next.conversations[0];
+      if (stateChanged && after && conversation) {
+        const modeLabel = after.mode === "ghost" ? "Ghost" : "Agent-owned";
+        conversation.messages.push({
+          id: `state_${Date.now().toString(36)}`,
+          role: "agent",
+          content: modeChanged
+            ? `I noticed this Presence is now ${modeLabel}. I’ll use that live state from here.`
+            : ghostProfileChanged
+              ? "I noticed the Ghost profile changed. I’ll use the reviewed profile for this Presence from here."
+              : "I noticed the Presence settings changed. I’ll use the new live state from here.",
+          timestamp: new Date().toISOString(),
+          change: "Presence state updated",
+        });
+        conversation.updatedAt = new Date().toISOString();
+        next.messages = conversation.messages;
+      }
+    }
+    if (parsed.type === "configureProvider" && parsed.secret) {
+      const connection = next.providerConnections.find((item) => item.provider === parsed.provider);
+      if (connection) saveProviderSecret(connection.id, parsed.secret);
+    }
+    if (parsed.type === "runSlot") {
+      const queued = next.executions.filter((item) => item.connector === "native" && item.status === "queued" && item.mode === "auto");
+      for (const execution of queued) {
+        const intent = next.socialIntents.find((item) => item.id === execution.socialIntentId);
+        const connection = next.nativeConnections.find((item) => item.presenceId === execution.presenceId && item.access === "read-write" && item.status === "connected");
+        const credentials = connection ? readNativeXCredentials(connection.id) : undefined;
+        const payload = intent?.publicationId ? next.publications.find((item) => item.id === intent.publicationId)?.payload : undefined;
+        const postText = payload && typeof payload === "object" && "text" in payload && typeof payload.text === "string" ? payload.text : undefined;
+        if (credentials && postText) {
+          const externalRef = await publishXPost(credentials, postText);
+          next = completeNativeExecution(next, execution.id, externalRef);
+        }
+      }
+    }
     writeState(next);
     return NextResponse.json(next);
   } catch (error) {

@@ -15,7 +15,7 @@ import {
   CircleAlert,
   FileText,
   Ghost,
-  LifeBuoy,
+  LoaderCircle,
   MessageCircle,
   PanelRightClose,
   PanelRightOpen,
@@ -31,7 +31,8 @@ import {
   Sparkles,
   X,
 } from "lucide-react";
-import { CHANNEL_CAPABILITIES } from "@/lib/types";
+import { AGENT_TOOL_DEFINITIONS, CHANNEL_CAPABILITIES } from "@/lib/types";
+import { deriveActivitySummary } from "@/lib/runtime";
 import type {
   CalendarSlot,
   ChannelDefinition,
@@ -41,6 +42,7 @@ import type {
   CreatePresenceInput,
   ExecutionMode,
   FileKind,
+  GhostProfile,
   OpenPresenceState,
   PresenceMode,
   View,
@@ -57,7 +59,7 @@ const fileOrder: FileKind[] = [
 ];
 const navItems: { id: View; label: string; icon: typeof MessageCircle }[] = [
   { id: "chat", label: "Chat", icon: MessageCircle },
-  { id: "live", label: "Live", icon: Radio },
+  { id: "live", label: "Activity", icon: Radio },
   { id: "calendar", label: "Calendar", icon: CalendarDays },
 ];
 const presenceNavItems = navItems.filter(({ id }) => id !== "chat");
@@ -98,6 +100,13 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
+function clientErrorMessage(reason: unknown, fallback: string) {
+  if (reason instanceof TypeError && /fetch/i.test(reason.message)) {
+    return "The OpenPresence runtime could not be reached. Try again; if it persists, restart the local app server.";
+  }
+  return reason instanceof Error ? reason.message : fallback;
+}
+
 const runtimeModels = [
   { provider: "openai" as const, label: "OpenAI", model: "gpt-5.6-sol", name: "GPT 5.6 Sol", quality: "low" as const, detail: "Fast drafting" },
   { provider: "openai" as const, label: "OpenAI", model: "gpt-5.6-sol", name: "GPT 5.6 Sol", quality: "medium" as const, detail: "Balanced" },
@@ -118,6 +127,27 @@ const runtimeProviders = [
   { id: "ollama" as const, label: "Ollama", detail: "Local models" },
   { id: "anthropic" as const, label: "Anthropic", detail: "Hosted models" },
 ];
+
+type OllamaModelOption = { name: string; capabilities: string[]; size?: number; parameterSize?: string };
+
+function ollamaModelLabel(name: string) {
+  const base = name.split(":")[0].toLowerCase();
+  const known: Record<string, string> = {
+    "qwen2.5": "Qwen 2.5",
+    "qwen2.5-coder": "Qwen 2.5 Coder",
+    "qwen3-vl": "Qwen3 VL",
+    "kimi-k3": "Kimi K3",
+    "kimi-k2.6": "Kimi K2.6",
+    "glm-5.2": "GLM 5.2",
+  };
+  return known[base] ?? base.replaceAll("-", " ").replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function ollamaModelDetail(model: OllamaModelOption) {
+  const cloud = model.name.endsWith(":cloud");
+  const size = typeof model.size === "number" && model.size > 1_000_000 ? `${(model.size / 1_000_000_000).toFixed(1)} GB` : model.parameterSize;
+  return [cloud ? "Ollama Cloud" : "Local", size].filter(Boolean).join(" · ");
+}
 
 function modelDisplayName(model: OpenPresenceState["modelProfiles"][number] | undefined) {
   if (!model) return "No model selected";
@@ -173,6 +203,9 @@ type Mutate = (operation: unknown) => Promise<OpenPresenceState | null>;
 type BridgeManage = (
   operation: unknown,
 ) => Promise<{ state: OpenPresenceState; key?: string } | null>;
+type XManage = (
+  operation: unknown,
+) => Promise<{ state?: OpenPresenceState; result?: { account: { id: string; username: string; name: string }; access: "read" | "read-write" } } | null>;
 
 const presenceModes: {
   id: PresenceMode;
@@ -253,13 +286,7 @@ export default function Home() {
         return readJsonResponse<OpenPresenceState>(response);
       })
       .then(setState)
-      .catch((reason: unknown) =>
-        setError(
-          reason instanceof Error
-            ? reason.message
-            : "Unable to load local state",
-        ),
-      )
+      .catch((reason: unknown) => setError(clientErrorMessage(reason, "Unable to load local state")))
       .finally(() => setLoading(false));
   }, []);
   useEffect(() => {
@@ -279,11 +306,7 @@ export default function Home() {
       setState(payload);
       return payload as OpenPresenceState;
     } catch (reason) {
-      setError(
-        reason instanceof Error
-          ? reason.message
-          : "That change could not be saved.",
-      );
+      setError(clientErrorMessage(reason, "That change could not be saved."));
       return null;
     }
   }
@@ -304,11 +327,24 @@ export default function Home() {
       setState(payload.state);
       return payload as { state: OpenPresenceState; key?: string };
     } catch (reason) {
-      setError(
-        reason instanceof Error
-          ? reason.message
-          : "That Bridge change could not be saved.",
-      );
+      setError(clientErrorMessage(reason, "That Bridge change could not be saved."));
+      return null;
+    }
+  }
+  async function manageX(operation: unknown) {
+    setError(null);
+    try {
+      const response = await fetch("/api/x/manage", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(operation),
+      });
+      const payload = await readJsonResponse<{ state?: OpenPresenceState; result?: { account: { id: string; username: string; name: string }; access: "read" | "read-write" }; error?: string }>(response);
+      if (!response.ok) throw new Error(payload.error ?? "The X connection could not be completed.");
+      if (payload.state) setState(payload.state);
+      return payload;
+    } catch (reason) {
+      setError(clientErrorMessage(reason, "The X connection could not be completed."));
       return null;
     }
   }
@@ -344,6 +380,7 @@ export default function Home() {
       setSelectedFile={setSelectedFile}
       mutate={mutate}
       manageBridge={manageBridge}
+      manageX={manageX}
       error={error}
     />
   );
@@ -841,6 +878,7 @@ function AgentWorkspaceShell({
   setSelectedFile,
   mutate,
   manageBridge,
+  manageX,
   error,
 }: {
   state: OpenPresenceState;
@@ -850,6 +888,7 @@ function AgentWorkspaceShell({
   setSelectedFile: (file: FileKind) => void;
   mutate: Mutate;
   manageBridge: BridgeManage;
+  manageX: XManage;
   error: string | null;
 }) {
   const agent = state.agent!;
@@ -866,7 +905,9 @@ function AgentWorkspaceShell({
       ? "Manage Agent"
       : view === "presence"
         ? "Presence settings"
-        : view[0].toUpperCase() + view.slice(1);
+        : view === "live"
+          ? "Activity"
+          : view[0].toUpperCase() + view.slice(1);
   const pendingExecutionCount = state.executions.filter(
     (item) =>
       item.presenceId === presence.id && item.status === "awaiting-review",
@@ -941,13 +982,10 @@ function AgentWorkspaceShell({
           </div>
           <div className="sidebar-footer-actions">
             <AgentSwitcher state={state} mutate={mutate} />
-            <button aria-label="Help">
-              <LifeBuoy size={16} />
-            </button>
           </div>
         </div>
       </aside>
-      <section className="workspace">
+      <section className={view === "chat" ? "workspace workspace-chat" : "workspace"}>
         <header className="topbar">
           <div className="mobile-brand">
             <div className="brand-mark">◉</div>
@@ -973,11 +1011,11 @@ function AgentWorkspaceShell({
               {view === "presence"
                 ? presence.status === "paused"
                   ? "Paused"
-                  : state.bridges.some(
+                  : (state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "connected") || state.bridges.some(
                         (item) =>
                           item.presenceId === presence.id &&
                           item.state === "online",
-                      )
+                      ))
                     ? "Connected"
                     : "Not connected"
                 : activeScope}
@@ -1013,6 +1051,7 @@ function AgentWorkspaceShell({
               state={state}
               mutate={mutate}
               manageBridge={manageBridge}
+              manageX={manageX}
             />
           )}
         </div>
@@ -1078,6 +1117,7 @@ function LegacyAppShell({
   setSelectedFile,
   mutate,
   manageBridge,
+  manageX,
   error,
 }: {
   state: OpenPresenceState;
@@ -1087,6 +1127,7 @@ function LegacyAppShell({
   setSelectedFile: (file: FileKind) => void;
   mutate: Mutate;
   manageBridge: BridgeManage;
+  manageX: XManage;
   error: string | null;
 }) {
   const agent = state.agent!;
@@ -1097,7 +1138,9 @@ function LegacyAppShell({
       ? "Brain"
       : view === "presence"
         ? `${channelLabel(presence.channel, state.channelDefinitions)} · Settings`
-        : view[0].toUpperCase() + view.slice(1);
+        : view === "live"
+          ? "Activity"
+          : view[0].toUpperCase() + view.slice(1);
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -1180,13 +1223,8 @@ function LegacyAppShell({
           <Brain size={17} />
           <span>Brain</span>
         </button>
-        <div className="sidebar-footer">
-          <button aria-label="Help">
-            <LifeBuoy size={16} />
-          </button>
-        </div>
       </aside>
-      <section className="workspace">
+      <section className={view === "chat" ? "workspace workspace-chat" : "workspace"}>
         <header className="topbar">
           <div className="mobile-brand">
             <div className="brand-mark">◉</div>
@@ -1248,6 +1286,7 @@ function LegacyAppShell({
               state={state}
               mutate={mutate}
               manageBridge={manageBridge}
+              manageX={manageX}
             />
           )}
         </div>
@@ -1685,8 +1724,8 @@ function ContextSidebar({
             <strong>{state.skills.length}</strong>
           </div>
           <div>
-            <span>Tools available</span>
-            <strong>{state.toolBindings.length}</strong>
+          <span>Tools bound</span>
+          <strong>{state.toolBindings.length}</strong>
           </div>
         </div>
       </section>
@@ -1706,6 +1745,8 @@ function ContextChatView({
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState<string[]>([]);
   const [contextOpen, setContextOpen] = useState(true);
+  const [sending, setSending] = useState(false);
+  const historyEndRef = useRef<HTMLDivElement>(null);
   const agent = state.agent!;
   const conversation =
     state.conversations.find(
@@ -1714,6 +1755,9 @@ function ContextChatView({
   const messages = conversation?.messages ?? [];
   const model = state.modelProfiles.find((item) => item.agentId === agent.id);
   const modelName = modelDisplayName(model);
+  useEffect(() => {
+    historyEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+  }, [conversation?.id, messages.length]);
   const addAttachment = (event: React.ChangeEvent<HTMLInputElement>) => {
     const name = event.target.files?.[0]?.name;
     if (name)
@@ -1724,17 +1768,22 @@ function ContextChatView({
   };
   const send = async (event?: React.FormEvent) => {
     event?.preventDefault();
-    if (!message.trim()) return;
+    if (!message.trim() || sending) return;
     const outgoing = attachments.length
       ? `${message}\n\nAttached context: ${attachments.join(", ")}`
       : message;
     setMessage("");
     setAttachments([]);
-    await mutate({
-      type: "sendMessage",
-      content: outgoing,
-      conversationId: conversation?.id,
-    });
+    setSending(true);
+    try {
+      await mutate({
+        type: "sendMessage",
+        content: outgoing,
+        conversationId: conversation?.id,
+      });
+    } finally {
+      setSending(false);
+    }
   };
   return (
     <div className="page page-chat">
@@ -1834,6 +1883,7 @@ function ContextChatView({
                 </div>
               ))
             )}
+            <div ref={historyEndRef} aria-hidden="true" className="chat-history-end" />
           </div>
           <div className="attachment-list">
             {attachments.map((name) => (
@@ -1861,21 +1911,23 @@ function ContextChatView({
               aria-label="Message your Presence"
               value={message}
               onChange={(event) => setMessage(event.target.value)}
+              disabled={sending}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
                   void send();
                 }
               }}
-              placeholder={`Tell ${agent.name} what to change…`}
+              placeholder={sending ? `${agent.name} is thinking…` : `Tell ${agent.name} what to change…`}
               rows={3}
             />
             <button
               className="send-button"
               aria-label="Send message"
               type="submit"
+              disabled={sending}
             >
-              <Send size={17} />
+              {sending ? <LoaderCircle size={17} className="spin" /> : <Send size={17} />}
             </button>
           </form>
           <div className="composer-hint">
@@ -2358,11 +2410,9 @@ function LiveView({
   const agent = state.agent!;
   const selected = state.presence;
   const paused = selected?.status === "paused";
+  const activity = deriveActivitySummary(state, selected?.id);
   const visibleEvents = state.events.filter(
     (item) => item.presenceId === selected?.id,
-  );
-  const latestDecision = visibleEvents.find(
-    (item) => item.type === "decision" || item.type === "execution",
   );
   const presenceScope = selected
     ? `${channelLabel(selected.channel, state.channelDefinitions)} · ${selected.handle}`
@@ -2376,35 +2426,55 @@ function LiveView({
             {selected?.handle ?? agent.name} is {paused ? "paused" : "live"}.
           </h1>
           <p className="muted">
-            What this Presence is seeing, deciding, and sending through its
-            selected channel.
+            See what Jenny is doing now, what happens next, and what is waiting
+            for you.
           </p>
         </div>
         <div className="heading-actions">
           <span className="scope-summary">{presenceScope}</span>
+          {paused && (
+            <Button
+              onClick={() => mutate({ type: "setPresence", patch: { status: "live" } })}
+              variant="secondary"
+            >
+              <Play size={15} /> Resume Presence
+            </Button>
+          )}
           <Button
             onClick={() =>
               mutate({ type: "runPulse", presenceId: selected?.id })
             }
             variant="primary"
             disabled={paused}
+            title={paused ? "Resume this Presence before running a pulse." : "Wake Jenny, observe the channel, and decide whether anything is worth doing."}
           >
-            <Play size={15} /> Run pulse
+            <Play size={15} /> Run one pulse
           </Button>
         </div>
       </div>
-      <div className="metric-row">
-        <Metric
-          label="Conversations"
-          value={state.metrics.conversations.toString()}
-          hint="worth returning to"
-        />
-        <Metric
-          label="Left alone"
-          value={state.metrics.opportunitiesIgnored.toString()}
-          hint="silence is useful"
-        />
-      </div>
+      <section className="activity-summary" aria-label="Operating status">
+        <div className={`activity-card activity-card-${activity.current.tone}`}>
+          <SectionEyebrow>Now</SectionEyebrow>
+          <h2>{activity.current.label}</h2>
+          <p>{activity.current.detail}</p>
+          <small>Last pulse: {activity.lastPulseAt ? formatTime(activity.lastPulseAt) : "Never"}</small>
+        </div>
+        <div className="activity-card">
+          <SectionEyebrow>Next</SectionEyebrow>
+          <h2>{activity.nextAttention.label}</h2>
+          <p>{activity.nextAttention.detail}</p>
+          <small>{activity.nextIntent.label} · {activity.nextIntent.detail}</small>
+        </div>
+        <div className="activity-card">
+          <SectionEyebrow>Today&apos;s rhythm</SectionEyebrow>
+          <div className="rhythm-summary">
+            <span>Attention <strong>{activity.rhythm.attention}</strong></span>
+            <span>Publishing <strong>{activity.rhythm.publishing}</strong></span>
+            <span>Replies <strong>{activity.rhythm.replies}</strong></span>
+            <span>Quiet hours <strong>{activity.rhythm.quietHours}</strong></span>
+          </div>
+        </div>
+      </section>
       <MirrorPanel state={state} filter={selected?.id ?? "all"} />
       <div className="live-layout">
         <section className="event-stream">
@@ -2428,10 +2498,11 @@ function LiveView({
                   }
                   variant="secondary"
                   disabled={paused}
+                  title={paused ? "Resume this Presence before running a pulse." : undefined}
                 >
-                  <Play size={14} /> Run first pulse
-                </Button>
-              }
+                  <Play size={14} /> Run one pulse
+                  </Button>
+                }
             />
           ) : (
             <div className="event-list">
@@ -2462,19 +2533,33 @@ function LiveView({
         </section>
         <aside className="live-aside">
           <ExecutionLedger state={state} mutate={mutate} presenceId={selected?.id} />
-          <div className="decision-card">
-            <div className="section-heading compact">
-              <div>
-                <SectionEyebrow>Decision stream</SectionEyebrow>
-                <h3>{latestDecision ? "Latest decision" : "No decisions yet"}</h3>
+            <div className="decision-card activity-rail-card">
+              <div className="section-heading compact">
+                <div>
+                <SectionEyebrow>Now · Up next · Needs attention</SectionEyebrow>
+                <h3>{activity.current.label}</h3>
               </div>
               <Activity size={17} />
             </div>
             <div className="decision-line">
-              <span className="decision-score">{latestDecision?.type ?? "—"}</span>
+              <span className="decision-score">NOW</span>
               <div>
-                <strong>{latestDecision?.title ?? "Nothing has happened yet"}</strong>
-                <small>{latestDecision?.detail ?? "Run a pulse when you want this Presence to pay attention."}</small>
+                <strong>{activity.current.label}</strong>
+                <small>{activity.current.detail}</small>
+              </div>
+            </div>
+            <div className="decision-line">
+              <span className="decision-score">NEXT</span>
+              <div>
+                <strong>{activity.nextAttention.label}</strong>
+                <small>{activity.nextAttention.detail}</small>
+              </div>
+            </div>
+            <div className="decision-line">
+              <span className="decision-score">REVIEW</span>
+              <div>
+                <strong>{activity.needsAttention.label}</strong>
+                <small>{activity.needsAttention.detail}</small>
               </div>
             </div>
             <Button
@@ -2509,6 +2594,12 @@ function MirrorPanel({
       (filter === "all" || item.presenceId === filter) &&
       item.state !== "offline",
   );
+  const nativeConnection = state.nativeConnections.find(
+    (item) =>
+      (filter === "all" || item.presenceId === filter) &&
+      item.kind === "x" &&
+      item.status === "connected",
+  );
   const channel = selectedPresence
     ? state.channelDefinitions.find(
         (item) => item.id === selectedPresence.channel,
@@ -2525,12 +2616,16 @@ function MirrorPanel({
               ? "What Jenny can see"
               : bridge
                 ? "Waiting for the first event"
+                : nativeConnection
+                  ? "Connected, waiting for observations"
                 : "No connected Presence"}
           </h3>
         </div>
         <span className="quiet-label">
           {bridge
             ? `${bridge.state} · ${objects.length} recent`
+            : nativeConnection
+              ? `Official X · ${nativeConnection.access === "read-write" ? "read + write" : "read-only"}`
             : filter === "all"
               ? "Connect a Presence"
               : builtIn
@@ -2567,6 +2662,8 @@ function MirrorPanel({
         <p className="mirror-explainer">
           {bridge
             ? "Your Bridge sends inbound posts, comments, and messages here as context. They remain channel content, not instructions."
+            : nativeConnection
+              ? "The native channel is connected, but this local runtime has not run an observation yet. Run one pulse or a standing intent to begin a truthful observation cycle."
             : filter === "all"
               ? "A Social Mirror is created per connected Presence. Select a Presence or connect a custom channel to start receiving read-only context."
               : builtIn
@@ -2575,23 +2672,6 @@ function MirrorPanel({
         </p>
       )}
     </section>
-  );
-}
-function Metric({
-  label,
-  value,
-  hint,
-}: {
-  label: string;
-  value: string;
-  hint: string;
-}) {
-  return (
-    <div className="metric">
-      <span>{label}</span>
-      <strong>{value}</strong>
-      <small>{hint}</small>
-    </div>
   );
 }
 function EmptyState({
@@ -2875,7 +2955,7 @@ function CalendarView({
           {visibleSlots.length === 0 ? (
             <EmptyState
               title="No standing intentions"
-              body="A quiet calendar is fine. Add one when you know where and when your Presence should pay attention."
+              body="A quiet calendar is fine. Jenny can still observe and respond through her normal operating rhythm; standing intentions are explicit scheduled considerations."
               action={
                 <Button onClick={() => setShowForm(true)} variant="secondary">
                   <Plus size={14} /> Add first intent
@@ -3002,11 +3082,41 @@ function BrainView({
   const [connectionLabel, setConnectionLabel] = useState("");
   const [connectionEndpoint, setConnectionEndpoint] = useState("http://localhost:11434");
   const [connectionSecret, setConnectionSecret] = useState("");
+  const [ollamaModels, setOllamaModels] = useState<OllamaModelOption[]>([]);
+  const [ollamaModelsError, setOllamaModelsError] = useState<string | null>(null);
+  const ollamaConnection = state.providerConnections.find((item) => item.provider === "ollama" && item.status !== "needs-configuration");
+  const ollamaConnectionId = ollamaConnection?.id;
+  const ollamaEndpoint = ollamaConnection?.endpoint;
+  const modelProvider = model?.provider;
   const enabledSkills = state.skills.filter((skill) => state.agentSkills.some((binding) => binding.skillId === skill.id && binding.enabled));
+  const boundTools = state.toolBindings.map((binding) => ({
+    binding,
+    definition: AGENT_TOOL_DEFINITIONS.find((tool) => tool.id === binding.toolId),
+  }));
+  useEffect(() => {
+    if (modelProvider !== "ollama" || !ollamaConnectionId) return;
+    let cancelled = false;
+    fetch(`/api/ollama/models?connectionId=${encodeURIComponent(ollamaConnectionId)}`, { cache: "no-store" })
+      .then(async (response) => {
+        const payload = await readJsonResponse<{ models?: OllamaModelOption[]; error?: string }>(response);
+        if (!response.ok) throw new Error(payload.error ?? "Ollama model discovery failed.");
+        return payload;
+      })
+      .then((payload) => {
+        if (!cancelled) {
+          setOllamaModelsError(null);
+          setOllamaModels(payload.models ?? []);
+        }
+      })
+      .catch((reason: unknown) => {
+        if (!cancelled) setOllamaModelsError(reason instanceof Error ? reason.message : "Ollama model discovery failed.");
+      });
+    return () => { cancelled = true; };
+  }, [modelProvider, ollamaConnectionId, ollamaEndpoint]);
   const resetSkillForm = () => { setSkillName(""); setSkillDescription(""); setEditingSkillId(null); setShowSkillForm(false); };
   const beginSkillEdit = (skill: OpenPresenceState["skills"][number]) => { setEditingSkillId(skill.id); setSkillName(skill.name ?? skill.id); setSkillDescription(skill.description); setShowSkillForm(true); };
   const saveSkill = async (event: React.FormEvent) => { event.preventDefault(); const next = await mutate(editingSkillId ? { type: "editSkill", id: editingSkillId, name: skillName, description: skillDescription } : { type: "createSkill", name: skillName, description: skillDescription }); if (next) resetSkillForm(); };
-  const saveConnection = async (event: React.FormEvent) => { event.preventDefault(); const next = await mutate({ type: "configureProvider", provider: connectionProvider!, label: connectionLabel || (connectionProvider === "ollama" ? "Ollama local" : "OpenAI"), endpoint: connectionProvider === "ollama" ? connectionEndpoint : undefined, hasSecret: Boolean(connectionSecret) }); if (next) { setConnectionProvider(null); setConnectionLabel(""); setConnectionSecret(""); } };
+  const saveConnection = async (event: React.FormEvent) => { event.preventDefault(); const next = await mutate({ type: "configureProvider", provider: connectionProvider!, label: connectionLabel || (connectionProvider === "ollama" ? "Ollama local" : "OpenAI"), endpoint: connectionProvider === "ollama" ? connectionEndpoint : undefined, hasSecret: Boolean(connectionSecret), secret: connectionSecret || undefined }); if (next) { setConnectionProvider(null); setConnectionLabel(""); setConnectionSecret(""); } };
   if (!file)
     return (
       <div className="page">
@@ -3034,8 +3144,9 @@ function BrainView({
         )}
       </div>
       <section className="brain-overview">
-        <div><SectionEyebrow>Model runtime</SectionEyebrow><strong>{runtimeModels.find((item) => item.model === model?.model && item.quality === model?.quality)?.name ?? model?.model ?? "Not selected"}</strong><small>{model?.provider ?? "Choose a provider"} · {model?.quality ?? "runtime"}</small></div>
+        <div><SectionEyebrow>Model runtime</SectionEyebrow><strong>{model?.provider === "ollama" ? ollamaModelLabel(ollamaModels.find((item) => item.name === model.model || item.name.startsWith(`${model.model}:`))?.name ?? model.model) : runtimeModels.find((item) => item.model === model?.model && item.quality === model?.quality)?.name ?? model?.model ?? "Not selected"}</strong><small>{model?.provider ?? "Choose a provider"} · {model?.quality ?? "runtime"}</small></div>
         <div><SectionEyebrow>Skills</SectionEyebrow><strong>{state.skills.length} installed</strong><small>{enabledSkills.length} enabled for {agent.name}</small></div>
+        <div><SectionEyebrow>Tools</SectionEyebrow><strong>{boundTools.length} bound</strong><small>Agent-wide mechanical capabilities</small></div>
         <div><SectionEyebrow>Connections</SectionEyebrow><strong>{state.providerConnections.filter((item) => item.status !== "needs-configuration").length ? "Ready" : "Needs setup"}</strong><small>Set up provider access below.</small></div>
       </section>
       <section className="runtime-panel settings-card">
@@ -3045,9 +3156,9 @@ function BrainView({
           const selectedProvider =
             runtimeProviders.find((item) => item.id === model?.provider) ??
             runtimeProviders[0];
-          const providerModels = runtimeModels.filter(
-            (item) => item.provider === selectedProvider.id,
-          );
+          const providerModels = selectedProvider.id === "ollama"
+            ? ollamaModels.map((item) => ({ provider: "ollama" as const, label: "Ollama", model: item.name, name: ollamaModelLabel(item.name), quality: "local" as const, detail: ollamaModelDetail(item) }))
+            : runtimeModels.filter((item) => item.provider === selectedProvider.id);
           return (
             <div className="runtime-provider">
               <div className="runtime-provider-heading">
@@ -3081,11 +3192,13 @@ function BrainView({
                 </select>
                 <span>{selectedProvider.detail}</span>
               </div>
+              {selectedProvider.id === "ollama" && (ollamaModelsError || !ollamaConnectionId) && <p className="runtime-model-status" role="status">{ollamaModelsError ?? "Connect Ollama to discover installed models."}</p>}
+              {selectedProvider.id === "ollama" && !ollamaModelsError && ollamaModels.length === 0 && <p className="runtime-model-status" role="status">Discovering installed Ollama models…</p>}
               <div className="runtime-model-grid">
                 {providerModels.map((item) => {
                   const selected =
                     model?.provider === item.provider &&
-                    model.model === item.model &&
+                    (model.model === item.model || item.provider === "ollama" && item.model.startsWith(`${model.model}:`)) &&
                     model.quality === item.quality;
                   return (
                     <button
@@ -3155,6 +3268,32 @@ function BrainView({
           </div>
         </div>
         <div className="settings-card brain-action-card"><div className="section-heading compact"><div><SectionEyebrow>Connections</SectionEyebrow><h2>Provider access</h2></div><PlugZap size={17} /></div><p className="muted">Connect a provider here; Chat will use the Agent runtime you choose above.</p><div className="config-list">{(["openai", "ollama"] as const).map((provider) => { const connection = state.providerConnections.find((item) => item.provider === provider); return <div className="config-list-row" key={provider}><div><strong>{provider === "openai" ? "OpenAI" : "Ollama"}</strong><small>{connection?.status === "local" ? connection.endpoint ?? "Local endpoint" : connection?.secretConfigured ? "Credential ready" : connection?.status === "available" ? "Connected" : "Needs setup"}</small></div><Button variant={connection && connection.status !== "needs-configuration" ? "ghost" : "secondary"} onClick={() => { setConnectionProvider(provider); if (provider === "openai") setConnectionLabel(connection?.label ?? "OpenAI"); else { setConnectionLabel(connection?.label ?? "Ollama local"); setConnectionEndpoint(connection?.endpoint ?? "http://localhost:11434"); } }}>{connection && connection.status !== "needs-configuration" ? "Edit" : "Set up"}</Button></div>; })}</div>{connectionProvider && <form className="inline-config-form" onSubmit={saveConnection}><h3>Set up {connectionProvider === "openai" ? "OpenAI" : "Ollama"}</h3><label>Connection name<input aria-label="Connection name" value={connectionLabel} onChange={(event) => setConnectionLabel(event.target.value)} required /></label>{connectionProvider === "ollama" ? <label>Ollama endpoint<input aria-label="Ollama endpoint" value={connectionEndpoint} onChange={(event) => setConnectionEndpoint(event.target.value)} required /></label> : <label>API key<input aria-label="Provider API key" type="password" value={connectionSecret} onChange={(event) => setConnectionSecret(event.target.value)} placeholder="sk-…" /></label>}<div className="inline-form-actions"><Button type="button" variant="ghost" onClick={() => setConnectionProvider(null)}>Cancel</Button><Button type="submit" variant="primary"><Check size={14} /> Save connection</Button></div></form>}</div>
+      </section>
+      <section className="settings-card tools-card" aria-label="Agent tools">
+        <div className="section-heading compact">
+          <div>
+            <SectionEyebrow>Agent capabilities</SectionEyebrow>
+            <h2>Tools bound to {agent.name}</h2>
+          </div>
+          <span className="quiet-label">{boundTools.length} bound</span>
+        </div>
+        <p className="muted tools-intro">
+          These are Agent-level tool bindings, not channel permissions. A binding makes a capability eligible for a supported invocation; it does not run a tool or define Jenny&apos;s identity by itself.
+        </p>
+        <div className="tool-list">
+          {boundTools.length ? boundTools.map(({ binding, definition }) => (
+            <div className="tool-row" key={binding.id}>
+              <div>
+                <strong>{definition?.name ?? binding.toolId}</strong>
+                <small>{definition?.description ?? "A runtime capability bound to this Agent."}</small>
+              </div>
+              <span className="status-tag">{definition?.scope === "presence" ? "Presence connector" : "Agent-wide"} · Bound</span>
+            </div>
+          )) : <p className="context-empty">No tools are bound to this Agent yet.</p>}
+        </div>
+        <p className="tool-boundary">
+          Presence settings still control whether channel actions are off, manual, review, or auto. A tool being bound does not authorize a publication by itself.
+        </p>
       </section>
       <div className="brain-layout">
         <aside className="file-list">
@@ -3278,10 +3417,12 @@ function PresenceView({
   state,
   mutate,
   manageBridge,
+  manageX,
 }: {
   state: OpenPresenceState;
   mutate: Mutate;
   manageBridge: BridgeManage;
+  manageX: XManage;
 }) {
   const presence = state.presence!;
   const capabilities =
@@ -3291,6 +3432,7 @@ function PresenceView({
     ] ??
     [];
   const [customizing, setCustomizing] = useState(true);
+  const [ghostDraft, setGhostDraft] = useState<GhostProfile>(presence.ghostProfile ?? { subject: "Me / my organization", priorities: "", preferences: "", voice: "", boundaries: "" });
   const setMode = (key: string, mode: ExecutionMode) =>
     mutate({ type: "setPresence", patch: { execution: { [key]: mode } } });
   const applyPreset = (mode: ExecutionMode) =>
@@ -3386,6 +3528,37 @@ function PresenceView({
           </button>
         </div>
       </section>
+      {presence.mode === "ghost" && (
+        <section className="settings-card ghost-profile-card" key={`${presence.id}-${JSON.stringify(presence.ghostProfile ?? {})}`}>
+          <div className="section-heading compact">
+            <div>
+              <SectionEyebrow>Ghost profile · Presence-scoped</SectionEyebrow>
+              <h2>What should this Ghost represent?</h2>
+            </div>
+            <Ghost size={17} />
+          </div>
+          <p className="muted">This is the context Jenny uses to extend you here. It does not change Jenny&apos;s Brain, Soul, Mission, Taste, Memory, or Growth.</p>
+          <div className="ghost-profile-form">
+            <label>Who or what is represented?<input aria-label="Ghost subject" value={ghostDraft.subject} onChange={(event) => setGhostDraft({ ...ghostDraft, subject: event.target.value })} placeholder="Me / my organization" /></label>
+            <label>Priorities here<textarea aria-label="Ghost priorities" value={ghostDraft.priorities} onChange={(event) => setGhostDraft({ ...ghostDraft, priorities: event.target.value })} placeholder="What should this Presence help accomplish?" rows={3} /></label>
+            <label>Preferences and points of view<textarea aria-label="Ghost preferences" value={ghostDraft.preferences} onChange={(event) => setGhostDraft({ ...ghostDraft, preferences: event.target.value })} placeholder="What do you care about, prefer, or believe?" rows={3} /></label>
+            <label>Voice and tone<textarea aria-label="Ghost voice" value={ghostDraft.voice} onChange={(event) => setGhostDraft({ ...ghostDraft, voice: event.target.value })} placeholder="How should it sound when extending you?" rows={3} /></label>
+            <label>Boundaries and things to avoid<textarea aria-label="Ghost boundaries" value={ghostDraft.boundaries} onChange={(event) => setGhostDraft({ ...ghostDraft, boundaries: event.target.value })} placeholder="What should it never assume, disclose, or do?" rows={3} /></label>
+          </div>
+          <div className="ghost-understanding" role="status">
+            <div className="section-heading compact"><div><SectionEyebrow>Review before acting</SectionEyebrow><h3>What Jenny currently understands</h3></div><span className={`status-tag ${ghostDraft.priorities.trim() && ghostDraft.preferences.trim() && ghostDraft.voice.trim() && ghostDraft.boundaries.trim() ? "status-ready" : "status-incomplete"}`}>{ghostDraft.priorities.trim() && ghostDraft.preferences.trim() && ghostDraft.voice.trim() && ghostDraft.boundaries.trim() ? "Profile defined" : "Needs your input"}</span></div>
+            <dl>
+              <div><dt>Represents</dt><dd>{ghostDraft.subject.trim() || "Not defined yet"}</dd></div>
+              <div><dt>Priorities</dt><dd>{ghostDraft.priorities.trim() || "Not defined yet"}</dd></div>
+              <div><dt>Preferences</dt><dd>{ghostDraft.preferences.trim() || "Not defined yet"}</dd></div>
+              <div><dt>Voice</dt><dd>{ghostDraft.voice.trim() || "Not defined yet"}</dd></div>
+              <div><dt>Boundaries</dt><dd>{ghostDraft.boundaries.trim() || "Not defined yet"}</dd></div>
+            </dl>
+            <p className="form-hint">Empty fields are unknown. Jenny must not infer them from her own identity or private context.</p>
+          </div>
+          <div className="inline-form-actions"><Button variant="primary" disabled={!ghostDraft.subject.trim()} onClick={() => void mutate({ type: "setPresence", patch: { ghostProfile: { ...ghostDraft, subject: ghostDraft.subject.trim(), priorities: ghostDraft.priorities.trim(), preferences: ghostDraft.preferences.trim(), voice: ghostDraft.voice.trim(), boundaries: ghostDraft.boundaries.trim() } } })}><Check size={14} /> Save Ghost profile</Button></div>
+        </section>
+      )}
       <section className="settings-card">
           <div className="section-heading compact">
             <div>
@@ -3481,12 +3654,75 @@ function PresenceView({
             </select>
           </div>
       </section>
+      {presence.channel === "x" && (
+        <XConnection state={state} presence={presence} manageX={manageX} />
+      )}
       <BridgeManager
         state={state}
         presence={presence}
         manageBridge={manageBridge}
       />
     </div>
+  );
+}
+
+function XConnection({
+  state,
+  presence,
+  manageX,
+}: {
+  state: OpenPresenceState;
+  presence: NonNullable<OpenPresenceState["presence"]>;
+  manageX: XManage;
+}) {
+  const connection = state.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x");
+  const [open, setOpen] = useState(!connection);
+  const [apiKey, setApiKey] = useState("");
+  const [apiSecret, setApiSecret] = useState("");
+  const [bearerToken, setBearerToken] = useState("");
+  const [accessToken, setAccessToken] = useState("");
+  const [accessTokenSecret, setAccessTokenSecret] = useState("");
+  const [result, setResult] = useState<{ account: { id: string; username: string; name: string }; access: "read" | "read-write" } | null>(null);
+  const [working, setWorking] = useState<"test" | "save" | "disconnect" | null>(null);
+  const credentials = { apiKey, apiSecret, bearerToken, accessToken, accessTokenSecret };
+  const clearForm = () => { setApiKey(""); setApiSecret(""); setBearerToken(""); setAccessToken(""); setAccessTokenSecret(""); setResult(null); };
+  const test = async () => { setWorking("test"); const response = await manageX({ action: "test", presenceId: presence.id, credentials }); setWorking(null); if (response?.result) setResult(response.result); };
+  const save = async (event: React.FormEvent) => { event.preventDefault(); setWorking("save"); const response = await manageX({ action: "save", presenceId: presence.id, credentials }); setWorking(null); if (response?.result) { setResult(response.result); setOpen(false); clearForm(); } };
+  const disconnect = async () => { setWorking("disconnect"); await manageX({ action: "disconnect", presenceId: presence.id }); setWorking(null); setResult(null); clearForm(); setOpen(true); };
+  return (
+    <section className="settings-card native-connection-card">
+      <div className="section-heading compact">
+        <div>
+          <SectionEyebrow>Official X API</SectionEyebrow>
+          <h2>{connection ? `Connected to @${connection.account?.username ?? presence.handle.replace(/^@/, "")}` : "Connect this Presence to X"}</h2>
+        </div>
+        <Radio size={17} />
+      </div>
+      {connection && !open ? (
+        <>
+          <div className="connection-summary">
+            <div><strong>{connection.account?.name ?? "X account"}</strong><small>@{connection.account?.username ?? "unknown"}</small></div>
+            <span className="live-pill"><span className="status-dot" /> Connected</span>
+          </div>
+          <p className="muted">Official X API access is {connection.access === "read-write" ? "read + write" : "read only"}. {connection.access === "read" ? "Add User Access Token and User Access Token Secret to let Jenny publish and reply." : ""} Credentials are encrypted on this server and never returned to the browser.</p>
+          <div className="bridge-row-actions"><Button variant="ghost" onClick={() => setOpen(true)}>Update credentials</Button><Button variant="danger" disabled={working === "disconnect"} onClick={() => void disconnect()}>{working === "disconnect" ? "Disconnecting…" : "Disconnect"}</Button></div>
+        </>
+      ) : (
+        <form className="x-connection-form" onSubmit={(event) => void save(event)}>
+          <p className="muted">Use the official X API for this Presence. A Bearer Token enables read access; user access tokens enable posting and replies.</p>
+          <p className="x-credentials-help">Find these values in <a href="https://console.x.com/" target="_blank" rel="noreferrer">X Developer Console</a> → your app → <strong>Keys and tokens</strong>. Generate or regenerate <strong>Access Token and Secret</strong> after setting the app permission to read and write.</p>
+          <div className="x-credential-grid">
+            <label className="x-credential-field"><span className="x-field-label">API Key / Consumer Key</span><input aria-label="X API Key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="off" required /></label>
+            <label className="x-credential-field"><span className="x-field-label">API Key Secret / Consumer Secret</span><input aria-label="X API Key Secret" type="password" value={apiSecret} onChange={(event) => setApiSecret(event.target.value)} autoComplete="off" required /></label>
+            <label className="x-credential-field"><span className="x-field-label">Bearer Token <small>Optional · read access</small></span><input aria-label="X Bearer Token" type="password" value={bearerToken} onChange={(event) => setBearerToken(event.target.value)} autoComplete="off" /></label>
+            <label className="x-credential-field"><span className="x-field-label">User Access Token <small>Required · write access</small></span><input aria-label="X User Access Token" type="password" value={accessToken} onChange={(event) => setAccessToken(event.target.value)} autoComplete="off" /></label>
+            <label className="x-credential-field"><span className="x-field-label">User Access Token Secret <small>Required · write access</small></span><input aria-label="X User Access Token Secret" type="password" value={accessTokenSecret} onChange={(event) => setAccessTokenSecret(event.target.value)} autoComplete="off" /></label>
+          </div>
+          {result && <div className="connection-result" role="status"><Check size={15} /><span>Connected to <strong>@{result.account.username}</strong> · {result.access === "read-write" ? "Read + write" : "Read only"}</span></div>}
+          <div className="inline-form-actions"><Button type="button" variant="ghost" onClick={() => { clearForm(); setOpen(Boolean(connection)); }}>Cancel</Button><Button type="button" variant="secondary" onClick={() => void test()} disabled={working !== null || !apiKey || !apiSecret}>{working === "test" ? "Testing…" : "Test connection"}</Button><Button type="submit" variant="primary" disabled={working !== null}>{working === "save" ? "Saving…" : "Save connection"}</Button></div>
+        </form>
+      )}
+    </section>
   );
 }
 
@@ -3509,6 +3745,9 @@ function BridgeManager({
   const activeBridges = bridges.filter((item) => item.state !== "offline");
   const channel = state.channelDefinitions.find(
     (item) => item.id === presence?.channel,
+  );
+  const nativeConnection = state.nativeConnections.find(
+    (item) => item.presenceId === presence?.id && item.kind === "x" && item.status === "connected",
   );
   if (!presence) return null;
   const create = async () => {
@@ -3533,6 +3772,12 @@ function BridgeManager({
     setDisconnecting(null);
     if (result) setKey(undefined);
   };
+  const remove = async (bridgeId: string) => {
+    setDisconnecting(bridgeId);
+    const result = await manageBridge({ action: "remove", bridgeId });
+    setDisconnecting(null);
+    if (result) setKey(undefined);
+  };
   const externalEventsEndpoint = "/api/bridge/v1/events";
   const externalExecutionsEndpoint = "/api/bridge/v1/executions/claim";
   const bridgeRows = bridges.map((bridge) => (
@@ -3541,9 +3786,21 @@ function BridgeManager({
         <strong>{bridge.name}</strong>
         <small>
           {bridge.state === "offline"
-            ? "Disconnected · its credential has been revoked."
+            ? bridge.credentialRevokedAt
+              ? "Disconnected · its credential has been revoked."
+              : bridge.keyPrefix || bridge.credentialId
+                ? "Disconnected · credential metadata is available, but its revocation time is unavailable."
+                : "Disconnected · credential metadata is unavailable."
             : `Can observe · ${bridge.capabilities.inbound ? "social objects" : "nothing yet"}`}
         </small>
+        {bridge.state === "offline" && (
+          <small className="bridge-credential-meta">
+            {bridge.keyPrefix || bridge.credentialId ? (
+              <>Credential prefix: <code>{bridge.keyPrefix ?? bridge.credentialId}</code>{bridge.credentialRevokedAt ? ` · revoked ${formatTime(bridge.credentialRevokedAt)}` : " · revocation time unavailable"}</>
+            ) : "No credential record remains for this Bridge."}
+            {" · secret value is not recoverable"}
+          </small>
+        )}
         {bridge.state !== "offline" && (
           <small>
             Can perform · {bridge.capabilities.affordances.join(", ")}
@@ -3570,6 +3827,15 @@ function BridgeManager({
             {disconnecting === bridge.id ? "Disconnecting…" : "Disconnect"}
           </Button>
         )}
+        {bridge.state === "offline" && (
+          <Button
+            variant="danger"
+            disabled={disconnecting === bridge.id}
+            onClick={() => void remove(bridge.id)}
+          >
+            {disconnecting === bridge.id ? "Removing…" : "Remove Bridge"}
+          </Button>
+        )}
       </div>
     </div>
   ));
@@ -3578,16 +3844,18 @@ function BridgeManager({
       <div className="section-heading compact">
         <div>
           <SectionEyebrow>
-            {channel?.builtIn ? "Optional live connection" : "Custom channel connection"}
+            {nativeConnection ? "Fallback external connection" : channel?.builtIn ? "Optional live connection" : "Custom channel connection"}
           </SectionEyebrow>
-          <h2>{channel?.builtIn ? "Add a live connector" : "Connect this Presence"}</h2>
+          <h2>{nativeConnection ? "Add a Bridge alternative" : channel?.builtIn ? "Add a live connector" : "Connect this Presence"}</h2>
         </div>
         <ShieldCheck size={17} />
       </div>
       {activeBridges.length === 0 && (
         <div className="empty-bridge">
           <p>
-            {channel?.builtIn
+            {nativeConnection
+              ? "Official X API is connected for this Presence. Add a Bridge only if an external executor should be an alternative to the native connector."
+              : channel?.builtIn
               ? `This ${channelLabel(presence.channel, state.channelDefinitions)} Presence already works in the local simulator. Add a Bridge only when an external adapter should send live channel events and receive approved actions.`
               : "A Bridge is a small external adapter for this channel. It sends inbound social objects to OpenPresence and receives only approved actions from this Presence's execution envelope."}
           </p>

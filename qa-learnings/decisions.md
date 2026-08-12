@@ -8,6 +8,14 @@
 **Tests/evals affected:** Boot, migration, state persistence, browser workflow, and execution-ledger tests.
 **Approved by:** Product plan.
 
+## 2026-08-12 — Native X connector and shared encrypted secret vault
+
+**What changed:** Added a Presence-scoped Official X API connection with OAuth 1.0a user-context testing and native post delivery; retained Bridge and Manual Relay as alternatives. Added AES-256-GCM encrypted storage for X and provider secrets, with `OPENPRESENCE_SECRET_KEY` supported for production deployments and a local-only generated key for development/test data.
+**Why:** A Bridge is an external fallback connector, not a replacement for an official channel integration. Channel credentials must remain separate from Agent model-provider access while sharing secure storage infrastructure.
+**Requirements affected:** X Presence connection, read-only/read-write capability truth, native execution, credential persistence, provider access security, and the User → Agent → Presence hierarchy.
+**Tests/evals affected:** 26 unit tests, 34 browser tests across Chromium and Pixel 5, production build, OAuth signing, encrypted storage, disconnect cleanup, and native X execution.
+**Approved by:** User request and attached architecture correction.
+
 ## 2026-08-12 — Bridge Connector and Social Mirror vertical slice
 
 **What changed:** Custom channel definitions, presence-scoped Bridges, a durable Mirror, REST inbound/outbound protocol, rotatable API keys, and leased execution claims were added while preserving simulated X behavior.
