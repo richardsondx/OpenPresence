@@ -33,7 +33,7 @@ async function navigate(page: import("@playwright/test").Page, label: string) {
   const mobile = page.locator(".mobile-nav");
   if (await mobile.isVisible()) await mobile.getByRole("button", { name: navigationLabel }).click();
   else if (label === "Brain") await page.getByRole("button", { name: /^Manage Agent/ }).click();
-  else await page.getByRole("button", { name: navigationLabel, exact: true }).click();
+  else await page.locator(".sidebar").getByRole("button", { name: navigationLabel, exact: true }).click();
 }
 
 function presenceSwitcher(page: import("@playwright/test").Page, handle: string) {
@@ -74,6 +74,30 @@ async function expectComposerLayout(page: import("@playwright/test").Page) {
   expect(geometry.send!.top).toBeGreaterThanOrEqual(geometry.textarea!.top);
   expect(geometry.send!.bottom).toBeLessThanOrEqual(geometry.textarea!.bottom);
   expect(geometry.hintTop).toBeGreaterThanOrEqual(geometry.form.bottom);
+}
+
+async function expectChatViewportLayout(page: import("@playwright/test").Page) {
+  const geometry = await page.locator(".chat-thread").evaluate((thread) => {
+    const history = thread.querySelector<HTMLElement>(".chat-history");
+    const composer = thread.querySelector<HTMLElement>(".chat-composer");
+    if (!history || !composer) throw new Error("Chat viewport nodes are missing");
+    const historyBox = history.getBoundingClientRect();
+    const composerBox = composer.getBoundingClientRect();
+    return {
+      historyTop: historyBox.top,
+      historyBottom: historyBox.bottom,
+      composerTop: composerBox.top,
+      composerBottom: composerBox.bottom,
+      overflowY: getComputedStyle(history).overflowY,
+      scrollGap: history.scrollHeight - history.clientHeight - history.scrollTop,
+      documentOverflow: document.documentElement.scrollHeight > window.innerHeight + 1,
+    };
+  });
+  expect(geometry.overflowY).toBe("auto");
+  expect(geometry.composerTop).toBeGreaterThanOrEqual(geometry.historyTop);
+  expect(geometry.composerBottom).toBeLessThanOrEqual(await page.evaluate(() => window.innerHeight));
+  expect(geometry.scrollGap).toBeLessThanOrEqual(2);
+  expect(geometry.documentOverflow).toBe(false);
 }
 
 test("operator can create an agent and first Presence from blank state", async ({ page }) => {
@@ -136,12 +160,14 @@ test("Chat keeps one persistent Agent conversation", async ({ page }) => {
   await page.getByRole("button", { name: "Show context sidebar" }).click();
   await expect(contextSidebar).toBeVisible();
   await expectComposerLayout(page);
+  await expectChatViewportLayout(page);
   await page.getByLabel("Message your Presence").fill("Remember that useful software should feel calm.");
   await page.getByRole("button", { name: "Send message" }).click();
-  await expect(page.getByText("Remember that useful software should feel calm.")).toBeVisible();
+  await expect(page.getByText("Remember that useful software should feel calm.", { exact: true })).toBeVisible();
+  await expect(page.getByText(/I understood “Remember that useful software should feel calm/)).toBeVisible();
   await page.reload();
   await navigate(page, "Chat");
-  await expect(page.getByText("Remember that useful software should feel calm.")).toBeVisible();
+  await expect(page.getByText("Remember that useful software should feel calm.", { exact: true })).toBeVisible();
 });
 
 test("Agent switcher creates and switches isolated workspaces", async ({ page }) => {
@@ -186,7 +212,13 @@ test("Agent model selection lives in Brain and persists per Agent", async ({ pag
   await expect(page.getByLabel("Runtime provider")).toBeVisible();
   await page.getByLabel("Runtime provider").selectOption("ollama");
   await expect(page.getByLabel("Runtime provider")).toHaveValue("ollama");
-  await expect(page.getByRole("button", { name: "Use Llama 3.2 local" })).toBeVisible();
+  await expect(page.getByText("Connect Ollama to discover installed models.", { exact: true })).toBeVisible();
+  const ollamaConnection = page.locator(".config-list-row").filter({ hasText: "Ollama" });
+  await ollamaConnection.getByRole("button", { name: "Set up", exact: true }).click();
+  await page.getByLabel("Connection name").fill("Ollama local");
+  await page.getByLabel("Ollama endpoint").fill("http://localhost:11434");
+  await page.getByRole("button", { name: "Save connection", exact: true }).click();
+  await expect(page.getByRole("button", { name: /Use Qwen 2\.5/ }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Use GPT 5.6 Sol high" })).toHaveCount(0);
   await page.getByLabel("Runtime provider").selectOption("openai");
   await page.getByRole("button", { name: "Use GPT 5.6 Sol high" }).click();
@@ -197,6 +229,20 @@ test("Agent model selection lives in Brain and persists per Agent", async ({ pag
   await page.reload();
   await navigate(page, "Brain");
   await expect(page.getByRole("button", { name: "Use GPT 5.6 Sol high" })).toHaveClass(/selected/);
+});
+
+test("Manage Agent makes Agent tools discoverable", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Brain");
+  await expect(page.getByRole("heading", { name: "Tools bound to Jenny" })).toBeVisible();
+  for (const name of ["Web search", "Asset inspection", "Chart rendering", "Channel execution"]) {
+    await expect(page.getByText(name, { exact: true })).toBeVisible();
+  }
+  await expect(page.getByText("Presence connector · Bound", { exact: true })).toBeVisible();
+  await expect(page.locator(".tool-boundary")).toContainText("Presence settings still control whether channel actions are off, manual, review, or auto.");
+  await navigate(page, "Chat");
+  await expect(page.getByText("Tools available", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Tools bound", { exact: true })).toBeVisible();
 });
 
 test("Brain makes skill creation and provider setup actionable", async ({ page }) => {
@@ -247,13 +293,24 @@ test("Calendar stores a real Standing Intent and evaluates it now", async ({ pag
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(page.getByText("Teach the audience one edited useful idea about persistent agents.")).toBeVisible();
   await page.getByRole("button", { name: "Run now" }).click();
-  await navigate(page, "Live");
-  await expect(page.getByText("Standing intent evaluated", { exact: true })).toBeVisible();
+  await navigate(page, "Activity");
+  await expect(page.locator(".event-title").filter({ hasText: "Standing intent evaluated" })).toBeVisible();
   await expect(page.getByText("0.94", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Reply to a technical founder", { exact: true })).toHaveCount(0);
 });
 
-test("Live completes review and manual execution lifecycles", async ({ page }) => {
+test("Activity explains current work, next attention, and configured rhythm", async ({ page }) => {
+  await createAgent(page);
+  await expect(page.getByLabel("Operating status").getByRole("heading", { name: "Waiting for the next meaningful event" })).toBeVisible();
+  await expect(page.getByLabel("Operating status").getByRole("heading", { name: "On demand" })).toBeVisible();
+  await expect(page.getByLabel("Operating status").getByText("No automatic scan is scheduled in this local runtime.", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Operating status").getByText("Publishing Auto", { exact: true })).toBeVisible();
+  await page.locator(".page-heading .heading-actions").getByRole("button", { name: "Run one pulse", exact: true }).click();
+  await expect(page.getByLabel("Operating status").getByRole("heading", { name: "Waiting for a better moment" })).toBeVisible();
+  await expect(page.locator(".event-title").filter({ hasText: "Pulse completed" })).toBeVisible();
+});
+
+test("Activity completes review and manual execution lifecycles", async ({ page }) => {
   await createAgent(page);
   await navigate(page, "Settings");
   await page.getByRole("button", { name: "Posts review", exact: true }).click();
@@ -262,10 +319,11 @@ test("Live completes review and manual execution lifecycles", async ({ page }) =
   await page.getByLabel("What should Jenny do?").fill("Review one useful idea before it is sent.");
   await page.getByRole("button", { name: "Save standing intent" }).click();
   await page.getByRole("button", { name: "Run now" }).click();
-  await navigate(page, "Live");
+  await page.waitForTimeout(150);
+  await page.reload();
   await page.getByRole("button", { name: "Approve execution" }).click();
   await page.getByRole("button", { name: "Execute approved action" }).click();
-  await expect(page.getByRole("heading", { name: "Action completed" })).toBeVisible();
+  await expect(page.locator(".execution-ledger").getByRole("heading", { name: "Action completed" })).toBeVisible();
 
   await navigate(page, "Settings");
   await page.getByRole("button", { name: "Posts manual", exact: true }).click();
@@ -274,11 +332,12 @@ test("Live completes review and manual execution lifecycles", async ({ page }) =
   await page.getByLabel("What should Jenny do?").fill("Carry one useful idea to the channel manually.");
   await page.getByRole("button", { name: "Save standing intent" }).click();
   await page.locator(".slot-row").filter({ hasText: "Carry one useful idea to the channel manually" }).getByRole("button", { name: "Run now" }).click();
-  await navigate(page, "Live");
+  await page.waitForTimeout(150);
+  await page.reload();
   await expect(page.getByLabel("External reference", { exact: true })).toBeVisible();
   await page.getByLabel("External reference", { exact: true }).fill("manual-post-1");
   await page.getByRole("button", { name: "Mark posted" }).click();
-  await expect(page.getByRole("heading", { name: "Action completed" })).toBeVisible();
+  await expect(page.locator(".execution-ledger").getByRole("heading", { name: "Action completed" })).toBeVisible();
 });
 
 test("Presence settings are generated from channel capabilities and pause truthfully", async ({ page }) => {
@@ -291,17 +350,47 @@ test("Presence settings are generated from channel capabilities and pause truthf
   await expect(page.getByRole("button", { name: "Posts auto", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Replies review", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Pause Presence" }).click();
-  await navigate(page, "Live");
+  await navigate(page, "Activity");
   await expect(page.getByRole("heading", { name: "@jenny_ai is paused." })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Run pulse" })).toBeDisabled();
+  await expect(page.getByRole("button", { name: "Run one pulse" })).toBeDisabled();
   await navigate(page, "Settings");
   await page.getByRole("button", { name: "Resume Presence" }).click();
-  await navigate(page, "Live");
+  await navigate(page, "Activity");
   await expect(page.getByRole("heading", { name: "@jenny_ai is live." })).toBeVisible();
+});
+
+test("Chat acknowledges live Presence identity changes", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Settings");
+  const identityOptions = page.locator(".identity-options");
+  await identityOptions.getByRole("button", { name: /Me \/ my organization/ }).click();
+  await expect(identityOptions.getByRole("button", { name: /Me \/ my organization/ })).toHaveClass(/selected/);
+  await expect(page.getByRole("heading", { name: "What should this Ghost represent?" })).toBeVisible();
+  await page.getByLabel("Ghost subject").fill("Alex Rivera");
+  await page.getByLabel("Ghost priorities").fill("Build trustworthy open-source AI products.");
+  await page.getByLabel("Ghost preferences").fill("Prefer clear evidence and useful depth over hype.");
+  await page.getByLabel("Ghost voice").fill("Warm, direct, and technically sharp.");
+  await page.getByLabel("Ghost boundaries").fill("Never invent my views or disclose private community context.");
+  await page.getByRole("button", { name: "Save Ghost profile", exact: true }).click();
+  await expect(page.getByText("Profile defined", { exact: true })).toBeVisible();
+  await page.reload();
+  await navigate(page, "Settings");
+  await expect(page.getByLabel("Ghost subject")).toHaveValue("Alex Rivera");
+  await expect(page.locator(".ghost-understanding").getByText("Never invent my views or disclose private community context.", { exact: true })).toBeVisible();
+  await navigate(page, "Chat");
+  await expect(page.getByText("I noticed this Presence is now Ghost. I’ll use that live state from here.", { exact: true })).toBeVisible();
+  await expect(page.getByText("I noticed the Ghost profile changed. I’ll use the reviewed profile for this Presence from here.", { exact: true })).toBeVisible();
+
+  await navigate(page, "Settings");
+  await identityOptions.getByRole("button", { name: /^Jenny Agent-owned/ }).click();
+  await expect(identityOptions.getByRole("button", { name: /^Jenny Agent-owned/ })).toHaveClass(/selected/);
+  await navigate(page, "Chat");
+  await expect(page.getByText("I noticed this Presence is now Agent-owned. I’ll use that live state from here.", { exact: true })).toBeVisible();
 });
 
 test("desktop shell keeps sidebar and runtime status available", async ({ page }) => {
   await createAgent(page);
+  await expect(page.getByLabel("Help")).toHaveCount(0);
   const expectedPosition = test.info().project.name === "mobile" ? "relative" : "sticky";
   await expect(page.locator(".sidebar")).toHaveCSS("position", expectedPosition);
   if (test.info().project.name !== "mobile") {
@@ -352,7 +441,7 @@ test("Custom Channel connects a Bridge, receives Mirror events, and completes qu
   const persisted = await (await request.get("/api/state")).json();
   expect(JSON.stringify(persisted)).not.toContain(bridgeKey);
   await page.reload();
-  await navigate(page, "Live");
+  await navigate(page, "Activity");
   await expect(page.getByText("How are people handling memory?")).toBeVisible();
 
   await navigate(page, "Calendar");
@@ -371,13 +460,18 @@ test("Custom Channel connects a Bridge, receives Mirror events, and completes qu
   const acknowledged = await request.post(`/api/bridge/v1/executions/${execution.id}/ack`, { headers: { Authorization: `Bearer ${bridgeKey}` }, data: { executorId: "playwright-bridge", externalRef: { type: "post", id: "comment-8821" } } });
   expect(acknowledged.ok()).toBeTruthy();
   await page.reload();
-  await navigate(page, "Live");
-  await expect(page.getByText("Action completed", { exact: false })).toBeVisible();
+  await navigate(page, "Activity");
+  await expect(page.locator(".execution-ledger").getByRole("heading", { name: "Action completed" })).toBeVisible();
 
   await navigate(page, "Settings");
   await page.getByRole("button", { name: "Disconnect", exact: true }).click();
   await expect(page.getByText("Disconnected", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Disconnect", exact: true })).toHaveCount(0);
+  const disconnectedRow = page.locator(".bridge-row").filter({ hasText: "Founder Bridge" });
+  await expect(disconnectedRow).toContainText("Credential prefix:");
+  await expect(disconnectedRow).toContainText("secret value is not recoverable");
+  await disconnectedRow.getByRole("button", { name: "Remove Bridge", exact: true }).click();
+  await expect(disconnectedRow).toHaveCount(0);
   await expect(page.getByLabel("Bridge name")).toBeVisible();
   await page.getByLabel("Bridge name").fill("Reconnected Bridge");
   await page.getByRole("button", { name: "Connect", exact: true }).click();

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { applyOperation, compilePresenceContext, createAgent, initialState } from "../lib/runtime";
-import { acknowledgeExecution, claimExecutions, createBridgeWithKey, ingestEvents } from "../lib/bridge";
-import { readState, writeState } from "../lib/db";
+import { applyOperation, compilePresenceContext, createAgent, deriveActivitySummary, initialState } from "../lib/runtime";
+import { acknowledgeExecution, claimExecutions, createBridgeWithKey, ingestEvents, removeBridge, revokeBridge } from "../lib/bridge";
+import { readBridgeCredentialMetadata, readState, writeState } from "../lib/db";
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
@@ -12,6 +12,17 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.agent?.id).not.toBe(state.presence?.id);
     expect(state.files.map((file) => file.kind)).toEqual(["BRAIN", "SOUL", "MISSION", "TASTE", "MEMORY", "GROWTH", "PULSE", "PRESENCE"]);
     expect(state.files.find((file) => file.kind === "TASTE")?.protected).toBe(true);
+  });
+
+  it("seeds the Agent with the named mechanical tool bindings", () => {
+    const state = createAgent(input);
+    expect(state.toolBindings.map((binding) => binding.toolId)).toEqual([
+      "web.search",
+      "asset.inspect",
+      "chart.render",
+      "channel.execute",
+    ]);
+    expect(state.toolBindings.every((binding) => binding.agentId === state.agent?.id)).toBe(true);
   });
 
   it("creates a proposal instead of silently mutating protected identity", () => {
@@ -45,6 +56,51 @@ describe("OpenPresence runtime boundaries", () => {
     const afterPulse = applyOperation(paused, { type: "runPulse" });
     expect(afterPulse.events.length).toBe(before);
     expect(afterPulse.presence?.status).toBe("paused");
+  });
+
+  it("derives truthful now, next, and rhythm state for Activity", () => {
+    let state = createAgent(input);
+    let summary = deriveActivitySummary(state);
+    expect(summary.current.label).toBe("Waiting for the next meaningful event");
+    expect(summary.nextAttention.label).toBe("On demand");
+    expect(summary.nextAttention.detail).toContain("No automatic scan");
+    expect(summary.rhythm.publishing).toBe("Auto");
+    expect(summary.rhythm.replies).toBe("Review");
+    expect(summary.lastPulseAt).toBeUndefined();
+
+    state = applyOperation(state, { type: "runPulse" });
+    summary = deriveActivitySummary(state);
+    expect(summary.current.label).toBe("Waiting for a better moment");
+    expect(summary.lastPulseAt).toBeDefined();
+
+    state = applyOperation(state, { type: "setPresence", patch: { status: "paused" } });
+    summary = deriveActivitySummary(state);
+    expect(summary.current.label).toBe("Paused");
+    expect(summary.nextAttention.label).toBe("After resume");
+    expect(summary.rhythm.attention).toBe("Paused");
+  });
+
+  it("surfaces a standing intent as the next explicit consideration", () => {
+    const state = applyOperation(createAgent(input), { type: "addSlot", instruction: "Teach one useful thing", day: "Tuesday", time: "08:00", objective: "education", executionWindow: "08:00–11:00" });
+    const summary = deriveActivitySummary(state);
+    expect(summary.nextAttention.label).toBe("Next standing intent");
+    expect(summary.nextAttention.detail).toContain("Tuesday at 08:00");
+    expect(summary.nextIntent.label).toContain("Teach one useful thing");
+  });
+
+  it("keeps Ghost representation Presence-scoped and reviewable", () => {
+    const state = createAgent(input);
+    const originalSoul = state.files.find((file) => file.kind === "SOUL")?.content;
+    const ghost = applyOperation(state, { type: "setPresence", patch: { mode: "ghost" } });
+    expect(ghost.presence?.ghostProfile?.subject).toBe("Me / my organization");
+    expect(ghost.presence?.context.ghostProfile?.priorities).toBe("");
+    const configured = applyOperation(ghost, { type: "setPresence", patch: { ghostProfile: { subject: "Alex Rivera", priorities: "Build trustworthy open-source AI products.", preferences: "Prefer clear evidence and useful depth over hype.", voice: "Warm, direct, and technically sharp.", boundaries: "Never invent my views or disclose private community context." } } });
+    expect(configured.presence?.ghostProfile?.subject).toBe("Alex Rivera");
+    expect(configured.presence?.context.ghostProfile?.boundaries).toContain("private community");
+    expect(configured.files.find((file) => file.kind === "SOUL")?.content).toBe(originalSoul);
+    const agentOwned = applyOperation(configured, { type: "setPresence", patch: { mode: "agent" } });
+    expect(agentOwned.presence?.context.ghostProfile).toBeUndefined();
+    expect(agentOwned.presence?.ghostProfile?.subject).toBe("Alex Rivera");
   });
 
   it("starts cleanly without an agent", () => {
@@ -222,5 +278,24 @@ describe("OpenPresence runtime boundaries", () => {
     const claimed = claimExecutions(bridge, { executorId: "bridge-test", limit: 1 });
     const ack = acknowledgeExecution(bridge, claimed.executions[0]!.id, { executorId: "bridge-test", externalRef: { type: "post", id: "external-1" } });
     expect(() => acknowledgeExecution(bridge, ack.execution.id, { executorId: "bridge-test", externalRef: { type: "comment", id: "external-1" } })).toThrow(/different external reference/);
+  });
+
+  it("shows safe revoked Bridge credential metadata and removes the revoked Bridge", () => {
+    const state = createAgent(input);
+    const result = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "Revoked Community Bridge", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["post"], formats: [], metrics: [] } } });
+    const bridgeId = result.bridge!.id;
+    const revoked = revokeBridge(result.state, bridgeId);
+    const revokedBridge = revoked.bridges.find((bridge) => bridge.id === bridgeId)!;
+    expect(revokedBridge.state).toBe("offline");
+    expect(revokedBridge.keyPrefix).toBe(result.bridge!.keyPrefix);
+    expect(revokedBridge.credentialRevokedAt).toBeTruthy();
+    expect(readBridgeCredentialMetadata(bridgeId)?.credentialRevokedAt).toBeTruthy();
+    expect(JSON.stringify(revoked)).not.toContain(result.key!);
+
+    const removed = removeBridge(revoked, bridgeId);
+    expect(removed.bridges.some((bridge) => bridge.id === bridgeId)).toBe(false);
+    expect(removed.bridgeSync.some((sync) => sync.bridgeId === bridgeId)).toBe(false);
+    expect(removed.events[0]?.title).toBe("Bridge removed");
+    expect(readBridgeCredentialMetadata(bridgeId)).toBeUndefined();
   });
 });
