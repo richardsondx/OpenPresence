@@ -44,6 +44,7 @@ const operation: z.ZodType<Operation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("createSkill"), name: z.string().trim().min(1).max(100), description: z.string().trim().min(1).max(500) }),
   z.object({ type: z.literal("editSkill"), id: z.string().min(1), name: z.string().trim().min(1).max(100), description: z.string().trim().min(1).max(500) }),
   z.object({ type: z.literal("configureProvider"), provider: z.enum(["openai", "anthropic", "gemini", "openrouter", "ollama", "custom"]), label: z.string().trim().min(1).max(120), endpoint: z.string().url().optional(), hasSecret: z.boolean().optional(), secret: z.string().max(4000).optional() }),
+  z.object({ type: z.literal("wakePresence"), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("runPulse"), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("setModel"), model: z.string().trim().min(1).max(80), provider: z.enum(["openai", "anthropic", "gemini", "openrouter", "ollama", "custom"]).optional(), quality: z.enum(["low", "medium", "high", "local"]).optional() }),
   z.object({ type: z.literal("runSlot"), id: z.string().min(1) }),

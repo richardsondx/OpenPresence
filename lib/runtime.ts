@@ -81,13 +81,13 @@ export function deriveActivitySummary(source: OpenPresenceState, presenceId?: st
 
   let current: ActivitySummary["current"] = {
     label: "Waiting for the next meaningful event",
-    detail: "Nothing is running right now. Jenny will look again when you run one pulse or a standing intent is invoked.",
+    detail: "Nothing is running right now. Jenny will look again when you check now or a standing intent is invoked.",
     tone: "neutral",
   };
   if (!presence) {
     current = { label: "No Presence selected", detail: "Select a Presence to see its operating state.", tone: "neutral" };
   } else if (presence.status === "paused") {
-    current = { label: "Paused", detail: "Automatic observation and external actions are stopped until you resume this Presence.", tone: "warning" };
+    current = { label: "Asleep", detail: "Jenny is not watching or acting on this channel right now.", tone: "warning" };
   } else if (presence.status === "disconnected") {
     current = { label: "Disconnected", detail: "This Presence cannot observe or embody actions until its channel connection is restored.", tone: "warning" };
   } else if (reviewCount > 0) {
@@ -99,19 +99,19 @@ export function deriveActivitySummary(source: OpenPresenceState, presenceId?: st
   } else if (events.some((item) => item.title === "Silence was the right action")) {
     current = { label: "Waiting for a better moment", detail: "The last pulse observed activity but found nothing worth forcing into the channel.", tone: "quiet" };
   } else if (nativeConnection) {
-    current = { label: `Ready to observe ${nativeConnection.account?.username ? `@${nativeConnection.account.username}` : channelName(presence.channel)}`, detail: "The native channel is connected. Observation begins when a pulse or standing intent is invoked.", tone: "positive" };
+    current = { label: `Ready to observe ${nativeConnection.account?.username ? `@${nativeConnection.account.username}` : channelName(presence.channel)}`, detail: "The native channel is connected. Observation begins when you check now or a standing intent is invoked.", tone: "positive" };
   }
 
   const nextAttention = presence?.status === "paused"
-    ? { label: "After resume", detail: "Run one pulse to ask Jenny to observe and decide." }
+    ? { label: "After waking", detail: "Wake up Jenny to resume attention and begin a first check." }
     : nextSlot
       ? { label: "Next standing intent", detail: `${nextSlot.day} at ${nextSlot.time} · ${nextSlot.label}` }
       : { label: "On demand", detail: "No automatic scan is scheduled in this local runtime." };
   const nextIntent = nextSlot
     ? { label: nextSlot.label, detail: `${nextSlot.day} at ${nextSlot.time} · ${nextSlot.executionWindow}` }
-    : { label: "No standing intent scheduled", detail: "Calendar is optional; Jenny can still be asked to look with one pulse." };
+    : { label: "No standing intent scheduled", detail: "Calendar is optional; Jenny can still be asked to check the channel now." };
   const rhythm = {
-    attention: presence?.status === "paused" ? "Paused" : "On demand",
+    attention: presence?.status === "paused" ? "Asleep" : "On demand",
     publishing: activityModeLabel(presence?.execution.post),
     replies: activityModeLabel(presence?.execution.reply ?? presence?.execution.comment),
     quietHours: "Not configured",
@@ -202,6 +202,18 @@ function makeStandingIntent(state: OpenPresenceState, instruction: string, prese
 function bridgeFor(state: OpenPresenceState, presenceId: string, affordance: string): Bridge | undefined { return state.bridges.find((bridge) => bridge.presenceId === presenceId && bridge.state !== "offline" && bridge.capabilities.affordances.includes(affordance)); }
 function normalizedCapabilities(input: ConnectorCapabilities): ConnectorCapabilities { return { inbound: input.inbound, reconcile: input.reconcile, affordances: [...new Set(input.affordances)], formats: [...new Set(input.formats)], metrics: [...new Set(input.metrics)] }; }
 function makePublication(state: OpenPresenceState, text: string, format: string): Publication { const publication: Publication = { id: id("publication"), format, payload: { text }, assetIds: [], links: [], createdAt: now() }; state.publications.unshift(publication); return publication; }
+
+function runAttentionCycle(state: OpenPresenceState, presence: Presence) {
+  state.actions.unshift({ id: id("act"), intent: "no_op", target: `${presence.channel}_stream`, summary: "Stayed quiet on 36 observed opportunities", status: "skipped", reason: "Nothing met the relevance, usefulness, and taste threshold today.", createdAt: now() });
+  state.events.unshift(event("decision", "Silence was the right action", "36 conversations observed · 2 worth saving · 0 worth forcing.", "quiet", { presenceId: presence.id }));
+  state.events.unshift(event("system", "Pulse completed", "Observed the selected channel, considered what was worth doing, and stopped without forcing an action.", "positive", { presenceId: presence.id }));
+  state.events.splice(7);
+  state.metrics.opportunitiesIgnored += 36;
+  state.metrics.conversations += 2;
+  state.metrics.audienceHealth = Math.max(0, state.metrics.audienceHealth - 1);
+  state.events.unshift(event("learning", "A small learning was recorded", "Technical conversations with a distinct point are worth revisiting.", "positive", { presenceId: presence.id }));
+  return state;
+}
 
 function addSocialEvaluation(state: OpenPresenceState, standing: StandingIntent, slot: CalendarSlot) {
   const presence = state.presences.find((item) => item.id === standing.presenceId) ?? state.presence;
@@ -307,7 +319,8 @@ export function applyOperation(source: OpenPresenceState, operation: Operation):
     case "executeIntent": { const intent = state.socialIntents.find((item) => item.id === operation.id); if (!intent) return state; const execution = state.executions.find((item) => item.socialIntentId === intent.id); if (!execution || intent.state !== "active") return state; if (["awaiting-review", "awaiting-manual", "awaiting-connector", "claimed", "executing", "succeeded"].includes(execution.status)) { if (execution.status === "approved" && execution.bridgeId) execution.status = "queued"; else return state; } if (intent.validity.expiresAt && new Date(intent.validity.expiresAt).getTime() <= Date.now()) { intent.state = "expired"; execution.status = "expired"; execution.updatedAt = now(); state.events.unshift(event("decision", "Intent expired", "The social moment passed before execution.", "quiet", { intentId: intent.id, executionId: execution.id })); return state; } if (execution.bridgeId) { execution.status = "queued"; execution.updatedAt = now(); state.events.unshift(event("execution", "Queued for Bridge", "The execution is ready for an external executor.", "positive", { intentId: intent.id, executionId: execution.id })); return state; } execution.status = "succeeded"; execution.attempts += 1; execution.updatedAt = now(); execution.executedAt = now(); const outcome = { id: id("outcome"), socialIntentId: intent.id, executionId: execution.id, presenceId: intent.presenceId, status: "succeeded" as const, observedAt: now(), metrics: {} }; state.outcomes.unshift(outcome); state.events.unshift(event("execution", "Execution completed", "The simulated channel accepted the action.", "positive", { intentId: intent.id, executionId: execution.id, outcomeId: outcome.id })); return state; }
     case "markManualExecution": { const execution = state.executions.find((item) => item.id === operation.id); if (!execution || execution.status !== "awaiting-manual") return state; execution.status = "succeeded"; execution.externalRef = operation.externalRef; execution.attempts += 1; execution.executedAt = now(); execution.updatedAt = now(); const outcome: Outcome = { id: id("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, status: "succeeded", observedAt: now(), metrics: {}, evidence: [operation.externalRef] }; state.outcomes.unshift(outcome); state.events.unshift(event("execution", "Manual relay completed", "The operator marked the external action as posted.", "positive", { executionId: execution.id, outcomeId: outcome.id })); return state; }
     case "setModel": { const profile = state.modelProfiles.find((item) => item.agentId === state.agent?.id); if (profile && operation.model.trim()) { profile.model = operation.model.trim(); if (operation.provider) profile.provider = operation.provider; if (operation.quality) profile.quality = operation.quality; const connection = state.providerConnections.find((item) => item.provider === profile.provider && item.status !== "needs-configuration"); if (connection) profile.connectionId = connection.id; profile.updatedAt = now(); } return state; }
-    case "runPulse": { const pulsePresence = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence; if (!pulsePresence || pulsePresence.status !== "live") return state; state.actions.unshift({ id: id("act"), intent: "no_op", target: `${pulsePresence.channel}_stream`, summary: "Stayed quiet on 36 observed opportunities", status: "skipped", reason: "Nothing met the relevance, usefulness, and taste threshold today.", createdAt: now() }); state.events.unshift(event("decision", "Silence was the right action", "36 conversations observed · 2 worth saving · 0 worth forcing.", "quiet", { presenceId: pulsePresence.id })); state.events.unshift(event("system", "Pulse completed", "Observed the selected channel, considered what was worth doing, and stopped without forcing an action.", "positive", { presenceId: pulsePresence.id })); state.events.splice(7); state.metrics.opportunitiesIgnored += 36; state.metrics.conversations += 2; state.metrics.audienceHealth = Math.max(0, state.metrics.audienceHealth - 1); state.events.unshift(event("learning", "A small learning was recorded", "Technical conversations with a distinct point are worth revisiting.", "positive", { presenceId: pulsePresence.id })); return state; }
+    case "wakePresence": { const target = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence; if (!target || target.status !== "paused") return state; const updated = { ...target, status: "live" as const }; state.presences = state.presences.map((item) => item.id === updated.id ? updated : item); if (state.presence?.id === updated.id) state.presence = updated; state.events.unshift(event("system", "Jenny woke up", "The Presence is active again and beginning its first attention cycle.", "positive", { presenceId: updated.id })); return runAttentionCycle(state, updated); }
+    case "runPulse": { const pulsePresence = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence; if (!pulsePresence || pulsePresence.status !== "live") return state; return runAttentionCycle(state, pulsePresence); }
     case "setPresence": { if (state.presence) { const updated = { ...state.presence, ...operation.patch, ghostProfile: operation.patch.ghostProfile ?? state.presence.ghostProfile ?? (operation.patch.mode === "ghost" ? defaultGhostProfile() : undefined), execution: operation.patch.execution ? { ...state.presence.execution, ...operation.patch.execution } : state.presence.execution }; updated.executionEnvelope = { ...state.presence.executionEnvelope, affordances: Object.fromEntries(channelCapabilities(state, updated.channel).map((item) => [item.id, { mode: updated.execution[item.id] ?? "off" }])) }; updated.context = compilePresenceContext(updated); state.presence = updated; state.presences = state.presences.map((item) => item.id === updated.id ? updated : item); } state.events.unshift(event("system", "Presence settings updated", state.presence?.status === "paused" ? "All external actions are paused." : "The new execution envelope is active.", state.presence?.status === "paused" ? "warning" : "positive", { presenceId: state.presence?.id })); return state; }
   }
 }
