@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyOperation, compilePresenceContext, createAgent, deriveActivitySummary, initialState } from "../lib/runtime";
+import { applyOperation, compilePresenceContext, createAgent, deriveActivitySummary, formChatPostIntent, initialState, isExplicitXPostRequest } from "../lib/runtime";
 import { acknowledgeExecution, claimExecutions, createBridgeWithKey, ingestEvents, removeBridge, revokeBridge } from "../lib/bridge";
 import { readBridgeCredentialMetadata, readState, writeState } from "../lib/db";
 
@@ -47,6 +47,18 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.actions[0]?.status).toBe("skipped");
     expect(state.metrics.opportunitiesIgnored).toBe(36);
     expect(state.events.some((item) => item.title === "Silence was the right action")).toBe(true);
+  });
+
+  it("turns an explicit Chat publication request into a native X execution", () => {
+    let state = createAgent(input);
+    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "hourandcode", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    expect(isExplicitXPostRequest("Introduce this Presence on X and invite conversation.")).toBe(true);
+    state = formChatPostIntent(state, "I am Jenny, learning to become a useful presence for thoughtful builders. What are you learning right now?");
+    expect(state.socialIntents[0]?.affordance).toBe("x.post");
+    expect(state.executions[0]?.connector).toBe("native");
+    expect(state.executions[0]?.status).toBe("queued");
+    expect(state.actions[0]?.executionId).toBe(state.executions[0]?.id);
+    expect(state.outcomes).toHaveLength(0);
   });
 
   it("pauses the Presence deterministically", () => {

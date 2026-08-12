@@ -247,6 +247,38 @@ function addSocialEvaluation(state: OpenPresenceState, standing: StandingIntent,
   }
 }
 
+export function isExplicitXPostRequest(content: string) {
+  const lower = content.toLowerCase();
+  return lower.includes("introduce this presence on x") ||
+    (lower.includes("post on x") && (lower.includes("presence") || lower.includes("publish")));
+}
+
+export function formChatPostIntent(source: OpenPresenceState, text: string) {
+  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  const presence = state.presence;
+  if (!state.agent || !presence || presence.status !== "live" || presence.channel !== "x" || !text.trim()) return state;
+  const formedAt = now();
+  const expiresAt = new Date(Date.now() + 45 * 60 * 1000).toISOString();
+  const publication = makePublication(state, text.trim(), "x.post");
+  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: "x.post", publicationId: publication.id, priority: 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt };
+  state.socialIntents.unshift(socialIntent);
+  const mode = presence.execution.post ?? "off";
+  if (mode === "off") {
+    state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: "skipped", reason: "Posts are off in the Presence execution envelope.", createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id });
+    state.events.unshift(event("decision", "Post intention held", "Jenny formed a social intention, but Posts are off for this Presence.", "quiet", { presenceId: presence.id, intentId: socialIntent.id }));
+    return state;
+  }
+  const bridge = bridgeFor(state, presence.id, "post");
+  const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.status === "connected" && connection.access === "read-write");
+  const connector = nativeX ? "native" as const : bridge ? bridge.kind : undefined;
+  const status = mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
+  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.post", mode, status, attempts: 0, bridgeId: bridge?.id, connector, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, createdAt: formedAt, updatedAt: formedAt };
+  state.executions.unshift(execution);
+  state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: mode === "review" ? "review" : "queued", reason: "The operator asked Jenny to introduce this Presence through the native X connector.", createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
+  state.events.unshift(event("decision", "A post intention was formed", connector ? "Jenny formed an X post from the conversation and handed it to the Presence execution envelope." : "Jenny formed an X post, but no write-enabled X connector is available.", connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id }));
+  return state;
+}
+
 export function completeNativeExecution(source: OpenPresenceState, executionId: string, externalRef: import("./types").EntityRef) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const execution = state.executions.find((item) => item.id === executionId && item.connector === "native");
@@ -261,6 +293,19 @@ export function completeNativeExecution(source: OpenPresenceState, executionId: 
   const action = state.actions.find((item) => item.executionId === execution.id);
   if (action) { action.status = "executed"; action.outcomeId = outcome.id; }
   state.events.unshift(event("execution", "Published on X", "The native X connector delivered the approved action and returned an external reference.", "positive", { presenceId: execution.presenceId, executionId: execution.id, outcomeId: outcome.id }));
+  return state;
+}
+
+export function failNativeExecution(source: OpenPresenceState, executionId: string, message: string) {
+  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  const execution = state.executions.find((item) => item.id === executionId && item.connector === "native");
+  if (!execution) return state;
+  execution.status = "failed";
+  execution.failure = { message, retryable: true };
+  execution.updatedAt = now();
+  const action = state.actions.find((item) => item.executionId === execution.id);
+  if (action) action.status = "failed";
+  state.events.unshift(event("execution", "X delivery failed", "The native X connector could not deliver this action. Review the connection and try again.", "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }));
   return state;
 }
 

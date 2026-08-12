@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { readState, saveProviderSecret, writeState } from "@/lib/db";
 import { generateAgentReply } from "@/lib/ai";
-import { applyOperation, completeNativeExecution } from "@/lib/runtime";
+import { applyOperation, completeNativeExecution, failNativeExecution, formChatPostIntent, isExplicitXPostRequest } from "@/lib/runtime";
 import { publishXPost, readNativeXCredentials } from "@/lib/x";
 import type { Operation } from "@/lib/types";
 
@@ -87,6 +87,30 @@ export async function POST(request: Request) {
       const lastMessage = conversation?.messages.at(-1);
       if (lastMessage?.role === "agent") lastMessage.content = reply;
       if (conversation) conversation.updatedAt = new Date().toISOString();
+      if (isExplicitXPostRequest(parsed.content) && next.presence?.channel === "x") {
+        const existingExecutionIds = new Set(next.executions.map((item) => item.id));
+        next = formChatPostIntent(next, reply);
+        const execution = next.executions.find((item) => !existingExecutionIds.has(item.id) && item.connector === "native" && item.status === "queued" && item.mode === "auto");
+        if (execution) {
+          const connection = next.nativeConnections.find((item) => item.presenceId === execution.presenceId && item.access === "read-write" && item.status === "connected");
+          const intent = next.socialIntents.find((item) => item.id === execution.socialIntentId);
+          const credentials = connection ? readNativeXCredentials(connection.id) : undefined;
+          const payload = intent?.publicationId ? next.publications.find((item) => item.id === intent.publicationId)?.payload : undefined;
+          const postText = payload && typeof payload === "object" && "text" in payload && typeof payload.text === "string" ? payload.text : undefined;
+          if (credentials && postText) {
+            try {
+              const externalRef = await publishXPost(credentials, postText);
+              next = completeNativeExecution(next, execution.id, externalRef);
+            } catch (error) {
+              const message = error instanceof Error ? error.message : "X rejected the post.";
+              console.warn("Native X post failed", message);
+              next = failNativeExecution(next, execution.id, message);
+            }
+          } else {
+            next = failNativeExecution(next, execution.id, "The native X connection or generated post text is unavailable.");
+          }
+        }
+      }
       next.messages = conversation?.messages ?? next.messages;
       writeState(next);
       return NextResponse.json(next);
