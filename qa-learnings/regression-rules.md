@@ -1,5 +1,21 @@
 # Regression rules
 
+## Rule: Explicit Chat publication requests must enter the real execution ledger
+
+**Defect class:** Agent action boundary / false completion
+
+**General principle:** A Chat request that explicitly asks a Presence to publish is a Social Intent, not merely a conversational drafting exercise. Cognition, execution, and delivery must remain separately visible, and the Agent must never imply delivery without a native outcome.
+
+**Project-specific risk:** Chat returned a generic draft for an explicit X introduction request while Activity still showed no intent, execution, or observation. The operator could not tell whether Jenny had acted, and the real feed remained unchanged.
+
+**Project enforcement:** The exact explicit X publication request is converted into a Social Intent and native execution. Auto Posts are delivered through the native connector and recorded with the external reference; connector failures persist as failed executions and truthful Activity events. Review and manual modes remain gated by the Presence envelope.
+
+**Executable protection:** `tests/runtime.test.ts` verifies an explicit Chat publication request forms a native queued execution without prematurely creating an outcome. Narrow live QA must verify the real X post before any inbound reply test begins.
+
+**Apply when:** Connecting Chat cognition to Social Intent formation, adding channel tools, changing auto/review/manual execution, or reporting external delivery.
+
+**Added:** 2026-08-12
+
 ## Rule: Agent tools must be discoverable at Agent scope
 
 **Defect class:** Information architecture / capability provenance

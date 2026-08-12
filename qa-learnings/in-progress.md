@@ -1,5 +1,12 @@
 # Active QA Work
 
+## WAITING — Live native X Presence behavioral test
+
+- **Started:** 2026-08-12
+- **Scope:** Run the attached 10-minute end-to-end test against the real configured X Presence for `@hourandcode`: pre-flight, wake, one Agent-authored public post, real inbound reply, contextual response, continuity check, and truthful OpenPresence activity state.
+- **Acceptance:** No simulator or fabricated records are used; a live test passes only when X externally proves each delivery and the Agent observes/responds to real inbound activity. Stop and wait for the operator when a different X account must send the required reply.
+- **Verification:** Chrome pre-flight passed: `@hourandcode` was signed in, the native connector reported read + write, Posts were Auto, Replies were Review, and the local model answered. The first stale-app attempt was discarded because port 3004 was not running. After restarting the branch server, the exact Chat instruction formed a Social Intent and native execution, but X rejected `POST /2/tweets` with HTTP 403. Activity recorded `X delivery failed`; the real X profile still shows `0 posts`. Waiting for the operator to regenerate the X User Access Token and Secret with write permission and update the Presence connection.
+
 ## COMPLETE — Unify Presence wake and pulse actions
 
 - **Started:** 2026-08-12
