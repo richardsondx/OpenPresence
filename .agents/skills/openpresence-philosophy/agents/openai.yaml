@@ -1,0 +1,7 @@
+interface:
+  display_name: "OpenPresence Philosophy"
+  short_description: "Apply OpenPresence product principles"
+  default_prompt: "Use $openpresence-philosophy to review this change against OpenPresence's product and architecture principles."
+
+policy:
+  allow_implicit_invocation: true
