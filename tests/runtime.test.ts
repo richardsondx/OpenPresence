@@ -58,6 +58,19 @@ describe("OpenPresence runtime boundaries", () => {
     expect(afterPulse.presence?.status).toBe("paused");
   });
 
+  it("wakes a paused Presence and immediately runs its first attention cycle", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { status: "paused" } });
+    const beforeActions = state.actions.length;
+    const awake = applyOperation(state, { type: "wakePresence" });
+    expect(awake.presence?.status).toBe("live");
+    expect(awake.actions.length).toBe(beforeActions + 1);
+    expect(awake.events.some((item) => item.title === "Jenny woke up")).toBe(true);
+    expect(awake.events.some((item) => item.title === "Pulse completed")).toBe(true);
+    expect(awake.actions[0]?.intent).toBe("no_op");
+    expect(awake.metrics.opportunitiesIgnored).toBe(36);
+  });
+
   it("derives truthful now, next, and rhythm state for Activity", () => {
     let state = createAgent(input);
     let summary = deriveActivitySummary(state);
@@ -75,9 +88,9 @@ describe("OpenPresence runtime boundaries", () => {
 
     state = applyOperation(state, { type: "setPresence", patch: { status: "paused" } });
     summary = deriveActivitySummary(state);
-    expect(summary.current.label).toBe("Paused");
-    expect(summary.nextAttention.label).toBe("After resume");
-    expect(summary.rhythm.attention).toBe("Paused");
+    expect(summary.current.label).toBe("Asleep");
+    expect(summary.nextAttention.label).toBe("After waking");
+    expect(summary.rhythm.attention).toBe("Asleep");
   });
 
   it("surfaces a standing intent as the next explicit consideration", () => {

@@ -305,7 +305,7 @@ test("Activity explains current work, next attention, and configured rhythm", as
   await expect(page.getByLabel("Operating status").getByRole("heading", { name: "On demand" })).toBeVisible();
   await expect(page.getByLabel("Operating status").getByText("No automatic scan is scheduled in this local runtime.", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Operating status").getByText("Publishing Auto", { exact: true })).toBeVisible();
-  await page.locator(".page-heading .heading-actions").getByRole("button", { name: "Run one pulse", exact: true }).click();
+  await page.locator(".page-heading .heading-actions").getByRole("button", { name: "Check now", exact: true }).click();
   await expect(page.getByLabel("Operating status").getByRole("heading", { name: "Waiting for a better moment" })).toBeVisible();
   await expect(page.locator(".event-title").filter({ hasText: "Pulse completed" })).toBeVisible();
 });
@@ -351,12 +351,22 @@ test("Presence settings are generated from channel capabilities and pause truthf
   await expect(page.getByRole("button", { name: "Replies review", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Pause Presence" }).click();
   await navigate(page, "Activity");
-  await expect(page.getByRole("heading", { name: "@jenny_ai is paused." })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Run one pulse" })).toBeDisabled();
-  await navigate(page, "Settings");
-  await page.getByRole("button", { name: "Resume Presence" }).click();
-  await navigate(page, "Activity");
+  await expect(page.getByRole("heading", { name: "@jenny_ai is asleep." })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Wake up Jenny", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Resume Presence", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Run one pulse", exact: true })).toHaveCount(0);
+  await page.route("**/api/state", async (route) => {
+    const request = route.request();
+    if (request.method() === "POST" && request.postDataJSON()?.type === "wakePresence") await new Promise((resolve) => setTimeout(resolve, 250));
+    await route.continue();
+  });
+  await page.getByRole("button", { name: "Wake up Jenny", exact: true }).first().click();
+  await expect(page.getByRole("button", { name: "Waking Jenny…", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "@jenny_ai is live." })).toBeVisible();
+  await expect(page.locator(".event-title").filter({ hasText: "Jenny woke up" })).toBeVisible();
+  await expect(page.locator(".event-title").filter({ hasText: "Pulse completed" })).toBeVisible();
+  await navigate(page, "Settings");
+  await expect(page.getByRole("button", { name: "Pause Presence" })).toBeVisible();
 });
 
 test("Chat acknowledges live Presence identity changes", async ({ page }) => {

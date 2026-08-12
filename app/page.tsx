@@ -279,6 +279,7 @@ export default function Home() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<FileKind>("BRAIN");
+  const [pendingOperation, setPendingOperation] = useState<string | null>(null);
   useEffect(() => {
     fetch(`/api/state?read=${Date.now()}`, { cache: "no-store" })
       .then(async (response) => {
@@ -294,6 +295,9 @@ export default function Home() {
   }, [state?.onboarded]);
   async function mutate(operation: unknown) {
     setError(null);
+    const operationType = typeof operation === "object" && operation !== null && "type" in operation && typeof operation.type === "string" ? operation.type : null;
+    const tracksAttention = operationType === "wakePresence" || operationType === "runPulse";
+    if (tracksAttention) setPendingOperation(operationType);
     try {
       const response = await fetch("/api/state", {
         method: "POST",
@@ -308,6 +312,8 @@ export default function Home() {
     } catch (reason) {
       setError(clientErrorMessage(reason, "That change could not be saved."));
       return null;
+    } finally {
+      if (tracksAttention) setPendingOperation(null);
     }
   }
   async function manageBridge(operation: unknown) {
@@ -379,6 +385,7 @@ export default function Home() {
       selectedFile={selectedFile}
       setSelectedFile={setSelectedFile}
       mutate={mutate}
+      pendingOperation={pendingOperation}
       manageBridge={manageBridge}
       manageX={manageX}
       error={error}
@@ -877,6 +884,7 @@ function AgentWorkspaceShell({
   selectedFile,
   setSelectedFile,
   mutate,
+  pendingOperation,
   manageBridge,
   manageX,
   error,
@@ -887,6 +895,7 @@ function AgentWorkspaceShell({
   selectedFile: FileKind;
   setSelectedFile: (file: FileKind) => void;
   mutate: Mutate;
+  pendingOperation: string | null;
   manageBridge: BridgeManage;
   manageX: XManage;
   error: string | null;
@@ -1010,7 +1019,7 @@ function AgentWorkspaceShell({
               <span className="status-dot" />{" "}
               {view === "presence"
                 ? presence.status === "paused"
-                  ? "Paused"
+                  ? "Asleep"
                   : (state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "connected") || state.bridges.some(
                         (item) =>
                           item.presenceId === presence.id &&
@@ -1032,7 +1041,7 @@ function AgentWorkspaceShell({
             <ContextChatView state={state} mutate={mutate} setView={setView} />
           )}
           {view === "live" && (
-            <LiveView state={state} mutate={mutate} setView={setView} />
+            <LiveView state={state} mutate={mutate} setView={setView} pendingOperation={pendingOperation} />
           )}
           {view === "calendar" && (
             <CalendarView state={state} mutate={mutate} />
@@ -1050,6 +1059,7 @@ function AgentWorkspaceShell({
             <PresenceView
               state={state}
               mutate={mutate}
+              pendingOperation={pendingOperation}
               manageBridge={manageBridge}
               manageX={manageX}
             />
@@ -2402,14 +2412,18 @@ function LiveView({
   state,
   mutate,
   setView,
+  pendingOperation,
 }: {
   state: OpenPresenceState;
   mutate: Mutate;
   setView: (view: View) => void;
+  pendingOperation?: string | null;
 }) {
   const agent = state.agent!;
   const selected = state.presence;
   const paused = selected?.status === "paused";
+  const waking = pendingOperation === "wakePresence";
+  const checking = pendingOperation === "runPulse";
   const activity = deriveActivitySummary(state, selected?.id);
   const visibleEvents = state.events.filter(
     (item) => item.presenceId === selected?.id,
@@ -2423,7 +2437,7 @@ function LiveView({
         <div>
           <SectionEyebrow>Presence activity</SectionEyebrow>
           <h1>
-            {selected?.handle ?? agent.name} is {paused ? "paused" : "live"}.
+            {selected?.handle ?? agent.name} is {paused ? "asleep" : "live"}.
           </h1>
           <p className="muted">
             See what Jenny is doing now, what happens next, and what is waiting
@@ -2432,24 +2446,32 @@ function LiveView({
         </div>
         <div className="heading-actions">
           <span className="scope-summary">{presenceScope}</span>
-          {paused && (
+          {paused ? (
             <Button
-              onClick={() => mutate({ type: "setPresence", patch: { status: "live" } })}
-              variant="secondary"
+              onClick={() => mutate({ type: "wakePresence", presenceId: selected?.id })}
+              variant="primary"
+              disabled={waking}
             >
-              <Play size={15} /> Resume Presence
+              <Play size={15} /> {waking ? "Waking Jenny…" : "Wake up Jenny"}
             </Button>
+          ) : (
+            <>
+              <Button
+                onClick={() => mutate({ type: "runPulse", presenceId: selected?.id })}
+                variant="primary"
+                disabled={checking}
+                title="Look at the channel now and decide whether anything is worth doing."
+              >
+                <Play size={15} /> {checking ? "Checking now…" : "Check now"}
+              </Button>
+              <Button
+                onClick={() => mutate({ type: "setPresence", patch: { status: "paused" } })}
+                variant="secondary"
+              >
+                <Pause size={15} /> Pause
+              </Button>
+            </>
           )}
-          <Button
-            onClick={() =>
-              mutate({ type: "runPulse", presenceId: selected?.id })
-            }
-            variant="primary"
-            disabled={paused}
-            title={paused ? "Resume this Presence before running a pulse." : "Wake Jenny, observe the channel, and decide whether anything is worth doing."}
-          >
-            <Play size={15} /> Run one pulse
-          </Button>
         </div>
       </div>
       <section className="activity-summary" aria-label="Operating status">
@@ -2484,23 +2506,21 @@ function LiveView({
               <h2>The day in motion</h2>
             </div>
             <span className="live-pill">
-              <span className="status-dot" /> {paused ? "Paused" : "Live"}
+              <span className="status-dot" /> {paused ? "Asleep" : "Live"}
             </span>
           </div>
           {visibleEvents.length === 0 ? (
               <EmptyState
                 title="Nothing has happened yet"
-                body="Run a pulse to let this Presence look for something worth saying."
+                body={paused ? "Jenny is asleep. Wake her up to begin a first attention cycle." : "Check now to let this Presence look for something worth saying."}
                 action={
                   <Button
-                    onClick={() =>
-                    mutate({ type: "runPulse", presenceId: selected?.id })
-                  }
-                  variant="secondary"
-                  disabled={paused}
-                  title={paused ? "Resume this Presence before running a pulse." : undefined}
+                    onClick={() => mutate(paused ? { type: "wakePresence", presenceId: selected?.id } : { type: "runPulse", presenceId: selected?.id })}
+                    variant="secondary"
+                    disabled={waking || checking}
+                    title={paused ? "Wake up Jenny and begin a first attention cycle." : "Look at the channel now."}
                 >
-                  <Play size={14} /> Run one pulse
+                  <Play size={14} /> {paused ? (waking ? "Waking Jenny…" : "Wake up Jenny") : (checking ? "Checking now…" : "Check now")}
                   </Button>
                 }
             />
@@ -2663,7 +2683,7 @@ function MirrorPanel({
           {bridge
             ? "Your Bridge sends inbound posts, comments, and messages here as context. They remain channel content, not instructions."
             : nativeConnection
-              ? "The native channel is connected, but this local runtime has not run an observation yet. Run one pulse or a standing intent to begin a truthful observation cycle."
+              ? "The native channel is connected, but this local runtime has not run an observation yet. Check now or invoke a standing intent to begin a truthful observation cycle."
             : filter === "all"
               ? "A Social Mirror is created per connected Presence. Select a Presence or connect a custom channel to start receiving read-only context."
               : builtIn
@@ -3416,15 +3436,18 @@ function ProposalRow({
 function PresenceView({
   state,
   mutate,
+  pendingOperation,
   manageBridge,
   manageX,
 }: {
   state: OpenPresenceState;
   mutate: Mutate;
+  pendingOperation?: string | null;
   manageBridge: BridgeManage;
   manageX: XManage;
 }) {
   const presence = state.presence!;
+  const waking = pendingOperation === "wakePresence";
   const capabilities =
     presence.capabilities ??
     CHANNEL_CAPABILITIES[
@@ -3456,18 +3479,14 @@ function PresenceView({
         </div>
         <Button
           variant={presence.status === "paused" ? "primary" : "secondary"}
-          onClick={() =>
-            mutate({
-              type: "setPresence",
-              patch: {
-                status: presence.status === "paused" ? "live" : "paused",
-              },
-            })
-          }
+          disabled={waking}
+          onClick={() => mutate(presence.status === "paused"
+            ? { type: "wakePresence", presenceId: presence.id }
+            : { type: "setPresence", patch: { status: "paused" } })}
         >
           {presence.status === "paused" ? (
             <>
-              <Play size={14} /> Resume Presence
+              <Play size={14} /> {waking ? "Waking Jenny…" : "Wake up Jenny"}
             </>
           ) : (
             <>

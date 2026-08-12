@@ -162,21 +162,21 @@
 
 **Added:** 2026-08-12
 
-## Rule: Paused state must change the primary status language
+## Rule: Wake and pulse actions must follow Presence lifecycle state
 
 **Defect class:** State / UX contradiction
 
-**General principle:** A page's primary heading and controls must describe the current lifecycle state, especially when an action is paused, cancelled, or unavailable.
+**General principle:** Lifecycle controls should match the operator's mental model: waking a Presence starts its operation and first attention cycle; checking now is only an on-demand cycle for an already-live Presence.
 
-**Project-specific risk:** Live previously said “Jenny is live” while the Presence was paused, and the pulse control silently did nothing.
+**Project-specific risk:** Live previously said “Jenny is live” while the Presence was paused, and `Resume Presence` sat beside a disabled `Run one pulse`, requiring the operator to understand two runtime primitives before Jenny would do anything.
 
 **Learned from:** Production Chrome exploratory review on 2026-08-12.
 
-**Why QA missed it:** The first walkthrough verified pause controls and the paused badge but did not re-check the Live page heading after navigating back.
+**Why QA missed it:** The first walkthrough verified pause controls and the paused badge but did not exercise the complete paused → wake → first attention cycle or inspect the duplicate action language across Activity and Presence settings.
 
-**Project enforcement:** `LiveView` status copy and pulse button state; exercise pause → Live → resume in browser QA.
+**Project enforcement:** Paused Activity and Presence settings expose `Wake up Jenny`, which applies the `wakePresence` operation and immediately evaluates one cycle; live Activity exposes `Check now` and `Pause`. Paused copy says “asleep” and no longer exposes `Resume Presence` or `Run one pulse`.
 
-**Executable protection:** `tests/runtime.test.ts` covers paused pulse behavior; Playwright acceptance should cover paused Live copy.
+**Executable protection:** `tests/runtime.test.ts` verifies paused pulses remain inert and `wakePresence` restores live state plus a no-op attention cycle. `tests/e2e/openpresence.spec.ts` verifies asleep copy, action de-duplication, wake transition, wake event, pulse completion, and live settings controls.
 
 **Apply when:** Adding or changing lifecycle states or control-plane actions.
 
