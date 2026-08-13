@@ -50,8 +50,7 @@ test("small desktop keeps each page task above the fold", async ({ page }) => {
   expect(settingsScroll.documentScrolls).toBe(true);
   expect(settingsScroll.workspaceOverflow).toBe("visible");
 
-  await page.getByRole("button", { name: "Chat", exact: true }).click();
-  await expect(page.getByRole("button", { name: "New conversation", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Teach", exact: true }).click();
   const contextSidebar = page.getByRole("complementary", { name: "Context & Changes sidebar" });
   await expect(contextSidebar).toBeVisible();
   await page.getByRole("button", { name: "Hide context sidebar" }).click();

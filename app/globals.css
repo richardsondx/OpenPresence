@@ -721,6 +721,27 @@ fieldset { border: none; padding: 0; margin: 0 0 26px; }
 .activity-context-close:hover { color: var(--ink); border-color: #cfc4b9; }
 .activity-context-intro { margin: 0 0 16px; color: var(--muted); font-size: 11px; line-height: 1.55; }
 .activity-context-post { box-shadow: none; }
+.presence-chat-attachment { display: grid; gap: 8px; margin-top: 12px; max-width: 360px; padding: 9px; border: 1px solid var(--line); border-radius: 8px; background: #fffaf5; }
+.presence-chat-attachment img { width: 100%; height: auto; max-height: 180px; object-fit: contain; border-radius: 5px; background: #f5f2ee; }
+.presence-chat-attachment details { color: var(--muted); font-size: 10px; line-height: 1.45; }
+.presence-chat-attachment summary { cursor: pointer; color: var(--ink); font-weight: 700; }
+.presence-chat-attachment p { margin: 7px 0 4px; }
+.presence-chat-attachment small { color: var(--faint); }
+.presence-chat-link-row { display: flex; gap: 6px; max-width: 860px; margin-top: 8px; }
+.presence-chat-link-row input { min-width: 0; flex: 1; border: 0; border-bottom: 1px solid var(--line); background: transparent; color: var(--muted); padding: 7px 2px; font-size: 10px; outline: none; }
+.presence-chat-link-row input:focus { border-color: #c9ae98; }
+.presence-chat-link-row button { border: 1px solid var(--line); border-radius: 5px; background: white; color: var(--muted); padding: 6px 9px; font: 9px "DM Mono", monospace; }
+.presence-chat-link-row button:not(:disabled):hover { color: var(--ink); border-color: #c9ae98; }
+.presence-chat-boundary { display: flex; align-items: center; gap: 7px; margin: 18px 0 13px; color: var(--green); font: 9px "DM Mono", monospace; text-transform: uppercase; letter-spacing: .04em; }
+.presence-chat-aside > small { display: block; color: var(--muted); line-height: 1.55; }
+.presence-chat-aside .button { margin-top: 18px; }
+@media (max-width: 680px) {
+  .page-chat .chat-layout { display: block; }
+  .page-chat .chat-thread { height: auto; min-height: 0; padding-bottom: 78px; }
+  .page-chat .chat-history { flex: none; max-height: none; overflow: visible; }
+  .presence-chat-aside { display: block; margin-top: 28px; padding: 18px 0 88px !important; border-top: 1px solid var(--line); border-left: 0 !important; }
+  .mobile-nav { grid-template-columns: repeat(8, 1fr); }
+}
 
 @media (max-width: 900px) {
   .activity-main-grid { grid-template-columns: 1fr; gap: 42px; }

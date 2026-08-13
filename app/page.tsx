@@ -90,14 +90,16 @@ const fileOrder: FileKind[] = [
   "PULSE",
 ];
 const navItems: { id: View; label: string; icon: typeof MessageCircle }[] = [
-  { id: "chat", label: "Chat", icon: MessageCircle },
-  { id: "playground", label: "Playground", icon: FlaskConical },
   { id: "live", label: "Activity", icon: Radio },
+  { id: "chat", label: "Chat", icon: MessageSquare },
   { id: "calendar", label: "Calendar", icon: CalendarDays },
   { id: "schedule", label: "Schedule", icon: Clock3 },
+  { id: "presence", label: "Settings", icon: Settings2 },
+  { id: "teach", label: "Teach", icon: MessageCircle },
+  { id: "playground", label: "Playground", icon: FlaskConical },
 ];
-const presenceNavItems = navItems.filter(({ id }) => id === "live" || id === "calendar" || id === "schedule");
-const agentNavItems = navItems.filter(({ id }) => id === "chat" || id === "playground");
+const presenceNavItems = navItems.filter(({ id }) => id === "live" || id === "chat" || id === "calendar" || id === "schedule" || id === "presence");
+const agentNavItems = navItems.filter(({ id }) => id === "teach" || id === "playground");
 const channelLabel = (channel: ChannelId, definitions?: ChannelDefinition[]) =>
   definitions?.find((item) => item.id === channel)?.name ??
   (channel === "x"
@@ -1211,13 +1213,6 @@ function AgentWorkspaceShell({
               )}
             </button>
           ))}
-          <button
-            onClick={() => setView("presence")}
-            className={view === "presence" ? "active" : ""}
-          >
-            <Settings2 size={17} />
-            <span>Settings</span>
-          </button>
         </nav>
         <div className="sidebar-divider" />
         <div className="sidebar-label">Agent</div>
@@ -1252,7 +1247,7 @@ function AgentWorkspaceShell({
           </div>
         </div>
       </aside>
-      <section className={view === "chat" ? "workspace workspace-chat" : "workspace"}>
+      <section className={view === "chat" || view === "teach" ? "workspace workspace-chat" : "workspace"}>
         <header className="topbar">
           <div className="mobile-brand">
             <div className="brand-mark">◉</div>
@@ -1295,9 +1290,8 @@ function AgentWorkspaceShell({
           </div>
         )}
         <div className="workspace-content">
-          {view === "chat" && (
-            <ContextChatView state={state} mutate={mutate} setView={setView} />
-          )}
+          {view === "teach" && <TeachView state={state} mutate={mutate} setView={setView} />}
+          {view === "chat" && <PresenceChatView state={state} mutate={mutate} />}
           {view === "playground" && (
             <PlaygroundView state={state} mutate={mutate} />
           )}
@@ -1343,13 +1337,6 @@ function AgentWorkspaceShell({
             <span>{label}</span>
           </button>
         ))}
-        <button
-          onClick={() => setView("presence")}
-          className={view === "presence" ? "active" : ""}
-        >
-          <Settings2 size={18} />
-          <span>Settings</span>
-        </button>
         {agentNavItems.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
@@ -1541,8 +1528,8 @@ function LegacyAppShell({
           </div>
         )}
         <div className="workspace-content">
-          {view === "chat" && (
-            <ChatView state={state} mutate={mutate} setView={setView} />
+          {view === "teach" && (
+            <TeachView state={state} mutate={mutate} setView={setView} />
           )}
           {view === "live" && (
             <LiveView state={state} mutate={mutate} />
@@ -2356,7 +2343,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
   );
 }
 
-function ContextChatView({
+function TeachView({
   state,
   mutate,
   setView,
@@ -2437,7 +2424,7 @@ function ContextChatView({
                 <div className="blank-glyph">
                   <PresenceGlyph accent={agent.accent} />
                 </div>
-                <h2>A mind becomes useful through conversation.</h2>
+                <h2>Teach the Agent through conversation.</h2>
                 <p>
                   Tell {agent.name} what to notice, protect, pursue, or leave
                   alone. This transcript stays with {agent.name}; durable
@@ -2794,50 +2781,58 @@ function OldChatView({
   );
 }
 
-function ChatView({
+function PresenceChatView({
   state,
   mutate,
-  setView,
 }: {
   state: OpenPresenceState;
   mutate: Mutate;
-  setView: (view: View) => void;
 }) {
   const [message, setMessage] = useState("");
-  const [attachments, setAttachments] = useState<string[]>([]);
+  const [attachments, setAttachments] = useState<SandboxAssetInput[]>([]);
+  const [link, setLink] = useState("");
+  const [sending, setSending] = useState(false);
   const agent = state.agent!;
-  const conversation =
-    state.conversations.find(
-      (item) => item.id === state.activeConversationId,
-    ) ?? state.conversations[0];
-  const messages = conversation?.messages ?? [];
+  const presence = state.presence ?? state.presences[0]!;
+  const session = state.presenceChatSessions.find((item) => item.presenceId === presence.id);
+  const messages = session?.messages ?? [];
+  useEffect(() => {
+    if (!session) void mutate({ type: "newPresenceChatSession", presenceId: presence.id });
+  }, [mutate, presence.id, session]);
+  const addFile = (file: File) => {
+    if (attachments.length >= 4 || file.size > 1_500_000) return;
+    const kind = file.type === "image/gif" ? "gif" : file.type.startsWith("video/") ? "video" : file.type.startsWith("image/") ? "image" : "document";
+    const reader = new FileReader();
+    reader.onload = () => setAttachments((items) => [...items, { name: file.name, kind, mimeType: file.type, dataUrl: typeof reader.result === "string" ? reader.result : undefined }]);
+    reader.readAsDataURL(file);
+  };
+  const addLink = () => {
+    const sourceUrl = link.trim();
+    if (!sourceUrl || attachments.length >= 4) return;
+    try { new URL(sourceUrl); } catch { return; }
+    setAttachments((items) => [...items, { name: sourceUrl, kind: "link", sourceUrl }]);
+    setLink("");
+  };
   const send = async (event?: React.FormEvent) => {
     event?.preventDefault();
-    if (!message.trim()) return;
-    const outgoing = attachments.length
-      ? `${message}\n\nAttached context: ${attachments.join(", ")}`
-      : message;
+    if (!message.trim() || !session || sending) return;
     setMessage("");
     setAttachments([]);
-    await mutate({
-      type: "sendMessage",
-      content: outgoing,
-      conversationId: conversation?.id,
-    });
+    setSending(true);
+    try { await mutate({ type: "sendPresenceChatMessage", presenceId: presence.id, sessionId: session.id, content: message, attachments }); } finally { setSending(false); }
   };
   return (
     <div className="page page-chat">
       <div className="page-heading chat-heading">
         <div>
-          <SectionEyebrow>Agent-wide conversation</SectionEyebrow>
-          <h1>Talk to {agent.name}.</h1>
+          <SectionEyebrow>Public self · {presence.handle}</SectionEyebrow>
+          <h1>Talk to {presence.name}.</h1>
           <p className="muted">
-            One persistent conversation for shaping personality, mission, taste,
-            and every Presence.
+            Experience this Presence directly, using the real Agent judgment that would shape its public voice.
           </p>
         </div>
         <div className="chat-scope-label">
-          <span className="status-dot" /> Agent-wide context
+          <span className="status-dot" /> Private test conversation
         </div>
       </div>
       <div className="chat-layout">
@@ -2846,74 +2841,56 @@ function ChatView({
             {messages.length === 0 ? (
               <div className="chat-blank">
                 <div className="blank-glyph">
-                  <PresenceGlyph accent={agent.accent} />
+                  <PresenceGlyph accent={presence.accent} />
                 </div>
-                <h2>A mind becomes useful through conversation.</h2>
+                <h2>Meet the public self.</h2>
                 <p>
-                  Tell {agent.name} what to notice, protect, pursue, or leave
-                  alone. This transcript stays with {agent.name}; durable
-                  meaning belongs in Brain.
+                  Ask {presence.name} anything you would ask after encountering it in {channelLabel(presence.channel, state.channelDefinitions)}. This session remembers the exchange, but it cannot change the Agent.
                 </p>
                 <div className="blank-suggestions">
-                  <button
-                    onClick={() =>
-                      setMessage("What should you become known for?")
-                    }
-                  >
-                    What should you become known for?
-                  </button>
-                  <button
-                    onClick={() =>
-                      setMessage(
-                        "Schedule something useful every Tuesday morning.",
-                      )
-                    }
-                  >
-                    Schedule something useful every Tuesday morning.
-                  </button>
+                  <button onClick={() => setMessage("Who are you?")}>Who are you?</button>
+                  <button onClick={() => setMessage("What do you think about this startup?")}>What do you think about this startup?</button>
+                  <button onClick={() => setMessage("I disagree with you.")}>I disagree with you.</button>
                 </div>
               </div>
             ) : (
               messages.map((item) => (
                 <div key={item.id} className={`chat-message ${item.role}`}>
                   <div className="message-avatar">
-                    {item.role === "agent" ? (
-                      <PresenceGlyph accent={agent.accent} />
+                    {item.role === "presence" ? (
+                      <PresenceGlyph accent={presence.accent} />
                     ) : (
                       initials("You")
                     )}
                   </div>
                   <div>
                     <div className="message-meta">
-                      {item.role === "agent" ? agent.name : "You"}
+                      {item.role === "presence" ? presence.name : "You"}
                       <span>{formatTime(item.timestamp)}</span>
                     </div>
                     <p>{item.content}</p>
-                    {item.change && (
-                      <button
-                        className="inline-change"
-                        onClick={() => setView("brain")}
-                      >
-                        <Sparkles size={13} /> {item.change}{" "}
-                        <ChevronRight size={13} />
-                      </button>
-                    )}
+                    {item.attachments?.map((attachment) => (
+                      <div className="presence-chat-attachment" key={attachment.id}>
+                        {attachment.dataUrl && attachment.kind !== "document" ? <Image unoptimized width={180} height={110} src={attachment.dataUrl} alt={`Attached ${attachment.kind}`} /> : <span className="social-link-asset">{attachment.sourceUrl ?? attachment.name}</span>}
+                        <details>
+                          <summary>What {presence.name} sees</summary>
+                          <p>{attachment.perception?.observation ?? "Not inspected. The Presence must not infer this asset's contents."}</p>
+                          <small>Uncertainty: {attachment.perception?.uncertainty ?? "insufficient"}{attachment.perception?.missingContext?.length ? ` · ${attachment.perception.missingContext.join(" ")}` : ""}</small>
+                        </details>
+                      </div>
+                    ))}
                   </div>
                 </div>
               ))
             )}
           </div>
           <div className="attachment-list">
-            {attachments.map((name) => (
-              <span key={name}>
-                {name}
+            {attachments.map((attachment) => (
+              <span key={attachment.name}>
+                {attachment.name}
                 <button
-                  aria-label={`Remove ${name}`}
-                  onClick={() =>
-                    setAttachments((items) =>
-                      items.filter((item) => item !== name),
-                    )
-                  }
+                  aria-label={`Remove ${attachment.name}`}
+                  onClick={() => setAttachments((items) => items.filter((item) => item.name !== attachment.name))}
                 >
                   <X size={11} />
                 </button>
@@ -2921,28 +2898,27 @@ function ChatView({
             ))}
           </div>
           <form className="chat-composer" onSubmit={send}>
-            <label className="attach-button" aria-label="Attach context">
+            <label className="attach-button" aria-label="Attach asset">
               <Plus size={16} />
               <input
                 type="file"
                 hidden
-                onChange={(event) => {
-                  const name = event.target.files?.[0]?.name;
-                  if (name) setAttachments((items) => [...items, name]);
-                }}
+                accept="image/*,video/*,.pdf,.doc,.docx,.csv"
+                onChange={(event) => { const file = event.target.files?.[0]; if (file) addFile(file); event.target.value = ""; }}
               />
             </label>
             <textarea
               aria-label="Message your Presence"
               value={message}
               onChange={(event) => setMessage(event.target.value)}
+              disabled={sending || !session}
               onKeyDown={(event) => {
                 if (event.key === "Enter" && !event.shiftKey) {
                   event.preventDefault();
                   void send();
                 }
               }}
-              placeholder={`Tell ${agent.name} what to change…`}
+              placeholder={sending ? `${presence.name} is thinking…` : `Message ${presence.name}…`}
               rows={3}
             />
             <button
@@ -2950,54 +2926,22 @@ function ChatView({
               aria-label="Send message"
               type="submit"
             >
-              <Send size={17} />
+              {sending ? <LoaderCircle size={17} className="spin" /> : <Send size={17} />}
             </button>
           </form>
+          <div className="presence-chat-link-row"><input aria-label="Link to inspect" placeholder="Paste a link to inspect" value={link} onChange={(event) => setLink(event.target.value)} /><button type="button" onClick={addLink} disabled={!link.trim() || attachments.length >= 4}>Add link</button></div>
           <div className="composer-hint">
-            Enter to send <span>·</span> Shift + Enter for a new line
+            Enter to send <span>·</span> Shift + Enter for a new line <span>·</span> Nothing here publishes or teaches the Agent
           </div>
         </section>
-        {messages.length === 0 ? (
-          <aside className="chat-aside">
-            <SectionEyebrow>Try saying</SectionEyebrow>
-            <div className="suggestion-list">
-              <button
-                onClick={() => setMessage("Don't use em dashes anymore.")}
-              >
-                <span>“</span>Don&apos;t use em dashes anymore.
-                <ChevronRight size={14} />
-              </button>
-              <button
-                onClick={() =>
-                  setMessage("Schedule something useful every Tuesday morning.")
-                }
-              >
-                <span>“</span>Schedule something useful every Tuesday.
-                <ChevronRight size={14} />
-              </button>
-              <button
-                onClick={() => setMessage("Put this Presence into Ghost mode.")}
-              >
-                <span>“</span>Put this Presence into Ghost mode.
-                <ChevronRight size={14} />
-              </button>
-            </div>
-          </aside>
-        ) : state.changeSets.length > 0 ? (
-          <aside className="chat-aside context-panel">
-            <SectionEyebrow>Context & changes</SectionEyebrow>
-            <h3>
-              {state.changeSets.length} durable change
-              {state.changeSets.length > 1 ? "s" : ""}
-            </h3>
-            {state.changeSets.slice(0, 3).map((change) => (
-              <div className="context-change" key={change.id}>
-                <strong>{change.summary}</strong>
-                <small>{formatTime(change.createdAt)}</small>
-              </div>
-            ))}
-          </aside>
-        ) : null}
+        <aside className="chat-aside context-panel presence-chat-aside">
+          <SectionEyebrow>Conversation boundary</SectionEyebrow>
+          <h3>{presence.name} as encountered in public</h3>
+          <p className="muted">{presence.brief.purpose}</p>
+          <div className="presence-chat-boundary"><span className="status-dot" /> Session memory only</div>
+          <small>Chat uses {agent.name}&apos;s selected model, meaning files, Presence Brief, Public Self, relationship context, and perception when needed. Use Teach for durable changes.</small>
+          <Button variant="secondary" onClick={() => void mutate({ type: "newPresenceChatSession", presenceId: presence.id })}><Plus size={14} /> New test conversation</Button>
+        </aside>
       </div>
     </div>
   );
@@ -3005,7 +2949,7 @@ function ChatView({
 
 void LegacyAppShell;
 void OldChatView;
-void ContextChatView;
+void TeachView;
 
 function LiveView({
   state,

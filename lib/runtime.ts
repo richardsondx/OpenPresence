@@ -72,7 +72,7 @@ const fileContent = (kind: FileKind, input: CreateAgentInput, presence?: Presenc
 };
 
 export function initialState(): OpenPresenceState {
-  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, events: [], calendar: [], actions: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], toolBindings: [], changeSets: [], standingIntents: [], socialIntents: [], executions: [], outcomes: [], publications: [], librarySources: [], assets: [], perceptions: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
+  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], events: [], calendar: [], actions: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], toolBindings: [], changeSets: [], standingIntents: [], socialIntents: [], executions: [], outcomes: [], publications: [], librarySources: [], assets: [], perceptions: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
 }
 
 function makeFiles(input: CreateAgentInput, presence: Presence): AgentFile[] { return (Object.keys(fileMeta) as FileKind[]).map((kind) => ({ kind, ...fileMeta[kind], content: fileContent(kind, input, presence), revision: 1, updatedAt: now() })); }
@@ -731,7 +731,7 @@ export function declineSandboxIntroduction(source: OpenPresenceState, introducti
 }
 
 function normalizeState(raw: OpenPresenceState): OpenPresenceState {
-  const state = raw as OpenPresenceState & { presences?: Presence[]; conversations?: import("./types").Conversation[]; activeConversationId?: string | null; activePresenceId?: string | null };
+  const state = raw as OpenPresenceState & { presences?: Presence[]; conversations?: import("./types").Conversation[]; activeConversationId?: string | null; activePresenceId?: string | null; presenceChatSessions?: import("./types").PresenceChatSession[] };
   const agents = state.agents?.length ? state.agents : state.agent ? [state.agent] : [];
   const activeAgentId = state.activeAgentId ?? state.agent?.id ?? agents[0]?.id ?? null;
   const activeAgent = agents.find((item) => item.id === activeAgentId) ?? agents[0];
@@ -754,7 +754,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   const base = initialState();
   const skills = (state.skills ?? []).map((skill) => ({ ...skill, name: skill.name ?? skill.id.replaceAll("-", " ") }));
   const providerConnections = (state.providerConnections ?? []).map((connection) => ({ ...connection, label: providerName(connection.provider) }));
-  const normalized = { ...base, ...state, agents, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], presence, presences, activePresenceId, conversations, activeConversationId, calendar, messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, toolBindings: state.toolBindings ?? [], changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], perceptions: state.perceptions ?? [], skills, agentSkills: state.agentSkills ?? [], contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: state.playgroundSessions ?? [], sandboxActors: state.sandboxActors ?? [], networkSearches: state.networkSearches ?? [], networkIntroductions: state.networkIntroductions ?? [] };
+  const normalized = { ...base, ...state, agents, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], presence, presences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], calendar, messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, toolBindings: state.toolBindings ?? [], changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], perceptions: state.perceptions ?? [], skills, agentSkills: state.agentSkills ?? [], contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: state.playgroundSessions ?? [], sandboxActors: state.sandboxActors ?? [], networkSearches: state.networkSearches ?? [], networkIntroductions: state.networkIntroductions ?? [] };
   const pulseTimes = normalized.events.filter((item) => item.title === "Pulse completed").map((item) => item.time).sort().reverse();
   const priorPulseAt = pulseTimes[1];
   if (priorPulseAt) {
@@ -811,6 +811,7 @@ function recordChangeSet(state: OpenPresenceState, summary: string, operations: 
 function proposal(state: OpenPresenceState, kind: FileKind, proposed: string, reason: string, conversationId?: string): FileProposal { const current = state.files.find((file) => file.kind === kind)?.content ?? ""; const changeSetId = recordChangeSet(state, `Propose ${kind}.md change`, [{ path: `agentFiles.${kind}`, action: "update", before: current, after: proposed }], conversationId); return { id: id("proposal"), file: kind, title: `Update ${kind}.md`, reason, current, proposed, status: "pending", createdAt: now(), changeSetId }; }
 function activeConversation(state: OpenPresenceState, conversationId?: string) { return state.conversations.find((conversation) => conversation.id === (conversationId ?? state.activeConversationId)) ?? state.conversations[0]; }
 function syncMessages(state: OpenPresenceState) { state.messages = activeConversation(state)?.messages ?? []; }
+function makePresenceChatSession(presenceId: string): import("./types").PresenceChatSession { const timestamp = now(); return { id: id("presence-chat"), presenceId, title: "New conversation", createdAt: timestamp, updatedAt: timestamp, messages: [] }; }
 
 function inferPresenceBriefChange(content: string, current: PresenceBrief): { brief: PresenceBrief; summary: string } | undefined {
   const clean = (value: string) => value.trim().replace(/[.!?]+$/, "").trim();
@@ -1095,6 +1096,16 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     case "selectPresence": { const selected = state.presences.find((item) => item.id === operation.id); if (!selected) return state; state.activePresenceId = selected.id; state.presence = selected; return state; }
     case "selectConversation": { if (!state.conversations.some((conversation) => conversation.id === operation.id)) return state; state.activeConversationId = operation.id; syncMessages(state); return state; }
     case "newConversation": { const conversation = makeConversation(); state.conversations.unshift(conversation); state.activeConversationId = conversation.id; syncMessages(state); return state; }
+    case "newPresenceChatSession": { if (!state.presences.some((presence) => presence.id === operation.presenceId)) return state; const session = makePresenceChatSession(operation.presenceId); state.presenceChatSessions.unshift(session); return state; }
+    case "sendPresenceChatMessage": {
+      const session = state.presenceChatSessions.find((item) => item.id === operation.sessionId && item.presenceId === operation.presenceId);
+      if (!session || !state.presences.some((presence) => presence.id === operation.presenceId) || !operation.content.trim()) return state;
+      const content = operation.content.trim();
+      session.messages.push({ id: id("presence-chat-message"), role: "user", content, timestamp: now(), attachments: operation.attachments?.map((attachment) => ({ id: id("presence-chat-asset"), ...attachment })) });
+      if (session.title === "New conversation") session.title = content.replace(/\s+/g, " ").slice(0, 42) + (content.length > 42 ? "…" : "");
+      session.updatedAt = now();
+      return state;
+    }
     case "sendMessage": {
       const content = operation.content.trim(); if (!content || !state.agent) return state; let conversation = activeConversation(state, operation.conversationId); if (!conversation) { conversation = makeConversation(); state.conversations.unshift(conversation); state.activeConversationId = conversation.id; }
       conversation.messages.push({ id: id("msg"), role: "operator", content, timestamp: now() }); if (conversation.title === "New conversation") conversation.title = content.replace(/\s+/g, " ").slice(0, 42) + (content.length > 42 ? "…" : "");

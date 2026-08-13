@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { generateAgentReply, generateAgentSocialDecision, parseAgentSocialDecision, parseAgentSocialEdit, parseAgentSocialJudgment } from "../lib/ai";
+import { generateAgentReply, generateAgentSocialDecision, generatePresenceChatReply, parseAgentSocialDecision, parseAgentSocialEdit, parseAgentSocialJudgment } from "../lib/ai";
 import { saveProviderSecret } from "../lib/db";
 import { applyOperation, createAgent } from "../lib/runtime";
 
@@ -83,6 +83,34 @@ describe("Agent social decision parsing", () => {
     expect(system).toContain("A draft that could be pasted into any AI account is a failed draft.");
     expect(system).not.toContain("Live Presence snapshot");
     expect(system).toContain('"BRAIN"');
+  });
+
+  it("uses the selected Presence public self with session history only", async () => {
+    let state = createAgent({ name: "Ada", description: "Explain reliable AI agents.", mode: "agent", handle: "@ada", accent: "#D68754" });
+    state.providerConnections.push({ id: "ollama-presence-chat", provider: "ollama", label: "Ollama", status: "local", endpoint: "http://ollama.test", createdAt: new Date().toISOString() });
+    state = applyOperation(state, { type: "setModel", provider: "ollama", model: "glm-5.2:cloud", vision: false });
+    const presence = state.presences[0]!;
+    const calls: Array<{ url: string; body?: Record<string, unknown> }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
+      calls.push({ url, body });
+      if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
+      return new Response(JSON.stringify({ message: { content: "Ada answered from the public self." } }), { status: 200 });
+    }));
+    await expect(generatePresenceChatReply(state, presence.id, "What should I notice next?", [
+      { role: "presence", content: "Start with the evidence." },
+      { role: "user", content: "I am listening." },
+    ], "The attached chart was not inspected.")).resolves.toBe("Ada answered from the public self.");
+    const chatCall = calls.find((call) => call.url.endsWith("/api/chat"));
+    const messages = chatCall?.body?.messages as Array<{ role: string; content: string }>;
+    expect(messages).toHaveLength(4);
+    expect(messages[1]).toEqual({ role: "assistant", content: "Start with the evidence." });
+    expect(messages[2]).toEqual({ role: "user", content: "I am listening." });
+    expect(messages[3]).toEqual({ role: "user", content: "What should I notice next?" });
+    expect(messages[0]?.content).toContain("This is a private test conversation with the Presence's public self");
+    expect(messages[0]?.content).toContain("The attached chart was not inspected.");
+    expect(messages[0]?.content).not.toContain("Private operator transcript");
   });
 
   it("sends GPT-5.6 Luna directly with the selected reasoning effort", async () => {
