@@ -42,6 +42,7 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
       postsPublished: posts.length,
       recentPostIds: posts.map((post) => post.id),
       recentInboundIds: mentions.map((mention) => mention.id),
+      judgedInboundIds: next.presences.find((item) => item.id === presenceId)?.context.publicFooting?.judgedInboundIds,
       observedAt,
     });
 

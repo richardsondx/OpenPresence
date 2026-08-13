@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyOperation, compilePresenceContext, createAgent, deriveActivitySummary, failNativeExecution, formChatPostIntent, formXReplyIntent, initialState, isExplicitXPostRequest, markNativeConnectionNeedsAttention, recordPublicFooting } from "../lib/runtime";
+import { applyOperation, compilePresenceContext, createAgent, deriveActivitySummary, failNativeExecution, formChatPostIntent, formXReplyIntent, initialState, isExplicitXPostRequest, markInboundJudged, markNativeConnectionNeedsAttention, recordPublicFooting, recordStandingIntentNoOp } from "../lib/runtime";
 import { acknowledgeExecution, claimExecutions, createBridgeWithKey, ingestEvents, removeBridge, revokeBridge } from "../lib/bridge";
 import { readBridgeCredentialMetadata, readState, writeState } from "../lib/db";
 
@@ -69,6 +69,15 @@ describe("OpenPresence runtime boundaries", () => {
     state = formXReplyIntent(state, "That is exactly the kind of question I want to explore.", "post-1");
     expect(state.socialIntents[0]?.target).toEqual({ type: "x.post", id: "post-1" });
     expect(state.executions[0]?.target).toEqual({ type: "x.post", id: "post-1" });
+  });
+
+  it("keeps observed inbound messages separate from messages already judged", () => {
+    let state = createAgent(input);
+    state = recordPublicFooting(state, state.presence!.id, { postsPublished: 1, recentPostIds: ["post-1"], recentInboundIds: ["new-mention", "old-mention"], observedAt: new Date().toISOString() });
+    state = markInboundJudged(state, state.presence!.id, "old-mention");
+    expect(state.presence?.context.publicFooting?.recentInboundIds).toEqual(["new-mention", "old-mention"]);
+    expect(state.presence?.context.publicFooting?.judgedInboundIds).toEqual(["old-mention"]);
+    expect(state.presence?.context.publicFooting?.judgedInboundIds).not.toContain("new-mention");
   });
 
   it("records a native delivery failure without inventing an external outcome", () => {
@@ -147,12 +156,39 @@ describe("OpenPresence runtime boundaries", () => {
     expect(summary.rhythm.attention).toBe("Continuous observation");
   });
 
+  it("does not let an old delivery mask a newer Mirror observation", () => {
+    let state = createAgent(input);
+    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read", account: { id: "account-1", username: "jenny_ai", name: "Jenny" }, observation: { status: "up-to-date", lastObservedAt: new Date().toISOString(), nextObservationAt: new Date(Date.now() + 300_000).toISOString(), ownPostCount: 1, mentionCount: 0, conversationCount: 0 }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    state = formChatPostIntent(state, "A useful point of view.");
+    state.executions[0]!.status = "succeeded";
+    state.executions[0]!.updatedAt = new Date(Date.now() - 60_000).toISOString();
+    state.events.unshift({ id: "mirror-now", type: "system", title: "Social Mirror updated", detail: "Observed 1 public post and 0 inbound mentions.", time: new Date().toISOString(), tone: "positive", presenceId: state.presence!.id });
+    expect(deriveActivitySummary(state).current.label).toBe("Watching X");
+  });
+
   it("surfaces a standing intent as the next explicit consideration", () => {
     const state = applyOperation(createAgent(input), { type: "addSlot", instruction: "Teach one useful thing", day: "Tuesday", time: "08:00", objective: "education", executionWindow: "08:00–11:00" });
     const summary = deriveActivitySummary(state);
     expect(summary.nextAttention.label).toBe("Next standing intent");
     expect(summary.nextAttention.detail).toContain("Tuesday at 08:00");
     expect(summary.nextIntent.label).toContain("Teach one useful thing");
+  });
+
+  it("reopens a Calendar slot when its schedule moves after an evaluation", () => {
+    let state = applyOperation(createAgent(input), { type: "addSlot", instruction: "Teach one useful thing", day: "Wednesday", time: "08:00", objective: "education", executionWindow: "08:00–11:00" });
+    state.calendar[0]!.lastEvaluatedAt = new Date().toISOString();
+    state = applyOperation(state, { type: "editSlot", id: state.calendar[0]!.id, instruction: "Teach one useful thing", day: "Wednesday", time: "09:00", objective: "education", executionWindow: "09:00–10:00" });
+    expect(state.calendar[0]!.lastEvaluatedAt).toBeUndefined();
+    expect(state.standingIntents[0]!.trigger.config.time).toBe("09:00");
+    expect(state.standingIntents[0]!.executionWindow).toEqual({ startsAt: "09:00", endsAt: "10:00" });
+  });
+
+  it("shows a Calendar no-op as the current truth instead of an older delivery", () => {
+    let state = applyOperation(createAgent(input), { type: "addSlot", instruction: "Teach one useful thing", day: "Wednesday", time: "08:00", objective: "education", executionWindow: "08:00–11:00" });
+    state = recordStandingIntentNoOp(state, state.presence!.id, state.calendar[0]!.instruction);
+    const summary = deriveActivitySummary(state);
+    expect(summary.current.label).toBe("Waiting for a better moment");
+    expect(summary.current.detail).toContain("schedule grants permission");
   });
 
   it("keeps Ghost representation Presence-scoped and reviewable", () => {
@@ -181,6 +217,21 @@ describe("OpenPresence runtime boundaries", () => {
     expect(next.presence?.channel).toBe("linkedin");
     expect(next.presence?.capabilities.map((item) => item.id)).toContain("connect");
     expect(next.presence?.capabilities.map((item) => item.id)).not.toContain("quote");
+  });
+
+  it("edits Presence and Agent names without crossing identity boundaries", () => {
+    let state = createAgent(input);
+    const originalHandle = state.presence!.handle;
+    const soul = state.files.find((file) => file.kind === "SOUL")?.content;
+    state = applyOperation(state, { type: "setPresence", patch: { name: "Jenny in Founders" } });
+    expect(state.presence?.name).toBe("Jenny in Founders");
+    expect(state.presence?.handle).toBe(originalHandle);
+    expect(state.presence?.context.publicIdentity.displayName).toBe("Jenny in Founders");
+    state = applyOperation(state, { type: "renameAgent", name: "Juno" });
+    expect(state.agent?.name).toBe("Juno");
+    expect(state.agents[0]?.name).toBe("Juno");
+    expect(state.presence?.name).toBe("Jenny in Founders");
+    expect(state.files.find((file) => file.kind === "SOUL")?.content).toBe(soul);
   });
 
   it("scopes Pulse activity to the requested Presence", () => {
@@ -308,9 +359,11 @@ describe("OpenPresence runtime boundaries", () => {
   });
 
   it("supports a custom channel with a Bridge-backed outbox", () => {
-    const definition = { id: "founder-community", name: "Founder Community", entities: [{ id: "member", label: "Member" }, { id: "post", label: "Post" }], affordances: [{ id: "post", label: "Posts", description: "Publish a post." }], formats: [{ id: "founder-community.text-post", label: "Text post", description: "A text post.", channel: "founder-community" }], relationships: [], metrics: [], privacyDefaults: { visibility: "private-community" as const, shareability: "presence-only" as const }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const definition = { id: "founder-community", name: "Founder Community", icon: "community", domain: "https://www.skool.com/", entities: [{ id: "member", label: "Member" }, { id: "post", label: "Post" }], affordances: [{ id: "post", label: "Posts", description: "Publish a post." }], formats: [{ id: "founder-community.text-post", label: "Text post", description: "A text post.", channel: "founder-community" }], relationships: [], metrics: [], privacyDefaults: { visibility: "private-community" as const, shareability: "presence-only" as const }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     let state = createAgent(input);
     state = applyOperation(state, { type: "createPresence", input: { channel: definition.id, handle: "Jenny in Founders", mode: "agent", accent: "#D68754", channelDefinition: definition } });
+    expect(state.channelDefinitions.find((item) => item.id === definition.id)?.domain).toBe("https://www.skool.com/");
+    expect(state.presence?.name).toBe("Jenny in Founders");
     state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto" } } });
     const result = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "Founder Bridge", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["post"], formats: ["founder-community.text-post"], metrics: [] } } });
     state = result.state;

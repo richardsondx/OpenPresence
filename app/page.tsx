@@ -5,18 +5,23 @@ import { createPortal } from "react-dom";
 import {
   Activity,
   ArrowUpRight,
+  BookOpen,
   Bot,
   Brain,
+  BriefcaseBusiness,
   CalendarDays,
   Check,
+  Code2,
   ChevronDown,
   ChevronRight,
   Circle,
   CircleAlert,
   FileText,
+  Globe2,
   Ghost,
   LoaderCircle,
   MessageCircle,
+  MessageSquare,
   PanelRightClose,
   PanelRightOpen,
   Pause,
@@ -29,6 +34,7 @@ import {
   Settings2,
   ShieldCheck,
   Sparkles,
+  Users,
   X,
 } from "lucide-react";
 import { AGENT_TOOL_DEFINITIONS, CHANNEL_CAPABILITIES } from "@/lib/types";
@@ -89,6 +95,60 @@ const initials = (name: string) =>
     .join("")
     .slice(0, 2)
     .toUpperCase();
+
+const channelIconOptions = [
+  { id: "community", label: "Community", icon: Users },
+  { id: "forum", label: "Forum", icon: MessageSquare },
+  { id: "book", label: "Publication", icon: BookOpen },
+  { id: "work", label: "Work", icon: BriefcaseBusiness },
+  { id: "code", label: "Code", icon: Code2 },
+  { id: "globe", label: "Web", icon: Globe2 },
+  { id: "spark", label: "Spark", icon: Sparkles },
+] as const;
+
+function XBrand() {
+  return (
+    <svg viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+      <path fill="currentColor" d="M18.244 2.25h3.308l-7.227 8.26 8.502 11.24H16.17l-5.214-6.817-5.965 6.817H1.68l7.73-8.835L1.254 2.25H8.08l4.713 6.231 5.45-6.231Zm-1.161 17.52h1.833L7.084 4.126H5.117l11.966 15.644Z" />
+    </svg>
+  );
+}
+
+function faviconUrl(domain: string) {
+  try {
+    const normalized = /^https?:\/\//i.test(domain) ? domain : `https://${domain}`;
+    const hostname = new URL(normalized).hostname;
+    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostname)}&sz=64`;
+  } catch {
+    return null;
+  }
+}
+
+function PresenceLogo({
+  channel,
+  definitions,
+  size = "normal",
+}: {
+  channel: ChannelId;
+  definitions?: ChannelDefinition[];
+  size?: "normal" | "large";
+}) {
+  const definition = definitions?.find((item) => item.id === channel);
+  const icon = definition?.icon ?? (channel === "x" ? "x" : "community");
+  const option = channelIconOptions.find((item) => item.id === icon);
+  const fallback = icon === "x" ? <XBrand /> : option ? <option.icon size={size === "large" ? 18 : 14} strokeWidth={1.8} /> : <Globe2 size={size === "large" ? 18 : 14} strokeWidth={1.8} />;
+  const favicon = definition?.domain ? faviconUrl(definition.domain) : null;
+  return (
+    <span className={`presence-logo presence-logo-${size}`} aria-hidden="true">
+      <span className="presence-logo-fallback">{fallback}</span>
+      {favicon && (
+        // External favicon URLs are user-provided and cannot use Next Image's fixed domain allowlist.
+        // eslint-disable-next-line @next/next/no-img-element
+        <img src={favicon} alt="" onError={(event) => event.currentTarget.remove()} />
+      )}
+    </span>
+  );
+}
 
 async function readJsonResponse<T>(response: Response): Promise<T> {
   const contentType = response.headers.get("content-type") ?? "";
@@ -281,6 +341,7 @@ export default function Home() {
   const [selectedFile, setSelectedFile] = useState<FileKind>("BRAIN");
   const [pendingOperation, setPendingOperation] = useState<string | null>(null);
   const nativeSyncInFlight = useRef<string | null>(null);
+  const calendarRunInFlight = useRef<string | null>(null);
   useEffect(() => {
     fetch(`/api/state?read=${Date.now()}`, { cache: "no-store" })
       .then(async (response) => {
@@ -318,6 +379,7 @@ export default function Home() {
     }
   }
   useEffect(() => {
+    if (pendingOperation === "wakePresence" || pendingOperation === "runPulse") return;
     const presence = state?.presence;
     const connection = presence
       ? state.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x" && item.status === "connected")
@@ -348,7 +410,43 @@ export default function Home() {
     if (due) void observe();
     else schedule(observation.nextObservationAt);
     return () => { if (timer) clearTimeout(timer); };
-  }, [state?.presence, state?.nativeConnections]);
+  }, [state?.presence, state?.nativeConnections, pendingOperation]);
+  useEffect(() => {
+    const presence = state?.presence;
+    if (!presence || presence.status !== "live") return;
+    const slots = state.calendar.filter((slot) => slot.presence === presence.id && slot.enabled && slot.day && slot.time);
+    if (!slots.length) return;
+    const now = new Date();
+    const dayIndex: Record<string, number> = { Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6 };
+    const currentMinutes = now.getHours() * 60 + now.getMinutes();
+    const due = slots.find((slot) => {
+      const [hours, minutes] = slot.time.split(":").map(Number);
+      return dayIndex[slot.day] === now.getDay() && hours * 60 + minutes <= currentMinutes && (!slot.lastEvaluatedAt || new Date(slot.lastEvaluatedAt).toDateString() !== now.toDateString());
+    });
+    if (due && calendarRunInFlight.current !== due.id) {
+      calendarRunInFlight.current = due.id;
+      void mutate({ type: "runSlot", id: due.id, scheduled: true }).finally(() => { calendarRunInFlight.current = null; });
+      return;
+    }
+    const nextSlots = slots.map((slot) => {
+      const [hours, minutes] = slot.time.split(":").map(Number);
+      const target = new Date(now);
+      const targetDay = dayIndex[slot.day];
+      target.setDate(now.getDate() + ((targetDay - now.getDay() + 7) % 7));
+      target.setHours(hours, minutes, 0, 0);
+      if (target.getTime() <= now.getTime() || (slot.lastEvaluatedAt && new Date(slot.lastEvaluatedAt).toDateString() === target.toDateString())) target.setDate(target.getDate() + 7);
+      return { slot, time: target.getTime() };
+    });
+    const nextSlot = nextSlots.sort((left, right) => left.time - right.time)[0];
+    if (!nextSlot) return;
+    const delay = Math.max(1_000, nextSlot.time - now.getTime());
+    const timer = setTimeout(() => {
+      if (calendarRunInFlight.current === nextSlot.slot.id) return;
+      calendarRunInFlight.current = nextSlot.slot.id;
+      void mutate({ type: "runSlot", id: nextSlot.slot.id, scheduled: true }).finally(() => { calendarRunInFlight.current = null; });
+    }, delay);
+    return () => clearTimeout(timer);
+  }, [state?.calendar, state?.presence, state?.activePresenceId]);
   async function manageBridge(operation: unknown) {
     setError(null);
     try {
@@ -742,11 +840,11 @@ function PresenceSwitcher({
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <span className="channel-badge">
-          {channelLabel(presence.channel, state.channelDefinitions)}
+        <span className="channel-badge" title={channelLabel(presence.channel, state.channelDefinitions)}>
+          <PresenceLogo channel={presence.channel} definitions={state.channelDefinitions} />
         </span>
         <span>
-          <strong>{presence.handle}</strong>
+          <strong>{presence.name}</strong>
           <small>{presence.mode === "ghost" ? "Ghost" : "Agent-owned"}</small>
         </span>
         <span className={`live-dot ${presence.status === "paused" ? "paused-dot" : ""}`} />
@@ -759,15 +857,16 @@ function PresenceSwitcher({
             <button
               key={item.id}
               role="menuitem"
+              aria-label={`Select Presence ${item.name} (${item.handle})`}
               className={`presence-menu-item ${item.id === presence.id ? "active" : ""}`}
               onClick={async () => {
                 await mutate({ type: "selectPresence", id: item.id });
                 setOpen(false);
               }}
             >
-              <span className="channel-badge">{channelLabel(item.channel, state.channelDefinitions)}</span>
+              <span className="channel-badge" title={channelLabel(item.channel, state.channelDefinitions)}><PresenceLogo channel={item.channel} definitions={state.channelDefinitions} /></span>
               <span>
-                <strong>{item.handle}</strong>
+                <strong>{item.name}</strong>
                 <small>{channelLabel(item.channel, state.channelDefinitions)} · {item.mode === "ghost" ? "Ghost" : "Agent-owned"}</small>
               </span>
               <span className={`live-dot ${item.status === "paused" ? "paused-dot" : ""}`} />
@@ -1092,6 +1191,7 @@ function AgentWorkspaceShell({
           )}
           {view === "presence" && (
             <PresenceView
+              key={presence.id}
               state={state}
               mutate={mutate}
               pendingOperation={pendingOperation}
@@ -1330,6 +1430,7 @@ function LegacyAppShell({
           )}
           {view === "presence" && (
             <PresenceView
+              key={presence.id}
               state={state}
               mutate={mutate}
               manageBridge={manageBridge}
@@ -1388,11 +1489,14 @@ function AddPresenceDialog({
   onCreate: (input: CreatePresenceInput) => Promise<void>;
 }) {
   const [channel, setChannel] = useState<ChannelId>("x");
+  const [presenceName, setPresenceName] = useState("");
   const [handle, setHandle] = useState("@jenny_ai");
   const [mode, setMode] = useState<PresenceMode>("agent");
   const [submitting, setSubmitting] = useState(false);
   const [customName, setCustomName] = useState("Custom channel");
   const [customId, setCustomId] = useState("custom-channel");
+  const [customDomain, setCustomDomain] = useState("");
+  const [customIcon, setCustomIcon] = useState("community");
   const [affordances, setAffordances] = useState("post, reply, react, message");
   const customDefinition = (): ChannelDefinition => {
     const timestamp = new Date().toISOString();
@@ -1411,6 +1515,8 @@ function AddPresenceDialog({
       id: customId.trim().toLowerCase(),
       name: customName.trim(),
       description: `A custom social environment for ${customName.trim()}.`,
+      icon: customIcon,
+      domain: customDomain.trim() || undefined,
       entities: [
         { id: "member", label: "Member" },
         { id: "post", label: "Post" },
@@ -1454,6 +1560,7 @@ function AddPresenceDialog({
       channel === "__custom__" ? customDefinition() : undefined;
     await onCreate({
       channel: definition?.id ?? channel,
+      name: presenceName.trim() || handle,
       handle,
       mode,
       accent,
@@ -1539,6 +1646,37 @@ function AddPresenceDialog({
               />
             </label>
             <label>
+              Social Mirror domain (optional)
+              <input
+                aria-label="Social Mirror domain"
+                value={customDomain}
+                onChange={(event) => setCustomDomain(event.target.value)}
+                placeholder="https://www.skool.com/"
+              />
+              <small className="muted">A favicon will be used for this channel when the domain is available.</small>
+            </label>
+            <fieldset className="icon-picker">
+              <legend>Fallback channel icon</legend>
+              <div className="icon-picker-options">
+                {channelIconOptions.map((option) => {
+                  const Icon = option.icon;
+                  return (
+                    <button
+                      type="button"
+                      key={option.id}
+                      className={customIcon === option.id ? "selected" : ""}
+                      aria-label={`Use ${option.label} icon`}
+                      aria-pressed={customIcon === option.id}
+                      onClick={() => setCustomIcon(option.id)}
+                    >
+                      <Icon size={15} strokeWidth={1.8} />
+                      <span>{option.label}</span>
+                    </button>
+                  );
+                })}
+              </div>
+            </fieldset>
+            <label>
               Affordances
               <input
                 aria-label="Custom affordances"
@@ -1557,6 +1695,15 @@ function AddPresenceDialog({
             </details>
           </>
         )}
+        <label>
+          Presence name
+          <input
+            aria-label="Presence name"
+            value={presenceName}
+            onChange={(event) => setPresenceName(event.target.value)}
+            placeholder="Jenny in this place"
+          />
+        </label>
         <label>
           Handle or identity
           <input
@@ -3008,6 +3155,7 @@ function CalendarView({
               type="time"
               value={time}
               onChange={(event) => setTime(event.target.value)}
+              onInput={(event) => setTime(event.currentTarget.value)}
             />
           </label>
           <label>
@@ -3170,6 +3318,7 @@ function BrainView({
     state.files.find((item) => item.kind === selectedFile) ?? state.files[0];
   const [content, setContent] = useState(file?.content ?? "");
   const agent = state.agent!;
+  const [agentNameDraft, setAgentNameDraft] = useState(agent.name);
   const pending = state.proposals.filter((item) => item.status === "pending");
   const model = state.modelProfiles.find((item) => item.agentId === agent.id);
   const [showSkillForm, setShowSkillForm] = useState(false);
@@ -3241,6 +3390,20 @@ function BrainView({
           </span>
         )}
       </div>
+      <section className="settings-card agent-identity-card">
+        <div>
+          <SectionEyebrow>Agent identity</SectionEyebrow>
+          <h2>What should this Agent be called?</h2>
+          <p className="muted">This name identifies the persistent mind across its Presences. Changing it does not rewrite protected meaning files.</p>
+        </div>
+        <form className="identity-name-form" onSubmit={(event) => { event.preventDefault(); if (agentNameDraft.trim() && agentNameDraft.trim() !== agent.name) void mutate({ type: "renameAgent", name: agentNameDraft.trim() }); }}>
+          <label>
+            Agent name
+            <input aria-label="Agent name" value={agentNameDraft} onChange={(event) => setAgentNameDraft(event.target.value)} maxLength={80} />
+          </label>
+          <Button type="submit" variant="secondary" disabled={!agentNameDraft.trim() || agentNameDraft.trim() === agent.name}><Check size={14} /> Save name</Button>
+        </form>
+      </section>
       <section className="brain-overview">
         <div><SectionEyebrow>Model runtime</SectionEyebrow><strong>{model?.provider === "ollama" ? ollamaModelLabel(ollamaModels.find((item) => item.name === model.model || item.name.startsWith(`${model.model}:`))?.name ?? model.model) : runtimeModels.find((item) => item.model === model?.model && item.quality === model?.quality)?.name ?? model?.model ?? "Not selected"}</strong><small>{model?.provider ?? "Choose a provider"} · {model?.quality ?? "runtime"}</small></div>
         <div><SectionEyebrow>Skills</SectionEyebrow><strong>{state.skills.length} installed</strong><small>{enabledSkills.length} enabled for {agent.name}</small></div>
@@ -3533,6 +3696,7 @@ function PresenceView({
     ] ??
     [];
   const [customizing, setCustomizing] = useState(true);
+  const [presenceNameDraft, setPresenceNameDraft] = useState(presence.name);
   const [ghostDraft, setGhostDraft] = useState<GhostProfile>(presence.ghostProfile ?? { subject: "Me / my organization", priorities: "", preferences: "", voice: "", boundaries: "" });
   const setMode = (key: string, mode: ExecutionMode) =>
     mutate({ type: "setPresence", patch: { execution: { [key]: mode } } });
@@ -3575,17 +3739,16 @@ function PresenceView({
       </div>
       <div className="presence-overview">
         <div className="presence-identity">
-          <PresenceGlyph
-            accent={presence.accent}
-            size="large"
-            pulse={presence.status === "live"}
-          />
+          <div className="presence-overview-logo" style={{ "--agent-accent": presence.accent } as React.CSSProperties}>
+            <PresenceLogo channel={presence.channel} definitions={state.channelDefinitions} size="large" />
+          </div>
           <div>
             <span className="eyebrow">
               {channelLabel(presence.channel, state.channelDefinitions)} ·
               Presence
             </span>
-            <h2>{presence.handle}</h2>
+            <h2>{presence.name}</h2>
+            <p className="presence-handle">{presence.handle}</p>
             <p>
               {presence.mode === "ghost"
                 ? "Ghost · extends the operator’s attention"
@@ -3603,6 +3766,25 @@ function PresenceView({
               ? "Jenny extends the operator’s attention and judgment."
               : "Jenny speaks as an agent with her own point of view."}
           </p>
+        </div>
+        <div className="identity-name-form">
+          <label>
+            Presence name
+            <input
+              aria-label="Presence name"
+              value={presenceNameDraft}
+              onChange={(event) => setPresenceNameDraft(event.target.value)}
+              maxLength={120}
+            />
+          </label>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={!presenceNameDraft.trim() || presenceNameDraft.trim() === presence.name}
+            onClick={() => void mutate({ type: "setPresence", patch: { name: presenceNameDraft.trim() } })}
+          >
+            <Check size={14} /> Save name
+          </Button>
         </div>
         <div className="identity-options">
           <button

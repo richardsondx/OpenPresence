@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { readState, saveProviderSecret, writeState } from "@/lib/db";
 import { generateAgentReply } from "@/lib/ai";
-import { applyOperation, completeNativeExecution, failNativeExecution, finishPulse, formChatPostIntent, formXReplyIntent, isExplicitXPostRequest, isLaunchCandidate, markNativeConnectionNeedsAttention, recordRuntimeEvent } from "@/lib/runtime";
+import { applyOperation, completeNativeExecution, failNativeExecution, finishPulse, formChatPostIntent, formStandingPostIntent, formXReplyIntent, isExplicitXPostRequest, isLaunchCandidate, markCalendarSlotEvaluated, markInboundJudged, markNativeConnectionNeedsAttention, recordRuntimeEvent, recordStandingIntentNoOp } from "@/lib/runtime";
 import { publishXPost, readNativeXCredentials } from "@/lib/x";
 import { reconcileNativeX } from "@/lib/native-x";
 import type { OpenPresenceState, Operation } from "@/lib/types";
@@ -42,12 +42,13 @@ async function deliverNativeExecutions(source: OpenPresenceState, executionIds: 
   return next;
 }
 
-async function runNativePulse(source: OpenPresenceState, presenceId: string, previousInboundIds: Set<string>) {
+async function runNativePulse(source: OpenPresenceState, presenceId: string) {
   let next = recordRuntimeEvent(source, presenceId, "Evaluating observed context", "Jenny is judging the Social Mirror before deciding whether anything is worth doing.", "positive");
   const connection = next.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x");
   const accountId = connection?.account?.id;
+  const judgedInboundIds = new Set(next.presences.find((item) => item.id === presenceId)?.context.publicFooting?.judgedInboundIds ?? []);
   const observedMentions = next.mirrorObjects
-    .filter((item) => item.presenceId === presenceId && item.channelId === "x" && item.objectType === "post" && item.author?.externalRef?.type === "x.user" && item.author.externalRef.id !== accountId && !previousInboundIds.has(item.externalRef.id))
+    .filter((item) => item.presenceId === presenceId && item.channelId === "x" && item.objectType === "post" && item.author?.externalRef?.type === "x.user" && item.author.externalRef.id !== accountId && !judgedInboundIds.has(item.externalRef.id))
     .sort((left, right) => (right.occurredAt ?? right.observedAt).localeCompare(left.occurredAt ?? left.observedAt));
   if (observedMentions.length) {
     const inbound = observedMentions[0]!;
@@ -60,10 +61,14 @@ async function runNativePulse(source: OpenPresenceState, presenceId: string, pre
       const message = error instanceof Error ? error.message : "The selected Agent runtime could not evaluate the reply.";
       return finishPulse(recordRuntimeEvent(next, presenceId, "Reply evaluation unavailable", message, "warning"), presenceId, "Observed a reply but could not complete the Agent's judgment.");
     }
-    if (!replyDraft.trim() || /^NO_OP$/i.test(replyDraft.trim())) return finishPulse(recordRuntimeEvent(next, presenceId, "Conversation left alone", "Jenny considered the new message and found no useful reply worth adding.", "quiet"), presenceId, "Observed the new conversation and chose NO_OP.");
+    if (!replyDraft.trim() || /^NO_OP$/i.test(replyDraft.trim())) {
+      next = markInboundJudged(next, presenceId, inbound.externalRef.id);
+      return finishPulse(recordRuntimeEvent(next, presenceId, "Conversation left alone", "Jenny considered the new message and found no useful reply worth adding.", "quiet"), presenceId, "Observed the new conversation and chose NO_OP.");
+    }
     next = recordRuntimeEvent(next, presenceId, "Worth responding to", "Jenny judged the new message relevant enough to continue the conversation.", "positive");
     const existingExecutionIds = new Set(next.executions.map((item) => item.id));
     next = formXReplyIntent(next, replyDraft, parentId);
+    next = markInboundJudged(next, presenceId, inbound.externalRef.id);
     const replyExecutionIds = new Set(next.executions.filter((item) => !existingExecutionIds.has(item.id)).map((item) => item.id));
     next = await deliverNativeExecutions(next, replyExecutionIds);
     const replyExecution = next.executions.find((item) => replyExecutionIds.has(item.id));
@@ -97,6 +102,51 @@ async function runNativePulse(source: OpenPresenceState, presenceId: string, pre
   return finishPulse(next, presenceId, detail);
 }
 
+function localDateKey(value = new Date()) {
+  return `${value.getFullYear()}-${value.getMonth() + 1}-${value.getDate()}`;
+}
+
+async function evaluateCalendarSlot(source: OpenPresenceState, slotId: string, scheduled = false) {
+  let next = source;
+  const slot = next.calendar.find((item) => item.id === slotId);
+  if (!slot || !slot.enabled) return next;
+  const presence = next.presences.find((item) => item.id === slot.presence) ?? next.presence;
+  const standing = next.standingIntents.find((item) => item.id === slot.standingIntentId);
+  if (!presence || presence.status !== "live" || !standing || standing.status !== "active") return next;
+  if (scheduled && slot.lastEvaluatedAt && localDateKey(new Date(slot.lastEvaluatedAt)) === localDateKey()) return next;
+  next = recordRuntimeEvent(next, presence.id, "Calendar attention started", `Jenny is evaluating “${slot.instruction}” now. The standing intention grants permission to consider acting; it does not require a post.`, "positive");
+  const prompt = `Evaluate this Calendar standing intention for the current moment.
+
+Standing instruction: ${standing.instruction}
+Objective: ${standing.objective ?? "usefulness"}
+Execution window: ${slot.executionWindow}
+
+Use Jenny's meaning files, current Presence, and actual context. Decide whether a specific original ${presence.channel} publication is worth publishing now. Prefer silence when the instruction is not timely, useful, or consistent with Jenny's Taste. Return only one publication draft, or exactly NO_OP. Do not mention calendars, schedules, APIs, connectors, or internal systems.`;
+  let draft: string;
+  try {
+    draft = await generateAgentReply(next, prompt);
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "The selected Agent runtime could not evaluate this standing intention.";
+    return recordRuntimeEvent(next, presence.id, "Calendar evaluation unavailable", message, "warning");
+  }
+  next = markCalendarSlotEvaluated(next, slot.id);
+  if (!draft.trim() || /^NO_OP$/i.test(draft.trim())) return recordStandingIntentNoOp(next, presence.id, standing.instruction);
+  if (presence.channel === "x" && draft.trim().length > 280) return recordRuntimeEvent(next, presence.id, "Standing intention held", "Jenny's candidate exceeded X's single-post limit, so no external action was attempted.", "warning");
+  const existingExecutionIds = new Set(next.executions.map((item) => item.id));
+  next = formStandingPostIntent(next, draft.trim(), standing.id);
+  const executionIds = new Set(next.executions.filter((item) => !existingExecutionIds.has(item.id)).map((item) => item.id));
+  next = await deliverNativeExecutions(next, executionIds);
+  const execution = next.executions.find((item) => executionIds.has(item.id));
+  const detail = execution?.status === "succeeded"
+    ? "Jenny judged the Calendar intention worthwhile and published it through the native X connector."
+    : execution?.status === "failed"
+      ? "Jenny judged the Calendar intention worthwhile, but X rejected delivery; no external post is counted."
+      : execution?.status === "awaiting-review"
+        ? "Jenny judged the Calendar intention worthwhile and is waiting for operator review."
+        : "Jenny judged the Calendar intention worthwhile and left it in the Presence execution envelope.";
+  return recordRuntimeEvent(next, presence.id, "Calendar evaluation complete", detail, execution?.status === "failed" ? "warning" : "positive");
+}
+
 const agentInput = z.object({
   name: z.string().trim().min(1).max(80),
   description: z.string().trim().min(1).max(1000),
@@ -109,13 +159,14 @@ const fileKind = z.enum(["BRAIN", "SOUL", "MISSION", "TASTE", "MEMORY", "GROWTH"
 const executionMode = z.enum(["off", "manual", "review", "auto"]);
 const channelId = z.string().trim().min(1).max(80).regex(/^[a-z0-9][a-z0-9._-]*$/i);
 const capabilities = z.object({ inbound: z.boolean(), reconcile: z.boolean(), affordances: z.array(z.string().min(1)).max(100), formats: z.array(z.string()).max(100), metrics: z.array(z.string()).max(100) });
-const channelDefinition = z.object({ id: channelId, name: z.string().trim().min(1).max(120), description: z.string().max(500).optional(), icon: z.string().max(40).optional(), entities: z.array(z.object({ id: z.string().min(1), label: z.string().min(1) })).max(100), affordances: z.array(z.object({ id: z.string().min(1), label: z.string().min(1), description: z.string().min(1) })).max(100), formats: z.array(z.object({ id: z.string().min(1), label: z.string().min(1), description: z.string().min(1), channel: channelId })).max(100), relationships: z.array(z.object({ from: z.string(), to: z.array(z.string()), relation: z.enum(["contains", "replies-to", "mentions", "direct"]) })).max(100), metrics: z.array(z.object({ id: z.string(), label: z.string() })).max(100), playbook: z.string().max(10_000).optional(), privacyDefaults: z.object({ visibility: z.enum(["public", "private-community", "private-thread", "direct-message", "unknown"]), shareability: z.enum(["presence-only", "agent-wide", "public"]) }), builtIn: z.boolean().optional(), createdAt: z.string().datetime(), updatedAt: z.string().datetime() });
-const presenceInput = z.object({ channel: channelId, handle: z.string().trim().min(1).max(80), mode: z.enum(["agent", "ghost"]), accent: z.string().regex(/^#[0-9a-f]{6}$/i), channelDefinition: channelDefinition.optional() });
+const channelDefinition = z.object({ id: channelId, name: z.string().trim().min(1).max(120), description: z.string().max(500).optional(), icon: z.string().max(40).optional(), domain: z.string().trim().max(300).optional(), entities: z.array(z.object({ id: z.string().min(1), label: z.string().min(1) })).max(100), affordances: z.array(z.object({ id: z.string().min(1), label: z.string().min(1), description: z.string().min(1) })).max(100), formats: z.array(z.object({ id: z.string().min(1), label: z.string().min(1), description: z.string().min(1), channel: channelId })).max(100), relationships: z.array(z.object({ from: z.string(), to: z.array(z.string()), relation: z.enum(["contains", "replies-to", "mentions", "direct"]) })).max(100), metrics: z.array(z.object({ id: z.string(), label: z.string() })).max(100), playbook: z.string().max(10_000).optional(), privacyDefaults: z.object({ visibility: z.enum(["public", "private-community", "private-thread", "direct-message", "unknown"]), shareability: z.enum(["presence-only", "agent-wide", "public"]) }), builtIn: z.boolean().optional(), createdAt: z.string().datetime(), updatedAt: z.string().datetime() });
+const presenceInput = z.object({ channel: channelId, name: z.string().trim().min(1).max(120).optional(), handle: z.string().trim().min(1).max(80), mode: z.enum(["agent", "ghost"]), accent: z.string().regex(/^#[0-9a-f]{6}$/i), channelDefinition: channelDefinition.optional() });
 const operation: z.ZodType<Operation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("reset") }),
   z.object({ type: z.literal("createAgent"), input: agentInput }),
   z.object({ type: z.literal("createAdditionalAgent"), input: agentInput }),
   z.object({ type: z.literal("selectAgent"), id: z.string().min(1) }),
+  z.object({ type: z.literal("renameAgent"), name: z.string().trim().min(1).max(80) }),
   z.object({ type: z.literal("createPresence"), input: presenceInput }),
   z.object({ type: z.literal("createChannel"), definition: channelDefinition }),
   z.object({ type: z.literal("createBridge"), input: z.object({ presenceId: z.string().min(1), name: z.string().trim().min(1).max(120), kind: z.enum(["simulated", "native", "bridge", "manual"]), capabilities }) }),
@@ -137,10 +188,10 @@ const operation: z.ZodType<Operation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("runPulse"), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("syncNativeX"), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("setModel"), model: z.string().trim().min(1).max(80), provider: z.enum(["openai", "anthropic", "gemini", "openrouter", "ollama", "custom"]).optional(), quality: z.enum(["low", "medium", "high", "local"]).optional() }),
-  z.object({ type: z.literal("runSlot"), id: z.string().min(1) }),
+  z.object({ type: z.literal("runSlot"), id: z.string().min(1), scheduled: z.boolean().optional() }),
   z.object({ type: z.literal("approveExecution"), id: z.string().min(1) }),
   z.object({ type: z.literal("executeIntent"), id: z.string().min(1) }),
-  z.object({ type: z.literal("setPresence"), patch: z.object({ mode: z.enum(["agent", "ghost"]).optional(), status: z.enum(["live", "paused", "disconnected"]).optional(), pacing: z.enum(["recommended", "gentle", "custom"]).optional(), execution: z.record(executionMode).optional(), ghostProfile: z.object({ subject: z.string().trim().min(1).max(160), priorities: z.string().trim().max(2000), preferences: z.string().trim().max(2000), voice: z.string().trim().max(2000), boundaries: z.string().trim().max(2000) }).optional() }) }),
+  z.object({ type: z.literal("setPresence"), patch: z.object({ name: z.string().trim().min(1).max(120).optional(), mode: z.enum(["agent", "ghost"]).optional(), status: z.enum(["live", "paused", "disconnected"]).optional(), pacing: z.enum(["recommended", "gentle", "custom"]).optional(), execution: z.record(executionMode).optional(), ghostProfile: z.object({ subject: z.string().trim().min(1).max(160), priorities: z.string().trim().max(2000), preferences: z.string().trim().max(2000), voice: z.string().trim().max(2000), boundaries: z.string().trim().max(2000) }).optional() }) }),
 ]);
 
 export async function GET() { return NextResponse.json(readState()); }
@@ -167,14 +218,18 @@ export async function POST(request: Request) {
       writeState(next);
       return NextResponse.json(next);
     }
+    if (parsed.type === "runSlot") {
+      const next = await evaluateCalendarSlot(current, parsed.id, parsed.scheduled);
+      writeState(next);
+      return NextResponse.json(next);
+    }
     let next = applyOperation(current, parsed);
     if ((parsed.type === "wakePresence" || parsed.type === "runPulse") && next.presence?.channel === "x") {
       const presenceId = pulsePresenceId(next, parsed);
       const hasNativeRead = Boolean(presenceId && next.nativeConnections.some((item) => item.presenceId === presenceId && item.kind === "x" && item.status === "connected"));
       if (presenceId && hasNativeRead) {
-        const previousInboundIds = new Set(next.presence?.context.publicFooting?.recentInboundIds ?? []);
         next = await reconcileNativeX(next, presenceId);
-        next = await runNativePulse(next, presenceId, previousInboundIds);
+        next = await runNativePulse(next, presenceId);
       }
     }
     if (parsed.type === "sendMessage") {
@@ -230,10 +285,6 @@ export async function POST(request: Request) {
     if (parsed.type === "configureProvider" && parsed.secret) {
       const connection = next.providerConnections.find((item) => item.provider === parsed.provider);
       if (connection) saveProviderSecret(connection.id, parsed.secret);
-    }
-    if (parsed.type === "runSlot") {
-      const queued = new Set(next.executions.filter((item) => item.connector === "native" && item.status === "queued" && item.mode === "auto").map((item) => item.id));
-      next = await deliverNativeExecutions(next, queued);
     }
     writeState(next);
     return NextResponse.json(next);

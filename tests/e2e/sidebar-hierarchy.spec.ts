@@ -28,15 +28,16 @@ test("Presence is selected from one dropdown and changes the active Presence", a
     ? page.locator(".mobile-presence-switcher").getByRole("button", { name: "Switch Presence, currently @jenny_ai" })
     : page.locator(".sidebar").getByRole("button", { name: "Switch Presence, currently @jenny_ai" });
   await expect(activePresence).toBeVisible();
-  await expect(activePresence.locator(".channel-badge")).toHaveText("X");
+  await expect(activePresence.locator(".channel-badge")).toHaveAttribute("title", "X");
+  await expect(activePresence.locator(".channel-badge .presence-logo svg")).toHaveCount(1);
   await expect(activePresence.locator("span:nth-child(2) small")).toHaveText("Agent-owned");
   const rootGeometry = await activePresence.evaluate((node) => ({
     width: node.scrollWidth,
     clientWidth: node.clientWidth,
-    text: node.textContent ?? "",
+    hasLogo: Boolean(node.querySelector(".presence-logo")),
   }));
   expect(rootGeometry.width).toBeLessThanOrEqual(rootGeometry.clientWidth);
-  expect(rootGeometry.text.match(/X/g)?.length ?? 0).toBe(1);
+  expect(rootGeometry.hasLogo).toBe(true);
   await activePresence.click();
   await expect(page.getByRole("button", { name: "Presence settings", exact: true })).toHaveCount(0);
   const settingsLink = test.info().project.name === "mobile"

@@ -284,17 +284,20 @@ test("Calendar stores a real Standing Intent and evaluates it now", async ({ pag
   await navigate(page, "Calendar");
   await page.getByRole("button", { name: "Add intent" }).click();
   await page.getByLabel("What should Jenny do?").fill("Teach the audience one useful idea about persistent agents.");
+  await page.getByRole("textbox", { name: "Time", exact: true }).fill("09:15");
   await page.getByRole("button", { name: "Save standing intent" }).click();
   await expect(page.getByText("Teach the audience one useful idea about persistent agents.")).toBeVisible();
+  await expect(page.locator(".slot-row")).toContainText("09:15");
   await expect(page.getByLabel("Calendar presence filter")).toHaveCount(0);
   await expect(page.getByLabel("Intent presence")).toHaveCount(0);
   await page.getByRole("button", { name: /^Edit / }).click();
   await page.getByLabel("What should Jenny do?").fill("Teach the audience one edited useful idea about persistent agents.");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(page.getByText("Teach the audience one edited useful idea about persistent agents.")).toBeVisible();
+  await expect(page.locator(".slot-row")).toContainText("09:15");
   await page.getByRole("button", { name: "Run now" }).click();
   await navigate(page, "Activity");
-  await expect(page.locator(".event-title").filter({ hasText: "Standing intent evaluated" })).toBeVisible();
+  await expect(page.locator(".event-title").filter({ hasText: /Calendar evaluation complete|Standing intention held/ }).first()).toBeVisible();
   await expect(page.getByText("0.94", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Reply to a technical founder", { exact: true })).toHaveCount(0);
 });
@@ -415,6 +418,27 @@ test("desktop shell keeps sidebar and runtime status available", async ({ page }
   await expect(page.getByLabel("Calendar presence filter")).toHaveCount(0);
 });
 
+test("Presence and Agent names can be edited at their own scopes", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Settings");
+  await page.getByLabel("Presence name").fill("Jenny in Founders");
+  await page.getByRole("button", { name: "Save name" }).click();
+  await expect(page.getByRole("heading", { name: "Jenny in Founders" })).toBeVisible();
+  await page.reload();
+  await navigate(page, "Settings");
+  await expect(page.getByLabel("Presence name")).toHaveValue("Jenny in Founders");
+
+  await navigate(page, "Brain");
+  await page.getByLabel("Agent name").fill("Juno");
+  await page.getByRole("button", { name: "Save name" }).click();
+  await expect(page.getByRole("button", { name: "Switch agent, currently Juno" })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Switch agent, currently Juno" })).toBeVisible();
+  await navigate(page, "Settings");
+  await expect(page.getByRole("heading", { name: "Jenny in Founders" })).toBeVisible();
+  await expect(page.getByLabel("Presence name")).toHaveValue("Jenny in Founders");
+});
+
 test("Custom Channel connects a Bridge, receives Mirror events, and completes queued work", async ({ page, request }) => {
   await createAgent(page);
   await page.getByRole("button", { name: "Add a Presence" }).click();
@@ -422,9 +446,14 @@ test("Custom Channel connects a Bridge, receives Mirror events, and completes qu
   await dialog.getByRole("radio", { name: "Custom Channel" }).check();
   await dialog.getByLabel("Custom channel name").fill("Founder Community");
   await dialog.getByLabel("Custom channel ID").fill("founder-community");
+  await dialog.getByLabel("Social Mirror domain").fill("https://www.skool.com/");
+  await dialog.getByRole("button", { name: "Use Forum icon" }).click();
   await dialog.getByLabel("New Presence handle").fill("Jenny in Founders");
   await dialog.getByRole("button", { name: "Add Presence" }).click();
   await expect(presenceSwitcher(page, "Jenny in Founders")).toBeVisible();
+  await expect(presenceSwitcher(page, "Jenny in Founders").locator(".presence-logo img")).toHaveAttribute("src", /domain=www\.skool\.com/);
+  const customChannel = await (await request.get("/api/state")).json();
+  expect(customChannel.channelDefinitions.find((item: { id: string }) => item.id === "founder-community")).toMatchObject({ icon: "forum", domain: "https://www.skool.com/" });
 
   await navigate(page, "Settings");
   await expect(page.getByRole("heading", { name: "Connect this Presence" })).toBeVisible();
