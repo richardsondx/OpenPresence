@@ -172,4 +172,51 @@ describe("native X connection", () => {
     expect(completed.executions[0].status).toBe("succeeded");
     expect(completed.outcomes[0].evidence[0].id).toBe("mock-post-1");
   });
+
+  it("lets a first wake observe X, ask the Agent for a first move, and use the native execution path", async () => {
+    const presenceId = readState().presence?.id;
+    await POST(new Request("http://localhost/api/x/manage", { method: "POST", body: JSON.stringify({ action: "save", presenceId, credentials: { apiKey: "test_api", apiSecret: "test_secret", accessToken: "test_access", accessTokenSecret: "test_access_secret" } }), headers: { "content-type": "application/json" } }));
+    await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "configureProvider", provider: "openai", label: "OpenAI workspace", secret: "provider-secret-test", hasSecret: true }), headers: { "content-type": "application/json" } }));
+    await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setModel", model: "gpt-5.6-luna", provider: "openai", quality: "high" }), headers: { "content-type": "application/json" } }));
+    await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setPresence", patch: { status: "paused" } }), headers: { "content-type": "application/json" } }));
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], includes: { users: [] } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: "I am here to make complicated AI systems feel more understandable. What are you trying to build?" } }] }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "wakePresence", presenceId }), headers: { "content-type": "application/json" } }));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.presence.context.publicFooting.postsPublished).toBe(0);
+    expect(body.events.some((event: { title: string }) => event.title === "Considering first public move")).toBe(true);
+    expect(body.socialIntents[0].affordance).toBe("x.post");
+    expect(body.executions[0].status).toBe("succeeded");
+    expect(body.executions[0].externalRef).toEqual({ type: "x.post", id: "mock-post-1" });
+    expect(JSON.stringify(fetchMock.mock.calls[2]?.[1]?.body)).toContain("publicFooting");
+    expect(JSON.stringify(fetchMock.mock.calls[2]?.[1]?.body)).toContain("postsPublished");
+    vi.unstubAllGlobals();
+  });
+
+  it("keeps a connected account truthful when X rejects a real write", async () => {
+    const presenceId = readState().presence?.id;
+    const save = await POST(new Request("http://localhost/api/x/manage", { method: "POST", body: JSON.stringify({ action: "save", presenceId, credentials: { apiKey: "test_api", apiSecret: "test_secret", accessToken: "test_access", accessTokenSecret: "test_access_secret" } }), headers: { "content-type": "application/json" } }));
+    await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "configureProvider", provider: "openai", label: "OpenAI workspace", secret: "provider-secret-test", hasSecret: true }), headers: { "content-type": "application/json" } }));
+    await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setModel", model: "gpt-5.6-luna", provider: "openai", quality: "high" }), headers: { "content-type": "application/json" } }));
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: "A real post candidate from Jenny." } }] }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ title: "Forbidden", detail: "Your client app is not configured with the appropriate permissions." }), { status: 403, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "sendMessage", content: "Introduce this Presence on X." }), headers: { "content-type": "application/json" } }));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.nativeConnections[0].status).toBe("needs-attention");
+    expect(body.nativeConnections[0].healthMessage).toContain("appropriate permissions");
+    expect(body.executions[0].status).toBe("failed");
+    expect(body.outcomes[0].status).toBe("failed");
+    expect(body.executions[0].externalRef).toBeUndefined();
+    expect(body.events.some((event: { title: string; detail: string }) => event.title === "X delivery failed" && event.detail.includes("No external artifact"))).toBe(true);
+    expect((await save.json()).state.nativeConnections[0].status).toBe("connected");
+    vi.unstubAllGlobals();
+  });
 });

@@ -16,6 +16,34 @@
 
 **Added:** 2026-08-12
 
+## Rule: First wake must use real Presence footing and native observation
+
+**Defect class:** Agent autonomy / cognition-to-world boundary
+
+**General principle:** Waking a Presence starts a real attention cycle. It must observe the connected channel, make a first-move judgment from Mission, Taste, Soul, and live public footing, then pass any Social Intent through the normal execution and delivery path. A canned introduction, fabricated mirror event, or successful local execution is not an acceptable substitute.
+
+**Project-specific enforcement:** A connected native X wake reads the Presence's recent posts and mentions, persists the observed public footing in Presence context, invokes the selected Agent runtime for launch judgment, and creates a native `x.post` or `x.reply` execution only when the Agent chooses to act. Inbound mentions become native Mirror records before cognition. Missing mention-read scope is reported as partial observation without blocking a first launch when own-history observation succeeds.
+
+**Failure enforcement:** A connector rejection persists a failed Execution and failed Outcome without an external reference, preserves the provider's actionable error, marks the native connection as needing attention, and surfaces the failure in Activity. “Connected” authentication is not treated as proof that X accepted a write.
+
+**Executable protection:** `tests/x-connection.test.ts` covers first wake → public footing → Agent launch → native delivery, and a real-write rejection with no invented external artifact. `tests/runtime.test.ts` covers Presence-scoped footing and reply targets. Live QA must still provide a real X post ID/URL before it can pass.
+
+**Apply when:** Changing wake/pulse behavior, native channel reads, launch cognition, social observation, reply continuity, connector health, or external delivery reporting.
+
+**Added:** 2026-08-13
+
+## Rule: Stable IDs are required for repeated state acknowledgements
+
+**Defect class:** Persistence integrity / rapid mutation collision
+
+**General principle:** User-visible state changes may happen back-to-back and must remain independently persistable. Timestamp-only IDs are not safe identifiers for rapid operations.
+
+**Project-specific enforcement:** State acknowledgment messages use UUID-backed IDs, so rapid Ghost/Agent or Presence setting changes cannot collide in SQLite's `messages` primary key.
+
+**Executable protection:** The provider connection test repeatedly applies immediate Presence changes before reading the authoritative live state.
+
+**Added:** 2026-08-13
+
 ## Rule: Agent tools must be discoverable at Agent scope
 
 **Defect class:** Information architecture / capability provenance

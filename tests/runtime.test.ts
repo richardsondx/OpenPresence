@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyOperation, compilePresenceContext, createAgent, deriveActivitySummary, formChatPostIntent, initialState, isExplicitXPostRequest } from "../lib/runtime";
+import { applyOperation, compilePresenceContext, createAgent, deriveActivitySummary, failNativeExecution, formChatPostIntent, formXReplyIntent, initialState, isExplicitXPostRequest, markNativeConnectionNeedsAttention, recordPublicFooting } from "../lib/runtime";
 import { acknowledgeExecution, claimExecutions, createBridgeWithKey, ingestEvents, removeBridge, revokeBridge } from "../lib/bridge";
 import { readBridgeCredentialMetadata, readState, writeState } from "../lib/db";
 
@@ -59,6 +59,30 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.executions[0]?.status).toBe("queued");
     expect(state.actions[0]?.executionId).toBe(state.executions[0]?.id);
     expect(state.outcomes).toHaveLength(0);
+  });
+
+  it("keeps public footing in Presence context and anchors replies to the observed post", () => {
+    let state = createAgent(input);
+    state = recordPublicFooting(state, state.presence!.id, { postsPublished: 0, recentPostIds: [], recentInboundIds: ["mention-1"], observedAt: new Date().toISOString() });
+    expect(state.presence?.context.publicFooting?.postsPublished).toBe(0);
+    expect(compilePresenceContext(state.presence!).publicFooting?.recentInboundIds).toEqual(["mention-1"]);
+    state = formXReplyIntent(state, "That is exactly the kind of question I want to explore.", "post-1");
+    expect(state.socialIntents[0]?.target).toEqual({ type: "x.post", id: "post-1" });
+    expect(state.executions[0]?.target).toEqual({ type: "x.post", id: "post-1" });
+  });
+
+  it("records a native delivery failure without inventing an external outcome", () => {
+    let state = createAgent(input);
+    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "hourandcode", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    state = formChatPostIntent(state, "A useful first point of view.");
+    const executionId = state.executions[0]!.id;
+    state = failNativeExecution(state, executionId, "X rejected this action: write permission unavailable.");
+    state = markNativeConnectionNeedsAttention(state, state.presence!.id, "X rejected this action: write permission unavailable.");
+    expect(state.executions[0]?.status).toBe("failed");
+    expect(state.executions[0]?.externalRef).toBeUndefined();
+    expect(state.outcomes[0]?.status).toBe("failed");
+    expect(state.nativeConnections[0]?.status).toBe("needs-attention");
+    expect(deriveActivitySummary(state).current.label).toBe("X delivery failed");
   });
 
   it("pauses the Presence deterministically", () => {

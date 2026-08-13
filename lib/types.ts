@@ -93,6 +93,7 @@ export interface NativeChannelConnection {
   status: "connected" | "needs-attention";
   access: "read" | "read-write";
   account?: { id: string; username: string; name: string };
+  healthMessage?: string;
   updatedAt: string;
   createdAt: string;
 }
