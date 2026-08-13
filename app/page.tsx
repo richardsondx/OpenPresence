@@ -44,7 +44,7 @@ import {
 } from "lucide-react";
 import { AGENT_TOOL_DEFINITIONS, CHANNEL_CAPABILITIES, simulationForChannel } from "@/lib/types";
 import { latestPerception } from "@/lib/perception";
-import { deriveActivitySummary, derivePublicHistory, pendingReviewExecutionsForCapabilities } from "@/lib/runtime";
+import { deriveActivitySummary, derivePublicHistory, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities } from "@/lib/runtime";
 import type {
   CalendarSlot,
   ChannelDefinition,
@@ -2984,7 +2984,7 @@ function LiveView({
   const visibleEvents = state.events.filter(
     (item) => item.presenceId === selected?.id && (activityEnvironment === "sandbox" ? (!item.sessionId || activitySessionIds.has(item.sessionId)) : !item.sessionId),
   );
-  const activityEvents = visibleEvents.filter((item, index, events) => {
+  const activityEvents = visibleEvents.filter(isActivityDecisionEvent).filter((item, index, events) => {
     const itemTime = new Date(item.time).getTime();
     return !events.slice(0, index).some((previous) => {
       const previousTime = new Date(previous.time).getTime();
@@ -3035,6 +3035,46 @@ function LiveView({
       return objectForReference(source.parentExternalRef, source.sessionId) ?? source;
     }
     return source;
+  };
+  const decisionTraceForEvent = (item: OpenPresenceState["events"][number]) => {
+    const intent = item.intentId ? state.socialIntents.find((entry) => entry.id === item.intentId) : undefined;
+    const execution = item.executionId
+      ? state.executions.find((entry) => entry.id === item.executionId)
+      : item.outcomeId
+        ? (() => {
+            const outcome = state.outcomes.find((entry) => entry.id === item.outcomeId);
+            return outcome?.executionId ? state.executions.find((entry) => entry.id === outcome.executionId) : undefined;
+          })()
+        : undefined;
+    const outcome = execution ? state.outcomes.find((entry) => entry.executionId === execution.id) : undefined;
+    const actionRecord = intent ? state.actions.find((entry) => entry.socialIntentId === intent.id) : undefined;
+    const standingIntent = intent?.standingIntentId ? state.standingIntents.find((entry) => entry.id === intent.standingIntentId) : undefined;
+    const context = contextForEvent(item);
+    const observed = context?.content?.text
+      ? `${context.author?.displayName ?? "Someone"} · “${context.content.text.slice(0, 150)}${context.content.text.length > 150 ? "…" : ""}”`
+      : standingIntent
+        ? `Standing intention · “${standingIntent.instruction.slice(0, 150)}${standingIntent.instruction.length > 150 ? "…" : ""}”`
+        : item.title === "Pulse completed"
+          ? "The Presence checked its current channel context."
+          : item.title === "Social Mirror updated"
+            ? "New channel context became available to the Presence."
+            : "No linked world object was recorded for this event.";
+    const isSilence = actionRecord?.intent === "no_op" || /held|silence|off/i.test(`${item.title} ${item.detail}`);
+    const judgment = intent
+      ? isSilence
+        ? "Silence · no worthwhile action was selected"
+        : `Selected ${formatActivityAffordance(intent.affordance)}${standingIntent ? " from the standing intention" : ""}`
+      : item.type === "execution"
+        ? "The selected Social Intent moved into delivery."
+        : item.type === "system"
+          ? "Observation recorded; no public action was selected yet."
+          : item.detail;
+    const delivery = execution
+      ? `${execution.status.replaceAll("-", " ")} · ${execution.mode}${outcome ? ` · outcome ${outcome.status}` : ""}`
+      : intent
+        ? "No execution created"
+        : "No delivery selected";
+    return { observed, judgment, delivery };
   };
   const relevantExecution = state.executions
     .filter((item) => !selected?.id || (item.presenceId === selected.id && (activityEnvironment === "sandbox" ? item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && activitySessionIds.has(item.sessionId))) : item.environment !== "sandbox" && !item.sessionId)))
@@ -3118,8 +3158,8 @@ function LiveView({
             </div>
             {activityEvents.length === 0 ? (
               <EmptyState
-                title="Nothing has happened yet"
-                body={paused ? `${presenceName} is asleep. Wake this Presence to begin a first attention cycle.` : "Check now to let this Presence look for something worth saying."}
+                title="No Presence decisions yet"
+                body={paused ? `${presenceName} is asleep. Wake this Presence to begin a first attention cycle.` : "Activity will show what this Presence observed, chose, and delivered. Settings changes stay in Settings."}
                 action={
                   <Button
                     onClick={() => mutate(paused ? { type: "wakePresence", presenceId: selected?.id } : { type: "runPulse", presenceId: selected?.id })}
@@ -3141,6 +3181,7 @@ function LiveView({
                     <div className="event-copy">
                       <div className="event-title">{presenceCopy(item.title)}<span>{formatTime(item.time)}</span></div>
                       <ActivityEventDetail text={presenceCopy(item.detail)} />
+                      <ActivityDecisionTrace trace={decisionTraceForEvent(item)} />
                       {contextForEvent(item) && <div className="event-context-preview"><span aria-label={`Reply context from ${contextForEvent(item)!.author?.displayName ?? "this observed post"}`}>↳</span><strong>{(contextForEvent(item)!.content?.text ?? "Open the observed post").slice(0, 112)}{(contextForEvent(item)!.content?.text?.length ?? 0) > 112 ? "…" : ""}</strong><em>View post</em></div>}
                     </div>
                   </button>
@@ -3380,6 +3421,16 @@ function ActivityEventDetail({ text }: { text: string }) {
     <p>
       {parts.map((part, index) => /playground/i.test(part) ? <span className="activity-tag" key={`${part}-${index}`}>{part}</span> : part)}
     </p>
+  );
+}
+
+function ActivityDecisionTrace({ trace }: { trace: { observed: string; judgment: string; delivery: string } }) {
+  return (
+    <div className="activity-decision-trace" aria-label="Decision path">
+      <div><strong>Observed</strong><span>{trace.observed}</span></div>
+      <div><strong>Judgment</strong><span>{trace.judgment}</span></div>
+      <div><strong>Delivery</strong><span>{trace.delivery}</span></div>
+    </div>
   );
 }
 

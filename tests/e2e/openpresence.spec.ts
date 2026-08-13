@@ -428,6 +428,17 @@ test("Activity explains current work, next attention, and configured rhythm", as
   await expect(page.locator(".event-title").filter({ hasText: "Pulse completed" })).toBeVisible();
 });
 
+test("Activity separates configuration changes from Presence decisions", async ({ page, request }) => {
+  await createAgent(page);
+  const changed = await request.post("/api/state", { data: { type: "setPresence", patch: { execution: { post: "review" } } } });
+  expect(changed.ok()).toBeTruthy();
+  await page.reload();
+  await navigate(page, "Activity");
+  await expect(page.getByRole("heading", { name: "No Presence decisions yet" })).toBeVisible();
+  await expect(page.getByText("Presence settings updated", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Activity will show what this Presence observed, chose, and delivered.", { exact: false })).toBeVisible();
+});
+
 test("Activity does not guess a repeated post for legacy unlinked decisions", async ({ page, request }) => {
   await createAgent(page);
   await navigate(page, "Playground");

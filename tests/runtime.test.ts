@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addSandboxEvent, applyOperation, compilePresenceContext, createAgent, deriveActivitySummary, derivePublicHistory, failNativeExecution, formChatPostIntent, formXReplyIntent, initialState, isExplicitXPostRequest, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, recordPublicFooting, recordStandingIntentNoOp, startPlaygroundSession } from "../lib/runtime";
+import { addSandboxEvent, applyOperation, compilePresenceContext, createAgent, deriveActivitySummary, derivePublicHistory, failNativeExecution, formChatPostIntent, formXReplyIntent, initialState, isActivityDecisionEvent, isExplicitXPostRequest, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, recordPublicFooting, recordStandingIntentNoOp, startPlaygroundSession } from "../lib/runtime";
 import { acknowledgeExecution, claimExecutions, createBridgeWithKey, ingestEvents, removeBridge, revokeBridge } from "../lib/bridge";
 import { readBridgeCredentialMetadata, readState, writeState } from "../lib/db";
 import { nextObservationAt } from "../lib/native-x";
@@ -7,6 +7,12 @@ import { nextObservationAt } from "../lib/native-x";
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
 describe("OpenPresence runtime boundaries", () => {
+  it("keeps configuration churn out of the Presence decision feed", () => {
+    expect(isActivityDecisionEvent({ id: "settings", type: "system", title: "Presence settings updated", detail: "The new execution envelope is active.", time: new Date().toISOString(), tone: "positive" })).toBe(false);
+    expect(isActivityDecisionEvent({ id: "pulse", type: "system", title: "Pulse completed", detail: "The channel was checked.", time: new Date().toISOString(), tone: "positive" })).toBe(true);
+    expect(isActivityDecisionEvent({ id: "decision", type: "decision", title: "Post intention held", detail: "Silence was selected.", time: new Date().toISOString(), tone: "quiet" })).toBe(true);
+  });
+
   it("removes legacy unsolicited Presence messages without touching real chat turns", () => {
     const state = createAgent(input);
     const conversation = state.conversations[0]!;
