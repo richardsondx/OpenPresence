@@ -1,7 +1,8 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { Fragment, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
+import Image from "next/image";
 import {
   Activity,
   ArrowUpRight,
@@ -21,6 +22,7 @@ import {
   FlaskConical,
   Globe2,
   Ghost,
+  Heart,
   LoaderCircle,
   MessageCircle,
   MessageSquare,
@@ -41,7 +43,8 @@ import {
   X,
 } from "lucide-react";
 import { AGENT_TOOL_DEFINITIONS, CHANNEL_CAPABILITIES, simulationForChannel } from "@/lib/types";
-import { deriveActivitySummary } from "@/lib/runtime";
+import { latestPerception } from "@/lib/perception";
+import { deriveActivitySummary, derivePublicHistory } from "@/lib/runtime";
 import type {
   CalendarSlot,
   ChannelDefinition,
@@ -54,13 +57,18 @@ import type {
   FileKind,
   GhostProfile,
   OpenPresenceState,
+  PublicHistoryItem,
   PublicDisclosurePosture,
   PublicSelf,
   PublicTechnicalFact,
   PresenceConnectionMode,
+  PresenceEnvironment,
   PresenceMode,
   MirrorObject,
+  ModelProvider,
   SandboxActor,
+  SandboxAssetInput,
+  SocialAssetKind,
   View,
 } from "@/lib/types";
 
@@ -87,8 +95,9 @@ const navItems: { id: View; label: string; icon: typeof MessageCircle }[] = [
   { id: "playground", label: "Playground", icon: FlaskConical },
   { id: "live", label: "Activity", icon: Radio },
   { id: "calendar", label: "Calendar", icon: CalendarDays },
+  { id: "schedule", label: "Schedule", icon: Clock3 },
 ];
-const presenceNavItems = navItems.filter(({ id }) => id === "live" || id === "calendar");
+const presenceNavItems = navItems.filter(({ id }) => id === "live" || id === "calendar" || id === "schedule");
 const agentNavItems = navItems.filter(({ id }) => id === "chat" || id === "playground");
 const channelLabel = (channel: ChannelId, definitions?: ChannelDefinition[]) =>
   definitions?.find((item) => item.id === channel)?.name ??
@@ -200,13 +209,18 @@ const runtimeModels = [
   { provider: "ollama" as const, label: "Ollama", model: "llama3.2", name: "Llama 3.2", quality: "local" as const, detail: "Local" },
   { provider: "ollama" as const, label: "Ollama", model: "qwen2.5", name: "Qwen 2.5", quality: "local" as const, detail: "Local" },
   { provider: "ollama" as const, label: "Ollama", model: "mistral-small", name: "Mistral Small", quality: "local" as const, detail: "Local" },
+  { provider: "openrouter" as const, label: "OpenRouter", model: "openrouter/auto", name: "Auto", quality: "medium" as const, detail: "OpenRouter routing" },
   { provider: "anthropic" as const, label: "Anthropic", model: "claude", name: "Claude Sonnet", quality: "high" as const, detail: "Connected model" },
 ];
 const runtimeProviders = [
   { id: "openai" as const, label: "OpenAI", detail: "Hosted models" },
+  { id: "openrouter" as const, label: "OpenRouter", detail: "Hosted model routing" },
   { id: "ollama" as const, label: "Ollama", detail: "Local models" },
   { id: "anthropic" as const, label: "Anthropic", detail: "Hosted models" },
 ];
+
+const providerAccessProviders: ModelProvider[] = ["openai", "openrouter", "ollama"];
+const providerLabel = (provider: ModelProvider) => provider === "ollama" ? "Ollama" : provider === "openrouter" ? "OpenRouter" : provider === "openai" ? "OpenAI" : provider[0].toUpperCase() + provider.slice(1);
 
 type OllamaModelOption = { name: string; capabilities: string[]; size?: number; parameterSize?: string };
 
@@ -289,13 +303,17 @@ type XManage = (
 
 function SandboxEventForm({
   sessionId,
+  presenceName,
   simulation,
+  assetKinds,
   actors,
   targetObjects,
   mutate,
 }: {
   sessionId: string;
+  presenceName: string;
   simulation: ChannelSimulationDefinition;
+  assetKinds: SocialAssetKind[];
   actors: SandboxActor[];
   targetObjects: MirrorObject[];
   mutate: Mutate;
@@ -306,6 +324,8 @@ function SandboxEventForm({
   const [actorHandle, setActorHandle] = useState("@mayachen");
   const [content, setContent] = useState("");
   const [targetId, setTargetId] = useState("");
+  const [assets, setAssets] = useState<SandboxAssetInput[]>([]);
+  const [sourceUrl, setSourceUrl] = useState("");
   const [busy, setBusy] = useState(false);
   const selectedAction = simulation.actions.find((item) => item.id === actionId) ?? simulation.actions[0];
   const selectedActor = actors.find((item) => item.id === actorId);
@@ -313,24 +333,43 @@ function SandboxEventForm({
   const actorNameForSubmit = selectedActor?.displayName ?? actorName.trim();
   const requiresContent = selectedAction?.contentRequired !== false;
   const canSubmit = Boolean(selectedAction && actorNameForSubmit && (!requiresContent || content.trim()) && (!selectedAction.target || targetObject));
+  const addFile = (file: File) => {
+    if (assets.length >= 4 || file.size > 1_500_000) return;
+    const kind: SocialAssetKind = file.type === "image/gif" ? "gif" : file.type.startsWith("video/") ? "video" : "image";
+    if (!assetKinds.includes(kind)) return;
+    const reader = new FileReader();
+    reader.onload = () => {
+      if (typeof reader.result === "string") setAssets((items) => [...items, { name: file.name, kind, mimeType: file.type, dataUrl: reader.result as string }].slice(0, 4));
+    };
+    reader.readAsDataURL(file);
+  };
+  const addLink = () => {
+    const value = sourceUrl.trim();
+    if (!value || assets.length >= 4 || !assetKinds.includes("link")) return;
+    try { new URL(value); } catch { return; }
+    setAssets((items) => [...items, { name: value, kind: "link" as const, sourceUrl: value }].slice(0, 4));
+    setSourceUrl("");
+  };
   const submitEvent = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!selectedAction || !canSubmit) return;
     setBusy(true);
     try {
-      await mutate({ type: "addSandboxEvent", sessionId, actionId: selectedAction.id, actorId: selectedActor?.id, actorName: actorNameForSubmit, actorHandle: selectedActor?.handle ?? actorHandle, content, targetExternalRef: targetObject?.externalRef });
+      await mutate({ type: "addSandboxEvent", sessionId, actionId: selectedAction.id, actorId: selectedActor?.id, actorName: actorNameForSubmit, actorHandle: selectedActor?.handle ?? actorHandle, content, assets, targetExternalRef: targetObject?.externalRef });
       setContent("");
+      setAssets([]);
     } finally {
       setBusy(false);
     }
   };
   return (
     <form className="sandbox-event-form" onSubmit={submitEvent}>
-      <label>What should happen<select aria-label="What should happen" value={actionId} onChange={(event) => { setActionId(event.target.value); setTargetId(""); setContent(""); }}>{simulation.actions.map((action) => <option key={action.id} value={action.id}>{action.label}</option>)}</select></label>
+      <label>What should happen<select aria-label="What should happen" value={actionId} onChange={(event) => { setActionId(event.target.value); setTargetId(""); setContent(""); }}>{simulation.actions.map((action) => <option key={action.id} value={action.id}>{action.label.replaceAll("Jenny", presenceName)}</option>)}</select></label>
       <label>{selectedAction?.actorLabel ?? "Who?"}<select aria-label="Who" value={actorId} onChange={(event) => setActorId(event.target.value)}><option value="new">New person</option>{actors.map((actor) => <option key={actor.id} value={actor.id}>{actor.displayName}{actor.handle ? ` · ${actor.handle}` : ""}</option>)}</select></label>
       {actorId === "new" && <div className="sandbox-new-actor"><label>Name<input aria-label="New person name" value={actorName} onChange={(event) => setActorName(event.target.value)} /></label><label>Handle<input aria-label="New person handle" value={actorHandle} onChange={(event) => setActorHandle(event.target.value)} /></label></div>}
       {selectedAction?.target && <label>{selectedAction.target.label}<select aria-label={selectedAction.target.label} value={targetId} onChange={(event) => setTargetId(event.target.value)}><option value="">Choose a simulated post</option>{targetObjects.map((item) => <option key={item.id} value={item.id}>{item.author?.displayName ?? "Someone"}: {(item.content?.text ?? "").slice(0, 42)}</option>)}</select></label>}
-      {selectedAction?.contentLabel && <label>{selectedAction.contentLabel}<textarea aria-label={selectedAction.contentLabel} value={content} onChange={(event) => setContent(event.target.value)} placeholder={selectedAction.contentPlaceholder} rows={4} /></label>}
+      {selectedAction?.contentLabel && <label>{selectedAction.contentLabel}<textarea aria-label={selectedAction.contentLabel} value={content} onChange={(event) => setContent(event.target.value)} placeholder={selectedAction.contentPlaceholder?.replaceAll("Jenny", presenceName)} rows={4} /></label>}
+      {assetKinds.length > 0 && <div className="sandbox-media-input"><span className="form-label">Media or link</span><div className="sandbox-media-actions">{assetKinds.some((kind) => ["image", "video", "gif"].includes(kind)) && <label className="button button-secondary sandbox-file-button"><Plus size={14} /> Add media<input className="sandbox-file-input" aria-label="Add media" type="file" accept="image/*,video/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) addFile(file); event.target.value = ""; }} /></label>}{assetKinds.includes("link") && <div className="sandbox-link-input"><input aria-label="Media URL" placeholder="Paste a link" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} /><button type="button" onClick={addLink} disabled={!sourceUrl.trim()}>Add link</button></div>}</div>{assets.length > 0 && <div className="sandbox-asset-list">{assets.map((asset, index) => <span className="sandbox-asset-chip" key={`${asset.name}-${index}`}>{asset.kind === "link" ? asset.sourceUrl : asset.name}<button type="button" aria-label={`Remove ${asset.name}`} onClick={() => setAssets((items) => items.filter((_, itemIndex) => itemIndex !== index))}>×</button></span>)}</div>}<small className="form-hint">{presenceName} will not infer media contents until a capable perception provider has inspected them.</small></div>}
       <Button type="submit" variant="secondary" disabled={busy || !canSubmit}><Plus size={14} /> {selectedAction?.submitLabel ?? "Add event"}</Button>
     </form>
   );
@@ -1247,10 +1286,13 @@ function AgentWorkspaceShell({
             <PlaygroundView state={state} mutate={mutate} />
           )}
           {view === "live" && (
-            <LiveView state={state} mutate={mutate} pendingOperation={pendingOperation} />
+            <LiveView state={state} mutate={mutate} setView={setView} pendingOperation={pendingOperation} />
           )}
           {view === "calendar" && (
-            <CalendarView state={state} mutate={mutate} />
+            <PublicCalendarView state={state} setView={setView} />
+          )}
+          {view === "schedule" && (
+            <ScheduleView state={state} mutate={mutate} />
           )}
           {view === "brain" && (
             <BrainView
@@ -1490,7 +1532,10 @@ function LegacyAppShell({
             <LiveView state={state} mutate={mutate} />
           )}
           {view === "calendar" && (
-            <CalendarView state={state} mutate={mutate} />
+            <PublicCalendarView state={state} setView={setView} />
+          )}
+          {view === "schedule" && (
+            <ScheduleView state={state} mutate={mutate} />
           )}
           {view === "brain" && (
             <BrainView
@@ -1644,6 +1689,12 @@ function AddPresenceDialog({
     setSubmitting(false);
   };
   const preview = channel === "__custom__" ? customDefinition() : null;
+  const handleLabel = channel === "x" ? "X handle" : "Platform handle";
+  const handleHint = connectionMode === "sandbox"
+    ? "Used by the Social Mirror when this Presence speaks in rehearsal."
+    : connectionMode === "bridge"
+      ? "The public handle this Presence uses in the connected community."
+      : "The public @handle this Presence uses on X. The connected account is verified separately.";
   return (
     <div
       className="modal-backdrop add-presence-modal-backdrop"
@@ -1674,8 +1725,9 @@ function AddPresenceDialog({
           </button>
         </div>
         <p className="muted">
-          Choose the social environment first. You can connect it after the
-          Presence exists.
+          The Agent stays the same; this Presence defines how it appears in
+          this social environment. You can connect it after the Presence
+          exists.
         </p>
         <fieldset className="channel-picker">
           <legend>Where should Jenny show up?</legend>
@@ -1782,7 +1834,7 @@ function AddPresenceDialog({
           </>
         )}
         <label>
-          Presence name
+          Display name in this place
           <input
             aria-label="Presence name"
             value={presenceName}
@@ -1791,13 +1843,15 @@ function AddPresenceDialog({
           />
         </label>
         <label>
-          Handle or identity
+          {handleLabel}
           <input
             aria-label="New Presence handle"
+            aria-describedby="new-presence-handle-help"
             value={handle}
             onChange={(event) => setHandle(event.target.value)}
             placeholder="@yourpresence"
           />
+          <small id="new-presence-handle-help" className="muted">{handleHint}</small>
         </label>
         <fieldset>
           <legend>Who is speaking here?</legend>
@@ -2013,17 +2067,172 @@ function ContextSidebar({
   );
 }
 
+function SocialObjectCard({
+  item,
+  objects,
+  assets,
+  presenceId,
+  presenceName,
+  onSelect,
+  threadDepth = 0,
+}: {
+  item: MirrorObject;
+  objects: MirrorObject[];
+  assets: OpenPresenceState["assets"];
+  presenceId: string;
+  presenceName: string;
+  onSelect: (id: string) => void;
+  threadDepth?: number;
+}) {
+  const itemAssets = (item.assetRefs ?? [])
+    .map((ref) => assets.find((asset) => asset.id === ref.assetId))
+    .filter(Boolean);
+  const isLike = item.objectType === "like";
+  const target = item.parentExternalRef
+    ? objects.find(
+        (object) =>
+          object.externalRef.type === item.parentExternalRef?.type &&
+          object.externalRef.id === item.parentExternalRef?.id,
+      )
+    : undefined;
+  const authorName = item.author?.displayName ?? "Someone";
+  const authorHandle = item.author?.handle ?? "Audience";
+
+  return (
+    <article
+      className={`social-card ${item.actorPresenceId === presenceId ? "agent-authored" : ""} ${isLike ? "social-event-card social-event-like" : ""} ${threadDepth > 0 ? "thread-reply-card" : ""}`}
+    >
+      {isLike ? (
+        <div className="social-event-meta">
+          <span className="social-event-icon" aria-hidden="true">
+            <Heart size={15} fill="currentColor" />
+          </span>
+          <span className="social-event-actor">
+            <small className="social-event-kicker">Activity · Like</small>
+            <strong>{authorName} liked a post</strong>
+            <small>{authorHandle}</small>
+          </span>
+          <time>{formatTime(item.occurredAt ?? item.observedAt)}</time>
+        </div>
+      ) : (
+        <div className="social-card-meta">
+          <span className="actor-avatar">{initials(authorName)}</span>
+          <span>
+            <strong>{authorName}</strong>
+            <small>
+              {authorHandle} · {threadDepth > 0 ? "reply" : item.objectType}
+            </small>
+          </span>
+          <time>{formatTime(item.occurredAt ?? item.observedAt)}</time>
+        </div>
+      )}
+      {isLike ? (
+        <div className="social-event-body">
+          <strong>Liked a post</strong>
+          {target?.content?.text ? (
+            <blockquote>
+              “{target.content.text}”
+              <cite>
+                {target.author?.handle ?? target.author?.displayName ?? "Simulated post"}
+              </cite>
+            </blockquote>
+          ) : (
+            <small>Signal of attention on the simulated world.</small>
+          )}
+        </div>
+      ) : (
+        <p>{item.content?.text ?? ""}</p>
+      )}
+      {itemAssets.length > 0 && (
+        <div className="social-card-assets">
+          {itemAssets.map((asset) =>
+            asset?.type === "image" || asset?.type === "gif" ? (
+              <Image
+                unoptimized
+                width={90}
+                height={64}
+                key={asset.id}
+                src={asset.dataUrl ?? ""}
+                alt="Attached simulated media"
+              />
+            ) : (
+              <span className="social-link-asset" key={asset?.id}>
+                {asset?.type === "link" ? asset.provenance.sourceUrl : `${asset?.type} attached`}
+              </span>
+            ),
+          )}
+        </div>
+      )}
+      {item.assetRefs?.length ? (
+        <button className="what-sees-button" type="button" onClick={() => onSelect(item.id)}>
+          What {presenceName} sees
+        </button>
+      ) : null}
+      {item.parentExternalRef && !isLike && (
+        <small className="thread-context">↳ in this conversation</small>
+      )}
+    </article>
+  );
+}
+
+function PlaygroundThreadFeed({
+  objects,
+  assets,
+  presenceId,
+  presenceName,
+  onSelect,
+}: {
+  objects: MirrorObject[];
+  assets: OpenPresenceState["assets"];
+  presenceId: string;
+  presenceName: string;
+  onSelect: (id: string) => void;
+}) {
+  const refKey = (object: MirrorObject) => `${object.externalRef.type}:${object.externalRef.id}`;
+  const objectsByRef = new Map(objects.map((object) => [refKey(object), object]));
+  const childrenByParent = new Map<string, MirrorObject[]>();
+  for (const object of objects) {
+    if (!object.parentExternalRef) continue;
+    const key = `${object.parentExternalRef.type}:${object.parentExternalRef.id}`;
+    const children = childrenByParent.get(key) ?? [];
+    children.push(object);
+    childrenByParent.set(key, children);
+  }
+  const timestamp = (object: MirrorObject) => new Date(object.occurredAt ?? object.observedAt).getTime();
+  const descendants = (object: MirrorObject): MirrorObject[] => {
+    const children = (childrenByParent.get(refKey(object)) ?? []).sort((left, right) => timestamp(left) - timestamp(right));
+    return children.flatMap((child) => [child, ...descendants(child)]);
+  };
+  const roots = objects
+    .filter((object) => !object.parentExternalRef || !objectsByRef.has(`${object.parentExternalRef.type}:${object.parentExternalRef.id}`))
+    .sort((left, right) => {
+      const leftThread = [left, ...descendants(left)];
+      const rightThread = [right, ...descendants(right)];
+      return Math.max(...rightThread.map(timestamp)) - Math.max(...leftThread.map(timestamp));
+    });
+  const renderThread = (object: MirrorObject, depth = 0): React.ReactNode => (
+    <Fragment key={object.id}>
+      <SocialObjectCard item={object} objects={objects} assets={assets} presenceId={presenceId} presenceName={presenceName} onSelect={onSelect} threadDepth={depth} />
+      {(childrenByParent.get(refKey(object)) ?? []).sort((left, right) => timestamp(left) - timestamp(right)).map((child) => renderThread(child, depth + 1))}
+    </Fragment>
+  );
+  return <div className="social-feed">{roots.map((root) => <div className="social-thread" key={`thread:${root.id}`}>{renderThread(root)}</div>)}</div>;
+}
+
 function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: Mutate }) {
   const presence = state.presence ?? state.presences[0];
   const session = state.playgroundSessions.find((item) => item.presenceId === presence?.id && item.status === "active") ?? state.playgroundSessions[0];
   const channelDefinition = state.channelDefinitions.find((item) => item.id === presence?.channel);
   const simulation = simulationForChannel(presence?.channel ?? "x", channelDefinition);
-  const objects = session ? state.mirrorObjects.filter((item) => item.sessionId === session.id).sort((left, right) => (right.occurredAt ?? right.observedAt).localeCompare(left.occurredAt ?? left.observedAt)) : [];
+  const objects = session ? state.mirrorObjects.filter((item) => item.sessionId === session.id && item.channelId === session.channelId).sort((left, right) => (right.occurredAt ?? right.observedAt).localeCompare(left.occurredAt ?? left.observedAt)) : [];
   const sessionEvents = session ? state.events.filter((item) => item.sessionId === session.id).slice(0, 8) : [];
   const reviewCount = session ? state.executions.filter((item) => item.sessionId === session.id && item.status === "awaiting-review").length : 0;
   const actors = session ? state.sandboxActors.filter((item) => item.sessionId === session.id) : [];
   const [busy, setBusy] = useState(false);
+  const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const targetObjects = objects.filter((item) => item.actorPresenceId === presence?.id && item.objectType !== "like");
+  const assetKinds = channelDefinition?.supportedAssetKinds ?? ["image", "video", "gif", "link"] as SocialAssetKind[];
+  const selectedObject = selectedObjectId ? objects.find((item) => item.id === selectedObjectId) : undefined;
   const run = async (operation: unknown) => { setBusy(true); try { await mutate(operation); } finally { setBusy(false); } };
   const wakeOrCheck = async () => {
     if (!session) return;
@@ -2041,7 +2250,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
         <div>
           <div className="eyebrow">Agent rehearsal</div>
           <div className="playground-title-row"><h1>Playground</h1><span className="playground-world-label">{simulation.worldLabel}</span><span className="environment-chip"><span className="status-dot" /> Sandbox</span></div>
-          <p>{simulation.worldDescription} This world is simulated. {state.agent?.name ?? "Your Agent"} is real.</p>
+          <p>{simulation.worldDescription} This world is simulated. {presence.name} is real.</p>
           <p className="playground-handle-hint">Agent handle: <strong>{presence.handle}</strong>. Use @mentions in Chat when addressing {presence.name}.</p>
         </div>
         <div className="playground-toolbar-actions">
@@ -2055,12 +2264,12 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
             <section className="playground-panel"><div className="eyebrow">People in the room</div>{state.sandboxActors.filter((actor) => actor.sessionId === session.id).length ? state.sandboxActors.filter((actor) => actor.sessionId === session.id).map((actor) => <div className="playground-actor" key={actor.id}><span className="actor-avatar">{initials(actor.displayName)}</span><span><strong>{actor.displayName}</strong><small>{actor.handle ?? "Audience"}</small></span></div>) : <p className="playground-muted">Add a person below to make the first social event.</p>}</section>
             <section className="playground-panel playground-time"><div className="eyebrow"><Clock3 size={12} /> Virtual time</div><strong>{new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(session.virtualNow))}</strong><div className="time-actions"><button onClick={() => void run({ type: "advanceSandboxTime", sessionId: session.id, minutes: 15 })}>+15m</button><button onClick={() => void run({ type: "advanceSandboxTime", sessionId: session.id, minutes: 60 })}>+1h</button><button onClick={() => void run({ type: "advanceSandboxTime", sessionId: session.id, minutes: 1440 })}>Tomorrow</button></div></section>
           </aside>
-          <main className="playground-world"><div className="world-heading"><div><div className="eyebrow">{simulation.worldLabel}</div><h2>What Jenny can see</h2></div><Button variant="primary" disabled={busy} onClick={() => void wakeOrCheck()}><Sparkles size={14} /> {presence.status === "paused" ? "Wake Jenny" : "Check now"}</Button></div>{objects.length ? <div className="social-feed">{objects.map((item) => <article className={`social-card ${item.actorPresenceId === presence.id ? "agent-authored" : ""}`} key={item.id}><div className="social-card-meta"><span className="actor-avatar">{initials(item.author?.displayName ?? "Someone")}</span><span><strong>{item.author?.displayName ?? "Someone"}</strong><small>{item.author?.handle ?? "Audience"} · {item.objectType}</small></span><time>{formatTime(item.occurredAt ?? item.observedAt)}</time></div><p>{item.content?.text ?? ""}</p>{item.parentExternalRef && <small className="thread-context">↳ attached to the selected simulated post</small>}</article>)}</div> : <div className="world-blank"><MessageSquare size={20} /><p>The simulated {channelLabel(session.channelId, state.channelDefinitions)} world is quiet.</p><small>Check now to let {state.agent?.name ?? "the Agent"} choose a first move, or add an event from the control room.</small></div> }</main>
+          <main className="playground-world"><div className="world-heading"><div><div className="eyebrow">{simulation.worldLabel}</div><h2>What {presence.name} can see</h2></div><Button variant="primary" disabled={busy} onClick={() => void wakeOrCheck()}><Sparkles size={14} /> {presence.status === "paused" ? `Wake ${presence.name}` : "Check now"}</Button></div>{objects.length ? <PlaygroundThreadFeed objects={objects} assets={state.assets} presenceId={presence.id} presenceName={presence.name} onSelect={setSelectedObjectId} /> : <div className="world-blank"><MessageSquare size={20} /><p>The simulated {channelLabel(session.channelId, state.channelDefinitions)} world is quiet.</p><small>Check now to let {state.agent?.name ?? "the Agent"} choose a first move, or add an event from the control room.</small></div>}{selectedObject && <section className="perception-panel" aria-label={`What ${presence.name} sees`}><div className="section-heading compact"><div><div className="eyebrow">Perception</div><h3>What {presence.name} sees</h3></div><div className="perception-actions"><button type="button" className="what-sees-button" disabled={busy} onClick={() => void run({ type: "inspectSandboxMedia", sessionId: session.id, objectId: selectedObject.id })}>Inspect media</button><button type="button" className="perception-close" onClick={() => setSelectedObjectId(null)}>Close</button></div></div>{selectedObject.assetRefs?.map((ref) => { const asset = state.assets.find((item) => item.id === ref.assetId); const perception = latestPerception(state.perceptions, ref.assetId); return <div className="perception-item" key={ref.assetId}><strong>{asset?.type === "link" ? asset.provenance.sourceUrl : asset?.type ?? ref.kind}</strong><dl><div><dt>Appears to mean</dt><dd>{perception?.result.interpretation ?? perception?.result.observation ?? "No perception recorded."}</dd></div><div><dt>Uncertainty</dt><dd>{perception?.result.uncertainty ?? "insufficient"}</dd></div><div><dt>Missing context</dt><dd>{perception?.result.missingContext?.join(" ") ?? "None recorded."}</dd></div></dl></div>; })}<p className="perception-boundary">Perception explains what media appears to mean. Taste decides whether it is worth acting on. {presence.name} will not infer an uninspected asset.</p></section>}</main>
           <aside className="playground-activity">
             <div className="activity-rail-heading"><div className="eyebrow">Control room</div><span className="environment-chip">{channelLabel(session.channelId, state.channelDefinitions)} · Sandbox</span></div>
             <section>
               <div className="eyebrow">Now</div>
-              {sessionEvents.length ? sessionEvents.slice(0, 3).map((item) => <div className="playground-event" key={item.id}><span className={`event-dot event-${item.tone}`} /><span><strong>{item.title}</strong><small>{item.detail}</small></span></div>) : <p className="playground-muted">No decisions yet.</p>}
+              {sessionEvents.length ? sessionEvents.slice(0, 3).map((item) => <div className="playground-event" key={item.id}><span className={`event-dot event-${item.tone}`} /><span><strong>{item.title.replaceAll("Jenny", presence.name)}</strong><small>{item.detail.replaceAll("Jenny", presence.name)}</small></span></div>) : <p className="playground-muted">No decisions yet.</p>}
             </section>
             <section>
               <div className="eyebrow">Needs you</div>
@@ -2068,8 +2277,8 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
             </section>
             <section>
               <div className="eyebrow">Add to {simulation.worldLabel}</div>
-              <p className="playground-form-intro">Place a channel-native situation into the world Jenny can see.</p>
-              <SandboxEventForm key={`${presence.id}:${session.id}`} sessionId={session.id} simulation={simulation} actors={actors} targetObjects={targetObjects} mutate={mutate} />
+              <p className="playground-form-intro">Place a channel-native situation into the world {presence.name} can see.</p>
+              <SandboxEventForm key={`${presence.id}:${session.id}`} sessionId={session.id} presenceName={presence.name} simulation={simulation} assetKinds={assetKinds} actors={actors} targetObjects={targetObjects} mutate={mutate} />
             </section>
           </aside>
       </div>
@@ -2731,10 +2940,12 @@ void ContextChatView;
 function LiveView({
   state,
   mutate,
+  setView,
   pendingOperation,
 }: {
   state: OpenPresenceState;
   mutate: Mutate;
+  setView?: (view: View) => void;
   pendingOperation?: string | null;
 }) {
   const selected = state.presence;
@@ -2743,22 +2954,100 @@ function LiveView({
   const waking = pendingOperation === "wakePresence";
   const checking = pendingOperation === "runPulse";
   const activity = deriveActivitySummary(state, selected?.id);
+  const [selectedContext, setSelectedContext] = useState<MirrorObject | null>(null);
   const presenceCopy = (text: string) => text.replaceAll("Jenny", presenceName).replaceAll(state.agent?.name ?? "Jenny", presenceName);
-  const visibleEvents = state.events.filter(
-    (item) => item.presenceId === selected?.id,
+  const activityEnvironment: PresenceEnvironment = selected?.environment ?? "live";
+  const activitySessionIds = new Set(
+    state.playgroundSessions
+      .filter((session) => session.presenceId === selected?.id && session.channelId === selected?.channel && session.status !== "completed")
+      .map((session) => session.id),
   );
-  const presenceScope = selected ? channelLabel(selected.channel, state.channelDefinitions) : "No Presence selected";
+  const isScopedMirror = (item: MirrorObject) => {
+    if (!selected || item.presenceId !== selected.id || item.channelId !== selected.channel) return false;
+    if (activityEnvironment === "sandbox") return item.environment === "sandbox" && Boolean(item.sessionId && activitySessionIds.has(item.sessionId));
+    return item.environment !== "sandbox" && !item.sessionId;
+  };
+  const visibleEvents = state.events.filter(
+    (item) => item.presenceId === selected?.id && (activityEnvironment === "sandbox" ? (!item.sessionId || activitySessionIds.has(item.sessionId)) : !item.sessionId),
+  );
+  const activityEvents = visibleEvents.filter((item, index, events) => {
+    const itemTime = new Date(item.time).getTime();
+    return !events.slice(0, index).some((previous) => {
+      const previousTime = new Date(previous.time).getTime();
+      return previous.type === item.type &&
+        previous.title === item.title &&
+        previous.detail === item.detail &&
+        previous.sessionId === item.sessionId &&
+        previous.sourceObjectId === item.sourceObjectId &&
+        Number.isFinite(itemTime) &&
+        Number.isFinite(previousTime) &&
+        Math.abs(previousTime - itemTime) <= 10_000;
+    });
+  });
+  const objectForReference = (reference?: { type: string; id: string }, sessionId?: string) =>
+    reference
+      ? state.mirrorObjects.find(
+          (item) =>
+            item.presenceId === selected?.id &&
+            item.channelId === selected?.channel &&
+            isScopedMirror(item) &&
+            (!sessionId || item.sessionId === sessionId) &&
+            item.externalRef.type === reference.type &&
+            item.externalRef.id === reference.id,
+        )
+      : undefined;
+  const contextForEvent = (event: OpenPresenceState["events"][number]) => {
+    const explicit = event.sourceObjectId
+      ? state.mirrorObjects.find((item) => item.id === event.sourceObjectId)
+      : undefined;
+    const source = explicit ?? (() => {
+      const intent = event.intentId
+        ? state.socialIntents.find((item) => item.id === event.intentId)
+        : undefined;
+      const execution = event.executionId
+        ? state.executions.find((item) => item.id === event.executionId)
+        : event.outcomeId
+          ? (() => {
+              const outcome = state.outcomes.find((item) => item.id === event.outcomeId);
+              return outcome?.executionId
+                ? state.executions.find((item) => item.id === outcome.executionId)
+                : undefined;
+            })()
+          : undefined;
+      return objectForReference(intent?.target ?? execution?.target, event.sessionId);
+    })();
+    if (!source) return undefined;
+    if (["like", "reaction", "repost"].includes(source.objectType) && source.parentExternalRef) {
+      return objectForReference(source.parentExternalRef, source.sessionId) ?? source;
+    }
+    return source;
+  };
+  const relevantExecution = state.executions
+    .filter((item) => !selected?.id || (item.presenceId === selected.id && (activityEnvironment === "sandbox" ? item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && activitySessionIds.has(item.sessionId))) : item.environment !== "sandbox" && !item.sessionId)))
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+    .find((item) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing"].includes(item.status));
+  const relevantIntent = relevantExecution ? state.socialIntents.find((item) => item.id === relevantExecution.socialIntentId) : undefined;
+  const actionContext = relevantIntent?.target
+    ? state.mirrorObjects.find((item) => isScopedMirror(item) && item.externalRef.id === relevantIntent.target?.id)
+    : undefined;
+  const actionName = formatActivityAffordance(relevantExecution?.affordance ?? relevantIntent?.affordance);
+  const actionSnippet = actionContext?.content?.text?.trim();
+  const currentDetail = relevantExecution && actionContext
+    ? relevantExecution.status === "awaiting-review"
+      ? `A ${actionName} for ${actionContext.author?.handle ?? actionContext.author?.displayName ?? "this post"} is ready for your review.`
+      : `Preparing a ${actionName} for ${actionContext.author?.handle ?? actionContext.author?.displayName ?? "this post"}.`
+    : activity.current.label === "Preparing to act"
+      ? `${actionName} is moving toward delivery.`
+      : presenceCopy(activity.current.detail).replace("execution envelope", "delivery");
+  const presenceScope = selected ? `${channelLabel(selected.channel, state.channelDefinitions)} · ${activityEnvironment === "sandbox" ? "Sandbox" : "Live"}` : "No Presence selected";
   return (
-    <div className="page">
-      <div className="page-heading">
+    <div className="page activity-page">
+      <div className="page-heading activity-heading">
         <div>
-          <SectionEyebrow>Presence activity</SectionEyebrow>
-          <h1>
-            {presenceName} is {paused ? "asleep" : "live"}.
-          </h1>
+          <SectionEyebrow>Activity</SectionEyebrow>
+          <h1>{presenceName}, right now.</h1>
           <p className="muted">
-            See what {presenceName} is doing now, what happens next, and what is waiting
-            for you.
+            A clear view of what {presenceName} has seen, decided, and done.
           </p>
         </div>
         <div className="heading-actions">
@@ -2791,42 +3080,29 @@ function LiveView({
           )}
         </div>
       </div>
-      <section className="activity-summary" aria-label="Operating status">
-        <div className={`activity-card activity-card-${activity.current.tone}`}>
-          <SectionEyebrow>Now</SectionEyebrow>
-          <h2>{activity.current.label}</h2>
-          <p>{presenceCopy(activity.current.detail)}</p>
-          <small>Last pulse: {activity.lastPulseAt ? formatTime(activity.lastPulseAt) : "Never"}</small>
-        </div>
-        <div className="activity-card">
-          <SectionEyebrow>Next</SectionEyebrow>
-          <h2>{activity.nextAttention.label}</h2>
-          <p>{presenceCopy(activity.nextAttention.detail)}</p>
-          <small>{activity.nextIntent.label} · {presenceCopy(activity.nextIntent.detail)}</small>
-        </div>
-        <div className="activity-card">
-          <SectionEyebrow>Today&apos;s rhythm</SectionEyebrow>
-          <div className="rhythm-summary">
-            <span>Attention <strong>{activity.rhythm.attention}</strong></span>
-            <span>Publishing <strong>{activity.rhythm.publishing}</strong></span>
-            <span>Replies <strong>{activity.rhythm.replies}</strong></span>
-            <span>Quiet hours <strong>{activity.rhythm.quietHours}</strong></span>
+      {activity.needsAttention.count > 0 && (
+        <section className="activity-attention" aria-label="Needs your attention">
+          <div className="activity-attention-icon"><CircleAlert size={19} /></div>
+          <div className="activity-attention-copy">
+            <SectionEyebrow>Needs your attention</SectionEyebrow>
+            <h2>{activity.needsAttention.count} action{activity.needsAttention.count === 1 ? "" : "s"} waiting for you.</h2>
+            <p>Review the latest decision before it is delivered. Your approval changes execution, not {presenceName}&apos;s judgment.</p>
           </div>
-        </div>
-      </section>
-      <MirrorPanel state={state} filter={selected?.id ?? "all"} />
-      <div className="live-layout">
-        <section className="event-stream">
-          <div className="section-heading">
-            <div>
-              <SectionEyebrow>Activity</SectionEyebrow>
-              <h2>The day in motion</h2>
+          <a className="button button-secondary activity-attention-link" href="#decision-and-action">Open review</a>
+        </section>
+      )}
+      <div className="activity-main-grid">
+        <div className="activity-left-column">
+          <MirrorPanel state={state} filter={selected?.id ?? "all"} channelId={selected?.channel} environment={activityEnvironment} sessionIds={activitySessionIds} />
+          <section className="event-stream activity-log">
+            <div className="section-heading">
+              <div>
+                <SectionEyebrow>Recent activity</SectionEyebrow>
+                <h2>What {presenceName} decided</h2>
+              </div>
+              <span className="quiet-label">{paused ? "Presence asleep" : `${activityEvents.length} recorded event${activityEvents.length === 1 ? "" : "s"}`}</span>
             </div>
-            <span className="live-pill">
-              <span className="status-dot" /> {paused ? "Asleep" : "Live"}
-            </span>
-          </div>
-          {visibleEvents.length === 0 ? (
+            {activityEvents.length === 0 ? (
               <EmptyState
                 title="Nothing has happened yet"
                 body={paused ? `${presenceName} is asleep. Wake this Presence to begin a first attention cycle.` : "Check now to let this Presence look for something worth saying."}
@@ -2836,81 +3112,90 @@ function LiveView({
                     variant="secondary"
                     disabled={waking || checking}
                     title={paused ? `Wake up ${presenceName} and begin a first attention cycle.` : "Look at the channel now."}
-                >
-                  <Play size={14} /> {paused ? (waking ? `Waking ${presenceName}…` : `Wake up ${presenceName}`) : (checking ? "Checking now…" : "Check now")}
+                  >
+                    <Play size={14} /> {paused ? (waking ? `Waking ${presenceName}…` : `Wake up ${presenceName}`) : (checking ? "Checking now…" : "Check now")}
                   </Button>
                 }
-            />
-          ) : (
-            <div className="event-list">
-              {visibleEvents.map((item) => (
-                <div className="event-row" key={item.id}>
-                  <div className={`event-icon tone-${item.tone}`}>
-                    {item.type === "execution" ? (
-                      <ArrowUpRight size={15} />
-                    ) : item.type === "learning" ? (
-                      <Sparkles size={15} />
-                    ) : item.type === "memory" ? (
-                      <Brain size={15} />
-                    ) : (
-                      <Circle size={9} fill="currentColor" />
-                    )}
-                  </div>
-                  <div className="event-copy">
-                    <div className="event-title">
-                      {presenceCopy(item.title)}
-                      <span>{formatTime(item.time)}</span>
+              />
+            ) : (
+              <div className="event-list">
+                {activityEvents.map((item) => (
+                  <button className="event-row event-row-button" type="button" key={item.id} data-event-id={item.id} onClick={() => { const context = contextForEvent(item); if (context) setSelectedContext(context); }} disabled={!contextForEvent(item)} aria-label={contextForEvent(item) ? `View the post ${presenceName} considered` : undefined}>
+                    <div className={`event-icon tone-${item.tone}`}>
+                      {item.type === "execution" ? <ArrowUpRight size={15} /> : item.type === "learning" ? <Sparkles size={15} /> : item.type === "memory" ? <Brain size={15} /> : <Circle size={9} fill="currentColor" />}
                     </div>
-                    <p>{presenceCopy(item.detail)}</p>
-                  </div>
-                </div>
-              ))}
-            </div>
-          )}
-        </section>
-        <aside className="live-aside">
-          <ExecutionLedger state={state} mutate={mutate} presenceId={selected?.id} />
-            <div className="decision-card activity-rail-card">
-              <div className="section-heading compact">
-                <div>
-                <SectionEyebrow>Now · Up next · Needs attention</SectionEyebrow>
-                <h3>{activity.current.label}</h3>
+                    <div className="event-copy">
+                      <div className="event-title">{presenceCopy(item.title)}<span>{formatTime(item.time)}</span></div>
+                      <ActivityEventDetail text={presenceCopy(item.detail)} />
+                      {contextForEvent(item) && <div className="event-context-preview"><span aria-label={`Reply context from ${contextForEvent(item)!.author?.displayName ?? "this observed post"}`}>↳</span><strong>{(contextForEvent(item)!.content?.text ?? "Open the observed post").slice(0, 112)}{(contextForEvent(item)!.content?.text?.length ?? 0) > 112 ? "…" : ""}</strong><em>View post</em></div>}
+                    </div>
+                  </button>
+                ))}
               </div>
-              <Activity size={17} />
-            </div>
-            <div className="decision-line">
-              <span className="decision-score">NOW</span>
+            )}
+          </section>
+        </div>
+        <aside className="activity-side-column">
+          <section className="activity-status-panel" aria-label="Operating status">
+            <div className="activity-status-heading">
               <div>
-                <strong>{activity.current.label}</strong>
-                <small>{activity.current.detail}</small>
+                <SectionEyebrow>Operating status</SectionEyebrow>
+                <h2>{paused ? "Asleep" : "On watch"}</h2>
               </div>
+              <span className={`live-pill ${paused ? "activity-pill-paused" : ""}`}><span className="status-dot" /> {paused ? "Asleep" : "Live"}</span>
             </div>
-            <div className="decision-line">
-              <span className="decision-score">NEXT</span>
-              <div>
-                <strong>{activity.nextAttention.label}</strong>
-                <small>{activity.nextAttention.detail}</small>
+            <div className={`activity-status-block activity-status-${activity.current.tone}`}>
+              <SectionEyebrow>Now</SectionEyebrow>
+              <h3>{activity.current.label}</h3>
+              <p>{currentDetail}</p>
+              {actionContext && (
+                <button type="button" className="status-context-button" onClick={() => setSelectedContext(actionContext)}>
+                  <span>{actionSnippet ? `“${actionSnippet.slice(0, 86)}${actionSnippet.length > 86 ? "…" : ""}”` : "View the observed post"}</span>
+                  <strong>View post</strong>
+                </button>
+              )}
+              <small>Last pulse: {activity.lastPulseAt ? formatTime(activity.lastPulseAt) : "Never"}</small>
+            </div>
+            <div className="activity-status-block">
+              <SectionEyebrow>Next</SectionEyebrow>
+              <h3>{activity.nextAttention.label}</h3>
+              <p>{presenceCopy(activity.nextAttention.detail)}</p>
+              <small>{activity.nextIntent.label} · {presenceCopy(activity.nextIntent.detail)}</small>
+            </div>
+            <div className="activity-rhythm-block">
+              <SectionEyebrow>Rhythm</SectionEyebrow>
+              <h3>When {presenceName} pays attention</h3>
+              <p className="activity-rhythm-description">Rhythm controls when this Presence looks for something worth considering. It does not decide what to say or force a publication.</p>
+              <div className="rhythm-summary">
+                <span>Attention <strong>{activity.rhythm.attention}</strong></span>
+                <span>Publishing <strong>{activity.rhythm.publishing}</strong></span>
+                <span>Replies <strong>{activity.rhythm.replies}</strong></span>
+                <span>Quiet hours <strong>{activity.rhythm.quietHours}</strong></span>
               </div>
+              {setView && <button type="button" className="rhythm-manage-link" onClick={() => setView("presence")}><Settings2 size={13} /> Manage attention rhythm</button>}
             </div>
-            <div className="decision-line">
-              <span className="decision-score">REVIEW</span>
-              <div>
-                <strong>{activity.needsAttention.label}</strong>
-                <small>{activity.needsAttention.detail}</small>
-              </div>
-            </div>
+          </section>
+          <div id="decision-and-action">
+            <ExecutionLedger state={state} mutate={mutate} presenceId={selected?.id} environment={activityEnvironment} sessionIds={activitySessionIds} onContext={setSelectedContext} />
           </div>
         </aside>
       </div>
+      {selectedContext && <ActivityContextInspector object={selectedContext} state={state} onClose={() => setSelectedContext(null)} />}
     </div>
   );
 }
 function MirrorPanel({
   state,
   filter = "all",
+  channelId,
+  environment,
+  sessionIds,
 }: {
   state: OpenPresenceState;
   filter?: string;
+  channelId?: ChannelId;
+  environment?: PresenceEnvironment;
+  sessionIds?: Set<string>;
 }) {
   const selectedPresence =
     filter === "all"
@@ -2918,16 +3203,24 @@ function MirrorPanel({
       : state.presences.find((item) => item.id === filter);
   const presenceName = selectedPresence?.name ?? "this Presence";
   const objects = state.mirrorObjects
-    .filter((item) => filter === "all" || item.presenceId === filter)
+    .filter((item) => {
+      if (filter !== "all" && item.presenceId !== filter) return false;
+      if (channelId && item.channelId !== channelId) return false;
+      if (environment === "sandbox") return item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && sessionIds?.has(item.sessionId)));
+      if (environment === "live") return item.environment !== "sandbox" && !item.sessionId;
+      return true;
+    })
     .slice(0, 3);
   const bridge = state.bridges.find(
     (item) =>
       (filter === "all" || item.presenceId === filter) &&
+      (!channelId || item.channelId === channelId) &&
       item.state !== "offline",
   );
   const nativeConnection = state.nativeConnections.find(
     (item) =>
       (filter === "all" || item.presenceId === filter) &&
+      (!channelId || item.channelId === channelId) &&
       item.kind === "x",
   );
   const nativeObservation = nativeConnection?.observation;
@@ -2963,11 +3256,11 @@ function MirrorPanel({
             : "Community observations unavailable"
         : "No connected Presence";
   return (
-    <section className="decision-card mirror-panel">
+    <section className="decision-card mirror-panel" aria-label={`${presenceName} observed channel context`}>
       <div className="section-heading compact">
         <div>
-          <SectionEyebrow>Social Mirror</SectionEyebrow>
-          <h3>{heading}</h3>
+          <SectionEyebrow>Observed context</SectionEyebrow>
+          <h3>{objects.length ? `${presenceName}'s view` : heading}</h3>
         </div>
         <span className="quiet-label">
           {bridge
@@ -2984,25 +3277,25 @@ function MirrorPanel({
       {objects.length ? (
         <>
           <p className="mirror-explainer">
-            Observed public context from the channel. The Mirror describes
-            social reality for {presenceName}&apos;s judgment; it is not an instruction and
-            it does not replace the execution envelope.
+            Public posts currently available to {presenceName} on {channelLabel(selectedPresence?.channel ?? objects[0]?.channelId ?? "x", state.channelDefinitions)}.
           </p>
+          <p className="mirror-boundary">Observed context only · available for judgment, not an instruction.</p>
           <div className="mirror-list">
             {objects.map((item) => (
-              <div className="mirror-item" key={item.id}>
-                <div className="mirror-author">
+              <article className="mirror-post" key={item.id}>
+                <div className="mirror-post-header">
                   <span className="mirror-avatar">
                     {initials(item.author?.displayName ?? "World")}
                   </span>
-                  <strong>{item.author?.displayName ?? item.objectType}</strong>
-                  <small>
-                    {channelLabel(item.channelId, state.channelDefinitions)}
-                  </small>
+                  <div className="mirror-post-author">
+                    <strong>{item.author?.displayName ?? item.objectType}</strong>
+                    <span>{item.author?.handle ?? "Public account"} · {channelLabel(item.channelId, state.channelDefinitions)}</span>
+                  </div>
+                  <time>{formatTime(item.occurredAt ?? item.observedAt)}</time>
                 </div>
-                <p>{item.content?.text ?? "External activity received."}</p>
-                <span className="mirror-detail">Details</span>
-              </div>
+                <p className="mirror-post-content">{item.content?.text ?? "External activity received."}</p>
+                <div className="mirror-post-footer"><span>Observed</span><span>{item.objectType.replaceAll("-", " ")}</span></div>
+              </article>
             ))}
           </div>
         </>
@@ -3066,38 +3359,102 @@ function EmptyState({
     </div>
   );
 }
+
+function ActivityEventDetail({ text }: { text: string }) {
+  const parts = text.split(/(Playground)/gi);
+  return (
+    <p>
+      {parts.map((part, index) => /playground/i.test(part) ? <span className="activity-tag" key={`${part}-${index}`}>{part}</span> : part)}
+    </p>
+  );
+}
+
+function ActivityContextInspector({ object, state, onClose }: { object: MirrorObject; state: OpenPresenceState; onClose: () => void }) {
+  return (
+    <div className="activity-context-scrim" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
+      <aside className="activity-context-dialog" role="dialog" aria-modal="true" aria-label="Decision context">
+        <div className="section-heading compact">
+          <div><SectionEyebrow>Decision context</SectionEyebrow><h2>What was considered</h2></div>
+          <button type="button" className="activity-context-close" aria-label="Close decision context" onClick={onClose}><X size={16} /></button>
+        </div>
+        <p className="activity-context-intro">This observed post was part of the public context available to the Agent. It is world data, not an instruction.</p>
+        <article className="mirror-post activity-context-post">
+          <div className="mirror-post-header">
+            <span className="mirror-avatar">{initials(object.author?.displayName ?? "World")}</span>
+            <div className="mirror-post-author"><strong>{object.author?.displayName ?? object.objectType}</strong><span>{object.author?.handle ?? "Public account"} · {channelLabel(object.channelId, state.channelDefinitions)}</span></div>
+            <time>{formatTime(object.occurredAt ?? object.observedAt)}</time>
+          </div>
+          <p className="mirror-post-content">{object.content?.text ?? "External activity received."}</p>
+          <div className="mirror-post-footer"><span>Observed</span><span>{object.objectType.replaceAll("-", " ")}</span></div>
+        </article>
+      </aside>
+    </div>
+  );
+}
+
+const formatActivityAffordance = (value?: string) => {
+  const affordance = value?.split(".").pop() ?? "action";
+  return affordance.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+};
+
+const executionStatusLabel = (status: OpenPresenceState["executions"][number]["status"]) => {
+  if (status === "awaiting-review") return "Needs your review";
+  if (["approved", "queued", "claimed", "executing", "awaiting-connector"].includes(status)) return "Preparing to send";
+  if (status === "succeeded") return "Sent";
+  if (status === "failed") return "Could not send";
+  if (status === "awaiting-manual") return "Waiting for you to mark sent";
+  return status.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+};
+
 function ExecutionLedger({
   state,
   mutate,
   presenceId,
+  environment,
+  sessionIds,
+  onContext,
 }: {
   state: OpenPresenceState;
   mutate: Mutate;
   presenceId?: string;
+  environment?: PresenceEnvironment;
+  sessionIds?: Set<string>;
+  onContext?: (object: MirrorObject) => void;
 }) {
   const [externalType, setExternalType] = useState("post");
   const [externalId, setExternalId] = useState("");
-  const latest = state.executions.find(
-    (item) => !presenceId || item.presenceId === presenceId,
-  );
+  const executions = state.executions
+    .filter((item) => {
+      if (presenceId && item.presenceId !== presenceId) return false;
+      if (environment === "sandbox") return item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && sessionIds?.has(item.sessionId)));
+      if (environment === "live") return item.environment !== "sandbox" && !item.sessionId;
+      return true;
+    })
+    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
+  const latest = executions.find((item) => item.status === "awaiting-review") ?? executions[0];
   const intent = latest
     ? state.socialIntents.find((item) => item.id === latest.socialIntentId)
     : undefined;
   const presence = latest
     ? state.presences.find((item) => item.id === latest.presenceId)
     : undefined;
+  const actionContext = intent?.target
+    ? state.mirrorObjects.find((item) => item.presenceId === latest?.presenceId && item.externalRef.id === intent.target?.id && (environment !== "sandbox" ? item.environment !== "sandbox" && !item.sessionId : item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && sessionIds?.has(item.sessionId)))))
+    : undefined;
+  const actionName = formatActivityAffordance(intent?.affordance ?? latest?.affordance);
+  const targetLabel = actionContext?.author?.handle ?? actionContext?.author?.displayName ?? "the observed post";
+  const actionSnippet = actionContext?.content?.text?.trim();
   if (!latest || !intent)
     return (
       <div className="decision-card execution-ledger">
         <div className="section-heading compact">
           <div>
-            <SectionEyebrow>Execution</SectionEyebrow>
-            <h3>No embodiment yet</h3>
+            <SectionEyebrow>Decision & action</SectionEyebrow>
+            <h3>No action yet</h3>
           </div>
         </div>
         <p>
-          Jenny’s social judgment will appear here as an intention first. The
-          operator envelope decides whether it becomes an execution.
+          When {presence?.name ?? "this Presence"} decides a response is worth making, you&apos;ll see the source post and what happens next here.
         </p>
       </div>
     );
@@ -3107,7 +3464,7 @@ function ExecutionLedger({
     <div className="decision-card execution-ledger">
       <div className="section-heading compact">
         <div>
-          <SectionEyebrow>Execution ledger</SectionEyebrow>
+          <SectionEyebrow>Decision & action</SectionEyebrow>
           <h3>
             {needsApproval
               ? "Waiting for review"
@@ -3116,22 +3473,29 @@ function ExecutionLedger({
                 : "Intent ready"}
           </h3>
         </div>
-        <span className="quiet-label">{latest.mode}</span>
+        <span className="quiet-label">{executionStatusLabel(latest.status)}</span>
       </div>
       <div className="execution-line">
-        <strong>{intent.affordance}</strong>
-        <span>{latest.status.replaceAll("-", " ")}</span>
+        <div><SectionEyebrow>{actionContext ? `${actionName} to` : "Action"}</SectionEyebrow><strong>{actionContext ? targetLabel : actionName}</strong></div>
+        <span className={`execution-status execution-status-${latest.status}`}>{executionStatusLabel(latest.status)}</span>
       </div>
-      <small className="execution-scope">
-        {presence
-          ? `${channelLabel(presence.channel, state.channelDefinitions)} · ${presence.handle}`
-          : "Selected Presence"}
-        {intent.target ? ` · ${intent.target.type}` : ""}
-      </small>
-      <p>
+      {actionContext && (
+        <div className="action-context-card">
+          <span>{actionSnippet ? `“${actionSnippet.slice(0, 130)}${actionSnippet.length > 130 ? "…" : ""}”` : "This post is the source context for the action."}</span>
+          {onContext && <button type="button" className="action-context-button" onClick={() => onContext(actionContext)}>View post</button>}
+        </div>
+      )}
+      <div className="execution-detail-grid">
+        <span><small>Action</small><strong>{actionName}</strong></span>
+        <span><small>Channel</small><strong>{presence ? channelLabel(presence.channel, state.channelDefinitions) : "Selected Presence"}</strong></span>
+        <span><small>Approval</small><strong>{latest.mode === "review" ? "Review" : latest.mode === "manual" ? "Manual" : "Automatic"}</strong></span>
+      </div>
+      <p className="execution-explanation">
         {needsApproval
-          ? "This is operator-owned embodiment. Approving it does not rewrite Jenny’s judgment."
-          : "Intent, execution, and result remain separately attributable."}
+          ? "Ada has chosen this action. Your review decides whether it is sent."
+          : latest.externalRef
+            ? `Sent on ${presence ? channelLabel(presence.channel, state.channelDefinitions) : "the channel"}.`
+            : "Ada’s decision, your approval, and the channel result are kept separate."}
       </p>
       {needsApproval && (
         <Button
@@ -3190,7 +3554,157 @@ const objectiveLabel = (objective: string) => objective.replaceAll("_", " ").rep
 const objectiveTone = (objective: string) => objective.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "other";
 const timeToMinutes = (value: string) => { const [hours, minutes] = value.split(":").map(Number); return (Number.isFinite(hours) ? hours : 8) * 60 + (Number.isFinite(minutes) ? minutes : 0); };
 
-function CalendarView({
+function PublicCalendarView({
+  state,
+  setView,
+}: {
+  state: OpenPresenceState;
+  setView: (view: View) => void;
+}) {
+  const presenceId = state.activePresenceId ?? state.presence?.id ?? "";
+  const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
+  const [range, setRange] = useState<"week" | "month" | "day">("week");
+  const [filter, setFilter] = useState<"all" | PublicHistoryItem["kind"]>("all");
+  const [selected, setSelected] = useState<PublicHistoryItem | null>(null);
+  const [anchor, setAnchor] = useState(() => new Date());
+  const history = derivePublicHistory(state, presence?.id).filter((item) => filter === "all" || item.kind === filter);
+  const filteredHistory = history.filter((item) => item.channel === presence?.channel);
+  const selectedIndex = selected ? filteredHistory.findIndex((item) => item.id === selected.id) : -1;
+  const allHistory = derivePublicHistory(state, presence?.id).filter((item) => item.channel === presence?.channel);
+  const counts = {
+    publications: allHistory.filter((item) => ["post", "thread"].includes(item.kind)).length,
+    replies: allHistory.filter((item) => ["reply", "comment"].includes(item.kind)).length,
+    attributedFollows: allHistory.reduce((total, item) => total + (item.metrics.qualifiedFollows ?? item.metrics.follows ?? 0), 0),
+    observedOutcomes: allHistory.filter((item) => Object.keys(item.metrics).length > 0).length,
+  };
+  const dateLabel = (date: Date, options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en", options).format(date);
+  const startOfWeek = (date: Date) => {
+    const next = new Date(date);
+    const day = next.getDay();
+    next.setDate(next.getDate() - (day === 0 ? 6 : day - 1));
+    next.setHours(0, 0, 0, 0);
+    return next;
+  };
+  const sameDay = (left: Date, right: Date) => left.toDateString() === right.toDateString();
+  const moveAnchor = (amount: number) => setAnchor((current) => {
+    const next = new Date(current);
+    if (range === "month") next.setMonth(next.getMonth() + amount);
+    else if (range === "week") next.setDate(next.getDate() + amount * 7);
+    else next.setDate(next.getDate() + amount);
+    return next;
+  });
+  const historyForDay = (date: Date) => filteredHistory.filter((item) => sameDay(new Date(item.occurredAt), date));
+  const rangeLabel = range === "month"
+    ? dateLabel(anchor, { month: "long", year: "numeric" })
+    : range === "day"
+      ? dateLabel(anchor, { weekday: "long", month: "long", day: "numeric", year: "numeric" })
+      : `${dateLabel(startOfWeek(anchor), { month: "short", day: "numeric" })} – ${dateLabel(new Date(startOfWeek(anchor).getTime() + 6 * 86400000), { month: "short", day: "numeric", year: "numeric" })}`;
+  return (
+    <div className="page public-calendar-page">
+      <div className="page-heading">
+        <div>
+          <SectionEyebrow>Verified public history</SectionEyebrow>
+          <h1>Calendar</h1>
+          <p className="muted">What {presence?.name ?? "this Presence"} actually left in the public world.</p>
+        </div>
+        <div className="heading-actions calendar-heading-actions">
+          <span className="scope-summary">{presence ? `${channelLabel(presence.channel, state.channelDefinitions)} · ${presence.name}` : "No Presence selected"}</span>
+          <Button variant="secondary" onClick={() => setView("schedule")}><Clock3 size={15} /> Schedule</Button>
+        </div>
+      </div>
+      <div className="metric-row public-history-metrics" aria-label="Public history summary">
+        <div className="metric"><span>Publications</span><strong>{counts.publications}</strong><small>Verified posts and threads</small></div>
+        <div className="metric"><span>Replies</span><strong>{counts.replies}</strong><small>Public conversation turns</small></div>
+        <div className="metric"><span>Attributed follows</span><strong>{counts.attributedFollows}</strong><small>Only when the channel reports it</small></div>
+        <div className="metric"><span>Observed outcomes</span><strong>{counts.observedOutcomes}</strong><small>Items with outcome evidence</small></div>
+      </div>
+      <div className="history-toolbar">
+        <div className="calendar-view-toggle" role="group" aria-label="Calendar history view">
+          {(["week", "month", "day"] as const).map((item) => <button type="button" key={item} className={range === item ? "active" : ""} aria-pressed={range === item} onClick={() => setRange(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}
+        </div>
+        <div className="history-filter">
+          <label htmlFor="history-filter">Showing</label>
+          <select id="history-filter" value={filter} onChange={(event) => setFilter(event.target.value as typeof filter)}>
+            <option value="all">All public activity</option>
+            <option value="post">Original posts</option>
+            <option value="thread">Threads</option>
+            <option value="reply">Replies</option>
+            <option value="comment">Comments</option>
+            <option value="quote">Quotes</option>
+            <option value="repost">Reposts</option>
+          </select>
+        </div>
+        <div className="history-date-controls">
+          <button type="button" aria-label="Previous period" onClick={() => moveAnchor(-1)}><ChevronDown size={15} style={{ transform: "rotate(90deg)" }} /></button>
+          <strong>{rangeLabel}</strong>
+          <button type="button" aria-label="Next period" onClick={() => moveAnchor(1)}><ChevronDown size={15} style={{ transform: "rotate(-90deg)" }} /></button>
+        </div>
+      </div>
+      <div className={`public-history-layout ${selected ? "has-inspector" : ""}`}>
+        <section className="public-history-surface" aria-label={`${range} public history`}>
+          {range === "month" ? (
+            <MonthHistory anchor={anchor} history={filteredHistory} onSelect={setSelected} />
+          ) : range === "day" ? (
+            <DayHistory date={anchor} history={historyForDay(anchor)} onSelect={setSelected} />
+          ) : (
+            <WeekHistory anchor={anchor} history={filteredHistory} presenceName={presence?.name ?? "this Presence"} onSelect={setSelected} />
+          )}
+          {!filteredHistory.length && <EmptyState title="No verified public expression yet" body={`${presence?.name ?? "This Presence"} has no successful public delivery or own-authored public observation in this history.`} action={<Button variant="secondary" onClick={() => setView("schedule")}><Clock3 size={14} /> Open Schedule</Button>} />}
+        </section>
+        {selected && <PublicHistoryInspector item={selected} state={state} index={selectedIndex} total={filteredHistory.length} onNavigate={(offset) => { const next = filteredHistory[selectedIndex + offset]; if (next) setSelected(next); }} onClose={() => setSelected(null)} onActivity={() => setView("live")} />}
+      </div>
+    </div>
+  );
+}
+
+function HistoryCard({ item, onSelect, compact = false }: { item: PublicHistoryItem; onSelect: (item: PublicHistoryItem) => void; compact?: boolean }) {
+  const label = item.kind === "post" ? "POST" : item.kind.toUpperCase();
+  return <button type="button" className={`history-card history-card-${item.kind} ${compact ? "compact" : ""}`} onClick={() => onSelect(item)}>
+    <span className="history-card-kicker"><strong>{label}</strong><time>{formatTime(item.occurredAt)}</time></span>
+    {item.text ? <span className="history-card-text">{item.text}</span> : <span className="history-card-text quiet">{item.kind === "repost" ? "Passed along publicly" : "Public expression"}</span>}
+    <span className="history-card-proof">Verified public expression</span>
+  </button>;
+}
+
+function WeekHistory({ anchor, history, presenceName, onSelect }: { anchor: Date; history: PublicHistoryItem[]; presenceName: string; onSelect: (item: PublicHistoryItem) => void }) {
+  const start = new Date(anchor);
+  const day = start.getDay();
+  start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
+  start.setHours(0, 0, 0, 0);
+  const days = Array.from({ length: 7 }, (_, index) => new Date(start.getTime() + index * 86400000));
+  const hours = Array.from({ length: 24 }, (_, index) => index);
+  return <div className="history-week" aria-label={`Weekly public history for ${presenceName}`}>
+    <div className="history-week-grid">
+      <div className="history-week-header"><span>Local time</span>{days.map((date) => <span key={date.toISOString()}>{date.toLocaleDateString("en", { weekday: "short" })}<small>{date.getDate()}</small></span>)}</div>
+      <div className="history-week-body"><div className="history-time-rail">{hours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>{days.map((date) => {
+        const dayItems = history.filter((item) => new Date(item.occurredAt).toDateString() === date.toDateString());
+        return <div className="history-day-column" key={date.toISOString()}>{hours.map((hour) => <div className="history-hour-cell" key={hour} />)}{dayItems.map((item) => { const timestamp = new Date(item.occurredAt); const top = Math.max(2, ((timestamp.getHours() + timestamp.getMinutes() / 60) * 56)); return <div key={item.id} className="history-positioned-card" style={{ top }}><HistoryCard item={item} onSelect={onSelect} compact={item.kind === "reply" || item.kind === "comment"} /></div>; })}</div>;
+      })}</div>
+    </div>
+  </div>;
+}
+
+function MonthHistory({ anchor, history, onSelect }: { anchor: Date; history: PublicHistoryItem[]; onSelect: (item: PublicHistoryItem) => void }) {
+  const monthStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
+  const start = new Date(monthStart); const day = start.getDay(); start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
+  const days = Array.from({ length: 42 }, (_, index) => new Date(start.getTime() + index * 86400000));
+  return <div className="history-month"><div className="history-month-header">{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => <span key={day}>{day}</span>)}</div><div className="history-month-grid">{days.map((date) => { const items = history.filter((item) => new Date(item.occurredAt).toDateString() === date.toDateString()); return <div className={`history-month-day ${date.getMonth() !== anchor.getMonth() ? "outside" : ""}`} key={date.toISOString()}><strong>{date.getDate()}</strong>{items.slice(0, 4).map((item) => <HistoryCard key={item.id} item={item} onSelect={onSelect} compact />)}{items.length > 4 && <small className="history-more">+ {items.length - 4} more</small>}</div>; })}</div></div>;
+}
+
+function DayHistory({ date, history, onSelect }: { date: Date; history: PublicHistoryItem[]; onSelect: (item: PublicHistoryItem) => void }) {
+  const hours = Array.from({ length: 24 }, (_, index) => index);
+  return <div className="history-day"><div className="history-day-header"><SectionEyebrow>{date.toLocaleDateString("en", { weekday: "long" })}</SectionEyebrow><h2>{date.toLocaleDateString("en", { month: "long", day: "numeric", year: "numeric" })}</h2><p>Only verified public expression appears here.</p></div><div className="history-day-timeline">{hours.map((hour) => <div className="history-timeline-row" key={hour}><span>{String(hour).padStart(2, "0")}:00</span><div>{history.filter((item) => new Date(item.occurredAt).getHours() === hour).map((item) => <HistoryCard key={item.id} item={item} onSelect={onSelect} />)}</div></div>)}</div></div>;
+}
+
+function PublicHistoryInspector({ item, state, index, total, onNavigate, onClose, onActivity }: { item: PublicHistoryItem; state: OpenPresenceState; index: number; total: number; onNavigate: (offset: number) => void; onClose: () => void; onActivity: () => void }) {
+  const presence = state.presences.find((candidate) => candidate.id === item.presenceId);
+  const metrics = Object.entries(item.metrics);
+  const kindLabel = item.kind === "post" ? "Post" : item.kind[0].toUpperCase() + item.kind.slice(1);
+  const position = Math.max(0, index) + 1;
+  return <aside className="history-inspector" aria-label={`${kindLabel} details`}><div className="history-inspector-header"><div><SectionEyebrow>{kindLabel} details</SectionEyebrow><h2>{kindLabel}</h2><small>{new Date(item.occurredAt).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" })}</small></div><button type="button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button></div><div className="history-inspector-navigation" aria-label="Browse public posts"><span aria-live="polite"><strong>Post {position}</strong> of {total}</span><div><button type="button" aria-label="Previous post" disabled={index <= 0} onClick={() => onNavigate(-1)}><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /></button><button type="button" aria-label="Next post" disabled={index < 0 || index >= total - 1} onClick={() => onNavigate(1)}><ChevronRight size={14} /></button></div></div><div className="history-inspector-identity"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span><strong>{presence?.name ?? "Presence"}</strong><small>{presence?.handle ?? ""}</small></span></div><p className="history-inspector-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "No text was returned by the channel.")}</p><div className="history-proof"><Check size={14} /><span>Verified by {item.externalRef.type} · {item.externalRef.id}</span></div><section className="history-outcome"><SectionEyebrow>Outcome</SectionEyebrow>{metrics.length ? <div className="history-outcome-grid">{metrics.map(([key, value]) => <div key={key}><strong>{value}</strong><small>{key.replaceAll("_", " ")}</small></div>)}</div> : <p>No channel outcome evidence is attached to this expression yet.</p>}</section><div className="history-inspector-actions">{item.externalUrl ? <a className="history-external-link" href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> Open on X</a> : item.environment === "sandbox" && item.channel === "x" ? <p className="history-sandbox-note">Sandbox rehearsal only. This expression has no live X URL.</p> : null}<Button variant="secondary" onClick={onActivity}><Activity size={14} /> View in Activity</Button></div></aside>;
+}
+
+function ScheduleView({
   state,
   mutate,
 }: {
@@ -3231,8 +3745,8 @@ function CalendarView({
     <div className="page">
       <div className="page-heading">
         <div>
-          <SectionEyebrow>Presence planning</SectionEyebrow>
-          <h1>Calendar</h1>
+          <SectionEyebrow>Future attention</SectionEyebrow>
+          <h1>Schedule</h1>
           <p className="muted">
             Tell {presenceName} when to pay
             attention. Words come later, from the moment.
@@ -3320,8 +3834,8 @@ function CalendarView({
         <section>
           <div className="section-heading">
             <div>
-              <SectionEyebrow>This week</SectionEyebrow>
-              <h2>Standing intentions</h2>
+            <SectionEyebrow>Future attention</SectionEyebrow>
+          <h2>Standing intentions</h2>
             </div>
             <span className="quiet-label">
               {visibleSlots.filter((slot) => slot.enabled).length} active
@@ -3456,8 +3970,7 @@ function BrainView({
   const [editingSkillId, setEditingSkillId] = useState<string | null>(null);
   const [skillName, setSkillName] = useState("");
   const [skillDescription, setSkillDescription] = useState("");
-  const [connectionProvider, setConnectionProvider] = useState<"openai" | "ollama" | null>(null);
-  const [connectionLabel, setConnectionLabel] = useState("");
+  const [connectionProvider, setConnectionProvider] = useState<"openai" | "openrouter" | "ollama" | null>(null);
   const [connectionEndpoint, setConnectionEndpoint] = useState("http://localhost:11434");
   const [connectionSecret, setConnectionSecret] = useState("");
   const [ollamaModels, setOllamaModels] = useState<OllamaModelOption[]>([]);
@@ -3494,7 +4007,7 @@ function BrainView({
   const resetSkillForm = () => { setSkillName(""); setSkillDescription(""); setEditingSkillId(null); setShowSkillForm(false); };
   const beginSkillEdit = (skill: OpenPresenceState["skills"][number]) => { setEditingSkillId(skill.id); setSkillName(skill.name ?? skill.id); setSkillDescription(skill.description); setShowSkillForm(true); };
   const saveSkill = async (event: React.FormEvent) => { event.preventDefault(); const next = await mutate(editingSkillId ? { type: "editSkill", id: editingSkillId, name: skillName, description: skillDescription } : { type: "createSkill", name: skillName, description: skillDescription }); if (next) resetSkillForm(); };
-  const saveConnection = async (event: React.FormEvent) => { event.preventDefault(); const next = await mutate({ type: "configureProvider", provider: connectionProvider!, label: connectionLabel || (connectionProvider === "ollama" ? "Ollama local" : "OpenAI"), endpoint: connectionProvider === "ollama" ? connectionEndpoint : undefined, hasSecret: Boolean(connectionSecret), secret: connectionSecret || undefined }); if (next) { setConnectionProvider(null); setConnectionLabel(""); setConnectionSecret(""); } };
+  const saveConnection = async (event: React.FormEvent) => { event.preventDefault(); const next = await mutate({ type: "configureProvider", provider: connectionProvider!, label: providerLabel(connectionProvider!), endpoint: connectionProvider === "ollama" ? connectionEndpoint : undefined, hasSecret: Boolean(connectionSecret), secret: connectionSecret || undefined }); if (next) { setConnectionProvider(null); setConnectionSecret(""); } };
   if (!file)
     return (
       <div className="page">
@@ -3505,7 +4018,7 @@ function BrainView({
       </div>
     );
   return (
-    <div className="page">
+    <div className="page brain-page">
       <div className="page-heading">
         <div>
           <SectionEyebrow>Managed Agent</SectionEyebrow>
@@ -3572,6 +4085,7 @@ function BrainView({
                         model: nextModel.model,
                         provider: nextModel.provider,
                         quality: nextModel.quality,
+                        vision: nextModel.provider !== "ollama",
                       });
                     }
                   }}
@@ -3604,6 +4118,7 @@ function BrainView({
                           model: item.model,
                           provider: item.provider,
                           quality: item.quality,
+                          vision: item.provider !== "ollama",
                         })
                       }
                     >
@@ -3659,7 +4174,7 @@ function BrainView({
             ))}
           </div>
         </div>
-        <div className="settings-card brain-action-card"><div className="section-heading compact"><div><SectionEyebrow>Connections</SectionEyebrow><h2>Provider access</h2></div><PlugZap size={17} /></div><p className="muted">Connect a provider here; Chat will use the Agent runtime you choose above.</p><div className="config-list">{(["openai", "ollama"] as const).map((provider) => { const connection = state.providerConnections.find((item) => item.provider === provider); return <div className="config-list-row" key={provider}><div><strong>{provider === "openai" ? "OpenAI" : "Ollama"}</strong><small>{connection?.status === "local" ? connection.endpoint ?? "Local endpoint" : connection?.secretConfigured ? "Credential ready" : connection?.status === "available" ? "Connected" : "Needs setup"}</small></div><Button variant={connection && connection.status !== "needs-configuration" ? "ghost" : "secondary"} onClick={() => { setConnectionProvider(provider); if (provider === "openai") setConnectionLabel(connection?.label ?? "OpenAI"); else { setConnectionLabel(connection?.label ?? "Ollama local"); setConnectionEndpoint(connection?.endpoint ?? "http://localhost:11434"); } }}>{connection && connection.status !== "needs-configuration" ? "Edit" : "Set up"}</Button></div>; })}</div>{connectionProvider && <form className="inline-config-form" onSubmit={saveConnection}><h3>Set up {connectionProvider === "openai" ? "OpenAI" : "Ollama"}</h3><label>Connection name<input aria-label="Connection name" value={connectionLabel} onChange={(event) => setConnectionLabel(event.target.value)} required /></label>{connectionProvider === "ollama" ? <label>Ollama endpoint<input aria-label="Ollama endpoint" value={connectionEndpoint} onChange={(event) => setConnectionEndpoint(event.target.value)} required /></label> : <label>API key<input aria-label="Provider API key" type="password" value={connectionSecret} onChange={(event) => setConnectionSecret(event.target.value)} placeholder="sk-…" /></label>}<div className="inline-form-actions"><Button type="button" variant="ghost" onClick={() => setConnectionProvider(null)}>Cancel</Button><Button type="submit" variant="primary"><Check size={14} /> Save connection</Button></div></form>}</div>
+        <div className="settings-card brain-action-card"><div className="section-heading compact"><div><SectionEyebrow>Connections</SectionEyebrow><h2>Provider access</h2></div><PlugZap size={17} /></div><p className="muted">Connect a provider here; Chat will use the Agent runtime you choose above.</p><div className="config-list">{providerAccessProviders.map((provider) => { const connection = state.providerConnections.find((item) => item.provider === provider); const name = providerLabel(provider); return <div className="config-list-row" key={provider}><div><strong>{name}</strong><small>{connection?.status === "local" ? connection.endpoint ?? "Local endpoint" : connection?.secretConfigured ? "Credential ready" : connection?.status === "available" ? "Connected" : "Needs setup"}</small></div><Button variant={connection && connection.status !== "needs-configuration" ? "ghost" : "secondary"} onClick={() => { setConnectionProvider(provider as "openai" | "openrouter" | "ollama"); setConnectionSecret(""); if (provider === "ollama") setConnectionEndpoint(connection?.endpoint ?? "http://localhost:11434"); }}>{connection && connection.status !== "needs-configuration" ? "Edit" : "Set up"}</Button></div>; })}</div>{connectionProvider && <form className="inline-config-form" onSubmit={saveConnection}><h3>Set up {providerLabel(connectionProvider)}</h3>{connectionProvider === "ollama" ? <label>Ollama endpoint<input aria-label="Ollama endpoint" value={connectionEndpoint} onChange={(event) => setConnectionEndpoint(event.target.value)} required /></label> : <label>API key<input aria-label="Provider API key" type="password" value={connectionSecret} onChange={(event) => setConnectionSecret(event.target.value)} placeholder={connectionProvider === "openrouter" ? "sk-or-…" : "sk-…"} autoComplete="off" /></label>}<div className="inline-form-actions"><Button type="button" variant="ghost" onClick={() => setConnectionProvider(null)}>Cancel</Button><Button type="submit" variant="primary"><Check size={14} /> Save connection</Button></div></form>}</div>
       </section>
       <section className="settings-card tools-card" aria-label="Agent tools">
         <div className="section-heading compact">
@@ -3836,10 +4351,11 @@ function PresenceView({
   const [presenceNameDraft, setPresenceNameDraft] = useState(presence.name);
   const [ghostDraft, setGhostDraft] = useState<GhostProfile>(presence.ghostProfile ?? { subject: "Me / my organization", priorities: "", preferences: "", voice: "", boundaries: "" });
   const [publicSelfDraft, setPublicSelfDraft] = useState<PublicSelf>(presence.publicSelf ?? { displayName: presence.name, posture: presence.mode === "ghost" ? "representational" : "contextual", approvedTechnicalFacts: [] });
+  const [mediaPolicyDraft, setMediaPolicyDraft] = useState(presence.mediaPerceptionPolicy);
   const publicPostures: { id: PublicDisclosurePosture; label: string; detail: string }[] = presence.mode === "ghost"
     ? [{ id: "representational", label: "Representational", detail: "Speak as the person or organization this Presence extends." }, { id: "open-about-assistance", label: "Open about assistance", detail: "Acknowledge AI assistance when it is relevant." }]
     : [{ id: "contextual", label: "Contextual", detail: "Answer socially and acknowledge AI only when it matters." }, { id: "ai-forward", label: "AI-forward", detail: "Be direct that this is an AI presence when relevant." }, { id: "private", label: "Private", detail: "Keep technical identity private in public conversation." }];
-  const savePublicSelf = () => void mutate({ type: "setPresence", patch: { publicSelf: { ...publicSelfDraft, displayName: presenceNameDraft.trim() || presence.name } } });
+  const savePublicSelf = () => void mutate({ type: "setPresence", patch: { publicSelf: { ...publicSelfDraft, displayName: presenceNameDraft.trim() || presence.name }, mediaPerceptionPolicy: mediaPolicyDraft } });
   const setMode = (key: string, mode: ExecutionMode) =>
     mutate({ type: "setPresence", patch: { execution: { [key]: mode } } });
   const applyPreset = (mode: ExecutionMode) =>
@@ -4007,6 +4523,69 @@ function PresenceView({
         </div>
         <div className="inline-form-actions"><Button variant="primary" onClick={savePublicSelf}><Check size={14} /> Save Public Self</Button></div>
       </section>
+      <section className="settings-card presence-rhythm-card" id="rhythm-settings">
+        <div className="section-heading compact">
+          <div>
+            <SectionEyebrow>Attention rhythm</SectionEyebrow>
+            <h2>When should {presence.name} look around?</h2>
+          </div>
+          <Clock3 size={17} />
+        </div>
+        <p className="muted rhythm-intro">Rhythm controls when this Presence checks its connected channel for something worth considering. It never tells Jenny what to say, and it never turns a check into a forced publication.</p>
+        <div className="rhythm-options" role="group" aria-label="Attention rhythm">
+          {([
+            ["recommended", "Recommended", "Check about every 5 minutes when a live observer is connected."],
+            ["gentle", "Gentle", "Check about every 15 minutes to reduce interruptions."],
+            ["custom", "Custom", "Choose the check interval and a quiet-hours window."],
+          ] as const).map(([id, label, detail]) => (
+            <button type="button" key={id} className={presence.pacing === id ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { pacing: id } })} aria-pressed={presence.pacing === id}>
+              <strong>{label}</strong>
+              <small>{detail}</small>
+            </button>
+          ))}
+        </div>
+        {presence.pacing === "custom" && (
+          <div className="rhythm-custom-control">
+            <label htmlFor="attention-interval">Check interval</label>
+            <div className="rhythm-control-line">
+              <select id="attention-interval" aria-label="Custom attention interval" value={presence.attentionIntervalMinutes} onChange={(event) => void mutate({ type: "setPresence", patch: { attentionIntervalMinutes: Number(event.target.value) } })}>
+                {[5, 10, 15, 30, 45, 60, 90, 120].map((minutes) => <option key={minutes} value={minutes}>{minutes} minutes</option>)}
+              </select>
+              <small>Automatic observation only. “Check now” remains available at any time.</small>
+            </div>
+          </div>
+        )}
+        <div className="quiet-hours-control">
+          <div className="quiet-hours-heading">
+            <div><strong>Quiet hours</strong><small>Pause automatic channel checks during this local time window. Calendar intentions remain available to run explicitly.</small></div>
+            <label className="toggle-control"><input type="checkbox" aria-label="Enable quiet hours" checked={presence.quietHours.enabled} onChange={(event) => void mutate({ type: "setPresence", patch: { quietHours: { ...presence.quietHours, enabled: event.target.checked } } })} /><span aria-hidden="true" /></label>
+          </div>
+          {presence.quietHours.enabled ? (
+            <div className="quiet-hours-fields">
+              <label>Starts<input aria-label="Quiet hours start" type="time" value={presence.quietHours.start} onChange={(event) => void mutate({ type: "setPresence", patch: { quietHours: { ...presence.quietHours, start: event.target.value } } })} /></label>
+              <span>to</span>
+              <label>Ends<input aria-label="Quiet hours end" type="time" value={presence.quietHours.end} onChange={(event) => void mutate({ type: "setPresence", patch: { quietHours: { ...presence.quietHours, end: event.target.value } } })} /></label>
+            </div>
+          ) : <p className="form-hint quiet-hours-off">Off · automatic observation follows the selected rhythm.</p>}
+        </div>
+      </section>
+      <section className="settings-card media-policy-card">
+        <div className="section-heading compact">
+          <div>
+            <SectionEyebrow>Media understanding</SectionEyebrow>
+            <h2>When media is hard to interpret</h2>
+          </div>
+          <ShieldCheck size={17} />
+        </div>
+        <p className="muted">Perception explains what media appears to mean. Taste decides whether it is worth acting on. An uninspected asset is never treated as truth.</p>
+        <div className="media-policy-options">
+          {([
+            ["use-judgment", "Use judgment", "Continue only when the available perception is enough for this action."],
+            ["review-uncertain", "Review uncertain actions", "Send media-dependent actions for review when perception is uncertain."],
+            ["always-review", "Always review media actions", "Keep every reply, repost, or quote involving media under review."],
+          ] as const).map(([id, label, detail]) => <button type="button" key={id} className={mediaPolicyDraft === id ? "selected" : ""} onClick={() => { setMediaPolicyDraft(id); void mutate({ type: "setPresence", patch: { mediaPerceptionPolicy: id } }); }}><strong>{label}</strong><small>{detail}</small></button>)}
+        </div>
+      </section>
       {presence.mode === "ghost" && (
         <section className="settings-card ghost-profile-card" key={`${presence.id}-${JSON.stringify(presence.ghostProfile ?? {})}`}>
           <div className="section-heading compact">
@@ -4107,31 +4686,6 @@ function PresenceView({
               ))}
             </div>
           )}
-          <div className="rhythm-row">
-            <div>
-              <strong>Rhythm</strong>
-              <small>Pacing is infrastructure, not a social capability.</small>
-            </div>
-            <select
-              aria-label="Pacing"
-              value={presence.pacing}
-              onChange={(event) =>
-                mutate({
-                  type: "setPresence",
-                  patch: {
-                    pacing: event.target.value as
-                      | "recommended"
-                      | "gentle"
-                      | "custom",
-                  },
-                })
-              }
-            >
-              <option value="recommended">Recommended</option>
-              <option value="gentle">Gentle</option>
-              <option value="custom">Custom</option>
-            </select>
-          </div>
       </section>
     </div>
   );

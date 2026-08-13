@@ -1,0 +1,9 @@
+{
+  "name": "Ambiguous meme",
+  "steps": [
+    { "command": "start", "options": { "source": "scenario" } },
+    { "command": "inject", "options": { "actor": "Jules", "handle": "@jules_irony", "action": "post", "content": "No caption. You know what this means.", "assets": [{ "name": "ambiguous-meme.gif", "kind": "gif", "path": "scenarios/fixtures/ambiguous-meme.gif" }] } },
+    { "command": "consider" },
+    { "command": "timeline" }
+  ]
+}

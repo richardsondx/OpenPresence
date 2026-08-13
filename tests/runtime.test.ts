@@ -1,17 +1,43 @@
 import { describe, expect, it } from "vitest";
-import { applyOperation, compilePresenceContext, createAgent, deriveActivitySummary, failNativeExecution, formChatPostIntent, formXReplyIntent, initialState, isExplicitXPostRequest, markInboundJudged, markNativeConnectionNeedsAttention, recordPublicFooting, recordStandingIntentNoOp } from "../lib/runtime";
+import { applyOperation, compilePresenceContext, createAgent, deriveActivitySummary, derivePublicHistory, failNativeExecution, formChatPostIntent, formXReplyIntent, initialState, isExplicitXPostRequest, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, recordPublicFooting, recordStandingIntentNoOp, startPlaygroundSession } from "../lib/runtime";
 import { acknowledgeExecution, claimExecutions, createBridgeWithKey, ingestEvents, removeBridge, revokeBridge } from "../lib/bridge";
 import { readBridgeCredentialMetadata, readState, writeState } from "../lib/db";
+import { nextObservationAt } from "../lib/native-x";
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
 describe("OpenPresence runtime boundaries", () => {
+  it("removes legacy unsolicited Presence messages without touching real chat turns", () => {
+    const state = createAgent(input);
+    const conversation = state.conversations[0]!;
+    conversation.messages.push(
+      { id: "state_legacy", role: "agent", content: "I noticed the Presence settings changed.", timestamp: new Date().toISOString(), change: "Presence state updated" },
+      { id: "operator_real", role: "operator", content: "Keep the voice direct.", timestamp: new Date().toISOString() },
+      { id: "agent_real", role: "agent", content: "I will.", timestamp: new Date().toISOString() },
+    );
+
+    const normalized = normalizeState(state);
+    expect(normalized.conversations[0]?.messages.map((message) => message.id)).toEqual(["operator_real", "agent_real"]);
+  });
+
   it("creates an agent and a distinct Presence with human-readable meaning files", () => {
     const state = createAgent(input);
     expect(state.onboarded).toBe(true);
     expect(state.agent?.id).not.toBe(state.presence?.id);
     expect(state.files.map((file) => file.kind)).toEqual(["BRAIN", "SOUL", "MISSION", "TASTE", "MEMORY", "GROWTH", "PULSE", "PRESENCE"]);
     expect(state.files.find((file) => file.kind === "TASTE")?.protected).toBe(true);
+  });
+
+  it("seeds the default Brain with concrete, natural social voice judgment", () => {
+    const brain = createAgent(input).files.find((file) => file.kind === "BRAIN")?.content ?? "";
+    expect(brain).toContain("Start from the specific object in front of me.");
+    expect(brain).toContain("Do not open with automatic praise, canned agreement");
+    expect(brain).toContain("For replies, answer the exact sentence in front of me.");
+    expect(brain).toContain("often 8 to 35 words");
+    expect(brain).toContain("Avoid filler frames such as \"I agree\"");
+    expect(brain).toContain("Voice is craft, not taste");
+    expect(brain).toContain("Emoji are seasoning, not grammar.");
+    expect(brain).toContain("never invent a network match");
   });
 
   it("seeds the Agent with the named mechanical tool bindings", () => {
@@ -23,6 +49,14 @@ describe("OpenPresence runtime boundaries", () => {
       "channel.execute",
     ]);
     expect(state.toolBindings.every((binding) => binding.agentId === state.agent?.id)).toBe(true);
+  });
+
+  it("can bind media inspection to a specialized model without changing the Agent brain", () => {
+    const state = createAgent(input);
+    const brain = state.modelProfiles[0]!;
+    const next = applyOperation(state, { type: "setToolBinding", toolId: "asset.inspect", provider: "ollama", model: "qwen3-vl:8b", connectionId: "local-ollama" });
+    expect(next.modelProfiles[0]?.model).toBe(brain.model);
+    expect(next.toolBindings.find((binding) => binding.toolId === "asset.inspect")).toMatchObject({ provider: "ollama", model: "qwen3-vl:8b", connectionId: "local-ollama" });
   });
 
   it("creates a proposal instead of silently mutating protected identity", () => {
@@ -147,13 +181,39 @@ describe("OpenPresence runtime boundaries", () => {
     expect(summary.rhythm.attention).toBe("Asleep");
   });
 
+  it("scopes Activity summary to the Presence environment", () => {
+    let state = startPlaygroundSession(createAgent(input));
+    const session = state.playgroundSessions[0]!;
+    state.events.unshift({ id: "sandbox-pulse", type: "system", title: "Pulse completed", detail: "Sandbox pulse", time: new Date().toISOString(), tone: "positive", presenceId: state.presence!.id, sessionId: session.id });
+    expect(deriveActivitySummary(state).lastPulseAt).toBeDefined();
+
+    state = applyOperation(state, { type: "setPresence", patch: { connectionMode: "native" } });
+    expect(deriveActivitySummary(state).lastPulseAt).toBeUndefined();
+  });
+
+  it("persists custom rhythm and quiet hours without changing execution permissions", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { pacing: "custom", attentionIntervalMinutes: 30, quietHours: { enabled: true, start: "22:00", end: "07:00" } } });
+    expect(state.presence).toMatchObject({ pacing: "custom", attentionIntervalMinutes: 30, quietHours: { enabled: true, start: "22:00", end: "07:00" } });
+    expect(state.presence?.execution.post).toBe("auto");
+    expect(deriveActivitySummary(state).rhythm.quietHours).toBe("22:00–07:00");
+  });
+
+  it("moves automatic observation past an overnight quiet-hours window", () => {
+    const state = createAgent(input);
+    const next = nextObservationAt({ ...state.presence!, pacing: "custom", attentionIntervalMinutes: 30, quietHours: { enabled: true, start: "22:00", end: "07:00" } }, new Date(2026, 7, 13, 21, 50).getTime());
+    const nextDate = new Date(next);
+    expect(nextDate.getHours()).toBe(7);
+    expect(nextDate.getMinutes()).toBe(0);
+  });
+
   it("treats a successfully reconciled empty Mirror as up to date", () => {
     const state = createAgent(input);
     state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read", account: { id: "account-1", username: "jenny_ai", name: "Jenny" }, observation: { status: "up-to-date", lastObservedAt: new Date().toISOString(), nextObservationAt: new Date(Date.now() + 300_000).toISOString(), ownPostCount: 0, mentionCount: 0, conversationCount: 0 }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
     const summary = deriveActivitySummary(state);
     expect(summary.current.label).toBe("Watching X");
     expect(summary.nextAttention.label).toBe("Next X observation");
-    expect(summary.rhythm.attention).toBe("Continuous observation");
+    expect(summary.rhythm.attention).toBe("Every 5 min");
   });
 
   it("does not let an old delivery mask a newer Mirror observation", () => {
@@ -189,6 +249,30 @@ describe("OpenPresence runtime boundaries", () => {
     const summary = deriveActivitySummary(state);
     expect(summary.current.label).toBe("Waiting for a better moment");
     expect(summary.current.detail).toContain("schedule grants permission");
+  });
+
+  it("projects only verified public expression into Calendar history", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto" } } });
+    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "hourandcode", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    state = formChatPostIntent(state, "A durable public point of view.");
+    const execution = state.executions[0]!;
+    execution.status = "succeeded";
+    execution.externalRef = { type: "x.post", id: "verified-1" };
+    execution.executedAt = new Date().toISOString();
+    state.outcomes.unshift({ id: "outcome-verified", socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, status: "succeeded", observedAt: new Date().toISOString(), metrics: { follows: 7 } });
+    state.mirrorObjects.unshift({ id: "private-observation", bridgeId: "native:test", presenceId: state.presence!.id, channelId: "x", externalRef: { type: "x.post", id: "inbound-1" }, objectType: "post", author: { displayName: "Someone else" }, content: { text: "A private-to-the-model observation" }, occurredAt: new Date().toISOString(), observedAt: new Date().toISOString(), visibility: "private-thread", shareability: "presence-only" });
+    const history = derivePublicHistory(state, state.presence!.id);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({ kind: "post", text: "A durable public point of view.", externalRef: { id: "verified-1" }, externalUrl: "https://x.com/hourandcode/status/verified-1", metrics: { follows: 7 } });
+  });
+
+  it("does not invent a live X destination for Sandbox history", () => {
+    const state = createAgent(input);
+    state.mirrorObjects.unshift({ id: "sandbox-post", bridgeId: "sandbox:test", presenceId: state.presence!.id, channelId: "x", externalRef: { type: "x.post", id: "sandbox-1" }, objectType: "post", actorPresenceId: state.presence!.id, content: { text: "A rehearsal only." }, occurredAt: new Date().toISOString(), observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", environment: "sandbox", sessionId: "sandbox-session" });
+    const history = derivePublicHistory(state, state.presence!.id);
+    expect(history[0]).toMatchObject({ externalRef: { id: "sandbox-1" }, environment: "sandbox" });
+    expect(history[0]?.externalUrl).toBeUndefined();
   });
 
   it("keeps Ghost representation Presence-scoped and reviewable", () => {
@@ -262,7 +346,7 @@ describe("OpenPresence runtime boundaries", () => {
     expect(edited.standingIntents[0]?.trigger.config.day).toBe("Wednesday");
   });
 
-  it("creates an enabled skill and configures a provider without storing a secret", () => {
+  it("creates an enabled skill and configures providers without allowing connection renames", () => {
     let state = createAgent(input);
     state = applyOperation(state, { type: "createSkill", name: "Founder brief", description: "Turn research into a founder brief." });
     expect(state.skills.some((skill) => skill.name === "Founder brief")).toBe(true);
@@ -272,8 +356,13 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.skills.find((skill) => skill.id === skillId)?.description).toBe("Turn research into a concise, evidence-backed founder brief.");
     expect(state.agentSkills.find((binding) => binding.skillId === skillId)?.enabled).toBe(true);
     state = applyOperation(state, { type: "configureProvider", provider: "ollama", label: "Ollama local", endpoint: "http://localhost:11434" });
+    expect(state.providerConnections.find((connection) => connection.provider === "ollama")?.label).toBe("Ollama");
     expect(state.providerConnections.find((connection) => connection.provider === "ollama")?.status).toBe("local");
     expect(state.providerConnections.find((connection) => connection.provider === "ollama")?.endpoint).toBe("http://localhost:11434");
+    state = applyOperation(state, { type: "configureProvider", provider: "openrouter", label: "My renamed router", hasSecret: true, secret: "not-stored-by-runtime" });
+    expect(state.providerConnections.find((connection) => connection.provider === "openrouter")).toMatchObject({ label: "OpenRouter", status: "available", secretConfigured: true });
+    state = applyOperation(state, { type: "configureProvider", provider: "openrouter", label: "Another attempted rename" });
+    expect(state.providerConnections.find((connection) => connection.provider === "openrouter")?.label).toBe("OpenRouter");
   });
 
   it("switches between isolated Agent workspaces", () => {

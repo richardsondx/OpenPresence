@@ -1,12 +1,54 @@
 import { readNativeXCredentials, readRecentXMentions, readRecentXPosts } from "./x";
 import { recordNativeMirror, recordNativeObservation, recordPublicFooting, recordRuntimeEvent } from "./runtime";
-import type { OpenPresenceState } from "./types";
+import type { OpenPresenceState, Presence, PresenceQuietHours } from "./types";
 
-const intervalFor = (pacing: OpenPresenceState["presences"][number]["pacing"] | undefined) =>
-  pacing === "gentle" ? 15 * 60_000 : 5 * 60_000;
+const intervalFor = (presence: Presence | undefined) => {
+  if (presence?.pacing === "gentle") return 15 * 60_000;
+  if (presence?.pacing === "custom") return Math.max(5, Math.min(120, presence.attentionIntervalMinutes || 30)) * 60_000;
+  return 5 * 60_000;
+};
 
-const nextObservationAt = (presence: OpenPresenceState["presences"][number] | undefined, from = Date.now()) =>
-  new Date(from + intervalFor(presence?.pacing)).toISOString();
+const minuteOfDay = (date: Date) => date.getHours() * 60 + date.getMinutes();
+
+const timeToMinutes = (value: string) => {
+  const [hours, minutes] = value.split(":").map(Number);
+  return Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 60 + minutes : undefined;
+};
+
+const quietHoursEnd = (quietHours: PresenceQuietHours, from: Date) => {
+  const start = timeToMinutes(quietHours.start);
+  const end = timeToMinutes(quietHours.end);
+  if (start === undefined || end === undefined || start === end) return undefined;
+  const current = minuteOfDay(from);
+  const crossesMidnight = start > end;
+  const endDate = new Date(from);
+  if (crossesMidnight && current >= start) endDate.setDate(endDate.getDate() + 1);
+  endDate.setHours(Math.floor(end / 60), end % 60, 0, 0);
+  return endDate;
+};
+
+const isQuiet = (quietHours: PresenceQuietHours | undefined, date: Date) => {
+  if (!quietHours?.enabled) return false;
+  const start = timeToMinutes(quietHours.start);
+  const end = timeToMinutes(quietHours.end);
+  if (start === undefined || end === undefined || start === end) return false;
+  const current = minuteOfDay(date);
+  return start < end ? current >= start && current < end : current >= start || current < end;
+};
+
+export const nextObservationAt = (presence: Presence | undefined, from = Date.now()) => {
+  const base = new Date(from);
+  const candidate = new Date(from + intervalFor(presence));
+  if (isQuiet(presence?.quietHours, base)) {
+    const end = presence?.quietHours ? quietHoursEnd(presence.quietHours, base) : undefined;
+    if (end) return end.toISOString();
+  }
+  if (isQuiet(presence?.quietHours, candidate)) {
+    const end = presence?.quietHours ? quietHoursEnd(presence.quietHours, candidate) : undefined;
+    if (end) return end.toISOString();
+  }
+  return candidate.toISOString();
+};
 
 export async function reconcileNativeX(source: OpenPresenceState, presenceId: string): Promise<OpenPresenceState> {
   let next = recordNativeObservation(source, presenceId, {

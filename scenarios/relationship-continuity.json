@@ -1,0 +1,12 @@
+{
+  "name": "Relationship continuity",
+  "steps": [
+    { "command": "start", "options": { "source": "scenario" } },
+    { "command": "consider" },
+    { "command": "inject", "options": { "actor": "Maya", "handle": "@maya", "action": "post", "content": "I am deciding whether a social Agent should remember people or only topics." } },
+    { "command": "inject", "options": { "actor": "Maya", "handle": "@maya", "action": "post", "content": "I came back to this. The relationship question still feels harder than retrieval." } },
+    { "command": "inject", "options": { "actor": "Devon", "handle": "@devon", "action": "post", "content": "What is the fastest way to grow an account?" } },
+    { "command": "consider" },
+    { "command": "timeline" }
+  ]
+}

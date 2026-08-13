@@ -155,6 +155,42 @@ git diff --check
 
 The browser suite covers desktop and Pixel 5 layouts, onboarding, Chat, Activity, Calendar, Presence Settings, Manage Agent, provider setup, native X flows, and Bridge execution. It uses an isolated test database and deterministic AI/X fixtures.
 
+## Agent CLI
+
+Codex and other AI agents can drive the simulated Playground without reading the browser UI. The CLI is sandbox-only and returns compact JSON by default:
+
+~~~bash
+pnpm --silent openpresence playground start
+pnpm --silent openpresence playground inspect
+pnpm --silent openpresence playground inject --actor Maya --action post --content "What should an AI remember?"
+pnpm --silent openpresence playground inspect-media --object mirror_123
+pnpm --silent openpresence playground consider
+pnpm --silent openpresence playground timeline
+~~~
+
+Set `OPENPRESENCE_URL` when the local server is not on port 3000. Use `--human` for a concise terminal summary. Repeatable JSON scenarios live in [scenarios/reply-to-founder.json](scenarios/reply-to-founder.json):
+
+~~~bash
+pnpm --silent openpresence playground run scenarios/reply-to-founder.json
+~~~
+
+Command meanings:
+
+- `start` creates a fresh isolated Sandbox session. Use `--presence <id>` to select a Presence and `--source scenario` to label the session as a fixture run.
+- `inspect` (also `status`) returns the current Presence, Agent meaning files, model, Channel affordances, execution envelope, Calendar, skills, tools, actors, world objects, decisions, and review queue.
+- `inject` adds a simulated inbound post, reply, message, reaction, like, repost, or quote and immediately runs the Agent’s judgment. Use `--actor`, `--handle`, `--action`, `--content`, `--target`, `--parent`, and `--assets-json`.
+- `inspect-media` runs a deeper Social Mirror perception pass for a simulated object. It records the provider, model, uncertainty, and missing context without deciding whether to act.
+- `consider` runs one attention cycle over the current simulated world, including a possible original post or `NO_OP`.
+- `advance` moves virtual time with `--minutes <n>` and evaluates due Calendar standing intents.
+- `schedule` adds a Calendar Standing Intent to the selected Presence so a later `advance` can evaluate it against the current simulated world. Use `--day`/`--time`, or `--minutes-from-now <n>` for a session-relative slot.
+- `timeline` emits a chronological audit of observations, perceptions, Social Intents, Executions, Outcomes, and events.
+- `reset` clears only the selected Sandbox session’s world and relationships; it does not rewrite Agent meaning or live state.
+- `run <scenario.json>` executes a repeatable sequence of the commands above. Scenario values can refer to `$session`, `$latest-object`, `$latest-object-id`, and `$latest-inbound`.
+
+All commands accept `--session <id>` when more than one rehearsal is active. JSON is the default output for agent consumption; add `--human` for a concise terminal summary. `--assets-json` accepts inline asset objects or local fixture paths, for example `[{"kind":"image","path":"docs/screenshots/chat.png"}]`.
+
+The projection keeps observation, Social Intent, Execution, Delivery, and Outcome visible as separate records while omitting unrelated application state. `NO_OP` remains a successful decision, and the CLI never enables live channel delivery.
+
 ## Contributing
 
 Keep the product boundaries visible in code and UI:

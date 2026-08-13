@@ -6,6 +6,7 @@
     "dev": "next dev",
     "build": "next build",
     "start": "next start",
+    "openpresence": "node bin/openpresence.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",
@@ -20,7 +21,11 @@
     "next": "^15.1.4",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "sharp": "^0.35.0",
     "zod": "^3.24.1"
+  },
+  "bin": {
+    "openpresence": "bin/openpresence.mjs"
   },
   "devDependencies": {
     "@eslint/eslintrc": "^3.3.6",

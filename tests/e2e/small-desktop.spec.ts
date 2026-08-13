@@ -11,15 +11,15 @@ async function createAgent(page: import("@playwright/test").Page) {
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await expect(page.getByRole("heading", { name: "Jenny is live." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
 }
 
-async function inspectCompactPage(page: import("@playwright/test").Page, view: "Chat" | "Activity" | "Calendar" | "Brain" | "Presence settings") {
+async function inspectCompactPage(page: import("@playwright/test").Page, view: "Chat" | "Activity" | "Calendar" | "Schedule" | "Brain" | "Presence settings") {
   if (view === "Presence settings") {
     await page.locator(".sidebar").getByRole("button", { name: "Settings", exact: true }).click();
   } else {
     const label = view === "Brain" ? "Manage Agent" : view;
-    await page.getByRole("button", { name: view === "Brain" ? /^Manage Agent/ : label, exact: view !== "Brain" }).click();
+    await page.locator(".sidebar").getByRole("button", { name: view === "Brain" ? /^Manage Agent/ : label, exact: view !== "Brain" }).click();
   }
   const metrics = await page.evaluate(() => {
     const heading = document.querySelector(".page-heading")?.getBoundingClientRect();
@@ -36,9 +36,9 @@ async function inspectCompactPage(page: import("@playwright/test").Page, view: "
 
 test("small desktop keeps each page task above the fold", async ({ page }) => {
   await createAgent(page);
-  for (const view of ["Chat", "Activity", "Calendar", "Brain", "Presence settings"] as const) await inspectCompactPage(page, view);
+  for (const view of ["Chat", "Activity", "Calendar", "Schedule", "Brain", "Presence settings"] as const) await inspectCompactPage(page, view);
 
-  await page.getByRole("button", { name: "Calendar", exact: true }).click();
+  await page.getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("button", { name: "Add intent" }).click();
   await expect(page.getByRole("button", { name: "Save standing intent" })).toBeVisible();
 
