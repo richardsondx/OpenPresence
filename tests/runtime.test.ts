@@ -129,6 +129,15 @@ describe("OpenPresence runtime boundaries", () => {
     expect(summary.rhythm.attention).toBe("Asleep");
   });
 
+  it("treats a successfully reconciled empty Mirror as up to date", () => {
+    const state = createAgent(input);
+    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read", account: { id: "account-1", username: "jenny_ai", name: "Jenny" }, observation: { status: "up-to-date", lastObservedAt: new Date().toISOString(), nextObservationAt: new Date(Date.now() + 300_000).toISOString(), ownPostCount: 0, mentionCount: 0, conversationCount: 0 }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    const summary = deriveActivitySummary(state);
+    expect(summary.current.label).toBe("Watching X");
+    expect(summary.nextAttention.label).toBe("Next X observation");
+    expect(summary.rhythm.attention).toBe("Continuous observation");
+  });
+
   it("surfaces a standing intent as the next explicit consideration", () => {
     const state = applyOperation(createAgent(input), { type: "addSlot", instruction: "Teach one useful thing", day: "Tuesday", time: "08:00", objective: "education", executionWindow: "08:00–11:00" });
     const summary = deriveActivitySummary(state);

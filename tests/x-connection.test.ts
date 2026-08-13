@@ -92,6 +92,7 @@ describe("native X connection", () => {
     const body = await response.json();
     expect(body.result.access).toBe("read-write");
     expect(body.state.nativeConnections[0].account.username).toBe("jenny_ai");
+    expect(body.state.nativeConnections[0].observation).toMatchObject({ status: "up-to-date", ownPostCount: 0, mentionCount: 0, conversationCount: 0 });
     expect(JSON.stringify(body.state)).not.toContain("test_secret");
     expect(readChannelSecret(body.state.nativeConnections[0].id)).toMatchObject({ apiKey: "test_api", apiSecret: "test_secret" });
   });
@@ -180,8 +181,6 @@ describe("native X connection", () => {
     await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setModel", model: "gpt-5.6-luna", provider: "openai", quality: "high" }), headers: { "content-type": "application/json" } }));
     await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setPresence", patch: { status: "paused" } }), headers: { "content-type": "application/json" } }));
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [], includes: { users: [] } }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: "I am here to make complicated AI systems feel more understandable. What are you trying to build?" } }] }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "wakePresence", presenceId }), headers: { "content-type": "application/json" } }));
@@ -192,8 +191,8 @@ describe("native X connection", () => {
     expect(body.socialIntents[0].affordance).toBe("x.post");
     expect(body.executions[0].status).toBe("succeeded");
     expect(body.executions[0].externalRef).toEqual({ type: "x.post", id: "mock-post-1" });
-    expect(JSON.stringify(fetchMock.mock.calls[2]?.[1]?.body)).toContain("publicFooting");
-    expect(JSON.stringify(fetchMock.mock.calls[2]?.[1]?.body)).toContain("postsPublished");
+    expect(JSON.stringify(fetchMock.mock.calls[0]?.[1]?.body)).toContain("publicFooting");
+    expect(JSON.stringify(fetchMock.mock.calls[0]?.[1]?.body)).toContain("postsPublished");
     vi.unstubAllGlobals();
   });
 

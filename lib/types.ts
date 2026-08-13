@@ -85,6 +85,16 @@ export interface MirrorEvent {
 
 export interface BridgeSyncState { bridgeId: string; cursor?: string; lastSyncAt?: string; status: "idle" | "syncing" | "healthy" | "degraded" | "offline"; error?: string; }
 
+export interface NativeObservationState {
+  status: "syncing" | "up-to-date" | "stale" | "degraded" | "error";
+  lastObservedAt?: string;
+  nextObservationAt?: string;
+  ownPostCount?: number;
+  mentionCount?: number;
+  conversationCount?: number;
+  error?: string;
+}
+
 export interface NativeChannelConnection {
   id: string;
   presenceId: string;
@@ -94,6 +104,7 @@ export interface NativeChannelConnection {
   access: "read" | "read-write";
   account?: { id: string; username: string; name: string };
   healthMessage?: string;
+  observation?: NativeObservationState;
   updatedAt: string;
   createdAt: string;
 }
@@ -226,4 +237,4 @@ export interface OpenPresenceState extends AgentWorkspaceSnapshot {
 export interface CreateAgentInput { name: string; description: string; audience?: string; mode: PresenceMode; handle: string; accent: string; }
 export interface CreatePresenceInput { channel: ChannelId; handle: string; mode: PresenceMode; accent: string; channelDefinition?: ChannelDefinition; }
 export type Operation =
-  | { type: "reset" } | { type: "createAgent"; input: CreateAgentInput } | { type: "createAdditionalAgent"; input: CreateAgentInput } | { type: "selectAgent"; id: string } | { type: "createPresence"; input: CreatePresenceInput } | { type: "createChannel"; definition: ChannelDefinition } | { type: "createBridge"; input: { presenceId: string; name: string; kind: ConnectorKind; capabilities: ConnectorCapabilities } } | { type: "rotateBridgeKey"; id: string } | { type: "revokeBridge"; id: string } | { type: "removeBridge"; id: string } | { type: "markManualExecution"; id: string; externalRef: EntityRef } | { type: "selectPresence"; id: string } | { type: "selectConversation"; id: string } | { type: "newConversation" } | { type: "sendMessage"; content: string; conversationId?: string } | { type: "saveFile"; kind: FileKind; content: string } | { type: "resolveProposal"; id: string; decision: "approve" | "reject" } | { type: "addSlot"; instruction: string; day: string; time: string; objective: string; executionWindow: string; presenceId?: string } | { type: "editSlot"; id: string; instruction: string; day: string; time: string; objective: string; executionWindow: string } | { type: "createSkill"; name: string; description: string } | { type: "editSkill"; id: string; name: string; description: string } | { type: "configureProvider"; provider: ModelProvider; label: string; endpoint?: string; hasSecret?: boolean; secret?: string } | { type: "wakePresence"; presenceId?: string } | { type: "runPulse"; presenceId?: string } | { type: "setModel"; model: string; provider?: ModelProvider; quality?: ModelQuality } | { type: "runSlot"; id: string } | { type: "approveExecution"; id: string } | { type: "executeIntent"; id: string } | { type: "setPresence"; patch: Partial<Pick<Presence, "mode" | "status" | "pacing" | "execution" | "ghostProfile">> };
+  | { type: "reset" } | { type: "createAgent"; input: CreateAgentInput } | { type: "createAdditionalAgent"; input: CreateAgentInput } | { type: "selectAgent"; id: string } | { type: "createPresence"; input: CreatePresenceInput } | { type: "createChannel"; definition: ChannelDefinition } | { type: "createBridge"; input: { presenceId: string; name: string; kind: ConnectorKind; capabilities: ConnectorCapabilities } } | { type: "rotateBridgeKey"; id: string } | { type: "revokeBridge"; id: string } | { type: "removeBridge"; id: string } | { type: "markManualExecution"; id: string; externalRef: EntityRef } | { type: "selectPresence"; id: string } | { type: "selectConversation"; id: string } | { type: "newConversation" } | { type: "sendMessage"; content: string; conversationId?: string } | { type: "saveFile"; kind: FileKind; content: string } | { type: "resolveProposal"; id: string; decision: "approve" | "reject" } | { type: "addSlot"; instruction: string; day: string; time: string; objective: string; executionWindow: string; presenceId?: string } | { type: "editSlot"; id: string; instruction: string; day: string; time: string; objective: string; executionWindow: string } | { type: "createSkill"; name: string; description: string } | { type: "editSkill"; id: string; name: string; description: string } | { type: "configureProvider"; provider: ModelProvider; label: string; endpoint?: string; hasSecret?: boolean; secret?: string } | { type: "wakePresence"; presenceId?: string } | { type: "runPulse"; presenceId?: string } | { type: "syncNativeX"; presenceId?: string } | { type: "setModel"; model: string; provider?: ModelProvider; quality?: ModelQuality } | { type: "runSlot"; id: string } | { type: "approveExecution"; id: string } | { type: "executeIntent"; id: string } | { type: "setPresence"; patch: Partial<Pick<Presence, "mode" | "status" | "pacing" | "execution" | "ghostProfile">> };

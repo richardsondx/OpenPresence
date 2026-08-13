@@ -280,6 +280,7 @@ export default function Home() {
   const [error, setError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<FileKind>("BRAIN");
   const [pendingOperation, setPendingOperation] = useState<string | null>(null);
+  const nativeSyncInFlight = useRef<string | null>(null);
   useEffect(() => {
     fetch(`/api/state?read=${Date.now()}`, { cache: "no-store" })
       .then(async (response) => {
@@ -316,6 +317,38 @@ export default function Home() {
       if (tracksAttention) setPendingOperation(null);
     }
   }
+  useEffect(() => {
+    const presence = state?.presence;
+    const connection = presence
+      ? state.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x" && item.status === "connected")
+      : undefined;
+    if (!presence || !connection) return;
+    const observation = connection.observation;
+    const due = !observation?.nextObservationAt || new Date(observation.nextObservationAt).getTime() <= Date.now();
+    let timer: ReturnType<typeof setTimeout> | undefined;
+    const schedule = (nextObservationAt?: string) => {
+      const delay = nextObservationAt ? Math.max(1_000, new Date(nextObservationAt).getTime() - Date.now()) : 1_000;
+      timer = setTimeout(() => { void observe(); }, delay);
+    };
+    const observe = async () => {
+      if (nativeSyncInFlight.current === presence.id) return;
+      nativeSyncInFlight.current = presence.id;
+      try {
+        const response = await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "syncNativeX", presenceId: presence.id }) });
+        const payload = await readJsonResponse<OpenPresenceState & { error?: string }>(response);
+        if (!response.ok) throw new Error(payload.error ?? "The X observer could not run.");
+        setState(payload);
+        schedule(payload.nativeConnections.find((item) => item.presenceId === presence.id)?.observation?.nextObservationAt);
+      } catch (reason) {
+        setError(clientErrorMessage(reason, "The X observer could not run."));
+      } finally {
+        nativeSyncInFlight.current = null;
+      }
+    };
+    if (due) void observe();
+    else schedule(observation.nextObservationAt);
+    return () => { if (timer) clearTimeout(timer); };
+  }, [state?.presence, state?.nativeConnections]);
   async function manageBridge(operation: unknown) {
     setError(null);
     try {
@@ -2623,34 +2656,50 @@ function MirrorPanel({
       (filter === "all" || item.presenceId === filter) &&
       item.kind === "x",
   );
+  const nativeObservation = nativeConnection?.observation;
+  const bridgeSync = bridge ? state.bridgeSync.find((item) => item.bridgeId === bridge.id) : undefined;
   const channel = selectedPresence
     ? state.channelDefinitions.find(
         (item) => item.id === selectedPresence.channel,
       )
     : undefined;
   const builtIn = channel?.builtIn ?? false;
+  const syncLabel = nativeObservation
+    ? nativeObservation.status === "up-to-date" ? "up to date" : nativeObservation.status.replaceAll("-", " ")
+    : bridgeSync?.status === "healthy" ? "up to date" : bridgeSync?.status ?? "not observed";
+  const heading = objects.length
+    ? "What Jenny can see"
+    : nativeConnection
+      ? nativeConnection.status === "needs-attention"
+        ? "X connection needs attention"
+        : nativeObservation?.status === "up-to-date"
+        ? "Up to date"
+        : nativeObservation?.status === "syncing"
+          ? "Syncing X"
+          : nativeObservation?.status === "degraded"
+            ? "Partially observed"
+            : nativeObservation?.status === "error"
+              ? "X observations unavailable"
+              : "Not observed yet"
+      : bridge
+        ? bridgeSync?.status === "healthy"
+          ? "Up to date"
+          : bridgeSync?.status === "syncing"
+            ? "Syncing community"
+            : "Community observations unavailable"
+        : "No connected Presence";
   return (
     <section className="decision-card mirror-panel">
       <div className="section-heading compact">
         <div>
           <SectionEyebrow>Social Mirror</SectionEyebrow>
-          <h3>
-            {objects.length
-              ? "What Jenny can see"
-              : bridge
-                ? "Waiting for the first event"
-                : nativeConnection?.status === "needs-attention"
-                  ? "X connection needs attention"
-                : nativeConnection
-                  ? "Connected, waiting for observations"
-                : "No connected Presence"}
-          </h3>
+          <h3>{heading}</h3>
         </div>
         <span className="quiet-label">
           {bridge
-            ? `${bridge.state} · ${objects.length} recent`
+            ? `${syncLabel} · ${objects.length} recent`
             : nativeConnection
-              ? `Official X · ${nativeConnection.status === "needs-attention" ? "needs attention" : nativeConnection.access === "read-write" ? "read + write credentials" : "read-only"}`
+              ? `X · ${nativeConnection.account?.username ? `@${nativeConnection.account.username}` : "connected"} · ${nativeConnection.status === "needs-attention" ? "needs attention" : syncLabel}`
             : filter === "all"
               ? "Connect a Presence"
               : builtIn
@@ -2661,9 +2710,9 @@ function MirrorPanel({
       {objects.length ? (
         <>
           <p className="mirror-explainer">
-            Read-only context from the connected channel. The Mirror helps
-            Jenny judge what is happening; it does not publish or give the
-            Agent unrestricted account access.
+            Observed public context from the channel. The Mirror describes
+            social reality for Jenny&apos;s judgment; it is not an instruction and
+            it does not replace the execution envelope.
           </p>
           <div className="mirror-list">
             {objects.map((item) => (
@@ -2683,17 +2732,41 @@ function MirrorPanel({
             ))}
           </div>
         </>
+      ) : nativeConnection && nativeObservation?.status === "up-to-date" ? (
+        <>
+          <p className="mirror-explainer">
+            The latest X reconciliation found no recent public activity. A
+            quiet Mirror is still a real observation, not a missing connection.
+          </p>
+          <div className="mirror-zero-state">
+            <strong>{nativeConnection.account?.username ? `@${nativeConnection.account.username}` : "This X account"} has no recent activity.</strong>
+            <div className="mirror-stats">
+              <span>{nativeObservation.ownPostCount ?? 0} posts</span>
+              <span>{nativeObservation.mentionCount ?? 0} mentions</span>
+              <span>{nativeObservation.conversationCount ?? 0} conversations</span>
+            </div>
+            <small>
+              Last observed {nativeObservation.lastObservedAt ? formatTime(nativeObservation.lastObservedAt) : "just now"}. Next observation is scheduled automatically.
+            </small>
+          </div>
+        </>
       ) : (
         <p className="mirror-explainer">
           {bridge
-            ? "Your Bridge sends inbound posts, comments, and messages here as context. They remain channel content, not instructions."
+            ? bridgeSync?.status === "syncing"
+              ? "The Bridge is reconciling the community into the Social Mirror."
+              : bridgeSync?.status === "degraded"
+                ? `The last community reconciliation was partial${bridgeSync.error ? `: ${bridgeSync.error}` : "."}`
+                : "The Bridge feeds observed posts, comments, and messages into the Social Mirror. They remain channel content, not instructions."
             : nativeConnection
-              ? "The native channel is connected, but this local runtime has not run an observation yet. Check now or invoke a standing intent to begin a truthful observation cycle."
+              ? nativeObservation?.status === "syncing"
+                ? "The connected X account is being reconciled now. Jenny will judge the Mirror after the observation completes."
+                : nativeObservation?.error ?? "The X connection is configured, but its first reconciliation has not completed yet."
             : filter === "all"
-              ? "A Social Mirror is created per connected Presence. Select a Presence or connect a custom channel to start receiving read-only context."
+              ? "A Social Mirror is created per connected Presence and records observed social reality with its freshness."
               : builtIn
-                ? `This ${channelLabel(selectedPresence?.channel ?? "channel", state.channelDefinitions)} Presence is running in the local simulator. A live connector can add a Social Mirror later; nothing is being imported now.`
-                : "Connect this custom Presence to a Bridge. The Bridge observes its channel and sends events here as read-only context for Jenny."}
+                ? `This ${channelLabel(selectedPresence?.channel ?? "channel", state.channelDefinitions)} Presence has no connected observer yet.`
+                : "Connect this custom Presence to a Bridge so its observed channel reality can appear here."}
         </p>
       )}
     </section>

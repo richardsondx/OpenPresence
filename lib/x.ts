@@ -65,6 +65,14 @@ async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
   return body as T;
 }
 
+function readAuthHeader(method: string, url: string, credentials: XCredentials, query: Record<string, string> = {}) {
+  return credentials.accessToken && credentials.accessTokenSecret
+    ? oauthHeader(method, url, credentials, query)
+    : credentials.bearerToken
+      ? `Bearer ${credentials.bearerToken}`
+      : (() => { throw new Error("X read access requires a Bearer Token or User Access Token pair."); })();
+}
+
 function mockAccount(credentials: XCredentials, handle: string): XAccount | undefined {
   if (process.env.OPENPRESENCE_X_API_MOCK !== "1") return undefined;
   if (!credentials.apiKey.startsWith("test_") || !credentials.apiSecret.startsWith("test_")) return undefined;
@@ -109,25 +117,27 @@ export async function publishXPost(credentials: XCredentials, text: string, repl
 }
 
 export async function readRecentXPosts(credentials: XCredentials, accountId: string, maxResults = 100): Promise<XRecentPost[]> {
-  const query = { "tweet.fields": "created_at", max_results: String(Math.min(100, Math.max(5, maxResults))) };
+  if (process.env.OPENPRESENCE_X_API_MOCK === "1" && credentials.apiKey.startsWith("test_")) return [];
+  const query = { "tweet.fields": "created_at,conversation_id,referenced_tweets", max_results: String(Math.min(100, Math.max(5, maxResults))) };
   const queryString = new URLSearchParams(query).toString();
   const url = `${apiBase()}/2/users/${encode(accountId)}/tweets?${queryString}`;
-  const response = await requestJson<{ data?: Array<{ id?: string; text?: string; created_at?: string }> }>(`/2/users/${encode(accountId)}/tweets?${queryString}`, {
+  const response = await requestJson<{ data?: Array<{ id?: string; text?: string; created_at?: string; conversation_id?: string; referenced_tweets?: Array<{ type?: string; id?: string }> }> }>(`/2/users/${encode(accountId)}/tweets?${queryString}`, {
     method: "GET",
-    headers: { Authorization: oauthHeader("GET", url, credentials, query) },
+    headers: { Authorization: readAuthHeader("GET", url, credentials, query) },
   });
   return (response.data ?? [])
-    .filter((item): item is { id: string; text: string; created_at?: string } => typeof item.id === "string" && typeof item.text === "string")
-    .map((item) => ({ id: item.id, text: item.text, createdAt: item.created_at }));
+    .filter((item): item is { id: string; text: string; created_at?: string; conversation_id?: string; referenced_tweets?: Array<{ type?: string; id?: string }> } => typeof item.id === "string" && typeof item.text === "string")
+    .map((item) => ({ id: item.id, text: item.text, createdAt: item.created_at, conversationId: item.conversation_id, parentId: item.referenced_tweets?.find((reference) => reference.type === "replied_to")?.id }));
 }
 
 export async function readRecentXMentions(credentials: XCredentials, accountId: string, maxResults = 100): Promise<XRecentPost[]> {
+  if (process.env.OPENPRESENCE_X_API_MOCK === "1" && credentials.apiKey.startsWith("test_")) return [];
   const query = { expansions: "author_id", "tweet.fields": "created_at,conversation_id,referenced_tweets", "user.fields": "username", max_results: String(Math.min(100, Math.max(5, maxResults))) };
   const queryString = new URLSearchParams(query).toString();
   const url = `${apiBase()}/2/users/${encode(accountId)}/mentions?${queryString}`;
   const response = await requestJson<{ data?: Array<{ id?: string; text?: string; created_at?: string; author_id?: string; conversation_id?: string; referenced_tweets?: Array<{ type?: string; id?: string }> }>; includes?: { users?: Array<{ id?: string; username?: string }> } }>(`/2/users/${encode(accountId)}/mentions?${queryString}`, {
     method: "GET",
-    headers: { Authorization: oauthHeader("GET", url, credentials, query) },
+    headers: { Authorization: readAuthHeader("GET", url, credentials, query) },
   });
   const usernames = new Map((response.includes?.users ?? []).filter((user) => user.id && user.username).map((user) => [user.id!, user.username!]));
   return (response.data ?? [])
@@ -143,7 +153,7 @@ export function upsertNativeXConnection(source: OpenPresenceState, input: { pres
   const state = JSON.parse(JSON.stringify(source)) as OpenPresenceState;
   const timestamp = new Date().toISOString();
   const existing = state.nativeConnections.find((connection) => connection.presenceId === input.presenceId && connection.kind === "x");
-  const connection: NativeChannelConnection = { id: existing?.id ?? input.id, presenceId: input.presenceId, channelId: "x", kind: "x", status: "connected", access: input.access, account: input.account, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp };
+  const connection: NativeChannelConnection = { id: existing?.id ?? input.id, presenceId: input.presenceId, channelId: "x", kind: "x", status: "connected", access: input.access, account: input.account, observation: existing?.observation, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp };
   state.nativeConnections = [connection, ...state.nativeConnections.filter((item) => item.id !== connection.id && item.presenceId !== input.presenceId)];
   return state;
 }
