@@ -17,8 +17,10 @@ const apiBase = () => (process.env.OPENPRESENCE_X_API_BASE_URL ?? "https://api.x
 const encode = (value: string) => encodeURIComponent(value).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
 const normalizeHandle = (handle: string) => handle.trim().replace(/^@/, "");
 
-function oauthHeader(method: string, url: string, credentials: XCredentials, query: Record<string, string> = {}) {
+export function oauthHeader(method: string, url: string, credentials: XCredentials, query: Record<string, string> = {}) {
   if (!credentials.accessToken || !credentials.accessTokenSecret) throw new Error("User access token and user access token secret are required for X write access.");
+  const requestUrl = new URL(url);
+  const baseUrl = `${requestUrl.origin}${requestUrl.pathname}`;
   const oauth: Record<string, string> = {
     oauth_consumer_key: credentials.apiKey,
     oauth_nonce: crypto.randomBytes(16).toString("hex"),
@@ -27,10 +29,18 @@ function oauthHeader(method: string, url: string, credentials: XCredentials, que
     oauth_token: credentials.accessToken,
     oauth_version: "1.0",
   };
-  const pairs = Object.entries({ ...query, ...oauth }).flatMap(([key, value]) => [[encode(key), encode(value)] as const]);
+  // OAuth 1.0a signs the query parameters once, separately from the base URL.
+  // Callers pass the query explicitly so the same canonical values are used
+  // for both the request URL and the signature. Never sign a URL containing
+  // its query string as the OAuth base URL; doing so makes X reject reads with
+  // a misleading invalid-credentials response.
+  const signedQuery = Object.keys(query).length
+    ? Object.entries(query)
+    : [...requestUrl.searchParams.entries()];
+  const pairs = [...signedQuery, ...Object.entries(oauth)].map(([key, value]) => [encode(key), encode(value)] as const);
   pairs.sort(([leftKey, leftValue], [rightKey, rightValue]) => leftKey.localeCompare(rightKey) || leftValue.localeCompare(rightValue));
   const parameterString = pairs.map(([key, value]) => `${key}=${value}`).join("&");
-  const base = [method.toUpperCase(), encode(url), encode(parameterString)].join("&");
+  const base = [method.toUpperCase(), encode(baseUrl), encode(parameterString)].join("&");
   const signingKey = `${encode(credentials.apiSecret)}&${encode(credentials.accessTokenSecret)}`;
   const signature = crypto.createHmac("sha1", signingKey).update(base).digest("base64");
   oauth.oauth_signature = signature;

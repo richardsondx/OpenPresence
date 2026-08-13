@@ -67,7 +67,9 @@ export function recordPublicFooting(source: OpenPresenceState, presenceId: strin
 export function recordNativeObservation(source: OpenPresenceState, presenceId: string, observation: OpenPresenceState["nativeConnections"][number]["observation"]) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   state.nativeConnections = state.nativeConnections.map((connection) => connection.presenceId === presenceId && connection.kind === "x"
-    ? { ...connection, observation, updatedAt: now() }
+    ? /no API credits remaining|temporarily rate-limited/i.test(connection.healthMessage ?? "")
+      ? { ...connection, status: "connected" as const, healthMessage: undefined, deliveryError: connection.healthMessage, observation, updatedAt: now() }
+      : { ...connection, observation, updatedAt: now() }
     : connection);
   return state;
 }
@@ -97,10 +99,13 @@ export function recordRuntimeEvent(source: OpenPresenceState, presenceId: string
 
 export function markNativeConnectionNeedsAttention(source: OpenPresenceState, presenceId: string, message: string) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  const deliveryOnlyFailure = /no API credits remaining|temporarily rate-limited/i.test(message);
   state.nativeConnections = state.nativeConnections.map((connection) => connection.presenceId === presenceId && connection.kind === "x"
-    ? { ...connection, status: "needs-attention" as const, healthMessage: message, updatedAt: now() }
+    ? deliveryOnlyFailure
+      ? { ...connection, status: "connected" as const, healthMessage: undefined, deliveryError: message, updatedAt: now() }
+      : { ...connection, status: "needs-attention" as const, healthMessage: message, deliveryError: undefined, updatedAt: now() }
     : connection);
-  return recordRuntimeEvent(state, presenceId, "X connection needs attention", message, "warning");
+  return recordRuntimeEvent(state, presenceId, deliveryOnlyFailure ? "X delivery needs attention" : "X connection needs attention", message, "warning");
 }
 
 export function isLaunchCandidate(source: OpenPresenceState, presenceId: string) {
@@ -402,6 +407,9 @@ export function completeNativeExecution(source: OpenPresenceState, executionId: 
   execution.updatedAt = now();
   const outcome: Outcome = { id: id("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, status: "succeeded", observedAt: now(), metrics: {}, evidence: [externalRef] };
   state.outcomes.unshift(outcome);
+  state.nativeConnections = state.nativeConnections.map((connection) => connection.presenceId === execution.presenceId && connection.kind === "x"
+    ? { ...connection, deliveryError: undefined, updatedAt: now() }
+    : connection);
   const action = state.actions.find((item) => item.executionId === execution.id);
   if (action) { action.status = "executed"; action.outcomeId = outcome.id; }
   state.events.unshift(event("execution", "Published on X", "The native X connector delivered the approved action and returned an external reference.", "positive", { presenceId: execution.presenceId, executionId: execution.id, outcomeId: outcome.id }));

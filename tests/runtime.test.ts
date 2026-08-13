@@ -85,6 +85,15 @@ describe("OpenPresence runtime boundaries", () => {
     expect(deriveActivitySummary(state).current.label).toBe("X delivery failed");
   });
 
+  it("keeps the Social Mirror connected when delivery is blocked by X billing", () => {
+    let state = createAgent(input);
+    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "hourandcode", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    state = markNativeConnectionNeedsAttention(state, state.presence!.id, "X has no API credits remaining for this app.");
+    expect(state.nativeConnections[0]?.status).toBe("connected");
+    expect(state.nativeConnections[0]?.deliveryError).toContain("no API credits");
+    expect(state.nativeConnections[0]?.healthMessage).toBeUndefined();
+  });
+
   it("pauses the Presence deterministically", () => {
     const state = createAgent(input);
     const paused = applyOperation(state, { type: "setPresence", patch: { status: "paused" } });

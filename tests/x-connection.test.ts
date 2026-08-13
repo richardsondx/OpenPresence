@@ -1,5 +1,7 @@
+import crypto from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readChannelSecret, readProviderSecret, readState, writeState } from "../lib/db";
+import { readRecentXPosts } from "../lib/x";
 import { applyOperation, createAgent } from "../lib/runtime";
 import { generateAgentReply } from "../lib/ai";
 import { POST } from "../app/api/x/manage/route";
@@ -130,6 +132,38 @@ describe("native X connection", () => {
     const authorization = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
     expect(authorization.Authorization).toMatch(/^OAuth /);
     expect(authorization.Authorization).toContain("oauth_signature=");
+    vi.unstubAllGlobals();
+  });
+
+  it("signs X observation query parameters exactly once", async () => {
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    vi.setSystemTime(new Date(1700000000000));
+    vi.spyOn(crypto, "randomBytes").mockImplementation((() => Buffer.from("nonce")) as typeof crypto.randomBytes);
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const credentials = { apiKey: "api", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" };
+    const query = { "tweet.fields": "created_at,conversation_id,referenced_tweets", max_results: "10" };
+    await readRecentXPosts(credentials, "account-1", 10);
+
+    const authorization = (fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>).Authorization;
+    const encoded = (value: string) => encodeURIComponent(value).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
+    const oauth = {
+      oauth_consumer_key: "api",
+      oauth_nonce: "6e6f6e6365",
+      oauth_signature_method: "HMAC-SHA1",
+      oauth_timestamp: "1700000000",
+      oauth_token: "token",
+      oauth_version: "1.0",
+    };
+    const pairs = Object.entries({ ...query, ...oauth }).map(([key, value]) => [encoded(key), encoded(value)] as const);
+    pairs.sort(([leftKey, leftValue], [rightKey, rightValue]) => leftKey.localeCompare(rightKey) || leftValue.localeCompare(rightValue));
+    const parameterString = pairs.map(([key, value]) => `${key}=${value}`).join("&");
+    const base = ["GET", encoded("https://api.x.com/2/users/account-1/tweets"), encoded(parameterString)].join("&");
+    const signature = crypto.createHmac("sha1", `${encoded("secret")}&${encoded("token-secret")}`).update(base).digest("base64");
+    expect(authorization).toContain(`oauth_signature="${encoded(signature)}"`);
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.x.com/2/users/account-1/tweets?tweet.fields=created_at%2Cconversation_id%2Creferenced_tweets&max_results=10");
+    vi.useRealTimers();
+    vi.restoreAllMocks();
     vi.unstubAllGlobals();
   });
 
