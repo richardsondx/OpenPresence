@@ -33,7 +33,7 @@ test("operator connects an X Presence through the official API", async ({ page }
   await expect(page.getByRole("status")).toContainText("Connected to @jenny_ai · Read + write");
   await page.getByRole("button", { name: "Save connection" }).click();
   await expect(page.getByRole("heading", { name: "Connected to @jenny_ai" })).toBeVisible();
-  await expect(page.getByText("Official X API access is read + write.")).toBeVisible();
+  await expect(page.getByText(/Official X API authentication is configured with read \+ write credentials/)).toBeVisible();
   await expect(page.getByRole("heading", { name: "Add a Bridge alternative" })).toBeVisible();
 
   await page.reload();
@@ -41,6 +41,10 @@ test("operator connects an X Presence through the official API", async ({ page }
   await freshNavigation.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Connected to @jenny_ai" })).toBeVisible();
   await expect(page.getByText("Credentials are encrypted on this server and never returned to the browser.")).toBeVisible();
+  await freshNavigation.getByRole("button", { name: "Activity", exact: true }).click();
+  await expect(page.locator(".mirror-panel").getByRole("heading", { name: "Up to date" })).toBeVisible();
+  await expect(page.locator(".mirror-panel")).toContainText("0 posts");
+  await expect(page.locator(".mirror-panel")).not.toContainText("waiting for observations");
   expect(consoleErrors).toEqual([]);
   expect(failedRequests).toEqual([]);
 });

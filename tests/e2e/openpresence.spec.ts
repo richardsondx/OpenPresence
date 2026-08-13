@@ -303,7 +303,7 @@ test("Activity explains current work, next attention, and configured rhythm", as
   await createAgent(page);
   await expect(page.getByLabel("Operating status").getByRole("heading", { name: "Waiting for the next meaningful event" })).toBeVisible();
   await expect(page.getByLabel("Operating status").getByRole("heading", { name: "On demand" })).toBeVisible();
-  await expect(page.getByLabel("Operating status").getByText("No automatic scan is scheduled in this local runtime.", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Operating status").getByText("No automatic scan is scheduled because no observer or standing intent is connected.", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Operating status").getByText("Publishing Auto", { exact: true })).toBeVisible();
   await page.locator(".page-heading .heading-actions").getByRole("button", { name: "Check now", exact: true }).click();
   await expect(page.getByLabel("Operating status").getByRole("heading", { name: "Waiting for a better moment" })).toBeVisible();

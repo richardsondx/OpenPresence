@@ -64,13 +64,28 @@ export function recordPublicFooting(source: OpenPresenceState, presenceId: strin
   return state;
 }
 
+export function recordNativeObservation(source: OpenPresenceState, presenceId: string, observation: OpenPresenceState["nativeConnections"][number]["observation"]) {
+  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  state.nativeConnections = state.nativeConnections.map((connection) => connection.presenceId === presenceId && connection.kind === "x"
+    ? { ...connection, observation, updatedAt: now() }
+    : connection);
+  return state;
+}
+
 export function recordNativeMirror(source: OpenPresenceState, input: { connectionId: string; presenceId: string; post: { id: string; text: string; createdAt?: string; authorId?: string; authorUsername?: string; conversationId?: string; parentId?: string } }) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
-  if (state.mirrorObjects.some((item) => item.externalRef.type === "x.post" && item.externalRef.id === input.post.id)) return state;
   const receivedAt = now();
   const sourceEventId = `native-x:${input.connectionId}:${input.post.id}`;
-  state.mirrorObjects.unshift({ id: id("mirror"), bridgeId: `native:${input.connectionId}`, presenceId: input.presenceId, channelId: "x", externalRef: { type: "x.post", id: input.post.id }, parentExternalRef: input.post.parentId ? { type: "x.post", id: input.post.parentId } : undefined, objectType: "post", author: { externalRef: input.post.authorId ? { type: "x.user", id: input.post.authorId } : undefined, displayName: input.post.authorUsername ? `@${input.post.authorUsername}` : "X user", handle: input.post.authorUsername }, content: { text: input.post.text }, occurredAt: input.post.createdAt, observedAt: receivedAt, visibility: "public", shareability: "presence-only", sourceEventId });
-  state.mirrorEvents.unshift({ id: id("mirror-event"), bridgeId: `native:${input.connectionId}`, presenceId: input.presenceId, sourceEventId, event: "created", externalRef: { type: "x.post", id: input.post.id }, receivedAt });
+  const existing = state.mirrorObjects.find((item) => item.externalRef.type === "x.post" && item.externalRef.id === input.post.id);
+  const object = { id: existing?.id ?? id("mirror"), bridgeId: `native:${input.connectionId}`, presenceId: input.presenceId, channelId: "x" as const, externalRef: { type: "x.post", id: input.post.id }, parentExternalRef: input.post.parentId ? { type: "x.post", id: input.post.parentId } : undefined, objectType: "post", author: { externalRef: input.post.authorId ? { type: "x.user", id: input.post.authorId } : undefined, displayName: input.post.authorUsername ? `@${input.post.authorUsername}` : "X user", handle: input.post.authorUsername }, content: { text: input.post.text }, occurredAt: input.post.createdAt, observedAt: receivedAt, visibility: "public" as const, shareability: "presence-only" as const, sourceEventId };
+  if (existing) {
+    state.mirrorObjects = state.mirrorObjects.map((item) => item.id === existing.id ? object : item);
+  } else {
+    state.mirrorObjects.unshift(object);
+  }
+  if (!state.mirrorEvents.some((item) => item.externalRef.type === "x.post" && item.externalRef.id === input.post.id && item.event === "created")) {
+    state.mirrorEvents.unshift({ id: id("mirror-event"), bridgeId: `native:${input.connectionId}`, presenceId: input.presenceId, sourceEventId, event: existing ? "updated" : "created", externalRef: { type: "x.post", id: input.post.id }, receivedAt });
+  }
   return state;
 }
 
@@ -103,11 +118,15 @@ export function finishPulse(source: OpenPresenceState, presenceId: string, detai
 
 const activityModeLabel = (mode: string | undefined) => mode ? mode.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase()) : "Off";
 
-/**
- * Derive the small amount of operational state Activity can show without
- * pretending that the local runtime has a hidden scheduler or background
- * observation loop.
- */
+const relativeSchedule = (value: string | undefined) => {
+  if (!value) return undefined;
+  const delta = new Date(value).getTime() - Date.now();
+  if (!Number.isFinite(delta)) return undefined;
+  if (delta <= 0) return "due now";
+  const minutes = Math.max(1, Math.round(delta / 60_000));
+  return `in about ${minutes} minute${minutes === 1 ? "" : "s"}`;
+};
+
 export function deriveActivitySummary(source: OpenPresenceState, presenceId?: string): ActivitySummary {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presences.find((item) => item.id === (presenceId ?? state.activePresenceId)) ?? state.presence;
@@ -119,6 +138,7 @@ export function deriveActivitySummary(source: OpenPresenceState, presenceId?: st
   const reviewCount = executions.filter((item) => item.status === "awaiting-review").length;
   const pulseEvent = events.find((item) => item.title === "Pulse completed");
   const nativeConnection = state.nativeConnections.find((item) => item.presenceId === presence?.id);
+  const observation = nativeConnection?.observation;
   const standingSlots = state.calendar
     .filter((slot) => slot.presence === presence?.id && slot.enabled)
     .sort((a, b) => a.day.localeCompare(b.day) || a.time.localeCompare(b.time));
@@ -143,6 +163,15 @@ export function deriveActivitySummary(source: OpenPresenceState, presenceId?: st
     current = { label: "Action completed", detail: `The latest ${latestExecution.affordance} was delivered and remains visible in the execution ledger.`, tone: "positive" };
   } else if (latestExecution?.status === "failed") {
     current = { label: "X delivery failed", detail: `${latestExecution.failure?.message ?? "The connector rejected the action."} No external artifact was counted.`, tone: "warning" };
+  } else if (observation?.status === "error") {
+    current = { label: "X observation failed", detail: observation.error ?? "The connected channel could not be read.", tone: "warning" };
+  } else if (observation?.status === "degraded") {
+    current = { label: "Watching X with limited coverage", detail: observation.error ?? "The Social Mirror has fresh public history, but some inbound coverage is unavailable.", tone: "warning" };
+  } else if (observation?.status === "syncing") {
+    current = { label: "Syncing the Social Mirror", detail: "The connector is reconciling X before Jenny makes a judgment.", tone: "positive" };
+  } else if (observation?.status === "up-to-date") {
+    const next = relativeSchedule(observation.nextObservationAt);
+    current = { label: "Watching X", detail: next ? `The Social Mirror is up to date. Next observation ${next}.` : "The Social Mirror is up to date and ready for Jenny's next judgment.", tone: "positive" };
   } else if (events[0]?.title === "X observation failed" || events[1]?.title === "X observation failed") {
     current = { label: "X observation failed", detail: events.find((item) => item.title === "X observation failed")?.detail ?? "The connected channel could not be read.", tone: "warning" };
   } else if (events[0]?.title === "Considering first public move" || events[1]?.title === "Considering first public move") {
@@ -161,12 +190,14 @@ export function deriveActivitySummary(source: OpenPresenceState, presenceId?: st
     ? { label: "After waking", detail: "Wake up Jenny to resume attention and begin a first check." }
     : nextSlot
       ? { label: "Next standing intent", detail: `${nextSlot.day} at ${nextSlot.time} · ${nextSlot.label}` }
-      : { label: "On demand", detail: "No automatic scan is scheduled in this local runtime." };
+      : observation?.nextObservationAt
+        ? { label: "Next X observation", detail: relativeSchedule(observation.nextObservationAt) ?? "Scheduled by the connected observer." }
+        : { label: "On demand", detail: "No automatic scan is scheduled because no observer or standing intent is connected." };
   const nextIntent = nextSlot
     ? { label: nextSlot.label, detail: `${nextSlot.day} at ${nextSlot.time} · ${nextSlot.executionWindow}` }
     : { label: "No standing intent scheduled", detail: "Calendar is optional; Jenny can still be asked to check the channel now." };
   const rhythm = {
-    attention: presence?.status === "paused" ? "Asleep" : "On demand",
+    attention: presence?.status === "paused" ? "Asleep" : nativeConnection ? "Continuous observation" : "On demand",
     publishing: activityModeLabel(presence?.execution.post),
     replies: activityModeLabel(presence?.execution.reply ?? presence?.execution.comment),
     quietHours: "Not configured",
@@ -450,6 +481,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation):
     case "setModel": { const profile = state.modelProfiles.find((item) => item.agentId === state.agent?.id); if (profile && operation.model.trim()) { profile.model = operation.model.trim(); if (operation.provider) profile.provider = operation.provider; if (operation.quality) profile.quality = operation.quality; const connection = state.providerConnections.find((item) => item.provider === profile.provider && item.status !== "needs-configuration"); if (connection) profile.connectionId = connection.id; profile.updatedAt = now(); } return state; }
     case "wakePresence": { const target = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence; if (!target || target.status !== "paused") return state; const updated = { ...target, status: "live" as const }; state.presences = state.presences.map((item) => item.id === updated.id ? updated : item); if (state.presence?.id === updated.id) state.presence = updated; state.events.unshift(event("system", "Jenny woke up", "The Presence is active again and beginning its first attention cycle.", "positive", { presenceId: updated.id })); return state.nativeConnections.some((connection) => connection.presenceId === updated.id && connection.channelId === "x" && connection.status === "connected") ? state : runAttentionCycle(state, updated); }
     case "runPulse": { const pulsePresence = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence; if (!pulsePresence || pulsePresence.status !== "live") return state; return state.nativeConnections.some((connection) => connection.presenceId === pulsePresence.id && connection.channelId === "x" && connection.status === "connected") ? state : runAttentionCycle(state, pulsePresence); }
+    case "syncNativeX": return state;
     case "setPresence": { if (state.presence) { const updated = { ...state.presence, ...operation.patch, ghostProfile: operation.patch.ghostProfile ?? state.presence.ghostProfile ?? (operation.patch.mode === "ghost" ? defaultGhostProfile() : undefined), execution: operation.patch.execution ? { ...state.presence.execution, ...operation.patch.execution } : state.presence.execution }; updated.executionEnvelope = { ...state.presence.executionEnvelope, affordances: Object.fromEntries(channelCapabilities(state, updated.channel).map((item) => [item.id, { mode: updated.execution[item.id] ?? "off" }])) }; updated.context = compilePresenceContext(updated); state.presence = updated; state.presences = state.presences.map((item) => item.id === updated.id ? updated : item); } state.events.unshift(event("system", "Presence settings updated", state.presence?.status === "paused" ? "All external actions are paused." : "The new execution envelope is active.", state.presence?.status === "paused" ? "warning" : "positive", { presenceId: state.presence?.id })); return state; }
   }
 }

@@ -3,6 +3,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { readState, writeState } from "@/lib/db";
 import { disconnectNativeX, saveNativeXCredentials, testXCredentials, upsertNativeXConnection } from "@/lib/x";
+import { reconcileNativeX } from "@/lib/native-x";
 
 export const dynamic = "force-dynamic";
 
@@ -41,7 +42,8 @@ export async function POST(request: Request) {
     const existing = state.nativeConnections.find((item) => item.presenceId === parsed.presenceId && item.kind === "x");
     const connectionId = existing?.id ?? `native_x_${crypto.randomUUID()}`;
     saveNativeXCredentials(connectionId, cleanCredentials);
-    const next = upsertNativeXConnection(state, { presenceId: parsed.presenceId, id: connectionId, ...result });
+    const connected = upsertNativeXConnection(state, { presenceId: parsed.presenceId, id: connectionId, ...result });
+    const next = await reconcileNativeX(connected, parsed.presenceId);
     writeState(next);
     return NextResponse.json({ state: next, result });
   } catch (error) {

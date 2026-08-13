@@ -24,3 +24,11 @@ This log records repairs made when observed behavior contradicted the OpenPresen
 - **Expected:** Every user-visible state change must persist independently, even when operations are back-to-back.
 - **Repair:** State acknowledgment IDs now use UUIDs instead of timestamp-only IDs.
 - **Verification:** The full Vitest suite passes, including the rapid Ghost → Agent state synchronization test.
+
+## 2026-08-13 — Social Mirror presented connector readiness as missing observations
+
+- **Observed:** A connected native X account displayed “Connected, waiting for observations.” The Mirror had no durable sync state or zero-activity evidence, and the only way to populate it was to run a cognition-bearing Pulse.
+- **Expected:** Connecting X starts an observation/reconciliation path. The Mirror owns observed social reality and freshness; a successful empty read is visibly “Up to date” with zero posts/mentions/conversations. Pulse consumes that context and remains separate from connector observation.
+- **Root cause:** Native X reads lived inside `runNativePulse`; credential save only stored the connection. The UI treated absence of Mirror objects as proof that observation had not happened.
+- **Repair:** Added native observation lifecycle metadata, initial reconciliation on credential save, an independent `syncNativeX` observer operation with a foreground interval, bearer-token read support, durable native Mirror upserts for own posts and mentions, truthful empty/degraded/error states, and Activity’s next-observation status.
+- **Verification:** 43 unit tests pass; typecheck passes. Focused browser verification remains to be completed against the running app. No external X write was attempted by this repair.

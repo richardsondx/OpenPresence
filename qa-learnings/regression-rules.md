@@ -623,3 +623,21 @@
 **Apply when:** Adding fetch calls, API routes, navigation fallbacks, or error/loading handling.
 
 **Added:** 2026-08-12
+
+## Rule: Social Mirror status must describe observed social reality, not connector readiness
+
+**Defect class:** Social Mirror architecture / truthful state
+
+**General principle:** A connected channel and an observed Mirror are different facts. After a successful reconciliation, the UI must show `Up to date` even when the observed world is empty; it must never leave the user at “waiting for observations” as if the Mirror were an on-demand input buffer.
+
+**Project-specific risk:** Native X credentials could be connected while no Mirror objects, freshness, counts, or next observation were persisted. Activity and the Mirror panel therefore implied that nothing had been observed until an operator ran a Pulse.
+
+**Learned from:** Human-reported Social Mirror review on 2026-08-13 and the attached OpenPresence architecture guidance.
+
+**Project enforcement:** Native X reconciliation runs when credentials are saved and through the local connector observer. It persists Mirror objects, public footing, observation health, freshness, counts, and the next observation time without invoking cognition. Pulse consumes that Mirror; it does not own channel reads.
+
+**Executable protection:** `tests/x-connection.test.ts` covers the native connection path and mock reconciliation; `tests/e2e/x-connection.spec.ts` asserts the connected empty Mirror is presented as up to date and that the old waiting copy is absent.
+
+**Apply when:** Changing native X reads, Bridge reconciliation, Mirror panels, Activity status, connector health, or Pulse behavior.
+
+**Added:** 2026-08-13

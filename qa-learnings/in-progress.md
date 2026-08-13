@@ -7,6 +7,13 @@
 - **Acceptance:** No simulator or fabricated records are used; a live test passes only when X externally proves each delivery and the Agent observes/responds to real inbound activity. Stop and wait for the operator when a different X account must send the required reply.
 - **Verification:** Chrome pre-flight passed: `@hourandcode` was signed in, the native connector authenticated the account and reported read + write credentials, Posts were Auto, Replies were Review, and the local model answered. The first stale-app attempt was discarded because port 3004 was not running. After restarting the branch server, the exact Chat instruction formed a Social Intent and native execution, but X rejected `POST /2/tweets` with HTTP 403 while the real X profile still showed `0 posts`. The implementation now performs a real native read on wake, carries public footing into cognition, chooses a first move through the selected Agent runtime, and records failed delivery/connection health truthfully. Live verification remains blocked at the external X write boundary until the next real attempt returns an external post ID/URL; no reply test should begin before that artifact exists.
 
+## IN_PROGRESS — Social Mirror observation repair
+
+- **Started:** 2026-08-13
+- **Scope:** Replace connector-readiness language with a durable Social Mirror observation lifecycle, initial native X reconciliation, independent local observation, and truthful zero/degraded/error states.
+- **Acceptance:** A connected native X Presence records an actual reconciliation before cognition; Activity and the Mirror panel distinguish syncing, up-to-date, stale/degraded, and error states; an empty account is shown as up to date with zero observed activity; Pulse consumes the Mirror rather than owning the channel read.
+- **Verification:** Implementation and unit coverage are in progress. No external X write is part of this scoped repair.
+
 ## COMPLETE — Unify Presence wake and pulse actions
 
 - **Started:** 2026-08-12
