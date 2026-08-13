@@ -1981,37 +1981,23 @@ function ContextChatView({
   };
   return (
     <div className="page page-chat">
-      <div className="page-heading chat-heading">
-        <div>
-          <SectionEyebrow>Agent-wide conversation</SectionEyebrow>
-          <h1>Talk to {agent.name}.</h1>
-          <p className="muted">
-            One persistent conversation for shaping personality, mission, taste,
-            and every Presence.
-          </p>
-        </div>
-        <div className="heading-actions">
-          <button
-            type="button"
-            className="context-toggle"
-            aria-label={
-              contextOpen ? "Hide context sidebar" : "Show context sidebar"
-            }
-            aria-expanded={contextOpen}
-            title={
-              contextOpen ? "Hide context sidebar" : "Show context sidebar"
-            }
-            aria-controls="chat-context-sidebar"
-            onClick={() => setContextOpen((open) => !open)}
-          >
-            {contextOpen ? (
-              <PanelRightClose size={17} />
-            ) : (
-              <PanelRightOpen size={17} />
-            )}
-          </button>
-        </div>
-      </div>
+      <button
+        type="button"
+        className="context-toggle"
+        aria-label={
+          contextOpen ? "Hide context sidebar" : "Show context sidebar"
+        }
+        aria-expanded={contextOpen}
+        title={contextOpen ? "Hide context sidebar" : "Show context sidebar"}
+        aria-controls="chat-context-sidebar"
+        onClick={() => setContextOpen((open) => !open)}
+      >
+        {contextOpen ? (
+          <PanelRightClose size={17} />
+        ) : (
+          <PanelRightOpen size={17} />
+        )}
+      </button>
       <div
         className={`chat-layout ${contextOpen ? "context-open" : "context-collapsed"}`}
       >
