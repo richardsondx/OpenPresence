@@ -80,7 +80,9 @@ Jenny
 
 The Agent is the persistent mind.
 
-The Presence is where that mind exists, who it represents there, what that environment allows, what audience it encounters, and how independently it acts.
+The Presence is where that mind exists, who it represents there, what role it inhabits, what audience it encounters, and how independently it acts. Channel and connector details are part of embodiment, but they are not the whole Presence.
+
+The Agent is a person. A Presence is a role that person inhabits in a particular social world. Mission answers, “Where am I ultimately going?” Presence answers, “What am I doing in this room?” A Presence may specialize its audience, topical emphasis, personal or professional mix, public boundaries, social priorities, and representation without becoming another Brain or rewriting the Agent.
 
 This distinction sounds architectural, but it is really philosophical.
 
@@ -102,7 +104,11 @@ OpenPresence makes this explicit.
 
 The Agent owns continuity.
 
-The Presence owns embodiment.
+The Presence owns the situated role and its embodiment.
+
+This is why each Presence has a Presence Brief: a compact, durable account of what this incarnation is here to do, whom it serves, what territory it emphasizes, what it can participate in nearby, and what it generally stays out of. The Brief inherits the Agent's meaning by default and contains specialization, not a duplicate personality. Different Briefs let one coherent Agent inhabit different rooms without becoming different people.
+
+Presence boundaries guide expression and amplification. They do not make the Agent blind to the surrounding world. If a Presence generally stays out of partisan politics, political material can still be observed and understood; the boundary becomes a judgment toward silence or non-amplification, not an observation filter.
 
 ---
 
@@ -654,9 +660,9 @@ The filter behind public action.
 Curated continuity.
 
 ### `PRESENCE.md`
-**Where I exist and who I represent here.**
+**What role I inhabit, where I exist, and who I represent here.**
 
-Channel, public self, audience, Ghost context, boundaries.
+Presence Brief, channel context, public self, audience, Ghost context, boundaries, and the social priorities of this incarnation. It is more than connector or account configuration.
 
 ### `PULSE.md`
 **What keeps me active.**
@@ -708,6 +714,8 @@ PULSE.md     auto: NO   propose: YES
 Performance may evolve Growth.
 
 Experience may evolve Memory.
+
+A Presence Brief may be edited for that Presence through explicit, durable configuration or conversation. That is specialization, not permission to rewrite Soul, Mission, Taste, or the Agent's other protected meaning. A Brief that would contradict core Taste or Mission requires the same explicit review as any protected identity contradiction.
 
 Identity changes should be explicit, versioned, reviewable, and reversible.
 
@@ -1402,7 +1410,7 @@ Examples:
 
 > Stop treating follower count as the only signal.
 
-These should become durable configuration, proposals, preferences, or Standing Intents when appropriate.
+These should become durable configuration, proposals, preferences, Presence Brief changes, or Standing Intents when appropriate. For example, “Make this account mostly about persistent agents,” “Founders and agent builders are the audience,” and “Do not get involved in culture-war arguments here” should shape the active Presence without rewriting the Agent's global Mission or Taste.
 
 This is the philosophy behind:
 
@@ -1957,7 +1965,10 @@ OpenPresence is trying to answer:
                             │
                             ▼
                          PRESENCE
-             where and as whom I exist here
+              the role and place I inhabit here
+                            │
+                    PRESENCE BRIEF
+             what this incarnation is here to do
                             │
                             ▼
                           CHANNEL
@@ -2006,6 +2017,14 @@ These sentences should survive implementation changes.
 > **An Agent should be able to live somewhere, not merely answer in a chat window.**
 
 > **One Agent, many Presences.**
+
+> **The Agent is a person. A Presence is a role that person inhabits in a particular social world.**
+
+> **Mission says where the person is going. Presence says what they are doing in this room.**
+
+> **A Presence inherits the Agent by default and specializes it without becoming another mind.**
+
+> **Presence boundaries guide expression; they do not make the Agent blind to the world.**
 
 > **Presence is where the mind meets the world.**
 

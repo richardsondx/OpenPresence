@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyOperation, compilePresenceContext, createAgent, deriveActivitySummary, derivePublicHistory, failNativeExecution, formChatPostIntent, formXReplyIntent, initialState, isExplicitXPostRequest, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, recordPublicFooting, recordStandingIntentNoOp, startPlaygroundSession } from "../lib/runtime";
+import { addSandboxEvent, applyOperation, compilePresenceContext, createAgent, deriveActivitySummary, derivePublicHistory, failNativeExecution, formChatPostIntent, formXReplyIntent, initialState, isExplicitXPostRequest, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, recordPublicFooting, recordStandingIntentNoOp, startPlaygroundSession } from "../lib/runtime";
 import { acknowledgeExecution, claimExecutions, createBridgeWithKey, ingestEvents, removeBridge, revokeBridge } from "../lib/bridge";
 import { readBridgeCredentialMetadata, readState, writeState } from "../lib/db";
 import { nextObservationAt } from "../lib/native-x";
@@ -112,6 +112,56 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.presence?.context.publicFooting?.recentInboundIds).toEqual(["new-mention", "old-mention"]);
     expect(state.presence?.context.publicFooting?.judgedInboundIds).toEqual(["old-mention"]);
     expect(state.presence?.context.publicFooting?.judgedInboundIds).not.toContain("new-mention");
+  });
+
+  it("gives each Presence its own brief without changing the Agent meaning files", () => {
+    let state = createAgent(input);
+    const originalFiles = Object.fromEntries(state.files.filter((file) => ["MISSION", "SOUL", "TASTE"].includes(file.kind)).map((file) => [file.kind, file.content]));
+    const firstId = state.presence!.id;
+    state = applyOperation(state, { type: "setPresence", patch: { brief: { ...state.presence!.brief, purpose: "Become a recognizable voice among founders.", primaryTerritory: ["Persistent agents", "Agent memory"] } } });
+    state = applyOperation(state, { type: "createPresence", input: { channel: "linkedin", handle: "@jenny-builds", mode: "agent", accent: "#D68754" } });
+    const secondId = state.presence!.id;
+    state = applyOperation(state, { type: "setPresence", patch: { brief: { ...state.presence!.brief, purpose: "Help product teams make AI understandable.", primaryTerritory: ["Product design", "AI teams"] } } });
+    expect(state.presences.find((item) => item.id === firstId)?.brief.primaryTerritory).toEqual(["Persistent agents", "Agent memory"]);
+    expect(state.presences.find((item) => item.id === secondId)?.brief.primaryTerritory).toEqual(["Product design", "AI teams"]);
+    expect(Object.fromEntries(state.files.filter((file) => ["MISSION", "SOUL", "TASTE"].includes(file.kind)).map((file) => [file.kind, file.content]))).toEqual(originalFiles);
+  });
+
+  it("keeps Presence boundaries in judgment context without hiding Social Mirror objects", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { brief: { ...state.presence!.brief, boundaries: ["Partisan politics"] } } });
+    const session = startPlaygroundSession(state, state.presence!.id);
+    state = addSandboxEvent(session, { sessionId: session.playgroundSessions[0]!.id, actionId: "post", actorName: "Maya", content: "A political claim that this Presence should understand before deciding whether to engage." });
+    expect(state.mirrorObjects.some((item) => item.content?.text?.includes("political claim"))).toBe(true);
+    expect(compilePresenceContext(state.presence!).brief.boundaries).toEqual(["Partisan politics"]);
+  });
+
+  it("compiles only the active Presence Brief and keeps Ghost specialization local", () => {
+    let state = createAgent(input);
+    const firstId = state.presence!.id;
+    state = applyOperation(state, { type: "setPresence", patch: { brief: { ...state.presence!.brief, primaryTerritory: ["Persistent agents"] } } });
+    state = applyOperation(state, { type: "createPresence", input: { channel: "x", handle: "@jenny-ghost", mode: "ghost", accent: "#D68754" } });
+    const ghostId = state.presence!.id;
+    state = applyOperation(state, { type: "setPresence", patch: { brief: { ...state.presence!.brief, primaryTerritory: ["Alex's public work"] } } });
+    expect(compilePresenceContext(state.presences.find((item) => item.id === firstId)!).brief.primaryTerritory).toEqual(["Persistent agents"]);
+    expect(compilePresenceContext(state.presences.find((item) => item.id === ghostId)!).brief.primaryTerritory).toEqual(["Alex's public work"]);
+    expect(state.presences.find((item) => item.id === ghostId)?.mode).toBe("ghost");
+  });
+
+  it("persists Presence Brief changes from typed conversation without rewriting protected meaning", () => {
+    let state = createAgent(input);
+    const originalFiles = Object.fromEntries(state.files.filter((file) => ["MISSION", "SOUL", "TASTE"].includes(file.kind)).map((file) => [file.kind, file.content]));
+    state = applyOperation(state, { type: "sendMessage", content: "Make this account mostly about persistent agents." });
+    state = applyOperation(state, { type: "sendMessage", content: "Founders and agent builders are the audience." });
+    state = applyOperation(state, { type: "sendMessage", content: "Don’t get involved in culture-war arguments here." });
+    state = applyOperation(state, { type: "sendMessage", content: "Technical AI infrastructure is adjacent, but not the main thing." });
+    expect(state.presence?.brief.primaryTerritory).toEqual(["persistent agents"]);
+    expect(state.presence?.brief.audience).toBe("Founders and agent builders");
+    expect(state.presence?.brief.boundaries).toContain("culture-war arguments");
+    expect(state.presence?.brief.adjacentTerritory).toContain("Technical AI infrastructure");
+    expect(state.files.find((file) => file.kind === "PRESENCE")?.content).toContain("Presence brief");
+    expect(state.changeSets.filter((item) => item.summary.includes("Presence Brief"))).toHaveLength(4);
+    expect(Object.fromEntries(state.files.filter((file) => ["MISSION", "SOUL", "TASTE"].includes(file.kind)).map((file) => [file.kind, file.content]))).toEqual(originalFiles);
   });
 
   it("records a native delivery failure without inventing an external outcome", () => {

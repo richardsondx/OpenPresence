@@ -62,6 +62,7 @@ import type {
   PublicSelf,
   PublicTechnicalFact,
   PresenceConnectionMode,
+  PresenceBrief,
   PresenceEnvironment,
   PresenceMode,
   MirrorObject,
@@ -943,9 +944,11 @@ function AgentSwitcher({
 function PresenceSwitcher({
   state,
   mutate,
+  onAddPresence,
 }: {
   state: OpenPresenceState;
   mutate: Mutate;
+  onAddPresence: () => void;
 }) {
   const [open, setOpen] = useState(false);
   const presence = state.presence ?? state.presences[0];
@@ -990,6 +993,19 @@ function PresenceSwitcher({
               <span className={`live-dot ${item.status === "paused" ? "paused-dot" : ""}`} />
             </button>
           ))}
+          <div className="presence-menu-divider" />
+          <button
+            type="button"
+            role="menuitem"
+            className="presence-settings-action"
+            onClick={() => {
+              setOpen(false);
+              onAddPresence();
+            }}
+          >
+            <Plus size={15} />
+            <span>Add a Presence</span>
+          </button>
         </div>
       )}
     </div>
@@ -1176,13 +1192,11 @@ function AgentWorkspaceShell({
           <span>OpenPresence</span>
         </div>
         <div className="sidebar-label presence-label">Presences</div>
-        <PresenceSwitcher state={state} mutate={mutate} />
-        <button
-          className="add-presence"
-          onClick={() => setShowPresenceModal(true)}
-        >
-          <Plus size={15} /> Add a Presence
-        </button>
+        <PresenceSwitcher
+          state={state}
+          mutate={mutate}
+          onAddPresence={() => setShowPresenceModal(true)}
+        />
         <nav className="main-nav" aria-label="Primary navigation">
           {presenceNavItems.map(({ id, label, icon: Icon }) => (
             <button
@@ -1248,7 +1262,11 @@ function AgentWorkspaceShell({
             <AgentSwitcher state={state} mutate={mutate} />
           </div>
           <div className="mobile-presence-switcher">
-            <PresenceSwitcher state={state} mutate={mutate} />
+            <PresenceSwitcher
+              state={state}
+              mutate={mutate}
+              onAddPresence={() => setShowPresenceModal(true)}
+            />
           </div>
           <div className="topbar-context">
             <PresenceGlyph accent={agent.accent} />
@@ -2217,6 +2235,60 @@ function PlaygroundThreadFeed({
   return <div className="social-feed">{roots.map((root) => <div className="social-thread" key={`thread:${root.id}`}>{renderThread(root)}</div>)}</div>;
 }
 
+function structuredEventDetail(detail: string): Record<string, unknown> | undefined {
+  try {
+    const parsed: unknown = JSON.parse(detail);
+    return parsed && typeof parsed === "object" && !Array.isArray(parsed) ? parsed as Record<string, unknown> : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function eventDetailText(value: unknown): string | undefined {
+  return typeof value === "string" && value.trim() ? value.trim() : undefined;
+}
+
+function formatEventAction(action: string | undefined): string {
+  if (!action) return "No action";
+  if (action === "no_op") return "Silence";
+  return action.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function PlaygroundEventDetail({ event }: { event: OpenPresenceState["events"][number] }) {
+  const detail = structuredEventDetail(event.detail);
+  if (!detail) return <small>{event.detail}</small>;
+
+  const rationale = eventDetailText(detail.rationale);
+  const responseNeed = eventDetailText(detail.responseNeed);
+  const recommendedAction = eventDetailText(detail.recommendedAction ?? detail.action);
+  const confidence = eventDetailText(detail.confidence);
+
+  if (event.title === "Social plan formed") {
+    return (
+      <div className="playground-event-detail">
+        <span className="event-decision-label">{formatEventAction(recommendedAction)}</span>
+        {rationale && <small>{rationale}</small>}
+      </div>
+    );
+  }
+
+  if (event.title === "Social perception recorded") {
+    return (
+      <div className="playground-event-detail">
+        <small>{responseNeed ?? "The Agent recorded what the exchange appears to need."}</small>
+        {(recommendedAction || confidence) && (
+          <div className="event-facts">
+            {recommendedAction && <span>{formatEventAction(recommendedAction)} recommended</span>}
+            {confidence && <span>{confidence} confidence</span>}
+          </div>
+        )}
+      </div>
+    );
+  }
+
+  return <small>{event.detail}</small>;
+}
+
 function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: Mutate }) {
   const presence = state.presence ?? state.presences[0];
   const session = state.playgroundSessions.find((item) => item.presenceId === presence?.id && item.status === "active") ?? state.playgroundSessions[0];
@@ -2267,7 +2339,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
             <div className="activity-rail-heading"><div className="eyebrow">Control room</div><span className="environment-chip">{channelLabel(session.channelId, state.channelDefinitions)} · Sandbox</span></div>
             <section>
               <div className="eyebrow">Now</div>
-              {sessionEvents.length ? sessionEvents.slice(0, 3).map((item) => <div className="playground-event" key={item.id}><span className={`event-dot event-${item.tone}`} /><span><strong>{item.title.replaceAll("Jenny", presence.name)}</strong><small>{item.detail.replaceAll("Jenny", presence.name)}</small></span></div>) : <p className="playground-muted">No decisions yet.</p>}
+              {sessionEvents.length ? sessionEvents.slice(0, 3).map((item) => <div className="playground-event" key={item.id}><span className={`event-dot event-${item.tone}`} /><span><strong>{item.title.replaceAll("Jenny", presence.name).replace("Social perception recorded", "Perception recorded").replace("Social plan formed", "Plan formed")}</strong><PlaygroundEventDetail event={item} /></span></div>) : <p className="playground-muted">No decisions yet.</p>}
             </section>
             <section>
               <div className="eyebrow">Needs you</div>
@@ -3716,7 +3788,7 @@ function ScheduleView({
   const [objective, setObjective] = useState("audience_growth");
   const [executionWindow, setExecutionWindow] = useState("08:00–11:00");
   const [editingSlot, setEditingSlot] = useState<CalendarSlot | null>(null);
-  const [viewMode, setViewMode] = useState<"list" | "week">("list");
+  const [viewMode, setViewMode] = useState<"list" | "week">("week");
   const presenceId = state.activePresenceId ?? state.presence?.id ?? "";
   const selectedPresence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   const presenceName = selectedPresence?.name ?? "this Presence";
@@ -4347,6 +4419,8 @@ function PresenceView({
   const activeBridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
   const [customizing, setCustomizing] = useState(true);
   const [presenceNameDraft, setPresenceNameDraft] = useState(presence.name);
+  const [briefDraft, setBriefDraft] = useState<PresenceBrief>(presence.brief);
+  const [editingBrief, setEditingBrief] = useState(false);
   const [ghostDraft, setGhostDraft] = useState<GhostProfile>(presence.ghostProfile ?? { subject: "Me / my organization", priorities: "", preferences: "", voice: "", boundaries: "" });
   const [publicSelfDraft, setPublicSelfDraft] = useState<PublicSelf>(presence.publicSelf ?? { displayName: presence.name, posture: presence.mode === "ghost" ? "representational" : "contextual", approvedTechnicalFacts: [] });
   const [mediaPolicyDraft, setMediaPolicyDraft] = useState(presence.mediaPerceptionPolicy);
@@ -4408,23 +4482,43 @@ function PresenceView({
           )}
         </Button>
       </div>
-      <div className="presence-overview">
+      <div className="presence-overview" style={{ "--agent-accent": presence.accent } as React.CSSProperties}>
         <div className="presence-identity">
-          <div className="presence-overview-logo" style={{ "--agent-accent": presence.accent } as React.CSSProperties}>
+          <div className="presence-overview-logo">
             <PresenceLogo channel={presence.channel} definitions={state.channelDefinitions} size="large" />
           </div>
-          <div>
+          <div className="presence-overview-copy">
             <span className="eyebrow">
               {channelLabel(presence.channel, state.channelDefinitions)} ·
               Presence
             </span>
             <h2>{presence.name}</h2>
             <p className="presence-handle">{presence.handle}</p>
-            <p>
-              {presence.mode === "ghost"
-                ? "Ghost · extends the operator’s attention"
-                : "Agent-owned · speaks as Jenny"}
-            </p>
+          </div>
+        </div>
+        <div className="presence-overview-intro">
+          <span className="eyebrow">Public identity</span>
+          <strong>{presence.mode === "ghost" ? "Ghost presence" : "Agent-owned presence"}</strong>
+          <p>
+            {presence.mode === "ghost"
+              ? "Extends the operator’s attention and judgment here."
+              : `Speaks as ${presence.name} with an independent point of view.`}
+          </p>
+        </div>
+        <div className="presence-overview-meta" aria-label="Presence summary">
+          <div>
+            <span>Channel</span>
+            <strong>{channelLabel(presence.channel, state.channelDefinitions)}</strong>
+          </div>
+          <div>
+            <span>Route</span>
+            <strong>{connectionMode === "sandbox" ? "Sandbox" : connectionMode === "native" ? "Live API" : "Bridge"}</strong>
+          </div>
+          <div>
+            <span>Status</span>
+            <strong className={presence.status === "paused" ? "presence-status paused" : "presence-status"}>
+              <span aria-hidden="true" /> {presence.status === "paused" ? "Paused" : "Awake"}
+            </strong>
           </div>
         </div>
       </div>
@@ -4508,6 +4602,36 @@ function PresenceView({
           </button>
         </div>
       </section>
+      <section className="settings-card presence-brief-card">
+        <div className="section-heading compact">
+          <div>
+            <SectionEyebrow>PRESENCE BRIEF · Presence-scoped</SectionEyebrow>
+            <h2>What is this Presence here for?</h2>
+          </div>
+          <Button type="button" variant="ghost" onClick={() => setEditingBrief((value) => !value)} aria-label={editingBrief ? "Close brief editor" : "Edit brief"}>
+            <Pencil size={14} /> {editingBrief ? "Close" : "Edit brief"}
+          </Button>
+        </div>
+        <p className="muted presence-brief-intro">{presence.name} brings the same mind here, but this Presence can have its own audience, emphasis, and boundaries.</p>
+        {!editingBrief ? (
+          <div className="presence-brief-summary">
+            <div><span>Purpose</span><p>{presence.brief.purpose}</p></div>
+            <div><span>Audience</span><p>{presence.brief.audience}</p></div>
+            <div><span>Known for</span><div className="presence-brief-chips">{presence.brief.primaryTerritory.length ? presence.brief.primaryTerritory.map((item) => <span key={item}>{item}</span>) : <em>Not narrowed yet</em>}</div></div>
+            <div><span>Also comfortable with</span><div className="presence-brief-chips">{presence.brief.adjacentTerritory.length ? presence.brief.adjacentTerritory.map((item) => <span key={item}>{item}</span>) : <em>Not specified yet</em>}</div></div>
+            <div><span>Keep out</span><div className="presence-brief-chips">{presence.brief.boundaries.length ? presence.brief.boundaries.map((item) => <span key={item}>{item}</span>) : <em>No public boundaries set</em>}</div></div>
+          </div>
+        ) : (
+          <div className="presence-brief-editor">
+            <label>Purpose<textarea aria-label="Presence Brief purpose" value={briefDraft.purpose} onChange={(event) => setBriefDraft({ ...briefDraft, purpose: event.target.value })} rows={2} /></label>
+            <label>Audience<input aria-label="Presence Brief audience" value={briefDraft.audience} onChange={(event) => setBriefDraft({ ...briefDraft, audience: event.target.value })} /></label>
+            <label>Primary territory <small>Topics, ideas, communities, or problems this Presence wants to be known for.</small><textarea aria-label="Primary territory" value={briefDraft.primaryTerritory.join(", ")} onChange={(event) => setBriefDraft({ ...briefDraft, primaryTerritory: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} rows={2} /></label>
+            <label>Adjacent territory <small>Things this Presence can join without making them its main identity.</small><textarea aria-label="Adjacent territory" value={briefDraft.adjacentTerritory.join(", ")} onChange={(event) => setBriefDraft({ ...briefDraft, adjacentTerritory: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} rows={2} /></label>
+            <label>Keep out <small>Public areas this Presence generally does not express or amplify. They remain visible for judgment.</small><textarea aria-label="Presence Brief boundaries" value={briefDraft.boundaries.join(", ")} onChange={(event) => setBriefDraft({ ...briefDraft, boundaries: event.target.value.split(",").map((item) => item.trim()).filter(Boolean) })} rows={2} /></label>
+            <div className="inline-form-actions"><Button type="button" variant="ghost" onClick={() => { setBriefDraft(presence.brief); setEditingBrief(false); }}>Cancel</Button><Button type="button" variant="primary" disabled={!briefDraft.purpose.trim() || !briefDraft.audience.trim()} onClick={() => { void mutate({ type: "setPresence", patch: { brief: { purpose: briefDraft.purpose.trim(), audience: briefDraft.audience.trim(), primaryTerritory: briefDraft.primaryTerritory, adjacentTerritory: briefDraft.adjacentTerritory, boundaries: briefDraft.boundaries } } }); setEditingBrief(false); }}><Check size={14} /> Save brief</Button></div>
+          </div>
+        )}
+      </section>
       <section className="settings-card public-self-card">
         <div className="section-heading compact">
           <div>
@@ -4534,6 +4658,10 @@ function PresenceView({
             })}
           </div>
         </div>
+        {publicSelfDraft.approvedTechnicalFacts.length === 0 && <div className="public-facts-default" role="note">
+          <strong>Default when none are selected</strong>
+          <p><b>Typical response:</b> answer naturally as this Presence without volunteering AI, platform, provider, model, or tool details. Direct questions still follow the Identity posture above.</p>
+        </div>}
         <div className="inline-form-actions"><Button variant="primary" onClick={savePublicSelf}><Check size={14} /> Save Public Self</Button></div>
       </section>
       <section className="settings-card presence-rhythm-card" id="rhythm-settings">
