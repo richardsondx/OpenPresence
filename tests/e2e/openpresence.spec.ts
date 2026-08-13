@@ -83,6 +83,7 @@ async function expectChatViewportLayout(page: import("@playwright/test").Page) {
     if (!history || !composer) throw new Error("Chat viewport nodes are missing");
     const historyBox = history.getBoundingClientRect();
     const composerBox = composer.getBoundingClientRect();
+    const hintBox = thread.querySelector<HTMLElement>(".composer-hint")?.getBoundingClientRect();
     return {
       historyTop: historyBox.top,
       historyBottom: historyBox.bottom,
@@ -91,6 +92,8 @@ async function expectChatViewportLayout(page: import("@playwright/test").Page) {
       overflowY: getComputedStyle(history).overflowY,
       scrollGap: history.scrollHeight - history.clientHeight - history.scrollTop,
       documentOverflow: document.documentElement.scrollHeight > window.innerHeight + 1,
+      hintBottom: hintBox?.bottom ?? 0,
+      viewportHeight: window.innerHeight,
     };
   });
   expect(geometry.overflowY).toBe("auto");
@@ -98,6 +101,8 @@ async function expectChatViewportLayout(page: import("@playwright/test").Page) {
   expect(geometry.composerBottom).toBeLessThanOrEqual(await page.evaluate(() => window.innerHeight));
   expect(geometry.scrollGap).toBeLessThanOrEqual(2);
   expect(geometry.documentOverflow).toBe(false);
+  const bottomInset = test.info().project.name === "mobile" ? 68 : 0;
+  expect(geometry.viewportHeight - geometry.hintBottom - bottomInset).toBeLessThanOrEqual(2);
 }
 
 async function expectChatContextRailLayout(page: import("@playwright/test").Page) {
@@ -170,7 +175,7 @@ test("Add Presence opens a working channel-aware flow", async ({ page }) => {
 test("Chat keeps one persistent Agent conversation", async ({ page }) => {
   await createAgent(page);
   await navigate(page, "Chat");
-  await expect(page.getByRole("heading", { name: "Talk to Jenny." })).toBeVisible();
+  await expect(page.getByLabel("Message your Presence")).toBeVisible();
   const contextSidebar = page.getByRole("complementary", { name: "Context & Changes sidebar" });
   await expect(contextSidebar).toBeVisible();
   await expectChatContextRailLayout(page);

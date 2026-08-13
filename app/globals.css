@@ -468,6 +468,9 @@ fieldset { border: none; padding: 0; margin: 0 0 26px; }
 /* The fixed context rail must not be clipped by the Chat viewport wrappers. */
 .workspace.workspace-chat,
 .workspace.workspace-chat .workspace-content { overflow: visible; }
+.workspace.workspace-chat .workspace-content { padding-top: 0; padding-bottom: 0; }
+.page-chat .chat-thread { padding-bottom: 0; }
+.page-chat .composer-hint { margin-bottom: 0; }
 
 /* Calendar modes: List is for editing; Week is for seeing the rhythm of intent. */
 .calendar-heading-actions { flex-wrap: wrap; justify-content: flex-end; }
