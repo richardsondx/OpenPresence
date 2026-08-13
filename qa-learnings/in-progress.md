@@ -1,18 +1,42 @@
 # Active QA Work
 
+## COMPLETE — Make Presence identity legible and editable
+
+- **Started:** 2026-08-13
+- **Scope:** Replace long Social Mirror/channel text badges with channel marks, support custom channel favicons from an optional domain or a predefined icon, and add explicit Presence-name and Agent-name editing at their correct scopes.
+- **Acceptance:** X renders its X mark; a custom channel using `https://www.skool.com/` renders a favicon-backed mark; custom channels can choose a predefined icon when no domain is supplied; Presence Settings persists a Presence name; Manage Agent persists an Agent name; Agent-wide meaning files and Presence connector handles remain unchanged unless explicitly edited.
+- **Verification:** 53 unit tests, typecheck, lint, production build, and `git diff --check` passed. Chromium and Pixel 5 each passed all 22 browser tests. Isolated browser QA verified X's brand mark, Skool favicon loading (`naturalWidth > 0`), predefined fallback icons, Presence-name and Agent-name persistence, identity-scope separation, clean console output, and no horizontal overflow at 390px.
+
+## COMPLETE — 20-minute Calendar and native Presence observation test
+
+- **Started:** 2026-08-13
+- **Scope:** Exercise a live OpenPresence Presence for 20 minutes while testing Calendar evaluation, native X observation, and account-boundary safety. Calendar must ask Jenny to judge the instruction in the moment before any Social Intent or delivery is formed.
+- **Safety gate:** All external delivery remains limited to the configured native connection for `@hourandcode`; Chrome must not switch to or mutate `@RichardsonDx` or another operator account. No second-account stimulus will be manufactured by the test.
+- **Finding and repair:** Calendar `Run now` previously created a prewritten publication without Agent cognition, and the local app had no open-browser scheduler for due standing intents. Added Agent evaluation with explicit `NO_OP`, standing-intent provenance, native execution delivery, once-per-day idempotence, and an open-app scheduler. Activity now reports the latest Calendar decision instead of masking it with an older successful execution. The Calendar time input also captures input events explicitly after live QA found a displayed edit could remain persisted as `08:00`.
+- **Live verification so far:** Chrome created a standing intent under `@jenny_ghost`, the scheduler and explicit `Run now` each evaluated it, both chose `NO_OP`, and Activity showed `Calendar attention started` followed by `Standing intention held`. Native observation then completed with `@hourandcode`, read-write access, and the next observation advanced without creating an operator-account action.
+- **Verification:** The timed window completed with two truthful Calendar evaluations and no new external X post: Jenny chose silence rather than publishing a forced or prewritten message. Native X observation remained current for `@hourandcode`, and no operator-account mutation occurred. Final verification passed: 52 unit tests, typecheck, lint, production build, and all 42 Chromium + Pixel 5 browser tests.
+
+## IN_PROGRESS — Repair live X test account-boundary handling
+
+- **Started:** 2026-08-13
+- **Scope:** Investigate the wrong-account X post observed during the live Agent experiment and prevent test automation from mutating the operator account.
+- **Finding:** OpenPresence's persisted native X connection is read/write for `@hourandcode`, and its execution ledger contains only native `x.post` activity for that Presence. The `@RichardsonDx` post was created through the browser test path after the session was switched to the operator account; it was not a Jenny delivery. No OpenPresence connector defect caused that account mutation.
+- **Repair:** Added the project rule `Live X tests must never mutate the operator account`. Future live tests must verify the active X account before any external action and stop for operator-authored inbound stimuli.
+- **Verification:** Read-only `/api/state` inspection confirms `nativeConnections[0].account.username === "hourandcode"`, `access === "read-write"`, and no execution targets `@RichardsonDx`. Native connector unit/integration coverage remains the enforcement for Agent delivery; external browser-account enforcement is documented as a manual gate.
+
 ## IN_PROGRESS — Launch pulse and live native X Presence behavioral test
 
 - **Started:** 2026-08-12
 - **Scope:** Implement and run the attached 10-minute end-to-end test against the real configured X Presence for `@hourandcode`: launch pulse on wake, one Agent-authored public post, real inbound reply, contextual response, continuity check, and truthful OpenPresence activity state.
 - **Acceptance:** No simulator or fabricated records are used; a live test passes only when X externally proves each delivery and the Agent observes/responds to real inbound activity. Stop and wait for the operator when a different X account must send the required reply.
-- **Verification:** Chrome pre-flight passed: `@hourandcode` was signed in, the native connector authenticated the account and reported read + write credentials, Posts were Auto, Replies were Review, and the local model answered. The first stale-app attempt was discarded because port 3004 was not running. After restarting the branch server, the exact Chat instruction formed a Social Intent and native execution, but X rejected `POST /2/tweets` with HTTP 403 while the real X profile still showed `0 posts`. The implementation now performs a real native read on wake, carries public footing into cognition, chooses a first move through the selected Agent runtime, and records failed delivery/connection health truthfully. Live verification remains blocked at the external X write boundary until the next real attempt returns an external post ID/URL; no reply test should begin before that artifact exists.
+- **Verification:** Chrome pre-flight passed: `@hourandcode` was signed in, the native connector authenticated the account and reported read + write credentials, Posts were Auto, Replies were Review, and the local model answered. After the OAuth1 signing and delivery-health repairs, the real Activity `Check now` flow formed a Social Intent through the selected Agent runtime, delivered a native X post, and returned external post ID `2087708893077979544` (`https://x.com/hourandcode/status/2087708893077979544`). X visibly shows the post and the X usage console recorded spend, proving the external artifact is real. A subsequent real Activity check observed `@RichardsonDx`'s reply, persisted one inbound mention in the Social Mirror, and truthfully recorded Jenny's `NO_OP` judgment for the ambiguous message `Hi Genny is it Jenny or genny`; no reply was fabricated. The initial autonomous-post gate and observation gate pass. The contextual-reply and continuity gates remain paused until the operator sends a clearly substantive reply from the second X account; the configured Reply mode is Review, so any judged response must then be approved before native delivery.
 
 ## IN_PROGRESS — Social Mirror observation repair
 
 - **Started:** 2026-08-13
 - **Scope:** Replace connector-readiness language with a durable Social Mirror observation lifecycle, initial native X reconciliation, independent local observation, and truthful zero/degraded/error states.
 - **Acceptance:** A connected native X Presence records an actual reconciliation before cognition; Activity and the Mirror panel distinguish syncing, up-to-date, stale/degraded, and error states; an empty account is shown as up to date with zero observed activity; Pulse consumes the Mirror rather than owning the channel read.
-- **Verification:** Implementation and unit coverage are in progress. No external X write is part of this scoped repair.
+- **Verification:** Implementation and unit coverage are complete. The real native X reconciliation now reports `1 public post and 1 inbound mention`, the Mirror panel shows the actual `@RichardsonDx` reply, and Activity separates observation completion from Jenny's `NO_OP` judgment. The remaining live experiment is the contextual-reply path, which is intentionally waiting for a substantive external message.
 
 ## COMPLETE — Unify Presence wake and pulse actions
 

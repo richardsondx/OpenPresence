@@ -1,5 +1,51 @@
 # Regression rules
 
+## Rule: Presence marks must stay legible and channel-scoped
+
+**Defect class:** Visual identity / compact navigation overflow
+
+**General principle:** A Presence's channel identity must remain recognizable in compact controls even when its human-readable name is long. Use a channel-native mark, a verified domain favicon, or an explicit predefined fallback icon; keep the full name available through accessible naming and detail views rather than forcing it into the badge.
+
+**Incident:** The Founder Community screenshot rendered the long Social Mirror name as the badge, causing the compact Presence control to lose its visual hierarchy and fit. The requested correction is especially important for community names such as “Founder Community” and for the actual X mark.
+
+**Project enforcement:** `PresenceLogo` resolves X's brand mark, a custom channel's optional domain favicon, or a predefined icon. `PresenceSwitcher` uses the mark in compact controls while retaining the full Presence name in the accessible label and menu. Add Presence supports optional domain input and fallback-icon selection; Presence Settings uses the same mark in the overview.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts` verifies X and custom favicon/icon behavior, name persistence, and mobile overflow; `tests/e2e/sidebar-hierarchy.spec.ts` verifies the compact logo geometry; `tests/runtime.test.ts` verifies custom channel metadata persistence.
+
+**Apply when:** Changing Presence/channel identity UI, Social Mirror configuration, compact navigation, Presence Settings, or responsive layout.
+
+**Added:** 2026-08-13
+
+## Rule: Calendar grants permission to consider, not a prewritten publication
+
+**Defect class:** Schedule-to-cognition boundary / false external action
+
+**General principle:** A Calendar standing intent is permission for Jenny to pay attention at a time, not a stored post or an obligation to publish. Every evaluation must pass through Agent cognition, allow `NO_OP`, and only then form Social Intent, Execution, and Delivery.
+
+**Project enforcement:** Calendar `Run now` and the open-app scheduler call the Agent runtime with the standing instruction and current Presence context. A `NO_OP` records a truthful decision and no execution. A candidate is linked to its `standingIntentId`, passes through the Presence execution envelope, and native X delivery is counted only with an external reference. Due scheduled evaluations are idempotent per Calendar day.
+
+**Executable protection:** `tests/x-connection.test.ts` covers Calendar cognition → standing Social Intent → native X delivery with external evidence; `tests/runtime.test.ts` covers truthful Calendar no-op Activity state; `tests/e2e/openpresence.spec.ts` covers Calendar creation, edit, time persistence, and evaluation.
+
+**Apply when:** Changing Calendar, Standing Intent, scheduler behavior, Agent evaluation, Social Intent formation, or external delivery.
+
+**Added:** 2026-08-13
+
+## Rule: Live X tests must never mutate the operator account
+
+**Defect class:** Test contamination / account-boundary violation
+
+**General principle:** A live Agent-to-Presence experiment must keep external stimulus, Agent delivery, and operator activity attributable. Browser automation must not post, reply, like, follow, or otherwise mutate a human/operator account while testing the Agent's public behavior.
+
+**Incident:** During the 2026-08-13 X experiment, the browser session was switched to the operator's `@RichardsonDx` account and a substantive reply was posted there. The post was authored by the test operator path, not Jenny's native X connector. The screenshot made the account identity visible, but the test was not stopped at the account boundary.
+
+**Project enforcement:** Live X delivery is verified only through the Presence-scoped native connector shown in `state.nativeConnections[].account`; for this Presence that account is `@hourandcode`. A second-account reply must be authored by the operator or another explicitly authorized tester. If that input is needed and no separately authorized test account is available, stop and wait. Never switch a browser session to an operator account to manufacture it.
+
+**Executable protection:** ⚠️ Missing — the product test suite can verify native delivery account provenance, but it cannot police external browser actions performed by a test operator. The live-test checklist must include an explicit account check before every external action and a hard stop when the active account is not the configured Presence account.
+
+**Apply when:** Running live X experiments, using Chrome with multiple signed-in X accounts, creating inbound test stimuli, or verifying external artifacts.
+
+**Added:** 2026-08-13
+
 ## Rule: Explicit Chat publication requests must enter the real execution ledger
 
 **Defect class:** Agent action boundary / false completion

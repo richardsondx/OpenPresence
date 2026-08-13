@@ -208,6 +208,32 @@ describe("native X connection", () => {
     expect(completed.outcomes[0].evidence[0].id).toBe("mock-post-1");
   });
 
+  it("evaluates a Calendar intention with the Agent before native X delivery", async () => {
+    const presenceId = readState().presence?.id;
+    const save = await POST(new Request("http://localhost/api/x/manage", { method: "POST", body: JSON.stringify({ action: "save", presenceId, credentials: { apiKey: "test_api", apiSecret: "test_secret", accessToken: "test_access", accessTokenSecret: "test_access_secret" } }), headers: { "content-type": "application/json" } }));
+    let state = (await save.json()).state;
+    await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "configureProvider", provider: "openai", label: "OpenAI workspace", secret: "provider-secret-test", hasSecret: true }), headers: { "content-type": "application/json" } }));
+    await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setModel", model: "gpt-5.6-luna", provider: "openai", quality: "high" }), headers: { "content-type": "application/json" } }));
+    const added = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "addSlot", instruction: "Share one timely lesson for founders", day: "Wednesday", time: "21:00", objective: "education", executionWindow: "21:00–22:00", presenceId }), headers: { "content-type": "application/json" } }));
+    state = await added.json();
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: "A useful lesson for founders, grounded in what I am learning about persistent AI: make the next decision easier for the person who has to live with it." } }] }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { id: "calendar-post-1" } }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "runSlot", id: state.calendar[0]!.id, scheduled: true }), headers: { "content-type": "application/json" } }));
+    const evaluated = await response.json();
+    expect(response.status).toBe(200);
+    expect(evaluated.calendar[0].lastEvaluatedAt).toBeTruthy();
+    expect(evaluated.socialIntents[0].standingIntentId).toBe(evaluated.calendar[0].standingIntentId);
+    expect(evaluated.executions[0].status).toBe("succeeded");
+    expect(evaluated.executions[0].externalRef).toEqual({ type: "x.post", id: "calendar-post-1" });
+    expect(evaluated.outcomes[0].evidence[0].id).toBe("calendar-post-1");
+    expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).messages.at(-1).content).toContain("Share one timely lesson for founders");
+    expect(fetchMock).toHaveBeenCalledTimes(2);
+    vi.unstubAllGlobals();
+  });
+
   it("lets a first wake observe X, ask the Agent for a first move, and use the native execution path", async () => {
     const presenceId = readState().presence?.id;
     await POST(new Request("http://localhost/api/x/manage", { method: "POST", body: JSON.stringify({ action: "save", presenceId, credentials: { apiKey: "test_api", apiSecret: "test_secret", accessToken: "test_access", accessTokenSecret: "test_access_secret" } }), headers: { "content-type": "application/json" } }));
@@ -227,6 +253,30 @@ describe("native X connection", () => {
     expect(body.executions[0].externalRef).toEqual({ type: "x.post", id: "mock-post-1" });
     expect(JSON.stringify(fetchMock.mock.calls[0]?.[1]?.body)).toContain("publicFooting");
     expect(JSON.stringify(fetchMock.mock.calls[0]?.[1]?.body)).toContain("postsPublished");
+    vi.unstubAllGlobals();
+  });
+
+  it("does not lose a substantive inbound reply when observation and pulse overlap", async () => {
+    const presenceId = readState().presence?.id;
+    await POST(new Request("http://localhost/api/x/manage", { method: "POST", body: JSON.stringify({ action: "save", presenceId, credentials: { apiKey: "test_api", apiSecret: "test_secret", accessToken: "test_access", accessTokenSecret: "test_access_secret" } }), headers: { "content-type": "application/json" } }));
+    await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "configureProvider", provider: "openai", label: "OpenAI workspace", secret: "provider-secret-test", hasSecret: true }), headers: { "content-type": "application/json" } }));
+    await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setModel", model: "gpt-5.6-luna", provider: "openai", quality: "high" }), headers: { "content-type": "application/json" } }));
+    await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setPresence", patch: { execution: { reply: "auto" } } }), headers: { "content-type": "application/json" } }));
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "post-1", text: "Jenny's first post", created_at: "2026-08-13T01:00:00.000Z", conversation_id: "post-1" }] }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "mention-1", text: "@jenny_ai I'm building an AI product for founders. What are you interested in discussing?", created_at: "2026-08-13T01:01:00.000Z", author_id: "user-1", conversation_id: "post-1", referenced_tweets: [{ type: "replied_to", id: "post-1" }] }], includes: { users: [{ id: "user-1", username: "builder" }] } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: "I care about thoughtful AI products, durable relationships, and the ideas that help people build with more clarity. What are you working on?" } }] }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { id: "reply-1" } }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "runPulse", presenceId }), headers: { "content-type": "application/json" } }));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.events.some((event: { title: string }) => event.title === "Worth responding to")).toBe(true);
+    expect(body.executions[0].affordance).toBe("x.reply");
+    expect(body.executions[0].status).toBe("succeeded");
+    expect(body.executions[0].externalRef).toEqual({ type: "x.post", id: "reply-1" });
+    expect(body.presence.context.publicFooting.judgedInboundIds).toContain("mention-1");
     vi.unstubAllGlobals();
   });
 
