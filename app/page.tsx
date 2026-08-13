@@ -16,7 +16,9 @@ import {
   ChevronRight,
   Circle,
   CircleAlert,
+  Clock3,
   FileText,
+  FlaskConical,
   Globe2,
   Ghost,
   LoaderCircle,
@@ -30,6 +32,7 @@ import {
   Plus,
   PlugZap,
   Radio,
+  RotateCcw,
   Send,
   Settings2,
   ShieldCheck,
@@ -37,12 +40,13 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { AGENT_TOOL_DEFINITIONS, CHANNEL_CAPABILITIES } from "@/lib/types";
+import { AGENT_TOOL_DEFINITIONS, CHANNEL_CAPABILITIES, simulationForChannel } from "@/lib/types";
 import { deriveActivitySummary } from "@/lib/runtime";
 import type {
   CalendarSlot,
   ChannelDefinition,
   ChannelId,
+  ChannelSimulationDefinition,
   ConnectorKind,
   CreateAgentInput,
   CreatePresenceInput,
@@ -50,9 +54,24 @@ import type {
   FileKind,
   GhostProfile,
   OpenPresenceState,
+  PublicDisclosurePosture,
+  PublicSelf,
+  PublicTechnicalFact,
+  PresenceConnectionMode,
   PresenceMode,
+  MirrorObject,
+  SandboxActor,
   View,
 } from "@/lib/types";
+
+const PUBLIC_TECHNICAL_FACTS: { id: PublicTechnicalFact; label: string; detail: string }[] = [
+  { id: "ai-presence", label: "This is an AI presence", detail: "Say so when the question makes it relevant." },
+  { id: "open-source", label: "Open source", detail: "Share the project is open source." },
+  { id: "built-with-openpresence", label: "Built with OpenPresence", detail: "Name the platform when explicitly useful." },
+  { id: "model-provider", label: "Current model provider", detail: "Share the provider, not credentials." },
+  { id: "exact-model", label: "Exact model", detail: "Share the selected model when approved." },
+  { id: "tools", label: "Tools used", detail: "Describe capabilities at a public level." },
+];
 
 const fileOrder: FileKind[] = [
   "BRAIN",
@@ -65,11 +84,12 @@ const fileOrder: FileKind[] = [
 ];
 const navItems: { id: View; label: string; icon: typeof MessageCircle }[] = [
   { id: "chat", label: "Chat", icon: MessageCircle },
+  { id: "playground", label: "Playground", icon: FlaskConical },
   { id: "live", label: "Activity", icon: Radio },
   { id: "calendar", label: "Calendar", icon: CalendarDays },
 ];
-const presenceNavItems = navItems.filter(({ id }) => id !== "chat");
-const agentNavItems = navItems.filter(({ id }) => id === "chat");
+const presenceNavItems = navItems.filter(({ id }) => id === "live" || id === "calendar");
+const agentNavItems = navItems.filter(({ id }) => id === "chat" || id === "playground");
 const channelLabel = (channel: ChannelId, definitions?: ChannelDefinition[]) =>
   definitions?.find((item) => item.id === channel)?.name ??
   (channel === "x"
@@ -267,6 +287,55 @@ type XManage = (
   operation: unknown,
 ) => Promise<{ state?: OpenPresenceState; result?: { account: { id: string; username: string; name: string }; access: "read" | "read-write" } } | null>;
 
+function SandboxEventForm({
+  sessionId,
+  simulation,
+  actors,
+  targetObjects,
+  mutate,
+}: {
+  sessionId: string;
+  simulation: ChannelSimulationDefinition;
+  actors: SandboxActor[];
+  targetObjects: MirrorObject[];
+  mutate: Mutate;
+}) {
+  const [actionId, setActionId] = useState(simulation.actions[0]?.id ?? "post");
+  const [actorId, setActorId] = useState("new");
+  const [actorName, setActorName] = useState("Maya Chen");
+  const [actorHandle, setActorHandle] = useState("@mayachen");
+  const [content, setContent] = useState("");
+  const [targetId, setTargetId] = useState("");
+  const [busy, setBusy] = useState(false);
+  const selectedAction = simulation.actions.find((item) => item.id === actionId) ?? simulation.actions[0];
+  const selectedActor = actors.find((item) => item.id === actorId);
+  const targetObject = targetId ? targetObjects.find((item) => item.id === targetId) : undefined;
+  const actorNameForSubmit = selectedActor?.displayName ?? actorName.trim();
+  const requiresContent = selectedAction?.contentRequired !== false;
+  const canSubmit = Boolean(selectedAction && actorNameForSubmit && (!requiresContent || content.trim()) && (!selectedAction.target || targetObject));
+  const submitEvent = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedAction || !canSubmit) return;
+    setBusy(true);
+    try {
+      await mutate({ type: "addSandboxEvent", sessionId, actionId: selectedAction.id, actorId: selectedActor?.id, actorName: actorNameForSubmit, actorHandle: selectedActor?.handle ?? actorHandle, content, targetExternalRef: targetObject?.externalRef });
+      setContent("");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <form className="sandbox-event-form" onSubmit={submitEvent}>
+      <label>What should happen<select aria-label="What should happen" value={actionId} onChange={(event) => { setActionId(event.target.value); setTargetId(""); setContent(""); }}>{simulation.actions.map((action) => <option key={action.id} value={action.id}>{action.label}</option>)}</select></label>
+      <label>{selectedAction?.actorLabel ?? "Who?"}<select aria-label="Who" value={actorId} onChange={(event) => setActorId(event.target.value)}><option value="new">New person</option>{actors.map((actor) => <option key={actor.id} value={actor.id}>{actor.displayName}{actor.handle ? ` · ${actor.handle}` : ""}</option>)}</select></label>
+      {actorId === "new" && <div className="sandbox-new-actor"><label>Name<input aria-label="New person name" value={actorName} onChange={(event) => setActorName(event.target.value)} /></label><label>Handle<input aria-label="New person handle" value={actorHandle} onChange={(event) => setActorHandle(event.target.value)} /></label></div>}
+      {selectedAction?.target && <label>{selectedAction.target.label}<select aria-label={selectedAction.target.label} value={targetId} onChange={(event) => setTargetId(event.target.value)}><option value="">Choose a simulated post</option>{targetObjects.map((item) => <option key={item.id} value={item.id}>{item.author?.displayName ?? "Someone"}: {(item.content?.text ?? "").slice(0, 42)}</option>)}</select></label>}
+      {selectedAction?.contentLabel && <label>{selectedAction.contentLabel}<textarea aria-label={selectedAction.contentLabel} value={content} onChange={(event) => setContent(event.target.value)} placeholder={selectedAction.contentPlaceholder} rows={4} /></label>}
+      <Button type="submit" variant="secondary" disabled={busy || !canSubmit}><Plus size={14} /> {selectedAction?.submitLabel ?? "Add event"}</Button>
+    </form>
+  );
+}
+
 const presenceModes: {
   id: PresenceMode;
   label: string;
@@ -342,6 +411,7 @@ export default function Home() {
   const [pendingOperation, setPendingOperation] = useState<string | null>(null);
   const nativeSyncInFlight = useRef<string | null>(null);
   const calendarRunInFlight = useRef<string | null>(null);
+  const playgroundStartInFlight = useRef<string | null>(null);
   useEffect(() => {
     fetch(`/api/state?read=${Date.now()}`, { cache: "no-store" })
       .then(async (response) => {
@@ -378,10 +448,21 @@ export default function Home() {
       if (tracksAttention) setPendingOperation(null);
     }
   }
+  function openView(nextView: View) {
+    setView(nextView);
+    const presence = state?.presence;
+    if (nextView !== "playground" || !state?.onboarded || !presence || playgroundStartInFlight.current === presence.id) return;
+    const hasActiveSession = state.playgroundSessions.some((item) => item.presenceId === presence.id && item.status === "active");
+    if (hasActiveSession) return;
+    playgroundStartInFlight.current = presence.id;
+    void mutate({ type: "startPlayground", presenceId: presence.id, source: "fresh" }).finally(() => {
+      playgroundStartInFlight.current = null;
+    });
+  }
   useEffect(() => {
     if (pendingOperation === "wakePresence" || pendingOperation === "runPulse") return;
     const presence = state?.presence;
-    const connection = presence
+    const connection = presence && presence.connectionMode !== "bridge"
       ? state.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x" && item.status === "connected")
       : undefined;
     if (!presence || !connection) return;
@@ -509,10 +590,10 @@ export default function Home() {
       />
     );
   return (
-    <AgentWorkspaceShell
+      <AgentWorkspaceShell
       state={state}
       view={view}
-      setView={setView}
+      setView={openView}
       selectedFile={selectedFile}
       setSelectedFile={setSelectedFile}
       mutate={mutate}
@@ -845,7 +926,7 @@ function PresenceSwitcher({
         </span>
         <span>
           <strong>{presence.name}</strong>
-          <small>{presence.mode === "ghost" ? "Ghost" : "Agent-owned"}</small>
+          <small>{presence.mode === "ghost" ? "Ghost" : "Agent-owned"} · {presence.environment === "sandbox" ? "Sandbox" : "Live"}</small>
         </span>
         <span className={`live-dot ${presence.status === "paused" ? "paused-dot" : ""}`} />
         <ChevronDown size={14} className={open ? "presence-chevron-open" : ""} />
@@ -867,7 +948,7 @@ function PresenceSwitcher({
               <span className="channel-badge" title={channelLabel(item.channel, state.channelDefinitions)}><PresenceLogo channel={item.channel} definitions={state.channelDefinitions} /></span>
               <span>
                 <strong>{item.name}</strong>
-                <small>{channelLabel(item.channel, state.channelDefinitions)} · {item.mode === "ghost" ? "Ghost" : "Agent-owned"}</small>
+                <small>{channelLabel(item.channel, state.channelDefinitions)} · {item.mode === "ghost" ? "Ghost" : "Agent-owned"} · {item.environment === "sandbox" ? "Sandbox" : "Live"}</small>
               </span>
               <span className={`live-dot ${item.status === "paused" ? "paused-dot" : ""}`} />
             </button>
@@ -1035,12 +1116,6 @@ function AgentWorkspaceShell({
   const agent = state.agent!;
   const presence = state.presence ?? state.presences[0]!;
   const [showPresenceModal, setShowPresenceModal] = useState(false);
-  const activeScope =
-    view === "chat"
-      ? "Agent-wide"
-      : view === "brain"
-        ? "Agent settings"
-        : `${channelLabel(presence.channel, state.channelDefinitions)} · ${presence.handle}`;
   const pageLabel =
     view === "brain"
       ? "Manage Agent"
@@ -1144,26 +1219,20 @@ function AgentWorkspaceShell({
             <ChevronRight size={14} />
             <strong>{pageLabel}</strong>
           </div>
-          <div className="topbar-actions">
-            <span
-              className={`connection-label ${presence.status === "paused" ? "paused" : ""}`}
-            >
+          {view === "presence" && <div className="topbar-actions">
+            <span className={`connection-label ${presence.status === "paused" ? "paused" : ""}`}>
               <span className="status-dot" />{" "}
-              {view === "presence"
-                ? presence.status === "paused"
-                  ? "Asleep"
-                  : state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "needs-attention")
-                    ? "Needs attention"
-                  : (state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "connected") || state.bridges.some(
-                        (item) =>
-                          item.presenceId === presence.id &&
-                          item.state === "online",
-                      ))
-                    ? "Connected"
-                    : "Not connected"
-                : activeScope}
+              {presence.status === "paused"
+                ? "Asleep"
+                : state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "needs-attention") || state.bridges.some((item) => item.presenceId === presence.id && item.state === "degraded")
+                  ? "Needs attention"
+                  : presence.connectionMode === "sandbox"
+                    ? "Sandbox"
+                    : (state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "connected") || state.bridges.some((item) => item.presenceId === presence.id && item.state === "online"))
+                      ? "Connected"
+                      : "Not connected"}
             </span>
-          </div>
+          </div>}
         </header>
         {error && (
           <div className="toast-error" role="alert">
@@ -1174,8 +1243,11 @@ function AgentWorkspaceShell({
           {view === "chat" && (
             <ContextChatView state={state} mutate={mutate} setView={setView} />
           )}
+          {view === "playground" && (
+            <PlaygroundView state={state} mutate={mutate} />
+          )}
           {view === "live" && (
-            <LiveView state={state} mutate={mutate} setView={setView} pendingOperation={pendingOperation} />
+            <LiveView state={state} mutate={mutate} pendingOperation={pendingOperation} />
           )}
           {view === "calendar" && (
             <CalendarView state={state} mutate={mutate} />
@@ -1194,6 +1266,7 @@ function AgentWorkspaceShell({
               key={presence.id}
               state={state}
               mutate={mutate}
+              setView={setView}
               pendingOperation={pendingOperation}
               manageBridge={manageBridge}
               manageX={manageX}
@@ -1414,7 +1487,7 @@ function LegacyAppShell({
             <ChatView state={state} mutate={mutate} setView={setView} />
           )}
           {view === "live" && (
-            <LiveView state={state} mutate={mutate} setView={setView} />
+            <LiveView state={state} mutate={mutate} />
           )}
           {view === "calendar" && (
             <CalendarView state={state} mutate={mutate} />
@@ -1489,6 +1562,7 @@ function AddPresenceDialog({
   onCreate: (input: CreatePresenceInput) => Promise<void>;
 }) {
   const [channel, setChannel] = useState<ChannelId>("x");
+  const [connectionMode, setConnectionMode] = useState<PresenceConnectionMode>("sandbox");
   const [presenceName, setPresenceName] = useState("");
   const [handle, setHandle] = useState("@jenny_ai");
   const [mode, setMode] = useState<PresenceMode>("agent");
@@ -1565,6 +1639,7 @@ function AddPresenceDialog({
       mode,
       accent,
       channelDefinition: definition,
+      connectionMode,
     });
     setSubmitting(false);
   };
@@ -1608,23 +1683,34 @@ function AddPresenceDialog({
             <input
               type="radio"
               name="channel"
+              value="sandbox"
+              checked={connectionMode === "sandbox"}
+              onChange={() => { setConnectionMode("sandbox"); setChannel("x"); }}
+            />
+            <strong>Sandbox</strong>
+            <small>Rehearse safely in a simulated social world</small>
+          </label>
+          <label>
+            <input
+              type="radio"
+              name="channel"
               value="x"
-              checked={channel === "x"}
-              onChange={() => setChannel("x")}
+              checked={connectionMode === "native"}
+              onChange={() => { setConnectionMode("native"); setChannel("x"); }}
             />
             <strong>X</strong>
-            <small>Public conversations and posts</small>
+            <small>Live public conversations through the X API</small>
           </label>
           <label>
             <input
               type="radio"
               name="channel"
               value="__custom__"
-              checked={channel === "__custom__"}
-              onChange={() => setChannel("__custom__")}
+              checked={connectionMode === "bridge"}
+              onChange={() => { setConnectionMode("bridge"); setChannel("__custom__"); }}
             />
-            <strong>Custom Channel</strong>
-            <small>Describe a community or social environment</small>
+            <strong>Bridge</strong>
+            <small>Connect a community or social environment through an adapter</small>
           </label>
         </fieldset>
         {channel === "__custom__" && (
@@ -1889,10 +1975,10 @@ function ContextSidebar({
         <SectionEyebrow>Outputs</SectionEyebrow>
         {outputs.length ? (
           <div className="context-item-list">
-            {outputs.map((output) => (
+            {outputs.map((output, index) => (
               <div
                 className="context-item"
-                key={`${output.label}-${output.detail}`}
+                key={`${output.label}-${output.detail}-${index}`}
               >
                 <Sparkles size={14} />
                 <span>
@@ -1924,6 +2010,70 @@ function ContextSidebar({
         </div>
       </section>
     </aside>
+  );
+}
+
+function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: Mutate }) {
+  const presence = state.presence ?? state.presences[0];
+  const session = state.playgroundSessions.find((item) => item.presenceId === presence?.id && item.status === "active") ?? state.playgroundSessions[0];
+  const channelDefinition = state.channelDefinitions.find((item) => item.id === presence?.channel);
+  const simulation = simulationForChannel(presence?.channel ?? "x", channelDefinition);
+  const objects = session ? state.mirrorObjects.filter((item) => item.sessionId === session.id).sort((left, right) => (right.occurredAt ?? right.observedAt).localeCompare(left.occurredAt ?? left.observedAt)) : [];
+  const sessionEvents = session ? state.events.filter((item) => item.sessionId === session.id).slice(0, 8) : [];
+  const reviewCount = session ? state.executions.filter((item) => item.sessionId === session.id && item.status === "awaiting-review").length : 0;
+  const actors = session ? state.sandboxActors.filter((item) => item.sessionId === session.id) : [];
+  const [busy, setBusy] = useState(false);
+  const targetObjects = objects.filter((item) => item.actorPresenceId === presence?.id && item.objectType !== "like");
+  const run = async (operation: unknown) => { setBusy(true); try { await mutate(operation); } finally { setBusy(false); } };
+  const wakeOrCheck = async () => {
+    if (!session) return;
+    if (presence?.status === "paused") {
+      const next = await mutate({ type: "setPresence", patch: { status: "live" } });
+      if (!next) return;
+    }
+    await run({ type: "runSandboxPulse", sessionId: session.id });
+  };
+  if (!presence) return null;
+  if (!session) return <div className="playground-page"><div className="playground-loading" role="status">Opening a fresh simulated account…</div></div>;
+  return (
+    <div className="playground-page">
+      <div className="playground-toolbar">
+        <div>
+          <div className="eyebrow">Agent rehearsal</div>
+          <div className="playground-title-row"><h1>Playground</h1><span className="playground-world-label">{simulation.worldLabel}</span><span className="environment-chip"><span className="status-dot" /> Sandbox</span></div>
+          <p>{simulation.worldDescription} This world is simulated. {state.agent?.name ?? "Your Agent"} is real.</p>
+          <p className="playground-handle-hint">Agent handle: <strong>{presence.handle}</strong>. Use @mentions in Chat when addressing {presence.name}.</p>
+        </div>
+        <div className="playground-toolbar-actions">
+          <span className="playground-presence"><PresenceLogo channel={presence.channel} definitions={state.channelDefinitions} /> <strong>{presence.name}</strong> <span>{channelLabel(presence.channel, state.channelDefinitions)}</span></span>
+          <Button variant="ghost" disabled={busy} onClick={() => void run({ type: "resetPlayground", sessionId: session.id })}><RotateCcw size={14} /> Reset</Button>
+        </div>
+      </div>
+      <div className="playground-grid">
+          <aside className="playground-rail">
+            <section className="playground-panel"><div className="eyebrow">Starting world</div><strong>{simulation.startingStateLabel}</strong><p>Nothing here is live. Simulated history stays in this session.</p><div className="session-status"><span className="status-dot" /> {presence.status === "paused" ? "Paused" : "Awake"}</div></section>
+            <section className="playground-panel"><div className="eyebrow">People in the room</div>{state.sandboxActors.filter((actor) => actor.sessionId === session.id).length ? state.sandboxActors.filter((actor) => actor.sessionId === session.id).map((actor) => <div className="playground-actor" key={actor.id}><span className="actor-avatar">{initials(actor.displayName)}</span><span><strong>{actor.displayName}</strong><small>{actor.handle ?? "Audience"}</small></span></div>) : <p className="playground-muted">Add a person below to make the first social event.</p>}</section>
+            <section className="playground-panel playground-time"><div className="eyebrow"><Clock3 size={12} /> Virtual time</div><strong>{new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(session.virtualNow))}</strong><div className="time-actions"><button onClick={() => void run({ type: "advanceSandboxTime", sessionId: session.id, minutes: 15 })}>+15m</button><button onClick={() => void run({ type: "advanceSandboxTime", sessionId: session.id, minutes: 60 })}>+1h</button><button onClick={() => void run({ type: "advanceSandboxTime", sessionId: session.id, minutes: 1440 })}>Tomorrow</button></div></section>
+          </aside>
+          <main className="playground-world"><div className="world-heading"><div><div className="eyebrow">{simulation.worldLabel}</div><h2>What Jenny can see</h2></div><Button variant="primary" disabled={busy} onClick={() => void wakeOrCheck()}><Sparkles size={14} /> {presence.status === "paused" ? "Wake Jenny" : "Check now"}</Button></div>{objects.length ? <div className="social-feed">{objects.map((item) => <article className={`social-card ${item.actorPresenceId === presence.id ? "agent-authored" : ""}`} key={item.id}><div className="social-card-meta"><span className="actor-avatar">{initials(item.author?.displayName ?? "Someone")}</span><span><strong>{item.author?.displayName ?? "Someone"}</strong><small>{item.author?.handle ?? "Audience"} · {item.objectType}</small></span><time>{formatTime(item.occurredAt ?? item.observedAt)}</time></div><p>{item.content?.text ?? ""}</p>{item.parentExternalRef && <small className="thread-context">↳ attached to the selected simulated post</small>}</article>)}</div> : <div className="world-blank"><MessageSquare size={20} /><p>The simulated {channelLabel(session.channelId, state.channelDefinitions)} world is quiet.</p><small>Check now to let {state.agent?.name ?? "the Agent"} choose a first move, or add an event from the control room.</small></div> }</main>
+          <aside className="playground-activity">
+            <div className="activity-rail-heading"><div className="eyebrow">Control room</div><span className="environment-chip">{channelLabel(session.channelId, state.channelDefinitions)} · Sandbox</span></div>
+            <section>
+              <div className="eyebrow">Now</div>
+              {sessionEvents.length ? sessionEvents.slice(0, 3).map((item) => <div className="playground-event" key={item.id}><span className={`event-dot event-${item.tone}`} /><span><strong>{item.title}</strong><small>{item.detail}</small></span></div>) : <p className="playground-muted">No decisions yet.</p>}
+            </section>
+            <section>
+              <div className="eyebrow">Needs you</div>
+              {reviewCount ? <div className="needs-review"><strong>{reviewCount} action waiting</strong><small>Review before it appears in the simulated world.</small></div> : <p className="playground-muted">Nothing waiting for review.</p>}
+            </section>
+            <section>
+              <div className="eyebrow">Add to {simulation.worldLabel}</div>
+              <p className="playground-form-intro">Place a channel-native situation into the world Jenny can see.</p>
+              <SandboxEventForm key={`${presence.id}:${session.id}`} sessionId={session.id} simulation={simulation} actors={actors} targetObjects={targetObjects} mutate={mutate} />
+            </section>
+          </aside>
+      </div>
+    </div>
   );
 }
 
@@ -2581,36 +2731,33 @@ void ContextChatView;
 function LiveView({
   state,
   mutate,
-  setView,
   pendingOperation,
 }: {
   state: OpenPresenceState;
   mutate: Mutate;
-  setView: (view: View) => void;
   pendingOperation?: string | null;
 }) {
-  const agent = state.agent!;
   const selected = state.presence;
+  const presenceName = selected?.name ?? "this Presence";
   const paused = selected?.status === "paused";
   const waking = pendingOperation === "wakePresence";
   const checking = pendingOperation === "runPulse";
   const activity = deriveActivitySummary(state, selected?.id);
+  const presenceCopy = (text: string) => text.replaceAll("Jenny", presenceName).replaceAll(state.agent?.name ?? "Jenny", presenceName);
   const visibleEvents = state.events.filter(
     (item) => item.presenceId === selected?.id,
   );
-  const presenceScope = selected
-    ? `${channelLabel(selected.channel, state.channelDefinitions)} · ${selected.handle}`
-    : "No Presence selected";
+  const presenceScope = selected ? channelLabel(selected.channel, state.channelDefinitions) : "No Presence selected";
   return (
     <div className="page">
       <div className="page-heading">
         <div>
           <SectionEyebrow>Presence activity</SectionEyebrow>
           <h1>
-            {selected?.handle ?? agent.name} is {paused ? "asleep" : "live"}.
+            {presenceName} is {paused ? "asleep" : "live"}.
           </h1>
           <p className="muted">
-            See what Jenny is doing now, what happens next, and what is waiting
+            See what {presenceName} is doing now, what happens next, and what is waiting
             for you.
           </p>
         </div>
@@ -2622,7 +2769,7 @@ function LiveView({
               variant="primary"
               disabled={waking}
             >
-              <Play size={15} /> {waking ? "Waking Jenny…" : "Wake up Jenny"}
+              <Play size={15} /> {waking ? `Waking ${presenceName}…` : `Wake up ${presenceName}`}
             </Button>
           ) : (
             <>
@@ -2648,14 +2795,14 @@ function LiveView({
         <div className={`activity-card activity-card-${activity.current.tone}`}>
           <SectionEyebrow>Now</SectionEyebrow>
           <h2>{activity.current.label}</h2>
-          <p>{activity.current.detail}</p>
+          <p>{presenceCopy(activity.current.detail)}</p>
           <small>Last pulse: {activity.lastPulseAt ? formatTime(activity.lastPulseAt) : "Never"}</small>
         </div>
         <div className="activity-card">
           <SectionEyebrow>Next</SectionEyebrow>
           <h2>{activity.nextAttention.label}</h2>
-          <p>{activity.nextAttention.detail}</p>
-          <small>{activity.nextIntent.label} · {activity.nextIntent.detail}</small>
+          <p>{presenceCopy(activity.nextAttention.detail)}</p>
+          <small>{activity.nextIntent.label} · {presenceCopy(activity.nextIntent.detail)}</small>
         </div>
         <div className="activity-card">
           <SectionEyebrow>Today&apos;s rhythm</SectionEyebrow>
@@ -2682,15 +2829,15 @@ function LiveView({
           {visibleEvents.length === 0 ? (
               <EmptyState
                 title="Nothing has happened yet"
-                body={paused ? "Jenny is asleep. Wake her up to begin a first attention cycle." : "Check now to let this Presence look for something worth saying."}
+                body={paused ? `${presenceName} is asleep. Wake this Presence to begin a first attention cycle.` : "Check now to let this Presence look for something worth saying."}
                 action={
                   <Button
                     onClick={() => mutate(paused ? { type: "wakePresence", presenceId: selected?.id } : { type: "runPulse", presenceId: selected?.id })}
                     variant="secondary"
                     disabled={waking || checking}
-                    title={paused ? "Wake up Jenny and begin a first attention cycle." : "Look at the channel now."}
+                    title={paused ? `Wake up ${presenceName} and begin a first attention cycle.` : "Look at the channel now."}
                 >
-                  <Play size={14} /> {paused ? (waking ? "Waking Jenny…" : "Wake up Jenny") : (checking ? "Checking now…" : "Check now")}
+                  <Play size={14} /> {paused ? (waking ? `Waking ${presenceName}…` : `Wake up ${presenceName}`) : (checking ? "Checking now…" : "Check now")}
                   </Button>
                 }
             />
@@ -2711,10 +2858,10 @@ function LiveView({
                   </div>
                   <div className="event-copy">
                     <div className="event-title">
-                      {item.title}
+                      {presenceCopy(item.title)}
                       <span>{formatTime(item.time)}</span>
                     </div>
-                    <p>{item.detail}</p>
+                    <p>{presenceCopy(item.detail)}</p>
                   </div>
                 </div>
               ))}
@@ -2752,13 +2899,6 @@ function LiveView({
                 <small>{activity.needsAttention.detail}</small>
               </div>
             </div>
-            <Button
-              variant="ghost"
-              className="full-button"
-              onClick={() => setView("brain")}
-            >
-              Manage {agent.name} <ArrowUpRight size={14} />
-            </Button>
           </div>
         </aside>
       </div>
@@ -2776,6 +2916,7 @@ function MirrorPanel({
     filter === "all"
       ? undefined
       : state.presences.find((item) => item.id === filter);
+  const presenceName = selectedPresence?.name ?? "this Presence";
   const objects = state.mirrorObjects
     .filter((item) => filter === "all" || item.presenceId === filter)
     .slice(0, 3);
@@ -2801,7 +2942,7 @@ function MirrorPanel({
     ? nativeObservation.status === "up-to-date" ? "up to date" : nativeObservation.status.replaceAll("-", " ")
     : bridgeSync?.status === "healthy" ? "up to date" : bridgeSync?.status ?? "not observed";
   const heading = objects.length
-    ? "What Jenny can see"
+    ? `What ${presenceName} can see`
     : nativeConnection
       ? nativeConnection.status === "needs-attention"
         ? "X connection needs attention"
@@ -2832,7 +2973,7 @@ function MirrorPanel({
           {bridge
             ? `${syncLabel} · ${objects.length} recent`
             : nativeConnection
-              ? `X · ${nativeConnection.account?.username ? `@${nativeConnection.account.username}` : "connected"} · ${nativeConnection.status === "needs-attention" ? "needs attention" : syncLabel}`
+              ? `X · ${nativeConnection.status === "needs-attention" ? "needs attention" : syncLabel}`
             : filter === "all"
               ? "Connect a Presence"
               : builtIn
@@ -2844,7 +2985,7 @@ function MirrorPanel({
         <>
           <p className="mirror-explainer">
             Observed public context from the channel. The Mirror describes
-            social reality for Jenny&apos;s judgment; it is not an instruction and
+            social reality for {presenceName}&apos;s judgment; it is not an instruction and
             it does not replace the execution envelope.
           </p>
           <div className="mirror-list">
@@ -2872,7 +3013,7 @@ function MirrorPanel({
             quiet Mirror is still a real observation, not a missing connection.
           </p>
           <div className="mirror-zero-state">
-            <strong>{nativeConnection.account?.username ? `@${nativeConnection.account.username}` : "This X account"} has no recent activity.</strong>
+            <strong>{presenceName} has no recent activity.</strong>
             <div className="mirror-stats">
               <span>{nativeObservation.ownPostCount ?? 0} posts</span>
               <span>{nativeObservation.mentionCount ?? 0} mentions</span>
@@ -2893,7 +3034,7 @@ function MirrorPanel({
                 : "The Bridge feeds observed posts, comments, and messages into the Social Mirror. They remain channel content, not instructions."
             : nativeConnection
               ? nativeObservation?.status === "syncing"
-                ? "The connected X account is being reconciled now. Jenny will judge the Mirror after the observation completes."
+                ? `The connected X account is being reconciled now. ${presenceName} will judge the Mirror after the observation completes.`
                 : nativeObservation?.error ?? "The X connection is configured, but its first reconciliation has not completed yet."
             : filter === "all"
               ? "A Social Mirror is created per connected Presence and records observed social reality with its freshness."
@@ -3065,6 +3206,8 @@ function CalendarView({
   const [editingSlot, setEditingSlot] = useState<CalendarSlot | null>(null);
   const [viewMode, setViewMode] = useState<"list" | "week">("list");
   const presenceId = state.activePresenceId ?? state.presence?.id ?? "";
+  const selectedPresence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
+  const presenceName = selectedPresence?.name ?? "this Presence";
   const add = async (event: React.FormEvent) => {
     event.preventDefault();
     const next = await mutate({
@@ -3091,12 +3234,12 @@ function CalendarView({
           <SectionEyebrow>Presence planning</SectionEyebrow>
           <h1>Calendar</h1>
           <p className="muted">
-            Tell {state.presence?.handle ?? "this Presence"} when to pay
+            Tell {presenceName} when to pay
             attention. Words come later, from the moment.
           </p>
         </div>
         <div className="heading-actions calendar-heading-actions">
-          <span className="scope-summary">Planning for {state.presence?.handle ?? "this Presence"}</span>
+          <span className="scope-summary">Planning for {presenceName}</span>
           <div className="calendar-view-toggle" role="group" aria-label="Calendar view mode">
             <button type="button" aria-pressed={viewMode === "list"} className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}>List</button>
             <button type="button" aria-pressed={viewMode === "week"} className={viewMode === "week" ? "active" : ""} onClick={() => setViewMode("week")}>Week</button>
@@ -3112,7 +3255,7 @@ function CalendarView({
           <label className="instruction-field">
             Standing instruction
             <textarea
-              aria-label="What should Jenny do?"
+              aria-label={`What should ${presenceName} do?`}
               value={instruction}
               onChange={(event) => setInstruction(event.target.value)}
               placeholder="Teach the audience one useful thing about persistent agents."
@@ -3171,7 +3314,7 @@ function CalendarView({
         </form>
       )}
       {viewMode === "week" ? (
-        <WeekCalendar slots={visibleSlots} state={state} onEdit={beginEdit} onAdd={() => setShowForm(true)} />
+        <WeekCalendar slots={visibleSlots} state={state} presenceName={presenceName} onEdit={beginEdit} onAdd={() => setShowForm(true)} />
       ) : (
       <div className="calendar-layout">
         <section>
@@ -3187,7 +3330,7 @@ function CalendarView({
           {visibleSlots.length === 0 ? (
             <EmptyState
               title="No standing intentions"
-              body="A quiet calendar is fine. Jenny can still observe and respond through her normal operating rhythm; standing intentions are explicit scheduled considerations."
+              body={`A quiet calendar is fine. ${presenceName} can still observe and respond through its normal operating rhythm; standing intentions are explicit scheduled considerations.`}
               action={
                 <Button onClick={() => setShowForm(true)} variant="secondary">
                   <Plus size={14} /> Add first intent
@@ -3212,7 +3355,7 @@ function CalendarView({
           <SectionEyebrow>Standing intent</SectionEyebrow>
           <h3>Nothing is written months in advance.</h3>
           <p>
-            At run time, Jenny can publish, draft, or choose{" "}
+            At run time, {presenceName} can publish, draft, or choose{" "}
             <strong>NO_OP</strong>.
           </p>
         </aside>
@@ -3225,11 +3368,13 @@ function CalendarView({
 function WeekCalendar({
   slots,
   state,
+  presenceName,
   onEdit,
   onAdd,
 }: {
   slots: CalendarSlot[];
   state: OpenPresenceState;
+  presenceName: string;
   onEdit: (slot: CalendarSlot) => void;
   onAdd: () => void;
 }) {
@@ -3241,14 +3386,14 @@ function WeekCalendar({
       <div className="week-calendar-toolbar">
         <div>
           <SectionEyebrow>Visual schedule</SectionEyebrow>
-          <h2>When Jenny is meant to pay attention</h2>
+          <h2>When {presenceName} is meant to pay attention</h2>
           <p>Standing intents are shown by day and time. Nothing here is a promised post.</p>
         </div>
         <div className="week-calendar-legend" aria-label="Intent objectives">
           {["audience_growth", "education", "relationship", "reflection"].map((objective) => <span key={objective}><i className={`legend-dot objective-${objectiveTone(objective)}`} />{objectiveLabel(objective)}</span>)}
         </div>
       </div>
-      {scheduledSlots.length === 0 ? <EmptyState title="Nothing scheduled for this Presence" body="Add a standing intent to see when Jenny will pay attention during the week." action={<Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add first intent</Button>} /> : <div className="week-grid-scroll"><div className="week-grid" style={{ "--week-grid-height": `${gridHeight}px` } as React.CSSProperties}><div className="week-grid-header"><span className="week-time-header">Local time</span>{calendarWeekDays.map((day) => <span key={day}>{day.slice(0, 3)}<small>{day}</small></span>)}</div><div className="week-grid-body"><div className="week-time-rail">{calendarHours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>{calendarWeekDays.map((day) => <div className="week-day-column" key={day}>{calendarHours.map((hour) => <div className="week-hour-cell" key={hour} />)}{(daySlots.get(day) ?? []).map((slot) => { const start = timeToMinutes(slot.time); const firstHour = calendarHours[0] * 60; const top = Math.max(0, ((start - firstHour) / 60) * 64); const windowParts = slot.executionWindow.split(/[–-]/).map((part) => part.trim()); const end = windowParts[1] ? timeToMinutes(windowParts[1]) : start + 60; const height = Math.max(54, Math.min(gridHeight - top - 8, ((Math.max(start + 60, end) - start) / 60) * 64 - 8)); const target = state.presences.find((item) => item.id === slot.presence); return <button type="button" key={slot.id} className={`week-intent objective-${objectiveTone(slot.objective)}`} style={{ top, height }} onClick={() => onEdit(slot)} aria-label={`Edit ${slot.label}, ${slot.day} at ${slot.time}`} title={`${slot.label} · ${slot.day} ${slot.time} · ${slot.executionWindow}`}><span className="week-intent-time">{slot.time}</span><strong>{slot.label}</strong><small>{target?.handle ?? "Presence"} · {objectiveLabel(slot.objective)}</small><em>{slot.mode === "auto" ? "Auto" : "Review"}</em></button>; })}</div>)}</div></div></div>}
+      {scheduledSlots.length === 0 ? <EmptyState title="Nothing scheduled for this Presence" body={`Add a standing intent to see when ${presenceName} will pay attention during the week.`} action={<Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add first intent</Button>} /> : <div className="week-grid-scroll"><div className="week-grid" style={{ "--week-grid-height": `${gridHeight}px` } as React.CSSProperties}><div className="week-grid-header"><span className="week-time-header">Local time</span>{calendarWeekDays.map((day) => <span key={day}>{day.slice(0, 3)}<small>{day}</small></span>)}</div><div className="week-grid-body"><div className="week-time-rail">{calendarHours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>{calendarWeekDays.map((day) => <div className="week-day-column" key={day}>{calendarHours.map((hour) => <div className="week-hour-cell" key={hour} />)}{(daySlots.get(day) ?? []).map((slot) => { const start = timeToMinutes(slot.time); const firstHour = calendarHours[0] * 60; const top = Math.max(0, ((start - firstHour) / 60) * 64); const windowParts = slot.executionWindow.split(/[–-]/).map((part) => part.trim()); const end = windowParts[1] ? timeToMinutes(windowParts[1]) : start + 60; const height = Math.max(54, Math.min(gridHeight - top - 8, ((Math.max(start + 60, end) - start) / 60) * 64 - 8)); const target = state.presences.find((item) => item.id === slot.presence); return <button type="button" key={slot.id} className={`week-intent objective-${objectiveTone(slot.objective)}`} style={{ top, height }} onClick={() => onEdit(slot)} aria-label={`Edit ${slot.label}, ${slot.day} at ${slot.time}`} title={`${slot.label} · ${slot.day} ${slot.time} · ${slot.executionWindow}`}><span className="week-intent-time">{slot.time}</span><strong>{slot.label}</strong><small>{target?.name ?? presenceName} · {objectiveLabel(slot.objective)}</small><em>{slot.mode === "auto" ? "Auto" : "Review"}</em></button>; })}</div>)}</div></div></div>}
     </section>
   );
 }
@@ -3276,7 +3421,7 @@ function SlotRow({
         <p>{slot.instruction}</p>
         <span>
           {target
-            ? `${channelLabel(target.channel, state.channelDefinitions)} · ${target.handle}`
+            ? `${channelLabel(target.channel, state.channelDefinitions)} · ${target.name}`
             : "No Presence"}{" "}
           · {slot.objective.replace("_", " ")} ·{" "}
           {slot.mode} · window{" "}
@@ -3663,12 +3808,14 @@ function ProposalRow({
 function PresenceView({
   state,
   mutate,
+  setView,
   pendingOperation,
   manageBridge,
   manageX,
 }: {
   state: OpenPresenceState;
   mutate: Mutate;
+  setView?: (view: View) => void;
   pendingOperation?: string | null;
   manageBridge: BridgeManage;
   manageX: XManage;
@@ -3681,9 +3828,18 @@ function PresenceView({
       presence.channel as keyof typeof CHANNEL_CAPABILITIES
     ] ??
     [];
+  const connectionMode = presence.connectionMode ?? (presence.environment === "sandbox" ? "sandbox" : presence.channel === "x" ? "native" : "bridge");
+  const simulation = simulationForChannel(presence.channel, state.channelDefinitions.find((item) => item.id === presence.channel));
+  const nativeConnection = state.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x");
+  const activeBridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
   const [customizing, setCustomizing] = useState(true);
   const [presenceNameDraft, setPresenceNameDraft] = useState(presence.name);
   const [ghostDraft, setGhostDraft] = useState<GhostProfile>(presence.ghostProfile ?? { subject: "Me / my organization", priorities: "", preferences: "", voice: "", boundaries: "" });
+  const [publicSelfDraft, setPublicSelfDraft] = useState<PublicSelf>(presence.publicSelf ?? { displayName: presence.name, posture: presence.mode === "ghost" ? "representational" : "contextual", approvedTechnicalFacts: [] });
+  const publicPostures: { id: PublicDisclosurePosture; label: string; detail: string }[] = presence.mode === "ghost"
+    ? [{ id: "representational", label: "Representational", detail: "Speak as the person or organization this Presence extends." }, { id: "open-about-assistance", label: "Open about assistance", detail: "Acknowledge AI assistance when it is relevant." }]
+    : [{ id: "contextual", label: "Contextual", detail: "Answer socially and acknowledge AI only when it matters." }, { id: "ai-forward", label: "AI-forward", detail: "Be direct that this is an AI presence when relevant." }, { id: "private", label: "Private", detail: "Keep technical identity private in public conversation." }];
+  const savePublicSelf = () => void mutate({ type: "setPresence", patch: { publicSelf: { ...publicSelfDraft, displayName: presenceNameDraft.trim() || presence.name } } });
   const setMode = (key: string, mode: ExecutionMode) =>
     mutate({ type: "setPresence", patch: { execution: { [key]: mode } } });
   const applyPreset = (mode: ExecutionMode) =>
@@ -3696,7 +3852,7 @@ function PresenceView({
       },
     });
   return (
-    <div className="page">
+    <div className="page presence-settings-page">
       <div className="page-heading">
         <div>
           <SectionEyebrow>One place, one envelope</SectionEyebrow>
@@ -3743,6 +3899,36 @@ function PresenceView({
           </div>
         </div>
       </div>
+      <section className="settings-card channel-settings-card">
+        <div className="section-heading compact">
+          <div>
+            <SectionEyebrow>Channel & environment</SectionEyebrow>
+            <h2>Where should Jenny show up?</h2>
+          </div>
+          <Globe2 size={17} />
+        </div>
+        <p className="muted channel-settings-intro">Choose one destination for {simulation.worldLabel}. Sandbox is safe to rehearse; X and Bridge are live routes.</p>
+        <div className="channel-mode-options">
+          <button className={connectionMode === "sandbox" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { connectionMode: "sandbox" } })}>
+            <FlaskConical size={17} />
+            <span><strong>Sandbox · {simulation.worldLabel}</strong><small>Channel-specific simulated world · nothing leaves OpenPresence</small></span>
+          </button>
+          {presence.channel === "x" && <button className={connectionMode === "native" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { connectionMode: "native" } })}>
+            <span className="channel-option-mark"><XBrand /></span>
+            <span><strong>X</strong><small>Live public channel through the official API</small></span>
+          </button>}
+          <button className={connectionMode === "bridge" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { connectionMode: "bridge" } })}>
+            <PlugZap size={17} />
+            <span><strong>Bridge</strong><small>Live channel through an external adapter</small></span>
+          </button>
+        </div>
+        <div className="channel-selection-status">
+          {connectionMode === "sandbox" && <div className="channel-sandbox-summary"><div><strong>This world is simulated.</strong><p>{simulation.worldLabel} history stays in this rehearsal session; Jenny’s mind is shared.</p></div><Button variant="secondary" onClick={() => setView?.("playground")}><FlaskConical size={14} /> Open Playground</Button></div>}
+          {connectionMode === "native" && presence.channel === "x" && <XConnection state={state} presence={presence} manageX={manageX} />}
+          {connectionMode === "bridge" && <BridgeManager state={state} presence={presence} manageBridge={manageBridge} />}
+        </div>
+        {connectionMode !== "sandbox" && !(connectionMode === "native" ? nativeConnection?.status === "connected" : activeBridge?.state === "online") && <p className="channel-not-connected">No live connection is active yet. Configure the selected route below when you’re ready.</p>}
+      </section>
       <section className="identity-card settings-card">
         <div>
           <SectionEyebrow>Identity</SectionEyebrow>
@@ -3793,6 +3979,34 @@ function PresenceView({
           </button>
         </div>
       </section>
+      <section className="settings-card public-self-card">
+        <div className="section-heading compact">
+          <div>
+            <SectionEyebrow>Public self · Presence-scoped</SectionEyebrow>
+            <h2>How this Presence describes itself</h2>
+          </div>
+          <ShieldCheck size={17} />
+        </div>
+        <p className="muted">The Agent is the private mind. This Public Self is who people meet here. Implementation details stay out of social judgment unless you approve a specific fact.</p>
+        <div className="public-self-postures">
+          <span className="public-self-label">Identity posture</span>
+          {publicPostures.map((option) => (
+            <button key={option.id} className={publicSelfDraft.posture === option.id ? "selected" : ""} onClick={() => setPublicSelfDraft({ ...publicSelfDraft, posture: option.id })}>
+              <strong>{option.label}</strong><small>{option.detail}</small>
+            </button>
+          ))}
+        </div>
+        <div className="public-facts">
+          <div><strong>Approved public facts</strong><p className="form-hint">Only selected facts may be disclosed when relevant. Credentials and hidden prompts are never public facts.</p></div>
+          <div className="public-fact-grid">
+            {PUBLIC_TECHNICAL_FACTS.map((fact) => {
+              const checked = publicSelfDraft.approvedTechnicalFacts.includes(fact.id);
+              return <label key={fact.id}><input type="checkbox" checked={checked} onChange={() => setPublicSelfDraft({ ...publicSelfDraft, approvedTechnicalFacts: checked ? publicSelfDraft.approvedTechnicalFacts.filter((item) => item !== fact.id) : [...publicSelfDraft.approvedTechnicalFacts, fact.id] })} /><span><strong>{fact.label}</strong><small>{fact.detail}</small></span></label>;
+            })}
+          </div>
+        </div>
+        <div className="inline-form-actions"><Button variant="primary" onClick={savePublicSelf}><Check size={14} /> Save Public Self</Button></div>
+      </section>
       {presence.mode === "ghost" && (
         <section className="settings-card ghost-profile-card" key={`${presence.id}-${JSON.stringify(presence.ghostProfile ?? {})}`}>
           <div className="section-heading compact">
@@ -3824,7 +4038,7 @@ function PresenceView({
           <div className="inline-form-actions"><Button variant="primary" disabled={!ghostDraft.subject.trim()} onClick={() => void mutate({ type: "setPresence", patch: { ghostProfile: { ...ghostDraft, subject: ghostDraft.subject.trim(), priorities: ghostDraft.priorities.trim(), preferences: ghostDraft.preferences.trim(), voice: ghostDraft.voice.trim(), boundaries: ghostDraft.boundaries.trim() } } })}><Check size={14} /> Save Ghost profile</Button></div>
         </section>
       )}
-      <section className="settings-card">
+      <section className="settings-card presence-execution-card">
           <div className="section-heading compact">
             <div>
               <SectionEyebrow>
@@ -3919,14 +4133,6 @@ function PresenceView({
             </select>
           </div>
       </section>
-      {presence.channel === "x" && (
-        <XConnection state={state} presence={presence} manageX={manageX} />
-      )}
-      <BridgeManager
-        state={state}
-        presence={presence}
-        manageBridge={manageBridge}
-      />
     </div>
   );
 }
@@ -3955,7 +4161,7 @@ function XConnection({
   const save = async (event: React.FormEvent) => { event.preventDefault(); setWorking("save"); const response = await manageX({ action: "save", presenceId: presence.id, credentials }); setWorking(null); if (response?.result) { setResult(response.result); setOpen(false); clearForm(); } };
   const disconnect = async () => { setWorking("disconnect"); await manageX({ action: "disconnect", presenceId: presence.id }); setWorking(null); setResult(null); clearForm(); setOpen(true); };
   return (
-    <section className="settings-card native-connection-card">
+    <div className="channel-connector-panel native-connection-card">
       <div className="section-heading compact">
         <div>
           <SectionEyebrow>Official X API</SectionEyebrow>
@@ -3987,7 +4193,7 @@ function XConnection({
           <div className="inline-form-actions"><Button type="button" variant="ghost" onClick={() => { clearForm(); setOpen(Boolean(connection)); }}>Cancel</Button><Button type="button" variant="secondary" onClick={() => void test()} disabled={working !== null || !apiKey || !apiSecret}>{working === "test" ? "Testing…" : "Test connection"}</Button><Button type="submit" variant="primary" disabled={working !== null}>{working === "save" ? "Saving…" : "Save connection"}</Button></div>
         </form>
       )}
-    </section>
+    </div>
   );
 }
 
@@ -4010,9 +4216,6 @@ function BridgeManager({
   const activeBridges = bridges.filter((item) => item.state !== "offline");
   const channel = state.channelDefinitions.find(
     (item) => item.id === presence?.channel,
-  );
-  const nativeConnection = state.nativeConnections.find(
-    (item) => item.presenceId === presence?.id && item.kind === "x",
   );
   if (!presence) return null;
   const create = async () => {
@@ -4105,24 +4308,20 @@ function BridgeManager({
     </div>
   ));
   return (
-    <section className="settings-card bridge-manager">
+    <div className="channel-connector-panel bridge-manager">
       <div className="section-heading compact">
         <div>
-          <SectionEyebrow>
-            {nativeConnection?.status === "needs-attention" ? "Native X connection needs attention" : nativeConnection ? "Fallback external connection" : channel?.builtIn ? "Optional live connection" : "Custom channel connection"}
-          </SectionEyebrow>
-          <h2>{nativeConnection?.status === "needs-attention" ? "Fix the native X connection first" : nativeConnection ? "Add a Bridge alternative" : channel?.builtIn ? "Add a live connector" : "Connect this Presence"}</h2>
+          <SectionEyebrow>External Bridge</SectionEyebrow>
+          <h2>{activeBridges.length ? "Connected through Bridge" : "Connect this Presence through Bridge"}</h2>
         </div>
         <ShieldCheck size={17} />
       </div>
       {activeBridges.length === 0 && (
         <div className="empty-bridge">
           <p>
-            {nativeConnection
-              ? "Official X API is connected for this Presence. Add a Bridge only if an external executor should be an alternative to the native connector."
-              : channel?.builtIn
-              ? `This ${channelLabel(presence.channel, state.channelDefinitions)} Presence already works in the local simulator. Add a Bridge only when an external adapter should send live channel events and receive approved actions.`
-              : "A Bridge is a small external adapter for this channel. It sends inbound social objects to OpenPresence and receives only approved actions from this Presence's execution envelope."}
+            {channel?.builtIn
+              ? `Use a Bridge when ${channelLabel(presence.channel, state.channelDefinitions)} should be reached through an external adapter. Only the selected route above can deliver actions.`
+              : "A Bridge is an external adapter for this channel. It sends inbound social objects to OpenPresence and receives only approved actions from this Presence's execution envelope."}
           </p>
           <div className="form-grid">
             <label>
@@ -4191,6 +4390,6 @@ function BridgeManager({
           )}
         </div>
       )}
-    </section>
+    </div>
   );
 }

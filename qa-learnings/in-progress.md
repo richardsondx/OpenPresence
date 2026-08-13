@@ -1,5 +1,50 @@
 # Active QA Work
 
+## COMPLETE — Improve Execution Ledger readability
+
+- **Started:** 2026-08-13
+- **Scope:** Separate execution action and status, add readable metadata rhythm, improve explanation spacing, and prevent review content from colliding on narrow screens.
+- **Verification:** Typecheck, lint, `git diff --check`, and focused Chromium + Pixel 5 review and manual execution lifecycle tests passed.
+
+## COMPLETE — Keep Sandbox intro copy free of dash punctuation
+
+- **Started:** 2026-08-13
+- **Scope:** Prevent the simulated first post and replies from using em dashes or en dashes in the Playground intro copy.
+- **Verification:** Sandbox generation now includes explicit plain-punctuation guidance and normalizes generated copy before simulated delivery. 60 unit tests, typecheck, lint, production build, `git diff --check`, and focused Chromium Playground coverage passed with a rendered no-dash assertion.
+
+## COMPLETE — Open Playground directly into a fresh simulated account
+
+- **Started:** 2026-08-13
+- **Scope:** Remove the separate Playground start card, open a fresh Sandbox account when the Playground is selected, move the simulated-world explanation into the active surface, and make Reset refresh the current account in place.
+- **Safety gate:** Reset only clears session-scoped Sandbox world data and preserves Agent identity, Presence configuration, live route selection, and meaning files. No live connector is touched.
+- **Verification:** 60 unit tests, typecheck, lint, production build, `git diff --check`, and focused Chromium + Pixel 5 Playground coverage passed. Coverage confirms direct entry, the new “This world is simulated. Jenny is real.” copy, live-routed rehearsal, and in-place Reset to an empty active account.
+
+## COMPLETE — Keep Playground rehearsal available for live-routed Presences
+
+- **Started:** 2026-08-13
+- **Scope:** Allow Wake and Add event to use the isolated Sandbox session even when the selected Presence route remains native X or Bridge, and show the current Presence handle where control-room interaction is explained.
+- **Safety gate:** Playground delivery remains `environment: "sandbox"` through the simulated connector; the selected live route and its connection state are not changed by rehearsal.
+- **Verification:** 60 unit tests, typecheck, lint, production build, `git diff --check`, and focused Chromium Playground coverage passed for both Sandbox and live-routed Presence flows. The regression confirms Wake and Add event persist without the save-error toast.
+
+## COMPLETE — Compact Presence identity controls
+
+- **Started:** 2026-08-13
+- **Scope:** Remove excessive horizontal distribution and the missing section rhythm between the Sandbox destination card and Presence identity controls.
+- **Verification:** 1024px small-desktop no-overflow test, focused desktop Presence Settings route test, typecheck, lint, unit tests, production build, and `git diff --check` passed.
+
+## COMPLETE — Clarify Presence channel and environment selection
+
+- **Started:** 2026-08-13
+- **Scope:** Group channel/environment settings into one mutually exclusive selection flow, make Sandbox discoverable as a first-class destination, remove misleading connection language, hide the redundant Agent-wide top-bar label, and eliminate duplicate Chat output keys.
+- **Focused verification:** Presence Settings selection and persistence, X/Bridge exclusivity, Sandbox entry, Chat/Playground copy, console cleanliness, and desktop/mobile layout. 59 unit tests, typecheck, lint, production build, and `git diff --check` passed. Focused Chromium coverage passed 20 desktop tests and 6 mobile tests; in-app browser inspection confirmed the route panels, truthful status copy, and a clean console with no duplicate-key warning.
+
+## COMPLETE — Build isolated Sandbox and Playground rehearsal loop
+
+- **Started:** 2026-08-13
+- **Scope:** Add a persistent simulated world and compact Playground for a real Presence. The affected path is limited to Sandbox state, Social Mirror normalization, simulated execution, Agent-driven rehearsal, and the Playground UI.
+- **Safety gate:** Sandbox objects use simulated references and a simulated connector only. No Playground operation may call a native connector, mutate live Mirror objects, or reuse another session's world.
+- **Focused verification:** Five Sandbox runtime tests plus the existing 53 regression tests (58 total), typecheck, lint, production build, Chromium and Pixel 5 Playground flow including Quick Rehearsal entry, responsive visual inspection at 390px, no horizontal overflow, and no browser console errors. `git diff --check` passed.
+
 ## COMPLETE — Make Presence identity legible and editable
 
 - **Started:** 2026-08-13
@@ -173,3 +218,31 @@
 - **Started:** 2026-08-12
 - **Scope:** Audit the supplied 50-story functional brief across the local app, runtime, persistence, Bridge API, and responsive browser surfaces; fix verified ordinary defects and record remaining simulated/partial stories honestly.
 - **Verification:** 20/20 unit tests, typecheck, lint, production build, production smoke/API checks, restart persistence, and 32/32 Chromium + Pixel 5 browser tests passed. The complete 50-story verdict is recorded in `qa-learnings/end-to-end-functional-audit-2026-08-12.md`.
+
+## COMPLETE — Put Presence identity before channel routing
+
+- **Started:** 2026-08-13
+- **Scope:** Reorder Presence Settings so the user defines who speaks here before choosing where that Presence appears. Channel & environment follows Identity, with the execution envelope remaining after both.
+- **Acceptance:** Identity is visibly above Channel & environment on desktop and mobile; existing name, mode, Sandbox, X, Bridge, and connection controls remain usable.
+- **Verification:** Typecheck, lint, production build, diff check, and focused Chromium + Pixel 5 Settings tests passed. Browser assertions compare rendered section positions directly.
+
+## COMPLETE — Keep Activity and Calendar scoped to the Presence
+
+- **Started:** 2026-08-13
+- **Scope:** Replace Agent-name and handle-based copy in Activity and Calendar with the selected Presence name, remove Activity’s Agent-management link, and preserve handles only where channel connection identity requires them.
+- **Acceptance:** A Presence named Genny reads “Genny is live”, “What Genny can see”, “Planning for Genny”, and “When Genny is meant to pay attention”; Activity and Calendar do not surface `@jenny_ai` or “Manage Jenny”.
+- **Verification:** 61 unit tests, typecheck, lint, production build, diff check, focused Chromium + Pixel 5 Activity/Calendar tests, and both desktop/mobile X connection suites passed.
+
+## COMPLETE — Make Playground events channel-native
+
+- **Started:** 2026-08-13
+- **Scope:** Replace the generic Sandbox event form with a channel-driven simulation grammar. X now exposes posts, replies, quotes, reposts, likes, and messages with reusable simulated people and relationship targets; raw Mention and the always-visible Conversation field are removed from the Playground form. Settings and Playground identify the route as `Sandbox · Simulated X` / `Simulated X` while keeping one generic Sandbox runtime underneath.
+- **Acceptance:** The simulated world is visibly tied to its Social Mirror; Reply/Quote/Repost/Like show only their relevant target field; Post does not show Conversation; actors can be reused; live-routed Presences can still rehearse in Sandbox; lifecycle controls distinguish `Wake Jenny` from `Check now`.
+- **Verification:** 61 unit tests, typecheck, lint, production build, Chromium and Pixel 5 Playground tests, and Chromium and Pixel 5 Presence Settings route tests passed. Focused browser coverage also verifies X relationship targets, actor reuse, absence of the Conversation field, and no newly introduced long dash in the simulated feed.
+
+## COMPLETE — Give each Presence an explicit Public Self boundary
+
+- **Started:** 2026-08-13
+- **Scope:** Separate Agent identity, Presence identity, and implementation details. Add Presence-scoped disclosure posture and approved technical facts, include the boundary in `PRESENCE.md` and social cognition, and hold Ghost drafts for review when they expose the private Agent or unapproved machinery.
+- **Acceptance:** Agent-owned Presences default to contextual disclosure; Ghost Presences default to representational disclosure; the operator can save posture/facts in Presence Settings; approved facts persist; Ghost publication drafts cannot silently disclose private identity or implementation details.
+- **Verification:** 64 unit tests, typecheck, lint, production build, diff check, and focused Chromium + Pixel 5 Presence Settings persistence tests passed.

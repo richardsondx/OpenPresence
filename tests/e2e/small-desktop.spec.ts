@@ -11,7 +11,7 @@ async function createAgent(page: import("@playwright/test").Page) {
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await expect(page.getByRole("heading", { name: "@jenny_ai is live." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny is live." })).toBeVisible();
 }
 
 async function inspectCompactPage(page: import("@playwright/test").Page, view: "Chat" | "Activity" | "Calendar" | "Brain" | "Presence settings") {

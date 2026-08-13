@@ -1,5 +1,67 @@
 # Regression rules
 
+## Rule: Presence destination selection must be singular and state-truthful
+
+**Defect class:** Information architecture / environment boundary / misleading status
+
+**General principle:** A Presence has one active destination at a time. Sandbox, native X, and Bridge are explicit route choices; the UI must show only the selected route's controls, and connection language must describe the actual connection state.
+
+**Incident:** Presence Settings rendered X and Bridge as parallel settings, made Sandbox difficult to discover, showed live-channel copy before a connection existed, and left “Agent-wide” in Chat chrome where it was not actionable context.
+
+**Project enforcement:** `connectionMode` persists the selected route, connector routing honors it, Sandbox is a first-class destination, inactive connector panels are hidden, unconnected live routes say they are not active, and Chat's top-right status area is absent outside Presence Settings.
+
+**Executable protection:** `tests/sandbox.test.ts` verifies route exclusivity and environment persistence. `tests/e2e/openpresence.spec.ts` verifies Sandbox/X/Bridge switching, persistence, truthful connection copy, Chat chrome, Playground copy, and desktop/mobile behavior. `tests/e2e/x-connection.spec.ts` verifies native X configuration within the selected X route.
+
+**Apply when:** Changing Presence Settings, channel selection, Sandbox/Playground, native connectors, Bridges, connection status copy, or Chat top-bar context.
+
+**Added:** 2026-08-13
+
+## Rule: Sandbox UI must be channel-native, not a generic social-event editor
+
+**Defect class:** Social Mirror semantics / Playground UX
+
+**General principle:** Sandbox is infrastructure; the user should experience the selected Social Mirror. Event actions, labels, relationships, and starting-world copy must come from the channel definition.
+
+**Project-specific risk:** A generic `Mention` action and always-present `Conversation` selector implied one universal social grammar and made X-specific rehearsal misleading for other channels.
+
+**Project enforcement:** `simulationForChannel` supplies the world label and action grammar; `SandboxEventForm` renders conditional relationship targets and reusable actors; Settings names the selected route with its simulated channel.
+
+**Executable protection:** `tests/sandbox.test.ts` verifies X reply targets and actor reuse; `tests/e2e/openpresence.spec.ts` verifies conditional fields, `Simulated X` labeling, live-route rehearsal, and desktop/mobile rendering.
+
+**Apply when:** Adding a Social Mirror, changing Playground controls, introducing a channel capability, or changing Sandbox copy.
+
+**Added:** 2026-08-13
+
+## Rule: Repeated context outputs require collision-proof React keys
+
+**Defect class:** Rendering integrity / repeated collection identity
+
+**General principle:** Context and Activity collections can contain repeated labels and details. Render keys must remain unique when two records describe the same kind of output.
+
+**Incident:** Two `x.post` outputs with `Publication draft` details produced the React duplicate-key warning `x.post-Publication draft` and made rendering behavior unsupported.
+
+**Project enforcement:** Context output rows use a stable per-render fallback index in addition to their semantic label and detail, so repeated outputs remain independently renderable.
+
+**Executable protection:** The Chat E2E flow captures browser console errors, and the affected output projection is covered by the focused Chat/browser pass.
+
+**Apply when:** Adding or changing repeated Context, Activity, execution, publication, or output lists.
+
+**Added:** 2026-08-13
+
+## Rule: Sandbox rehearsal must never escape into live delivery
+
+**Defect class:** Environment isolation / simulated delivery boundary
+
+**General principle:** Playground is a real Agent rehearsal in a simulated world. Social Mirror objects, sessions, clocks, intents, executions, outcomes, and publications must remain scoped to the selected Sandbox session, and no Sandbox operation may call a native connector.
+
+**Project enforcement:** Sandbox references use `sandbox://`-compatible simulated identifiers and `sandbox:` connector IDs. Delivery checks the environment, connector kind, bridge prefix, and session before creating a simulated Mirror object. Reset removes only the selected session's world and execution records while preserving Agent meaning files.
+
+**Executable protection:** `tests/sandbox.test.ts` verifies environment creation, Social Mirror normalization, simulated delivery, review gating, virtual time, and session reset. `tests/e2e/openpresence.spec.ts` verifies start, wake, audience event, virtual time, reset, and mobile/desktop flow.
+
+**Apply when:** Changing Playground, Sandbox state, Social Mirror normalization, simulated connectors, Agent rehearsal, or live connector routing.
+
+**Added:** 2026-08-13
+
 ## Rule: Presence marks must stay legible and channel-scoped
 
 **Defect class:** Visual identity / compact navigation overflow
@@ -685,5 +747,53 @@
 **Executable protection:** `tests/x-connection.test.ts` covers the native connection path and mock reconciliation; `tests/e2e/x-connection.spec.ts` asserts the connected empty Mirror is presented as up to date and that the old waiting copy is absent.
 
 **Apply when:** Changing native X reads, Bridge reconciliation, Mirror panels, Activity status, connector health, or Pulse behavior.
+
+**Added:** 2026-08-13
+
+## Rule: Presence Settings must introduce identity before destination
+
+**Defect class:** Settings information hierarchy / responsive layout
+
+**General principle:** Users should establish who the Presence is before deciding where it appears. Product hierarchy should reflect `User → Agent → Presence`, then channel and execution configuration.
+
+**Project-specific risk:** Showing Channel & environment before Identity made the user choose a route before understanding the Presence identity and pushed the editable name and Agent-owned/Ghost choice below the fold.
+
+**Project enforcement:** `.presence-settings-page` orders Identity and Ghost profile before `.channel-settings-card`, with the execution envelope after both.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts` compares the rendered bounding boxes of `.identity-card` and `.channel-settings-card` on Chromium and Pixel 5, then exercises the route controls.
+
+**Apply when:** Reordering Presence Settings, adding Presence identity fields, or changing the channel/environment configuration surface.
+
+**Added:** 2026-08-13
+
+## Rule: Presence surfaces must not borrow Agent identity or handles
+
+**Defect class:** Product hierarchy / Presence naming
+
+**General principle:** A Presence feature should speak about the selected social incarnation, while Agent identity belongs in Agent workspace surfaces. Handles are channel/account identity, not the default label for Presence operations.
+
+**Project-specific risk:** Activity and Calendar mixed `Jenny`, `Genny`, and `@jenny_ai`, making it unclear which identity the user was configuring and exposing a handle without a clear edit path.
+
+**Project enforcement:** Live Activity and Calendar derive copy from the selected Presence name; Activity omits the Agent management link; channel connection screens retain handles only where X authentication requires account identity.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts` renames the Presence to Genny and verifies Activity/Calendar copy, absence of `@jenny_ai`, and absence of “Manage Jenny” on Chromium and Pixel 5. X connection suites protect the separate connector identity flow.
+
+**Apply when:** Changing Activity, Calendar, Social Mirror summaries, Presence navigation, or channel connection identity copy.
+
+**Added:** 2026-08-13
+
+## Rule: Public Self must remain separate from Agent identity and implementation
+
+**Defect class:** Identity boundary / privacy / social cognition
+
+**General principle:** The Agent is the private mind, the Presence Public Self is who speaks here, and implementation is not social identity.
+
+**Project-specific risk:** A Ghost could answer as the private Agent or volunteer provider, model, prompt, credential, or infrastructure details simply because the runtime knew them.
+
+**Project enforcement:** `Presence.publicSelf` stores Presence-scoped posture and approved facts; `PRESENCE.md` and the AI context describe that boundary; Ghost publication drafts are held for review when they cross it.
+
+**Executable protection:** `tests/identity-boundary.test.ts` covers default postures, persistence, approved facts, and Ghost review gating. `tests/e2e/openpresence.spec.ts` covers settings persistence on Chromium and Pixel 5.
+
+**Apply when:** Changing Presence identity, Ghost behavior, public disclosure, provider/model context, social prompts, or publication review.
 
 **Added:** 2026-08-13
