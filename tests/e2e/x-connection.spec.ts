@@ -9,7 +9,7 @@ async function createAgent(page: import("@playwright/test").Page) {
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await expect(page.getByRole("heading", { name: "@jenny_ai is live." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny is live." })).toBeVisible();
 }
 
 test("operator connects an X Presence through the official API", async ({ page }) => {
@@ -20,6 +20,7 @@ test("operator connects an X Presence through the official API", async ({ page }
   await createAgent(page);
   const navigation = test.info().project.name === "mobile" ? page.locator(".mobile-nav") : page.locator(".sidebar");
   await navigation.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.locator(".channel-mode-options").getByRole("button", { name: /^X/ }).click();
   await expect(page.getByRole("heading", { name: "Connect this Presence to X" })).toBeVisible();
   const fieldWidths = await page.locator(".x-credential-field input").evaluateAll((inputs) => inputs.map((input) => Math.round(input.getBoundingClientRect().width)));
   expect(new Set(fieldWidths).size).toBe(1);
@@ -34,7 +35,7 @@ test("operator connects an X Presence through the official API", async ({ page }
   await page.getByRole("button", { name: "Save connection" }).click();
   await expect(page.getByRole("heading", { name: "Connected to @jenny_ai" })).toBeVisible();
   await expect(page.getByText(/Official X API authentication is configured with read \+ write credentials/)).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Add a Bridge alternative" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Connect this Presence through Bridge/ })).toHaveCount(0);
 
   await page.reload();
   const freshNavigation = test.info().project.name === "mobile" ? page.locator(".mobile-nav") : page.locator(".sidebar");
@@ -53,6 +54,7 @@ test("native X connection delivers an approved Presence action", async ({ page }
   await createAgent(page);
   const navigation = test.info().project.name === "mobile" ? page.locator(".mobile-nav") : page.locator(".sidebar");
   await navigation.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.locator(".channel-mode-options").getByRole("button", { name: /^X/ }).click();
   await page.getByLabel("X API Key", { exact: true }).fill("test_api");
   await page.getByLabel("X API Key Secret", { exact: true }).fill("test_secret");
   await page.getByLabel("X User Access Token", { exact: true }).fill("test_access");

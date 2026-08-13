@@ -13,9 +13,8 @@ async function createAgent(page: import("@playwright/test").Page, name = "Jenny"
   await page.getByLabel("Agent name").fill(name);
   if (name !== "Jenny") await page.getByLabel("Presence handle").fill(`@${name.toLowerCase()}`);
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  const handle = name === "Jenny" ? "@jenny_ai" : `@${name.toLowerCase()}`;
   if (test.info().project.name === "mobile") {
-    await expect(page.getByRole("heading", { name: `${handle} is live.` })).toBeVisible();
+    await expect(page.getByRole("heading", { name: `${name} is live.` })).toBeVisible();
   } else {
     await expect(page.getByRole("button", { name: `Switch agent, currently ${name}` })).toBeVisible();
   }
@@ -137,7 +136,7 @@ async function expectChatContextRailLayout(page: import("@playwright/test").Page
 
 test("operator can create an agent and first Presence from blank state", async ({ page }) => {
   await createAgent(page, "Atlas");
-  if (test.info().project.name === "mobile") await expect(page.getByRole("heading", { name: "@atlas is live." })).toBeVisible();
+  if (test.info().project.name === "mobile") await expect(page.getByRole("heading", { name: "Atlas is live." })).toBeVisible();
   else await expect(page.getByRole("button", { name: "Switch agent, currently Atlas" })).toBeVisible();
 });
 
@@ -173,9 +172,14 @@ test("Add Presence opens a working channel-aware flow", async ({ page }) => {
 });
 
 test("Chat keeps one persistent Agent conversation", async ({ page }) => {
+  const duplicateKeyErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error" && /same key/i.test(message.text())) duplicateKeyErrors.push(message.text());
+  });
   await createAgent(page);
   await navigate(page, "Chat");
   await expect(page.getByLabel("Message your Presence")).toBeVisible();
+  await expect(page.locator(".topbar-actions")).toHaveCount(0);
   const contextSidebar = page.getByRole("complementary", { name: "Context & Changes sidebar" });
   await expect(contextSidebar).toBeVisible();
   await expectChatContextRailLayout(page);
@@ -204,6 +208,41 @@ test("Chat keeps one persistent Agent conversation", async ({ page }) => {
   await page.reload();
   await navigate(page, "Chat");
   await expect(page.getByText("Remember that useful software should feel calm.", { exact: true })).toBeVisible();
+  expect(duplicateKeyErrors).toEqual([]);
+});
+
+test("Presence Settings makes the destination route explicit", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Settings");
+
+  const routeOptions = page.locator(".channel-mode-options");
+  const identityBox = await page.locator(".identity-card").boundingBox();
+  const channelBox = await page.locator(".channel-settings-card").boundingBox();
+  expect(identityBox?.y).toBeLessThan(channelBox?.y ?? Number.POSITIVE_INFINITY);
+  await expect(routeOptions.getByRole("button", { name: /^Sandbox/ })).toHaveClass(/selected/);
+  await expect(routeOptions.getByText("Sandbox · Simulated X", { exact: true })).toBeVisible();
+  await expect(page.getByText("This world is simulated.", { exact: false })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connect this Presence to X" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /Connect this Presence through Bridge/ })).toHaveCount(0);
+
+  await routeOptions.getByRole("button", { name: /^X/ }).click();
+  await expect(routeOptions.getByRole("button", { name: /^X/ })).toHaveClass(/selected/);
+  await expect(page.getByRole("heading", { name: "Connect this Presence to X" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Connect this Presence through Bridge/ })).toHaveCount(0);
+  await expect(page.getByText("No live connection is active yet.", { exact: false })).toBeVisible();
+
+  await routeOptions.getByRole("button", { name: /^Bridge/ }).click();
+  await expect(routeOptions.getByRole("button", { name: /^Bridge/ })).toHaveClass(/selected/);
+  await expect(page.getByRole("heading", { name: /Connect this Presence through Bridge/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connect this Presence to X" })).toHaveCount(0);
+
+  await routeOptions.getByRole("button", { name: /^Sandbox/ }).click();
+  await expect(page.getByText("This world is simulated.", { exact: false })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Connect this Presence through Bridge/ })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Connect this Presence to X" })).toHaveCount(0);
+  await page.reload();
+  await navigate(page, "Settings");
+  await expect(routeOptions.getByRole("button", { name: /^Sandbox/ })).toHaveClass(/selected/);
 });
 
 test("Agent switcher creates and switches isolated workspaces", async ({ page }) => {
@@ -229,13 +268,13 @@ test("Agent switcher creates and switches isolated workspaces", async ({ page })
   await page.getByLabel("Agent handle").fill("@atlas");
   await page.getByRole("dialog", { name: "Create Agent" }).getByRole("button", { name: "Create Agent" }).click();
   await expect(page.getByRole("button", { name: "Switch agent, currently Atlas" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "@atlas is live." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Atlas is live." })).toBeVisible();
   await clickAgentSwitcher("Atlas");
   await page.getByRole("menu", { name: "Your Agents" }).getByRole("menuitem", { name: /Jenny/ }).click();
-  await expect(page.getByRole("heading", { name: "@jenny_ai is live." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny is live." })).toBeVisible();
   await clickAgentSwitcher("Jenny");
   await page.getByRole("menu", { name: "Your Agents" }).getByRole("menuitem", { name: /Atlas/ }).click();
-  await expect(page.getByRole("heading", { name: "@atlas is live." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Atlas is live." })).toBeVisible();
   await navigate(page, "Brain");
   await expect(page.getByRole("button", { name: "Use Claude Sonnet high" })).toHaveClass(/selected/);
   await expect(page.getByText("How I think")).toBeVisible();
@@ -390,7 +429,7 @@ test("Presence settings are generated from channel capabilities and pause truthf
   await expect(page.getByRole("button", { name: "Replies review", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Pause Presence" }).click();
   await navigate(page, "Activity");
-  await expect(page.getByRole("heading", { name: "@jenny_ai is asleep." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny is asleep." })).toBeVisible();
   await expect(page.getByRole("button", { name: "Wake up Jenny", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Resume Presence", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Run one pulse", exact: true })).toHaveCount(0);
@@ -401,11 +440,29 @@ test("Presence settings are generated from channel capabilities and pause truthf
   });
   await page.getByRole("button", { name: "Wake up Jenny", exact: true }).first().click();
   await expect(page.getByRole("button", { name: "Waking Jenny…", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "@jenny_ai is live." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny is live." })).toBeVisible();
   await expect(page.locator(".event-title").filter({ hasText: "Jenny woke up" })).toBeVisible();
   await expect(page.locator(".event-title").filter({ hasText: "Pulse completed" })).toBeVisible();
   await navigate(page, "Settings");
   await expect(page.getByRole("button", { name: "Pause Presence" })).toBeVisible();
+});
+
+test("Presence Public Self saves its disclosure boundary", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Settings");
+  await page.getByLabel("Presence name").fill("Alex");
+  await page.getByRole("button", { name: "Save name", exact: true }).click();
+  await page.locator(".identity-options").getByRole("button", { name: /Me \/ my organization/ }).click();
+  const publicSelf = page.locator(".public-self-card");
+  await expect(publicSelf.getByRole("heading", { name: "How this Presence describes itself" })).toBeVisible();
+  await publicSelf.getByRole("button", { name: /Representational/ }).click();
+  await publicSelf.getByLabel("Built with OpenPresence", { exact: false }).check();
+  await publicSelf.getByRole("button", { name: "Save Public Self", exact: true }).click();
+  await page.reload();
+  await navigate(page, "Settings");
+  await expect(page.getByLabel("Presence name")).toHaveValue("Alex");
+  await expect(page.locator(".public-self-card").getByRole("button", { name: /Representational/ })).toHaveClass(/selected/);
+  await expect(page.locator(".public-self-card").getByLabel("Built with OpenPresence", { exact: false })).toBeChecked();
 });
 
 test("Chat acknowledges live Presence identity changes", async ({ page }) => {
@@ -444,11 +501,12 @@ test("desktop shell keeps sidebar and runtime status available", async ({ page }
   await expect(page.locator(".sidebar")).toHaveCSS("position", expectedPosition);
   if (test.info().project.name !== "mobile") {
     await expect(page.locator(".sidebar .secondary-nav").nth(0)).toHaveText("Chat");
-    await expect(page.locator(".sidebar .secondary-nav").nth(1)).toContainText("Manage Agent");
+    await expect(page.locator(".sidebar .secondary-nav").nth(1)).toHaveText("Playground");
+    await expect(page.locator(".sidebar .secondary-nav").nth(2)).toContainText("Manage Agent");
   }
   await expect(page.getByLabel("Live presence filter")).toHaveCount(0);
   await expect(page.locator(".pause-card")).toHaveCount(0);
-  await expect(page.locator(".scope-summary")).toContainText("@jenny_ai");
+  await expect(page.locator(".scope-summary")).toContainText("X");
   await navigate(page, "Calendar");
   await expect(page.getByText(/Planning for/)).toBeVisible();
   await expect(page.getByLabel("Calendar presence filter")).toHaveCount(0);
@@ -475,11 +533,78 @@ test("Presence and Agent names can be edited at their own scopes", async ({ page
   await expect(page.getByLabel("Presence name")).toHaveValue("Jenny in Founders");
 });
 
+test("Activity and Calendar stay scoped to the Presence identity", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Settings");
+  await page.getByLabel("Presence name").fill("Genny");
+  await page.getByRole("button", { name: "Save name" }).click();
+
+  await navigate(page, "Activity");
+  await expect(page.getByRole("heading", { name: "Genny is live." })).toBeVisible();
+  await expect(page.getByText("@jenny_ai", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Manage Jenny/ })).toHaveCount(0);
+
+  await navigate(page, "Calendar");
+  await expect(page.getByText("Tell Genny when to pay attention.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Planning for Genny", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Week" }).click();
+  await expect(page.getByRole("heading", { name: "When Genny is meant to pay attention" })).toBeVisible();
+});
+
+test("Playground rehearses a Presence inside an isolated simulated world", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Playground");
+  await expect(page.getByRole("heading", { name: "Playground", exact: true })).toBeVisible();
+  await expect(page.locator(".playground-grid")).toBeVisible();
+  await expect(page.getByText(/Rehearse how this Presence behaves on X\. This world is simulated\. Jenny is real\./)).toBeVisible();
+  await expect(page.getByText("Sandbox", { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Check now" }).click();
+  await expect(page.locator(".social-card").first()).toBeVisible();
+  await expect(page.locator(".social-card").first()).not.toContainText(/[–—]/);
+  const eventForm = page.locator(".sandbox-event-form");
+  await eventForm.getByLabel("What should happen").selectOption("reply");
+  await expect(eventForm.getByLabel("Replying to")).toBeVisible();
+  await expect(eventForm.getByText("Conversation", { exact: true })).toHaveCount(0);
+  await eventForm.getByLabel("What should happen").selectOption("post");
+  await expect(eventForm.getByLabel("Replying to")).toHaveCount(0);
+  await eventForm.getByLabel("New person name").fill("Maya Chen");
+  await eventForm.getByLabel("New person handle").fill("@maya");
+  await eventForm.getByLabel("What did they post?").fill("What is one thing you are learning about agents?");
+  await eventForm.getByRole("button", { name: "Add post" }).click();
+  await expect(page.getByText("Maya Chen", { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "+1h" }).click();
+  await expect(page.getByText("Virtual time", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Reset" }).click();
+  await expect(page.locator(".playground-grid")).toBeVisible();
+  await expect(page.locator(".social-card")).toHaveCount(0);
+  await expect(page.getByText("Fresh X account", { exact: true })).toBeVisible();
+});
+
+test("Playground actions work while a Presence keeps its live route", async ({ page, request }) => {
+  await createAgent(page);
+  const routeChange = await request.post("/api/state", { data: { type: "setPresence", patch: { connectionMode: "native" } } });
+  expect(routeChange.ok()).toBeTruthy();
+  await page.reload();
+  await navigate(page, "Playground");
+
+  await expect(page.getByText(/Agent handle: @jenny_ai/)).toBeVisible();
+  await expect(page.locator(".playground-grid")).toBeVisible();
+  await page.getByRole("button", { name: "Check now" }).click();
+  await expect(page.locator(".social-card").first()).toBeVisible();
+
+  const eventForm = page.locator(".sandbox-event-form");
+  await eventForm.getByLabel("New person name").fill("Maya Chen");
+  await eventForm.getByLabel("What did they post?").fill("A live-routed Presence can still rehearse safely.");
+  await eventForm.getByRole("button", { name: "Add post" }).click();
+  await expect(page.getByText("A live-routed Presence can still rehearse safely.", { exact: true })).toBeVisible();
+  await expect(page.getByText("That change could not be saved.", { exact: true })).toHaveCount(0);
+});
+
 test("Custom Channel connects a Bridge, receives Mirror events, and completes queued work", async ({ page, request }) => {
   await createAgent(page);
   await page.getByRole("button", { name: "Add a Presence" }).click();
   const dialog = page.getByRole("dialog", { name: "Add a Presence" });
-  await dialog.getByRole("radio", { name: "Custom Channel" }).check();
+  await dialog.getByRole("radio", { name: "Bridge" }).check();
   await dialog.getByLabel("Custom channel name").fill("Founder Community");
   await dialog.getByLabel("Custom channel ID").fill("founder-community");
   await dialog.getByLabel("Social Mirror domain").fill("https://www.skool.com/");

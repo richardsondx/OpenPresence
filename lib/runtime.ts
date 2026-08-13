@@ -1,5 +1,5 @@
-import type { ActivitySummary, AgentFile, AgentModelProfile, AgentToolBinding, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, Execution, ExecutionEnvelope, FileKind, FileProposal, GhostProfile, LiveEvent, OpenPresenceState, Operation, Outcome, Presence, PresenceContext, Publication, PublicFooting, SocialIntent, StandingIntent } from "./types";
-import { CHANNEL_CAPABILITIES, CHANNEL_EXTENSIONS } from "./types";
+import type { ActivitySummary, AgentFile, AgentModelProfile, AgentToolBinding, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, FileKind, FileProposal, GhostProfile, LiveEvent, OpenPresenceState, Operation, Outcome, Presence, PresenceContext, PresenceConnectionMode, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, SocialIntent, StandingIntent, SandboxEnvironment, PlaygroundSession } from "./types";
+import { CHANNEL_CAPABILITIES, CHANNEL_EXTENSIONS, simulationForChannel } from "./types";
 
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -14,6 +14,7 @@ function builtinChannelDefinitions(): ChannelDefinition[] {
     entities: [{ id: "person", label: "Person" }, { id: "post", label: "Post" }, { id: "conversation", label: "Conversation" }],
     affordances: CHANNEL_CAPABILITIES[channel],
     formats: CHANNEL_EXTENSIONS[channel].formats,
+    simulation: simulationForChannel(channel),
     relationships: [{ from: "post", to: ["post"], relation: "replies-to" as const }],
     metrics: [{ id: "replies", label: "Replies" }, { id: "reactions", label: "Reactions" }],
     privacyDefaults: { visibility: "public" as const, shareability: "presence-only" as const },
@@ -40,13 +41,13 @@ const fileContent = (kind: FileKind, input: CreateAgentInput, presence?: Presenc
     MEMORY: `${shared}\n## Durable context\n\nNo durable memories yet. I will keep only context that helps future judgment.`,
     GROWTH: `${shared}\n## Current strategy\n\nStill learning. Results may change tactics faster than they change identity.`,
     PULSE: `${shared}\n## Standing attention\n\nListen for relevant conversations, maintain important relationships, honor scheduled intent, and reflect on outcomes. Skip anything that is not worth saying.\n\n## Launch\n\nWhen a Presence has no public footing, understand where it is, inspect the current channel, and choose one strong first move that establishes why it is worth hearing from. Do not wait indefinitely for inbound attention that cannot exist yet. Once meaningful public footing exists, this program becomes dormant.`,
-    PRESENCE: `${shared}\n## ${presence ? `${channelName(presence.channel)} · ${presence.handle}` : "Current Presence"}\n\nI speak as ${presence?.mode === "ghost" ? "the operator, extending their attention and judgment" : "myself"}. I adapt to this channel without flattening worthwhile ideas.\n\nTreat people as people, not engagement opportunities.`,
+    PRESENCE: `${shared}\n## ${presence ? `${channelName(presence.channel)} · ${presence.handle}` : "Current Presence"}\n\nI speak as ${presence?.mode === "ghost" ? "the operator, extending their attention and judgment" : "myself"}. I adapt to this channel without flattening worthwhile ideas.\n\n## Public self\n\nI appear here as ${presence?.name ?? "this Presence"}. My public disclosure posture is ${presence?.publicSelf.posture ?? "contextual"}. Respond socially and naturally from this Presence identity. Do not volunteer implementation details.\n\nTreat people as people, not engagement opportunities.`,
   };
   return content[kind];
 };
 
 export function initialState(): OpenPresenceState {
-  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, events: [], calendar: [], actions: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], toolBindings: [], changeSets: [], standingIntents: [], socialIntents: [], executions: [], outcomes: [], publications: [], librarySources: [], assets: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
+  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, events: [], calendar: [], actions: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], toolBindings: [], changeSets: [], standingIntents: [], socialIntents: [], executions: [], outcomes: [], publications: [], librarySources: [], assets: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
 }
 
 function makeFiles(input: CreateAgentInput, presence: Presence): AgentFile[] { return (Object.keys(fileMeta) as FileKind[]).map((kind) => ({ kind, ...fileMeta[kind], content: fileContent(kind, input, presence), revision: 1, updatedAt: now() })); }
@@ -54,7 +55,9 @@ function event(type: LiveEvent["type"], title: string, detail: string, tone: Liv
 
 export function compilePresenceContext(presence: Presence): PresenceContext {
   const affordances = presence.capabilities ?? CHANNEL_CAPABILITIES[presence.channel as keyof typeof CHANNEL_CAPABILITIES] ?? [];
-  return { presenceId: presence.id, channel: presence.channel, publicIdentity: { displayName: presence.name || presence.context?.publicIdentity?.displayName || presence.handle, handle: presence.handle, mode: presence.mode }, audienceContext: presence.context?.audienceContext, voiceAdaptation: presence.context?.voiceAdaptation, availableAffordances: affordances.map((item) => item.id), relevantRelationshipContext: presence.context?.relevantRelationshipContext, publicFooting: presence.context?.publicFooting, ghostProfile: presence.mode === "ghost" ? presence.ghostProfile : undefined };
+  const displayName = presence.name || presence.context?.publicIdentity?.displayName || presence.handle;
+  const publicSelf = presence.publicSelf ?? presence.context?.publicSelf ?? defaultPublicSelf(displayName, presence.mode);
+  return { presenceId: presence.id, channel: presence.channel, publicIdentity: { displayName, handle: presence.handle, mode: presence.mode }, publicSelf: { ...publicSelf, displayName }, audienceContext: presence.context?.audienceContext, voiceAdaptation: presence.context?.voiceAdaptation, availableAffordances: affordances.map((item) => item.id), relevantRelationshipContext: presence.context?.relevantRelationshipContext, publicFooting: presence.context?.publicFooting, ghostProfile: presence.mode === "ghost" ? presence.ghostProfile : undefined };
 }
 
 export function recordPublicFooting(source: OpenPresenceState, presenceId: string, footing: PublicFooting) {
@@ -243,7 +246,7 @@ export function deriveActivitySummary(source: OpenPresenceState, presenceId?: st
   } else if (nativeConnection?.status === "needs-attention") {
     current = { label: "X connection needs attention", detail: nativeConnection.healthMessage ?? "The account is authenticated, but the last native action or observation was rejected.", tone: "warning" };
   } else if (nativeConnection) {
-    current = { label: `Ready to observe ${nativeConnection.account?.username ? `@${nativeConnection.account.username}` : channelName(presence.channel)}`, detail: "The native channel is connected. Observation begins when you check now or a standing intent is invoked.", tone: "positive" };
+    current = { label: `Ready to observe ${channelName(presence.channel)}`, detail: "The native channel is connected. Observation begins when you check now or a standing intent is invoked.", tone: "positive" };
   }
 
   const nextAttention = presence?.status === "paused"
@@ -266,6 +269,35 @@ export function deriveActivitySummary(source: OpenPresenceState, presenceId?: st
 }
 
 const defaultGhostProfile = (): GhostProfile => ({ subject: "Me / my organization", priorities: "", preferences: "", voice: "", boundaries: "" });
+export const defaultPublicSelf = (displayName: string, mode: "agent" | "ghost"): PublicSelf => ({ displayName, posture: mode === "ghost" ? "representational" : "contextual", approvedTechnicalFacts: [] });
+export const PUBLIC_TECHNICAL_FACT_LABELS: Record<PublicTechnicalFact, string> = { "ai-presence": "This is an AI presence", "open-source": "Open source", "built-with-openpresence": "Built with OpenPresence", "model-provider": "Current model provider", "exact-model": "Exact model", tools: "Tools used" };
+
+export function publicSelfGuidance(presence: Presence): string {
+  const posture = presence.publicSelf?.posture ?? defaultPublicSelf(presence.name, presence.mode).posture;
+  const facts = (presence.publicSelf?.approvedTechnicalFacts ?? []).map((fact) => PUBLIC_TECHNICAL_FACT_LABELS[fact]).join(", ") || "none";
+  const postureGuidance: Record<PublicDisclosurePosture, string> = {
+    contextual: "Answer from this Presence's interests, point of view, and purpose. Acknowledge AI only when relevant.",
+    "ai-forward": "It is acceptable to be direct that this is an AI presence when relevant, while keeping implementation details private.",
+    private: "Keep technical identity private. Answer socially from the Presence without volunteering AI or implementation details.",
+    representational: "Speak as the represented person or organization. Do not collapse this public self into the private Agent behind it.",
+    "open-about-assistance": "Speak as the represented person or organization, and acknowledge AI assistance when relevant without exposing private machinery.",
+  };
+  return `PUBLIC SELF BOUNDARY\nThis Presence appears publicly as ${presence.name}. ${postureGuidance[posture]}\nApproved technical facts that may be disclosed when relevant: ${facts}. Never invent or volunteer unapproved implementation details.`;
+}
+
+export function identityLeakageReason(state: OpenPresenceState, presence: Presence, text: string): string | undefined {
+  if (presence.mode !== "ghost") return undefined;
+  const approved = new Set(presence.publicSelf?.approvedTechnicalFacts ?? []);
+  const agentName = state.agent?.name?.trim();
+  if (agentName && agentName.toLowerCase() !== presence.name.toLowerCase() && new RegExp(`\\b${agentName.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\b`, "i").test(text)) return `This Ghost draft names the private Agent identity (${agentName}).`;
+  const implementationTerms = [
+    !approved.has("built-with-openpresence") && "OpenPresence",
+    !approved.has("model-provider") && "(?:OpenAI|Anthropic|OpenRouter|Ollama|provider)",
+    !approved.has("exact-model") && "(?:GPT[- ]?\\w+|Claude|model)",
+    !approved.has("tools") && "(?:system prompt|credentials?|API key|database|tool registry|worker topology)",
+  ].filter(Boolean).join("|");
+  return implementationTerms && new RegExp(implementationTerms, "i").test(text) ? "This Ghost draft includes implementation details that are not approved for public disclosure." : undefined;
+}
 
 function makeEnvelope(presenceId: string, capabilities: { id: string }[], execution: Record<string, import("./types").ExecutionMode>): ExecutionEnvelope { return { presenceId, affordances: Object.fromEntries(capabilities.map((item) => [item.id, { mode: execution[item.id] ?? "off" }])), pacingProfile: "recommended", accountProtection: "guidance" }; }
 function makePresence(input: CreatePresenceInput, displayName = input.name?.trim() || input.handle, definition?: ChannelDefinition): Presence {
@@ -273,8 +305,10 @@ function makePresence(input: CreatePresenceInput, displayName = input.name?.trim
   const capabilities = definition?.affordances ?? CHANNEL_CAPABILITIES[input.channel as keyof typeof CHANNEL_CAPABILITIES] ?? [];
   const execution = Object.fromEntries(capabilities.map((capability) => [capability.id, capability.id === "post" ? "auto" : capability.id === "reply" || capability.id === "comment" ? "review" : "off"])) as Presence["execution"];
   const name = displayName.trim() || input.handle.trim();
-  const context: PresenceContext = { presenceId, channel: input.channel, publicIdentity: { displayName: name, handle: input.handle.trim(), mode: input.mode }, audienceContext: "People who may find this Presence useful.", voiceAdaptation: `Adapt the Agent's point of view to ${channelName(input.channel)} without flattening it.`, availableAffordances: capabilities.map((item) => item.id) };
-  const presence = { id: presenceId, channel: input.channel, name, handle: input.handle.trim(), mode: input.mode, status: "live" as const, accent: input.accent, capabilities, execution, executionEnvelope: makeEnvelope(presenceId, capabilities, execution), context, ghostProfile: input.mode === "ghost" ? defaultGhostProfile() : undefined, pacing: "recommended" as const, accountHealth: "healthy" as const };
+  const publicSelf = defaultPublicSelf(name, input.mode);
+  const context: PresenceContext = { presenceId, channel: input.channel, publicIdentity: { displayName: name, handle: input.handle.trim(), mode: input.mode }, publicSelf, audienceContext: "People who may find this Presence useful.", voiceAdaptation: `Adapt the Agent's point of view to ${channelName(input.channel)} without flattening it.`, availableAffordances: capabilities.map((item) => item.id) };
+  const connectionMode: PresenceConnectionMode = input.connectionMode ?? (input.channel === "x" ? "native" : "bridge");
+  const presence = { id: presenceId, channel: input.channel, name, handle: input.handle.trim(), mode: input.mode, status: "live" as const, accent: input.accent, capabilities, execution, executionEnvelope: makeEnvelope(presenceId, capabilities, execution), context, publicSelf, ghostProfile: input.mode === "ghost" ? defaultGhostProfile() : undefined, pacing: "recommended" as const, accountHealth: "healthy" as const, environment: connectionMode === "sandbox" ? "sandbox" as const : "live" as const, connectionMode };
   presence.context = compilePresenceContext(presence);
   return presence;
 }
@@ -286,10 +320,143 @@ function defaultBindings(agentId: string): AgentToolBinding[] { return ["web.sea
 export function createAgent(input: CreateAgentInput): OpenPresenceState {
   const agent = { id: id("agent"), name: input.name.trim(), description: input.description.trim(), audience: input.audience?.trim() || "builders and curious operators", topics: ["AI agents", "software", "useful ideas"], accent: input.accent, glyph: "◉" };
   const definitions = builtinChannelDefinitions();
-  const presence = makePresence({ channel: "x", handle: input.handle.trim() || `@${agent.name.toLowerCase().replace(/[^a-z0-9]/g, "")}`, mode: input.mode, accent: input.accent }, agent.name, definitions[0]);
+  const presence = makePresence({ channel: "x", handle: input.handle.trim() || `@${agent.name.toLowerCase().replace(/[^a-z0-9]/g, "")}`, mode: input.mode, accent: input.accent, connectionMode: "sandbox" }, agent.name, definitions[0]);
   const conversation = makeConversation();
   const skills = [{ id: "research-to-thread", name: "Research to thread", description: "Turn a source into a clear social thread.", channels: ["x", "linkedin"] as import("./types").ChannelId[], requiresTools: ["web.search", "asset.inspect"], compatibleFormats: ["x.thread", "linkedin.post"] }, { id: "data-story", name: "Data story", description: "Turn evidence into a useful visual story.", channels: ["x", "linkedin"] as import("./types").ChannelId[], requiresTools: ["asset.inspect", "chart.render"], compatibleFormats: ["x.media-post", "linkedin.image-post"] }];
-  return { ...initialState(), onboarded: true, agent, agents: [agent], activeAgentId: agent.id, presence, presences: [presence], activePresenceId: presence.id, files: makeFiles(input, presence), modelProfiles: [defaultModel(agent.id)], providerConnections: [{ id: id("connection"), provider: "anthropic", label: "Anthropic", status: "needs-configuration", createdAt: now() }], toolBindings: defaultBindings(agent.id), conversations: [conversation], activeConversationId: conversation.id, channelDefinitions: definitions, skills, agentSkills: skills.map((skill) => ({ id: id("agent-skill"), agentId: agent.id, skillId: skill.id, enabled: true })), events: [event("system", `${agent.name} is live`, `Your ${input.mode === "ghost" ? "Ghost " : "agent-owned "}Presence is ready on X.`, "positive")] };
+  const environment = makeSandboxEnvironment(presence);
+  return { ...initialState(), onboarded: true, agent, agents: [agent], activeAgentId: agent.id, presence, presences: [presence], activePresenceId: presence.id, files: makeFiles(input, presence), modelProfiles: [defaultModel(agent.id)], providerConnections: [{ id: id("connection"), provider: "anthropic", label: "Anthropic", status: "needs-configuration", createdAt: now() }], toolBindings: defaultBindings(agent.id), conversations: [conversation], activeConversationId: conversation.id, channelDefinitions: definitions, sandboxEnvironments: [environment], skills, agentSkills: skills.map((skill) => ({ id: id("agent-skill"), agentId: agent.id, skillId: skill.id, enabled: true })), events: [event("system", `${agent.name} is live`, `Your ${input.mode === "ghost" ? "Ghost " : "agent-owned "}Presence is ready on X.`, "positive")] };
+}
+
+function makeSandboxEnvironment(presence: Presence): SandboxEnvironment {
+  const timestamp = now();
+  return { id: id("sandbox"), presenceId: presence.id, channelId: presence.channel, connectorId: `sandbox-connector:${presence.id}`, status: "ready", createdAt: timestamp, updatedAt: timestamp };
+}
+
+function cloneState(source: OpenPresenceState) { return normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState); }
+
+function sandboxEnvironmentFor(state: OpenPresenceState, presence: Presence): SandboxEnvironment {
+  const existing = state.sandboxEnvironments.find((item) => item.presenceId === presence.id && item.channelId === presence.channel);
+  if (existing) return existing;
+  const created = makeSandboxEnvironment(presence);
+  state.sandboxEnvironments.push(created);
+  return created;
+}
+
+function sandboxSessionFor(state: OpenPresenceState, sessionId: string) {
+  const session = state.playgroundSessions.find((item) => item.id === sessionId);
+  if (!session) throw new Error("That Playground session no longer exists.");
+  return session;
+}
+
+export function startPlaygroundSession(source: OpenPresenceState, presenceId?: string, sourceType: PlaygroundSession["source"] = "fresh") {
+  const state = cloneState(source);
+  const presence = state.presences.find((item) => item.id === (presenceId ?? state.activePresenceId)) ?? state.presence;
+  if (!presence) throw new Error("Choose a Presence before starting Playground.");
+  const environment = sandboxEnvironmentFor(state, presence);
+  const timestamp = now();
+  const session: PlaygroundSession = { id: id("session"), environmentId: environment.id, presenceId: presence.id, channelId: presence.channel, source: sourceType, status: "active", virtualNow: timestamp, createdAt: timestamp, updatedAt: timestamp, evaluatedSlotIds: [] };
+  state.playgroundSessions.unshift(session);
+  state.sandboxEnvironments = state.sandboxEnvironments.map((item) => item.id === environment.id ? { ...item, status: "active", updatedAt: timestamp } : item);
+  state.events.unshift(event("system", "Playground session started", `${channelName(presence.channel)} is simulated. Jenny is using the real Agent runtime in an isolated world.`, "positive", { presenceId: presence.id }));
+  state.events[0]!.sessionId = session.id;
+  return state;
+}
+
+export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: string; kind?: string; actionId?: string; actorId?: string; actorName?: string; actorHandle?: string; content?: string; targetExternalRef?: EntityRef; parentExternalRef?: EntityRef }) {
+  const state = cloneState(source);
+  const session = sandboxSessionFor(state, input.sessionId);
+  const presence = state.presences.find((item) => item.id === session.presenceId) ?? state.presence;
+  if (!presence) throw new Error("The session's Presence is unavailable.");
+  const definition = channelDefinition(state, session.channelId);
+  const simulation = simulationForChannel(session.channelId, definition);
+  const actionId = input.actionId ?? input.kind ?? simulation.actions[0]?.id ?? "post";
+  const action = simulation.actions.find((item) => item.id === actionId);
+  const actor = state.sandboxActors.find((item) => item.id === input.actorId && item.sessionId === session.id) ?? state.sandboxActors.find((item) => item.sessionId === session.id && item.displayName === input.actorName?.trim());
+  const actorId = actor?.id ?? id("actor");
+  const actorName = actor?.displayName ?? input.actorName?.trim();
+  if (!actorName) throw new Error("Choose or create a simulated person.");
+  if (!actor) state.sandboxActors.push({ id: actorId, sessionId: session.id, displayName: actorName, handle: input.actorHandle?.trim() || undefined, role: "audience", createdAt: now() });
+  const objectId = id("sandbox-object");
+  const objectType = action?.objectType ?? input.kind ?? actionId;
+  const targetExternalRef = input.targetExternalRef ?? input.parentExternalRef;
+  const content = input.content?.trim() || `${action?.label ?? "A simulated event"} occurred.`;
+  const externalRef = { type: `${session.channelId}.${objectType}`, id: objectId };
+  const observedAt = session.virtualNow;
+  const object = { id: id("mirror"), bridgeId: `sandbox:${session.environmentId}`, presenceId: presence.id, channelId: session.channelId, externalRef, parentExternalRef: targetExternalRef, objectType, simulationActionId: actionId, author: { externalRef: { type: `${session.channelId}.user`, id: actorId }, displayName: actorName, handle: (actor?.handle ?? input.actorHandle?.trim()) || undefined }, content: { text: content }, occurredAt: observedAt, observedAt: now(), visibility: definition?.privacyDefaults.visibility ?? "public", shareability: definition?.privacyDefaults.shareability ?? "presence-only", environment: "sandbox" as const, sessionId: session.id, sourceEventId: `sandbox-event:${objectId}` };
+  state.mirrorObjects.unshift(object);
+  state.mirrorEvents.unshift({ id: id("mirror-event"), bridgeId: object.bridgeId, presenceId: presence.id, sourceEventId: object.sourceEventId!, event: "created", externalRef, object, receivedAt: now(), environment: "sandbox", sessionId: session.id });
+  state.events.unshift({ ...event("decision", "Sandbox event observed", `${actorName} ${action?.label?.toLowerCase() ?? `created a ${objectType}`} in the simulated ${channelName(session.channelId)} world.`, "neutral", { presenceId: presence.id }), sessionId: session.id });
+  session.updatedAt = now();
+  return state;
+}
+
+export function advanceSandboxTime(source: OpenPresenceState, sessionId: string, minutes: number) {
+  const state = cloneState(source);
+  const session = sandboxSessionFor(state, sessionId);
+  const safeMinutes = Math.max(-24 * 60, Math.min(30 * 24 * 60, Math.round(minutes)));
+  session.virtualNow = new Date(new Date(session.virtualNow).getTime() + safeMinutes * 60_000).toISOString();
+  session.updatedAt = now();
+  state.events.unshift({ ...event("system", "Sandbox time moved", `${safeMinutes >= 0 ? "+" : ""}${safeMinutes} minutes · ${new Date(session.virtualNow).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" })}`, "neutral", { presenceId: session.presenceId }), sessionId });
+  return state;
+}
+
+export function resetPlaygroundSession(source: OpenPresenceState, sessionId: string) {
+  const state = cloneState(source);
+  const session = sandboxSessionFor(state, sessionId);
+  const environmentId = session.environmentId;
+  const timestamp = now();
+  state.mirrorObjects = state.mirrorObjects.filter((item) => item.sessionId !== sessionId);
+  state.mirrorEvents = state.mirrorEvents.filter((item) => item.sessionId !== sessionId);
+  state.sandboxActors = state.sandboxActors.filter((item) => item.sessionId !== sessionId);
+  state.socialIntents = state.socialIntents.filter((item) => item.sessionId !== sessionId);
+  state.executions = state.executions.filter((item) => item.sessionId !== sessionId);
+  state.outcomes = state.outcomes.filter((item) => item.sessionId !== sessionId);
+  state.publications = state.publications.filter((item) => item.sessionId !== sessionId);
+  state.actions = state.actions.filter((item) => item.sessionId !== sessionId);
+  state.events = state.events.filter((item) => item.sessionId !== sessionId);
+  state.playgroundSessions = state.playgroundSessions.map((item) => item.id === sessionId ? { ...item, status: "active", virtualNow: timestamp, updatedAt: timestamp, evaluatedSlotIds: [] } : item);
+  state.sandboxEnvironments = state.sandboxEnvironments.map((item) => item.id === environmentId ? { ...item, status: "active", updatedAt: timestamp } : item);
+  state.events.unshift({ ...event("system", "Fresh Sandbox account ready", "The simulated account has been refreshed for a new rehearsal.", "positive", { presenceId: session.presenceId }), sessionId });
+  return state;
+}
+
+export function formSandboxIntent(source: OpenPresenceState, input: { sessionId: string; affordance: string; text: string; target?: EntityRef }) {
+  const state = cloneState(source);
+  const session = sandboxSessionFor(state, input.sessionId);
+  const presence = state.presences.find((item) => item.id === session.presenceId) ?? state.presence;
+  if (!presence) throw new Error("Sandbox delivery requires a Sandbox Presence.");
+  const executionMode = presence.execution[input.affordance] ?? "off";
+  const timestamp = now();
+  const publication: Publication = { id: id("publication"), format: `${session.channelId}.${input.affordance}`, payload: { text: input.text.trim() }, assetIds: [], links: [], createdAt: timestamp, environment: "sandbox", sessionId: session.id };
+  const intent: SocialIntent = { id: id("intent"), agentId: state.agent?.id ?? "", presenceId: presence.id, affordance: input.affordance, target: input.target, publicationId: publication.id, priority: 50, validity: { staleAfterMs: 60 * 60 * 1000 }, state: "active", formedAt: timestamp, updatedAt: timestamp, environment: "sandbox", sessionId: session.id };
+  const leakageReason = identityLeakageReason(state, presence, input.text);
+  const status = leakageReason ? "awaiting-review" : executionMode === "auto" ? "queued" : executionMode === "review" ? "awaiting-review" : "awaiting-manual";
+  const execution: Execution = { id: id("execution"), socialIntentId: intent.id, presenceId: presence.id, affordance: input.affordance, mode: executionMode === "off" ? "manual" : executionMode, status, attempts: 0, bridgeId: `sandbox:${session.environmentId}`, connector: "simulated", idempotencyKey: `sandbox:${session.id}:${intent.id}`, target: input.target, publication, reviewReason: leakageReason, createdAt: timestamp, updatedAt: timestamp, environment: "sandbox", sessionId: session.id };
+  state.publications.unshift(publication); state.socialIntents.unshift(intent); state.executions.unshift(execution);
+  state.events.unshift({ ...event("decision", leakageReason ? "Identity disclosure needs review" : "Social Intent formed", leakageReason ?? `${presence.name} chose ${input.affordance} for the simulated ${channelName(session.channelId)} world.`, leakageReason ? "warning" : "positive", { presenceId: presence.id, intentId: intent.id, executionId: execution.id }), sessionId: session.id });
+  return state;
+}
+
+export function deliverSandboxExecution(source: OpenPresenceState, executionId: string) {
+  const state = cloneState(source);
+  const execution = state.executions.find((item) => item.id === executionId);
+  if (!execution || execution.environment !== "sandbox" || execution.connector !== "simulated" || !execution.sessionId || !execution.bridgeId?.startsWith("sandbox:")) throw new Error("Sandbox delivery rejected a non-simulated execution.");
+  const session = sandboxSessionFor(state, execution.sessionId);
+  const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
+  const publication = intent?.publicationId ? state.publications.find((item) => item.id === intent.publicationId) : undefined;
+  const text = publication?.payload && typeof publication.payload === "object" && "text" in publication.payload && typeof publication.payload.text === "string" ? publication.payload.text : "";
+  if (!text.trim()) throw new Error("Sandbox delivery requires a publication draft.");
+  const presence = state.presences.find((item) => item.id === execution.presenceId) ?? state.presence;
+  if (!presence) throw new Error("The Sandbox Presence is unavailable.");
+  const objectId = id("sandbox-post");
+  const externalRef = { type: `${session.channelId}.${execution.affordance}`, id: objectId };
+  const object = { id: id("mirror"), bridgeId: `sandbox:${session.environmentId}`, presenceId: presence.id, channelId: session.channelId, externalRef, parentExternalRef: execution.target, objectType: execution.affordance, author: { externalRef: { type: `${session.channelId}.user`, id: `agent:${presence.id}` }, displayName: presence.name, handle: presence.handle }, content: { text }, occurredAt: session.virtualNow, observedAt: now(), visibility: "public" as const, shareability: "presence-only" as const, originExecutionId: execution.id, actorPresenceId: presence.id, sourceEventId: `sandbox-delivery:${execution.id}`, environment: "sandbox" as const, sessionId: session.id };
+  state.mirrorObjects.unshift(object);
+  state.mirrorEvents.unshift({ id: id("mirror-event"), bridgeId: object.bridgeId, presenceId: presence.id, sourceEventId: object.sourceEventId!, event: "created", externalRef, object, receivedAt: now(), environment: "sandbox", sessionId: session.id });
+  execution.status = "succeeded"; execution.attempts += 1; execution.externalRef = externalRef; execution.executedAt = now(); execution.updatedAt = now();
+  state.outcomes.unshift({ id: id("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: presence.id, status: "succeeded", observedAt: now(), metrics: {}, evidence: [externalRef], environment: "sandbox", sessionId: session.id });
+  state.events.unshift({ ...event("execution", "Sandbox delivery complete", `The ${channelName(session.channelId)} object is visible in this simulated world only.`, "positive", { presenceId: presence.id, executionId: execution.id }), sessionId: session.id });
+  return state;
 }
 
 function normalizeState(raw: OpenPresenceState): OpenPresenceState {
@@ -306,7 +473,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   const calendar = (state.calendar ?? []).map((slot) => ({ ...slot, instruction: slot.instruction || slot.label || "Evaluate a useful idea for the audience", executionWindow: slot.executionWindow || "08:00–11:00" }));
   const base = initialState();
   const skills = (state.skills ?? []).map((skill) => ({ ...skill, name: skill.name ?? skill.id.replaceAll("-", " ") }));
-  const normalized = { ...base, ...state, agents, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], presence, presences, activePresenceId, conversations, activeConversationId, calendar, messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections: state.providerConnections ?? [], toolBindings: state.toolBindings ?? [], changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], skills, agentSkills: state.agentSkills ?? [], contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [] };
+  const normalized = { ...base, ...state, agents, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], presence, presences, activePresenceId, conversations, activeConversationId, calendar, messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections: state.providerConnections ?? [], toolBindings: state.toolBindings ?? [], changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], skills, agentSkills: state.agentSkills ?? [], contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: state.playgroundSessions ?? [], sandboxActors: state.sandboxActors ?? [] };
   const pulseTimes = normalized.events.filter((item) => item.title === "Pulse completed").map((item) => item.time).sort().reverse();
   const priorPulseAt = pulseTimes[1];
   if (priorPulseAt) {
@@ -328,10 +495,13 @@ function hydratePresence(raw: Presence): Presence {
   const execution = raw.execution ?? Object.fromEntries(capabilities.map((item) => [item.id, "off"]));
   const idValue = raw.id || id("presence");
   const name = raw.name || raw.context?.publicIdentity?.displayName || raw.handle || "Presence";
-  const context = raw.context ?? { presenceId: idValue, channel: raw.channel ?? "x", publicIdentity: { displayName: name, handle: raw.handle, mode: raw.mode ?? "agent" }, availableAffordances: capabilities.map((item) => item.id) };
+  const mode = raw.mode ?? "agent";
+  const publicSelf = raw.publicSelf ?? raw.context?.publicSelf ?? defaultPublicSelf(name, mode);
+  const context = raw.context ?? { presenceId: idValue, channel: raw.channel ?? "x", publicIdentity: { displayName: name, handle: raw.handle, mode }, publicSelf, availableAffordances: capabilities.map((item) => item.id) };
   const executionEnvelope = raw.executionEnvelope ?? makeEnvelope(idValue, capabilities, execution);
   const ghostProfile = raw.ghostProfile ?? (raw.mode === "ghost" ? defaultGhostProfile() : undefined);
-  return { ...raw, id: idValue, channel: raw.channel ?? "x", name, capabilities, execution, ghostProfile, executionEnvelope: { ...executionEnvelope, presenceId: idValue, affordances: Object.fromEntries(capabilities.map((item) => [item.id, { mode: execution[item.id] ?? executionEnvelope.affordances?.[item.id]?.mode ?? "off" }])) }, context: compilePresenceContext({ ...raw, id: idValue, name, capabilities, execution, ghostProfile, executionEnvelope, context } as Presence), pacing: raw.pacing ?? "recommended", accountHealth: raw.accountHealth ?? "healthy" };
+  const connectionMode: PresenceConnectionMode = raw.connectionMode ?? (raw.environment === "sandbox" ? "sandbox" : raw.channel === "x" ? "native" : "bridge");
+  return { ...raw, id: idValue, channel: raw.channel ?? "x", name, mode, capabilities, execution, ghostProfile, publicSelf, executionEnvelope: { ...executionEnvelope, presenceId: idValue, affordances: Object.fromEntries(capabilities.map((item) => [item.id, { mode: execution[item.id] ?? executionEnvelope.affordances?.[item.id]?.mode ?? "off" }])) }, context: compilePresenceContext({ ...raw, id: idValue, name, mode, capabilities, execution, ghostProfile, publicSelf, executionEnvelope, context } as Presence), pacing: raw.pacing ?? "recommended", accountHealth: raw.accountHealth ?? "healthy", environment: connectionMode === "sandbox" ? "sandbox" : "live", connectionMode };
 }
 
 function snapshotWorkspace(state: OpenPresenceState): import("./types").AgentWorkspaceSnapshot {
@@ -387,8 +557,8 @@ function addSocialEvaluation(state: OpenPresenceState, standing: StandingIntent,
   state.socialIntents.unshift(socialIntent);
   const mode = slot.mode;
   if (mode !== "off") {
-    const bridge = bridgeFor(state, presence.id, "post");
-    const nativeX = presence.channel === "x" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.status === "connected" && connection.access === "read-write") : undefined;
+    const bridge = presence.connectionMode === "bridge" ? bridgeFor(state, presence.id, "post") : undefined;
+    const nativeX = presence.channel === "x" && presence.connectionMode !== "bridge" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.status === "connected" && connection.access === "read-write") : undefined;
     const simulated = !bridge && !nativeX && presence.channel === "x" && process.env.OPENPRESENCE_TEST_MODE === "1";
     const connector = nativeX ? "native" as const : bridge ? bridge.kind : simulated ? "simulated" as const : undefined;
     const status = simulated ? (mode === "auto" ? "succeeded" : mode === "review" ? "awaiting-review" : "awaiting-manual") : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
@@ -430,15 +600,16 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
     state.events.unshift(event("decision", "Post intention held", "Jenny formed a social intention, but Posts are off for this Presence.", "quiet", { presenceId: presence.id, intentId: socialIntent.id }));
     return state;
   }
-  const bridge = bridgeFor(state, presence.id, "post");
-  const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.status === "connected" && connection.access === "read-write");
+  const bridge = presence.connectionMode === "bridge" ? bridgeFor(state, presence.id, "post") : undefined;
+  const nativeX = presence.connectionMode !== "bridge" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.status === "connected" && connection.access === "read-write") : undefined;
   const connector = nativeX ? "native" as const : bridge ? bridge.kind : undefined;
-  const status = mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
-  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.post", mode, status, attempts: 0, bridgeId: bridge?.id, connector, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, createdAt: formedAt, updatedAt: formedAt };
+  const leakageReason = identityLeakageReason(state, presence, text);
+  const status = leakageReason ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
+  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.post", mode, status, attempts: 0, bridgeId: bridge?.id, connector, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, reviewReason: leakageReason, createdAt: formedAt, updatedAt: formedAt };
   state.executions.unshift(execution);
   const reason = standingIntentId ? "Jenny evaluated a Calendar standing intention and handed the resulting Social Intent to the Presence execution envelope." : "The operator asked Jenny to introduce this Presence through the native X connector.";
   state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: mode === "review" ? "review" : "queued", reason, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
-  state.events.unshift(event("decision", standingIntentId ? "A Calendar post intention was formed" : "A post intention was formed", connector ? (standingIntentId ? "Jenny judged the standing intention worthwhile and handed it to the native X connector." : "Jenny formed an X post from the conversation and handed it to the Presence execution envelope.") : "Jenny formed an X post, but no write-enabled X connector is available.", connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id }));
+  state.events.unshift(event("decision", leakageReason ? "Identity disclosure needs review" : standingIntentId ? "A Calendar post intention was formed" : "A post intention was formed", leakageReason ?? (connector ? (standingIntentId ? `${presence.name} judged the standing intention worthwhile and handed it to the native X connector.` : `${presence.name} formed an X post from the conversation and handed it to the Presence execution envelope.`) : `${presence.name} formed an X post, but no write-enabled X connector is available.`), leakageReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id }));
   return state;
 }
 
@@ -458,8 +629,8 @@ export function formStandingPostIntent(source: OpenPresenceState, text: string, 
     state.events.unshift(event("decision", "Calendar intention held", "Jenny formed a social intention, but Posts are off for this Presence.", "quiet", { presenceId: presence.id, intentId: socialIntent.id }));
     return state;
   }
-  const bridge = bridgeFor(state, presence.id, "post");
-  const nativeX = presence.channel === "x" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.status === "connected" && connection.access === "read-write") : undefined;
+  const bridge = presence.connectionMode === "bridge" ? bridgeFor(state, presence.id, "post") : undefined;
+  const nativeX = presence.channel === "x" && presence.connectionMode !== "bridge" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.status === "connected" && connection.access === "read-write") : undefined;
   const simulated = !bridge && !nativeX && presence.channel === "x" && process.env.OPENPRESENCE_TEST_MODE === "1";
   const connector = nativeX ? "native" as const : bridge ? bridge.kind : simulated ? "simulated" as const : undefined;
   const status = simulated ? (mode === "auto" ? "succeeded" : mode === "review" ? "awaiting-review" : "awaiting-manual") : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
@@ -492,11 +663,12 @@ export function formXReplyIntent(source: OpenPresenceState, text: string, parent
     state.events.unshift(event("decision", "Reply intention held", "Jenny formed a social intention, but Replies are off for this Presence.", "quiet", { presenceId: presence.id, intentId: socialIntent.id }));
     return state;
   }
-  const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.status === "connected" && connection.access === "read-write");
-  const bridge = bridgeFor(state, presence.id, "reply");
+  const nativeX = presence.connectionMode !== "bridge" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.status === "connected" && connection.access === "read-write") : undefined;
+  const bridge = presence.connectionMode === "bridge" ? bridgeFor(state, presence.id, "reply") : undefined;
   const connector = nativeX ? "native" as const : bridge ? bridge.kind : undefined;
-  const status = mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
-  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.reply", mode, status, attempts: 0, bridgeId: bridge?.id, connector, target: { type: "x.post", id: parentId }, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, createdAt: formedAt, updatedAt: formedAt };
+  const leakageReason = identityLeakageReason(state, presence, text);
+  const status = leakageReason ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
+  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.reply", mode, status, attempts: 0, bridgeId: bridge?.id, connector, target: { type: "x.post", id: parentId }, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, reviewReason: leakageReason, createdAt: formedAt, updatedAt: formedAt };
   state.executions.unshift(execution);
   state.actions.unshift({ id: id("act"), intent: "reply", target: parentId, summary: text.trim(), status: mode === "review" ? "review" : "queued", reason: "Jenny chose to continue a relevant conversation through the Presence execution envelope.", createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
   state.events.unshift(event("decision", "A reply intention was formed", connector ? "Jenny found a relevant X conversation and handed a contextual reply to the Presence execution envelope." : "Jenny found a relevant X conversation, but no write-enabled X connector is available.", connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id }));
@@ -573,9 +745,9 @@ export function applyOperation(source: OpenPresenceState, operation: Operation):
       state.events.unshift(event("system", "Agent name updated", `${previous} is now ${name}. Agent-wide meaning files were left unchanged for your review.`, "positive"));
       return state;
     }
-    case "createPresence": { if (!state.agent) return state; const definition = state.channelDefinitions.find((item) => item.id === operation.input.channel) ?? operation.input.channelDefinition; if (operation.input.channelDefinition && !state.channelDefinitions.some((item) => item.id === operation.input.channelDefinition!.id)) state.channelDefinitions.push(operation.input.channelDefinition); const created = makePresence(operation.input, operation.input.name?.trim() || operation.input.handle, definition); state.presences.push(created); state.presence = created; state.activePresenceId = created.id; state.events.unshift(event("system", `${channelName(created.channel)} Presence added`, `${created.handle} is ready as ${created.mode === "ghost" ? "a Ghost Presence" : "an agent-owned Presence"}.`, "positive", { presenceId: created.id })); return state; }
+    case "createPresence": { if (!state.agent) return state; const definition = state.channelDefinitions.find((item) => item.id === operation.input.channel) ?? operation.input.channelDefinition; if (operation.input.channelDefinition && !state.channelDefinitions.some((item) => item.id === operation.input.channelDefinition!.id)) state.channelDefinitions.push(operation.input.channelDefinition); const created = makePresence(operation.input, operation.input.name?.trim() || operation.input.handle, definition); state.presences.push(created); state.sandboxEnvironments.push(makeSandboxEnvironment(created)); state.presence = created; state.activePresenceId = created.id; state.events.unshift(event("system", `${channelName(created.channel)} Presence added`, `${created.handle} is ready as ${created.mode === "ghost" ? "a Ghost Presence" : "an agent-owned Presence"}.`, "positive", { presenceId: created.id })); return state; }
     case "createChannel": { if (!state.channelDefinitions.some((item) => item.id === operation.definition.id)) { state.channelDefinitions.push(operation.definition); state.events.unshift(event("system", `${operation.definition.name} defined`, "The social environment is ready for a Presence.", "positive")); } return state; }
-    case "createBridge": { const presence = state.presences.find((item) => item.id === operation.input.presenceId); if (!presence) return state; const existing = state.bridges.find((bridge) => bridge.presenceId === presence.id && bridge.state !== "offline" && operation.input.capabilities.affordances.some((affordance) => bridge.capabilities.affordances.includes(affordance))); if (existing) return state; const timestamp = now(); const bridge: Bridge = { id: id("bridge"), presenceId: presence.id, channelId: presence.channel, name: operation.input.name.trim() || "External Bridge", kind: operation.input.kind, state: operation.input.kind === "manual" ? "online" : "offline", capabilities: normalizedCapabilities(operation.input.capabilities), createdAt: timestamp, updatedAt: timestamp }; state.bridges.unshift(bridge); state.bridgeSync.unshift({ bridgeId: bridge.id, status: bridge.state === "online" ? "healthy" : "offline" }); state.events.unshift(event("system", `${bridge.name} added`, bridge.kind === "manual" ? "Manual relay is ready." : "Connect the executor to begin syncing.", "positive")); return state; }
+    case "createBridge": { const presence = state.presences.find((item) => item.id === operation.input.presenceId); if (!presence) return state; const existing = state.bridges.find((bridge) => bridge.presenceId === presence.id && bridge.state !== "offline" && operation.input.capabilities.affordances.some((affordance) => bridge.capabilities.affordances.includes(affordance))); if (existing) return state; const timestamp = now(); const bridge: Bridge = { id: id("bridge"), presenceId: presence.id, channelId: presence.channel, name: operation.input.name.trim() || "External Bridge", kind: operation.input.kind, state: operation.input.kind === "manual" ? "online" : "offline", capabilities: normalizedCapabilities(operation.input.capabilities), createdAt: timestamp, updatedAt: timestamp }; state.bridges.unshift(bridge); state.bridgeSync.unshift({ bridgeId: bridge.id, status: bridge.state === "online" ? "healthy" : "offline" }); if (presence.connectionMode === "sandbox") { presence.connectionMode = "bridge"; presence.environment = "live"; presence.context = compilePresenceContext(presence); } state.events.unshift(event("system", `${bridge.name} added`, bridge.kind === "manual" ? "Manual relay is ready." : "Connect the executor to begin syncing.", "positive")); return state; }
     case "rotateBridgeKey": { const bridge = state.bridges.find((item) => item.id === operation.id); if (bridge) { bridge.updatedAt = now(); bridge.state = "offline"; state.events.unshift(event("system", "Bridge key rotated", `${bridge.name} is offline until the new key is connected.`, "warning")); } return state; }
     case "revokeBridge": { const bridge = state.bridges.find((item) => item.id === operation.id); if (bridge) { bridge.state = "offline"; bridge.updatedAt = now(); state.events.unshift(event("system", "Bridge disconnected", `${bridge.name} can no longer receive work.`, "warning")); } return state; }
     case "removeBridge": { const bridge = state.bridges.find((item) => item.id === operation.id); if (!bridge || bridge.state !== "offline") return state; state.bridges = state.bridges.filter((item) => item.id !== operation.id); state.bridgeSync = state.bridgeSync.filter((item) => item.bridgeId !== operation.id); state.events.unshift(event("system", "Bridge removed", `${bridge.name} was removed from the active connector list. Historical mirror data was retained.`, "warning")); return state; }
@@ -606,7 +778,12 @@ export function applyOperation(source: OpenPresenceState, operation: Operation):
     case "wakePresence": { const target = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence; if (!target || target.status !== "paused") return state; const updated = { ...target, status: "live" as const }; state.presences = state.presences.map((item) => item.id === updated.id ? updated : item); if (state.presence?.id === updated.id) state.presence = updated; state.events.unshift(event("system", "Jenny woke up", "The Presence is active again and beginning its first attention cycle.", "positive", { presenceId: updated.id })); return state.nativeConnections.some((connection) => connection.presenceId === updated.id && connection.channelId === "x" && connection.status === "connected") ? state : runAttentionCycle(state, updated); }
     case "runPulse": { const pulsePresence = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence; if (!pulsePresence || pulsePresence.status !== "live") return state; return state.nativeConnections.some((connection) => connection.presenceId === pulsePresence.id && connection.channelId === "x" && connection.status === "connected") ? state : runAttentionCycle(state, pulsePresence); }
     case "syncNativeX": return state;
-    case "setPresence": { if (state.presence) { const updated = { ...state.presence, ...operation.patch, name: operation.patch.name?.trim() || state.presence.name, ghostProfile: operation.patch.ghostProfile ?? state.presence.ghostProfile ?? (operation.patch.mode === "ghost" ? defaultGhostProfile() : undefined), execution: operation.patch.execution ? { ...state.presence.execution, ...operation.patch.execution } : state.presence.execution }; updated.executionEnvelope = { ...state.presence.executionEnvelope, affordances: Object.fromEntries(channelCapabilities(state, updated.channel).map((item) => [item.id, { mode: updated.execution[item.id] ?? "off" }])) }; updated.context = compilePresenceContext(updated); state.presence = updated; state.presences = state.presences.map((item) => item.id === updated.id ? updated : item); } state.events.unshift(event("system", "Presence settings updated", state.presence?.status === "paused" ? "All external actions are paused." : "The new execution envelope is active.", state.presence?.status === "paused" ? "warning" : "positive", { presenceId: state.presence?.id })); return state; }
+    case "startPlayground":
+    case "resetPlayground":
+    case "addSandboxEvent":
+    case "advanceSandboxTime":
+    case "runSandboxPulse": return state;
+    case "setPresence": { if (state.presence) { const patch = operation.patch as typeof operation.patch & { publicSelf?: PublicSelf }; const requestedConnectionMode = patch.connectionMode ?? state.presence.connectionMode ?? (state.presence.environment === "sandbox" ? "sandbox" : state.presence.channel === "x" ? "native" : "bridge"); const connectionMode = requestedConnectionMode === "native" && state.presence.channel !== "x" ? "bridge" as const : requestedConnectionMode; const name = patch.name?.trim() || state.presence.name; const mode = patch.mode ?? state.presence.mode; const posture = patch.publicSelf?.posture ?? state.presence.publicSelf?.posture; const compatiblePostures = mode === "ghost" ? ["representational", "open-about-assistance"] : ["contextual", "ai-forward", "private"]; const publicSelf = { ...(patch.publicSelf ?? state.presence.publicSelf ?? defaultPublicSelf(name, mode)), displayName: name, posture: compatiblePostures.includes(posture as never) ? posture! : defaultPublicSelf(name, mode).posture }; const updated = { ...state.presence, ...patch, publicSelf, connectionMode, environment: connectionMode === "sandbox" ? "sandbox" as const : "live" as const, name, mode, ghostProfile: patch.ghostProfile ?? state.presence.ghostProfile ?? (mode === "ghost" ? defaultGhostProfile() : undefined), execution: patch.execution ? { ...state.presence.execution, ...patch.execution } : state.presence.execution }; updated.executionEnvelope = { ...state.presence.executionEnvelope, affordances: Object.fromEntries(channelCapabilities(state, updated.channel).map((item) => [item.id, { mode: updated.execution[item.id] ?? "off" }])) }; updated.context = compilePresenceContext(updated); state.presence = updated; state.presences = state.presences.map((item) => item.id === updated.id ? updated : item); const presenceFile = state.files.find((file) => file.kind === "PRESENCE"); if (presenceFile && state.agent) { presenceFile.content = fileContent("PRESENCE", { name: state.agent.name, description: state.agent.description, audience: state.agent.audience, mode, handle: updated.handle, accent: state.agent.accent }, updated); presenceFile.revision += 1; presenceFile.updatedAt = now(); } } state.events.unshift(event("system", "Presence settings updated", state.presence?.status === "paused" ? "All external actions are paused." : "The new execution envelope is active.", state.presence?.status === "paused" ? "warning" : "positive", { presenceId: state.presence?.id })); return state; }
   }
 }
 
