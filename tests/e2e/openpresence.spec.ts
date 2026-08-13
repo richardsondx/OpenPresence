@@ -222,6 +222,14 @@ test("Presence Settings makes the destination route explicit", async ({ page }) 
   await expect(page.getByText("This world is simulated.", { exact: false })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Connect this Presence to X" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: /Connect this Presence through Bridge/ })).toHaveCount(0);
+  const publicSelf = page.locator(".public-self-card");
+  await expect(publicSelf).toHaveCSS("border-top-width", "2px");
+  await expect(publicSelf).toHaveCSS("padding-top", "26px");
+  await expect(publicSelf.getByText("Approved disclosure details", { exact: true })).toBeVisible();
+  await expect(publicSelf.getByText("Choose which details this Presence may share when relevant.", { exact: false })).toBeVisible();
+  await expect(publicSelf.getByText("Open source", { exact: true })).toHaveCount(0);
+  await expect(publicSelf.getByText("Tools used", { exact: true })).toHaveCount(0);
+  await expect(publicSelf.locator(".inline-form-actions")).toHaveCSS("margin-top", "20px");
 
   await routeOptions.getByRole("button", { name: /^X/ }).click();
   await expect(routeOptions.getByRole("button", { name: /^X/ })).toHaveClass(/selected/);
@@ -241,6 +249,37 @@ test("Presence Settings makes the destination route explicit", async ({ page }) 
   await page.reload();
   await navigate(page, "Settings");
   await expect(routeOptions.getByRole("button", { name: /^Sandbox/ })).toHaveClass(/selected/);
+});
+
+test("Review to Auto confirms and processes pending replies", async ({ page, request }) => {
+  await createAgent(page);
+  await navigate(page, "Playground");
+  const reviewRoute = await request.post("/api/state", { data: { type: "setPresence", patch: { execution: { reply: "review" } } } });
+  expect(reviewRoute.ok()).toBeTruthy();
+  const initial = await request.get("/api/state");
+  const session = (await initial.json()).playgroundSessions[0];
+  const added = await request.post("/api/state", {
+    data: { type: "addSandboxEvent", sessionId: session.id, actionId: "post", actorName: "Maya Chen", actorHandle: "@maya", content: "Can you introduce me to a backend engineer in Toronto?" },
+  });
+  expect(added.ok()).toBeTruthy();
+  const seeded = await added.json();
+  const pending = seeded.executions.find((item: { affordance: string; status: string }) => (item.affordance === "reply" || item.affordance === "x.reply") && item.status === "awaiting-review");
+  expect(pending).toBeTruthy();
+
+  await page.reload();
+  await navigate(page, "Settings");
+  await page.getByRole("button", { name: "Replies auto", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Enable Auto for Replies?" })).toContainText("automatically approve 1 message waiting for approval");
+  await page.getByRole("button", { name: "Keep Review", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Replies review", exact: true })).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByRole("button", { name: "Replies auto", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm Auto", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Replies auto", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const confirmed = await (await request.get("/api/state")).json();
+  expect(confirmed.executions.find((item: { id: string }) => item.id === pending.id)?.status).toBe("succeeded");
 });
 
 test("Agent switcher creates and switches isolated workspaces", async ({ page }) => {
@@ -449,7 +488,14 @@ test("Activity completes review and manual execution lifecycles", async ({ page 
   await page.getByRole("button", { name: "Run now" }).click();
   await page.waitForTimeout(150);
   await page.reload();
-  await page.getByRole("button", { name: "Approve execution" }).click();
+  const reviewButton = page.getByRole("button", { name: "Approve execution" });
+  await expect(reviewButton).toHaveClass(/review-cta/);
+  await expect(reviewButton).toHaveCSS("background-color", "rgb(169, 81, 44)");
+  await expect(reviewButton).toHaveCSS("color", "rgb(255, 255, 255)");
+  await expect(reviewButton).toHaveCSS("min-height", "48px");
+  await reviewButton.focus();
+  await expect(reviewButton).toBeFocused();
+  await reviewButton.click();
   await page.getByRole("button", { name: "Execute approved action" }).click();
   await expect(page.locator(".execution-ledger").getByRole("heading", { name: "Action completed" })).toBeVisible();
   await expect(page.locator(".execution-ledger")).not.toContainText("x.post");
@@ -536,9 +582,13 @@ test("Presence Public Self saves its disclosure boundary", async ({ page }) => {
   await page.getByRole("button", { name: "Save name", exact: true }).click();
   const settingsOrder = await page.locator(".presence-settings-page > section").evaluateAll((sections) => Object.fromEntries(sections.map((section) => [section.className, Number(getComputedStyle(section).order)])));
   expect(settingsOrder["settings-card channel-settings-card"]).toBeLessThan(settingsOrder["settings-card presence-execution-card"]);
+  expect(settingsOrder["settings-card presence-execution-card"]).toBeLessThan(settingsOrder["settings-card presence-rhythm-card"]);
+  expect(settingsOrder["settings-card presence-rhythm-card"]).toBeLessThan(settingsOrder["settings-card media-policy-card"]);
   expect(settingsOrder["settings-card presence-execution-card"]).toBeLessThan(settingsOrder["settings-card media-policy-card"]);
   expect(settingsOrder["settings-card media-policy-card"]).toBeLessThan(settingsOrder["settings-card public-self-card"]);
   const mediaPolicy = page.locator(".media-policy-card");
+  await expect(mediaPolicy).toHaveCSS("border-top-width", "2px");
+  await expect(mediaPolicy).toHaveCSS("padding-top", "26px");
   await expect(mediaPolicy.getByRole("heading", { name: "When media is hard to interpret" })).toBeVisible();
   await mediaPolicy.getByRole("button", { name: /Always review media actions/ }).click();
   await page.locator(".identity-options").getByRole("button", { name: /Me \/ my organization/ }).click();

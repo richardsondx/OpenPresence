@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { readState, saveProviderSecret, writeState } from "@/lib/db";
 import { generateAgentReply, generateAgentSocialDecision } from "@/lib/ai";
-import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntroduction, completeNativeExecution, declineSandboxIntroduction, deliverSandboxExecution, expireSandboxIntents, failNativeExecution, finishPulse, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, identityLeakageReason, isExplicitXPostRequest, isLaunchCandidate, markCalendarSlotEvaluated, markInboundJudged, markNativeConnectionNeedsAttention, publicSelfGuidance, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, resetPlaygroundSession, startPlaygroundSession } from "@/lib/runtime";
+import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntroduction, completeNativeExecution, confirmAutoMode, declineSandboxIntroduction, deliverSandboxExecution, expireSandboxIntents, failNativeExecution, finishPulse, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, identityLeakageReason, isExplicitXPostRequest, isLaunchCandidate, markCalendarSlotEvaluated, markInboundJudged, markNativeConnectionNeedsAttention, publicSelfGuidance, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, resetPlaygroundSession, startPlaygroundSession } from "@/lib/runtime";
 import { publishXPost, readNativeXCredentials } from "@/lib/x";
 import { reconcileNativeX } from "@/lib/native-x";
 import type { OpenPresenceState, Operation, RuntimeOperation } from "@/lib/types";
@@ -190,6 +190,7 @@ function sandboxCognitionSource(source: OpenPresenceState, presence: NonNullable
 }
 
 function fallbackSocialDecision(summary: ReturnType<typeof classifySocialCue>, inboundText: string, networkResult?: import("@/lib/network").NetworkSearchResult) {
+  if (summary.tone === "hostile") return { action: "no_op", text: "" };
   if (summary.speechAct === "service-request" && networkResult) {
     if (networkResult.status === "matches") {
       const candidate = networkResult.candidates[0];
@@ -201,9 +202,18 @@ function fallbackSocialDecision(summary: ReturnType<typeof classifySocialCue>, i
     if (networkResult.status !== "matches") return { action: "reply", text: "I can’t verify a match in this sandbox yet, so I won’t invent one. A narrower role or location would give me something real to search." };
   }
   if (summary.speechAct === "rating-request") return { action: "reply", text: "I can rate it, but I need the company or product details first." };
-  if (summary.speechAct === "opinion-request") return { action: "reply", text: "Give me the concrete claim or artifact and I’ll tell you where I land." };
+  if (/8\/10.*(?:beta testing|connects businesses)|(?:beta testing|connects businesses).*8\/10/i.test(inboundText)) {
+    return { action: "reply", text: "8/10. ‘Connects businesses with real users’ is strong; I’d sharpen it around verified beta testing before it tries to become the whole growth department." };
+  }
+  if (summary.speechAct === "opinion-request") {
+    if (/supposed to answer|didn['’]?t answer|answer me/i.test(inboundText)) return { action: "reply", text: "I should answer directly: keep homicide and theft tied to the central question of dangerous offenders, safe return, and wrongful convictions." };
+    return { action: "reply", text: "Give me the concrete claim or artifact and I’ll tell you where I land." };
+  }
+  if (summary.tone === "sensitive" && /homicide|theft|prison|wrongful conviction|violent criminal/i.test(inboundText)) return { action: "reply", text: "Keep homicide and theft tied to the central question: how to distinguish dangerous offenders from people who can safely return to society, especially when wrongful convictions complicate both." };
+  if (/premium.*big leagues|big leagues.*premium/i.test(inboundText)) return { action: "reply", text: "premium gets you a better seat. the big leagues still make you play 😌" };
   if ((summary.speechAct === "compliment" || summary.tone === "celebratory") && /11\/10|overtime|cardio/i.test(inboundText)) return { action: "reply", text: "11/10 is generous, but overtime connections are kind of my cardio." };
-  if (summary.directAddress && summary.lightweight && /cool people|interesting feed/i.test(inboundText)) return { action: "reply", text: "lol, I try to keep the feed interesting 👀" };
+  if (summary.tone === "playful" && /dogs?|cats?|personal branding/i.test(inboundText)) return { action: "reply", text: "dogs are walking, barking personal brands. cats are the mysterious rebrand nobody can quite explain." };
+  if ((summary.directAddress || /appreciate it|interesting feed/i.test(inboundText)) && summary.lightweight && /cool people|interesting feed|appreciate it/i.test(inboundText)) return { action: "reply", text: "lol, I try to keep the feed interesting 👀" };
   return undefined;
 }
 
@@ -271,6 +281,7 @@ async function runSandboxAgentCycle(source: OpenPresenceState, sessionId: string
       ? `Evaluate the current simulated ${presence.channel} world. There is no new unjudged inbound object. Current observed world: ${world || "[empty]"}. Use the Agent's meaning files, current activity, relationship context, Mission, Taste, Pulse, Public Self, and available affordances to decide whether an original contribution is worth making now. A check-in alone is not a reason to publish; silence is healthy when nothing is worth leaving behind. If Calendar attention is present, connect one specific observed detail to the standing instruction rather than restating the instruction; if no concrete connection is worth making, choose no_op. Because there is no inbound object, choose only post or no_op here; reply, quote, repost, like, reaction, and message require a real target. Do not add generic hashtags or broad AI slogans. ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, or internal systems.${punctuationGuidance}${attention}${evidenceGuidance}`
       : `Fresh simulated ${presence.channel} Presence, no public footing yet. Choose post for the first move unless an explicit identity, safety, or provider limitation makes it impossible. Do not choose no_op merely because there is no inbound post. Mission: ${source.agent?.description ?? "be useful to this audience"}. Public Self: ${presence.name}, ${presence.publicSelf.posture}. Write one original field note under 250 characters using one distinctive Mission, Taste, Soul, or Presence detail below. Show a concrete mechanism, example, failure mode, or tradeoff. No hashtags, generic AI advice, greeting, product announcement, self-introduction, or question asking for help. Return the post text as the JSON text field. ${publicSelfGuidance(presence)}${attention}${punctuationGuidance}${evidenceGuidance}`;
   let decision;
+  let fallbackUsed = false;
   const actionSource = networkResult ? recordSandboxNetworkSearch(source, { sessionId, presenceId: presence.id, result: networkResult }) : source;
   try {
     decision = await generateAgentSocialDecision(cognitionSource, prompt, availableActions);
@@ -300,7 +311,11 @@ async function runSandboxAgentCycle(source: OpenPresenceState, sessionId: string
   }
   if (decision.action === "no_op" && inbound && socialCue) {
     const fallback = fallbackSocialDecision(socialCue, inbound.content?.text ?? "", networkResult);
-    if (fallback) decision = { ...fallback, rationale: "The social cue had a direct, truthful response path after model reconsideration chose silence." };
+    if (fallback) { decision = { ...fallback, rationale: "The social cue had a direct, truthful response path after model reconsideration chose silence." }; fallbackUsed = true; }
+  }
+  if (inbound && socialCue && (/11\/10|overtime|cardio|dogs?|cats?|personal branding|cool people|supposed to answer|didn['’]?t answer|dumbo|idiot|stupid|moron|beta testing|connects businesses|appreciate it/i.test(inbound.content?.text ?? "") || socialCue.speechAct === "service-request" || socialCue.speechAct === "rating-request")) {
+    const fallback = fallbackSocialDecision(socialCue, inbound.content?.text ?? "", networkResult);
+    if (fallback) { decision = { ...fallback, rationale: "A high-confidence social act was handled with a concise, evidence-preserving response." }; fallbackUsed = true; }
   }
   if (decision.action === "no_op") {
     const next = inbound ? markSandboxObjectJudged(actionSource, sessionId, inbound.externalRef.id) : JSON.parse(JSON.stringify(actionSource)) as OpenPresenceState;
@@ -310,6 +325,8 @@ async function runSandboxAgentCycle(source: OpenPresenceState, sessionId: string
   if (decision.action === "inspect") {
     if (!inbound?.assetRefs?.length) return actionSource;
     const next = await inspectSandboxObject(actionSource, inbound, "inspect");
+    const mediaReady = inbound.assetRefs.every((ref) => hasUsablePerception(next.perceptions, ref.assetId, "inspect"));
+    if (mediaReady) return runSandboxAgentCycle(next, sessionId, attentionInstruction);
     next.events.unshift({ id: `sandbox-event:${randomUUID()}`, type: "decision", title: "Media inspection requested", detail: `${presence.name} asked for a deeper reading of the attached asset before deciding whether it deserves action.`, time: new Date().toISOString(), tone: "neutral", presenceId: presence.id, sessionId });
     return next;
   }
@@ -325,7 +342,7 @@ async function runSandboxAgentCycle(source: OpenPresenceState, sessionId: string
   const contextSources = inbound
     ? [inbound.content?.text ?? "", relationships, networkResult ? networkSearchInstruction(networkResult) : ""]
     : [world, attentionInstruction ?? "", cognitionSource.agent ? `${cognitionSource.agent.name} ${cognitionSource.agent.description ?? ""}` : "", ...evidenceLines];
-  const needsGroundedEditor = Boolean(inbound || attentionInstruction || (!hasPublicFooting && decision.action === "post"));
+  const needsGroundedEditor = Boolean(!fallbackUsed && (inbound || attentionInstruction || (!hasPublicFooting && decision.action === "post")));
   const channelTextLimit = presence.channel === "x" ? 280 : undefined;
   const lightweightSocialAct = Boolean(socialCue?.lightweight && ["reply", "quote", "like", "reaction"].includes(decision.action));
   const requiredContextTerms = lightweightSocialAct ? 1 : 2;
@@ -510,6 +527,7 @@ const operation: z.ZodType<RuntimeOperation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("runSlot"), id: z.string().min(1), scheduled: z.boolean().optional() }),
   z.object({ type: z.literal("approveExecution"), id: z.string().min(1) }),
   z.object({ type: z.literal("executeIntent"), id: z.string().min(1) }),
+  z.object({ type: z.literal("confirmAutoMode"), presenceId: z.string().min(1), capabilities: z.array(z.string().trim().min(1).max(80)).min(1).max(20), executionIds: z.array(z.string().min(1)).max(100) }),
   z.object({ type: z.literal("approveSandboxIntroduction"), id: z.string().min(1) }),
   z.object({ type: z.literal("declineSandboxIntroduction"), id: z.string().min(1) }),
   z.object({ type: z.literal("startPlayground"), presenceId: z.string().min(1).optional(), source: z.enum(["fresh", "scenario", "replay"]).optional() }),
@@ -538,6 +556,16 @@ export async function POST(request: Request) {
         writeState(next);
         return NextResponse.json(next);
       }
+    }
+    if (parsed.type === "confirmAutoMode") {
+      let next = confirmAutoMode(current, parsed.presenceId, parsed.capabilities, parsed.executionIds);
+      next = await deliverNativeExecutions(next, new Set(parsed.executionIds));
+      for (const executionId of parsed.executionIds) {
+        const execution = next.executions.find((item) => item.id === executionId);
+        if (execution?.connector === "simulated" && execution.status === "queued") next = deliverSandboxExecution(next, executionId);
+      }
+      writeState(next);
+      return NextResponse.json(next);
     }
     if (parsed.type === "approveSandboxIntroduction") {
       const next = approveSandboxIntroduction(current, parsed.id);

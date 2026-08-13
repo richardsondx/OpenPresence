@@ -44,7 +44,7 @@ import {
 } from "lucide-react";
 import { AGENT_TOOL_DEFINITIONS, CHANNEL_CAPABILITIES, simulationForChannel } from "@/lib/types";
 import { latestPerception } from "@/lib/perception";
-import { deriveActivitySummary, derivePublicHistory } from "@/lib/runtime";
+import { deriveActivitySummary, derivePublicHistory, pendingReviewExecutionsForCapabilities } from "@/lib/runtime";
 import type {
   CalendarSlot,
   ChannelDefinition,
@@ -74,11 +74,9 @@ import type {
 
 const PUBLIC_TECHNICAL_FACTS: { id: PublicTechnicalFact; label: string; detail: string }[] = [
   { id: "ai-presence", label: "This is an AI presence", detail: "Say so when the question makes it relevant." },
-  { id: "open-source", label: "Open source", detail: "Share the project is open source." },
   { id: "built-with-openpresence", label: "Built with OpenPresence", detail: "Name the platform when explicitly useful." },
   { id: "model-provider", label: "Current model provider", detail: "Share the provider, not credentials." },
   { id: "exact-model", label: "Exact model", detail: "Share the selected model when approved." },
-  { id: "tools", label: "Tools used", detail: "Describe capabilities at a public level." },
 ];
 
 const fileOrder: FileKind[] = [
@@ -3500,7 +3498,7 @@ function ExecutionLedger({
       {needsApproval && (
         <Button
           variant="secondary"
-          className="full-button"
+          className="full-button review-cta"
           onClick={() => mutate({ type: "approveExecution", id: latest.id })}
         >
           <Check size={14} /> Approve execution
@@ -4352,21 +4350,36 @@ function PresenceView({
   const [ghostDraft, setGhostDraft] = useState<GhostProfile>(presence.ghostProfile ?? { subject: "Me / my organization", priorities: "", preferences: "", voice: "", boundaries: "" });
   const [publicSelfDraft, setPublicSelfDraft] = useState<PublicSelf>(presence.publicSelf ?? { displayName: presence.name, posture: presence.mode === "ghost" ? "representational" : "contextual", approvedTechnicalFacts: [] });
   const [mediaPolicyDraft, setMediaPolicyDraft] = useState(presence.mediaPerceptionPolicy);
+  const [autoApprovalPrompt, setAutoApprovalPrompt] = useState<{ capabilities: string[]; labels: string[]; executionIds: string[] } | null>(null);
+  const [confirmingAutoApproval, setConfirmingAutoApproval] = useState(false);
   const publicPostures: { id: PublicDisclosurePosture; label: string; detail: string }[] = presence.mode === "ghost"
     ? [{ id: "representational", label: "Representational", detail: "Speak as the person or organization this Presence extends." }, { id: "open-about-assistance", label: "Open about assistance", detail: "Acknowledge AI assistance when it is relevant." }]
     : [{ id: "contextual", label: "Contextual", detail: "Answer socially and acknowledge AI only when it matters." }, { id: "ai-forward", label: "AI-forward", detail: "Be direct that this is an AI presence when relevant." }, { id: "private", label: "Private", detail: "Keep technical identity private in public conversation." }];
   const savePublicSelf = () => void mutate({ type: "setPresence", patch: { publicSelf: { ...publicSelfDraft, displayName: presenceNameDraft.trim() || presence.name }, mediaPerceptionPolicy: mediaPolicyDraft } });
-  const setMode = (key: string, mode: ExecutionMode) =>
-    mutate({ type: "setPresence", patch: { execution: { [key]: mode } } });
-  const applyPreset = (mode: ExecutionMode) =>
-    mutate({
-      type: "setPresence",
-      patch: {
-        execution: Object.fromEntries(
-          capabilities.map((item) => [item.id, mode]),
-        ),
-      },
-    });
+  const requestExecutionChange = (patch: Record<string, ExecutionMode>) => {
+    const autoCapabilities = Object.entries(patch).filter(([, mode]) => mode === "auto").map(([key]) => key);
+    const changingReviewToAuto = autoCapabilities.some((key) => (presence.execution[key] ?? "off") === "review");
+    const pending = changingReviewToAuto ? pendingReviewExecutionsForCapabilities(state, presence.id, autoCapabilities) : [];
+    if (pending.length > 0) {
+      setAutoApprovalPrompt({
+        capabilities: autoCapabilities,
+        labels: capabilities.filter((item) => autoCapabilities.includes(item.id)).map((item) => item.label),
+        executionIds: pending.map((execution) => execution.id),
+      });
+      return;
+    }
+    void mutate({ type: "setPresence", patch: { execution: patch } });
+  };
+  const setMode = (key: string, mode: ExecutionMode) => requestExecutionChange({ [key]: mode });
+  const applyPreset = (mode: ExecutionMode) => requestExecutionChange(Object.fromEntries(capabilities.map((item) => [item.id, mode])));
+  const confirmAutoApproval = async () => {
+    if (!autoApprovalPrompt) return;
+    setConfirmingAutoApproval(true);
+    const updated = await mutate({ type: "confirmAutoMode", presenceId: presence.id, capabilities: autoApprovalPrompt.capabilities, executionIds: autoApprovalPrompt.executionIds });
+    if (updated) setAutoApprovalPrompt(null);
+    setConfirmingAutoApproval(false);
+  };
+  const autoApprovalLabel = autoApprovalPrompt?.labels.length === 1 ? autoApprovalPrompt.labels[0] : "these capabilities";
   return (
     <div className="page presence-settings-page">
       <div className="page-heading">
@@ -4513,7 +4526,7 @@ function PresenceView({
           ))}
         </div>
         <div className="public-facts">
-          <div><strong>Approved public facts</strong><p className="form-hint">Only selected facts may be disclosed when relevant. Credentials and hidden prompts are never public facts.</p></div>
+          <div><strong>Approved disclosure details</strong><p className="form-hint">Choose which details this Presence may share when relevant. These permissions never include credentials, private instructions, or hidden prompts.</p></div>
           <div className="public-fact-grid">
             {PUBLIC_TECHNICAL_FACTS.map((fact) => {
               const checked = publicSelfDraft.approvedTechnicalFacts.includes(fact.id);
@@ -4687,6 +4700,28 @@ function PresenceView({
             </div>
           )}
       </section>
+      {autoApprovalPrompt && (
+        <div className="modal-backdrop auto-approval-modal-backdrop">
+          <section className="presence-dialog auto-approval-dialog" role="dialog" aria-modal="true" aria-labelledby="auto-approval-title">
+            <div className="dialog-header">
+              <div>
+                <SectionEyebrow>Execution setting</SectionEyebrow>
+                <h2 id="auto-approval-title">Enable Auto for {autoApprovalLabel}?</h2>
+              </div>
+              <button type="button" className="icon-button" aria-label="Close confirmation" disabled={confirmingAutoApproval} onClick={() => setAutoApprovalPrompt(null)}><X size={17} /></button>
+            </div>
+            <p>Changing {autoApprovalLabel} from Review to Auto will automatically approve {autoApprovalPrompt.executionIds.length} {autoApprovalPrompt.executionIds.length === 1 ? "message" : "messages"} waiting for approval and let them continue automatically.</p>
+            <div className="auto-approval-summary" role="status">
+              <strong>{autoApprovalPrompt.executionIds.length} pending {autoApprovalPrompt.executionIds.length === 1 ? "reply" : "replies"}</strong>
+              <small>Keep Review if you want to decide on these messages one at a time.</small>
+            </div>
+            <div className="dialog-actions">
+              <Button variant="secondary" disabled={confirmingAutoApproval} onClick={() => setAutoApprovalPrompt(null)}>Keep Review</Button>
+              <Button variant="primary" disabled={confirmingAutoApproval} onClick={() => void confirmAutoApproval()}>{confirmingAutoApproval ? "Approving…" : "Confirm Auto"}</Button>
+            </div>
+          </section>
+        </div>
+      )}
     </div>
   );
 }

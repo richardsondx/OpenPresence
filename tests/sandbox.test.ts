@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { writeState } from "../lib/db";
 import { POST as statePost } from "../app/api/state/route";
-import { addSandboxEvent, advanceSandboxTime, applyOperation, createAgent, deliverSandboxExecution, expireSandboxIntents, formSandboxIntent, resetPlaygroundSession, startPlaygroundSession } from "../lib/runtime";
+import { addSandboxEvent, advanceSandboxTime, applyOperation, confirmAutoMode, createAgent, deliverSandboxExecution, expireSandboxIntents, formSandboxIntent, resetPlaygroundSession, startPlaygroundSession } from "../lib/runtime";
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
@@ -138,6 +138,21 @@ describe("Sandbox and Playground boundaries", () => {
     expect(state.mirrorObjects.filter((item) => item.actorPresenceId === state.presence?.id)).toHaveLength(0);
   });
 
+  it("requires a stable confirmation set before enabling Auto for pending replies", () => {
+    let state = startPlaygroundSession(createAgent(input));
+    const session = state.playgroundSessions[0]!;
+    state = addSandboxEvent(state, { sessionId: session.id, kind: "post", actorName: "Maya Chen", content: "A question that deserves a careful answer." });
+    state = formSandboxIntent(state, { sessionId: session.id, affordance: "reply", text: "A grounded response.", target: state.mirrorObjects[0]?.externalRef });
+    const execution = state.executions[0]!;
+
+    expect(() => confirmAutoMode(state, state.presence!.id, ["reply"], [])).toThrow("pending review actions changed");
+
+    const confirmed = confirmAutoMode(state, state.presence!.id, ["reply"], [execution.id]);
+    expect(confirmed.presence?.execution.reply).toBe("auto");
+    expect(confirmed.executions[0]?.status).toBe("queued");
+    expect(confirmed.events.some((event) => event.title === "Approved for execution")).toBe(true);
+  });
+
   it("delivers an approved Sandbox review through the state API exactly once", async () => {
     let state = createAgent(input);
     state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "review" } } });
@@ -158,6 +173,22 @@ describe("Sandbox and Playground boundaries", () => {
     expect(delivered.executions.find((item: { id: string }) => item.id === execution.id)?.status).toBe("succeeded");
     expect(delivered.mirrorObjects.filter((item: { originExecutionId?: string }) => item.originExecutionId === execution.id)).toHaveLength(1);
     expect(delivered.outcomes.filter((item: { executionId?: string }) => item.executionId === execution.id)).toHaveLength(1);
+  });
+
+  it("confirms and delivers every pending Sandbox reply in one state transition", async () => {
+    let state = startPlaygroundSession(createAgent(input));
+    const session = state.playgroundSessions[0]!;
+    state = addSandboxEvent(state, { sessionId: session.id, kind: "post", actorName: "Maya Chen", content: "A question for the Presence." });
+    state = formSandboxIntent(state, { sessionId: session.id, affordance: "reply", text: "A useful answer from Jenny.", target: state.mirrorObjects[0]?.externalRef });
+    const execution = state.executions[0]!;
+    writeState(state);
+
+    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "confirmAutoMode", presenceId: state.presence!.id, capabilities: ["reply"], executionIds: [execution.id] }), headers: { "content-type": "application/json" } }));
+    const confirmed = await response.json();
+    expect(response.status).toBe(200);
+    expect(confirmed.presence.execution.reply).toBe("auto");
+    expect(confirmed.executions.find((item: { id: string }) => item.id === execution.id)?.status).toBe("succeeded");
+    expect(confirmed.mirrorObjects.filter((item: { originExecutionId?: string }) => item.originExecutionId === execution.id)).toHaveLength(1);
   });
 
   it("keeps off affordances truthful and can deliver empty-text signals", () => {
