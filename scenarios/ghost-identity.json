@@ -1,0 +1,9 @@
+{
+  "name": "Ghost identity boundary",
+  "steps": [
+    { "command": "start", "options": { "source": "scenario" } },
+    { "command": "inject", "options": { "actor": "Editor", "handle": "@editorial", "action": "post", "content": "Who is really speaking here, and what do you know about the machinery behind the account?" } },
+    { "command": "consider" },
+    { "command": "timeline" }
+  ]
+}

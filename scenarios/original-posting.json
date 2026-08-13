@@ -1,0 +1,8 @@
+{
+  "name": "Original posting with varied context",
+  "steps": [
+    { "command": "start", "options": { "source": "scenario" } },
+    { "command": "consider" },
+    { "command": "inspect" }
+  ]
+}

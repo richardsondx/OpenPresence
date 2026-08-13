@@ -1,0 +1,10 @@
+{
+  "name": "Repost versus quote judgment",
+  "steps": [
+    { "command": "start", "options": { "source": "scenario" } },
+    { "command": "consider" },
+    { "command": "inject", "options": { "actor": "Mina", "handle": "@mina_research", "action": "post", "content": "A careful field note on why agent memory should preserve evidence, not hidden reasoning." } },
+    { "command": "consider" },
+    { "command": "timeline" }
+  ]
+}

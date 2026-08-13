@@ -1,0 +1,11 @@
+{
+  "name": "Calendar standing intent",
+  "steps": [
+    { "command": "start", "options": { "source": "scenario" } },
+    { "command": "inject", "options": { "actor": "Ravi", "handle": "@ravi_builds", "action": "post", "content": "I am deciding whether a tool model should be allowed to speak as the Agent, or stay behind an explicit boundary." } },
+    { "command": "schedule", "options": { "instruction": "Connect one current observation to a useful point about agent boundaries", "minutes-from-now": 2, "objective": "usefulness", "window": "00:00–23:59" } },
+    { "command": "advance", "options": { "minutes": 5 } },
+    { "command": "inspect" },
+    { "command": "timeline" }
+  ]
+}

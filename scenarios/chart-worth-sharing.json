@@ -1,0 +1,10 @@
+{
+  "name": "Chart worth sharing",
+  "steps": [
+    { "command": "start", "options": { "source": "scenario" } },
+    { "command": "inject", "options": { "actor": "Owen", "handle": "@owen_metrics", "action": "post", "content": "The chart is only useful if the axes and denominator are clear.", "assets": [{ "name": "agent-quality-chart.png", "kind": "chart", "path": "scenarios/fixtures/agent-quality-chart.png" }] } },
+    { "command": "inspect-media", "options": { "object": "$latest-object-id" } },
+    { "command": "consider" },
+    { "command": "timeline" }
+  ]
+}

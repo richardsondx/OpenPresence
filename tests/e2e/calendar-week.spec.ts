@@ -8,7 +8,7 @@ test.beforeEach(async ({ request }) => {
 test("Calendar Week mode visualizes intent timing without pretending to show posts", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await page.getByRole("button", { name: "Calendar", exact: true }).click();
+  await page.getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("button", { name: "Add intent", exact: true }).click();
   await page.getByLabel("What should Jenny do?").fill("Teach one useful idea about persistent agents.");
   await page.getByLabel("Day").selectOption("Tuesday");
