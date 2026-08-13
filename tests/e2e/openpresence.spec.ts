@@ -100,43 +100,20 @@ async function expectChatViewportLayout(page: import("@playwright/test").Page) {
       viewportHeight: window.innerHeight,
     };
   });
-  expect(geometry.overflowY).toBe("auto");
+  const isMobilePresenceChat = test.info().project.name === "mobile" && await page.locator(".presence-chat-aside").count() > 0;
+  if (isMobilePresenceChat) {
+    expect(geometry.composerTop).toBeGreaterThanOrEqual(geometry.historyTop);
+    expect(geometry.composerBottom).toBeLessThanOrEqual(await page.evaluate(() => window.innerHeight));
+    expect(geometry.documentOverflow).toBe(true);
+    return;
+  }
+  if (!isMobilePresenceChat) expect(geometry.overflowY).toBe("auto");
   expect(geometry.composerTop).toBeGreaterThanOrEqual(geometry.historyTop);
   expect(geometry.composerBottom).toBeLessThanOrEqual(await page.evaluate(() => window.innerHeight));
   expect(geometry.scrollGap).toBeLessThanOrEqual(2);
   expect(geometry.documentOverflow).toBe(false);
   const bottomInset = test.info().project.name === "mobile" ? 68 : 0;
   expect(geometry.viewportHeight - geometry.hintBottom - bottomInset).toBeLessThanOrEqual(2);
-}
-
-async function expectChatContextRailLayout(page: import("@playwright/test").Page) {
-  const geometry = await page.getByRole("complementary", { name: "Context & Changes sidebar" }).evaluate((sidebar) => {
-    const box = sidebar.getBoundingClientRect();
-    const toggle = document.querySelector<HTMLButtonElement>(".context-toggle")?.getBoundingClientRect();
-    return {
-      position: getComputedStyle(sidebar).position,
-      top: box.top,
-      right: box.right,
-      bottom: box.bottom,
-      viewportWidth: window.innerWidth,
-      viewportHeight: window.innerHeight,
-      togglePosition: document.querySelector<HTMLButtonElement>(".context-toggle")
-        ? getComputedStyle(document.querySelector<HTMLButtonElement>(".context-toggle")!).position
-        : "",
-      toggleTop: toggle?.top ?? 0,
-      toggleRight: toggle ? window.innerWidth - toggle.right : 0,
-    };
-  });
-
-  expect(geometry.position).toBe("fixed");
-  expect(geometry.right).toBeCloseTo(geometry.viewportWidth, 0);
-  expect(geometry.togglePosition).toBe("fixed");
-  expect(geometry.toggleTop).toBeLessThan(60);
-  expect(geometry.toggleRight).toBeLessThan(40);
-  if (test.info().project.name !== "mobile") {
-    expect(geometry.top).toBeCloseTo(0, 0);
-    expect(geometry.bottom).toBeCloseTo(geometry.viewportHeight, 0);
-  }
 }
 
 test("operator can create an agent and first Presence from blank state", async ({ page }) => {
@@ -174,7 +151,7 @@ test("Add Presence opens a working channel-aware flow", async ({ page }) => {
   await expect(page.getByText("X · simulated locally")).toHaveCount(0);
 });
 
-test("Chat keeps one persistent Agent conversation", async ({ page }) => {
+test("Presence Chat speaks as the selected public self without teaching the Agent", async ({ page, request }) => {
   const duplicateKeyErrors: string[] = [];
   page.on("console", (message) => {
     if (message.type() === "error" && /same key/i.test(message.text())) duplicateKeyErrors.push(message.text());
@@ -183,35 +160,39 @@ test("Chat keeps one persistent Agent conversation", async ({ page }) => {
   await navigate(page, "Chat");
   await expect(page.getByLabel("Message your Presence")).toBeVisible();
   await expect(page.locator(".topbar-actions")).toHaveCount(0);
-  const contextSidebar = page.getByRole("complementary", { name: "Context & Changes sidebar" });
-  await expect(contextSidebar).toBeVisible();
-  await expectChatContextRailLayout(page);
-  await expect(contextSidebar.getByRole("button", { name: "Change scope", exact: true })).toHaveCount(0);
-  for (const [index, section] of ["Scope", "Context", "Changes", "Outputs", "Advanced"].entries()) {
-    await expect(contextSidebar.locator(".context-section").nth(index).locator(".eyebrow")).toHaveText(
-      new RegExp(`^${section}`),
-    );
-  }
-  await expect(page.locator(".conversation-list")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "New conversation", exact: true })).toHaveCount(0);
-  await expect(page.getByText("Try saying")).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Talk to Jenny." })).toBeVisible();
+  await expect(page.getByText("Private test conversation", { exact: true })).toBeVisible();
+  await expect(page.getByRole("complementary", { name: "Context & Changes sidebar" })).toHaveCount(0);
+  await expect(page.getByText("Session memory only", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Model")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Hide context sidebar" })).toBeVisible();
-  await page.getByRole("button", { name: "Hide context sidebar" }).click();
-  await expect(contextSidebar).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Show context sidebar" })).toBeVisible();
-  await page.getByRole("button", { name: "Show context sidebar" }).click();
-  await expect(contextSidebar).toBeVisible();
   await expectComposerLayout(page);
   await expectChatViewportLayout(page);
-  await page.getByLabel("Message your Presence").fill("Remember that useful software should feel calm.");
+  await page.getByLabel("Message your Presence").fill("My name is Bob and I own a submarine.");
   await page.getByRole("button", { name: "Send message" }).click();
-  await expect(page.getByText("Remember that useful software should feel calm.", { exact: true })).toBeVisible();
-  await expect(page.getByText(/I understood “Remember that useful software should feel calm/)).toBeVisible();
+  await expect(page.getByText("My name is Bob and I own a submarine.", { exact: true })).toBeVisible();
+  await expect(page.getByText(/I understood “My name is Bob/)).toBeVisible();
+  const afterChat = await (await request.get("/api/state")).json();
+  expect(afterChat.presenceChatSessions[0].messages.map((message: { role: string }) => message.role)).toEqual(["user", "presence"]);
+  expect(afterChat.conversations[0].messages).toHaveLength(0);
+  expect(afterChat.changeSets).toHaveLength(0);
   await page.reload();
   await navigate(page, "Chat");
-  await expect(page.getByText("Remember that useful software should feel calm.", { exact: true })).toBeVisible();
+  await expect(page.getByText("My name is Bob and I own a submarine.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "New test conversation", exact: true }).click();
+  await expect(page.getByText("Meet the public self.", { exact: true })).toBeVisible();
   expect(duplicateKeyErrors).toEqual([]);
+});
+
+test("Teach is the operator-facing surface for durable Agent changes", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Teach");
+  await expect(page.getByText("Teach the Agent through conversation.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Agent-wide conversation", { exact: true })).toBeVisible();
+  await page.getByLabel("Message your Presence").fill("Don't use em dashes anymore.");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByRole("button", { name: "Taste proposal created" })).toBeVisible();
+  const navigation = test.info().project.name === "mobile" ? page.locator(".mobile-nav") : page.locator(".sidebar");
+  await expect(navigation.getByRole("button", { name: /^Teach$/ })).toHaveClass(/active/);
 });
 
 test("Presence Settings makes the destination route explicit", async ({ page }) => {
@@ -374,7 +355,7 @@ test("Manage Agent makes Agent tools discoverable", async ({ page }) => {
   }
   await expect(page.getByText("Presence connector · Bound", { exact: true })).toBeVisible();
   await expect(page.locator(".tool-boundary")).toContainText("Presence settings still control whether channel actions are off, manual, review, or auto.");
-  await navigate(page, "Chat");
+  await navigate(page, "Teach");
   await expect(page.getByText("Tools available", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Tools bound", { exact: true })).toBeVisible();
 });
@@ -401,9 +382,9 @@ test("Brain makes skill creation and provider setup actionable", async ({ page }
   await expect(page.getByText("Credential ready")).toBeVisible();
 });
 
-test("Chat creates a protected proposal and Brain can apply it", async ({ page }) => {
+test("Teach creates a protected proposal and Brain can apply it", async ({ page }) => {
   await createAgent(page);
-  await navigate(page, "Chat");
+  await navigate(page, "Teach");
   await page.getByLabel("Message your Presence").fill("Don't use em dashes anymore.");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByRole("button", { name: "Taste proposal created" })).toBeVisible();
@@ -640,14 +621,14 @@ test("Chat stays quiet when Presence identity changes outside Chat", async ({ pa
   await navigate(page, "Chat");
   await expect(page.getByText("I noticed this Presence is now Ghost.", { exact: false })).toHaveCount(0);
   await expect(page.getByText("I noticed the Ghost profile changed.", { exact: false })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "A mind becomes useful through conversation." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Meet the public self." })).toBeVisible();
 
   await navigate(page, "Settings");
   await identityOptions.getByRole("button", { name: /^Jenny Agent-owned/ }).click();
   await expect(identityOptions.getByRole("button", { name: /^Jenny Agent-owned/ })).toHaveClass(/selected/);
   await navigate(page, "Chat");
   await expect(page.getByText("I noticed this Presence is now Agent-owned.", { exact: false })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "A mind becomes useful through conversation." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Meet the public self." })).toBeVisible();
 });
 
 test("desktop shell keeps sidebar and runtime status available", async ({ page }) => {
@@ -656,7 +637,7 @@ test("desktop shell keeps sidebar and runtime status available", async ({ page }
   const expectedPosition = test.info().project.name === "mobile" ? "relative" : "sticky";
   await expect(page.locator(".sidebar")).toHaveCSS("position", expectedPosition);
   if (test.info().project.name !== "mobile") {
-    await expect(page.locator(".sidebar .secondary-nav").nth(0)).toHaveText("Chat");
+    await expect(page.locator(".sidebar .secondary-nav").nth(0)).toHaveText("Teach");
     await expect(page.locator(".sidebar .secondary-nav").nth(1)).toHaveText("Playground");
     await expect(page.locator(".sidebar .secondary-nav").nth(2)).toContainText("Manage Agent");
   }

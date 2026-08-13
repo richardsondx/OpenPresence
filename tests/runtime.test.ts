@@ -28,6 +28,23 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.files.find((file) => file.kind === "TASTE")?.protected).toBe(true);
   });
 
+  it("keeps Presence Chat session memory separate from durable Agent state", () => {
+    let state = createAgent(input);
+    const presenceId = state.presence!.id;
+    const originalFiles = state.files.map((file) => `${file.kind}:${file.content}`).join("\n");
+    state = applyOperation(state, { type: "newPresenceChatSession", presenceId });
+    const session = state.presenceChatSessions[0]!;
+    state = applyOperation(state, { type: "sendPresenceChatMessage", presenceId, sessionId: session.id, content: "My name is Bob and I own a submarine.", attachments: [{ name: "chart.png", kind: "image", mimeType: "image/png" }] });
+    expect(state.presenceChatSessions[0]?.messages[0]).toMatchObject({ role: "user", content: "My name is Bob and I own a submarine." });
+    expect(state.presenceChatSessions[0]?.messages[0]?.attachments?.[0]).toMatchObject({ name: "chart.png", kind: "image" });
+    expect(state.conversations[0]?.messages).toHaveLength(0);
+    expect(state.proposals).toHaveLength(0);
+    expect(state.changeSets).toHaveLength(0);
+    expect(state.socialIntents).toHaveLength(0);
+    expect(state.executions).toHaveLength(0);
+    expect(state.files.map((file) => `${file.kind}:${file.content}`).join("\n")).toBe(originalFiles);
+  });
+
   it("seeds the default Brain with concrete, natural social voice judgment", () => {
     const brain = createAgent(input).files.find((file) => file.kind === "BRAIN")?.content ?? "";
     expect(brain).toContain("Start from the specific object in front of me.");

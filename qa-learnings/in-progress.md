@@ -1,5 +1,13 @@
 # Active QA Work
 
+## COMPLETE — Separate Teach, Presence Chat, and Playground
+
+- **Started:** 2026-08-13
+- **Scope:** Make Teach the operator-facing Agent-shaping surface, make Chat a direct conversation with the selected Presence's public self, and keep Playground as isolated simulated-world rehearsal. Presence Chat must use the social cognition path with local delivery and session-only memory by default.
+- **Product boundary:** Preserve `User → Agent → Presence`; Chat does not mutate durable Agent Memory, Growth, Presence identity, or live connector state unless the operator explicitly creates a later teaching proposal. Playground remains simulated and isolated.
+- **Acceptance:** Sidebar labels and destinations communicate the three distinct interaction modes; Chat loads the selected Presence context and maintains test-conversation continuity; attachments can be sent with truthful perception state; Teach is clearly framed around proposals/change sets; Playground remains a simulated rehearsal surface.
+- **Verification:** 122 unit tests, AI prompt coverage for selected Presence/session history, normalized SQLite projection, focused Presence Chat/Teach E2E on Chromium and Pixel 5, responsive exploratory browser review with attachment and `What Presence sees` disclosure, console/network inspection, typecheck, lint, production build, and `git diff --check`. The focused acceptance suite passed 8/8, including the corrected mobile safe-area interaction. The broader legacy E2E suite remained partially red in pre-existing Playground/Calendar/Bridge lifecycle cases outside this change; no focused Teach or Presence Chat case failed after the final fixes.
+
 ## COMPLETE — Confirm Auto transitions before approving pending replies
 
 - **Started:** 2026-08-13
