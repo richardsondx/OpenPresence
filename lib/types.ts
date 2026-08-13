@@ -104,6 +104,7 @@ export interface NativeChannelConnection {
   access: "read" | "read-write";
   account?: { id: string; username: string; name: string };
   healthMessage?: string;
+  deliveryError?: string;
   observation?: NativeObservationState;
   updatedAt: string;
   createdAt: string;
