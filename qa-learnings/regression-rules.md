@@ -1,5 +1,21 @@
 # Regression rules
 
+## Rule: Public Self must explain the zero-disclosure state
+
+**Defect class:** Presence settings / disclosure-state ambiguity
+
+**General principle:** A permissions checklist must explain its default behavior when no option is selected; otherwise operators cannot predict what the Agent will say.
+
+**Incident:** Approved disclosure details were shown as four unchecked controls without explaining the typical response when none were approved.
+
+**Project enforcement:** `PresenceView` renders `.public-facts-default` while `approvedTechnicalFacts` is empty, explaining that the Presence answers naturally, does not volunteer technical details, and still follows the selected Identity posture for direct questions.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts` asserts the default-state explanation in the Presence Public Self settings flow.
+
+**Apply when:** Changing Public Self, disclosure facts, Identity posture, Ghost boundaries, or Presence settings copy.
+
+**Added:** 2026-08-13
+
 ## Rule: Enabling Auto must explicitly approve the pending review queue
 
 **Defect class:** Execution-policy transition / implicit approval

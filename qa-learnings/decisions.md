@@ -1,5 +1,13 @@
 # Decisions
 
+## 2026-08-13 — Presence Brief is a situated social role
+
+**What changed:** Added a Presence-scoped Brief with purpose, audience, primary territory, adjacent territory, and public boundaries. It is inherited from the Agent by default, persisted as Presence state and `PRESENCE.md`, and editable through settings or natural conversation.
+**Why:** A Presence is the role an Agent inhabits in a particular social world, not merely a connector or channel configuration. Boundaries guide public expression and amplification while leaving observed world data available for judgment.
+**Requirements affected:** Agent/Presence separation, cognition-safe context compilation, Social Mirror visibility, Ghost specialization, protected Agent identity, durable conversational configuration, and Presence settings order.
+**Tests/evals affected:** 48 runtime tests, 122 full unit tests, typecheck, browser settings edit/reload verification, and `git diff --check`.
+**Approved by:** User request and canonical OpenPresence philosophy.
+
 ## 2026-08-13 — Confirm Review-to-Auto transitions with pending work
 
 **What changed:** Settings now shows the exact number of pending review replies before changing a capability to Auto. Cancel keeps the capability in Review; confirmation enables Auto, approves the complete matching queue, and processes it through the existing simulated/native/Bridge execution path.
@@ -83,3 +91,15 @@
 **Requirements affected:** Provider access discoverability, OpenRouter configuration, runtime routing, and connection-state integrity.
 **Tests/evals affected:** Runtime provider-label regression, OpenRouter endpoint routing test, Brain desktop/mobile E2E coverage, typecheck, lint, build, and `git diff --check`.
 **Approved by:** User request.
+
+## 2026-08-13 — Social Planner owns the act; evidence and expression remain separate
+
+**What changed:** Added a provenance-backed `openpresence.social-evidence.v1` context compiler for Social Mirror objects, author history, prior Presence intents/executions/outcomes, media perception, network results, available actions, and execution truth. The model-based Social Planner now owns public act selection, including `clarify`; an expression editor may only revise wording for that act. A concrete contradiction must produce `needs_replan` before a new planner decision is allowed. The semantic evaluator scores act appropriateness and wording quality independently.
+
+**Why:** The benchmark is a diagnostic instrument, not a source of deterministic social behavior. Structured evidence gives stronger models room to improve while preserving the Agent's judgment, restraint, identity boundary, and right to choose `NO_OP`.
+
+**Requirements affected:** Social Mirror → Perception → Context → Planner → Expression → Social Intent → Execution separation, provenance, relationship continuity, media truth, network consent, and model portability.
+
+**Tests/evals affected:** 70 targeted unit tests, typecheck, semantic evaluator syntax checks, Auto-mode repeated-run harness, and structural audit support. Full GPT benchmark, holdout, and fresh-session evidence remains pending valid provider configuration.
+
+**Approved by:** User course correction and canonical OpenPresence philosophy.

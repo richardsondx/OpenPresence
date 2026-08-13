@@ -35,6 +35,11 @@ async function navigate(page: import("@playwright/test").Page, label: string) {
   else await page.locator(".sidebar").getByRole("button", { name: navigationLabel, exact: true }).click();
 }
 
+async function openAddPresence(page: import("@playwright/test").Page) {
+  await presenceSwitcher(page, "@jenny_ai").click();
+  await page.getByRole("menu", { name: "Your Presences" }).getByRole("menuitem", { name: "Add a Presence", exact: true }).click();
+}
+
 function presenceSwitcher(page: import("@playwright/test").Page, handle: string) {
   const visibleShell = test.info().project.name === "mobile"
     ? page.locator("header")
@@ -142,7 +147,7 @@ test("operator can create an agent and first Presence from blank state", async (
 
 test("Add Presence opens a working channel-aware flow", async ({ page }) => {
   await createAgent(page);
-  await page.getByRole("button", { name: "Add a Presence" }).click();
+  await openAddPresence(page);
   await expect(page.getByRole("dialog", { name: "Add a Presence" })).toBeVisible();
   const alignment = await page.locator(".add-presence-modal-backdrop").evaluate((backdrop) => {
     const dialog = backdrop.querySelector<HTMLElement>('[role="dialog"]');
@@ -223,9 +228,11 @@ test("Presence Settings makes the destination route explicit", async ({ page }) 
   await expect(page.getByRole("heading", { name: "Connect this Presence to X" })).toHaveCount(0);
   await expect(page.getByRole("heading", { name: /Connect this Presence through Bridge/ })).toHaveCount(0);
   const publicSelf = page.locator(".public-self-card");
-  await expect(publicSelf).toHaveCSS("border-top-width", "2px");
+  await expect(publicSelf).toHaveCSS("border-top-width", "1px");
   await expect(publicSelf).toHaveCSS("padding-top", "26px");
   await expect(publicSelf.getByText("Approved disclosure details", { exact: true })).toBeVisible();
+  await expect(publicSelf.getByText("Default when none are selected", { exact: true })).toBeVisible();
+  await expect(publicSelf.getByText(/Typical response: answer naturally as this Presence without volunteering AI, platform, provider, model, or tool details\./)).toBeVisible();
   await expect(publicSelf.getByText("Choose which details this Presence may share when relevant.", { exact: false })).toBeVisible();
   await expect(publicSelf.getByText("Open source", { exact: true })).toHaveCount(0);
   await expect(publicSelf.getByText("Tools used", { exact: true })).toHaveCount(0);
@@ -586,8 +593,15 @@ test("Presence Public Self saves its disclosure boundary", async ({ page }) => {
   expect(settingsOrder["settings-card presence-rhythm-card"]).toBeLessThan(settingsOrder["settings-card media-policy-card"]);
   expect(settingsOrder["settings-card presence-execution-card"]).toBeLessThan(settingsOrder["settings-card media-policy-card"]);
   expect(settingsOrder["settings-card media-policy-card"]).toBeLessThan(settingsOrder["settings-card public-self-card"]);
+  const settingsSeparators = await page.locator(".presence-execution-card, .presence-rhythm-card, .media-policy-card, .public-self-card").evaluateAll((sections) => sections.map((section) => {
+    const style = getComputedStyle(section);
+    return { color: style.borderTopColor, width: style.borderTopWidth };
+  }));
+  expect(new Set(settingsSeparators.map((separator) => separator.color)).size).toBe(1);
+  expect(settingsSeparators.every((separator) => separator.width === "1px")).toBe(true);
+  await expect(page.locator(".presence-rhythm-card")).toHaveCSS("padding-top", "26px");
   const mediaPolicy = page.locator(".media-policy-card");
-  await expect(mediaPolicy).toHaveCSS("border-top-width", "2px");
+  await expect(mediaPolicy).toHaveCSS("border-top-width", "1px");
   await expect(mediaPolicy).toHaveCSS("padding-top", "26px");
   await expect(mediaPolicy.getByRole("heading", { name: "When media is hard to interpret" })).toBeVisible();
   await mediaPolicy.getByRole("button", { name: /Always review media actions/ }).click();
@@ -689,7 +703,7 @@ test("Activity and Calendar stay scoped to the Presence identity", async ({ page
   await navigate(page, "Schedule");
   await expect(page.getByText("Tell Genny when to pay attention.", { exact: false })).toBeVisible();
   await expect(page.getByText("Planning for Genny", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Week" }).click();
+  await expect(page.getByRole("button", { name: "Week", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("heading", { name: "When Genny is meant to pay attention" })).toBeVisible();
 });
 
@@ -895,7 +909,7 @@ test("Playground actions work while a Presence keeps its live route", async ({ p
 
 test("Custom Channel connects a Bridge, receives Mirror events, and completes queued work", async ({ page, request }) => {
   await createAgent(page);
-  await page.getByRole("button", { name: "Add a Presence" }).click();
+  await openAddPresence(page);
   const dialog = page.getByRole("dialog", { name: "Add a Presence" });
   await dialog.getByRole("radio", { name: "Bridge" }).check();
   await dialog.getByLabel("Custom channel name").fill("Founder Community");

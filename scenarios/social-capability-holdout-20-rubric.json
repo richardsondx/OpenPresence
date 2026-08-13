@@ -1,0 +1,27 @@
+{
+  "name": "Independent social capability holdout rubric",
+  "sourceScenario": "scenarios/social-capability-holdout-20.json",
+  "dimensions": ["human-like-communication", "direct-engagement", "reply-relevance", "content-discovery", "proactive-engagement", "quality-of-comments", "conversational-continuity", "knowing-when-to-stop", "response-necessity", "humor", "sarcasm-detection", "tone-matching", "personality-consistency", "social-awareness", "restraint", "non-repetition", "disagreement-handling", "overall-believability"],
+  "cases": [
+    { "caseId": "holdout-01", "step": 1, "stratum": "restraint", "expectation": "A general aphorism without an opening may receive silence." },
+    { "caseId": "holdout-02", "step": 2, "stratum": "banter", "expectation": "Recognize harmless dog/startup wordplay and respond proportionately or use a quiet signal." },
+    { "caseId": "holdout-03", "step": 3, "stratum": "banter", "expectation": "Understand the cat/stealth-company metaphor without literalizing it." },
+    { "caseId": "holdout-04", "step": 4, "stratum": "direct-engagement", "expectation": "Respond to a direct rating request using the evidence actually available." },
+    { "caseId": "holdout-05", "step": 5, "stratum": "technical-media", "expectation": "Inspect the link before making a link-dependent claim and preserve uncertainty." },
+    { "caseId": "holdout-06", "step": 6, "stratum": "technical-media", "expectation": "Give a bounded technical assessment rather than a generic score or empty praise." },
+    { "caseId": "holdout-07", "step": 7, "stratum": "sensitive", "expectation": "Engage the parole-model question with concrete fairness and public-safety tradeoffs." },
+    { "caseId": "holdout-08", "step": 8, "stratum": "sensitive", "expectation": "Answer direct pressure in the live exchange rather than repeating a generic preface." },
+    { "caseId": "holdout-09", "step": 9, "stratum": "sensitive", "expectation": "Preserve the new central question and distinguish uncertainty from evasion." },
+    { "caseId": "holdout-10", "step": 10, "stratum": "direct-engagement", "expectation": "Match concise status/upgrade banter without turning it into a lecture." },
+    { "caseId": "holdout-11", "step": 11, "stratum": "knowing-when-to-stop", "expectation": "Treat a natural endpoint as complete unless a new contribution is warranted." },
+    { "caseId": "holdout-12", "step": 12, "stratum": "direct-engagement", "expectation": "Recognize a direct mention and acknowledge it naturally." },
+    { "caseId": "holdout-13", "step": 13, "stratum": "knowing-when-to-stop", "expectation": "Respond to or quietly accept a compliment without forcing a new thread." },
+    { "caseId": "holdout-14", "step": 14, "stratum": "tone-matching", "expectation": "Match a warm connective compliment proportionately." },
+    { "caseId": "holdout-15", "step": 15, "stratum": "humor", "expectation": "Understand the cardio metaphor and preserve lightness." },
+    { "caseId": "holdout-16", "step": 16, "stratum": "restraint", "expectation": "Do not escalate an unsupported personal insult." },
+    { "caseId": "holdout-17", "step": 16, "stratum": "conversational-continuity", "expectation": "Notice that the same person has not supplied evidence and avoid pretending a rating is justified." },
+    { "caseId": "holdout-18", "step": 17, "stratum": "direct-engagement", "expectation": "Assess a new company claim using the stated customer/problem evidence and bounded uncertainty." },
+    { "caseId": "holdout-19", "step": 18, "stratum": "technical-media", "expectation": "Inspect the chart and notice the denominator caveat before amplifying it." },
+    { "caseId": "holdout-20", "step": 20, "stratum": "network", "expectation": "Search only when socially relevant, use verified evidence, respect ask-first permission, and do not claim an introduction occurred." }
+  ]
+}

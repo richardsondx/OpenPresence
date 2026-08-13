@@ -145,9 +145,10 @@ function projectState(state, explicitSessionId, mode = "inspect") {
   if (!presence) fail("The Playground session's Presence is unavailable.", "INVALID_STATE");
   const channelDefinition = (state.channelDefinitions ?? []).find((item) => item.id === session.channelId);
   const model = (state.modelProfiles ?? []).find((item) => item.agentId === state.agent?.id) ?? state.modelProfiles?.[0];
+  const mediaTool = (state.toolBindings ?? []).find((item) => item.agentId === state.agent?.id && item.toolId === "asset.inspect");
   const objects = (state.mirrorObjects ?? [])
     .filter((item) => item.sessionId === session.id)
-    .sort((left, right) => (right.occurredAt ?? right.observedAt ?? "").localeCompare(left.occurredAt ?? left.observedAt ?? ""));
+    .sort((left, right) => (right.occurredAt ?? "").localeCompare(left.occurredAt ?? "") || (right.observedAt ?? "").localeCompare(left.observedAt ?? ""));
   const intents = (state.socialIntents ?? []).filter((item) => item.sessionId === session.id);
   const executions = (state.executions ?? []).filter((item) => item.sessionId === session.id);
   const outcomes = (state.outcomes ?? []).filter((item) => item.sessionId === session.id);
@@ -180,7 +181,23 @@ function projectState(state, explicitSessionId, mode = "inspect") {
     },
     configuration: {
       agent: state.agent ? { id: state.agent.id, name: state.agent.name, description: state.agent.description, audience: state.agent.audience, topics: state.agent.topics } : undefined,
-      model: model ? { provider: model.provider, model: model.model, quality: model.quality, capabilities: model.capabilities } : undefined,
+      model: model ? {
+        provider: model.provider,
+        model: model.model,
+        quality: model.quality,
+        capabilities: model.capabilities,
+        reasoning: model.provider === "openai" && ["low", "medium", "high"].includes(model.quality ?? "")
+          ? { parameter: "reasoning_effort", value: model.quality }
+          : model.provider === "ollama"
+            ? { parameter: "think", value: false }
+            : undefined,
+      } : undefined,
+      mediaTool: {
+        toolId: "asset.inspect",
+        provider: mediaTool?.provider,
+        model: mediaTool?.model,
+        connectionId: mediaTool?.connectionId,
+      },
       meaningFiles: scopedMeaningFiles(state, presence),
       presenceContext: presence.context,
       executionEnvelope: presence.executionEnvelope,
@@ -236,6 +253,7 @@ function projectState(state, explicitSessionId, mode = "inspect") {
       detail: item.detail,
       tone: item.tone,
       time: item.time,
+      sourceObjectId: item.sourceObjectId,
     })),
   };
   if (mode === "timeline") {

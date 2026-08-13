@@ -126,7 +126,11 @@ async function requestJson(url: string, init: RequestInit, label: string): Promi
     const bodyText = await response.text();
     let body: Record<string, unknown> = {};
     try { body = bodyText ? JSON.parse(bodyText) as Record<string, unknown> : {}; } catch { /* handled as an invalid provider response */ }
-    if (!response.ok) throw new Error(`${label} rejected perception (${response.status}).`);
+    if (!response.ok) {
+      const providerError = body.error && typeof body.error === "object" ? body.error as Record<string, unknown> : body;
+      const detail = typeof providerError.message === "string" ? ` ${providerError.message.slice(0, 240)}` : "";
+      throw new Error(`${label} rejected perception (${response.status}).${detail}`);
+    }
     return body;
   } catch (error) {
     if (error instanceof Error && error.message.includes("rejected perception")) throw error;
@@ -217,7 +221,17 @@ async function inspectWithProvider(state: OpenPresenceState, asset: Asset, objec
       }
     } else {
       const endpoint = connection.endpoint || (profile.provider === "openrouter" ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1");
-      const body = await requestJson(`${endpoint.replace(/\/+$/, "")}/chat/completions`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${secret!}` }, body: JSON.stringify({ model: providerModel(profile.provider, profile.model), temperature: 0, response_format: { type: "json_object" }, messages: [{ role: "system", content: "You are a careful social perception provider. Do not decide whether the Agent should act." }, { role: "user", content: [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: asset.dataUrl } }] }] }) }, profile.provider === "openrouter" ? "OpenRouter" : "OpenAI");
+      const imageUrl = `data:${media.mimeType};base64,${media.data}`;
+      const messages = [{ role: "system", content: "You are a careful social perception provider. Do not decide whether the Agent should act." }, { role: "user", content: [{ type: "text", text: prompt }, { type: "image_url", image_url: { url: imageUrl } }] }];
+      const isGpt56 = profile.provider === "openai" && profile.model.startsWith("gpt-5.6");
+      const requestBody: Record<string, unknown> = { model: providerModel(profile.provider, profile.model), messages };
+      if (!isGpt56) {
+        requestBody.temperature = 0;
+        requestBody.response_format = { type: "json_object" };
+      } else if (profile.quality === "low" || profile.quality === "medium" || profile.quality === "high") {
+        requestBody.reasoning_effort = profile.quality;
+      }
+      const body = await requestJson(`${endpoint.replace(/\/+$/, "")}/chat/completions`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${secret!}` }, body: JSON.stringify(requestBody) }, profile.provider === "openrouter" ? "OpenRouter" : "OpenAI");
       const choice = Array.isArray(body.choices) ? body.choices[0] : undefined;
       raw = choice && typeof choice === "object" && (choice as Record<string, unknown>).message && typeof (choice as Record<string, unknown>).message === "object" ? contentText((choice as Record<string, unknown>).message && ((choice as Record<string, unknown>).message as Record<string, unknown>).content) : undefined;
     }
