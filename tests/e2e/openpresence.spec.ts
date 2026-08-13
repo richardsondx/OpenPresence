@@ -100,6 +100,36 @@ async function expectChatViewportLayout(page: import("@playwright/test").Page) {
   expect(geometry.documentOverflow).toBe(false);
 }
 
+async function expectChatContextRailLayout(page: import("@playwright/test").Page) {
+  const geometry = await page.getByRole("complementary", { name: "Context & Changes sidebar" }).evaluate((sidebar) => {
+    const box = sidebar.getBoundingClientRect();
+    const toggle = document.querySelector<HTMLButtonElement>(".context-toggle")?.getBoundingClientRect();
+    return {
+      position: getComputedStyle(sidebar).position,
+      top: box.top,
+      right: box.right,
+      bottom: box.bottom,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      togglePosition: document.querySelector<HTMLButtonElement>(".context-toggle")
+        ? getComputedStyle(document.querySelector<HTMLButtonElement>(".context-toggle")!).position
+        : "",
+      toggleTop: toggle?.top ?? 0,
+      toggleRight: toggle ? window.innerWidth - toggle.right : 0,
+    };
+  });
+
+  expect(geometry.position).toBe("fixed");
+  expect(geometry.right).toBeCloseTo(geometry.viewportWidth, 0);
+  expect(geometry.togglePosition).toBe("fixed");
+  expect(geometry.toggleTop).toBeLessThan(60);
+  expect(geometry.toggleRight).toBeLessThan(40);
+  if (test.info().project.name !== "mobile") {
+    expect(geometry.top).toBeCloseTo(0, 0);
+    expect(geometry.bottom).toBeCloseTo(geometry.viewportHeight, 0);
+  }
+}
+
 test("operator can create an agent and first Presence from blank state", async ({ page }) => {
   await createAgent(page, "Atlas");
   if (test.info().project.name === "mobile") await expect(page.getByRole("heading", { name: "@atlas is live." })).toBeVisible();
@@ -143,6 +173,7 @@ test("Chat keeps one persistent Agent conversation", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Talk to Jenny." })).toBeVisible();
   const contextSidebar = page.getByRole("complementary", { name: "Context & Changes sidebar" });
   await expect(contextSidebar).toBeVisible();
+  await expectChatContextRailLayout(page);
   await expect(contextSidebar.getByRole("button", { name: "Change scope", exact: true })).toHaveCount(0);
   for (const [index, section] of ["Scope", "Context", "Changes", "Outputs", "Advanced"].entries()) {
     await expect(contextSidebar.locator(".context-section").nth(index).locator(".eyebrow")).toHaveText(
