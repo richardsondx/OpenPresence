@@ -1020,6 +1020,8 @@ function AgentWorkspaceShell({
               {view === "presence"
                 ? presence.status === "paused"
                   ? "Asleep"
+                  : state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "needs-attention")
+                    ? "Needs attention"
                   : (state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "connected") || state.bridges.some(
                         (item) =>
                           item.presenceId === presence.id &&
@@ -1254,6 +1256,8 @@ function LegacyAppShell({
               {view === "presence"
                 ? presence.status === "paused"
                   ? "Paused"
+                  : state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "needs-attention")
+                    ? "Needs attention"
                   : state.bridges.some(
                         (item) =>
                           item.presenceId === presence.id &&
@@ -2617,8 +2621,7 @@ function MirrorPanel({
   const nativeConnection = state.nativeConnections.find(
     (item) =>
       (filter === "all" || item.presenceId === filter) &&
-      item.kind === "x" &&
-      item.status === "connected",
+      item.kind === "x",
   );
   const channel = selectedPresence
     ? state.channelDefinitions.find(
@@ -2636,6 +2639,8 @@ function MirrorPanel({
               ? "What Jenny can see"
               : bridge
                 ? "Waiting for the first event"
+                : nativeConnection?.status === "needs-attention"
+                  ? "X connection needs attention"
                 : nativeConnection
                   ? "Connected, waiting for observations"
                 : "No connected Presence"}
@@ -2645,7 +2650,7 @@ function MirrorPanel({
           {bridge
             ? `${bridge.state} · ${objects.length} recent`
             : nativeConnection
-              ? `Official X · ${nativeConnection.access === "read-write" ? "read + write" : "read-only"}`
+              ? `Official X · ${nativeConnection.status === "needs-attention" ? "needs attention" : nativeConnection.access === "read-write" ? "read + write credentials" : "read-only"}`
             : filter === "all"
               ? "Connect a Presence"
               : builtIn
@@ -3721,9 +3726,9 @@ function XConnection({
         <>
           <div className="connection-summary">
             <div><strong>{connection.account?.name ?? "X account"}</strong><small>@{connection.account?.username ?? "unknown"}</small></div>
-            <span className="live-pill"><span className="status-dot" /> Connected</span>
+            <span className={`live-pill ${connection.status === "needs-attention" ? "paused" : ""}`}><span className="status-dot" /> {connection.status === "needs-attention" ? "Needs attention" : "Connected"}</span>
           </div>
-          <p className="muted">Official X API access is {connection.access === "read-write" ? "read + write" : "read only"}. {connection.access === "read" ? "Add User Access Token and User Access Token Secret to let Jenny publish and reply." : ""} Credentials are encrypted on this server and never returned to the browser.</p>
+          <p className="muted">Official X API authentication is {connection.access === "read-write" ? "configured with read + write credentials" : "read only"}. {connection.status === "needs-attention" ? `The last native request was rejected: ${connection.healthMessage ?? "X returned an error"}.` : connection.access === "read" ? "Add User Access Token and User Access Token Secret to let Jenny publish and reply." : "A successful write is verified only when X accepts a post and returns its external ID."} Credentials are encrypted on this server and never returned to the browser.</p>
           <div className="bridge-row-actions"><Button variant="ghost" onClick={() => setOpen(true)}>Update credentials</Button><Button variant="danger" disabled={working === "disconnect"} onClick={() => void disconnect()}>{working === "disconnect" ? "Disconnecting…" : "Disconnect"}</Button></div>
         </>
       ) : (
@@ -3766,7 +3771,7 @@ function BridgeManager({
     (item) => item.id === presence?.channel,
   );
   const nativeConnection = state.nativeConnections.find(
-    (item) => item.presenceId === presence?.id && item.kind === "x" && item.status === "connected",
+    (item) => item.presenceId === presence?.id && item.kind === "x",
   );
   if (!presence) return null;
   const create = async () => {
@@ -3863,9 +3868,9 @@ function BridgeManager({
       <div className="section-heading compact">
         <div>
           <SectionEyebrow>
-            {nativeConnection ? "Fallback external connection" : channel?.builtIn ? "Optional live connection" : "Custom channel connection"}
+            {nativeConnection?.status === "needs-attention" ? "Native X connection needs attention" : nativeConnection ? "Fallback external connection" : channel?.builtIn ? "Optional live connection" : "Custom channel connection"}
           </SectionEyebrow>
-          <h2>{nativeConnection ? "Add a Bridge alternative" : channel?.builtIn ? "Add a live connector" : "Connect this Presence"}</h2>
+          <h2>{nativeConnection?.status === "needs-attention" ? "Fix the native X connection first" : nativeConnection ? "Add a Bridge alternative" : channel?.builtIn ? "Add a live connector" : "Connect this Presence"}</h2>
         </div>
         <ShieldCheck size={17} />
       </div>

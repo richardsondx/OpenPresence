@@ -48,7 +48,12 @@ function apiError(status: number, body: unknown) {
     return new Error("X has no API credits remaining for this app. Open the X Developer Console, check Billing and usage, add credits or choose a plan with API access, then try again.");
   }
   if (status === 401) return new Error("X rejected these credentials. Check that the API key, secret, and token values came from the same app, then regenerate them if needed.");
-  if (status === 403) return new Error("X rejected this action. Check your app permissions and regenerate the Access Token and Secret with read and write access.");
+  if (status === 403) {
+    const detail = providerMessage.toLowerCase() === "forbidden" || providerMessage.toLowerCase() === "access denied"
+      ? "Check your app permissions and regenerate the Access Token and Secret with read and write access."
+      : providerMessage;
+    return new Error(`X rejected this action: ${detail}`);
+  }
   if (status === 429) return new Error("X temporarily rate-limited this app. Wait and try the connection again.");
   return new Error(providerMessage);
 }

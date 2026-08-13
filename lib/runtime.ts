@@ -80,6 +80,14 @@ export function recordRuntimeEvent(source: OpenPresenceState, presenceId: string
   return state;
 }
 
+export function markNativeConnectionNeedsAttention(source: OpenPresenceState, presenceId: string, message: string) {
+  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  state.nativeConnections = state.nativeConnections.map((connection) => connection.presenceId === presenceId && connection.kind === "x"
+    ? { ...connection, status: "needs-attention" as const, healthMessage: message, updatedAt: now() }
+    : connection);
+  return recordRuntimeEvent(state, presenceId, "X connection needs attention", message, "warning");
+}
+
 export function isLaunchCandidate(source: OpenPresenceState, presenceId: string) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
@@ -110,7 +118,7 @@ export function deriveActivitySummary(source: OpenPresenceState, presenceId?: st
   const latestExecution = executions[0];
   const reviewCount = executions.filter((item) => item.status === "awaiting-review").length;
   const pulseEvent = events.find((item) => item.title === "Pulse completed");
-  const nativeConnection = state.nativeConnections.find((item) => item.presenceId === presence?.id && item.status === "connected");
+  const nativeConnection = state.nativeConnections.find((item) => item.presenceId === presence?.id);
   const standingSlots = state.calendar
     .filter((slot) => slot.presence === presence?.id && slot.enabled)
     .sort((a, b) => a.day.localeCompare(b.day) || a.time.localeCompare(b.time));
@@ -133,8 +141,18 @@ export function deriveActivitySummary(source: OpenPresenceState, presenceId?: st
     current = { label: "Preparing to act", detail: `A ${latestExecution.affordance} intent is moving through the execution envelope.`, tone: "positive" };
   } else if (latestExecution?.status === "succeeded") {
     current = { label: "Action completed", detail: `The latest ${latestExecution.affordance} was delivered and remains visible in the execution ledger.`, tone: "positive" };
+  } else if (latestExecution?.status === "failed") {
+    current = { label: "X delivery failed", detail: `${latestExecution.failure?.message ?? "The connector rejected the action."} No external artifact was counted.`, tone: "warning" };
+  } else if (events[0]?.title === "X observation failed" || events[1]?.title === "X observation failed") {
+    current = { label: "X observation failed", detail: events.find((item) => item.title === "X observation failed")?.detail ?? "The connected channel could not be read.", tone: "warning" };
+  } else if (events[0]?.title === "Considering first public move" || events[1]?.title === "Considering first public move") {
+    current = { label: "Choosing a first public move", detail: "Jenny found no public footing and is choosing how to arrive from Mission, Taste, and the live X context.", tone: "positive" };
+  } else if (events[0]?.title === "Reply observed" || events[1]?.title === "Reply observed") {
+    current = { label: "Reply observed", detail: events.find((item) => item.title === "Reply observed")?.detail ?? "A new public reply is now part of the Presence context.", tone: "positive" };
   } else if (events.some((item) => item.title === "Silence was the right action")) {
     current = { label: "Waiting for a better moment", detail: "The last pulse observed activity but found nothing worth forcing into the channel.", tone: "quiet" };
+  } else if (nativeConnection?.status === "needs-attention") {
+    current = { label: "X connection needs attention", detail: nativeConnection.healthMessage ?? "The account is authenticated, but the last native action or observation was rejected.", tone: "warning" };
   } else if (nativeConnection) {
     current = { label: `Ready to observe ${nativeConnection.account?.username ? `@${nativeConnection.account.username}` : channelName(presence.channel)}`, detail: "The native channel is connected. Observation begins when you check now or a standing intent is invoked.", tone: "positive" };
   }
@@ -368,7 +386,10 @@ export function failNativeExecution(source: OpenPresenceState, executionId: stri
   execution.updatedAt = now();
   const action = state.actions.find((item) => item.executionId === execution.id);
   if (action) action.status = "failed";
-  state.events.unshift(event("execution", "X delivery failed", "The native X connector could not deliver this action. Review the connection and try again.", "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }));
+  const outcome: Outcome = { id: id("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, status: "failed", observedAt: now(), metrics: {} };
+  state.outcomes.unshift(outcome);
+  if (action) action.outcomeId = outcome.id;
+  state.events.unshift(event("execution", "X delivery failed", `${message} No external artifact was counted.`, "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }));
   return state;
 }
 
