@@ -1,0 +1,15 @@
+{
+  "name": "Final benchmark C — relationships, calendar, and uncertainty",
+  "steps": [
+    { "command": "start", "options": { "source": "fresh" } },
+    { "command": "inject", "options": { "actor": "Maya", "handle": "@maya_research", "action": "post", "content": "I am deciding whether relationship memory should preserve people, topics, or the reasons a conversation mattered." } },
+    { "command": "inject", "options": { "actor": "Devon", "handle": "@devon_ops", "action": "post", "content": "What is the fastest way to grow an account without turning every notification into a task?" } },
+    { "command": "inject", "options": { "actor": "Maya", "handle": "@maya_research", "action": "post", "content": "I came back to this. The relationship question still feels harder than retrieval." } },
+    { "command": "schedule", "options": { "instruction": "Connect one current observation to a useful point about relationship memory", "minutes-from-now": 2, "objective": "usefulness", "window": "00:00–23:59" } },
+    { "command": "advance", "options": { "minutes": 5 } },
+    { "command": "inject", "options": { "actor": "Sam", "handle": "@sam_context", "action": "post", "content": "This screenshot is difficult to interpret without knowing who approved the action.", "assets": [{ "name": "sensitive-context.png", "kind": "image", "path": "docs/screenshots/chat.png" }] } },
+    { "command": "inspect-media", "options": { "object": "$latest-object-id" } },
+    { "command": "consider" },
+    { "command": "timeline" }
+  ]
+}

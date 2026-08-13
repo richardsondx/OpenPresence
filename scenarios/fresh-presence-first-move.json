@@ -1,0 +1,9 @@
+{
+  "name": "Fresh Presence first move",
+  "steps": [
+    { "command": "start", "options": { "source": "fresh" } },
+    { "command": "inspect" },
+    { "command": "consider" },
+    { "command": "timeline" }
+  ]
+}

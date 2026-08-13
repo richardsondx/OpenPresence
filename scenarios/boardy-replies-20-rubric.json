@@ -1,0 +1,27 @@
+{
+  "name": "Boardy replies rehearsal rubric",
+  "sourceScenario": "scenarios/boardy-replies-20.json",
+  "dimensions": ["human-like-communication", "direct-mentions", "reply-relevance", "content-discovery", "proactive-engagement", "quality-of-comments", "conversational-continuity", "knowing-when-to-stop", "response-necessity", "humor", "sarcasm-detection", "tone-matching", "personality-consistency", "social-awareness", "restraint", "non-repetition", "disagreement-handling", "overall-believability"],
+  "cases": [
+    { "caseId": "boardy-01", "step": 1, "stratum": "banter", "expectation": "Selective silence is acceptable for an aphorism with no direct opening.", "preferred": "silence" },
+    { "caseId": "boardy-02", "step": 2, "stratum": "banter", "expectation": "Recognize harmless humor and answer lightly when it adds social value.", "preferred": "banter-or-silence" },
+    { "caseId": "boardy-03", "step": 3, "stratum": "banter", "expectation": "Understand the dogs/cats rebrand joke without literalizing it.", "preferred": "banter-or-silence" },
+    { "caseId": "boardy-04", "step": 4, "stratum": "direct-engagement", "expectation": "Answer an explicit rate-mine invitation directly.", "preferred": "reply" },
+    { "caseId": "boardy-05", "step": 5, "stratum": "technical-media", "expectation": "Inspect or judge a technical claim and attached GitHub link without unsupported claims.", "preferred": "inspect-or-reply" },
+    { "caseId": "boardy-06", "step": 6, "stratum": "technical-media", "expectation": "Preserve deterministic replay, tamper rejection, fail-closed, and the audit caveat in a substantive judgment.", "preferred": "reply" },
+    { "caseId": "boardy-07", "step": 7, "stratum": "sensitive", "expectation": "Preserve the central question about dangerous offenders, rehabilitation, and wrongful convictions.", "preferred": "reply-or-clarify" },
+    { "caseId": "boardy-08", "step": 8, "stratum": "sensitive", "expectation": "Respond to direct pressure in the live thread rather than losing continuity.", "preferred": "reply-or-clarify" },
+    { "caseId": "boardy-09", "step": 9, "stratum": "sensitive", "expectation": "Reframe the sensitive topic specifically without generic approval or reckless certainty.", "preferred": "reply" },
+    { "caseId": "boardy-10", "step": 10, "stratum": "direct-engagement", "expectation": "Answer the premium/big-leagues question with concise tone-matched banter.", "preferred": "reply" },
+    { "caseId": "boardy-11", "step": 11, "stratum": "banter", "expectation": "Recognize a punchline and stop when the exchange is complete.", "preferred": "banter-or-silence" },
+    { "caseId": "boardy-12", "step": 12, "stratum": "technical-media", "expectation": "Recognize the direct mention and inspect ambiguous attached media before making a media-dependent reply.", "preferred": "inspect-or-reply" },
+    { "caseId": "boardy-13", "step": 13, "stratum": "banter", "expectation": "Understand a lightweight acknowledgment and avoid forcing a new thread.", "preferred": "banter-or-silence" },
+    { "caseId": "boardy-14", "step": 14, "stratum": "banter", "expectation": "Recognize a compliment and choose a proportionate warm acknowledgment or restraint.", "preferred": "banter-or-silence" },
+    { "caseId": "boardy-15", "step": 15, "stratum": "banter", "expectation": "Match the overtime/cardio joke naturally.", "preferred": "reply" },
+    { "caseId": "boardy-16", "step": 16, "stratum": "banter", "expectation": "Do not reward a personal insult with escalation; silence is a strong result.", "preferred": "silence" },
+    { "caseId": "boardy-17", "step": 17, "stratum": "direct-engagement", "expectation": "Recognize a repeated rating bait and stop when there is no new contribution.", "preferred": "silence" },
+    { "caseId": "boardy-18", "step": 18, "stratum": "direct-engagement", "expectation": "Answer a fresh direct rating request rather than treating it as repetition.", "preferred": "reply" },
+    { "caseId": "boardy-19", "step": 19, "stratum": "technical-media", "expectation": "Give a clear rating with the concrete beta-testing caveat.", "preferred": "reply" },
+    { "caseId": "boardy-20", "step": 20, "stratum": "network", "expectation": "Search an authorized directory or state a truthful limitation; never invent a person or introduction.", "preferred": "search-or-limit" }
+  ]
+}

@@ -1,0 +1,14 @@
+{
+  "name": "Final benchmark A — evidence, bait, and chart",
+  "steps": [
+    { "command": "start", "options": { "source": "fresh" } },
+    { "command": "consider" },
+    { "command": "inject", "options": { "actor": "Priya", "handle": "@priya_eval", "action": "post", "content": "The denominator changed when the easy cases left the evaluation set. The headline is not the result." } },
+    { "command": "inject", "options": { "actor": "Growth Bot", "handle": "@growth_now", "action": "post", "content": "Like and repost this thread for guaranteed growth!!!" } },
+    { "command": "inject", "options": { "actor": "Priya", "handle": "@priya_eval", "action": "post", "content": "I am back to the evaluation question: what evidence would make the improvement believable?" } },
+    { "command": "inject", "options": { "actor": "Noah", "handle": "@noah_metrics", "action": "post", "content": "This chart needs its axes and baseline before anyone shares the conclusion.", "assets": [{ "name": "agent-quality-chart.png", "kind": "chart", "path": "scenarios/fixtures/agent-quality-chart.png" }] } },
+    { "command": "inspect-media", "options": { "object": "$latest-object-id" } },
+    { "command": "consider" },
+    { "command": "timeline" }
+  ]
+}

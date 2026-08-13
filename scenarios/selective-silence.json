@@ -1,0 +1,11 @@
+{
+  "name": "Selective silence",
+  "steps": [
+    { "command": "start", "options": { "source": "scenario" } },
+    { "command": "consider" },
+    { "command": "inject", "options": { "actor": "Promo Bot", "handle": "@daily_hype", "action": "post", "content": "Like and repost this empty thread for guaranteed growth!!!" } },
+    { "command": "inject", "options": { "actor": "Nia", "handle": "@nia_notes", "action": "post", "content": "I am trying to understand whether silence can be a product feature." } },
+    { "command": "consider" },
+    { "command": "timeline" }
+  ]
+}

@@ -1,0 +1,10 @@
+{
+  "name": "Sensitive media",
+  "steps": [
+    { "command": "start", "options": { "source": "scenario" } },
+    { "command": "inject", "options": { "actor": "Sam", "handle": "@sam_context", "action": "post", "content": "This image is difficult to interpret without context.", "assets": [{ "name": "sensitive-context.png", "kind": "image", "path": "docs/screenshots/chat.png" }] } },
+    { "command": "inspect-media", "options": { "object": "$latest-object-id" } },
+    { "command": "consider" },
+    { "command": "timeline" }
+  ]
+}

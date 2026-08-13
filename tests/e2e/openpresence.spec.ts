@@ -13,9 +13,8 @@ async function createAgent(page: import("@playwright/test").Page, name = "Jenny"
   await page.getByLabel("Agent name").fill(name);
   if (name !== "Jenny") await page.getByLabel("Presence handle").fill(`@${name.toLowerCase()}`);
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  const handle = name === "Jenny" ? "@jenny_ai" : `@${name.toLowerCase()}`;
   if (test.info().project.name === "mobile") {
-    await expect(page.getByRole("heading", { name: `${handle} is live.` })).toBeVisible();
+    await expect(page.getByRole("heading", { name: `${name}, right now.` })).toBeVisible();
   } else {
     await expect(page.getByRole("button", { name: `Switch agent, currently ${name}` })).toBeVisible();
   }
@@ -33,7 +32,7 @@ async function navigate(page: import("@playwright/test").Page, label: string) {
   const mobile = page.locator(".mobile-nav");
   if (await mobile.isVisible()) await mobile.getByRole("button", { name: navigationLabel }).click();
   else if (label === "Brain") await page.getByRole("button", { name: /^Manage Agent/ }).click();
-  else await page.getByRole("button", { name: navigationLabel, exact: true }).click();
+  else await page.locator(".sidebar").getByRole("button", { name: navigationLabel, exact: true }).click();
 }
 
 function presenceSwitcher(page: import("@playwright/test").Page, handle: string) {
@@ -76,9 +75,68 @@ async function expectComposerLayout(page: import("@playwright/test").Page) {
   expect(geometry.hintTop).toBeGreaterThanOrEqual(geometry.form.bottom);
 }
 
+async function expectChatViewportLayout(page: import("@playwright/test").Page) {
+  const geometry = await page.locator(".chat-thread").evaluate((thread) => {
+    const history = thread.querySelector<HTMLElement>(".chat-history");
+    const composer = thread.querySelector<HTMLElement>(".chat-composer");
+    if (!history || !composer) throw new Error("Chat viewport nodes are missing");
+    const historyBox = history.getBoundingClientRect();
+    const composerBox = composer.getBoundingClientRect();
+    const hintBox = thread.querySelector<HTMLElement>(".composer-hint")?.getBoundingClientRect();
+    return {
+      historyTop: historyBox.top,
+      historyBottom: historyBox.bottom,
+      composerTop: composerBox.top,
+      composerBottom: composerBox.bottom,
+      overflowY: getComputedStyle(history).overflowY,
+      scrollGap: history.scrollHeight - history.clientHeight - history.scrollTop,
+      documentOverflow: document.documentElement.scrollHeight > window.innerHeight + 1,
+      hintBottom: hintBox?.bottom ?? 0,
+      viewportHeight: window.innerHeight,
+    };
+  });
+  expect(geometry.overflowY).toBe("auto");
+  expect(geometry.composerTop).toBeGreaterThanOrEqual(geometry.historyTop);
+  expect(geometry.composerBottom).toBeLessThanOrEqual(await page.evaluate(() => window.innerHeight));
+  expect(geometry.scrollGap).toBeLessThanOrEqual(2);
+  expect(geometry.documentOverflow).toBe(false);
+  const bottomInset = test.info().project.name === "mobile" ? 68 : 0;
+  expect(geometry.viewportHeight - geometry.hintBottom - bottomInset).toBeLessThanOrEqual(2);
+}
+
+async function expectChatContextRailLayout(page: import("@playwright/test").Page) {
+  const geometry = await page.getByRole("complementary", { name: "Context & Changes sidebar" }).evaluate((sidebar) => {
+    const box = sidebar.getBoundingClientRect();
+    const toggle = document.querySelector<HTMLButtonElement>(".context-toggle")?.getBoundingClientRect();
+    return {
+      position: getComputedStyle(sidebar).position,
+      top: box.top,
+      right: box.right,
+      bottom: box.bottom,
+      viewportWidth: window.innerWidth,
+      viewportHeight: window.innerHeight,
+      togglePosition: document.querySelector<HTMLButtonElement>(".context-toggle")
+        ? getComputedStyle(document.querySelector<HTMLButtonElement>(".context-toggle")!).position
+        : "",
+      toggleTop: toggle?.top ?? 0,
+      toggleRight: toggle ? window.innerWidth - toggle.right : 0,
+    };
+  });
+
+  expect(geometry.position).toBe("fixed");
+  expect(geometry.right).toBeCloseTo(geometry.viewportWidth, 0);
+  expect(geometry.togglePosition).toBe("fixed");
+  expect(geometry.toggleTop).toBeLessThan(60);
+  expect(geometry.toggleRight).toBeLessThan(40);
+  if (test.info().project.name !== "mobile") {
+    expect(geometry.top).toBeCloseTo(0, 0);
+    expect(geometry.bottom).toBeCloseTo(geometry.viewportHeight, 0);
+  }
+}
+
 test("operator can create an agent and first Presence from blank state", async ({ page }) => {
   await createAgent(page, "Atlas");
-  if (test.info().project.name === "mobile") await expect(page.getByRole("heading", { name: "@atlas is live." })).toBeVisible();
+  if (test.info().project.name === "mobile") await expect(page.getByRole("heading", { name: "Atlas, right now." })).toBeVisible();
   else await expect(page.getByRole("button", { name: "Switch agent, currently Atlas" })).toBeVisible();
 });
 
@@ -88,14 +146,12 @@ test("Add Presence opens a working channel-aware flow", async ({ page }) => {
   await expect(page.getByRole("dialog", { name: "Add a Presence" })).toBeVisible();
   const alignment = await page.locator(".add-presence-modal-backdrop").evaluate((backdrop) => {
     const dialog = backdrop.querySelector<HTMLElement>('[role="dialog"]');
-    const workspace = document.querySelector<HTMLElement>(".workspace");
-    if (!dialog || !workspace) throw new Error("Add Presence layout nodes are missing");
+    if (!dialog) throw new Error("Add Presence layout nodes are missing");
     const dialogBox = dialog.getBoundingClientRect();
     const backdropBox = backdrop.getBoundingClientRect();
-    const workspaceBox = workspace.getBoundingClientRect();
     return {
       horizontalOffset: Math.abs(
-        dialogBox.left + dialogBox.width / 2 - (workspaceBox.left + workspaceBox.width / 2),
+        dialogBox.left + dialogBox.width / 2 - (backdropBox.left + backdropBox.width / 2),
       ),
       verticalOffset: Math.abs(
         dialogBox.top + dialogBox.height / 2 - (backdropBox.top + backdropBox.height / 2),
@@ -114,11 +170,17 @@ test("Add Presence opens a working channel-aware flow", async ({ page }) => {
 });
 
 test("Chat keeps one persistent Agent conversation", async ({ page }) => {
+  const duplicateKeyErrors: string[] = [];
+  page.on("console", (message) => {
+    if (message.type() === "error" && /same key/i.test(message.text())) duplicateKeyErrors.push(message.text());
+  });
   await createAgent(page);
   await navigate(page, "Chat");
-  await expect(page.getByRole("heading", { name: "Talk to Jenny." })).toBeVisible();
+  await expect(page.getByLabel("Message your Presence")).toBeVisible();
+  await expect(page.locator(".topbar-actions")).toHaveCount(0);
   const contextSidebar = page.getByRole("complementary", { name: "Context & Changes sidebar" });
   await expect(contextSidebar).toBeVisible();
+  await expectChatContextRailLayout(page);
   await expect(contextSidebar.getByRole("button", { name: "Change scope", exact: true })).toHaveCount(0);
   for (const [index, section] of ["Scope", "Context", "Changes", "Outputs", "Advanced"].entries()) {
     await expect(contextSidebar.locator(".context-section").nth(index).locator(".eyebrow")).toHaveText(
@@ -136,12 +198,88 @@ test("Chat keeps one persistent Agent conversation", async ({ page }) => {
   await page.getByRole("button", { name: "Show context sidebar" }).click();
   await expect(contextSidebar).toBeVisible();
   await expectComposerLayout(page);
+  await expectChatViewportLayout(page);
   await page.getByLabel("Message your Presence").fill("Remember that useful software should feel calm.");
   await page.getByRole("button", { name: "Send message" }).click();
-  await expect(page.getByText("Remember that useful software should feel calm.")).toBeVisible();
+  await expect(page.getByText("Remember that useful software should feel calm.", { exact: true })).toBeVisible();
+  await expect(page.getByText(/I understood “Remember that useful software should feel calm/)).toBeVisible();
   await page.reload();
   await navigate(page, "Chat");
-  await expect(page.getByText("Remember that useful software should feel calm.")).toBeVisible();
+  await expect(page.getByText("Remember that useful software should feel calm.", { exact: true })).toBeVisible();
+  expect(duplicateKeyErrors).toEqual([]);
+});
+
+test("Presence Settings makes the destination route explicit", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Settings");
+
+  const routeOptions = page.locator(".channel-mode-options");
+  const identityBox = await page.locator(".identity-card").boundingBox();
+  const channelBox = await page.locator(".channel-settings-card").boundingBox();
+  expect(identityBox?.y).toBeLessThan(channelBox?.y ?? Number.POSITIVE_INFINITY);
+  await expect(routeOptions.getByRole("button", { name: /^Sandbox/ })).toHaveClass(/selected/);
+  await expect(routeOptions.getByText("Sandbox · Simulated X", { exact: true })).toBeVisible();
+  await expect(page.getByText("This world is simulated.", { exact: false })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connect this Presence to X" })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: /Connect this Presence through Bridge/ })).toHaveCount(0);
+  const publicSelf = page.locator(".public-self-card");
+  await expect(publicSelf).toHaveCSS("border-top-width", "2px");
+  await expect(publicSelf).toHaveCSS("padding-top", "26px");
+  await expect(publicSelf.getByText("Approved disclosure details", { exact: true })).toBeVisible();
+  await expect(publicSelf.getByText("Choose which details this Presence may share when relevant.", { exact: false })).toBeVisible();
+  await expect(publicSelf.getByText("Open source", { exact: true })).toHaveCount(0);
+  await expect(publicSelf.getByText("Tools used", { exact: true })).toHaveCount(0);
+  await expect(publicSelf.locator(".inline-form-actions")).toHaveCSS("margin-top", "20px");
+
+  await routeOptions.getByRole("button", { name: /^X/ }).click();
+  await expect(routeOptions.getByRole("button", { name: /^X/ })).toHaveClass(/selected/);
+  await expect(page.getByRole("heading", { name: "Connect this Presence to X" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Connect this Presence through Bridge/ })).toHaveCount(0);
+  await expect(page.getByText("No live connection is active yet.", { exact: false })).toBeVisible();
+
+  await routeOptions.getByRole("button", { name: /^Bridge/ }).click();
+  await expect(routeOptions.getByRole("button", { name: /^Bridge/ })).toHaveClass(/selected/);
+  await expect(page.getByRole("heading", { name: /Connect this Presence through Bridge/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Connect this Presence to X" })).toHaveCount(0);
+
+  await routeOptions.getByRole("button", { name: /^Sandbox/ }).click();
+  await expect(page.getByText("This world is simulated.", { exact: false })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Connect this Presence through Bridge/ })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "Connect this Presence to X" })).toHaveCount(0);
+  await page.reload();
+  await navigate(page, "Settings");
+  await expect(routeOptions.getByRole("button", { name: /^Sandbox/ })).toHaveClass(/selected/);
+});
+
+test("Review to Auto confirms and processes pending replies", async ({ page, request }) => {
+  await createAgent(page);
+  await navigate(page, "Playground");
+  const reviewRoute = await request.post("/api/state", { data: { type: "setPresence", patch: { execution: { reply: "review" } } } });
+  expect(reviewRoute.ok()).toBeTruthy();
+  const initial = await request.get("/api/state");
+  const session = (await initial.json()).playgroundSessions[0];
+  const added = await request.post("/api/state", {
+    data: { type: "addSandboxEvent", sessionId: session.id, actionId: "post", actorName: "Maya Chen", actorHandle: "@maya", content: "Can you introduce me to a backend engineer in Toronto?" },
+  });
+  expect(added.ok()).toBeTruthy();
+  const seeded = await added.json();
+  const pending = seeded.executions.find((item: { affordance: string; status: string }) => (item.affordance === "reply" || item.affordance === "x.reply") && item.status === "awaiting-review");
+  expect(pending).toBeTruthy();
+
+  await page.reload();
+  await navigate(page, "Settings");
+  await page.getByRole("button", { name: "Replies auto", exact: true }).click();
+  await expect(page.getByRole("dialog", { name: "Enable Auto for Replies?" })).toContainText("automatically approve 1 message waiting for approval");
+  await page.getByRole("button", { name: "Keep Review", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Replies review", exact: true })).toHaveAttribute("aria-pressed", "true");
+
+  await page.getByRole("button", { name: "Replies auto", exact: true }).click();
+  await page.getByRole("button", { name: "Confirm Auto", exact: true }).click();
+  await expect(page.getByRole("dialog")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Replies auto", exact: true })).toHaveAttribute("aria-pressed", "true");
+  const confirmed = await (await request.get("/api/state")).json();
+  expect(confirmed.executions.find((item: { id: string }) => item.id === pending.id)?.status).toBe("succeeded");
 });
 
 test("Agent switcher creates and switches isolated workspaces", async ({ page }) => {
@@ -167,13 +305,13 @@ test("Agent switcher creates and switches isolated workspaces", async ({ page })
   await page.getByLabel("Agent handle").fill("@atlas");
   await page.getByRole("dialog", { name: "Create Agent" }).getByRole("button", { name: "Create Agent" }).click();
   await expect(page.getByRole("button", { name: "Switch agent, currently Atlas" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "@atlas is live." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Atlas, right now." })).toBeVisible();
   await clickAgentSwitcher("Atlas");
   await page.getByRole("menu", { name: "Your Agents" }).getByRole("menuitem", { name: /Jenny/ }).click();
-  await expect(page.getByRole("heading", { name: "@jenny_ai is live." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
   await clickAgentSwitcher("Jenny");
   await page.getByRole("menu", { name: "Your Agents" }).getByRole("menuitem", { name: /Atlas/ }).click();
-  await expect(page.getByRole("heading", { name: "@atlas is live." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Atlas, right now." })).toBeVisible();
   await navigate(page, "Brain");
   await expect(page.getByRole("button", { name: "Use Claude Sonnet high" })).toHaveClass(/selected/);
   await expect(page.getByText("How I think")).toBeVisible();
@@ -186,7 +324,13 @@ test("Agent model selection lives in Brain and persists per Agent", async ({ pag
   await expect(page.getByLabel("Runtime provider")).toBeVisible();
   await page.getByLabel("Runtime provider").selectOption("ollama");
   await expect(page.getByLabel("Runtime provider")).toHaveValue("ollama");
-  await expect(page.getByRole("button", { name: "Use Llama 3.2 local" })).toBeVisible();
+  await expect(page.getByText("Connect Ollama to discover installed models.", { exact: true })).toBeVisible();
+  const ollamaConnection = page.locator(".config-list-row").filter({ hasText: "Ollama" });
+  await ollamaConnection.getByRole("button", { name: "Set up", exact: true }).click();
+  await expect(page.getByLabel("Connection name")).toHaveCount(0);
+  await page.getByLabel("Ollama endpoint").fill("http://localhost:11434");
+  await page.getByRole("button", { name: "Save connection", exact: true }).click();
+  await expect(page.getByRole("button", { name: /Use Qwen 2\.5/ }).first()).toBeVisible();
   await expect(page.getByRole("button", { name: "Use GPT 5.6 Sol high" })).toHaveCount(0);
   await page.getByLabel("Runtime provider").selectOption("openai");
   await page.getByRole("button", { name: "Use GPT 5.6 Sol high" }).click();
@@ -197,6 +341,35 @@ test("Agent model selection lives in Brain and persists per Agent", async ({ pag
   await page.reload();
   await navigate(page, "Brain");
   await expect(page.getByRole("button", { name: "Use GPT 5.6 Sol high" })).toHaveClass(/selected/);
+});
+
+test("Brain exposes OpenRouter without an editable connection name", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Brain");
+  const openRouterConnection = page.locator(".config-list-row").filter({ hasText: "OpenRouter" });
+  await expect(openRouterConnection).toBeVisible();
+  await openRouterConnection.getByRole("button", { name: "Set up", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Set up OpenRouter" })).toBeVisible();
+  await expect(page.getByLabel("Connection name")).toHaveCount(0);
+  await page.getByLabel("Provider API key").fill("test-openrouter-key");
+  await page.getByRole("button", { name: "Save connection", exact: true }).click();
+  await expect(openRouterConnection).toContainText("Credential ready");
+  await page.getByLabel("Runtime provider").selectOption("openrouter");
+  await expect(page.getByRole("button", { name: "Use Auto medium" })).toBeVisible();
+});
+
+test("Manage Agent makes Agent tools discoverable", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Brain");
+  await expect(page.getByRole("heading", { name: "Tools bound to Jenny" })).toBeVisible();
+  for (const name of ["Web search", "Asset inspection", "Chart rendering", "Channel execution"]) {
+    await expect(page.getByText(name, { exact: true })).toBeVisible();
+  }
+  await expect(page.getByText("Presence connector · Bound", { exact: true })).toBeVisible();
+  await expect(page.locator(".tool-boundary")).toContainText("Presence settings still control whether channel actions are off, manual, review, or auto.");
+  await navigate(page, "Chat");
+  await expect(page.getByText("Tools available", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Tools bound", { exact: true })).toBeVisible();
 });
 
 test("Brain makes skill creation and provider setup actionable", async ({ page }) => {
@@ -215,7 +388,7 @@ test("Brain makes skill creation and provider setup actionable", async ({ page }
   await expect(page.getByText("Turn research into a concise, evidence-backed founder brief.")).toBeVisible();
   await page.getByRole("button", { name: "Set up", exact: true }).first().click();
   await expect(page.getByRole("heading", { name: "Set up OpenAI" })).toBeVisible();
-  await page.getByLabel("Connection name").fill("OpenAI workspace");
+  await expect(page.getByLabel("Connection name")).toHaveCount(0);
   await page.getByLabel("Provider API key").fill("not-persisted-test-key");
   await page.getByRole("button", { name: "Save connection", exact: true }).click();
   await expect(page.getByText("Credential ready")).toBeVisible();
@@ -235,50 +408,112 @@ test("Chat creates a protected proposal and Brain can apply it", async ({ page }
 
 test("Calendar stores a real Standing Intent and evaluates it now", async ({ page }) => {
   await createAgent(page);
-  await navigate(page, "Calendar");
+  await navigate(page, "Schedule");
   await page.getByRole("button", { name: "Add intent" }).click();
   await page.getByLabel("What should Jenny do?").fill("Teach the audience one useful idea about persistent agents.");
+  await page.getByRole("textbox", { name: "Time", exact: true }).fill("09:15");
   await page.getByRole("button", { name: "Save standing intent" }).click();
   await expect(page.getByText("Teach the audience one useful idea about persistent agents.")).toBeVisible();
+  await expect(page.locator(".slot-row")).toContainText("09:15");
   await expect(page.getByLabel("Calendar presence filter")).toHaveCount(0);
   await expect(page.getByLabel("Intent presence")).toHaveCount(0);
   await page.getByRole("button", { name: /^Edit / }).click();
   await page.getByLabel("What should Jenny do?").fill("Teach the audience one edited useful idea about persistent agents.");
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(page.getByText("Teach the audience one edited useful idea about persistent agents.")).toBeVisible();
+  await expect(page.locator(".slot-row")).toContainText("09:15");
   await page.getByRole("button", { name: "Run now" }).click();
-  await navigate(page, "Live");
-  await expect(page.getByText("Standing intent evaluated", { exact: true })).toBeVisible();
+  await navigate(page, "Activity");
+  await expect(page.locator(".event-title").filter({ hasText: /Calendar evaluation complete|Standing intention held/ }).first()).toBeVisible();
   await expect(page.getByText("0.94", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Reply to a technical founder", { exact: true })).toHaveCount(0);
 });
 
-test("Live completes review and manual execution lifecycles", async ({ page }) => {
+test("Activity explains current work, next attention, and configured rhythm", async ({ page }) => {
+  await createAgent(page);
+  await expect(page.getByLabel("Operating status").getByRole("heading", { name: "Waiting for the next meaningful event" })).toBeVisible();
+  await expect(page.getByLabel("Operating status").getByRole("heading", { name: "On demand" })).toBeVisible();
+  await expect(page.getByLabel("Operating status").getByText("No automatic scan is scheduled because no observer or standing intent is connected.", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Operating status").getByText("Publishing Auto", { exact: true })).toBeVisible();
+  await page.locator(".page-heading .heading-actions").getByRole("button", { name: "Check now", exact: true }).click();
+  await expect(page.getByLabel("Operating status").getByRole("heading", { name: "Waiting for a better moment" })).toBeVisible();
+  await expect(page.locator(".event-title").filter({ hasText: "Pulse completed" })).toBeVisible();
+});
+
+test("Activity does not guess a repeated post for legacy unlinked decisions", async ({ page, request }) => {
+  await createAgent(page);
+  await navigate(page, "Playground");
+  const eventForm = page.locator(".sandbox-event-form");
+  await eventForm.getByLabel("New person name").fill("Maya Chen");
+  await eventForm.getByLabel("What did they post?").fill("A precise post used to test Activity lineage.");
+  await eventForm.getByRole("button", { name: "Add post" }).click();
+  await expect(page.getByText("A precise post used to test Activity lineage.", { exact: true })).toBeVisible();
+
+  const state = await (await request.get("/api/state")).json();
+  const legacyCandidate = state.events.find(
+    (item: { id: string; type: string; title: string; sessionId?: string; sourceObjectId?: string }) =>
+      item.type === "decision" &&
+      Boolean(item.sessionId) &&
+      Boolean(item.sourceObjectId) &&
+      /observed|silence|reply/i.test(item.title),
+  );
+  expect(legacyCandidate).toBeTruthy();
+
+  await page.route("**/api/state*", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    const body = await response.json();
+    body.events = body.events.map((item: { id: string; sourceObjectId?: string }) =>
+      item.id === legacyCandidate.id ? { ...item, sourceObjectId: undefined } : item,
+    );
+    const candidate = body.events.find((item: { id: string }) => item.id === legacyCandidate.id);
+    if (candidate) body.events.unshift({ ...candidate, id: `duplicate:${candidate.id}` });
+    await route.fulfill({ response, json: body });
+  });
+  await page.reload();
+  await navigate(page, "Activity");
+  const rows = page.locator(".event-row").filter({ hasText: legacyCandidate.title });
+  await expect(rows).toHaveCount(1);
+  await expect(rows.first().locator(".event-context-preview")).toHaveCount(0);
+});
+
+test("Activity completes review and manual execution lifecycles", async ({ page }) => {
   await createAgent(page);
   await navigate(page, "Settings");
   await page.getByRole("button", { name: "Posts review", exact: true }).click();
-  await navigate(page, "Calendar");
+  await navigate(page, "Schedule");
   await page.getByRole("button", { name: "Add intent" }).click();
   await page.getByLabel("What should Jenny do?").fill("Review one useful idea before it is sent.");
   await page.getByRole("button", { name: "Save standing intent" }).click();
   await page.getByRole("button", { name: "Run now" }).click();
-  await navigate(page, "Live");
-  await page.getByRole("button", { name: "Approve execution" }).click();
+  await page.waitForTimeout(150);
+  await page.reload();
+  const reviewButton = page.getByRole("button", { name: "Approve execution" });
+  await expect(reviewButton).toHaveClass(/review-cta/);
+  await expect(reviewButton).toHaveCSS("background-color", "rgb(169, 81, 44)");
+  await expect(reviewButton).toHaveCSS("color", "rgb(255, 255, 255)");
+  await expect(reviewButton).toHaveCSS("min-height", "48px");
+  await reviewButton.focus();
+  await expect(reviewButton).toBeFocused();
+  await reviewButton.click();
   await page.getByRole("button", { name: "Execute approved action" }).click();
-  await expect(page.getByRole("heading", { name: "Action completed" })).toBeVisible();
+  await expect(page.locator(".execution-ledger").getByRole("heading", { name: "Action completed" })).toBeVisible();
+  await expect(page.locator(".execution-ledger")).not.toContainText("x.post");
+  await expect(page.locator(".execution-ledger")).not.toContainText("execution envelope");
 
   await navigate(page, "Settings");
   await page.getByRole("button", { name: "Posts manual", exact: true }).click();
-  await navigate(page, "Calendar");
+  await navigate(page, "Schedule");
   await page.getByRole("button", { name: "Add intent" }).click();
   await page.getByLabel("What should Jenny do?").fill("Carry one useful idea to the channel manually.");
   await page.getByRole("button", { name: "Save standing intent" }).click();
   await page.locator(".slot-row").filter({ hasText: "Carry one useful idea to the channel manually" }).getByRole("button", { name: "Run now" }).click();
-  await navigate(page, "Live");
+  await page.waitForTimeout(150);
+  await page.reload();
   await expect(page.getByLabel("External reference", { exact: true })).toBeVisible();
   await page.getByLabel("External reference", { exact: true }).fill("manual-post-1");
   await page.getByRole("button", { name: "Mark posted" }).click();
-  await expect(page.getByRole("heading", { name: "Action completed" })).toBeVisible();
+  await expect(page.locator(".execution-ledger").getByRole("heading", { name: "Action completed" })).toBeVisible();
 });
 
 test("Presence settings are generated from channel capabilities and pause truthfully", async ({ page }) => {
@@ -291,41 +526,388 @@ test("Presence settings are generated from channel capabilities and pause truthf
   await expect(page.getByRole("button", { name: "Posts auto", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Replies review", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Pause Presence" }).click();
-  await navigate(page, "Live");
-  await expect(page.getByRole("heading", { name: "@jenny_ai is paused." })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Run pulse" })).toBeDisabled();
+  await navigate(page, "Activity");
+  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Wake up Jenny", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Resume Presence", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Run one pulse", exact: true })).toHaveCount(0);
+  await page.route("**/api/state", async (route) => {
+    const request = route.request();
+    if (request.method() === "POST" && request.postDataJSON()?.type === "wakePresence") await new Promise((resolve) => setTimeout(resolve, 250));
+    await route.continue();
+  });
+  await page.getByRole("button", { name: "Wake up Jenny", exact: true }).first().click();
+  await expect(page.getByRole("button", { name: "Waking Jenny…", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+  await expect(page.locator(".event-title").filter({ hasText: "Jenny woke up" })).toBeVisible();
+  await expect(page.locator(".event-title").filter({ hasText: "Pulse completed" })).toBeVisible();
   await navigate(page, "Settings");
-  await page.getByRole("button", { name: "Resume Presence" }).click();
-  await navigate(page, "Live");
-  await expect(page.getByRole("heading", { name: "@jenny_ai is live." })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Pause Presence" })).toBeVisible();
+});
+
+test("Presence rhythm explains attention settings and saves quiet hours", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Activity");
+  await expect(page.getByRole("heading", { name: "When Jenny pays attention" })).toBeVisible();
+  await expect(page.getByText("Rhythm controls when this Presence looks for something worth considering.", { exact: false })).toBeVisible();
+  await page.getByRole("button", { name: "Manage attention rhythm", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "When should Jenny look around?" })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Recommended.*Check about every 5 minutes/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Gentle.*Check about every 15 minutes/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Custom.*Choose the check interval/ })).toBeVisible();
+  await expect(page.getByText("Quiet hours", { exact: true })).toBeVisible();
+  await expect(page.getByText("Off · automatic observation follows the selected rhythm.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: /Custom.*Choose the check interval/ }).click();
+  await page.getByLabel("Custom attention interval").selectOption("30");
+  await expect(page.getByLabel("Custom attention interval")).toHaveValue("30");
+  await page.locator(".toggle-control").click();
+  await expect(page.getByLabel("Enable quiet hours")).toBeChecked();
+  await page.getByLabel("Quiet hours start").fill("22:00");
+  await page.getByLabel("Quiet hours end").fill("07:00");
+  await page.reload();
+  await navigate(page, "Settings");
+  await expect(page.getByRole("button", { name: /Custom.*Choose the check interval/ })).toHaveClass(/selected/);
+  await expect(page.getByLabel("Custom attention interval")).toHaveValue("30");
+  await expect(page.getByLabel("Enable quiet hours")).toBeChecked();
+  await expect(page.getByLabel("Quiet hours start")).toHaveValue("22:00");
+  await expect(page.getByLabel("Quiet hours end")).toHaveValue("07:00");
+  await navigate(page, "Activity");
+  await expect(page.locator(".rhythm-summary")).toContainText("22:00–07:00");
+});
+
+test("Presence Public Self saves its disclosure boundary", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Settings");
+  await page.getByLabel("Presence name").fill("Richardson");
+  await page.getByRole("button", { name: "Save name", exact: true }).click();
+  const settingsOrder = await page.locator(".presence-settings-page > section").evaluateAll((sections) => Object.fromEntries(sections.map((section) => [section.className, Number(getComputedStyle(section).order)])));
+  expect(settingsOrder["settings-card channel-settings-card"]).toBeLessThan(settingsOrder["settings-card presence-execution-card"]);
+  expect(settingsOrder["settings-card presence-execution-card"]).toBeLessThan(settingsOrder["settings-card presence-rhythm-card"]);
+  expect(settingsOrder["settings-card presence-rhythm-card"]).toBeLessThan(settingsOrder["settings-card media-policy-card"]);
+  expect(settingsOrder["settings-card presence-execution-card"]).toBeLessThan(settingsOrder["settings-card media-policy-card"]);
+  expect(settingsOrder["settings-card media-policy-card"]).toBeLessThan(settingsOrder["settings-card public-self-card"]);
+  const mediaPolicy = page.locator(".media-policy-card");
+  await expect(mediaPolicy).toHaveCSS("border-top-width", "2px");
+  await expect(mediaPolicy).toHaveCSS("padding-top", "26px");
+  await expect(mediaPolicy.getByRole("heading", { name: "When media is hard to interpret" })).toBeVisible();
+  await mediaPolicy.getByRole("button", { name: /Always review media actions/ }).click();
+  await page.locator(".identity-options").getByRole("button", { name: /Me \/ my organization/ }).click();
+  const publicSelf = page.locator(".public-self-card");
+  await expect(publicSelf.getByRole("heading", { name: "How this Presence describes itself" })).toBeVisible();
+  await publicSelf.getByRole("button", { name: /Representational/ }).click();
+  await publicSelf.getByLabel("Built with OpenPresence", { exact: false }).check();
+  await publicSelf.getByRole("button", { name: "Save Public Self", exact: true }).click();
+  await page.reload();
+  await navigate(page, "Settings");
+  await expect(page.getByLabel("Presence name")).toHaveValue("Richardson");
+  await expect(page.locator(".media-policy-card").getByRole("button", { name: /Always review media actions/ })).toHaveClass(/selected/);
+  await expect(page.locator(".public-self-card").getByRole("button", { name: /Representational/ })).toHaveClass(/selected/);
+  await expect(page.locator(".public-self-card").getByLabel("Built with OpenPresence", { exact: false })).toBeChecked();
+});
+
+test("Chat stays quiet when Presence identity changes outside Chat", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Settings");
+  const identityOptions = page.locator(".identity-options");
+  await identityOptions.getByRole("button", { name: /Me \/ my organization/ }).click();
+  await expect(identityOptions.getByRole("button", { name: /Me \/ my organization/ })).toHaveClass(/selected/);
+  await expect(page.getByRole("heading", { name: "What should this Ghost represent?" })).toBeVisible();
+  await page.getByLabel("Ghost subject").fill("Richardson Dackam");
+  await page.getByLabel("Ghost priorities").fill("Build trustworthy open-source AI products.");
+  await page.getByLabel("Ghost preferences").fill("Prefer clear evidence and useful depth over hype.");
+  await page.getByLabel("Ghost voice").fill("Warm, direct, and technically sharp.");
+  await page.getByLabel("Ghost boundaries").fill("Never invent my views or disclose private community context.");
+  await page.getByRole("button", { name: "Save Ghost profile", exact: true }).click();
+  await expect(page.getByText("Profile defined", { exact: true })).toBeVisible();
+  await page.reload();
+  await navigate(page, "Settings");
+  await expect(page.getByLabel("Ghost subject")).toHaveValue("Richardson Dackam");
+  await expect(page.locator(".ghost-understanding").getByText("Never invent my views or disclose private community context.", { exact: true })).toBeVisible();
+  await navigate(page, "Chat");
+  await expect(page.getByText("I noticed this Presence is now Ghost.", { exact: false })).toHaveCount(0);
+  await expect(page.getByText("I noticed the Ghost profile changed.", { exact: false })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "A mind becomes useful through conversation." })).toBeVisible();
+
+  await navigate(page, "Settings");
+  await identityOptions.getByRole("button", { name: /^Jenny Agent-owned/ }).click();
+  await expect(identityOptions.getByRole("button", { name: /^Jenny Agent-owned/ })).toHaveClass(/selected/);
+  await navigate(page, "Chat");
+  await expect(page.getByText("I noticed this Presence is now Agent-owned.", { exact: false })).toHaveCount(0);
+  await expect(page.getByRole("heading", { name: "A mind becomes useful through conversation." })).toBeVisible();
 });
 
 test("desktop shell keeps sidebar and runtime status available", async ({ page }) => {
   await createAgent(page);
+  await expect(page.getByLabel("Help")).toHaveCount(0);
   const expectedPosition = test.info().project.name === "mobile" ? "relative" : "sticky";
   await expect(page.locator(".sidebar")).toHaveCSS("position", expectedPosition);
   if (test.info().project.name !== "mobile") {
     await expect(page.locator(".sidebar .secondary-nav").nth(0)).toHaveText("Chat");
-    await expect(page.locator(".sidebar .secondary-nav").nth(1)).toContainText("Manage Agent");
+    await expect(page.locator(".sidebar .secondary-nav").nth(1)).toHaveText("Playground");
+    await expect(page.locator(".sidebar .secondary-nav").nth(2)).toContainText("Manage Agent");
   }
   await expect(page.getByLabel("Live presence filter")).toHaveCount(0);
   await expect(page.locator(".pause-card")).toHaveCount(0);
-  await expect(page.locator(".scope-summary")).toContainText("@jenny_ai");
-  await navigate(page, "Calendar");
+  await expect(page.locator(".scope-summary")).toContainText("X");
+  await navigate(page, "Schedule");
   await expect(page.getByText(/Planning for/)).toBeVisible();
   await expect(page.getByLabel("Calendar presence filter")).toHaveCount(0);
+});
+
+test("Presence and Agent names can be edited at their own scopes", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Settings");
+  await page.getByLabel("Presence name").fill("Jenny in Founders");
+  await page.getByRole("button", { name: "Save name" }).click();
+  await expect(page.getByRole("heading", { name: "Jenny in Founders" })).toBeVisible();
+  await page.reload();
+  await navigate(page, "Settings");
+  await expect(page.getByLabel("Presence name")).toHaveValue("Jenny in Founders");
+
+  await navigate(page, "Brain");
+  await page.getByLabel("Agent name").fill("Juno");
+  await page.getByRole("button", { name: "Save name" }).click();
+  await expect(page.getByRole("button", { name: "Switch agent, currently Juno" })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Switch agent, currently Juno" })).toBeVisible();
+  await navigate(page, "Settings");
+  await expect(page.getByRole("heading", { name: "Jenny in Founders" })).toBeVisible();
+  await expect(page.getByLabel("Presence name")).toHaveValue("Jenny in Founders");
+});
+
+test("Activity and Calendar stay scoped to the Presence identity", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Settings");
+  await page.getByLabel("Presence name").fill("Genny");
+  await page.getByRole("button", { name: "Save name" }).click();
+
+  await navigate(page, "Activity");
+  await expect(page.getByRole("heading", { name: "Genny, right now." })).toBeVisible();
+  await expect(page.getByText("@jenny_ai", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: /Manage Jenny/ })).toHaveCount(0);
+
+  await navigate(page, "Schedule");
+  await expect(page.getByText("Tell Genny when to pay attention.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Planning for Genny", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Week" }).click();
+  await expect(page.getByRole("heading", { name: "When Genny is meant to pay attention" })).toBeVisible();
+});
+
+test("Playground rehearses a Presence inside an isolated simulated world", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Playground");
+  await expect(page.getByRole("heading", { name: "Playground", exact: true })).toBeVisible();
+  await expect(page.locator(".playground-grid")).toBeVisible();
+  await expect(page.getByText(/Rehearse how this Presence behaves on X\. This world is simulated\. Jenny is real\./)).toBeVisible();
+  await expect(page.getByText("Sandbox", { exact: true }).first()).toBeVisible();
+  await page.getByRole("button", { name: "Check now" }).click();
+  await expect(page.locator(".social-card").first()).toBeVisible();
+  await expect(page.locator(".social-card").first()).not.toContainText(/[–—]/);
+  const eventForm = page.locator(".sandbox-event-form");
+  const mediaInput = eventForm.locator(".sandbox-file-input");
+  await expect(eventForm.locator(".sandbox-file-button")).toBeVisible();
+  await expect(eventForm.locator(".sandbox-file-button")).toContainText("Add media");
+  await expect(mediaInput).toBeAttached();
+  const mediaInputStyle = await mediaInput.evaluate((node) => {
+    const style = getComputedStyle(node);
+    return { position: style.position, width: style.width, height: style.height, clipPath: style.clipPath };
+  });
+  expect(mediaInputStyle).toEqual({ position: "absolute", width: "1px", height: "1px", clipPath: "inset(50%)" });
+  await eventForm.getByLabel("What should happen").selectOption("reply");
+  await expect(eventForm.getByLabel("Replying to")).toBeVisible();
+  await expect(eventForm.getByText("Conversation", { exact: true })).toHaveCount(0);
+  await eventForm.getByLabel("What should happen").selectOption("post");
+  await expect(eventForm.getByLabel("Replying to")).toHaveCount(0);
+  await eventForm.getByLabel("New person name").fill("Maya Chen");
+  await eventForm.getByLabel("New person handle").fill("@maya");
+  await eventForm.getByLabel("What did they post?").fill("What is one thing you are learning about agents?");
+  await eventForm.getByRole("button", { name: "Add post" }).click();
+  await expect(page.getByText("Maya Chen", { exact: true }).first()).toBeVisible();
+  const fixture = Buffer.from("iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=", "base64");
+  await eventForm.getByLabel("Add media").setInputFiles({ name: "simulated-image.png", mimeType: "image/png", buffer: fixture });
+  await eventForm.getByLabel("What did they post?").fill("This post includes an image.");
+  await eventForm.getByRole("button", { name: "Add post" }).click();
+  await expect(page.getByRole("button", { name: "What Jenny sees" })).toBeVisible();
+  await expect(page.getByText("Media needs inspection", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "What Jenny sees" }).click();
+  const perceptionPanel = page.locator(".perception-panel");
+  await expect(perceptionPanel.getByText(/not been successfully interpreted/)).toBeVisible();
+  await expect(perceptionPanel.getByText("insufficient", { exact: true })).toBeVisible();
+  await perceptionPanel.getByRole("button", { name: "Inspect media" }).click();
+  await expect(page.getByText("Media inspected", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "+1h" }).click();
+  await expect(page.getByText("Virtual time", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Reset" }).click();
+  await expect(page.locator(".playground-grid")).toBeVisible();
+  await expect(page.locator(".social-card")).toHaveCount(0);
+  await expect(page.getByText("Fresh X account", { exact: true })).toBeVisible();
+});
+
+test("Playground gives likes an activity treatment distinct from posts", async ({ page, request }) => {
+  await createAgent(page);
+  await navigate(page, "Playground");
+
+  const initial = await request.get("/api/state");
+  const initialState = await initial.json();
+  const session = initialState.playgroundSessions[0];
+  expect(session).toBeTruthy();
+
+  const postResponse = await request.post("/api/state", {
+    data: {
+      type: "addSandboxEvent",
+      sessionId: session.id,
+      actionId: "post",
+      actorName: "Maya Chen",
+      actorHandle: "@maya",
+      content: "What is the hardest part of giving an AI a durable identity?",
+    },
+  });
+  expect(postResponse.ok()).toBeTruthy();
+  const postState = await postResponse.json();
+  const post = postState.mirrorObjects.find(
+    (item: { objectType: string; content?: { text?: string } }) =>
+      item.objectType === "post" &&
+      item.content?.text === "What is the hardest part of giving an AI a durable identity?",
+  );
+  expect(post).toBeTruthy();
+
+  const likeResponse = await request.post("/api/state", {
+    data: {
+      type: "addSandboxEvent",
+      sessionId: session.id,
+      actionId: "like",
+      actorName: "Maya Chen",
+      actorHandle: "@mayachen",
+      targetExternalRef: post.externalRef,
+    },
+  });
+  expect(likeResponse.ok()).toBeTruthy();
+  const finalState = await (await request.get("/api/state")).json();
+  const like = finalState.mirrorObjects.find(
+    (item: { objectType: string; author?: { displayName?: string } }) =>
+      item.objectType === "like" && item.author?.displayName === "Maya Chen",
+  );
+  const target = like
+    ? finalState.mirrorObjects.find(
+        (item: { externalRef: { type: string; id: string }; content?: { text?: string } }) =>
+          item.externalRef.type === like.parentExternalRef?.type &&
+          item.externalRef.id === like.parentExternalRef?.id,
+      )
+    : undefined;
+  expect(like).toBeTruthy();
+  expect(target?.content?.text).toBeTruthy();
+
+  await page.reload();
+  await navigate(page, "Playground");
+  const reaction = page.locator(".social-event-card");
+  await expect(reaction).toHaveCount(1);
+  await expect(reaction).toContainText("Activity · Like");
+  await expect(reaction).toContainText("Maya Chen liked a post");
+  await expect(reaction.locator("blockquote")).toContainText(target.content.text);
+  await expect(reaction).not.toContainText("Someone likes a post occurred.");
+  await expect(reaction.locator(".social-card-meta")).toHaveCount(0);
+});
+
+test("Playground stacks Jenny's reply beneath the simulated post it answers", async ({ page, request }) => {
+  await createAgent(page);
+  await navigate(page, "Playground");
+  const initial = await request.get("/api/state");
+  const initialState = await initial.json();
+  const session = initialState.playgroundSessions[0];
+  expect(session).toBeTruthy();
+
+  const postResponse = await request.post("/api/state", {
+    data: {
+      type: "addSandboxEvent",
+      sessionId: session.id,
+      actionId: "post",
+      actorName: "Maya Chen",
+      actorHandle: "@maya",
+      content: "What is one concrete way to keep an AI agent's memory useful?",
+    },
+  });
+  expect(postResponse.ok()).toBeTruthy();
+  const replyState = await request.post("/api/state", {
+    data: {
+      type: "addSandboxEvent",
+      sessionId: session.id,
+      actionId: "reply",
+      actorName: "Jenny",
+      actorHandle: "@jenny_ai",
+      content: "Keep memories tied to people, decisions, and the evidence that made them useful.",
+      targetExternalRef: (await postResponse.json()).mirrorObjects.find((item: { content?: { text?: string }; externalRef: { type: string; id: string } }) => item.content?.text === "What is one concrete way to keep an AI agent's memory useful?").externalRef,
+    },
+  });
+  expect(replyState.ok()).toBeTruthy();
+
+  await page.reload();
+  await navigate(page, "Playground");
+  await expect(page.locator(".social-feed").getByText("What is one concrete way to keep an AI agent's memory useful?", { exact: true }).first()).toBeVisible();
+  await expect(page.locator(".thread-reply-card").filter({ hasText: "Jenny" })).toHaveCount(1);
+  const sourceBox = await page.locator(".social-feed").getByText("What is one concrete way to keep an AI agent's memory useful?", { exact: true }).first().locator("xpath=ancestor::article").boundingBox();
+  const replyBox = await page.locator(".thread-reply-card").filter({ hasText: "Jenny" }).boundingBox();
+  expect(sourceBox).not.toBeNull();
+  expect(replyBox).not.toBeNull();
+  expect(replyBox!.y).toBeGreaterThan(sourceBox!.y);
+});
+
+test("Activity keeps Sandbox records scoped and labels Playground context", async ({ page, request }) => {
+  await createAgent(page);
+  await navigate(page, "Playground");
+  const initial = await request.get("/api/state");
+  const session = (await initial.json()).playgroundSessions[0];
+  const added = await request.post("/api/state", {
+    data: { type: "addSandboxEvent", sessionId: session.id, actionId: "post", actorName: "Maya Chen", content: "A Playground-only observation." },
+  });
+  expect(added.ok()).toBeTruthy();
+  await page.reload();
+  await navigate(page, "Activity");
+  await expect(page.locator(".activity-tag", { hasText: "Playground" })).toBeVisible();
+  await expect(page.locator(".event-context-preview span", { hasText: "↳" })).toHaveCount(1);
+
+  const liveRoute = await request.post("/api/state", { data: { type: "setPresence", patch: { connectionMode: "native" } } });
+  expect(liveRoute.ok()).toBeTruthy();
+  await page.reload();
+  await navigate(page, "Activity");
+  await expect(page.locator(".scope-summary")).toHaveText("X · Live");
+  await expect(page.getByText("A Playground-only observation.", { exact: true })).toHaveCount(0);
+});
+
+test("Playground actions work while a Presence keeps its live route", async ({ page, request }) => {
+  await createAgent(page);
+  const routeChange = await request.post("/api/state", { data: { type: "setPresence", patch: { connectionMode: "native" } } });
+  expect(routeChange.ok()).toBeTruthy();
+  await page.reload();
+  await navigate(page, "Playground");
+
+  await expect(page.getByText(/Agent handle: @jenny_ai/)).toBeVisible();
+  await expect(page.locator(".playground-grid")).toBeVisible();
+  await page.getByRole("button", { name: "Check now" }).click();
+  await expect(page.locator(".social-card").first()).toBeVisible();
+
+  const eventForm = page.locator(".sandbox-event-form");
+  await eventForm.getByLabel("New person name").fill("Maya Chen");
+  await eventForm.getByLabel("What did they post?").fill("A live-routed Presence can still rehearse safely.");
+  await eventForm.getByRole("button", { name: "Add post" }).click();
+  await expect(page.getByText("A live-routed Presence can still rehearse safely.", { exact: true })).toBeVisible();
+  await expect(page.getByText("That change could not be saved.", { exact: true })).toHaveCount(0);
 });
 
 test("Custom Channel connects a Bridge, receives Mirror events, and completes queued work", async ({ page, request }) => {
   await createAgent(page);
   await page.getByRole("button", { name: "Add a Presence" }).click();
   const dialog = page.getByRole("dialog", { name: "Add a Presence" });
-  await dialog.getByRole("radio", { name: "Custom Channel" }).check();
+  await dialog.getByRole("radio", { name: "Bridge" }).check();
   await dialog.getByLabel("Custom channel name").fill("Founder Community");
   await dialog.getByLabel("Custom channel ID").fill("founder-community");
+  await dialog.getByLabel("Social Mirror domain").fill("https://www.skool.com/");
+  await dialog.getByRole("button", { name: "Use Forum icon" }).click();
   await dialog.getByLabel("New Presence handle").fill("Jenny in Founders");
   await dialog.getByRole("button", { name: "Add Presence" }).click();
   await expect(presenceSwitcher(page, "Jenny in Founders")).toBeVisible();
+  await expect(presenceSwitcher(page, "Jenny in Founders").locator(".presence-logo img")).toHaveAttribute("src", /domain=www\.skool\.com/);
+  const customChannel = await (await request.get("/api/state")).json();
+  expect(customChannel.channelDefinitions.find((item: { id: string }) => item.id === "founder-community")).toMatchObject({ icon: "forum", domain: "https://www.skool.com/" });
 
   await navigate(page, "Settings");
   await expect(page.getByRole("heading", { name: "Connect this Presence" })).toBeVisible();
@@ -352,12 +934,12 @@ test("Custom Channel connects a Bridge, receives Mirror events, and completes qu
   const persisted = await (await request.get("/api/state")).json();
   expect(JSON.stringify(persisted)).not.toContain(bridgeKey);
   await page.reload();
-  await navigate(page, "Live");
+  await navigate(page, "Activity");
   await expect(page.getByText("How are people handling memory?")).toBeVisible();
 
-  await navigate(page, "Calendar");
+  await navigate(page, "Schedule");
   await page.getByRole("button", { name: "Add intent" }).click();
-  await page.getByLabel("What should Jenny do?").fill("Share one useful memory idea with the founders.");
+  await page.getByLabel("What should Jenny in Founders do?").fill("Share one useful memory idea with the founders.");
   await page.getByRole("button", { name: "Save standing intent" }).click();
   await page.getByRole("button", { name: "Run now" }).click();
   const stateAfterRun = await (await request.get("/api/state")).json();
@@ -371,13 +953,18 @@ test("Custom Channel connects a Bridge, receives Mirror events, and completes qu
   const acknowledged = await request.post(`/api/bridge/v1/executions/${execution.id}/ack`, { headers: { Authorization: `Bearer ${bridgeKey}` }, data: { executorId: "playwright-bridge", externalRef: { type: "post", id: "comment-8821" } } });
   expect(acknowledged.ok()).toBeTruthy();
   await page.reload();
-  await navigate(page, "Live");
-  await expect(page.getByText("Action completed", { exact: false })).toBeVisible();
+  await navigate(page, "Activity");
+  await expect(page.locator(".execution-ledger").getByRole("heading", { name: "Action completed" })).toBeVisible();
 
   await navigate(page, "Settings");
   await page.getByRole("button", { name: "Disconnect", exact: true }).click();
   await expect(page.getByText("Disconnected", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Disconnect", exact: true })).toHaveCount(0);
+  const disconnectedRow = page.locator(".bridge-row").filter({ hasText: "Founder Bridge" });
+  await expect(disconnectedRow).toContainText("Credential prefix:");
+  await expect(disconnectedRow).toContainText("secret value is not recoverable");
+  await disconnectedRow.getByRole("button", { name: "Remove Bridge", exact: true }).click();
+  await expect(disconnectedRow).toHaveCount(0);
   await expect(page.getByLabel("Bridge name")).toBeVisible();
   await page.getByLabel("Bridge name").fill("Reconnected Bridge");
   await page.getByRole("button", { name: "Connect", exact: true }).click();

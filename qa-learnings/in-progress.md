@@ -1,5 +1,324 @@
 # Active QA Work
 
+## COMPLETE — Confirm Auto transitions before approving pending replies
+
+- **Started:** 2026-08-13
+- **Scope:** When a Presence capability changes from Review to Auto, show the exact number of pending review executions and require confirmation before approving and processing them.
+- **Safety boundary:** Local settings/runtime and test Sandbox only; no live connector or production mutation during QA.
+- **Acceptance:** Switching one capability to Auto with no pending review actions applies immediately; with pending actions it shows a count confirmation, cancel leaves settings/actions unchanged, confirm applies Auto and processes all matching pending review executions.
+- **Verification:** Runtime/unit coverage, focused Activity/Settings Chromium + Pixel 5 browser flow, typecheck, lint, production build, and `git diff --check`.
+
+## COMPLETE — Make the Activity review CTA visually prominent
+
+- **Started:** 2026-08-13
+- **Scope:** Increase the visual prominence and contrast of the `Approve execution` CTA in the Activity decision card without changing approval semantics or execution boundaries.
+- **Safety boundary:** Local UI styling and browser QA only. No live connector, external account, or production state mutation.
+- **Acceptance:** A pending review action is immediately recognizable as the primary CTA on desktop and mobile, remains keyboard-focusable, and retains readable contrast in enabled, hover, focus, and disabled states.
+- **Verification:** 115 unit tests, typecheck, lint, production build, `git diff --check`, and the Activity review lifecycle with CTA contrast, sizing, and keyboard-focus assertions passed on Chromium and Pixel 5.
+
+## COMPLETE — Stack Playground replies and scope Activity to the selected channel
+
+- **Started:** 2026-08-13
+- **Scope:** Show simulated inbound messages/posts with Jenny's replies in one readable thread; constrain Activity to the selected Presence's channel and current Sandbox/live environment; clarify Playground event language and replace causal preview copy with `↳`.
+- **Safety boundary:** Presentation and local Sandbox projection only. No live connector, external account, or production state mutation.
+- **Acceptance:** A user can relate each Jenny reply to the message/post it answers; Sandbox Activity contains only Sandbox events for the selected channel; live channel Activity contains only that channel's activity; Activity uses a `Playground` tag for simulated posts and `↳` for observed context.
+- **Verification:** 106 unit tests, typecheck, lint, production build, `git diff --check`, and focused Activity/Playground lifecycle, threading, and Sandbox/live scoping flows passed on Chromium and Pixel 5.
+
+## COMPLETE — Make Presence rhythm settings discoverable and complete
+
+- **Started:** 2026-08-13
+- **Scope:** Explain Rhythm in user terms, make the settings entry point obvious, give Recommended/Gentle/Custom meaningful behavior, and expose Quiet hours as a real Presence-scoped control without changing Agent identity or forcing publication.
+- **Safety boundary:** Local Presence configuration and development QA only; no live connector mutation or production state change.
+- **Acceptance:** A customer can find rhythm settings from Activity, understand attention cadence versus publishing/reply permissions, configure a custom interval and quiet-hours window, see the saved state reflected in Activity, and use the controls on desktop and mobile.
+- **Verification:** Runtime setting and overnight scheduling tests passed (93 repository tests total), isolated production build, typecheck, lint, and `git diff --check` passed. Focused Chromium + Pixel 5 browser flow passed with persistence, console/network checks, and no responsive overflow; exploratory desktop/mobile screenshots confirmed the rhythm card, attached Quiet hours toggle, and mobile layout.
+
+## COMPLETE — Repair Activity duplicate source previews
+
+- **Started:** 2026-08-13
+- **Scope:** Stop Activity decision rows from reusing the same observed post when event lineage is missing or points to a reaction object; preserve truthful target context for replies, likes, executions, and Sandbox observations.
+- **Safety boundary:** Presentation and local Sandbox lineage only; no live connector, external account, or production state mutation.
+- **Acceptance:** Each Activity context preview belongs to the event's explicit source/target, unlinked legacy events do not guess context, repeated decisions remain individually attributable, and desktop/mobile Activity remains readable and console-clean.
+- **Verification:** Runtime lineage regression, focused Chromium + Pixel 5 Activity flow with repeated Sandbox events, isolated production build, typecheck, lint, and `git diff --check` passed. The focused Activity suite passed 10 desktop/mobile cases with console, failed-request, and responsive-overflow checks.
+
+## COMPLETE — Add OpenRouter provider access and lock connection identity
+
+- **Started:** 2026-08-13
+- **Scope:** Add OpenRouter to Brain provider access and model runtime selection, preserve its existing OpenAI-compatible backend path, and prevent provider connection names from being edited or renamed.
+- **Safety boundary:** UI/runtime configuration only; no live provider request or production credential mutation during QA. Avoids the Playground cognition/CLI files owned by task `019ff960-b9c9-7432-b958-af13d464a229`.
+- **Acceptance:** OpenRouter is visible and can be configured with an API key; its hosted endpoint and a selectable model are usable; connection identity is provider-owned and not editable; existing OpenAI/Ollama setup remains intact.
+- **Verification:** OpenRouter endpoint/runtime routing test, canonical-label runtime regression, focused Brain Playwright flow passed on Chromium and Pixel 5, isolated production build, 89 unit tests, typecheck, lint, and `git diff --check`.
+
+## COMPLETE — Center Add a Presence modal and clarify platform handles
+
+- **Started:** 2026-08-13
+- **Scope:** Make the Add a Presence overlay full-viewport and center its dialog; clarify that a Presence handle is the platform/social identity used by the Agent and Social Mirror.
+- **Safety boundary:** No Activity redesign, Playground/API/runtime/perception/CLI changes, live connector mutations, or production operations.
+- **Acceptance:** The modal backdrop covers the viewport, the dialog is centered at desktop and mobile widths, the handle field has platform-specific language, and the handle remains available to runtime cognition/context without becoming Agent-wide identity.
+- **Verification:** Scoped Add Presence browser coverage passed on Chromium and Pixel 5; 84 unit tests, typecheck, lint, production build in an isolated clean copy, and `git diff --check` passed. The existing runtime context and Social Mirror identity test confirms the handle remains Presence-scoped and is available to authored social objects.
+
+## COMPLETE — Browse stacked Calendar publications from the inspector
+
+- **Started:** 2026-08-13
+- **Scope:** Add inspector navigation for dense Week-view cards and replace the ambiguous `PUBLIC EXPRESSION` label with a concrete post-specific label.
+- **Safety gate:** Presentation-only; no publication, connector, Playground, runtime, or Activity behavior changes.
+- **Acceptance:** Previous/Next changes the displayed selected post and position indicator; the label is concrete; navigation works in populated and single-item states on desktop and mobile.
+- **Verification:** Browser QA confirmed the concrete `Post details` label and disabled boundaries for a single item; the focused Calendar history suite passed all 4 tests on Chromium and Pixel 5, including a two-publication Previous/Next flow. Unit tests (83), typecheck, lint, build, and `git diff --check` passed.
+
+## COMPLETE — Keep late-day Calendar publications fully visible
+
+- **Started:** 2026-08-13
+- **Scope:** Prevent Week-view publication cards near 23:00 from being clipped by the timeline container, including the card footer/proof line shown in the reported screenshot.
+- **Safety gate:** Presentation-only change; no runtime, publication, connector, or Sandbox state is mutated.
+- **Acceptance:** A late-day card remains fully visible, the Calendar page can still scroll naturally, and narrow layouts retain horizontal timeline scrolling without page overflow.
+- **Verification:** The persisted 23:08 screenshot state was browser-checked with the proof footer inside the Week surface; focused Calendar E2E passed sequentially on Chromium and mobile (3 tests each), 82 unit tests passed, typecheck/lint/build passed, and `git diff --check` passed.
+
+## COMPLETE — Reframe Activity around operator attention and channel-native posts
+
+- **Started:** 2026-08-13
+- **Scope:** Replace the current Activity composition with a readable Presence-first control surface: actionable review attention at the top, a real social-feed presentation for observed Mirror objects, a compact operating-status context panel, and decision/execution evidence placed beside the activity it explains.
+- **Product boundary:** Keep observed world data, Agent judgment, Social Intent, Execution, Delivery, and Outcome separately attributable. No new scheduler behavior or fabricated activity is introduced.
+- **Acceptance:** Activity has one clear scan path, no duplicate Now/Next/Review rail, observed posts read like posts, execution status remains actionable, and desktop/mobile layouts have no clipping or horizontal overflow.
+- **Verification:** Typecheck, lint, production build, `git diff --check`, and all 82 unit tests pass. Activity lifecycle and Presence-scope E2E coverage pass, including review approval/manual relay and the updated “right now” heading contract. Rendered desktop (1440px) and Pixel 5 (390px) review found no horizontal overflow or browser console errors. The broad local Chromium run reached 24/30 passing; the six failures were existing shared-state/Calendar timing or stale non-Activity heading assumptions, with no Activity implementation failure.
+
+
+## COMPLETE — Separate public-history Calendar from future Schedule
+
+- **Started:** 2026-08-13
+- **Scope:** Replace the ambiguous Calendar intent surface with a verified public-expression history, add Week/Month/Day browsing and publication inspection, and expose the prior Standing Intent editor as Schedule.
+- **Safety boundary:** Calendar reads only public, externally evidenced expression. Drafts, pending review, no-ops, private observations, and unobserved intent records remain excluded. Playground CLI/runtime/perception work owned by task `019ff960-b9c9-7432-b958-af13d464a229` is out of scope.
+- **Acceptance:** Navigation distinguishes Activity, Calendar, and Schedule; Calendar history is Presence-scoped, filterable, responsive, and truthful about outcome evidence; Schedule CRUD/evaluation behavior remains intact; focused unit and browser checks pass.
+- **Verification:** `derivePublicHistory` is covered by `tests/runtime.test.ts`; the production build, typecheck, lint, all 81 unit tests, all 54 existing Chromium/mobile E2E tests, and the new `tests/e2e/calendar-history.spec.ts` Chromium/mobile test passed. Browser QA also verified the publication inspector → Activity cross-link and 390px no-overflow behavior.
+
+## IN_PROGRESS — Relentless Social-Agent Audit
+
+- **Started:** 2026-08-13
+- **Scope:** Prove the full Sandbox/Playground social-agent benchmark from the attached audit instructions across identity, original posting, replies, relationships, selective silence, affordance choice, media perception, Ghost representation, Calendar/Standing Intent timing, review semantics, intent expiry, resets, and long-session continuity. Repair systemic causes and rerun varied fresh sessions until the evidence supports the requested three-run gate.
+- **Safety boundary:** All stimulation and Agent execution remain in Sandbox/Playground. No live social connector or external publication is used. Chrome is reserved for blinded review of rendered simulated activity.
+- **Acceptance:** Three consecutive fresh, varied Playground runs pass the complete benchmark with zero critical failures, the resulting activity reads as a coherent human-quality presence to a blinded reviewer, and unit/integration/typecheck/lint/build quality gates pass.
+- **Current hypotheses under audit:** Sandbox cognition may be limited to post/reply selection; repeated pulses may reselect already-judged inbound objects; empty-world proactive behavior and scheduled rhythm may be incomplete; the CLI inspect projection may omit required context; media understanding may be provider-dependent and insufficiently exercised.
+- **Verification:** In progress. Full evidence ledger: `docs/PLAYGROUND_RELENTLESS_AUDIT.md`.
+
+## COMPLETE — Repair Playground media upload control presentation
+
+- **Started:** 2026-08-13
+- **Scope:** Remove leaked native file-input chrome from the channel-native Playground event form while preserving accessible media selection, link entry, asset chips, and responsive layout.
+- **Acceptance:** The custom Add media control is the only visible upload affordance; the native file input remains keyboard and label accessible; Media URL and Add link remain readable; desktop and mobile Playground states render without overflow or console errors.
+- **Verification:** Replaced the leaked native file-input row with a visually hidden, label-accessible input; aligned the custom Add media control and added focus styling. Typecheck, lint, production build, `git diff --check`, all 69 unit tests, and focused Chromium + Pixel 5 Playground tests passed. Rendered desktop and mobile inspection confirms the native row is gone, the custom control is aligned, the link field remains usable, and there is no horizontal overflow.
+
+## COMPLETE — Add multimodal Social Perception without weakening judgment boundaries
+
+- **Started:** 2026-08-13
+- **Scope:** Make assets and versioned perception first-class in the Social Mirror and Sandbox, preserve uncertainty and provenance, prevent text-only models from fabricating media understanding, and keep Sandbox corrections isolated.
+- **Acceptance:** Image-bearing simulated social objects persist raw assets separately from derived perception; perception is provider-agnostic and uncertainty-aware; media-dependent actions cannot auto-proceed without usable perception; the operator can inspect “What Jenny sees”; Ghost uses the same cognition with configurable uncertainty posture.
+- **Verification:** Added provider-agnostic SocialAsset and versioned AssetPerception records with raw Sandbox asset isolation, truthful insufficient-perception states, inspect-level action gating, Presence-scoped uncertainty policy, and a compact Playground media input plus “What Jenny sees” inspection panel. Typecheck, lint, production build, `git diff --check`, all 66 unit tests, and focused Chromium + Pixel 5 Playground tests passed. Browser coverage confirms an image-bearing simulated object persists, shows insufficient perception, records “Media needs inspection,” and resets without retaining session media.
+
+## COMPLETE — Improve Execution Ledger readability
+
+- **Started:** 2026-08-13
+- **Scope:** Separate execution action and status, add readable metadata rhythm, improve explanation spacing, and prevent review content from colliding on narrow screens.
+- **Verification:** Typecheck, lint, `git diff --check`, and focused Chromium + Pixel 5 review and manual execution lifecycle tests passed.
+
+## COMPLETE — Keep Sandbox intro copy free of dash punctuation
+
+- **Started:** 2026-08-13
+- **Scope:** Prevent the simulated first post and replies from using em dashes or en dashes in the Playground intro copy.
+- **Verification:** Sandbox generation now includes explicit plain-punctuation guidance and normalizes generated copy before simulated delivery. 60 unit tests, typecheck, lint, production build, `git diff --check`, and focused Chromium Playground coverage passed with a rendered no-dash assertion.
+
+## COMPLETE — Open Playground directly into a fresh simulated account
+
+- **Started:** 2026-08-13
+- **Scope:** Remove the separate Playground start card, open a fresh Sandbox account when the Playground is selected, move the simulated-world explanation into the active surface, and make Reset refresh the current account in place.
+- **Safety gate:** Reset only clears session-scoped Sandbox world data and preserves Agent identity, Presence configuration, live route selection, and meaning files. No live connector is touched.
+- **Verification:** 60 unit tests, typecheck, lint, production build, `git diff --check`, and focused Chromium + Pixel 5 Playground coverage passed. Coverage confirms direct entry, the new “This world is simulated. Jenny is real.” copy, live-routed rehearsal, and in-place Reset to an empty active account.
+
+## COMPLETE — Keep Playground rehearsal available for live-routed Presences
+
+- **Started:** 2026-08-13
+- **Scope:** Allow Wake and Add event to use the isolated Sandbox session even when the selected Presence route remains native X or Bridge, and show the current Presence handle where control-room interaction is explained.
+- **Safety gate:** Playground delivery remains `environment: "sandbox"` through the simulated connector; the selected live route and its connection state are not changed by rehearsal.
+- **Verification:** 60 unit tests, typecheck, lint, production build, `git diff --check`, and focused Chromium Playground coverage passed for both Sandbox and live-routed Presence flows. The regression confirms Wake and Add event persist without the save-error toast.
+
+## COMPLETE — Compact Presence identity controls
+
+- **Started:** 2026-08-13
+- **Scope:** Remove excessive horizontal distribution and the missing section rhythm between the Sandbox destination card and Presence identity controls.
+- **Verification:** 1024px small-desktop no-overflow test, focused desktop Presence Settings route test, typecheck, lint, unit tests, production build, and `git diff --check` passed.
+
+## COMPLETE — Clarify Presence channel and environment selection
+
+- **Started:** 2026-08-13
+- **Scope:** Group channel/environment settings into one mutually exclusive selection flow, make Sandbox discoverable as a first-class destination, remove misleading connection language, hide the redundant Agent-wide top-bar label, and eliminate duplicate Chat output keys.
+- **Focused verification:** Presence Settings selection and persistence, X/Bridge exclusivity, Sandbox entry, Chat/Playground copy, console cleanliness, and desktop/mobile layout. 59 unit tests, typecheck, lint, production build, and `git diff --check` passed. Focused Chromium coverage passed 20 desktop tests and 6 mobile tests; in-app browser inspection confirmed the route panels, truthful status copy, and a clean console with no duplicate-key warning.
+
+## COMPLETE — Build isolated Sandbox and Playground rehearsal loop
+
+- **Started:** 2026-08-13
+- **Scope:** Add a persistent simulated world and compact Playground for a real Presence. The affected path is limited to Sandbox state, Social Mirror normalization, simulated execution, Agent-driven rehearsal, and the Playground UI.
+- **Safety gate:** Sandbox objects use simulated references and a simulated connector only. No Playground operation may call a native connector, mutate live Mirror objects, or reuse another session's world.
+- **Focused verification:** Five Sandbox runtime tests plus the existing 53 regression tests (58 total), typecheck, lint, production build, Chromium and Pixel 5 Playground flow including Quick Rehearsal entry, responsive visual inspection at 390px, no horizontal overflow, and no browser console errors. `git diff --check` passed.
+
+## COMPLETE — Make Presence identity legible and editable
+
+- **Started:** 2026-08-13
+- **Scope:** Replace long Social Mirror/channel text badges with channel marks, support custom channel favicons from an optional domain or a predefined icon, and add explicit Presence-name and Agent-name editing at their correct scopes.
+- **Acceptance:** X renders its X mark; a custom channel using `https://www.skool.com/` renders a favicon-backed mark; custom channels can choose a predefined icon when no domain is supplied; Presence Settings persists a Presence name; Manage Agent persists an Agent name; Agent-wide meaning files and Presence connector handles remain unchanged unless explicitly edited.
+- **Verification:** 53 unit tests, typecheck, lint, production build, and `git diff --check` passed. Chromium and Pixel 5 each passed all 22 browser tests. Isolated browser QA verified X's brand mark, Skool favicon loading (`naturalWidth > 0`), predefined fallback icons, Presence-name and Agent-name persistence, identity-scope separation, clean console output, and no horizontal overflow at 390px.
+
+## COMPLETE — 20-minute Calendar and native Presence observation test
+
+- **Started:** 2026-08-13
+- **Scope:** Exercise a live OpenPresence Presence for 20 minutes while testing Calendar evaluation, native X observation, and account-boundary safety. Calendar must ask Jenny to judge the instruction in the moment before any Social Intent or delivery is formed.
+- **Safety gate:** All external delivery remains limited to the configured native connection for `@hourandcode`; Chrome must not switch to or mutate `@RichardsonDx` or another operator account. No second-account stimulus will be manufactured by the test.
+- **Finding and repair:** Calendar `Run now` previously created a prewritten publication without Agent cognition, and the local app had no open-browser scheduler for due standing intents. Added Agent evaluation with explicit `NO_OP`, standing-intent provenance, native execution delivery, once-per-day idempotence, and an open-app scheduler. Activity now reports the latest Calendar decision instead of masking it with an older successful execution. The Calendar time input also captures input events explicitly after live QA found a displayed edit could remain persisted as `08:00`.
+- **Live verification so far:** Chrome created a standing intent under `@jenny_ghost`, the scheduler and explicit `Run now` each evaluated it, both chose `NO_OP`, and Activity showed `Calendar attention started` followed by `Standing intention held`. Native observation then completed with `@hourandcode`, read-write access, and the next observation advanced without creating an operator-account action.
+- **Verification:** The timed window completed with two truthful Calendar evaluations and no new external X post: Jenny chose silence rather than publishing a forced or prewritten message. Native X observation remained current for `@hourandcode`, and no operator-account mutation occurred. Final verification passed: 52 unit tests, typecheck, lint, production build, and all 42 Chromium + Pixel 5 browser tests.
+
+## IN_PROGRESS — Repair live X test account-boundary handling
+
+- **Started:** 2026-08-13
+- **Scope:** Investigate the wrong-account X post observed during the live Agent experiment and prevent test automation from mutating the operator account.
+- **Finding:** OpenPresence's persisted native X connection is read/write for `@hourandcode`, and its execution ledger contains only native `x.post` activity for that Presence. The `@RichardsonDx` post was created through the browser test path after the session was switched to the operator account; it was not a Jenny delivery. No OpenPresence connector defect caused that account mutation.
+- **Repair:** Added the project rule `Live X tests must never mutate the operator account`. Future live tests must verify the active X account before any external action and stop for operator-authored inbound stimuli.
+- **Verification:** Read-only `/api/state` inspection confirms `nativeConnections[0].account.username === "hourandcode"`, `access === "read-write"`, and no execution targets `@RichardsonDx`. Native connector unit/integration coverage remains the enforcement for Agent delivery; external browser-account enforcement is documented as a manual gate.
+
+## IN_PROGRESS — Launch pulse and live native X Presence behavioral test
+
+- **Started:** 2026-08-12
+- **Scope:** Implement and run the attached 10-minute end-to-end test against the real configured X Presence for `@hourandcode`: launch pulse on wake, one Agent-authored public post, real inbound reply, contextual response, continuity check, and truthful OpenPresence activity state.
+- **Acceptance:** No simulator or fabricated records are used; a live test passes only when X externally proves each delivery and the Agent observes/responds to real inbound activity. Stop and wait for the operator when a different X account must send the required reply.
+- **Verification:** Chrome pre-flight passed: `@hourandcode` was signed in, the native connector authenticated the account and reported read + write credentials, Posts were Auto, Replies were Review, and the local model answered. After the OAuth1 signing and delivery-health repairs, the real Activity `Check now` flow formed a Social Intent through the selected Agent runtime, delivered a native X post, and returned external post ID `2087708893077979544` (`https://x.com/hourandcode/status/2087708893077979544`). X visibly shows the post and the X usage console recorded spend, proving the external artifact is real. A subsequent real Activity check observed `@RichardsonDx`'s reply, persisted one inbound mention in the Social Mirror, and truthfully recorded Jenny's `NO_OP` judgment for the ambiguous message `Hi Genny is it Jenny or genny`; no reply was fabricated. The initial autonomous-post gate and observation gate pass. The contextual-reply and continuity gates remain paused until the operator sends a clearly substantive reply from the second X account; the configured Reply mode is Review, so any judged response must then be approved before native delivery.
+
+## IN_PROGRESS — Social Mirror observation repair
+
+- **Started:** 2026-08-13
+- **Scope:** Replace connector-readiness language with a durable Social Mirror observation lifecycle, initial native X reconciliation, independent local observation, and truthful zero/degraded/error states.
+- **Acceptance:** A connected native X Presence records an actual reconciliation before cognition; Activity and the Mirror panel distinguish syncing, up-to-date, stale/degraded, and error states; an empty account is shown as up to date with zero observed activity; Pulse consumes the Mirror rather than owning the channel read.
+- **Verification:** Implementation and unit coverage are complete. The real native X reconciliation now reports `1 public post and 1 inbound mention`, the Mirror panel shows the actual `@RichardsonDx` reply, and Activity separates observation completion from Jenny's `NO_OP` judgment. The remaining live experiment is the contextual-reply path, which is intentionally waiting for a substantive external message.
+
+## COMPLETE — Unify Presence wake and pulse actions
+
+- **Started:** 2026-08-12
+- **Scope:** Apply the approved interaction model: paused Presences expose one primary “Wake up Jenny” action that resumes operation and immediately runs the first attention cycle; live Presences expose “Check now” for an on-demand pulse while pause remains the lifecycle control.
+- **Acceptance:** Paused Activity and Presence Settings no longer present peer Resume/Run pulse actions; waking is stateful, immediately evaluates one cycle, preserves NO_OP and Execution Envelope rules, and reports truthful transition/progress state. Live Activity exposes Check now and pause remains available.
+- **Verification:** Added the atomic `wakePresence` runtime operation, state-aware Activity/Presence controls, truthful asleep/wake/check copy, and loading feedback. 38 unit tests, typecheck, lint, production build, `git diff --check`, and four focused Chromium + Pixel 5 browser tests passed. The focused browser flow confirmed the delayed “Waking Jenny…” state, immediate wake transition, `Jenny woke up` event, and `Pulse completed` event; broader product QA was intentionally not rerun per the narrow-QA request.
+
+## COMPLETE — Publish a complete README and interface gallery
+
+- **Started:** 2026-08-12
+- **Scope:** Add a production-quality project README with a six-image interface gallery, setup instructions, architecture boundaries, provider/channel configuration notes, and release verification; commit and push the complete current worktree as requested.
+- **Acceptance:** A new contributor can understand the product model, start the app, configure AI/X access, find the main surfaces, and see six representative interface screenshots; all checks pass and the complete scoped worktree is committed and pushed.
+- **Verification:** Added the root README with product model, setup, AI/X configuration, security, architecture, and verification guidance; captured six clean 1440×900 interface screenshots from an isolated local runtime; 37 unit tests, typecheck, lint, production build, `git diff --check`, and all 42 Chromium + Pixel 5 browser tests passed.
+
+## COMPLETE — Make Chat local-runtime failures actionable
+
+- **Started:** 2026-08-12
+- **Scope:** Diagnose the Chat “Failed to fetch” report, restore a valid local runtime, and prevent raw browser network errors from being shown as the only explanation.
+- **Acceptance:** A single OpenPresence server serves the app and `/api/state` without generated-chunk conflicts; Chat completes a real Ollama round-trip; network failures produce an actionable local-runtime message.
+- **Verification:** Removed the duplicate OpenPresence dev server sharing `.next`, rebuilt the application, restarted one clean server on port 3004, and verified browser messages returned `CHAT_OK_FINAL` and `CHAT_OK_LIVE` with no fetch error, 404, or alert. 37 unit tests, typecheck, lint, production build, `git diff --check`, and all 42 Chromium + Pixel 5 browser tests passed.
+
+## COMPLETE — Make Agent tools discoverable and scope-correct
+
+- **Started:** 2026-08-12
+- **Scope:** Make the four existing Agent tool bindings visible and understandable, while separating Agent-wide mechanical tools from Presence-specific channel execution permissions.
+- **Acceptance:** Manage Agent exposes the bound tools with human-readable descriptions and truthful status; Chat no longer presents an unexplained count; Presence settings remain the place for channel affordance permissions.
+- **Verification:** Manage Agent now lists Web search, Asset inspection, Chart rendering, and Channel execution with descriptions and scope labels; Chat says “Tools bound”; Presence settings retain the channel execution mode boundary. 25 unit tests, typecheck, lint, production build, `git diff --check`, and all 42 Chromium + Pixel 5 browser tests passed.
+
+## COMPLETE — Make Activity answer what Jenny is doing and what happens next
+
+- **Started:** 2026-08-12
+- **Scope:** Replace the historical-only Live view with truthful operational visibility: current activity, last pulse, next attention/standing intent, review queue, and configured attention/expression rhythm.
+- **Acceptance:** Activity clearly answers what Jenny is doing now, what will happen next, and how her rhythm is configured; paused and idle states are explicit; the UI does not imply an automatic scheduler or background cognition that the local runtime does not provide.
+- **Verification:** Activity now exposes Now, Next, and Today’s rhythm summaries; paused, idle, review, completed, and waiting states are explicit; native X connectivity is distinguished from observation; Calendar explains that standing intents are optional. 36 unit tests, typecheck, lint, production build, `git diff --check`, and all 40 Chromium + Pixel 5 browser tests passed.
+
+## IN_PROGRESS — Live X Presence behavior test
+
+- **Started:** 2026-08-12
+- **Scope:** Verify the configured native X Presence can publish a real post, observe a real external reply, form a contextual response, and preserve continuity without fabricated state.
+- **Acceptance:** A real X post and any resulting replies are externally verifiable, OpenPresence exposes truthful intent/execution/delivery state, and the test stops for operator action if a second X account is required.
+- **Verification:** Pre-flight completed in Chrome: native X credentials are read + write for `@hourandcode`, Posts are Auto, Replies are Review, and a second X account is available. Test stopped before publication because Activity `Run pulse` still executes the simulator no-op path and the Social Mirror reports no native observations. A real Chat composition check also produced generic copy instead of the reviewed Ghost context. No external X state was changed.
+
+## COMPLETE — Make Ghost identity explicit and reviewable
+
+- **Started:** 2026-08-12
+- **Scope:** Give a Ghost Presence a Presence-scoped profile for the operator or organization it extends, make the Agent’s interpretation visible and editable, and include only that approved context in cognition.
+- **Acceptance:** Selecting Me / my organization exposes what the Ghost is extending, the operator can edit preferences and boundaries, the preview shows the current interpretation, Chat reflects the approved Ghost context, and Agent-wide identity files remain unchanged.
+- **Verification:** 34 unit tests, typecheck, lint, production build, and browser regression coverage passed. Chrome verification confirms Ghost profile editing, review status, reload persistence, Chat acknowledgment, and a live AI response using the reviewed subject, priorities, preferences, voice, and boundaries without changing Agent-wide meaning files.
+
+## IN_PROGRESS — Audit and remove revoked Bridge credentials
+
+- **Started:** 2026-08-12
+- **Scope:** Show a safe credential prefix and revocation time for disconnected Bridges, allow operators to remove revoked Bridge records, and retain the Bridge removal event and mirror history without retaining the revoked secret.
+- **Acceptance:** A revoked Community Bridge identifies the credential by non-secret prefix, states that the secret cannot be recovered, offers Remove Bridge, disappears after removal, and rejects its old key.
+- **Verification:** 21 runtime tests, typecheck, lint, production build, and all 38 Chromium + Pixel 5 browser tests passed. Browser verification confirms the redacted prefix/revocation copy and Remove Bridge control render in Presence settings; the acceptance flow removes the row and rejects the revoked key.
+
+## COMPLETE — Clarify Activity versus Presence state controls
+
+- **Started:** 2026-08-12
+- **Scope:** Rename the sidebar’s Live destination to Activity while preserving the Settings pause/resume control and the Activity page’s paused/live status reporting.
+- **Acceptance:** Sidebar and topbar consistently say Activity; the Activity page still reports the Presence state; Settings still provides the state-changing Resume/Pause action.
+- **Verification:** Running-browser label smoke check, typecheck, lint, production build, and all 38 Chromium + Pixel 5 browser tests passed. Settings retains Pause/Resume controls while Activity reports the current live/paused state.
+
+## COMPLETE — Restore scrolling for long non-Chat pages
+
+- **Started:** 2026-08-12
+- **Scope:** Keep Chat’s fixed composer viewport behavior while allowing Presence settings, Calendar, Live, and Manage Agent to use normal document scrolling.
+- **Acceptance:** Long settings content can scroll vertically on desktop and mobile; Chat retains transcript-only scrolling and no page-level overflow.
+- **Verification:** Running-browser measurements confirm Settings document scrolling and Chat transcript-only scrolling. Typecheck, lint, production build, and Chromium + Pixel 5 small-desktop regression tests passed.
+
+## COMPLETE — Remove the unused sidebar footer icon
+
+- **Started:** 2026-08-12
+- **Scope:** Remove the decorative Help/lifebuoy control from the bottom of the desktop sidebar without affecting the Agent switcher, runtime status, or mobile navigation.
+- **Acceptance:** The icon is absent from the active sidebar and no orphaned footer control remains.
+- **Verification:** Typecheck, lint, production build, direct browser DOM smoke check, and Chromium + Pixel 5 sidebar regression tests passed. The footer retains Local runtime and the Agent switcher with zero Help controls.
+
+## COMPLETE — Use the available workspace width
+
+- **Started:** 2026-08-12
+- **Scope:** Remove the flex shrink-to-fit behavior that left excessive whitespace around the desktop page content while keeping mobile and small-desktop layouts bounded and readable.
+- **Acceptance:** Main content reaches the usable workspace edges on desktop and small desktop, page-specific columns remain readable, and mobile does not gain horizontal overflow.
+- **Verification:** Measured desktop frame alignment, targeted small-desktop browser checks, full 38-test Chromium + Pixel 5 browser suite, typecheck, lint, production build, and visual screenshots of Live and Chat all passed.
+
+## COMPLETE — Keep Agent cognition synchronized with live Presence state
+
+- **Started:** 2026-08-12
+- **Scope:** Ensure mode and execution changes made outside Chat are visible immediately in the conversation and authoritative during the next AI request, even when older transcript messages contradict the current state.
+- **Acceptance:** A Ghost → Agent-owned change produces a visible acknowledgment, and the provider prompt identifies the current live mode as authoritative over stale history.
+- **Verification:** 32 unit tests, typecheck, lint, production build, and all 38 Chromium + Pixel 5 browser tests passed. Browser coverage confirms the Ghost → Agent-owned acknowledgment on desktop and mobile; provider-request coverage confirms the authoritative live mode snapshot.
+
+## COMPLETE — Keep Chat pinned to the latest message
+
+- **Started:** 2026-08-12
+- **Scope:** Make the Chat transcript behave like a standard chat surface: preserve a fixed composer and automatically reveal the newest user/Agent exchange on load and after each message.
+- **Acceptance:** The transcript scroll position ends at the latest message, the composer remains visible, and the document does not acquire page-level overflow on desktop or mobile.
+- **Verification:** 31 unit tests, typecheck, lint, production build, and all 36 Chromium + Pixel 5 browser tests passed. The browser assertion verifies the transcript scroll gap is at most two pixels.
+
+## COMPLETE — Discover and use the complete Ollama model catalog
+
+- **Started:** 2026-08-12
+- **Scope:** Replace the static Ollama model choices with the connected endpoint’s actual completion-capable catalog, preserve exact model identifiers for Chat, and verify a live local response through the browser.
+- **Acceptance:** Brain shows installed completion models, excludes image-only models, selecting a discovered model persists its exact tag, and Chat returns a real Ollama response.
+- **Verification:** Chrome showed the live Ollama catalog, selected `qwen2.5-coder:7b`, and received a real `OK` response. 31 unit tests, typecheck, lint, production build, and all 36 Chromium + Pixel 5 browser tests passed.
+
+## COMPLETE — Make local AI runtime reliable and keep Chat composer fixed
+
+- **Started:** 2026-08-12
+- **Scope:** Resolve compatible Ollama model tags, make missing-model guidance list the actual local catalog, and constrain Chat so only the transcript scrolls while the composer remains at the viewport bottom.
+- **Acceptance:** An installed tag such as `qwen2.5:7b-instruct` can satisfy the existing `qwen2.5` selector; an unavailable model produces an actionable list; desktop and mobile Chat have no page overflow and a persistent composer.
+- **Verification:** 30 unit tests, typecheck, lint, production build, and all 36 Chromium + Pixel 5 browser tests passed. Local Ollama catalog inspection confirmed the original mismatch and the compatible installed tag.
+
+## COMPLETE — Connect Agent chat to the selected AI provider
+
+- **Started:** 2026-08-12
+- **Scope:** Replace the deterministic chat placeholder with server-side inference through the configured model runtime, preserve protected Agent meaning and durable change handling, and show actionable provider setup failures.
+- **Verification:** 29 unit tests passed; provider request, encrypted secret boundary, missing-provider guidance, and browser-visible generated reply are covered. Full typecheck, lint, production build, and Chromium + Pixel 5 browser verification are required before release handoff.
+
+## COMPLETE — First-class native X credential and execution flow
+
+- **Started:** 2026-08-12
+- **Scope:** Replace the conceptual Bridge-only path for X with a Presence-scoped Official X API connection, encrypted credential storage, connection testing, and native post/reply execution while preserving Bridge and Manual Relay as alternatives.
+- **Verification:** Passed 26 unit tests, typecheck, lint, production build, and 36 Chromium + Pixel 5 browser tests covering X test/save/reload, read-write native delivery, Bridge separation, mobile layout, and console/request health.
+
 ## COMPLETE — Add Presence dialog workspace centering
 
 - **Started:** 2026-08-12
@@ -11,3 +330,46 @@
 - **Started:** 2026-08-12
 - **Scope:** Audit the supplied 50-story functional brief across the local app, runtime, persistence, Bridge API, and responsive browser surfaces; fix verified ordinary defects and record remaining simulated/partial stories honestly.
 - **Verification:** 20/20 unit tests, typecheck, lint, production build, production smoke/API checks, restart persistence, and 32/32 Chromium + Pixel 5 browser tests passed. The complete 50-story verdict is recorded in `qa-learnings/end-to-end-functional-audit-2026-08-12.md`.
+
+## COMPLETE — Put Presence identity before channel routing
+
+- **Started:** 2026-08-13
+- **Scope:** Reorder Presence Settings so the user defines who speaks here before choosing where that Presence appears. Channel & environment follows Identity, with the execution envelope remaining after both.
+- **Acceptance:** Identity is visibly above Channel & environment on desktop and mobile; existing name, mode, Sandbox, X, Bridge, and connection controls remain usable.
+- **Verification:** Typecheck, lint, production build, diff check, and focused Chromium + Pixel 5 Settings tests passed. Browser assertions compare rendered section positions directly.
+
+## COMPLETE — Keep Activity and Calendar scoped to the Presence
+
+- **Started:** 2026-08-13
+- **Scope:** Replace Agent-name and handle-based copy in Activity and Calendar with the selected Presence name, remove Activity’s Agent-management link, and preserve handles only where channel connection identity requires them.
+- **Acceptance:** A Presence named Genny reads “Genny is live”, “What Genny can see”, “Planning for Genny”, and “When Genny is meant to pay attention”; Activity and Calendar do not surface `@jenny_ai` or “Manage Jenny”.
+- **Verification:** 61 unit tests, typecheck, lint, production build, diff check, focused Chromium + Pixel 5 Activity/Calendar tests, and both desktop/mobile X connection suites passed.
+
+## COMPLETE — Make Playground events channel-native
+
+- **Started:** 2026-08-13
+- **Scope:** Replace the generic Sandbox event form with a channel-driven simulation grammar. X now exposes posts, replies, quotes, reposts, likes, and messages with reusable simulated people and relationship targets; raw Mention and the always-visible Conversation field are removed from the Playground form. Settings and Playground identify the route as `Sandbox · Simulated X` / `Simulated X` while keeping one generic Sandbox runtime underneath.
+- **Acceptance:** The simulated world is visibly tied to its Social Mirror; Reply/Quote/Repost/Like show only their relevant target field; Post does not show Conversation; actors can be reused; live-routed Presences can still rehearse in Sandbox; lifecycle controls distinguish `Wake Jenny` from `Check now`.
+- **Verification:** 61 unit tests, typecheck, lint, production build, Chromium and Pixel 5 Playground tests, and Chromium and Pixel 5 Presence Settings route tests passed. Focused browser coverage also verifies X relationship targets, actor reuse, absence of the Conversation field, and no newly introduced long dash in the simulated feed.
+
+## COMPLETE — Give each Presence an explicit Public Self boundary
+
+- **Started:** 2026-08-13
+- **Scope:** Separate Agent identity, Presence identity, and implementation details. Add Presence-scoped disclosure posture and approved technical facts, include the boundary in `PRESENCE.md` and social cognition, and hold Ghost drafts for review when they expose the private Agent or unapproved machinery.
+- **Acceptance:** Agent-owned Presences default to contextual disclosure; Ghost Presences default to representational disclosure; the operator can save posture/facts in Presence Settings; approved facts persist; Ghost publication drafts cannot silently disclose private identity or implementation details.
+- **Verification:** 64 unit tests, typecheck, lint, production build, diff check, and focused Chromium + Pixel 5 Presence Settings persistence tests passed.
+## COMPLETE — Expose live X destinations from Calendar history
+
+- **Started:** 2026-08-13
+- **Scope:** Make verified X history actionable by exposing the canonical post URL in the public-expression inspector, while clearly distinguishing Sandbox rehearsals that cannot have a live X destination.
+- **Safety gate:** Derive links only from verified external references and the selected Presence's native X account; never create a live URL for a Sandbox record or alter the live connector during QA.
+- **Acceptance:** A live verified X expression shows an `Open on X` link; a Sandbox expression shows an explicit no-live-URL explanation; the existing Activity cross-link remains available.
+- **Verification:** `tests/runtime.test.ts` covers the canonical native X URL and the no-URL Sandbox boundary; `tests/e2e/calendar-history.spec.ts` passes on Chromium and mobile; 82 unit tests, typecheck, lint, production build, and `git diff --check` pass. Browser inspection verified the screenshot's Sandbox inspector copy and preserved the Activity action.
+
+## COMPLETE — Give Activity decisions their source context
+
+- **Started:** 2026-08-13
+- **Scope:** Make Activity answer the operator's first question—“what post was this about?”—for silence, replies, and pending actions. Observed posts now retain source-object lineage, event rows preview the relevant post, and the current action card offers a readable action summary plus a post inspector.
+- **Product boundary:** The observed post remains world data; it is shown as context for the Agent's judgment, never as an instruction. Approval remains the operator's decision about delivery, not a rewrite of the Agent's judgment.
+- **Acceptance:** A context-bearing Activity event says why it is clickable, the current action identifies its source post when available, “View post” opens the full observed post, and internal terms such as `x.post`, `execution envelope`, and raw status names are not required to understand the screen.
+- **Verification:** 83 unit tests, typecheck, lint, production build after rotating a stale generated `.next` directory, `git diff --check`, and focused Chromium coverage for Add Presence viewport centering plus Activity review/manual lifecycles passed.

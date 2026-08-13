@@ -1,0 +1,30 @@
+{
+  "name": "Long mixed-world session",
+  "steps": [
+    { "command": "start", "options": { "source": "scenario" } },
+    { "command": "inject", "options": { "actor": "Ravi", "handle": "@ravi_builds", "action": "post", "content": "A tool model can classify a screenshot, but that does not make it the Agent who decides whether the screenshot should be shared." } },
+    { "command": "inject", "options": { "actor": "Maya", "handle": "@maya_research", "action": "post", "content": "The denominator matters more than the headline when a chart claims a system improved." } },
+    { "command": "inject", "options": { "actor": "Owen", "handle": "@owen_data", "action": "post", "content": "A small sample can make a reliability improvement look certain. What would you inspect before repeating it?" } },
+    { "command": "inject", "options": { "actor": "Nia", "handle": "@nia_product", "action": "post", "content": "Silence is sometimes the product decision when the evidence is still thin." } },
+    { "command": "inject", "options": { "actor": "Theo", "handle": "@theo_ops", "action": "post", "content": "We had a review queue expire while the team debated wording. Timing is part of execution quality." } },
+    { "command": "inject", "options": { "actor": "Ravi", "handle": "@ravi_builds", "action": "reply", "target": "$latest-object", "content": "The hard boundary is knowing which model output is evidence and which is a proposed action." } },
+    { "command": "inject", "options": { "actor": "Maya", "handle": "@maya_research", "action": "quote", "target": "$latest-object", "content": "This is why provenance belongs beside the claim, not hidden in a log." } },
+    { "command": "inject", "options": { "actor": "Owen", "handle": "@owen_data", "action": "post", "content": "A chart with a missing baseline is a prompt to investigate, not a prompt to celebrate." } },
+    { "command": "inject", "options": { "actor": "Nia", "handle": "@nia_product", "action": "post", "content": "The useful question is what changed in the decision loop, not whether the dashboard got busier." } },
+    { "command": "inject", "options": { "actor": "Theo", "handle": "@theo_ops", "action": "post", "content": "A message that says guaranteed growth is still a sales pitch, even when it uses technical language." } },
+    { "command": "inject", "options": { "actor": "Ravi", "handle": "@ravi_builds", "action": "post", "content": "An agent can be curious without treating every notification as a task." } },
+    { "command": "inject", "options": { "actor": "Maya", "handle": "@maya_research", "action": "post", "content": "When a media caption is ambiguous, asking for the missing context is more honest than guessing." } },
+    { "command": "inject", "options": { "actor": "Owen", "handle": "@owen_data", "action": "post", "content": "The same metric can move for different reasons. A useful explanation names the mechanism." } },
+    { "command": "inject", "options": { "actor": "Nia", "handle": "@nia_product", "action": "post", "content": "Public confidence should not outrun private uncertainty." } },
+    { "command": "inject", "options": { "actor": "Theo", "handle": "@theo_ops", "action": "post", "content": "If an action cannot be reviewed before its window closes, the system should say so rather than pretend it completed." } },
+    { "command": "inject", "options": { "actor": "Ravi", "handle": "@ravi_builds", "action": "post", "content": "The best tool is sometimes the one that returns evidence and leaves the judgment to the Agent." } },
+    { "command": "inject", "options": { "actor": "Maya", "handle": "@maya_research", "action": "post", "content": "A careful reply should answer the sentence someone wrote, not the topic you hoped they meant." } },
+    { "command": "inject", "options": { "actor": "Owen", "handle": "@owen_data", "action": "post", "content": "A missing axis label is not a minor presentation flaw when it changes the apparent conclusion.", "assets": [{ "name": "chat.png", "kind": "image", "path": "docs/screenshots/chat.png" }] } },
+    { "command": "inspect-media", "options": { "object": "$latest-object-id" } },
+    { "command": "inject", "options": { "actor": "Nia", "handle": "@nia_product", "action": "post", "content": "A screenshot can show an interface while still hiding who approved the action behind it." } },
+    { "command": "inject", "options": { "actor": "Theo", "handle": "@theo_ops", "action": "post", "content": "The shortest path to a bad automation is to confuse permission with obligation." } },
+    { "command": "schedule", "options": { "instruction": "Connect one current observation to a useful point about agent boundaries", "minutes-from-now": 2, "objective": "usefulness", "window": "00:00–23:59" } },
+    { "command": "advance", "options": { "minutes": 5 } },
+    { "command": "timeline" }
+  ]
+}

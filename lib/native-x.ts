@@ -1,0 +1,131 @@
+import { readNativeXCredentials, readRecentXMentions, readRecentXPosts } from "./x";
+import { recordNativeMirror, recordNativeObservation, recordPublicFooting, recordRuntimeEvent } from "./runtime";
+import type { OpenPresenceState, Presence, PresenceQuietHours } from "./types";
+
+const intervalFor = (presence: Presence | undefined) => {
+  if (presence?.pacing === "gentle") return 15 * 60_000;
+  if (presence?.pacing === "custom") return Math.max(5, Math.min(120, presence.attentionIntervalMinutes || 30)) * 60_000;
+  return 5 * 60_000;
+};
+
+const minuteOfDay = (date: Date) => date.getHours() * 60 + date.getMinutes();
+
+const timeToMinutes = (value: string) => {
+  const [hours, minutes] = value.split(":").map(Number);
+  return Number.isFinite(hours) && Number.isFinite(minutes) ? hours * 60 + minutes : undefined;
+};
+
+const quietHoursEnd = (quietHours: PresenceQuietHours, from: Date) => {
+  const start = timeToMinutes(quietHours.start);
+  const end = timeToMinutes(quietHours.end);
+  if (start === undefined || end === undefined || start === end) return undefined;
+  const current = minuteOfDay(from);
+  const crossesMidnight = start > end;
+  const endDate = new Date(from);
+  if (crossesMidnight && current >= start) endDate.setDate(endDate.getDate() + 1);
+  endDate.setHours(Math.floor(end / 60), end % 60, 0, 0);
+  return endDate;
+};
+
+const isQuiet = (quietHours: PresenceQuietHours | undefined, date: Date) => {
+  if (!quietHours?.enabled) return false;
+  const start = timeToMinutes(quietHours.start);
+  const end = timeToMinutes(quietHours.end);
+  if (start === undefined || end === undefined || start === end) return false;
+  const current = minuteOfDay(date);
+  return start < end ? current >= start && current < end : current >= start || current < end;
+};
+
+export const nextObservationAt = (presence: Presence | undefined, from = Date.now()) => {
+  const base = new Date(from);
+  const candidate = new Date(from + intervalFor(presence));
+  if (isQuiet(presence?.quietHours, base)) {
+    const end = presence?.quietHours ? quietHoursEnd(presence.quietHours, base) : undefined;
+    if (end) return end.toISOString();
+  }
+  if (isQuiet(presence?.quietHours, candidate)) {
+    const end = presence?.quietHours ? quietHoursEnd(presence.quietHours, candidate) : undefined;
+    if (end) return end.toISOString();
+  }
+  return candidate.toISOString();
+};
+
+export async function reconcileNativeX(source: OpenPresenceState, presenceId: string): Promise<OpenPresenceState> {
+  let next = recordNativeObservation(source, presenceId, {
+    ...(source.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x")?.observation ?? {}),
+    status: "syncing",
+    error: undefined,
+  });
+  next = recordRuntimeEvent(next, presenceId, "Social Mirror syncing", "Reconciling the connected X account into the Social Mirror.", "positive");
+
+  const connection = next.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x");
+  const credentials = connection ? readNativeXCredentials(connection.id) : undefined;
+  const accountId = connection?.account?.id;
+  if (!connection || !credentials || !accountId) {
+    const message = "The native X connection could not provide a readable account context.";
+    next = recordNativeObservation(next, presenceId, { status: "error", error: message, nextObservationAt: new Date(Date.now() + 60_000).toISOString() });
+    return recordRuntimeEvent(next, presenceId, "X observation failed", message, "warning");
+  }
+
+  try {
+    const [postsResult, mentionsResult] = await Promise.allSettled([
+      readRecentXPosts(credentials, accountId),
+      readRecentXMentions(credentials, accountId),
+    ]);
+    if (postsResult.status === "rejected") throw postsResult.reason;
+
+    const posts = postsResult.value;
+    const mentions = mentionsResult.status === "fulfilled" ? mentionsResult.value : [];
+    const observedAt = new Date().toISOString();
+    for (const post of [...posts, ...mentions]) {
+      next = recordNativeMirror(next, { connectionId: connection.id, presenceId, post });
+    }
+    next = recordPublicFooting(next, presenceId, {
+      postsPublished: posts.length,
+      recentPostIds: posts.map((post) => post.id),
+      recentInboundIds: mentions.map((mention) => mention.id),
+      judgedInboundIds: next.presences.find((item) => item.id === presenceId)?.context.publicFooting?.judgedInboundIds,
+      observedAt,
+    });
+
+    const conversations = new Set(
+      [...posts, ...mentions]
+        .map((post) => post.conversationId ?? post.parentId)
+        .filter((value): value is string => Boolean(value)),
+    );
+    const partial = mentionsResult.status === "rejected";
+    const error = partial
+      ? mentionsResult.reason instanceof Error ? mentionsResult.reason.message : "X did not return inbound mentions."
+      : undefined;
+    next = recordNativeObservation(next, presenceId, {
+      status: partial ? "degraded" : "up-to-date",
+      lastObservedAt: observedAt,
+      nextObservationAt: nextObservationAt(next.presences.find((item) => item.id === presenceId)),
+      ownPostCount: posts.length,
+      mentionCount: mentions.length,
+      conversationCount: conversations.size,
+      error,
+    });
+    next = recordRuntimeEvent(
+      next,
+      presenceId,
+      partial ? "Social Mirror partially updated" : "Social Mirror updated",
+      partial
+        ? `Observed ${posts.length} public post${posts.length === 1 ? "" : "s"}; inbound mentions were unavailable. The last known Mirror remains available.`
+        : posts.length || mentions.length
+          ? `Observed ${posts.length} public post${posts.length === 1 ? "" : "s"} and ${mentions.length} inbound mention${mentions.length === 1 ? "" : "s"}.`
+          : "X is up to date. No recent posts, mentions, or conversations were found.",
+      partial ? "warning" : "positive",
+    );
+    return next;
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "X did not return a readable observation.";
+    next = recordNativeObservation(next, presenceId, {
+      ...(connection.observation ?? {}),
+      status: "error",
+      error: message,
+      nextObservationAt: new Date(Date.now() + 60_000).toISOString(),
+    });
+    return recordRuntimeEvent(next, presenceId, "X observation failed", message, "warning");
+  }
+}

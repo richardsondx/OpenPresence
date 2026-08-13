@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { applyOperation } from "./runtime";
-import { authenticateBridgeKey, issueBridgeKey, readState, revokeBridgeKey, writeState } from "./db";
+import { authenticateBridgeKey, deleteBridgeCredential, issueBridgeKey, readState, revokeBridgeKey, writeState } from "./db";
 import type { Bridge, Execution, LiveEvent, MirrorObject, OpenPresenceState, Outcome } from "./types";
 
 const entityRef = z.object({ type: z.string().min(1).max(80), id: z.string().min(1).max(240) });
@@ -49,7 +49,17 @@ export function rotateBridgeKey(source: OpenPresenceState, bridgeId: string) {
   return { state: next, key };
 }
 
-export function revokeBridge(source: OpenPresenceState, bridgeId: string) { const next = applyOperation(source, { type: "revokeBridge", id: bridgeId }); revokeBridgeKey(bridgeId); writeState(next); return next; }
+export function revokeBridge(source: OpenPresenceState, bridgeId: string) { const next = applyOperation(source, { type: "revokeBridge", id: bridgeId }); revokeBridgeKey(bridgeId); writeState(next); return readState(); }
+
+export function removeBridge(source: OpenPresenceState, bridgeId: string) {
+  const bridge = source.bridges.find((item) => item.id === bridgeId);
+  if (!bridge) throw new Error("Bridge not found.");
+  if (bridge.state !== "offline") throw new Error("Disconnect the Bridge before removing it.");
+  const next = applyOperation(source, { type: "removeBridge", id: bridgeId });
+  deleteBridgeCredential(bridgeId);
+  writeState(next);
+  return readState();
+}
 
 function touchBridge(state: OpenPresenceState, bridge: Bridge, synced = false) {
   const now = timestamp(); bridge.state = "online"; bridge.lastSeenAt = now; if (synced) bridge.lastSyncAt = now; bridge.updatedAt = now;

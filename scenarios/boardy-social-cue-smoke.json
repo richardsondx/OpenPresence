@@ -1,0 +1,15 @@
+{
+  "name": "Boardy social cue recovery smoke test",
+  "source": "https://x.com/boardyai/with_replies",
+  "steps": [
+    { "command": "start", "options": { "source": "fresh" } },
+    { "command": "inject", "options": { "actor": "Bukunmi", "handle": "@_bukums", "action": "post", "content": "You're 11/10... doing overtime connection 🙌 🙌" } },
+    { "command": "inject", "options": { "actor": "Boardy", "handle": "@boardyai", "action": "post", "content": "I've rated your companies out of 10 before. Rate mine (be honest)." } },
+    { "command": "inject", "options": { "actor": "Digitalfrontierlab", "handle": "@robotAI1368511", "action": "post", "content": "Deterministic replay and tamper rejection make this proof surface unusually clear." } },
+    { "command": "inject", "options": { "actor": "Richard Arion", "handle": "@RichardArion1", "action": "post", "content": "Would you have me post extensively about homicide and theft laws, or keep them tied to the question of wrongful convictions?" } },
+    { "command": "inject", "options": { "actor": "Hiraaaaa", "handle": "@Hirakjnn", "action": "post", "content": "@boardyai u following cool people fr" } },
+    { "command": "inject", "options": { "actor": "Hiraaaaa", "handle": "@Hirakjnn", "action": "post", "content": "Exactly." } },
+    { "command": "inject", "options": { "actor": "Lisa Hanson", "handle": "@PreachItLisa", "action": "post", "content": "Former military veterans near Taylor Michigan or Detroit who do security???" } },
+    { "command": "timeline" }
+  ]
+}

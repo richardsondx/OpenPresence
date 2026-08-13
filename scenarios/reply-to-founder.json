@@ -1,0 +1,17 @@
+{
+  "name": "Reply to a founder in the simulated world",
+  "steps": [
+    { "command": "start", "options": { "source": "fresh" } },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Maya",
+        "handle": "@maya",
+        "action": "post",
+        "content": "What is the hardest part of giving an AI a durable identity?"
+      }
+    },
+    { "command": "consider" },
+    { "command": "inspect" }
+  ]
+}

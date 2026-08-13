@@ -1,0 +1,12 @@
+{
+  "name": "Multi-turn technical conversation",
+  "steps": [
+    { "command": "start", "options": { "source": "scenario" } },
+    { "command": "consider" },
+    { "command": "inject", "options": { "actor": "Ravi", "handle": "@ravi_builds", "action": "post", "content": "What breaks first when an AI agent starts acting across a real social graph?" } },
+    { "command": "inject", "options": { "actor": "Ravi", "handle": "@ravi_builds", "action": "post", "content": "I mean beyond prompt quality. Where should the durable boundary live?" } },
+    { "command": "inject", "options": { "actor": "Ravi", "handle": "@ravi_builds", "action": "post", "content": "That distinction between intention and execution is useful. What would you log?" } },
+    { "command": "consider" },
+    { "command": "timeline" }
+  ]
+}
