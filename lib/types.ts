@@ -105,6 +105,13 @@ export interface GhostProfile {
   boundaries: string;
 }
 
+export interface PublicFooting {
+  postsPublished: number;
+  recentPostIds: string[];
+  recentInboundIds?: string[];
+  observedAt: string;
+}
+
 export interface ChannelCapability { id: string; label: string; description: string; }
 
 export const CHANNEL_CAPABILITIES: Record<ChannelId, ChannelCapability[]> = {
@@ -172,7 +179,7 @@ export const AGENT_TOOL_DEFINITIONS: AgentToolDefinition[] = [
 ];
 
 export interface ExecutionEnvelope { presenceId: string; affordances: Record<string, { mode: ExecutionMode }>; pacingProfile: "recommended" | "custom"; customPacing?: Record<string, JsonValue>; accountProtection: "guidance" | "auto-protect"; }
-export interface PresenceContext { presenceId: string; channel: ChannelId; publicIdentity: { displayName: string; handle?: string; mode: PresenceMode }; audienceContext?: string; voiceAdaptation?: string; availableAffordances: string[]; relevantRelationshipContext?: string; ghostProfile?: GhostProfile; }
+export interface PresenceContext { presenceId: string; channel: ChannelId; publicIdentity: { displayName: string; handle?: string; mode: PresenceMode }; audienceContext?: string; voiceAdaptation?: string; availableAffordances: string[]; relevantRelationshipContext?: string; publicFooting?: PublicFooting; ghostProfile?: GhostProfile; }
 export interface Presence { id: string; channel: ChannelId; handle: string; mode: PresenceMode; status: "live" | "paused" | "disconnected"; accent: string; capabilities: ChannelCapability[]; execution: Record<string, ExecutionMode>; executionEnvelope: ExecutionEnvelope; context: PresenceContext; ghostProfile?: GhostProfile; pacing: "recommended" | "gentle" | "custom"; accountHealth: "healthy" | "elevated"; }
 
 export interface ChatMessage { id: string; role: "agent" | "operator"; content: string; timestamp: string; change?: string; }

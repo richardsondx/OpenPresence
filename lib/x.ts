@@ -11,6 +11,7 @@ export interface XCredentials {
 }
 
 export interface XAccount { id: string; username: string; name: string; }
+export interface XRecentPost { id: string; text: string; createdAt?: string; authorId?: string; authorUsername?: string; conversationId?: string; parentId?: string; }
 
 const apiBase = () => (process.env.OPENPRESENCE_X_API_BASE_URL ?? "https://api.x.com").replace(/\/$/, "");
 const encode = (value: string) => encodeURIComponent(value).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
@@ -100,6 +101,33 @@ export async function publishXPost(credentials: XCredentials, text: string, repl
   });
   if (!response.data?.id) throw new Error("X accepted the request without returning a post ID.");
   return { type: "x.post", id: response.data.id };
+}
+
+export async function readRecentXPosts(credentials: XCredentials, accountId: string, maxResults = 100): Promise<XRecentPost[]> {
+  const query = { "tweet.fields": "created_at", max_results: String(Math.min(100, Math.max(5, maxResults))) };
+  const queryString = new URLSearchParams(query).toString();
+  const url = `${apiBase()}/2/users/${encode(accountId)}/tweets?${queryString}`;
+  const response = await requestJson<{ data?: Array<{ id?: string; text?: string; created_at?: string }> }>(`/2/users/${encode(accountId)}/tweets?${queryString}`, {
+    method: "GET",
+    headers: { Authorization: oauthHeader("GET", url, credentials, query) },
+  });
+  return (response.data ?? [])
+    .filter((item): item is { id: string; text: string; created_at?: string } => typeof item.id === "string" && typeof item.text === "string")
+    .map((item) => ({ id: item.id, text: item.text, createdAt: item.created_at }));
+}
+
+export async function readRecentXMentions(credentials: XCredentials, accountId: string, maxResults = 100): Promise<XRecentPost[]> {
+  const query = { expansions: "author_id", "tweet.fields": "created_at,conversation_id,referenced_tweets", "user.fields": "username", max_results: String(Math.min(100, Math.max(5, maxResults))) };
+  const queryString = new URLSearchParams(query).toString();
+  const url = `${apiBase()}/2/users/${encode(accountId)}/mentions?${queryString}`;
+  const response = await requestJson<{ data?: Array<{ id?: string; text?: string; created_at?: string; author_id?: string; conversation_id?: string; referenced_tweets?: Array<{ type?: string; id?: string }> }>; includes?: { users?: Array<{ id?: string; username?: string }> } }>(`/2/users/${encode(accountId)}/mentions?${queryString}`, {
+    method: "GET",
+    headers: { Authorization: oauthHeader("GET", url, credentials, query) },
+  });
+  const usernames = new Map((response.includes?.users ?? []).filter((user) => user.id && user.username).map((user) => [user.id!, user.username!]));
+  return (response.data ?? [])
+    .filter((item): item is { id: string; text: string; created_at?: string; author_id?: string; conversation_id?: string; referenced_tweets?: Array<{ type?: string; id?: string }> } => typeof item.id === "string" && typeof item.text === "string")
+    .map((item) => ({ id: item.id, text: item.text, createdAt: item.created_at, authorId: item.author_id, authorUsername: item.author_id ? usernames.get(item.author_id) : undefined, conversationId: item.conversation_id, parentId: item.referenced_tweets?.find((reference) => reference.type === "replied_to")?.id }));
 }
 
 export function nativeXFor(state: OpenPresenceState, presenceId: string) {
