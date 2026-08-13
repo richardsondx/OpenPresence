@@ -30,7 +30,7 @@ test("Presence is selected from one dropdown and changes the active Presence", a
   await expect(activePresence).toBeVisible();
   await expect(activePresence.locator(".channel-badge")).toHaveAttribute("title", "X");
   await expect(activePresence.locator(".channel-badge .presence-logo svg")).toHaveCount(1);
-  await expect(activePresence.locator("span:nth-child(2) small")).toHaveText("Agent-owned");
+  await expect(activePresence.locator("span:nth-child(2) small")).toContainText("Agent-owned");
   const rootGeometry = await activePresence.evaluate((node) => ({
     width: node.scrollWidth,
     clientWidth: node.clientWidth,

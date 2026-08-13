@@ -1,0 +1,10 @@
+{
+  "name": "Boardy network search and consent smoke test",
+  "source": "https://x.com/boardyai/with_replies",
+  "steps": [
+    { "command": "start", "options": { "source": "fresh" } },
+    { "command": "inject", "options": { "actor": "Avery Cole", "handle": "@averysec", "action": "post", "profile": { "bio": "Former military veteran now doing security engineering", "location": "Detroit, Michigan", "roles": ["security engineer"], "skills": ["security", "incident response"], "introductionPermission": "ask-first" }, "content": "I work in security engineering in Detroit." } },
+    { "command": "inject", "options": { "actor": "Lisa Hanson", "handle": "@PreachItLisa", "action": "post", "content": "Former military veterans near Taylor Michigan or Detroit who do security???" } },
+    { "command": "timeline" }
+  ]
+}

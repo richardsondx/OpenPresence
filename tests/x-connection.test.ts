@@ -51,16 +51,16 @@ describe("native X connection", () => {
     expect(body.messages.at(-1).content).toBe("A provider-generated answer for this conversation.");
     expect(body.messages.at(-1).content).not.toContain("I heard you");
     const requestBody = JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string);
-    expect(requestBody.model).toBe("gpt-4o");
+    expect(requestBody.model).toBe("gpt-5.6-luna");
     expect((fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>).authorization).toBe("Bearer provider-secret-test");
     vi.unstubAllGlobals();
   });
 
-  it("keeps live Presence changes ahead of stale chat history", async () => {
+  it("keeps live Presence changes out of unsolicited chat history", async () => {
     await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setPresence", patch: { mode: "ghost" } }), headers: { "content-type": "application/json" } }));
     const changed = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setPresence", patch: { mode: "agent" } }), headers: { "content-type": "application/json" } }));
     const changedBody = await changed.json();
-    expect(changedBody.messages.at(-1).content).toContain("now Agent-owned");
+    expect(changedBody.messages).toHaveLength(0);
 
     await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "configureProvider", provider: "openai", label: "OpenAI workspace", secret: "provider-secret-test", hasSecret: true }), headers: { "content-type": "application/json" } }));
     await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setModel", model: "gpt-5.6-luna", provider: "openai", quality: "high" }), headers: { "content-type": "application/json" } }));

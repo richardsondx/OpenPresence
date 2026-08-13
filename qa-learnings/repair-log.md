@@ -2,6 +2,22 @@
 
 This log records repairs made when observed behavior contradicted the OpenPresence vision. It distinguishes implementation defects from external blockers and never treats a local fixture as an external success.
 
+## 2026-08-13 — Rhythm summary had no understandable setup path
+
+- **Observed:** Activity showed Rhythm values without explaining what Rhythm meant or where to configure them. Presence settings exposed opaque Recommended/Gentle/Custom options and displayed Quiet hours as “Not configured” without controls.
+- **Expected:** The operator should understand attention cadence versus publishing/reply permissions, find the settings from Activity, and configure quiet hours without needing documentation.
+- **Root cause:** `pacing` was a single unlabeled select, Quiet hours was a hard-coded Activity projection, and automatic observation scheduling did not consume a custom interval or quiet-hours window.
+- **Repair:** Added a Presence-scoped attention-rhythm card with explanatory presets, custom interval, quiet-hours controls, Activity navigation, persisted runtime fields, and overnight-safe native observation scheduling. Fixed the toggle positioning and mobile public-facts overflow caught during browser QA.
+- **Verification:** Runtime settings and overnight scheduling tests, isolated production build, and focused Chromium + Pixel 5 browser flow passed. Exploratory screenshots confirmed attached controls, no horizontal overflow, no console errors, and no failed requests apart from the existing remote Google Fonts request when network access was unavailable.
+
+## 2026-08-13 — Activity reused one post as context for unrelated rows
+
+- **Observed:** The Activity stream showed repeated decision rows with the same observed-post preview, and rapid identical silence records appeared as duplicates.
+- **Expected:** Activity context must belong to the event's explicit source or target. Repeated identical records within a short burst should not multiply the visible operator timeline.
+- **Root cause:** `LiveView.contextForEvent` guessed the latest Mirror object when event lineage was missing; the display also rendered rapid identical event records independently.
+- **Repair:** Activity now resolves only explicit source/intent/execution/outcome lineage, Sandbox observations and intents persist source IDs, and the visible projection collapses identical records within ten seconds while retaining the newest ledger event.
+- **Verification:** Sandbox lineage tests, isolated production build, and focused Chromium + Pixel 5 Activity E2E passed, including a legacy missing-lineage fixture, duplicate-event fixture, console/network checks, and responsive overflow inspection.
+
 ## 2026-08-13 — First wake did not pursue a real Presence launch
 
 - **Observed:** The live test could reach a native X delivery attempt only after an operator explicitly asked Chat to publish. Waking a connected Presence still used the deterministic local no-op path, had no X public-footing context, and had no native inbound observation/reply path.

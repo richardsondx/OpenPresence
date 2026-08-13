@@ -1,5 +1,13 @@
 # Decisions
 
+## 2026-08-13 — Stack Playground threads and scope Activity by Presence route
+
+**What changed:** Playground now renders parent posts with their replies nested beneath them. Activity is filtered to the selected Presence's channel and Sandbox/live environment, simulated context is tagged `Playground`, and source context uses `↳`.
+**Why:** Operators need to relate a reply to the observed conversation and understand which channel and embodiment produced an Activity record. Sandbox rehearsal must remain distinct from live delivery.
+**Requirements affected:** Playground social context, channel-specific Activity, Sandbox isolation, event language, and the Agent → Social Intent → Execution → Outcome boundary.
+**Tests/evals affected:** Runtime environment projection coverage, Playground thread geometry, Activity Playground tagging, Sandbox/live switching, review/manual execution lifecycle, typecheck, lint, production build, and Chromium + Pixel 5 browser verification.
+**Approved by:** User request and canonical OpenPresence philosophy.
+
 ## 2026-08-12 — Local-first modular monolith
 
 **What changed:** OpenPresence starts as one persistent Next.js/Node application with SQLite-backed state and an embedded simulation worker.
@@ -31,3 +39,27 @@
 **Requirements affected:** Architecture v1 sections 3, 11, 12, 29, 30, 32, 34, 37, 51, and 58.
 **Tests/evals affected:** 13 runtime tests, normalized SQLite tables, API validation, 16 Playwright tests across desktop/mobile.
 **Approved by:** Product plan.
+
+## 2026-08-13 — Agent-first Playground CLI
+
+**What changed:** Added a sandbox-only `openpresence playground` CLI with compact JSON projections, deterministic virtual-time and event controls, media inspection, and replayable JSON scenarios.
+**Why:** AI agents such as Codex need a fast, machine-readable control surface for functional testing and cognition/evaluation loops without parsing the browser UI or unrelated application state.
+**Requirements affected:** Playground rehearsal, agent evaluation, Sandbox isolation, auditable intent/execution/outcome visibility, and live-delivery safety.
+**Tests/evals affected:** CLI contract tests, live local-app CLI smoke, scenario replay, typecheck, lint, production build, and existing unit/browser regression suites.
+**Approved by:** User request.
+
+## 2026-08-13 — Calendar is public history; Schedule owns future intent
+
+**What changed:** Split the Presence navigation into Activity, Calendar, and Schedule. Calendar is a verified public-expression projection with Week/Month/Day views, filters, and an outcome inspector; Schedule retains Standing Intent editing and evaluation.
+**Why:** The product needs an honest relationship with time: Activity is present operations, Calendar is historical truth, and Schedule is future permission. This preserves the Agent → Social Intent → Execution → Delivery → Outcome boundary and keeps silence/pending review out of public history.
+**Requirements affected:** Presence navigation, public history, Standing Intent semantics, Social Mirror attribution, and outcome evidence.
+**Tests/evals affected:** Public-history projection unit coverage, Schedule browser regression updates, typecheck, lint, and focused browser verification.
+**Approved by:** User request and canonical OpenPresence philosophy.
+
+## 2026-08-13 — Provider access owns connection identity
+
+**What changed:** Added OpenRouter to Brain provider access and runtime selection, using the existing OpenAI-compatible request path and standard OpenRouter endpoint. Provider connection names are now canonical and cannot be edited through the UI or runtime operation.
+**Why:** Provider identity should remain legible and trustworthy; a credential form should configure access, not rename the external provider it represents.
+**Requirements affected:** Provider access discoverability, OpenRouter configuration, runtime routing, and connection-state integrity.
+**Tests/evals affected:** Runtime provider-label regression, OpenRouter endpoint routing test, Brain desktop/mobile E2E coverage, typecheck, lint, build, and `git diff --check`.
+**Approved by:** User request.

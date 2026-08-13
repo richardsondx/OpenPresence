@@ -1,5 +1,101 @@
 # Active QA Work
 
+## COMPLETE — Stack Playground replies and scope Activity to the selected channel
+
+- **Started:** 2026-08-13
+- **Scope:** Show simulated inbound messages/posts with Jenny's replies in one readable thread; constrain Activity to the selected Presence's channel and current Sandbox/live environment; clarify Playground event language and replace causal preview copy with `↳`.
+- **Safety boundary:** Presentation and local Sandbox projection only. No live connector, external account, or production state mutation.
+- **Acceptance:** A user can relate each Jenny reply to the message/post it answers; Sandbox Activity contains only Sandbox events for the selected channel; live channel Activity contains only that channel's activity; Activity uses a `Playground` tag for simulated posts and `↳` for observed context.
+- **Verification:** 106 unit tests, typecheck, lint, production build, `git diff --check`, and focused Activity/Playground lifecycle, threading, and Sandbox/live scoping flows passed on Chromium and Pixel 5.
+
+## COMPLETE — Make Presence rhythm settings discoverable and complete
+
+- **Started:** 2026-08-13
+- **Scope:** Explain Rhythm in user terms, make the settings entry point obvious, give Recommended/Gentle/Custom meaningful behavior, and expose Quiet hours as a real Presence-scoped control without changing Agent identity or forcing publication.
+- **Safety boundary:** Local Presence configuration and development QA only; no live connector mutation or production state change.
+- **Acceptance:** A customer can find rhythm settings from Activity, understand attention cadence versus publishing/reply permissions, configure a custom interval and quiet-hours window, see the saved state reflected in Activity, and use the controls on desktop and mobile.
+- **Verification:** Runtime setting and overnight scheduling tests passed (93 repository tests total), isolated production build, typecheck, lint, and `git diff --check` passed. Focused Chromium + Pixel 5 browser flow passed with persistence, console/network checks, and no responsive overflow; exploratory desktop/mobile screenshots confirmed the rhythm card, attached Quiet hours toggle, and mobile layout.
+
+## COMPLETE — Repair Activity duplicate source previews
+
+- **Started:** 2026-08-13
+- **Scope:** Stop Activity decision rows from reusing the same observed post when event lineage is missing or points to a reaction object; preserve truthful target context for replies, likes, executions, and Sandbox observations.
+- **Safety boundary:** Presentation and local Sandbox lineage only; no live connector, external account, or production state mutation.
+- **Acceptance:** Each Activity context preview belongs to the event's explicit source/target, unlinked legacy events do not guess context, repeated decisions remain individually attributable, and desktop/mobile Activity remains readable and console-clean.
+- **Verification:** Runtime lineage regression, focused Chromium + Pixel 5 Activity flow with repeated Sandbox events, isolated production build, typecheck, lint, and `git diff --check` passed. The focused Activity suite passed 10 desktop/mobile cases with console, failed-request, and responsive-overflow checks.
+
+## COMPLETE — Add OpenRouter provider access and lock connection identity
+
+- **Started:** 2026-08-13
+- **Scope:** Add OpenRouter to Brain provider access and model runtime selection, preserve its existing OpenAI-compatible backend path, and prevent provider connection names from being edited or renamed.
+- **Safety boundary:** UI/runtime configuration only; no live provider request or production credential mutation during QA. Avoids the Playground cognition/CLI files owned by task `019ff960-b9c9-7432-b958-af13d464a229`.
+- **Acceptance:** OpenRouter is visible and can be configured with an API key; its hosted endpoint and a selectable model are usable; connection identity is provider-owned and not editable; existing OpenAI/Ollama setup remains intact.
+- **Verification:** OpenRouter endpoint/runtime routing test, canonical-label runtime regression, focused Brain Playwright flow passed on Chromium and Pixel 5, isolated production build, 89 unit tests, typecheck, lint, and `git diff --check`.
+
+## COMPLETE — Center Add a Presence modal and clarify platform handles
+
+- **Started:** 2026-08-13
+- **Scope:** Make the Add a Presence overlay full-viewport and center its dialog; clarify that a Presence handle is the platform/social identity used by the Agent and Social Mirror.
+- **Safety boundary:** No Activity redesign, Playground/API/runtime/perception/CLI changes, live connector mutations, or production operations.
+- **Acceptance:** The modal backdrop covers the viewport, the dialog is centered at desktop and mobile widths, the handle field has platform-specific language, and the handle remains available to runtime cognition/context without becoming Agent-wide identity.
+- **Verification:** Scoped Add Presence browser coverage passed on Chromium and Pixel 5; 84 unit tests, typecheck, lint, production build in an isolated clean copy, and `git diff --check` passed. The existing runtime context and Social Mirror identity test confirms the handle remains Presence-scoped and is available to authored social objects.
+
+## COMPLETE — Browse stacked Calendar publications from the inspector
+
+- **Started:** 2026-08-13
+- **Scope:** Add inspector navigation for dense Week-view cards and replace the ambiguous `PUBLIC EXPRESSION` label with a concrete post-specific label.
+- **Safety gate:** Presentation-only; no publication, connector, Playground, runtime, or Activity behavior changes.
+- **Acceptance:** Previous/Next changes the displayed selected post and position indicator; the label is concrete; navigation works in populated and single-item states on desktop and mobile.
+- **Verification:** Browser QA confirmed the concrete `Post details` label and disabled boundaries for a single item; the focused Calendar history suite passed all 4 tests on Chromium and Pixel 5, including a two-publication Previous/Next flow. Unit tests (83), typecheck, lint, build, and `git diff --check` passed.
+
+## COMPLETE — Keep late-day Calendar publications fully visible
+
+- **Started:** 2026-08-13
+- **Scope:** Prevent Week-view publication cards near 23:00 from being clipped by the timeline container, including the card footer/proof line shown in the reported screenshot.
+- **Safety gate:** Presentation-only change; no runtime, publication, connector, or Sandbox state is mutated.
+- **Acceptance:** A late-day card remains fully visible, the Calendar page can still scroll naturally, and narrow layouts retain horizontal timeline scrolling without page overflow.
+- **Verification:** The persisted 23:08 screenshot state was browser-checked with the proof footer inside the Week surface; focused Calendar E2E passed sequentially on Chromium and mobile (3 tests each), 82 unit tests passed, typecheck/lint/build passed, and `git diff --check` passed.
+
+## COMPLETE — Reframe Activity around operator attention and channel-native posts
+
+- **Started:** 2026-08-13
+- **Scope:** Replace the current Activity composition with a readable Presence-first control surface: actionable review attention at the top, a real social-feed presentation for observed Mirror objects, a compact operating-status context panel, and decision/execution evidence placed beside the activity it explains.
+- **Product boundary:** Keep observed world data, Agent judgment, Social Intent, Execution, Delivery, and Outcome separately attributable. No new scheduler behavior or fabricated activity is introduced.
+- **Acceptance:** Activity has one clear scan path, no duplicate Now/Next/Review rail, observed posts read like posts, execution status remains actionable, and desktop/mobile layouts have no clipping or horizontal overflow.
+- **Verification:** Typecheck, lint, production build, `git diff --check`, and all 82 unit tests pass. Activity lifecycle and Presence-scope E2E coverage pass, including review approval/manual relay and the updated “right now” heading contract. Rendered desktop (1440px) and Pixel 5 (390px) review found no horizontal overflow or browser console errors. The broad local Chromium run reached 24/30 passing; the six failures were existing shared-state/Calendar timing or stale non-Activity heading assumptions, with no Activity implementation failure.
+
+
+## COMPLETE — Separate public-history Calendar from future Schedule
+
+- **Started:** 2026-08-13
+- **Scope:** Replace the ambiguous Calendar intent surface with a verified public-expression history, add Week/Month/Day browsing and publication inspection, and expose the prior Standing Intent editor as Schedule.
+- **Safety boundary:** Calendar reads only public, externally evidenced expression. Drafts, pending review, no-ops, private observations, and unobserved intent records remain excluded. Playground CLI/runtime/perception work owned by task `019ff960-b9c9-7432-b958-af13d464a229` is out of scope.
+- **Acceptance:** Navigation distinguishes Activity, Calendar, and Schedule; Calendar history is Presence-scoped, filterable, responsive, and truthful about outcome evidence; Schedule CRUD/evaluation behavior remains intact; focused unit and browser checks pass.
+- **Verification:** `derivePublicHistory` is covered by `tests/runtime.test.ts`; the production build, typecheck, lint, all 81 unit tests, all 54 existing Chromium/mobile E2E tests, and the new `tests/e2e/calendar-history.spec.ts` Chromium/mobile test passed. Browser QA also verified the publication inspector → Activity cross-link and 390px no-overflow behavior.
+
+## IN_PROGRESS — Relentless Social-Agent Audit
+
+- **Started:** 2026-08-13
+- **Scope:** Prove the full Sandbox/Playground social-agent benchmark from the attached audit instructions across identity, original posting, replies, relationships, selective silence, affordance choice, media perception, Ghost representation, Calendar/Standing Intent timing, review semantics, intent expiry, resets, and long-session continuity. Repair systemic causes and rerun varied fresh sessions until the evidence supports the requested three-run gate.
+- **Safety boundary:** All stimulation and Agent execution remain in Sandbox/Playground. No live social connector or external publication is used. Chrome is reserved for blinded review of rendered simulated activity.
+- **Acceptance:** Three consecutive fresh, varied Playground runs pass the complete benchmark with zero critical failures, the resulting activity reads as a coherent human-quality presence to a blinded reviewer, and unit/integration/typecheck/lint/build quality gates pass.
+- **Current hypotheses under audit:** Sandbox cognition may be limited to post/reply selection; repeated pulses may reselect already-judged inbound objects; empty-world proactive behavior and scheduled rhythm may be incomplete; the CLI inspect projection may omit required context; media understanding may be provider-dependent and insufficiently exercised.
+- **Verification:** In progress. Full evidence ledger: `docs/PLAYGROUND_RELENTLESS_AUDIT.md`.
+
+## COMPLETE — Repair Playground media upload control presentation
+
+- **Started:** 2026-08-13
+- **Scope:** Remove leaked native file-input chrome from the channel-native Playground event form while preserving accessible media selection, link entry, asset chips, and responsive layout.
+- **Acceptance:** The custom Add media control is the only visible upload affordance; the native file input remains keyboard and label accessible; Media URL and Add link remain readable; desktop and mobile Playground states render without overflow or console errors.
+- **Verification:** Replaced the leaked native file-input row with a visually hidden, label-accessible input; aligned the custom Add media control and added focus styling. Typecheck, lint, production build, `git diff --check`, all 69 unit tests, and focused Chromium + Pixel 5 Playground tests passed. Rendered desktop and mobile inspection confirms the native row is gone, the custom control is aligned, the link field remains usable, and there is no horizontal overflow.
+
+## COMPLETE — Add multimodal Social Perception without weakening judgment boundaries
+
+- **Started:** 2026-08-13
+- **Scope:** Make assets and versioned perception first-class in the Social Mirror and Sandbox, preserve uncertainty and provenance, prevent text-only models from fabricating media understanding, and keep Sandbox corrections isolated.
+- **Acceptance:** Image-bearing simulated social objects persist raw assets separately from derived perception; perception is provider-agnostic and uncertainty-aware; media-dependent actions cannot auto-proceed without usable perception; the operator can inspect “What Jenny sees”; Ghost uses the same cognition with configurable uncertainty posture.
+- **Verification:** Added provider-agnostic SocialAsset and versioned AssetPerception records with raw Sandbox asset isolation, truthful insufficient-perception states, inspect-level action gating, Presence-scoped uncertainty policy, and a compact Playground media input plus “What Jenny sees” inspection panel. Typecheck, lint, production build, `git diff --check`, all 66 unit tests, and focused Chromium + Pixel 5 Playground tests passed. Browser coverage confirms an image-bearing simulated object persists, shows insufficient perception, records “Media needs inspection,” and resets without retaining session media.
+
 ## COMPLETE — Improve Execution Ledger readability
 
 - **Started:** 2026-08-13
@@ -246,3 +342,18 @@
 - **Scope:** Separate Agent identity, Presence identity, and implementation details. Add Presence-scoped disclosure posture and approved technical facts, include the boundary in `PRESENCE.md` and social cognition, and hold Ghost drafts for review when they expose the private Agent or unapproved machinery.
 - **Acceptance:** Agent-owned Presences default to contextual disclosure; Ghost Presences default to representational disclosure; the operator can save posture/facts in Presence Settings; approved facts persist; Ghost publication drafts cannot silently disclose private identity or implementation details.
 - **Verification:** 64 unit tests, typecheck, lint, production build, diff check, and focused Chromium + Pixel 5 Presence Settings persistence tests passed.
+## COMPLETE — Expose live X destinations from Calendar history
+
+- **Started:** 2026-08-13
+- **Scope:** Make verified X history actionable by exposing the canonical post URL in the public-expression inspector, while clearly distinguishing Sandbox rehearsals that cannot have a live X destination.
+- **Safety gate:** Derive links only from verified external references and the selected Presence's native X account; never create a live URL for a Sandbox record or alter the live connector during QA.
+- **Acceptance:** A live verified X expression shows an `Open on X` link; a Sandbox expression shows an explicit no-live-URL explanation; the existing Activity cross-link remains available.
+- **Verification:** `tests/runtime.test.ts` covers the canonical native X URL and the no-URL Sandbox boundary; `tests/e2e/calendar-history.spec.ts` passes on Chromium and mobile; 82 unit tests, typecheck, lint, production build, and `git diff --check` pass. Browser inspection verified the screenshot's Sandbox inspector copy and preserved the Activity action.
+
+## COMPLETE — Give Activity decisions their source context
+
+- **Started:** 2026-08-13
+- **Scope:** Make Activity answer the operator's first question—“what post was this about?”—for silence, replies, and pending actions. Observed posts now retain source-object lineage, event rows preview the relevant post, and the current action card offers a readable action summary plus a post inspector.
+- **Product boundary:** The observed post remains world data; it is shown as context for the Agent's judgment, never as an instruction. Approval remains the operator's decision about delivery, not a rewrite of the Agent's judgment.
+- **Acceptance:** A context-bearing Activity event says why it is clickable, the current action identifies its source post when available, “View post” opens the full observed post, and internal terms such as `x.post`, `execution envelope`, and raw status names are not required to understand the screen.
+- **Verification:** 83 unit tests, typecheck, lint, production build after rotating a stale generated `.next` directory, `git diff --check`, and focused Chromium coverage for Add Presence viewport centering plus Activity review/manual lifecycles passed.

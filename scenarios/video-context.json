@@ -1,0 +1,11 @@
+{
+  "name": "Video context",
+  "steps": [
+    { "command": "start", "options": { "source": "scenario" } },
+    { "command": "inject", "options": { "actor": "Tara", "handle": "@tara_video", "action": "post", "content": "The important claim is in the second half of the clip.", "assets": [{ "name": "agent-demo.mp4", "kind": "video", "path": "scenarios/fixtures/agent-demo.mp4" }] } },
+    { "command": "consider" },
+    { "command": "inspect-media", "options": { "object": "$latest-object-id" } },
+    { "command": "consider" },
+    { "command": "timeline" }
+  ]
+}

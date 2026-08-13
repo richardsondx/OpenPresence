@@ -1,0 +1,10 @@
+{
+  "name": "Relevant image",
+  "steps": [
+    { "command": "start", "options": { "source": "scenario" } },
+    { "command": "inject", "options": { "actor": "Leah", "handle": "@leah_data", "action": "post", "content": "This image shows a useful comparison of agent evaluation loops.", "assets": [{ "name": "evaluation-loop.png", "kind": "image", "path": "docs/screenshots/activity.png" }] } },
+    { "command": "inspect-media", "options": { "object": "$latest-object-id" } },
+    { "command": "consider" },
+    { "command": "timeline" }
+  ]
+}

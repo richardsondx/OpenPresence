@@ -1,0 +1,11 @@
+{
+  "name": "Repetition and behavioral fingerprints",
+  "steps": [
+    { "command": "start", "options": { "source": "scenario" } },
+    { "command": "consider" },
+    { "command": "consider" },
+    { "command": "advance", "options": { "minutes": 180 } },
+    { "command": "consider" },
+    { "command": "timeline" }
+  ]
+}

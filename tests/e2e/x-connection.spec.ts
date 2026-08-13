@@ -9,7 +9,7 @@ async function createAgent(page: import("@playwright/test").Page) {
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await expect(page.getByRole("heading", { name: "Jenny is live." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
 }
 
 test("operator connects an X Presence through the official API", async ({ page }) => {
@@ -62,7 +62,7 @@ test("native X connection delivers an approved Presence action", async ({ page }
   await page.getByRole("button", { name: "Save connection" }).click();
   await expect(page.getByRole("heading", { name: "Connected to @jenny_ai" })).toBeVisible();
 
-  await navigation.getByRole("button", { name: "Calendar", exact: true }).click();
+  await navigation.getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("button", { name: "Add intent" }).click();
   await page.getByLabel("What should Jenny do?").fill("Share one useful idea about persistent agents.");
   await page.getByRole("button", { name: "Save standing intent" }).click();

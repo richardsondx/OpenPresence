@@ -1,5 +1,149 @@
 # Regression rules
 
+## Rule: Playground threads and Activity scopes must preserve social context
+
+**Defect class:** Social thread presentation / channel-environment leakage
+
+**General principle:** A social reply must render with its parent, and operational Activity must be scoped to the selected Presence's channel and embodiment; projections must not flatten thread context or mix Sandbox and live records.
+
+**Project-specific risk:** A flat Playground object list made Jenny replies look unrelated; Activity filtered by Presence only and mixed Sandbox with live-route records; causal copy exposed implementation-shaped context.
+
+**Project enforcement:** `PlaygroundThreadFeed` groups objects by `parentExternalRef`; `LiveView`, `MirrorPanel`, `ExecutionLedger`, and `deriveActivitySummary` filter the selected Presence/channel/environment/session; `ActivityEventDetail` and `.event-context-preview` use the `Playground` tag and `↳`.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts` covers reply stacking and Sandbox/live Activity isolation on Chromium + Pixel 5; `tests/runtime.test.ts` covers Activity environment scoping.
+
+**Apply when:** Changing Playground, MirrorObject lineage, Activity, Presence routing, channel selection, event context, or review execution projections.
+
+**Added:** 2026-08-13
+
+## Rule: Chat must contain intentional conversation turns only
+
+**Defect class:** Chat transcript provenance / cross-surface state leakage
+
+**General principle:** A conversational transcript must contain only turns caused by an intentional participant message or an explicitly requested conversational action. Configuration, presence, and background runtime changes belong in their operational surface and must not appear as unsolicited agent replies.
+
+**Incident:** Changing Presence identity, Ghost profile, rhythm, or other settings appended repeated “I noticed the Presence settings changed” messages to Chat even though the operator had not sent a chat message.
+
+**Project enforcement:** The `/api/state` `setPresence` mutation persists the Presence change and its existing system event, but never appends an agent message to the active conversation. Chat remains in its blank state until `sendMessage` is used; live Presence state is still included in the Agent's next intentional chat context.
+
+**Executable protection:** `tests/x-connection.test.ts` asserts repeated `setPresence` calls leave `messages` empty while a subsequent chat request receives the authoritative live Presence state. `tests/e2e/openpresence.spec.ts` asserts Settings changes do not create unsolicited Chat messages and the blank conversation state remains visible.
+
+**Apply when:** Changing Presence Settings, runtime/background events, Chat transcript persistence, conversation hydration, or cross-surface state synchronization.
+
+**Added:** 2026-08-13
+
+## Rule: Rhythm settings must explain attention, expose real controls, and be reachable from Activity
+
+**Defect class:** Presence configuration discoverability / cadence UX
+
+**General principle:** A summary value is not a configuration surface. When a product shows cadence, it must explain what is being paced, distinguish it from capability permissions, expose every displayed setting, and provide a direct path to change it.
+
+**Incident:** Activity showed “Attention · On demand” and Presence settings showed “Rhythm · Pacing is infrastructure” with opaque Recommended/Gentle/Custom options, while Quiet hours was displayed as “Not configured” without any setup path.
+
+**Project enforcement:** Activity explains that Rhythm controls when a Presence checks its connected channel, links to Presence settings, and the settings surface defines Recommended (5 minutes), Gentle (15 minutes), and Custom (5–120 minutes). Quiet hours is Presence-scoped, persists as an overnight-safe window, and pauses automatic observation without blocking explicit Check now or Calendar runs.
+
+**Executable protection:** `tests/runtime.test.ts` covers persisted custom rhythm and overnight quiet-hour scheduling; `tests/e2e/openpresence.spec.ts` covers Activity → Settings navigation, option explanations, quiet-hours persistence, Chromium + Pixel 5 responsive geometry, console errors, and failed requests.
+
+**Apply when:** Changing Activity rhythm summaries, Presence settings, native observation cadence, quiet hours, scheduling, or execution-envelope language.
+
+**Added:** 2026-08-13
+
+## Rule: Full-viewport modal backdrops must center their dialog in the viewport
+
+**Defect class:** Modal geometry / responsive overlay
+
+**General principle:** A modal backdrop must cover the complete viewport and its dialog must be centered against that same viewport; centering against an underlying shell creates a visibly off-center popup and leaves parts of the page outside the scrim.
+
+**Project-specific risk:** The Add a Presence backdrop inherited the workspace sidebar offset, so the overlay excluded the sidebar and the dialog was centered only in the remaining workspace.
+
+**Project enforcement:** `.add-presence-modal-backdrop` uses full fixed insets and centers the Presence dialog independently of the sidebar layout.
+
+**Executable protection:** `tests/e2e/presence-modal.spec.ts` checks backdrop bounds and dialog center at the active desktop/mobile viewport sizes.
+
+**Apply when:** Changing Add Presence, Create Agent, dialog shell, sidebar offsets, or responsive modal layout.
+
+**Added:** 2026-08-13
+
+## Rule: Custom media controls must not leak native input chrome
+
+**Defect class:** Playground media input / responsive UI
+
+**General principle:** A custom upload control must own its visual presentation while preserving an accessible native file-selection path.
+
+**Incident:** The Playground's form-wide input styling overrode the file input's `hidden` attribute, exposing the browser's “Choose File / No file chosen” control inside the custom Add media card and splitting one affordance into two competing controls.
+
+**Project enforcement:** The file input uses a dedicated visually-hidden class inside the labeled Add media control; the control has explicit flex alignment and focus-visible treatment, while the link field remains a separate channel-native action.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts` asserts the custom Add media control is visible, the file input is attached with the visually-hidden geometry, and the existing file-selection flow still persists a media-bearing simulated post on Chromium and Pixel 5.
+
+**Apply when:** Changing Playground media entry, Sandbox event forms, upload controls, or shared form-input styling.
+
+**Added:** 2026-08-13
+
+## Rule: Activity must read as a Presence, a channel, and an operator queue
+
+**Defect class:** Activity information architecture / social-feed readability
+
+**General principle:** An operational Presence page should answer one question at a time: what needs the operator, what did the Agent observe, what did it decide, and what happened. World objects should use the visual grammar of their channel; execution proof must stay adjacent without becoming a duplicate status rail.
+
+**Project-specific risk:** The former Activity surface presented Social Mirror posts as loose text, used the misleading “The day in motion” heading, repeated Now/Next/Review in separate areas, and placed the execution ledger away from the activity it explained. Operators had to reconstruct the social story from implementation-shaped fragments.
+
+**Project enforcement:** `LiveView` uses a Presence-specific “right now” header, an actionable review banner, channel-native `.mirror-post` cards, a single `.activity-status-panel`, a single `.execution-ledger`, and a chronological `.activity-log`. Context-bearing events and actions expose `.event-context-preview`, `.status-context-button`, or `.action-context-card` so the source post is one click away. The UI keeps observed context, Agent decisions, executions, and outcomes separately labeled.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts` covers Activity lifecycle, review/manual execution, and Presence-name scoping. Rendered desktop and Pixel 5 QA checks assert no horizontal overflow and no browser console errors; a dedicated visual regression assertion is recommended if screenshot testing is added to the project.
+
+**Apply when:** Changing Activity/Live composition, Social Mirror presentation, review queues, execution proof, or Presence operational copy.
+
+**Added:** 2026-08-13
+
+## Rule: Calendar Week must reserve space for late-day card content
+
+**Defect class:** Responsive layout / clipped evidence
+
+**General principle:** A time-grid item that begins near the final visible row must retain enough surface area for its complete content and footer; the operator should never have to infer that more content exists below a clipped boundary.
+
+**Project-specific risk:** Week view positioned a 23:08 publication inside a fixed 24-hour body with hidden overflow, cutting off the card's proof footer at the bottom of the calendar.
+
+**Project enforcement:** The Week timeline reserves a bottom buffer after the 24 hourly rows, while narrow screens keep the existing horizontal timeline scroll.
+
+**Executable protection:** `tests/e2e/calendar-history.spec.ts` asserts that the publication card and its proof footer remain within the Week surface on Chromium and mobile.
+
+**Apply when:** Changing Calendar Week positioning, timeline height, card density, or responsive overflow behavior.
+
+**Added:** 2026-08-13
+
+## Rule: Dense Calendar selections need an alternate browse path
+
+**Defect class:** Interaction discoverability / stacked-card selection
+
+**General principle:** When time-grid items overlap, the operator needs a reliable sequential navigation path; clicking exposed pixels cannot be the only way to reach an item.
+
+**Project-specific risk:** Calendar Week positioned multiple publications at the same time, stacking buttons so only the top card was reliably selectable.
+
+**Project enforcement:** PublicCalendarView passes the current filtered history to PublicHistoryInspector; the inspector exposes Previous/Next controls and a position indicator while preserving the selected item’s details.
+
+**Executable protection:** `tests/e2e/calendar-history.spec.ts` asserts that the navigation controls update the displayed post and position.
+
+**Apply when:** Changing Calendar history cards, inspector selection, filters, or Week overlap handling.
+
+**Added:** 2026-08-13
+
+## Rule: Verified external publications must expose an actionable destination
+
+**Defect class:** Evidence usability / channel provenance
+
+**General principle:** A verified public record should let the operator reach the canonical external object when the channel provides a stable URL; evidence that cannot be opened must say why.
+
+**Project-specific risk:** Calendar proved that an expression existed but exposed only an opaque X object ID, forcing the operator to leave OpenPresence and search manually. Sandbox rehearsals must never masquerade as live X publications.
+
+**Project enforcement:** `derivePublicHistory` derives an `externalUrl` only for verified, non-Sandbox X references using the selected Presence's native X account handle. `PublicHistoryInspector` renders `Open on X` for that URL and a truthful no-live-URL note for Sandbox history.
+
+**Executable protection:** `tests/runtime.test.ts` asserts the canonical X URL for a verified publication and asserts that Sandbox history has no external URL. The Calendar E2E and browser review protect the inspector's visible action and responsive layout.
+
+**Apply when:** Changing public-history projections, execution evidence, native X identity, Sandbox presentation, or the Calendar inspector.
+
+**Added:** 2026-08-13
+
 ## Rule: Presence destination selection must be singular and state-truthful
 
 **Defect class:** Information architecture / environment boundary / misleading status
@@ -13,6 +157,22 @@
 **Executable protection:** `tests/sandbox.test.ts` verifies route exclusivity and environment persistence. `tests/e2e/openpresence.spec.ts` verifies Sandbox/X/Bridge switching, persistence, truthful connection copy, Chat chrome, Playground copy, and desktop/mobile behavior. `tests/e2e/x-connection.spec.ts` verifies native X configuration within the selected X route.
 
 **Apply when:** Changing Presence Settings, channel selection, Sandbox/Playground, native connectors, Bridges, connection status copy, or Chat top-bar context.
+
+**Added:** 2026-08-13
+
+## Rule: Perception must remain evidence, not truth
+
+**Defect class:** Multimodal cognition / Sandbox isolation / truthful uncertainty
+
+**General principle:** Raw social assets, derived perception, and Taste-led action are separate layers. A text-only runtime must not invent media understanding, and Sandbox corrections must not update Agent-wide Memory, Growth, or Taste.
+
+**Project-specific risk:** An image-bearing Social Mirror object could be reduced to text, causing the Agent to reply as though it had seen the image, or a simulated correction could leak into durable Agent meaning.
+
+**Project enforcement:** `Asset` stores raw evidence separately from versioned `AssetPerception`; unsupported or uninspected media is explicitly `insufficient`; media-dependent Sandbox intents require usable inspect-level perception and Presence policy; Reset removes session-scoped assets and perceptions only.
+
+**Executable protection:** `tests/sandbox.test.ts` verifies raw asset references, provenance, insufficient perception, blocked media-dependent intent formation, Presence uncertainty policy, and session reset. `tests/e2e/openpresence.spec.ts` verifies image input, “What Jenny sees,” “Media needs inspection,” and reset behavior on Chromium and Pixel 5.
+
+**Apply when:** Adding media inputs, perception providers, Social Mirror object types, action gating, Sandbox corrections, or durable Agent learning from social evidence.
 
 **Added:** 2026-08-13
 
@@ -48,6 +208,24 @@
 
 **Added:** 2026-08-13
 
+## Rule: Activity context must be explicit and rapid duplicates must collapse
+
+**Defect class:** Activity provenance / repeated event presentation
+
+**General principle:** An activity record may show source context only when its lineage identifies that source or target. A concise operator timeline should collapse rapid identical records instead of presenting the same decision as several independent explanations.
+
+**Incident:** Activity used the latest observed post as a fallback for events without lineage, so several separate rows displayed the same “Because of” post. Rapid repeated silence events also appeared as duplicate rows in the visible timeline.
+
+**Why QA missed it:** Earlier Activity QA verified that a context preview appeared for one event, but did not exercise missing lineage or repeated event records in the same populated stream.
+
+**Project enforcement:** `LiveView` resolves context only from `sourceObjectId`, Social Intent/Execution/Outcome targets, or explicit target-object lineage. `addSandboxEvent` and `formSandboxIntent` persist Sandbox source IDs. Activity retains the newest event when identical records occur within ten seconds.
+
+**Executable protection:** `tests/sandbox.test.ts` asserts Sandbox source lineage; `tests/e2e/openpresence.spec.ts` removes lineage and injects a duplicate event through a browser response fixture, then verifies no guessed preview and one visible row on Chromium and Pixel 5.
+
+**Apply when:** Changing Activity, Social Mirror context previews, event lineage, Sandbox decisions, or repeated event projections.
+
+**Added:** 2026-08-13
+
 ## Rule: Sandbox rehearsal must never escape into live delivery
 
 **Defect class:** Environment isolation / simulated delivery boundary
@@ -59,6 +237,20 @@
 **Executable protection:** `tests/sandbox.test.ts` verifies environment creation, Social Mirror normalization, simulated delivery, review gating, virtual time, and session reset. `tests/e2e/openpresence.spec.ts` verifies start, wake, audience event, virtual time, reset, and mobile/desktop flow.
 
 **Apply when:** Changing Playground, Sandbox state, Social Mirror normalization, simulated connectors, Agent rehearsal, or live connector routing.
+
+**Added:** 2026-08-13
+
+## Rule: Agent CLI output must remain machine-readable and sandbox-scoped
+
+**Defect class:** Agent tooling / output contract / environment isolation
+
+**General principle:** AI agents should be able to drive Playground without parsing UI copy or receiving unrelated application state. Every CLI command must return structured JSON by default, identify the selected sandbox session, preserve the observation → decision → execution → outcome chain, and never enable live delivery.
+
+**Project enforcement:** `openpresence playground` targets `/api/state` only with Playground operations, projects state into Presence/world/decisions/review/timeline records, supports deterministic virtual time and JSON scenarios, and requires `--human` for non-machine output. Documentation uses `pnpm --silent` so package-manager banners cannot corrupt JSON streams.
+
+**Executable protection:** `tests/playground-cli.test.ts` verifies projection redaction, operation translation, and structured server errors. Local smoke verification covers `start`, `inspect`, `inject`, `advance`, `timeline`, and scenario replay against the production-shaped app.
+
+**Apply when:** Changing the Playground CLI, scenario format, agent-facing state projections, sandbox commands, or command output formatting.
 
 **Added:** 2026-08-13
 
@@ -89,6 +281,26 @@
 **Executable protection:** `tests/x-connection.test.ts` covers Calendar cognition → standing Social Intent → native X delivery with external evidence; `tests/runtime.test.ts` covers truthful Calendar no-op Activity state; `tests/e2e/openpresence.spec.ts` covers Calendar creation, edit, time persistence, and evaluation.
 
 **Apply when:** Changing Calendar, Standing Intent, scheduler behavior, Agent evaluation, Social Intent formation, or external delivery.
+
+**Added:** 2026-08-13
+
+## Rule: Provider connection identity is not user-editable
+
+**Defect class:** Configuration integrity / provider identity
+
+**General principle:** A connection name that identifies an external provider should be derived from the provider type, not treated as user-owned metadata that can be renamed in a credential form.
+
+**Project-specific risk:** Brain → Provider access previously exposed a writable “Connection name” field, and `configureProvider` accepted that label, allowing an OpenAI/Ollama connection to be presented under an arbitrary name and making provider selection less trustworthy.
+
+**Learned from:** Human-found UI defect in the provider setup flow.
+
+**Why QA missed it:** Earlier provider setup QA verified that a connection could be saved, but did not test identity immutability or compare the browser form with the runtime’s provider enum.
+
+**Project enforcement:** `BrainView` renders provider-owned names for OpenAI, OpenRouter, and Ollama and omits the connection-name input; `applyOperation`’s `configureProvider` branch canonicalizes stored labels through `providerName`.
+
+**Executable protection:** `tests/runtime.test.ts` rejects attempted OpenRouter renames, `tests/provider-connections.test.ts` verifies the OpenRouter endpoint, and `tests/e2e/openpresence.spec.ts` asserts the connection-name field is absent while completing OpenRouter and existing Ollama/OpenAI setup.
+
+**Apply when:** Adding providers, changing Brain provider access, editing credential forms, or changing `configureProvider` persistence.
 
 **Added:** 2026-08-13
 
@@ -296,23 +508,24 @@
 
 **Added:** 2026-08-12
 
-## Rule: Dialogs must center within the usable workspace
+## Rule: Dialogs must center within their intended interaction surface
 
 **Defect class:** Modal layout / visual alignment
 
-**General principle:** A dialog in an application shell should center within the active page workspace, not behind navigation chrome, and should remain vertically centered when the viewport has room.
+**General principle:** A dialog should center within the interaction surface it belongs to. Full-viewport flows must center against the viewport and cover it completely; dialogs intentionally constrained to a page workspace may center within that workspace.
 
-**Project-specific risk:** Add Presence was centered against the full viewport and pinned to the top by a later shared modal rule, making it appear offset from the page content beside the sidebar.
+**Project-specific risk:** Add Presence was previously offset by the workspace sidebar, leaving the navigation outside the scrim and making the popup appear off-center in the full application window.
 
-**Project enforcement:** Add Presence uses the scoped `.add-presence-modal-backdrop` class, which centers within the desktop workspace offset and returns to the full viewport on mobile.
+**Project enforcement:** Add Presence uses the scoped `.add-presence-modal-backdrop` class with full fixed insets and viewport centering at every responsive breakpoint.
 
-**Executable protection:** `tests/e2e/openpresence.spec.ts` measures the rendered dialog against `.workspace` and the backdrop at desktop and mobile sizes, asserting horizontal and vertical offsets below 2px.
+**Executable protection:** `tests/e2e/presence-modal.spec.ts` measures the backdrop against the viewport and the dialog against the viewport center at desktop and mobile sizes.
 
-**Why QA missed it:** Existing Add Presence coverage verified that the dialog opened and submitted but did not inspect rendered geometry or the hidden-state visual layout.
+**Why QA missed it:** Existing Add Presence coverage compared the dialog to the workspace surface, so it did not protect the intended full-viewport scrim contract.
 
 **Apply when:** Adding or changing dialogs, modal backdrops, shell navigation widths, or responsive layout rules.
 
 **Added:** 2026-08-12
+**Updated:** 2026-08-13
 
 ## Rule: Wake and pulse actions must follow Presence lifecycle state
 
@@ -795,5 +1008,21 @@
 **Executable protection:** `tests/identity-boundary.test.ts` covers default postures, persistence, approved facts, and Ghost review gating. `tests/e2e/openpresence.spec.ts` covers settings persistence on Chromium and Pixel 5.
 
 **Apply when:** Changing Presence identity, Ghost behavior, public disclosure, provider/model context, social prompts, or publication review.
+
+**Added:** 2026-08-13
+
+## Rule: Calendar is verified public history; Schedule is future permission
+
+**Defect class:** Product-model ambiguity / false historical record
+
+**General principle:** A historical calendar must describe what entered the public world, not what an Agent intended, considered, drafted, or was asked to consider later. Future Standing Intents belong on a separately named Schedule surface.
+
+**Project-specific risk:** The old Calendar mixed future permission with public history, making drafts and planned activity look like publications and forcing the operator to infer behavioral rhythm from an intent list.
+
+**Project enforcement:** `derivePublicHistory` admits only public Mirror objects authored by the selected Presence or successful Executions with an external reference. `app/page.tsx` renders that projection in Calendar with Week/Month/Day views and filters; the former `CalendarView` is now `ScheduleView`, and all Standing Intent CRUD/evaluation remains there.
+
+**Executable protection:** `tests/runtime.test.ts` verifies pending/private records are excluded while a successful externally evidenced publication is included. `tests/e2e/calendar-history.spec.ts` verifies the fresh Calendar empty state, Week/Month/Day browsing, and the separate Schedule surface; `tests/e2e/calendar-week.spec.ts` and `tests/e2e/openpresence.spec.ts` exercise Schedule intent creation, editing, and evaluation.
+
+**Apply when:** Changing Calendar, Schedule, Standing Intent, publication history, Social Mirror projections, outcome metrics, or Presence navigation.
 
 **Added:** 2026-08-13
