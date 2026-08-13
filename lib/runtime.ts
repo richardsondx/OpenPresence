@@ -78,6 +78,11 @@ export function initialState(): OpenPresenceState {
 function makeFiles(input: CreateAgentInput, presence: Presence): AgentFile[] { return (Object.keys(fileMeta) as FileKind[]).map((kind) => ({ kind, ...fileMeta[kind], content: fileContent(kind, input, presence), revision: 1, updatedAt: now() })); }
 function event(type: LiveEvent["type"], title: string, detail: string, tone: LiveEvent["tone"] = "neutral", lineage?: Pick<LiveEvent, "presenceId" | "intentId" | "executionId" | "outcomeId" | "sessionId" | "sourceObjectId">): LiveEvent { return { id: id("evt"), type, title, detail, time: now(), tone, ...lineage }; }
 
+const activityObservationTitles = new Set(["Pulse completed", "Social Mirror updated", "X observation failed", "Considering first public move", "Reply observed", "Calendar attention started", "Calendar evaluation unavailable"]);
+export function isActivityDecisionEvent(item: LiveEvent) {
+  return item.type !== "system" || activityObservationTitles.has(item.title);
+}
+
 export function compilePresenceContext(presence: Presence): PresenceContext {
   const affordances = presence.capabilities ?? CHANNEL_CAPABILITIES[presence.channel as keyof typeof CHANNEL_CAPABILITIES] ?? [];
   const displayName = presence.name || presence.context?.publicIdentity?.displayName || presence.handle;

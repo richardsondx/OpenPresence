@@ -103,3 +103,11 @@
 **Tests/evals affected:** 70 targeted unit tests, typecheck, semantic evaluator syntax checks, Auto-mode repeated-run harness, and structural audit support. Full GPT benchmark, holdout, and fresh-session evidence remains pending valid provider configuration.
 
 **Approved by:** User course correction and canonical OpenPresence philosophy.
+
+## 2026-08-13 — Make Activity explain how a Presence decision was reached
+
+**What changed:** Activity now filters generic Presence-settings acknowledgements out of “What [Presence] decided,” labels the empty state as “No Presence decisions yet,” and shows each eligible row’s `Observed`, `Judgment`, and `Delivery` path with truthful missing-lineage fallbacks.
+**Why:** Repeated infrastructure updates looked like identical social decisions and gave the operator no way to distinguish world evidence, Agent judgment, selected action, or delivery state.
+**Requirements affected:** Activity provenance, operator legibility, configuration/event boundaries, and the Agent → Social Intent → Execution → Delivery → Outcome separation.
+**Tests/evals affected:** Runtime event-boundary regression, focused Activity Chromium + mobile browser check, typecheck, lint, production build, and `git diff --check`.
+**Approved by:** User request and canonical OpenPresence philosophy.

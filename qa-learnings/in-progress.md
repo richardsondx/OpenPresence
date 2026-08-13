@@ -1,5 +1,13 @@
 # Active QA Work
 
+## COMPLETE — Explain Activity decision provenance
+
+- **Started:** 2026-08-13
+- **Scope:** Clarify the selected Presence's Activity decision rows so an operator can see what was observed, what social judgment was made, which action was selected, and whether delivery is pending, reviewed, or complete.
+- **Product boundary:** Preserve the separation between world observation, Agent judgment, Social Intent, Execution, Delivery, and Outcome. This is an evidence presentation fix, not a new cognition or execution behavior.
+- **Acceptance:** Repeated settings/system events no longer read as if they were meaningful social decisions; a decision row names its trigger/evidence, chosen action or silence, and current delivery state; the explanation remains truthful when evidence is missing.
+- **Verification:** 123 unit tests, focused Activity Chromium + mobile E2E regression passed, fresh Sandbox browser review confirmed distinct provenance lines on desktop and 390px mobile with no horizontal overflow, browser logs were clean, typecheck, lint, production build, and `git diff --check` passed.
+
 ## COMPLETE — Separate Teach, Presence Chat, and Playground
 
 - **Started:** 2026-08-13

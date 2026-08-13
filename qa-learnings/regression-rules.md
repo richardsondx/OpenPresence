@@ -1,5 +1,21 @@
 # Regression rules
 
+## Rule: Activity decisions must expose provenance and exclude configuration churn
+
+**Defect class:** Activity decision ambiguity / system-event leakage
+
+**General principle:** An operational feed called “What [Presence] decided” must distinguish observed evidence, Agent judgment, selected Social Intent, and delivery state. Configuration acknowledgements and other infrastructure updates are not decisions and must not masquerade as them.
+
+**Incident:** Repeated `Presence settings updated` rows all used the same generic copy, so the Activity feed looked like a sequence of identical decisions and did not explain how any decision was reached.
+
+**Project enforcement:** `isActivityDecisionEvent` excludes generic settings churn from the decision feed. Eligible rows render a compact `Observed`, `Judgment`, and `Delivery` path, with truthful fallbacks when no linked intent, execution, or outcome exists. The empty state names the absence of decisions and directs configuration changes to Settings.
+
+**Executable protection:** `tests/runtime.test.ts` covers the event boundary; `tests/e2e/openpresence.spec.ts` asserts configuration changes do not appear as Presence decisions and the empty state explains the feed.
+
+**Apply when:** Changing Activity event projections, system-event titles, Social Intent/execution lineage, decision summaries, or Presence Settings mutations.
+
+**Added:** 2026-08-13
+
 ## Rule: Public Self must explain the zero-disclosure state
 
 **Defect class:** Presence settings / disclosure-state ambiguity
