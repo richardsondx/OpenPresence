@@ -1,5 +1,25 @@
 # Decisions
 
+## 2026-08-13 — Confirm Review-to-Auto transitions with pending work
+
+**What changed:** Settings now shows the exact number of pending review replies before changing a capability to Auto. Cancel keeps the capability in Review; confirmation enables Auto, approves the complete matching queue, and processes it through the existing simulated/native/Bridge execution path.
+
+**Why:** Removing the operator checkpoint is a consequential execution decision. The confirmation makes the boundary explicit while keeping Agent judgment separate from operator approval and connector delivery.
+
+**Requirements affected:** Execution envelope, approval safety, pending reply handling, Sandbox/live connector boundaries, and operator clarity.
+
+**Tests/evals affected:** 117 unit tests, typecheck, lint, production build, `git diff --check`, and the focused Settings flow on Chromium and Pixel 5.
+
+**Approved by:** User request and canonical OpenPresence philosophy.
+
+## 2026-08-13 — Make operator approval the Activity primary CTA
+
+**What changed:** The pending `Approve execution` action now uses a high-contrast accent treatment, larger hit area, centered icon/label, hover elevation, and a visible keyboard focus ring.
+**Why:** Approval is the operator's immediate decision in the execution lifecycle and must stand out from secondary Activity controls without implying that approval changes the Agent's judgment.
+**Requirements affected:** Activity review discoverability, operator execution control, accessibility, and the Agent → Social Intent → Execution boundary.
+**Tests/evals affected:** Chromium + Pixel 5 review lifecycle, CTA contrast/size/focus assertions, typecheck, lint, unit tests, production build, and `git diff --check`.
+**Approved by:** User request and canonical OpenPresence philosophy.
+
 ## 2026-08-13 — Stack Playground threads and scope Activity by Presence route
 
 **What changed:** Playground now renders parent posts with their replies nested beneath them. Activity is filtered to the selected Presence's channel and Sandbox/live environment, simulated context is tagged `Playground`, and source context uses `↳`.

@@ -1,5 +1,37 @@
 # Regression rules
 
+## Rule: Enabling Auto must explicitly approve the pending review queue
+
+**Defect class:** Execution-policy transition / implicit approval
+
+**General principle:** Changing a capability from Review to Auto is an operator decision with an execution consequence. If pending work is waiting at that checkpoint, the UI must show the exact count and require confirmation before changing the policy or processing the work.
+
+**Project-specific risk:** A settings click could silently remove the operator checkpoint while leaving already-formed reply executions in an ambiguous state, or could process only part of the pending queue.
+
+**Project enforcement:** `confirmAutoMode` validates the Presence, capability affordances, and complete pending execution ID set before atomically enabling Auto, approving the matching executions, and handing them to the correct connector delivery path. The Settings dialog keeps Review unchanged when dismissed.
+
+**Executable protection:** `tests/sandbox.test.ts` covers stale-queue rejection and one-request Sandbox delivery; `tests/e2e/openpresence.spec.ts` asserts exact pending-count copy, cancel preservation, confirmed Auto state, and completed reply delivery on Chromium + Pixel 5.
+
+**Apply when:** Changing execution modes, approval queues, Settings capability controls, or connector delivery transitions.
+
+**Added:** 2026-08-13
+
+## Rule: Operator approval must be an unmistakable primary action
+
+**Defect class:** Activity CTA hierarchy / review discoverability
+
+**General principle:** When delivery is waiting for operator approval, the approval action must be visually dominant, keyboard-visible, and readable at a glance without changing the underlying execution boundary.
+
+**Project-specific risk:** The `Approve execution` control inherited the quiet secondary-button treatment and looked like a low-priority utility action despite being the operator's next required decision.
+
+**Project enforcement:** `.review-cta` uses high-contrast accent color, a larger hit area, centered icon/label, hover elevation, and a dedicated focus ring; approval still calls the existing `approveExecution` mutation.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts` asserts the review CTA class, enabled contrast colors, 48px minimum height, keyboard focus, and successful review/manual execution lifecycle on Chromium + Pixel 5.
+
+**Apply when:** Changing Activity review cards, approval actions, execution lifecycle controls, or CTA hierarchy.
+
+**Added:** 2026-08-13
+
 ## Rule: Playground threads and Activity scopes must preserve social context
 
 **Defect class:** Social thread presentation / channel-environment leakage

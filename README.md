@@ -16,6 +16,11 @@ The project is local-first and under active development. It is designed around a
   </tr>
   <tr>
     <td><img src="docs/screenshots/presence-settings.png" alt="OpenPresence Presence Settings" /></td>
+    <td><img src="docs/screenshots/playground.png" alt="OpenPresence Playground" /></td>
+    <td><img src="docs/screenshots/activity-review.png" alt="OpenPresence Activity with review" /></td>
+  </tr>
+  <tr>
+    <td><img src="docs/screenshots/review-confirmation.png" alt="OpenPresence Review confirmation" /></td>
     <td><img src="docs/screenshots/manage-agent.png" alt="OpenPresence Manage Agent" /></td>
     <td><img src="docs/screenshots/agent-tools.png" alt="OpenPresence Agent tools" /></td>
   </tr>

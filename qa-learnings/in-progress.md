@@ -1,5 +1,21 @@
 # Active QA Work
 
+## COMPLETE — Confirm Auto transitions before approving pending replies
+
+- **Started:** 2026-08-13
+- **Scope:** When a Presence capability changes from Review to Auto, show the exact number of pending review executions and require confirmation before approving and processing them.
+- **Safety boundary:** Local settings/runtime and test Sandbox only; no live connector or production mutation during QA.
+- **Acceptance:** Switching one capability to Auto with no pending review actions applies immediately; with pending actions it shows a count confirmation, cancel leaves settings/actions unchanged, confirm applies Auto and processes all matching pending review executions.
+- **Verification:** Runtime/unit coverage, focused Activity/Settings Chromium + Pixel 5 browser flow, typecheck, lint, production build, and `git diff --check`.
+
+## COMPLETE — Make the Activity review CTA visually prominent
+
+- **Started:** 2026-08-13
+- **Scope:** Increase the visual prominence and contrast of the `Approve execution` CTA in the Activity decision card without changing approval semantics or execution boundaries.
+- **Safety boundary:** Local UI styling and browser QA only. No live connector, external account, or production state mutation.
+- **Acceptance:** A pending review action is immediately recognizable as the primary CTA on desktop and mobile, remains keyboard-focusable, and retains readable contrast in enabled, hover, focus, and disabled states.
+- **Verification:** 115 unit tests, typecheck, lint, production build, `git diff --check`, and the Activity review lifecycle with CTA contrast, sizing, and keyboard-focus assertions passed on Chromium and Pixel 5.
+
 ## COMPLETE — Stack Playground replies and scope Activity to the selected channel
 
 - **Started:** 2026-08-13

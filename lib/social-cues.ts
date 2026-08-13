@@ -13,9 +13,10 @@ export interface SocialCueSummary {
 
 const directAddressPattern = /(^|\s)@[a-z0-9_]{2,}/i;
 const ratingReferencePattern = /\b(?:rate|rating|rated|score|scored|out of\s*10|\d+\/10)\b/i;
-const ratingRequestPattern = /\b(?:rate mine|rate my|rate yours|what would you rate|give me a rating|score mine|score my)\b|\brate\s+(?:this|it|mine|my)\b/i;
+const ratingRequestPattern = /\b(?:rate mine|rate my|rate yours|what would you rate|give me a rating|score mine|score my)\b|\brate\s+(?:this|it|mine|my)\b|\b(?:haven['’]?t|didn['’]?t)\s+rate(?:d)?\s+(?:mine|my|it)\b/i;
 const opinionPattern = /\b(?:what do you think|your take|thoughts on|be honest|answer the question|how does this look)\b/i;
-const servicePattern = /\b(?:looking for|need help finding|anyone know|who does|who can|introduce me|connect me|recommend someone|near .{0,60}\b(?:who|that)\b)\b/i;
+const answerPressurePattern = /\b(?:supposed to answer|didn['’]?t answer|still owe|you haven['’]?t answered|answer me)\b/i;
+const servicePattern = /\b(?:looking for|need help finding|anyone know|who do(?:es)?|who can (?:help|connect|recommend|do|provide|find)|introduce me|connect me|recommend someone)\b/i;
 const technicalPattern = /\b(?:api|benchmark|baseline|chart|code|denominator|deterministic|execution|github|implementation|latency|model|production|proof|replay|schema|security|spec|technical|tamper|test|verification)\b|https?:\/\//i;
 const sensitivePattern = /\b(?:homicide|theft|prison|criminal|violent|wrongful conviction|abuse|suicide|self-harm|harassment|immigration|war|死|kill)\b/i;
 const hostilePattern = /\b(?:dumbo|idiot|stupid|moron|shut up|loser|trash)\b/i;
@@ -30,7 +31,7 @@ export function classifySocialCue(content: string, presenceName?: string, presen
   const directAddress = Boolean((presenceHandle && lower.includes(presenceHandle.toLowerCase())) || (presenceName && new RegExp(`\\b${presenceName.replace(/[.*+?^${}()|[\\]\\]/g, "\\$&")}\\b`, "i").test(text)) || directAddressPattern.test(text));
   const rating = ratingReferencePattern.test(text);
   const ratingRequest = ratingRequestPattern.test(text);
-  const opinion = opinionPattern.test(text);
+  const opinion = opinionPattern.test(text) || answerPressurePattern.test(text);
   const service = servicePattern.test(text);
   const technical = technicalPattern.test(text);
   const sensitive = sensitivePattern.test(text);
