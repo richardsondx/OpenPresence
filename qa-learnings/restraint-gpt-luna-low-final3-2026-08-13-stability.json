@@ -1,0 +1,649 @@
+{
+  "reportVersion": "social-capability-stability.v1",
+  "source": "scenarios/restraint-development-20.json",
+  "packets": 54,
+  "repeatedRuns": 3,
+  "semanticEvaluator": {
+    "provider": "openai",
+    "model": "gpt-5.6-luna",
+    "reasoning": "medium"
+  },
+  "aggregate": {
+    "actAppropriateness": 0.9907407407407407,
+    "wordingQuality": 0.9285714285714286
+  },
+  "perRun": [
+    {
+      "run": 1,
+      "actionDistribution": {
+        "no_op_or_unavailable": 14,
+        "reply": 3,
+        "like": 1
+      },
+      "packets": 18
+    },
+    {
+      "run": 2,
+      "actionDistribution": {
+        "no_op_or_unavailable": 14,
+        "reply": 3,
+        "like": 1
+      },
+      "packets": 18
+    },
+    {
+      "run": 3,
+      "actionDistribution": {
+        "no_op_or_unavailable": 13,
+        "reply": 2,
+        "like": 3
+      },
+      "packets": 18
+    }
+  ],
+  "stability": {
+    "uniqueSourceCases": 18,
+    "actPassAllRuns": 17,
+    "actUnstable": 1,
+    "actFailAllRuns": 0,
+    "wordingPassAllRuns": 17,
+    "wordingUnstable": 1,
+    "wordingFailAllRuns": 0
+  },
+  "cases": [
+    {
+      "sourceCase": 1,
+      "actor": "Mara Vale",
+      "actPassAll": true,
+      "actFailAll": false,
+      "actUnstable": false,
+      "wordingPassAll": true,
+      "wordingFailAll": false,
+      "wordingUnstable": false,
+      "runs": [
+        {
+          "run": 1,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "A self-contained motivational greeting creates no clear need for engagement, so silence is appropriate."
+        },
+        {
+          "run": 2,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The greeting is self-contained and offers no clear reason to engage."
+        },
+        {
+          "run": 3,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The generic greeting has no request, claim, or unresolved need."
+        }
+      ]
+    },
+    {
+      "sourceCase": 2,
+      "actor": "Mara Vale",
+      "actPassAll": true,
+      "actFailAll": false,
+      "actUnstable": false,
+      "wordingPassAll": true,
+      "wordingFailAll": false,
+      "wordingUnstable": false,
+      "runs": [
+        {
+          "run": 1,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The post is repetitive meta-commentary without a request or substantive opening; no reply is warranted."
+        },
+        {
+          "run": 2,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "Repetitive advice commentary does not create a substantive opening or unresolved need."
+        },
+        {
+          "run": 3,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The repetitive meta-commentary does not warrant another contribution."
+        }
+      ]
+    },
+    {
+      "sourceCase": 3,
+      "actor": "Owen Reed",
+      "actPassAll": true,
+      "actFailAll": false,
+      "actUnstable": false,
+      "wordingPassAll": true,
+      "wordingFailAll": false,
+      "wordingUnstable": false,
+      "runs": [
+        {
+          "run": 1,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "Generic engagement bait offers no specific claim or useful conversational opening."
+        },
+        {
+          "run": 2,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The generic work-hard slogan is engagement bait without useful specifics."
+        },
+        {
+          "run": 3,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The post is generic engagement bait with no substantive opening."
+        }
+      ]
+    },
+    {
+      "sourceCase": 4,
+      "actor": "Owen Reed",
+      "actPassAll": true,
+      "actFailAll": false,
+      "actUnstable": false,
+      "wordingPassAll": false,
+      "wordingFailAll": false,
+      "wordingUnstable": true,
+      "runs": [
+        {
+          "run": 1,
+          "act": 2,
+          "wording": 2,
+          "layer": "none",
+          "rationale": "Clarification is necessary because no company information supports a rating, and the reply requests concrete evidence in a grounded way."
+        },
+        {
+          "run": 2,
+          "act": 2,
+          "wording": 1,
+          "layer": "expression",
+          "rationale": "Clarification is the right act, but “numerology” is somewhat dismissive and socially sharper than necessary."
+        },
+        {
+          "run": 3,
+          "act": 2,
+          "wording": 2,
+          "layer": "none",
+          "rationale": "Clarification is necessary, and the reply specifies the missing company and evaluation information clearly."
+        }
+      ]
+    },
+    {
+      "sourceCase": 5,
+      "actor": "Owen Reed",
+      "actPassAll": true,
+      "actFailAll": false,
+      "actUnstable": false,
+      "wordingPassAll": true,
+      "wordingFailAll": false,
+      "wordingUnstable": false,
+      "runs": [
+        {
+          "run": 1,
+          "act": 2,
+          "wording": 2,
+          "layer": "none",
+          "rationale": "The reply appropriately acknowledges the metric while requesting missing product, user, and definition context before evaluating."
+        },
+        {
+          "run": 2,
+          "act": 2,
+          "wording": 2,
+          "layer": "none",
+          "rationale": "The response correctly treats the metrics as insufficient and requests product, growth, cohort, and evaluation context."
+        },
+        {
+          "run": 3,
+          "act": 2,
+          "wording": 2,
+          "layer": "none",
+          "rationale": "The response appropriately gives the metric limited credit while requesting the context needed for a grounded rating."
+        }
+      ]
+    },
+    {
+      "sourceCase": 6,
+      "actor": "Jules Park",
+      "actPassAll": true,
+      "actFailAll": false,
+      "actUnstable": false,
+      "wordingPassAll": true,
+      "wordingFailAll": false,
+      "wordingUnstable": false,
+      "runs": [
+        {
+          "run": 1,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The sweeping claim lacks the referenced screenshot or supporting evidence, so non-engagement avoids speculation."
+        },
+        {
+          "run": 2,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The unsupported universal claim lacks the screenshot and any concrete evidence, so silence is best supported."
+        },
+        {
+          "run": 3,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The sensational claim lacks the referenced evidence and does not ask for assessment."
+        }
+      ]
+    },
+    {
+      "sourceCase": 7,
+      "actor": "Jules Park",
+      "actPassAll": true,
+      "actFailAll": false,
+      "actUnstable": false,
+      "wordingPassAll": true,
+      "wordingFailAll": false,
+      "wordingUnstable": false,
+      "runs": [
+        {
+          "run": 1,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The author has already supplied a self-correction; replying would merely restate a completed clarification."
+        },
+        {
+          "run": 2,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The author has already corrected the claim, leaving no unresolved question for a reply to address."
+        },
+        {
+          "run": 3,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The self-contained correction closes the issue without leaving a question for the Presence."
+        }
+      ]
+    },
+    {
+      "sourceCase": 8,
+      "actor": "Nia Chen",
+      "actPassAll": true,
+      "actFailAll": false,
+      "actUnstable": false,
+      "wordingPassAll": true,
+      "wordingFailAll": false,
+      "wordingUnstable": false,
+      "runs": [
+        {
+          "run": 1,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "This is an informal affirmation without visible context, request, or substantive claim."
+        },
+        {
+          "run": 2,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The brief affirmation supplies no visible substantive context or request."
+        },
+        {
+          "run": 3,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The brief agreement has no visible underlying claim or request to engage with."
+        }
+      ]
+    },
+    {
+      "sourceCase": 9,
+      "actor": "Nia Chen",
+      "actPassAll": true,
+      "actFailAll": false,
+      "actUnstable": false,
+      "wordingPassAll": true,
+      "wordingFailAll": false,
+      "wordingUnstable": false,
+      "runs": [
+        {
+          "run": 1,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The thank-you explicitly closes the exchange and presents no unresolved need."
+        },
+        {
+          "run": 2,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The acknowledgment explicitly indicates closure and does not invite further engagement."
+        },
+        {
+          "run": 3,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The acknowledgment indicates that the prior exchange is complete."
+        }
+      ]
+    },
+    {
+      "sourceCase": 10,
+      "actor": "Tariq Moss",
+      "actPassAll": true,
+      "actFailAll": false,
+      "actUnstable": false,
+      "wordingPassAll": true,
+      "wordingFailAll": false,
+      "wordingUnstable": false,
+      "runs": [
+        {
+          "run": 1,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "An unsupported promotional pitch with no product details does not merit amplification."
+        },
+        {
+          "run": 2,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The broad app promotion lacks enough detail or evidence to justify attention."
+        },
+        {
+          "run": 3,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The promotional solicitation supplies no product evidence or specific evaluative opening."
+        }
+      ]
+    },
+    {
+      "sourceCase": 11,
+      "actor": "Tariq Moss",
+      "actPassAll": true,
+      "actFailAll": false,
+      "actUnstable": false,
+      "wordingPassAll": true,
+      "wordingFailAll": false,
+      "wordingUnstable": false,
+      "runs": [
+        {
+          "run": 1,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The author explicitly provides no details, leaving no grounded basis for useful engagement."
+        },
+        {
+          "run": 2,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "An unsupported promotional assertion explicitly supplies no details and creates no clear opening."
+        },
+        {
+          "run": 3,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The unsupported promotional claim explicitly lacks details and does not request a response."
+        }
+      ]
+    },
+    {
+      "sourceCase": 12,
+      "actor": "Sofia Bell",
+      "actPassAll": true,
+      "actFailAll": false,
+      "actUnstable": false,
+      "wordingPassAll": true,
+      "wordingFailAll": false,
+      "wordingUnstable": false,
+      "runs": [
+        {
+          "run": 1,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "Responding to an unsupported personal insult would add heat without advancing a useful exchange."
+        },
+        {
+          "run": 2,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The insult contains no request or substantive claim, so disengagement is appropriate."
+        },
+        {
+          "run": 3,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The direct insult has no substantive content or unresolved issue to address."
+        }
+      ]
+    },
+    {
+      "sourceCase": 13,
+      "actor": "Cal West",
+      "actPassAll": true,
+      "actFailAll": false,
+      "actUnstable": false,
+      "wordingPassAll": true,
+      "wordingFailAll": false,
+      "wordingUnstable": false,
+      "runs": [
+        {
+          "run": 1,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The broad algorithmic claim has no example or evidence and no request for discussion."
+        },
+        {
+          "run": 2,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The unsupported generalization has no example, evidence, or question requiring response."
+        },
+        {
+          "run": 3,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The broad algorithm claim lacks evidence, examples, and a request for discussion."
+        }
+      ]
+    },
+    {
+      "sourceCase": 14,
+      "actor": "Cal West",
+      "actPassAll": true,
+      "actFailAll": false,
+      "actUnstable": false,
+      "wordingPassAll": true,
+      "wordingFailAll": false,
+      "wordingUnstable": false,
+      "runs": [
+        {
+          "run": 1,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The author explicitly frames this as a question-free, evidence-free mood report, making silence suitable."
+        },
+        {
+          "run": 2,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The author explicitly disclaims a question and evidence, making non-engagement appropriate."
+        },
+        {
+          "run": 3,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "This is explicitly an evidence-free mood report with no question or actionable opening."
+        }
+      ]
+    },
+    {
+      "sourceCase": 15,
+      "actor": "Rhea Singh",
+      "actPassAll": true,
+      "actFailAll": false,
+      "actUnstable": false,
+      "wordingPassAll": true,
+      "wordingFailAll": false,
+      "wordingUnstable": false,
+      "runs": [
+        {
+          "run": 1,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "A pleasant personal observation is self-contained and does not require a public response."
+        },
+        {
+          "run": 2,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The personal sunset observation is pleasant but self-contained; silence is socially acceptable."
+        },
+        {
+          "run": 3,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "A like is a proportionate, low-cost acknowledgment of a pleasant personal observation."
+        }
+      ]
+    },
+    {
+      "sourceCase": 16,
+      "actor": "Rhea Singh",
+      "actPassAll": false,
+      "actFailAll": false,
+      "actUnstable": true,
+      "wordingPassAll": true,
+      "wordingFailAll": false,
+      "wordingUnstable": false,
+      "runs": [
+        {
+          "run": 1,
+          "act": 2,
+          "wording": 2,
+          "layer": "none",
+          "rationale": "The warm reply appropriately acknowledges the goodwill and connects naturally to the observed sunset detail."
+        },
+        {
+          "run": 2,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "A like is a proportionate acknowledgment of a warm, non-substantive well-wish without forcing a reply."
+        },
+        {
+          "run": 3,
+          "act": 1,
+          "wording": null,
+          "layer": "planning",
+          "rationale": "A like is defensible for a self-contained well-wish, though a brief warm reply would better acknowledge the direct goodwill."
+        }
+      ]
+    },
+    {
+      "sourceCase": 17,
+      "actor": "Mina Fox",
+      "actPassAll": true,
+      "actFailAll": false,
+      "actUnstable": false,
+      "wordingPassAll": true,
+      "wordingFailAll": false,
+      "wordingUnstable": false,
+      "runs": [
+        {
+          "run": 1,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The reflection identifies missing introduction details but does not make a direct request or supply a target."
+        },
+        {
+          "run": 2,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The post is reflective rather than an active introduction request, so advice would be unnecessary."
+        },
+        {
+          "run": 3,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The post is self-reflective and does not make a direct request or identify an actionable introduction."
+        }
+      ]
+    },
+    {
+      "sourceCase": 18,
+      "actor": "Mina Fox",
+      "actPassAll": true,
+      "actFailAll": false,
+      "actUnstable": false,
+      "wordingPassAll": true,
+      "wordingFailAll": false,
+      "wordingUnstable": false,
+      "runs": [
+        {
+          "run": 1,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The author explicitly indicates that a quiet like is sufficient, and the like matches that preference."
+        },
+        {
+          "run": 2,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The explicit preference for a quiet like makes the selected action especially well matched."
+        },
+        {
+          "run": 3,
+          "act": 2,
+          "wording": null,
+          "layer": "none",
+          "rationale": "The selected like directly follows the author's stated preference for a quiet signal."
+        }
+      ]
+    }
+  ]
+}

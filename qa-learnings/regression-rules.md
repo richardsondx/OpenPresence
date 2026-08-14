@@ -1,5 +1,141 @@
 # Regression rules
 
+## Rule: Teach must not turn symbol-only operator context into assistant onboarding
+
+**Defect class:** Teach conversation identity / low-information operator input
+
+**General principle:** Teach is a person-shaped conversation with the Agent's private mind. A punctuation or symbol-only operator turn may be meaningful context, but it is not a request for a help menu, topic invention, or generic onboarding response.
+
+**Incident:** The operator sent \`.\` and \`?\`; Teach answered with “Share a question, idea, or half-formed thought” and “What’s on your mind?” The transcript looked like a generic assistant instead of an Agent being shaped by its operator.
+
+**Project enforcement:** \`isLowInformationCue\` records the operator turn without adding a canned Agent reply, the state route skips the model call for that cue, and the operator prompt explicitly prohibits generic AI-assistant onboarding.
+
+**Executable protection:** \`tests/runtime.test.ts\` asserts symbol-only Teach turns contain only the operator message; \`tests/e2e/openpresence.spec.ts\` verifies a fresh \`?\` turn has no onboarding response; \`tests/ai.test.ts\` asserts the Teach prompt is person-shaped.
+
+**Apply when:** Changing Teach, operator conversation routing, Brain prompt construction, low-information handling, or Chat/Teach surface boundaries.
+
+**Added:** 2026-08-13
+
+## Rule: UI forms must enforce runtime contracts before submission
+
+**Defect class:** Form validation / API contract mismatch
+
+**General principle:** Client forms should constrain values to the same limits as the write API and provide an actionable validation path before submission.
+
+**Project-specific risk:** The Manage Agent skill form allowed prompts longer than the API's 500-character limit, producing only a generic save failure.
+
+**Learned from:** OpenPresence Playground experiment on 2026-08-13.
+
+**Why QA missed it:** The form had required fields but no visible length constraint, and existing coverage did not exercise a near-boundary skill prompt.
+
+**Project enforcement:** `app/page.tsx` applies `maxLength={100}` to skill names and `maxLength={500}` to skill prompts; `tests/e2e/openpresence.spec.ts` asserts both attributes and completes a successful skill creation.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts` — `Skill creation keeps the instruction within the API contract`.
+
+**Apply when:** Adding or editing any form backed by a stricter Zod/API length, enum, format, or cardinality constraint.
+
+**Added:** 2026-08-13
+
+## Rule: Provider switching must choose an available runtime model
+
+**Defect class:** Runtime selection / environment capability mismatch
+
+**General principle:** A provider selector must choose from currently available capabilities, not a hard-coded default that may not exist in the target environment.
+
+**Project-specific risk:** Switching an Agent to Ollama selected `llama3.2` even though the local runtime only exposed `qwen3-vl:8b`, `qwen2.5:7b-instruct`, and other installed models; Playground then failed before cognition.
+
+**Learned from:** Alex Klonemozi Playground experiment on 2026-08-13.
+
+**Why QA missed it:** Provider UI coverage checked the selected provider label but not that the selected model was installed and executable.
+
+**Project enforcement:** `app/page.tsx` selects the first discovered Ollama model when changing providers; Brain's model grid remains the source of truth for explicit model selection.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts` — recommended follow-up: mock `/api/ollama/models` with an installed-model fixture and assert provider switching selects that model; currently missing in the existing suite.
+
+**Apply when:** Changing provider access, model discovery, Agent runtime selection, or AI-backed Playground/Chat flows.
+
+**Added:** 2026-08-13
+
+## Rule: Low-information social cues must be judged in context
+
+**Defect class:** Social cognition / minimal or ambiguous inbound content
+
+**General principle:** A short fragment, punctuation mark, emoji, brief acknowledgment, or casual greeting is neither an automatic question nor an automatic reply obligation. Use thread and relationship evidence to decide whether it opens a real exchange. If it does, choose the smallest natural response; otherwise preserve `no_op`. Never turn low-information content into assistant onboarding, invented context, or a canned public line.
+
+**Incident:** A human may answer a minimal cue with `??`, `Yes?`, `👀`, a tiny acknowledgment, or silence depending on the room. Treating every cue as a request produces performative activity; treating every cue as meaningless can miss a genuine conversational opening.
+
+**Project enforcement:** `promptFor` includes the model-facing rule for current and future Agents, and `fileContent("BRAIN")` includes the durable default Brain rule. No phrase-specific branch selects a public action.
+
+**Executable protection:** `tests/ai.test.ts` asserts that social cognition receives the low-information-cue guidance and that newly created Agents carry the Brain rule. The isolated Chrome Playground experiment is the current behavioral evidence; recommended follow-up is a small real-model eval fixture covering fresh and established relationships without asserting exact wording.
+
+**Apply when:** Changing Brain defaults, social cognition prompts, low-content social handling, clarification guidance, or Playground decision evaluation.
+
+**Added:** 2026-08-13
+
+## Rule: Social evaluation failures must not masquerade as intentional silence
+
+**Defect class:** Original Post Rehearsal / structured AI decision handling
+
+**General principle:** A no-op is a valid Agent judgment only when cognition returned a valid social decision. A malformed or unavailable model response must be surfaced as an evaluation failure, while deterministic test mode must provide structured social fixtures so the publication lifecycle is actually exercised.
+
+**Incident:** Original Post Rehearsal received the generic chat mock sentence instead of structured social-decision JSON. The parser correctly refused to publish, but the workflow recorded the result as `NO_OP` and told the operator the Presence chose silence, making an evaluation failure look like a deliberate identity judgment.
+
+**Project enforcement:** `generateAgentSocialDecision` returns a structured Sandbox-only fixture under `OPENPRESENCE_AI_MOCK=1`; `runSandboxAgentCycle` records `Sandbox evaluation unavailable` for the invalid structured-response rationale; the rehearsal completion copy names deliberate silence as “Silence” and explains that no post was formed.
+
+**Executable protection:** `tests/ai.test.ts` verifies structured mock decisions, `tests/sandbox.test.ts` preserves valid no-op calibration and its plain-language outcome, and `tests/e2e/openpresence.spec.ts` verifies Original Post Rehearsal publishes a Sandbox post, preserves private inspiration, records `fits` evidence, and passes on Chromium and Pixel 5.
+
+**Apply when:** Changing Original Post Rehearsal, social decision parsing, AI mock/replay behavior, Sandbox publication lifecycle, or no-op/error copy.
+
+**Added:** 2026-08-13
+
+## Rule: List-like Presence Brief fields must not rewrite text while typing
+
+**Defect class:** Controlled textarea input loss / comma-separated Brief editing
+
+**General principle:** Preserve the operator’s raw draft text during editing. Parse and normalize list-like values at an explicit commit boundary so punctuation, separators, and partial entries remain editable.
+
+**Incident:** Primary territory, Adjacent territory, and Keep out split the textarea value and filtered empty items on every keystroke. Typing a comma created an empty trailing item, which was immediately removed and made the comma disappear.
+
+**Project enforcement:** `PresenceView` stores raw territory strings separately from the persisted `PresenceBrief` arrays; `territoryValues` is applied only by Save brief. Cancel and reopening the editor rehydrate from persisted Presence state.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts` fills trailing commas in Adjacent territory and Keep out, asserts the comma remains before completion, saves internal comma-separated values, reopens the editor, and verifies persistence on Chromium and mobile.
+
+**Apply when:** Changing Presence Brief, territory, boundaries, comma-separated settings inputs, or controlled list-like textareas.
+
+**Added:** 2026-08-13
+
+## Rule: Schedule timing should explain relevance, not execution mechanics
+
+**Defect class:** Standing Intent timing abstraction / progressive disclosure
+
+**General principle:** A scheduled intention grants the Agent a future moment to reconsider the world; it is not a guaranteed delivery slot. The default form should make that boundary legible without requiring operators to understand the persisted execution-window representation.
+
+**Incident:** Schedule exposed every intent with the same raw `Execution window` field, making a meaningful attention choice look like an arbitrary delivery setting and making all updates appear equivalent.
+
+**Project enforcement:** `ScheduleView` keeps the internal window for runtime compatibility, but defaults to a collapsed `Timing options` control with Flexible, Exact time, and Custom relevance choices. List and Week surfaces describe consideration rather than an execution window.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts` asserts the raw field is absent by default, the timing panel is collapsed, the recommended explanation appears when expanded, and custom start/end values persist as consideration copy on Chromium and mobile.
+
+**Apply when:** Changing Schedule, standing intents, future attention, timing controls, calendar geometry, or execution-envelope copy.
+
+**Added:** 2026-08-13
+
+## Rule: Conversational surfaces must render the submitted turn before model completion
+
+**Defect class:** Chat/Teach loading-state omission / duplicate transcript
+
+**General principle:** A conversational submission is a visible user turn immediately. While the Agent is judging or composing, the surface must show a truthful in-flight state, then reconcile that temporary state with exactly one authoritative response.
+
+**Incident:** Chat and Teach waited for the model request to finish before rendering anything, then displayed the user message and Agent response together. A delayed submission could also be invoked twice before React committed the loading flag.
+
+**Project enforcement:** Teach and Presence Chat keep an optimistic local user turn, render a shared accessible `Thinking` status, reconcile against the returned persisted state, and guard the submission with a ref-level in-flight lock. The status communicates cognition without exposing hidden reasoning or infrastructure.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts` delays both API operations and asserts the immediate user turn, visible thinking state, eventual single response, and exact persisted role sequence on Chromium and mobile.
+
+**Apply when:** Changing Chat, Teach, Presence Chat, message submission, model loading states, transcript hydration, or response reconciliation.
+
+**Added:** 2026-08-13
+
 ## Rule: Activity decisions must expose provenance and exclude configuration churn
 
 **Defect class:** Activity decision ambiguity / system-event leakage

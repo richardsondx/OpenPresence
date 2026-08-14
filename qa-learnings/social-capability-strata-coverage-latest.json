@@ -1,0 +1,912 @@
+{
+  "auditVersion": "social-capability-strata-coverage.v1",
+  "generatedAt": "2026-08-13T23:46:23.569Z",
+  "status": "targets-met",
+  "policy": "Repeated turns from one actor/thread unit are counted once for independence. This audit does not inspect or score the hidden holdout.",
+  "inputFiles": [
+    "fresh-social-capability-1.json",
+    "fresh-social-capability-2.json",
+    "fresh-social-capability-3.json",
+    "independent-strata-development-24.json",
+    "restraint-development-20.json"
+  ],
+  "totalCandidateCases": 79,
+  "totalIndependentThreadUnits": 60,
+  "targetIndependentTotal": 60,
+  "additionalIndependentUnitsNeeded": 0,
+  "byCategory": {
+    "technical-link-media": {
+      "targetIndependentUnits": 15,
+      "candidateCases": 16,
+      "independentThreadUnits": 15,
+      "additionalIndependentUnitsNeeded": 0,
+      "threadUnits": [
+        "fresh-1:@juniperlabs",
+        "fresh-1:@miloreyes",
+        "fresh-2:@northstarcompute",
+        "fresh-2:@anikabose",
+        "fresh-3:@kestrelsystems",
+        "fresh-3:@yaraelsayed",
+        "independent-strata-development:@alixchen",
+        "independent-strata-development:@brunodata",
+        "independent-strata-development:@carmenops",
+        "independent-strata-development:@devontrace",
+        "independent-strata-development:@elizabethml",
+        "independent-strata-development:@farahsystems",
+        "independent-strata-development:@glenmetrics",
+        "independent-strata-development:@harpersec",
+        "restraint-development:@julespark"
+      ]
+    },
+    "network-introduction": {
+      "targetIndependentUnits": 15,
+      "candidateCases": 22,
+      "independentThreadUnits": 15,
+      "additionalIndependentUnitsNeeded": 0,
+      "threadUnits": [
+        "fresh-1:@leilasato",
+        "fresh-1:@marcushill",
+        "fresh-2:@rohanpatel",
+        "fresh-2:@mirastone",
+        "fresh-3:@felixmoore",
+        "fresh-3:@taliabrooks",
+        "independent-strata-development:@irisfounder",
+        "independent-strata-development:@jonasprocure",
+        "independent-strata-development:@kiansecurity",
+        "independent-strata-development:@lucyinfra",
+        "independent-strata-development:@mateohealth",
+        "independent-strata-development:@noelprivacy",
+        "independent-strata-development:@opheliahr",
+        "independent-strata-development:@priyalabs",
+        "restraint-development:@minafox"
+      ]
+    },
+    "sensitive-adversarial": {
+      "targetIndependentUnits": 10,
+      "candidateCases": 13,
+      "independentThreadUnits": 10,
+      "additionalIndependentUnitsNeeded": 0,
+      "threadUnits": [
+        "fresh-1:@noraibrahim",
+        "fresh-1:@drewpalmer",
+        "fresh-2:@eliasford",
+        "fresh-2:@hanaruiz",
+        "fresh-3:@samihaddad",
+        "fresh-3:@gretalin",
+        "independent-strata-development:@quinncare",
+        "independent-strata-development:@racheljustice",
+        "independent-strata-development:@samiraaccess",
+        "restraint-development:@sofiabell"
+      ]
+    },
+    "restraint": {
+      "targetIndependentUnits": 20,
+      "candidateCases": 32,
+      "independentThreadUnits": 24,
+      "additionalIndependentUnitsNeeded": 0,
+      "threadUnits": [
+        "fresh-1:@theomartins",
+        "fresh-1:@miloreyes",
+        "fresh-1:@sorakim",
+        "fresh-1:@pavelnovak",
+        "fresh-2:@calebwong",
+        "fresh-2:@anikabose",
+        "fresh-2:@omardiallo",
+        "fresh-2:@vedashah",
+        "fresh-3:@basilgrant",
+        "fresh-3:@yaraelsayed",
+        "fresh-3:@ravisingh",
+        "fresh-3:@martacosta",
+        "independent-strata-development:@tomaspromo",
+        "independent-strata-development:@umaquiet",
+        "independent-strata-development:@victorviral",
+        "independent-strata-development:@wendyweather",
+        "independent-strata-development:@xavierloop",
+        "restraint-development:@maravale",
+        "restraint-development:@owenreed",
+        "restraint-development:@niachen",
+        "restraint-development:@tariqmoss",
+        "restraint-development:@calwest",
+        "restraint-development:@rheasingh",
+        "restraint-development:@minafox"
+      ]
+    }
+  },
+  "cases": [
+    {
+      "caseId": "fresh-1-04",
+      "file": "fresh-social-capability-1.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "fresh-1:@theomartins",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-1-06",
+      "file": "fresh-social-capability-1.json",
+      "categories": [
+        "technical-link-media"
+      ],
+      "threadUnit": "fresh-1:@juniperlabs",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-1-07",
+      "file": "fresh-social-capability-1.json",
+      "categories": [
+        "technical-link-media",
+        "restraint"
+      ],
+      "threadUnit": "fresh-1:@miloreyes",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-1-09",
+      "file": "fresh-social-capability-1.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "fresh-1:@leilasato",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-1-10",
+      "file": "fresh-social-capability-1.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "fresh-1:@leilasato",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-1-11",
+      "file": "fresh-social-capability-1.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "fresh-1:@marcushill",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-1-12",
+      "file": "fresh-social-capability-1.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "fresh-1:@marcushill",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-1-13",
+      "file": "fresh-social-capability-1.json",
+      "categories": [
+        "sensitive-adversarial"
+      ],
+      "threadUnit": "fresh-1:@noraibrahim",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-1-14",
+      "file": "fresh-social-capability-1.json",
+      "categories": [
+        "sensitive-adversarial"
+      ],
+      "threadUnit": "fresh-1:@noraibrahim",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-1-15",
+      "file": "fresh-social-capability-1.json",
+      "categories": [
+        "sensitive-adversarial"
+      ],
+      "threadUnit": "fresh-1:@drewpalmer",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-1-18",
+      "file": "fresh-social-capability-1.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "fresh-1:@sorakim",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-1-19",
+      "file": "fresh-social-capability-1.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "fresh-1:@pavelnovak",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-1-20",
+      "file": "fresh-social-capability-1.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "fresh-1:@pavelnovak",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-2-04",
+      "file": "fresh-social-capability-2.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "fresh-2:@calebwong",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-2-06",
+      "file": "fresh-social-capability-2.json",
+      "categories": [
+        "technical-link-media"
+      ],
+      "threadUnit": "fresh-2:@northstarcompute",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-2-07",
+      "file": "fresh-social-capability-2.json",
+      "categories": [
+        "technical-link-media",
+        "restraint"
+      ],
+      "threadUnit": "fresh-2:@anikabose",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-2-09",
+      "file": "fresh-social-capability-2.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "fresh-2:@rohanpatel",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-2-10",
+      "file": "fresh-social-capability-2.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "fresh-2:@rohanpatel",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-2-11",
+      "file": "fresh-social-capability-2.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "fresh-2:@mirastone",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-2-12",
+      "file": "fresh-social-capability-2.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "fresh-2:@mirastone",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-2-13",
+      "file": "fresh-social-capability-2.json",
+      "categories": [
+        "sensitive-adversarial"
+      ],
+      "threadUnit": "fresh-2:@eliasford",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-2-14",
+      "file": "fresh-social-capability-2.json",
+      "categories": [
+        "sensitive-adversarial"
+      ],
+      "threadUnit": "fresh-2:@eliasford",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-2-15",
+      "file": "fresh-social-capability-2.json",
+      "categories": [
+        "sensitive-adversarial"
+      ],
+      "threadUnit": "fresh-2:@hanaruiz",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-2-18",
+      "file": "fresh-social-capability-2.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "fresh-2:@omardiallo",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-2-19",
+      "file": "fresh-social-capability-2.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "fresh-2:@vedashah",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-2-20",
+      "file": "fresh-social-capability-2.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "fresh-2:@vedashah",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-3-04",
+      "file": "fresh-social-capability-3.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "fresh-3:@basilgrant",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-3-06",
+      "file": "fresh-social-capability-3.json",
+      "categories": [
+        "technical-link-media"
+      ],
+      "threadUnit": "fresh-3:@kestrelsystems",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-3-07",
+      "file": "fresh-social-capability-3.json",
+      "categories": [
+        "technical-link-media",
+        "restraint"
+      ],
+      "threadUnit": "fresh-3:@yaraelsayed",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-3-09",
+      "file": "fresh-social-capability-3.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "fresh-3:@felixmoore",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-3-10",
+      "file": "fresh-social-capability-3.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "fresh-3:@felixmoore",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-3-11",
+      "file": "fresh-social-capability-3.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "fresh-3:@taliabrooks",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-3-12",
+      "file": "fresh-social-capability-3.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "fresh-3:@taliabrooks",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-3-13",
+      "file": "fresh-social-capability-3.json",
+      "categories": [
+        "sensitive-adversarial"
+      ],
+      "threadUnit": "fresh-3:@samihaddad",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-3-14",
+      "file": "fresh-social-capability-3.json",
+      "categories": [
+        "sensitive-adversarial"
+      ],
+      "threadUnit": "fresh-3:@samihaddad",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-3-15",
+      "file": "fresh-social-capability-3.json",
+      "categories": [
+        "sensitive-adversarial"
+      ],
+      "threadUnit": "fresh-3:@gretalin",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-3-18",
+      "file": "fresh-social-capability-3.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "fresh-3:@ravisingh",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-3-19",
+      "file": "fresh-social-capability-3.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "fresh-3:@martacosta",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "fresh-3-20",
+      "file": "fresh-social-capability-3.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "fresh-3:@martacosta",
+      "sourceType": "fresh_playground_generalization",
+      "partition": "validation"
+    },
+    {
+      "caseId": "independent-strata-01",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "technical-link-media"
+      ],
+      "threadUnit": "independent-strata-development:@alixchen",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-02",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "technical-link-media"
+      ],
+      "threadUnit": "independent-strata-development:@brunodata",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-03",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "technical-link-media"
+      ],
+      "threadUnit": "independent-strata-development:@carmenops",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-04",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "technical-link-media"
+      ],
+      "threadUnit": "independent-strata-development:@devontrace",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-05",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "technical-link-media"
+      ],
+      "threadUnit": "independent-strata-development:@elizabethml",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-06",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "technical-link-media"
+      ],
+      "threadUnit": "independent-strata-development:@farahsystems",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-07",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "technical-link-media"
+      ],
+      "threadUnit": "independent-strata-development:@glenmetrics",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-08",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "technical-link-media"
+      ],
+      "threadUnit": "independent-strata-development:@harpersec",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-09",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "independent-strata-development:@irisfounder",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-10",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "independent-strata-development:@jonasprocure",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-11",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "independent-strata-development:@kiansecurity",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-12",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "independent-strata-development:@lucyinfra",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-13",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "independent-strata-development:@mateohealth",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-14",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "independent-strata-development:@noelprivacy",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-15",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "independent-strata-development:@opheliahr",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-16",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "independent-strata-development:@priyalabs",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-17",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "sensitive-adversarial"
+      ],
+      "threadUnit": "independent-strata-development:@quinncare",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-18",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "sensitive-adversarial"
+      ],
+      "threadUnit": "independent-strata-development:@racheljustice",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-19",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "sensitive-adversarial"
+      ],
+      "threadUnit": "independent-strata-development:@samiraaccess",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-20",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "independent-strata-development:@tomaspromo",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-21",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "independent-strata-development:@umaquiet",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-22",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "independent-strata-development:@victorviral",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-23",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "independent-strata-development:@wendyweather",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "independent-strata-24",
+      "file": "independent-strata-development-24.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "independent-strata-development:@xavierloop",
+      "sourceType": "independently_curated_development",
+      "partition": "development"
+    },
+    {
+      "caseId": "restraint-development-01",
+      "file": "restraint-development-20.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "restraint-development:@maravale",
+      "sourceType": "independently_curated_restraint",
+      "partition": "development"
+    },
+    {
+      "caseId": "restraint-development-02",
+      "file": "restraint-development-20.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "restraint-development:@maravale",
+      "sourceType": "independently_curated_restraint",
+      "partition": "development"
+    },
+    {
+      "caseId": "restraint-development-03",
+      "file": "restraint-development-20.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "restraint-development:@owenreed",
+      "sourceType": "independently_curated_restraint",
+      "partition": "development"
+    },
+    {
+      "caseId": "restraint-development-04",
+      "file": "restraint-development-20.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "restraint-development:@owenreed",
+      "sourceType": "independently_curated_restraint",
+      "partition": "development"
+    },
+    {
+      "caseId": "restraint-development-06",
+      "file": "restraint-development-20.json",
+      "categories": [
+        "technical-link-media"
+      ],
+      "threadUnit": "restraint-development:@julespark",
+      "sourceType": "independently_curated_restraint",
+      "partition": "development"
+    },
+    {
+      "caseId": "restraint-development-07",
+      "file": "restraint-development-20.json",
+      "categories": [
+        "technical-link-media"
+      ],
+      "threadUnit": "restraint-development:@julespark",
+      "sourceType": "independently_curated_restraint",
+      "partition": "development"
+    },
+    {
+      "caseId": "restraint-development-09",
+      "file": "restraint-development-20.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "restraint-development:@niachen",
+      "sourceType": "independently_curated_restraint",
+      "partition": "development"
+    },
+    {
+      "caseId": "restraint-development-10",
+      "file": "restraint-development-20.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "restraint-development:@tariqmoss",
+      "sourceType": "independently_curated_restraint",
+      "partition": "development"
+    },
+    {
+      "caseId": "restraint-development-11",
+      "file": "restraint-development-20.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "restraint-development:@tariqmoss",
+      "sourceType": "independently_curated_restraint",
+      "partition": "development"
+    },
+    {
+      "caseId": "restraint-development-12",
+      "file": "restraint-development-20.json",
+      "categories": [
+        "sensitive-adversarial"
+      ],
+      "threadUnit": "restraint-development:@sofiabell",
+      "sourceType": "independently_curated_restraint",
+      "partition": "development"
+    },
+    {
+      "caseId": "restraint-development-13",
+      "file": "restraint-development-20.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "restraint-development:@calwest",
+      "sourceType": "independently_curated_restraint",
+      "partition": "development"
+    },
+    {
+      "caseId": "restraint-development-14",
+      "file": "restraint-development-20.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "restraint-development:@calwest",
+      "sourceType": "independently_curated_restraint",
+      "partition": "development"
+    },
+    {
+      "caseId": "restraint-development-15",
+      "file": "restraint-development-20.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "restraint-development:@rheasingh",
+      "sourceType": "independently_curated_restraint",
+      "partition": "development"
+    },
+    {
+      "caseId": "restraint-development-16",
+      "file": "restraint-development-20.json",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "restraint-development:@rheasingh",
+      "sourceType": "independently_curated_restraint",
+      "partition": "development"
+    },
+    {
+      "caseId": "restraint-development-17",
+      "file": "restraint-development-20.json",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "restraint-development:@minafox",
+      "sourceType": "independently_curated_restraint",
+      "partition": "development"
+    },
+    {
+      "caseId": "restraint-development-18",
+      "file": "restraint-development-20.json",
+      "categories": [
+        "network-introduction",
+        "restraint"
+      ],
+      "threadUnit": "restraint-development:@minafox",
+      "sourceType": "independently_curated_restraint",
+      "partition": "development"
+    }
+  ],
+  "nextAction": "Construct new independently curated thread units for every remaining deficit before freezing the supplemental strata."
+}

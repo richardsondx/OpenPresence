@@ -158,19 +158,28 @@ test("Presence Chat speaks as the selected public self without teaching the Agen
   });
   await createAgent(page);
   await navigate(page, "Chat");
-  await expect(page.getByLabel("Message your Presence")).toBeVisible();
+  await expect(page.getByLabel("Post for Jenny to encounter")).toBeVisible();
   await expect(page.locator(".topbar-actions")).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Talk to Jenny." })).toBeVisible();
-  await expect(page.getByText("Private test conversation", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "See Jenny in the feed." })).toBeVisible();
+  await expect(page.getByText("Public self · @jenny_ai", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Chat · X", { exact: true })).toBeVisible();
   await expect(page.getByRole("complementary", { name: "Context & Changes sidebar" })).toHaveCount(0);
-  await expect(page.getByText("Session memory only", { exact: true })).toBeVisible();
+  await expect(page.getByText("Private thread · not published", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Model")).toHaveCount(0);
   await expectComposerLayout(page);
   await expectChatViewportLayout(page);
-  await page.getByLabel("Message your Presence").fill("My name is Bob and I own a submarine.");
+  await page.route("**/api/state", async (route) => {
+    if (route.request().method() === "POST" && (route.request().postDataJSON() as { type?: string }).type === "sendPresenceChatMessage") {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+    await route.continue();
+  });
+  await page.getByLabel("Post for Jenny to encounter").fill("My name is Bob and I own a submarine.");
   await page.getByRole("button", { name: "Send message" }).click();
   await expect(page.getByText("My name is Bob and I own a submarine.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("status").getByText("Considering", { exact: true })).toBeVisible();
   await expect(page.getByText(/I understood “My name is Bob/)).toBeVisible();
+  await expect(page.getByRole("status")).toHaveCount(0);
   const afterChat = await (await request.get("/api/state")).json();
   expect(afterChat.presenceChatSessions[0].messages.map((message: { role: string }) => message.role)).toEqual(["user", "presence"]);
   expect(afterChat.conversations[0].messages).toHaveLength(0);
@@ -178,8 +187,8 @@ test("Presence Chat speaks as the selected public self without teaching the Agen
   await page.reload();
   await navigate(page, "Chat");
   await expect(page.getByText("My name is Bob and I own a submarine.", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "New test conversation", exact: true }).click();
-  await expect(page.getByText("Meet the public self.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "New rehearsal", exact: true }).click();
+  await expect(page.getByText("Start the rehearsal.", { exact: true })).toBeVisible();
   expect(duplicateKeyErrors).toEqual([]);
 });
 
@@ -188,11 +197,32 @@ test("Teach is the operator-facing surface for durable Agent changes", async ({ 
   await navigate(page, "Teach");
   await expect(page.getByText("Teach the Agent through conversation.", { exact: true })).toBeVisible();
   await expect(page.getByText("Agent-wide conversation", { exact: true })).toBeVisible();
+  await page.route("**/api/state", async (route) => {
+    if (route.request().method() === "POST" && (route.request().postDataJSON() as { type?: string }).type === "sendMessage") {
+      await new Promise((resolve) => setTimeout(resolve, 800));
+    }
+    await route.continue();
+  });
   await page.getByLabel("Message your Presence").fill("Don't use em dashes anymore.");
   await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByText("Don't use em dashes anymore.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("status").getByText("Thinking", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Taste proposal created" })).toBeVisible();
+  await expect(page.getByRole("status")).toHaveCount(0);
   const navigation = test.info().project.name === "mobile" ? page.locator(".mobile-nav") : page.locator(".sidebar");
   await expect(navigation.getByRole("button", { name: /^Teach$/ })).toHaveClass(/active/);
+});
+
+test("Teach does not turn punctuation-only context into assistant onboarding", async ({ page, request }) => {
+  await createAgent(page);
+  await navigate(page, "Teach");
+  await page.getByLabel("Message your Presence").fill("?");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByText("?", { exact: true })).toBeVisible();
+  await expect(page.getByText(/I understood/)).toHaveCount(0);
+  await expect(page.getByText(/What.?s on your mind|half-formed thought|AI assistant/i)).toHaveCount(0);
+  const state = await (await request.get("/api/state")).json();
+  expect(state.conversations[0].messages.map((message: { role: string }) => message.role)).toEqual(["operator"]);
 });
 
 test("Presence Settings makes the destination route explicit", async ({ page }) => {
@@ -294,6 +324,9 @@ test("Agent switcher creates and switches isolated workspaces", async ({ page })
   await page.getByRole("dialog", { name: "Create Agent" }).getByRole("button", { name: "Create Agent" }).click();
   await expect(page.getByRole("button", { name: "Switch agent, currently Atlas" })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Atlas, right now." })).toBeVisible();
+  await page.reload();
+  await expect(page.getByRole("button", { name: "Switch agent, currently Atlas" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Atlas, right now." })).toBeVisible();
   await clickAgentSwitcher("Atlas");
   await page.getByRole("menu", { name: "Your Agents" }).getByRole("menuitem", { name: /Jenny/ }).click();
   await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
@@ -303,6 +336,21 @@ test("Agent switcher creates and switches isolated workspaces", async ({ page })
   await navigate(page, "Brain");
   await expect(page.getByRole("button", { name: "Use Claude Sonnet high" })).toHaveClass(/selected/);
   await expect(page.getByText("How I think")).toBeVisible();
+});
+
+test("Skill creation keeps the instruction within the API contract", async ({ page }) => {
+  await createAgent(page, "Alex Klonemozi");
+  await navigate(page, "Brain");
+  await page.getByRole("button", { name: "Create skill", exact: true }).click();
+  const skillName = page.getByLabel("Skill name");
+  const skillPrompt = page.getByLabel("Skill prompt");
+  await expect(skillName).toHaveAttribute("maxlength", "100");
+  await expect(skillPrompt).toHaveAttribute("maxlength", "500");
+  await skillName.fill("Direct operator voice");
+  await skillPrompt.fill("Write original X posts with a clear claim, short sentences, concrete examples, practical next steps, and no filler or engagement bait.");
+  await page.locator("form.inline-config-form").getByRole("button", { name: "Create skill", exact: true }).click();
+  await expect(page.getByText("Direct operator voice", { exact: true })).toBeVisible();
+  await expect(page.getByRole("alert")).not.toContainText("could not be saved");
 });
 
 test("Agent model selection lives in Brain and persists per Agent", async ({ page }) => {
@@ -397,7 +445,11 @@ test("Teach creates a protected proposal and Brain can apply it", async ({ page 
 test("Calendar stores a real Standing Intent and evaluates it now", async ({ page }) => {
   await createAgent(page);
   await navigate(page, "Schedule");
+  await page.getByRole("button", { name: "List", exact: true }).click();
   await page.getByRole("button", { name: "Add intent" }).click();
+  await expect(page.getByLabel("Execution window")).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Timing options" })).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByText("How long is this relevant?", { exact: true })).toHaveCount(0);
   await page.getByLabel("What should Jenny do?").fill("Teach the audience one useful idea about persistent agents.");
   await page.getByRole("textbox", { name: "Time", exact: true }).fill("09:15");
   await page.getByRole("button", { name: "Save standing intent" }).click();
@@ -415,6 +467,24 @@ test("Calendar stores a real Standing Intent and evaluates it now", async ({ pag
   await expect(page.locator(".event-title").filter({ hasText: /Calendar evaluation complete|Standing intention held/ }).first()).toBeVisible();
   await expect(page.getByText("0.94", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Reply to a technical founder", { exact: true })).toHaveCount(0);
+});
+
+test("Schedule reveals custom consideration timing only when requested", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Schedule");
+  await page.getByRole("button", { name: "List", exact: true }).click();
+  await page.getByRole("button", { name: "Add intent" }).click();
+  await page.getByRole("button", { name: "Timing options" }).click();
+  await expect(page.getByText("How long is this relevant?", { exact: true })).toBeVisible();
+  await expect(page.getByText("Recommended · Jenny can consider this for a few hours.", { exact: true })).toBeVisible();
+  await page.getByRole("radio", { name: /Custom/ }).check();
+  await page.getByLabel("Consideration starts").fill("07:00");
+  await page.getByLabel("Consideration ends").fill("10:30");
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+  await page.getByLabel("What should Jenny do?").fill("Review one useful idea for the audience.");
+  await page.getByRole("button", { name: "Save standing intent" }).click();
+  await expect(page.locator(".slot-row")).toContainText("consider 07:00–10:30");
+  await expect(page.locator(".slot-row")).not.toContainText("window");
 });
 
 test("Activity explains current work, next attention, and configured rhythm", async ({ page }) => {
@@ -611,6 +681,32 @@ test("Presence Public Self saves its disclosure boundary", async ({ page }) => {
   await expect(page.locator(".public-self-card").getByLabel("Built with OpenPresence", { exact: false })).toBeChecked();
 });
 
+test("Presence Brief keeps comma-separated territory text while editing", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Settings");
+  await page.getByRole("button", { name: "Edit brief" }).click();
+  const adjacent = page.getByLabel("Adjacent territory");
+  const boundaries = page.getByLabel("Presence Brief boundaries");
+  const primary = page.getByLabel("Primary territory");
+  await adjacent.fill("AI infrastructure,");
+  await expect(adjacent).toHaveValue("AI infrastructure,");
+  await adjacent.fill("AI infrastructure, community design");
+  await boundaries.fill("Partisan politics,");
+  await expect(boundaries).toHaveValue("Partisan politics,");
+  await boundaries.fill("Partisan politics, engagement bait");
+  await primary.fill("Persistent agents, durable memory");
+  await page.getByRole("button", { name: "Save brief", exact: true }).click();
+  await page.getByRole("button", { name: "Edit brief" }).click();
+  await expect(adjacent).toHaveValue("AI infrastructure, community design");
+  await expect(boundaries).toHaveValue("Partisan politics, engagement bait");
+  await expect(primary).toHaveValue("Persistent agents, durable memory");
+  await page.getByRole("button", { name: "Close brief editor" }).click();
+  await expect(page.getByText("AI infrastructure", { exact: true })).toBeVisible();
+  await expect(page.getByText("community design", { exact: true })).toBeVisible();
+  await expect(page.getByText("Partisan politics", { exact: true })).toBeVisible();
+  await expect(page.getByText("engagement bait", { exact: true })).toBeVisible();
+});
+
 test("Chat stays quiet when Presence identity changes outside Chat", async ({ page }) => {
   await createAgent(page);
   await navigate(page, "Settings");
@@ -632,14 +728,14 @@ test("Chat stays quiet when Presence identity changes outside Chat", async ({ pa
   await navigate(page, "Chat");
   await expect(page.getByText("I noticed this Presence is now Ghost.", { exact: false })).toHaveCount(0);
   await expect(page.getByText("I noticed the Ghost profile changed.", { exact: false })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Meet the public self." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Start the rehearsal." })).toBeVisible();
 
   await navigate(page, "Settings");
   await identityOptions.getByRole("button", { name: /^Jenny Agent-owned/ }).click();
   await expect(identityOptions.getByRole("button", { name: /^Jenny Agent-owned/ })).toHaveClass(/selected/);
   await navigate(page, "Chat");
   await expect(page.getByText("I noticed this Presence is now Agent-owned.", { exact: false })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Meet the public self." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Start the rehearsal." })).toBeVisible();
 });
 
 test("desktop shell keeps sidebar and runtime status available", async ({ page }) => {
@@ -699,11 +795,20 @@ test("Activity and Calendar stay scoped to the Presence identity", async ({ page
   await expect(page.getByRole("heading", { name: "When Genny is meant to pay attention" })).toBeVisible();
 });
 
+test("Playground Presence chip keeps identity separate from channel context", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Playground");
+  await expect(page.locator(".playground-presence")).toHaveText(/^\s*Jenny\s*$/);
+  await expect(page.locator(".playground-world-label")).toHaveText("Simulated X");
+});
+
 test("Playground rehearses a Presence inside an isolated simulated world", async ({ page }) => {
   await createAgent(page);
   await navigate(page, "Playground");
   await expect(page.getByRole("heading", { name: "Playground", exact: true })).toBeVisible();
   await expect(page.locator(".playground-grid")).toBeVisible();
+  await expect(page.locator(".playground-presence")).toHaveText(/^\s*Jenny\s*$/);
+  await expect(page.locator(".playground-world-label")).toHaveText("Simulated X");
   await expect(page.getByText(/Rehearse how this Presence behaves on X\. This world is simulated\. Jenny is real\./)).toBeVisible();
   await expect(page.getByText("Sandbox", { exact: true }).first()).toBeVisible();
   await page.getByRole("button", { name: "Check now" }).click();
@@ -747,6 +852,58 @@ test("Playground rehearses a Presence inside an isolated simulated world", async
   await expect(page.locator(".playground-grid")).toBeVisible();
   await expect(page.locator(".social-card")).toHaveCount(0);
   await expect(page.getByText("Fresh X account", { exact: true })).toBeVisible();
+});
+
+test("Original Post Rehearsal stays autonomous and records calibration evidence", async ({ page, request }) => {
+  const consoleErrors: string[] = [];
+  const failedRequests: string[] = [];
+  page.on("console", (message) => { if (message.type() === "error") consoleErrors.push(message.text()); });
+  page.on("requestfailed", (request) => { failedRequests.push(`${request.method()} ${request.url()}`); });
+  await createAgent(page);
+  await navigate(page, "Playground");
+
+  await page.getByRole("button", { name: "Consider an original post", exact: true }).click();
+  await expect(page.getByRole("region", { name: "Original post rehearsal", exact: true })).toBeVisible();
+  await page.getByLabel("Optional inspiration").fill("A private operator thought that must not become a social-world event.");
+  await page.getByRole("button", { name: "Consider now", exact: true }).click();
+  const rehearsalHistory = page.getByRole("region", { name: "Original post rehearsal history" });
+  const controlRoomLayout = await page.evaluate(() => {
+    const sections = Array.from(document.querySelectorAll<HTMLElement>(".playground-activity > section"));
+    return {
+      documentFitsViewport: document.documentElement.scrollWidth <= document.documentElement.clientWidth,
+      sectionsFitRail: sections.every((section) => section.scrollWidth <= section.clientWidth + 1),
+    };
+  });
+  expect(controlRoomLayout).toEqual({ documentFitsViewport: true, sectionsFitRail: true });
+  await expect(rehearsalHistory).toContainText("Published in Sandbox");
+  await expect(rehearsalHistory).toContainText("A good memory keeps the decision and the evidence that made it useful, not every transcript.");
+  await expect(rehearsalHistory.getByRole("button", { name: "View what you submitted", exact: true })).toBeVisible();
+  await rehearsalHistory.getByRole("button", { name: "View what you submitted", exact: true }).click();
+  await expect(rehearsalHistory.locator(".rehearsal-context-detail").getByText("A private operator thought that must not become a social-world event.", { exact: true })).toBeVisible();
+  await expect(rehearsalHistory).toContainText("Considered as context only. It was not added to the simulated world or treated as a command to publish.");
+
+  const afterConsider = await (await request.get("/api/state")).json();
+  expect(afterConsider.originalPostRehearsals).toHaveLength(1);
+  expect(afterConsider.originalPostRehearsals[0].stimulus).toEqual({ type: "text", value: "A private operator thought that must not become a social-world event." });
+  expect(afterConsider.originalPostRehearsals[0].result).toBe("published");
+  expect(afterConsider.originalPostRehearsals[0].publicationId).toBeTruthy();
+  const rehearsalExecution = afterConsider.executions.find((item: { rehearsalAttemptId?: string }) => item.rehearsalAttemptId === afterConsider.originalPostRehearsals[0].id);
+  expect(rehearsalExecution).toMatchObject({ status: "succeeded", connector: "simulated", environment: "sandbox" });
+  expect(afterConsider.mirrorObjects.some((item: { originExecutionId?: string; environment?: string }) => item.originExecutionId === rehearsalExecution?.id && item.environment === "sandbox")).toBe(true);
+  expect(afterConsider.mirrorObjects.some((item: { content?: { text?: string } }) => item.content?.text?.includes("private operator thought"))).toBe(false);
+
+  await page.getByRole("button", { name: "Fits", exact: true }).click();
+  await expect(page.getByText(/Saved as preference evidence/).first()).toBeVisible();
+  const calibrated = await (await request.get("/api/state")).json();
+  expect(calibrated.preferenceEvidence[0].reaction).toBe("fits");
+
+  await page.getByRole("button", { name: "Try another", exact: true }).click();
+  await expect(rehearsalHistory).toContainText("Attempt 2");
+  const retried = await (await request.get("/api/state")).json();
+  expect(retried.originalPostRehearsals).toHaveLength(2);
+  expect(retried.originalPostRehearsals[0].id).not.toBe(retried.originalPostRehearsals[1].id);
+  expect(consoleErrors).toEqual([]);
+  expect(failedRequests).toEqual([]);
 });
 
 test("Playground gives likes an activity treatment distinct from posts", async ({ page, request }) => {

@@ -1,0 +1,27 @@
+{
+  "generatedAt": "2026-08-13T23:49:21.693Z",
+  "packet": "qa-learnings/social-capability-independent-review-packet-v1.json",
+  "status": "not-ready",
+  "counts": {
+    "candidates": 60,
+    "uniqueThreadUnits": 60,
+    "included": 0,
+    "pending": 60,
+    "excluded": 0,
+    "includedByCategory": {
+      "technical-link-media": 0,
+      "network-introduction": 0,
+      "sensitive-adversarial": 0,
+      "restraint": 0
+    }
+  },
+  "errors": [
+    "included technical-link-media units are 0/15",
+    "included network-introduction units are 0/15",
+    "included sensitive-adversarial units are 0/10",
+    "included restraint units are 0/20"
+  ],
+  "warnings": [
+    "packet status is pending-independent-review; promotion requires approved-for-freeze"
+  ]
+}

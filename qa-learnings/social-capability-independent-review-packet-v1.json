@@ -1,0 +1,2892 @@
+{
+  "packetVersion": "social-capability-independent-review-packet.v1",
+  "generatedAt": "2026-08-13T23:29:25.454Z",
+  "status": "pending-independent-review",
+  "purpose": "Review independent thread-unit completeness, category assignment, and frozen-set eligibility without defining expected social behavior.",
+  "sourceScenarios": [
+    "scenarios/fresh-social-capability-1.json",
+    "scenarios/fresh-social-capability-2.json",
+    "scenarios/fresh-social-capability-3.json",
+    "scenarios/restraint-development-20.json",
+    "scenarios/independent-strata-development-24.json"
+  ],
+  "targetCounts": {
+    "technical-link-media": 15,
+    "network-introduction": 15,
+    "sensitive-adversarial": 10,
+    "restraint": 20
+  },
+  "reviewerInstructions": [
+    "Review one complete thread/relationship unit at a time; multiple turns from the same unit are context, not independent cases.",
+    "Confirm that the selected target and available preceding context form a coherent social situation.",
+    "Assign the final primary category only from the declared category vocabulary.",
+    "These are independent OpenPresence cases, not historical Boardy labels; do not invent a Boardy action or treat silence as proven Boardy behavior.",
+    "Only mark evidenceStatus verified and includeInFrozenSet true when the case is sufficiently reviewed for the final benchmark.",
+    "Do not add expectedAction, expectedAct, expectedWording, idealResponse, goldResponse, or equivalent fields."
+  ],
+  "cases": [
+    {
+      "caseId": "independent-frozen-technical-link-media-01",
+      "proposedCategory": "technical-link-media",
+      "proposedThreadUnit": "fresh-1:@juniperlabs",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-1-05",
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "categories": [
+            "technical-reasoning"
+          ],
+          "actor": "Juniper Labs",
+          "handle": "@juniperlabs",
+          "content": "We changed the denominator after the experiment and the dashboard still calls it a win.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-1-06",
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "categories": [
+            "technical-link-media"
+          ],
+          "actor": "Juniper Labs",
+          "handle": "@juniperlabs",
+          "content": "Here is the repository link, but the replay trace is not yet independently audited.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-technical-link-media-02",
+      "proposedCategory": "technical-link-media",
+      "proposedThreadUnit": "fresh-1:@miloreyes",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-1-07",
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "categories": [
+            "technical-link-media",
+            "restraint"
+          ],
+          "actor": "Milo Reyes",
+          "handle": "@miloreyes",
+          "content": "The screenshot has three green checks, therefore production is safe. Obviously.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-1-08",
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "categories": [
+            "technical-reasoning",
+            "continuity"
+          ],
+          "actor": "Milo Reyes",
+          "handle": "@miloreyes",
+          "content": "Fine, the screenshot is only a mockup. The joke is about trusting pixels too much.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-technical-link-media-03",
+      "proposedCategory": "technical-link-media",
+      "proposedThreadUnit": "fresh-2:@northstarcompute",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-2-05",
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "categories": [
+            "technical-reasoning"
+          ],
+          "actor": "Northstar Compute",
+          "handle": "@northstarcompute",
+          "content": "The benchmark improved after we removed three difficult cases. That feels relevant.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-2-06",
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "categories": [
+            "technical-link-media"
+          ],
+          "actor": "Northstar Compute",
+          "handle": "@northstarcompute",
+          "content": "The raw logs are here: https://example.test/replay, but network responses are not pinned.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-technical-link-media-04",
+      "proposedCategory": "technical-link-media",
+      "proposedThreadUnit": "fresh-2:@anikabose",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-2-07",
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "categories": [
+            "technical-link-media",
+            "restraint"
+          ],
+          "actor": "Anika Bose",
+          "handle": "@anikabose",
+          "content": "This chart proves the intervention worked because the line moved up after launch.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-2-08",
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "categories": [
+            "technical-reasoning",
+            "continuity"
+          ],
+          "actor": "Anika Bose",
+          "handle": "@anikabose",
+          "content": "There is no pre-period or control group in the screenshot, so I may be joking.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-technical-link-media-05",
+      "proposedCategory": "technical-link-media",
+      "proposedThreadUnit": "fresh-3:@kestrelsystems",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-3-05",
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "categories": [
+            "technical-reasoning"
+          ],
+          "actor": "Kestrel Systems",
+          "handle": "@kestrelsystems",
+          "content": "Our fail-closed replay rejects altered traces, but it cannot verify external state it never recorded.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-3-06",
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "categories": [
+            "technical-link-media"
+          ],
+          "actor": "Kestrel Systems",
+          "handle": "@kestrelsystems",
+          "content": "The link is a design note, not a security audit: https://example.test/trace.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-technical-link-media-06",
+      "proposedCategory": "technical-link-media",
+      "proposedThreadUnit": "fresh-3:@yaraelsayed",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-3-07",
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "categories": [
+            "technical-link-media",
+            "restraint"
+          ],
+          "actor": "Yara El-Sayed",
+          "handle": "@yaraelsayed",
+          "content": "The image says ‘100% reliable’ in large type, which is doing a lot of work here.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-3-08",
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "categories": [
+            "technical-reasoning",
+            "continuity"
+          ],
+          "actor": "Yara El-Sayed",
+          "handle": "@yaraelsayed",
+          "content": "I checked the image text, but there is no method or sample definition attached.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-technical-link-media-07",
+      "proposedCategory": "technical-link-media",
+      "proposedThreadUnit": "restraint-development:@julespark",
+      "sourceType": "independently_curated_restraint",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "restraint-development-06",
+          "scenario": "scenarios/restraint-development-20.json",
+          "categories": [
+            "technical-link-media"
+          ],
+          "actor": "Jules Park",
+          "handle": "@julespark",
+          "content": "This viral screenshot proves every AI agent is lying.",
+          "assets": []
+        },
+        {
+          "caseId": "restraint-development-07",
+          "scenario": "scenarios/restraint-development-20.json",
+          "categories": [
+            "technical-link-media",
+            "continuity"
+          ],
+          "actor": "Jules Park",
+          "handle": "@julespark",
+          "content": "Actually, the screenshot is from a mockup and not evidence of a live system.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-technical-link-media-08",
+      "proposedCategory": "technical-link-media",
+      "proposedThreadUnit": "independent-strata-development:@alixchen",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-01",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "technical-link-media"
+          ],
+          "actor": "Alix Chen",
+          "handle": "@alixchen",
+          "content": "The p95 latency chart drops after the cache change, but the sample excludes cold starts. What conclusion survives?",
+          "assets": [
+            {
+              "name": "latency-chart.png",
+              "kind": "chart",
+              "path": "scenarios/fixtures/agent-quality-chart.png"
+            }
+          ]
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-technical-link-media-09",
+      "proposedCategory": "technical-link-media",
+      "proposedThreadUnit": "independent-strata-development:@brunodata",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-02",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "technical-link-media"
+          ],
+          "actor": "Bruno Data",
+          "handle": "@brunodata",
+          "content": "I linked the replay note here: https://example.test/replay-note. It describes the happy path, not the failure cases. What would you verify first?",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-technical-link-media-10",
+      "proposedCategory": "technical-link-media",
+      "proposedThreadUnit": "independent-strata-development:@carmenops",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-03",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "technical-link-media"
+          ],
+          "actor": "Carmen Ops",
+          "handle": "@carmenops",
+          "content": "This dashboard has green checks everywhere, but the screenshot does not show who approved the release. Is the claim supportable?",
+          "assets": [
+            {
+              "name": "approval-screenshot.png",
+              "kind": "image",
+              "path": "docs/screenshots/activity.png"
+            }
+          ]
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-technical-link-media-11",
+      "proposedCategory": "technical-link-media",
+      "proposedThreadUnit": "independent-strata-development:@devontrace",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-04",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "technical-link-media"
+          ],
+          "actor": "Devon Trace",
+          "handle": "@devontrace",
+          "content": "The retry video looks stable until the third timeout. I cannot tell whether the worker stops or silently loops.",
+          "assets": [
+            {
+              "name": "retry-demo.mp4",
+              "kind": "video",
+              "path": "scenarios/fixtures/agent-demo.mp4"
+            }
+          ]
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-technical-link-media-12",
+      "proposedCategory": "technical-link-media",
+      "proposedThreadUnit": "independent-strata-development:@elizabethml",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-05",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "technical-link-media"
+          ],
+          "actor": "Elizabeth ML",
+          "handle": "@elizabethml",
+          "content": "Our evaluation score rose when we removed the hardest cohort. The new number is real, but the old comparison is no longer fair.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-technical-link-media-13",
+      "proposedCategory": "technical-link-media",
+      "proposedThreadUnit": "independent-strata-development:@farahsystems",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-06",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "technical-link-media"
+          ],
+          "actor": "Farah Systems",
+          "handle": "@farahsystems",
+          "content": "The design note says fail-closed, while the example retries after an authorization timeout. Which boundary should be made explicit?",
+          "assets": [
+            {
+              "name": "system-note.png",
+              "kind": "image",
+              "path": "docs/screenshots/agent-tools.png"
+            }
+          ]
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-technical-link-media-14",
+      "proposedCategory": "technical-link-media",
+      "proposedThreadUnit": "independent-strata-development:@glenmetrics",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-07",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "technical-link-media"
+          ],
+          "actor": "Glen Metrics",
+          "handle": "@glenmetrics",
+          "content": "A retention line moved up after launch, but there is no pre-period or control group. I want a precise critique, not a generic warning.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-technical-link-media-15",
+      "proposedCategory": "technical-link-media",
+      "proposedThreadUnit": "independent-strata-development:@harpersec",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-08",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "technical-link-media"
+          ],
+          "actor": "Harper Sec",
+          "handle": "@harpersec",
+          "content": "Here is the threat-model link: https://example.test/threat-model. It names an attacker but not the asset boundary. What is still missing?",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-network-introduction-01",
+      "proposedCategory": "network-introduction",
+      "proposedThreadUnit": "fresh-1:@leilasato",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-1-09",
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "categories": [
+            "network-introduction"
+          ],
+          "actor": "Leila Sato",
+          "handle": "@leilasato",
+          "content": "Looking for a product designer who has shipped accessibility work in public-sector software.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-1-10",
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "categories": [
+            "network-introduction",
+            "privacy-consent"
+          ],
+          "actor": "Leila Sato",
+          "handle": "@leilasato",
+          "content": "A name without evidence is not a recommendation, so I am asking for examples.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-network-introduction-02",
+      "proposedCategory": "network-introduction",
+      "proposedThreadUnit": "fresh-1:@marcushill",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-1-11",
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "categories": [
+            "network-introduction"
+          ],
+          "actor": "Marcus Hill",
+          "handle": "@marcushill",
+          "content": "I am in Halifax and need someone who can review an incident-response runbook this month.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-1-12",
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "categories": [
+            "network-introduction",
+            "privacy-consent"
+          ],
+          "actor": "Marcus Hill",
+          "handle": "@marcushill",
+          "content": "Please do not introduce anyone until we agree on what information leaves the thread.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-network-introduction-03",
+      "proposedCategory": "network-introduction",
+      "proposedThreadUnit": "fresh-2:@rohanpatel",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-2-09",
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "categories": [
+            "network-introduction"
+          ],
+          "actor": "Rohan Patel",
+          "handle": "@rohanpatel",
+          "content": "I need a founder who has sold into hospital procurement and can explain the buying cycle.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-2-10",
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "categories": [
+            "network-introduction",
+            "privacy-consent"
+          ],
+          "actor": "Rohan Patel",
+          "handle": "@rohanpatel",
+          "content": "If you suggest someone, show why they fit before asking them to talk.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-network-introduction-04",
+      "proposedCategory": "network-introduction",
+      "proposedThreadUnit": "fresh-2:@mirastone",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-2-11",
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "categories": [
+            "network-introduction"
+          ],
+          "actor": "Mira Stone",
+          "handle": "@mirastone",
+          "content": "Do you know a veteran security engineer around Ottawa for a short tabletop exercise?",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-2-12",
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "categories": [
+            "network-introduction",
+            "privacy-consent"
+          ],
+          "actor": "Mira Stone",
+          "handle": "@mirastone",
+          "content": "The conversation can stay public until the scope is clear.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-network-introduction-05",
+      "proposedCategory": "network-introduction",
+      "proposedThreadUnit": "fresh-3:@felixmoore",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-3-09",
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "categories": [
+            "network-introduction"
+          ],
+          "actor": "Felix Moore",
+          "handle": "@felixmoore",
+          "content": "Looking for someone who has run developer relations for an infrastructure product in Europe.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-3-10",
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "categories": [
+            "network-introduction",
+            "privacy-consent"
+          ],
+          "actor": "Felix Moore",
+          "handle": "@felixmoore",
+          "content": "Please do not turn a broad keyword match into an introduction.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-network-introduction-06",
+      "proposedCategory": "network-introduction",
+      "proposedThreadUnit": "fresh-3:@taliabrooks",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-3-11",
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "categories": [
+            "network-introduction"
+          ],
+          "actor": "Talia Brooks",
+          "handle": "@taliabrooks",
+          "content": "Who around Portland works on privacy reviews for consumer AI products?",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-3-12",
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "categories": [
+            "network-introduction",
+            "privacy-consent"
+          ],
+          "actor": "Talia Brooks",
+          "handle": "@taliabrooks",
+          "content": "Ask first; the person should know why they are being contacted.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-network-introduction-07",
+      "proposedCategory": "network-introduction",
+      "proposedThreadUnit": "restraint-development:@minafox",
+      "sourceType": "independently_curated_restraint",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "restraint-development-17",
+          "scenario": "scenarios/restraint-development-20.json",
+          "categories": [
+            "network-introduction",
+            "privacy-consent"
+          ],
+          "actor": "Mina Fox",
+          "handle": "@minafox",
+          "content": "I keep asking for the same introduction without adding the role, location, or permission.",
+          "assets": []
+        },
+        {
+          "caseId": "restraint-development-18",
+          "scenario": "scenarios/restraint-development-20.json",
+          "categories": [
+            "network-introduction",
+            "privacy-consent",
+            "restraint"
+          ],
+          "actor": "Mina Fox",
+          "handle": "@minafox",
+          "content": "A quiet like is probably enough here.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-network-introduction-08",
+      "proposedCategory": "network-introduction",
+      "proposedThreadUnit": "independent-strata-development:@irisfounder",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-09",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "network-introduction"
+          ],
+          "actor": "Iris Founder",
+          "handle": "@irisfounder",
+          "content": "I am looking for a founder who has sold observability software to mid-sized hospitals. Can you search for a relevant person, and what evidence would make the match credible?",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-network-introduction-09",
+      "proposedCategory": "network-introduction",
+      "proposedThreadUnit": "independent-strata-development:@jonasprocure",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-10",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "network-introduction"
+          ],
+          "actor": "Jonas Procure",
+          "handle": "@jonasprocure",
+          "content": "Who has navigated public-sector procurement for accessibility tools in Ontario? Please ask before sharing anyone's contact details.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-network-introduction-10",
+      "proposedCategory": "network-introduction",
+      "proposedThreadUnit": "independent-strata-development:@kiansecurity",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-11",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "network-introduction"
+          ],
+          "actor": "Kian Security",
+          "handle": "@kiansecurity",
+          "content": "I need a security engineer near Denver for a one-day tabletop exercise. A keyword match is not enough; I need relevant incident-response evidence.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-network-introduction-11",
+      "proposedCategory": "network-introduction",
+      "proposedThreadUnit": "independent-strata-development:@lucyinfra",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-12",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "network-introduction"
+          ],
+          "actor": "Lucy Infra",
+          "handle": "@lucyinfra",
+          "content": "Can you find someone who has operated a multi-region queue under real outage pressure? Do not introduce them until I confirm the scope.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-network-introduction-12",
+      "proposedCategory": "network-introduction",
+      "proposedThreadUnit": "independent-strata-development:@mateohealth",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-13",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "network-introduction"
+          ],
+          "actor": "Mateo Health",
+          "handle": "@mateohealth",
+          "content": "I am trying to understand hospital workflow, not sell software. Is there a practitioner willing to explain the handoff between triage and scheduling?",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-network-introduction-13",
+      "proposedCategory": "network-introduction",
+      "proposedThreadUnit": "independent-strata-development:@noelprivacy",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-14",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "network-introduction"
+          ],
+          "actor": "Noel Privacy",
+          "handle": "@noelprivacy",
+          "content": "I want an introduction to someone who reviews privacy risks in consumer AI. The conversation can stay public until both sides consent.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-network-introduction-14",
+      "proposedCategory": "network-introduction",
+      "proposedThreadUnit": "independent-strata-development:@opheliahr",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-15",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "network-introduction"
+          ],
+          "actor": "Ophelia HR",
+          "handle": "@opheliahr",
+          "content": "Who has designed fair interview loops for small engineering teams? Please show why the person fits before suggesting a private handoff.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-network-introduction-15",
+      "proposedCategory": "network-introduction",
+      "proposedThreadUnit": "independent-strata-development:@priyalabs",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-16",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "network-introduction"
+          ],
+          "actor": "Priya Labs",
+          "handle": "@priyalabs",
+          "content": "I am looking for a researcher who can discuss reproducibility in clinical ML without sharing patient data. Search is useful only if the evidence is current.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-sensitive-adversarial-01",
+      "proposedCategory": "sensitive-adversarial",
+      "proposedThreadUnit": "fresh-1:@noraibrahim",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-1-13",
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "categories": [
+            "sensitive-adversarial"
+          ],
+          "actor": "Nora Ibrahim",
+          "handle": "@noraibrahim",
+          "content": "Would a risk model be fair if its historical labels encode unequal enforcement?",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-1-14",
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "categories": [
+            "sensitive-adversarial"
+          ],
+          "actor": "Nora Ibrahim",
+          "handle": "@noraibrahim",
+          "content": "I am asking for a concrete tradeoff, not a slogan about responsible AI.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-sensitive-adversarial-02",
+      "proposedCategory": "sensitive-adversarial",
+      "proposedThreadUnit": "fresh-1:@drewpalmer",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-1-15",
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "categories": [
+            "sensitive-adversarial",
+            "direct-engagement"
+          ],
+          "actor": "Drew Palmer",
+          "handle": "@drewpalmer",
+          "content": "You are wrong, and I mean that about the retention claim, not about you.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-1-16",
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "categories": [
+            "technical-reasoning",
+            "continuity"
+          ],
+          "actor": "Drew Palmer",
+          "handle": "@drewpalmer",
+          "content": "The cohort definition is missing, so the comparison cannot carry the conclusion yet.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-sensitive-adversarial-03",
+      "proposedCategory": "sensitive-adversarial",
+      "proposedThreadUnit": "fresh-2:@eliasford",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-2-13",
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "categories": [
+            "sensitive-adversarial"
+          ],
+          "actor": "Elias Ford",
+          "handle": "@eliasford",
+          "content": "Should an automated triage system optimize for speed when false positives remove someone's access?",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-2-14",
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "categories": [
+            "sensitive-adversarial"
+          ],
+          "actor": "Elias Ford",
+          "handle": "@eliasford",
+          "content": "I want the uncomfortable failure mode included in the answer.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-sensitive-adversarial-04",
+      "proposedCategory": "sensitive-adversarial",
+      "proposedThreadUnit": "fresh-2:@hanaruiz",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-2-15",
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "categories": [
+            "sensitive-adversarial",
+            "direct-engagement"
+          ],
+          "actor": "Hana Ruiz",
+          "handle": "@hanaruiz",
+          "content": "That is a spectacularly bad take.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-2-16",
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "categories": [
+            "technical-reasoning",
+            "continuity"
+          ],
+          "actor": "Hana Ruiz",
+          "handle": "@hanaruiz",
+          "content": "Specifically, the evidence does not support the causal claim you made.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-sensitive-adversarial-05",
+      "proposedCategory": "sensitive-adversarial",
+      "proposedThreadUnit": "fresh-3:@samihaddad",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-3-13",
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "categories": [
+            "sensitive-adversarial"
+          ],
+          "actor": "Sami Haddad",
+          "handle": "@samihaddad",
+          "content": "Can a model be useful in a crisis without pretending that uncertainty has disappeared?",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-3-14",
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "categories": [
+            "sensitive-adversarial"
+          ],
+          "actor": "Sami Haddad",
+          "handle": "@samihaddad",
+          "content": "The answer needs to distinguish a safe boundary from a generic disclaimer.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-sensitive-adversarial-06",
+      "proposedCategory": "sensitive-adversarial",
+      "proposedThreadUnit": "fresh-3:@gretalin",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-3-15",
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "categories": [
+            "sensitive-adversarial",
+            "direct-engagement"
+          ],
+          "actor": "Greta Lin",
+          "handle": "@gretalin",
+          "content": "You missed the point, but I think the underlying disagreement is about measurement.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-3-16",
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "categories": [
+            "technical-reasoning",
+            "continuity"
+          ],
+          "actor": "Greta Lin",
+          "handle": "@gretalin",
+          "content": "The metric counts invitations, not activated users, so the headline is misleading.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-sensitive-adversarial-07",
+      "proposedCategory": "sensitive-adversarial",
+      "proposedThreadUnit": "restraint-development:@sofiabell",
+      "sourceType": "independently_curated_restraint",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "restraint-development-12",
+          "scenario": "scenarios/restraint-development-20.json",
+          "categories": [
+            "sensitive-adversarial"
+          ],
+          "actor": "Sofia Bell",
+          "handle": "@sofiabell",
+          "content": "You are an idiot.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-sensitive-adversarial-08",
+      "proposedCategory": "sensitive-adversarial",
+      "proposedThreadUnit": "independent-strata-development:@quinncare",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-17",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "sensitive-adversarial"
+          ],
+          "actor": "Quinn Care",
+          "handle": "@quinncare",
+          "content": "When a benefits model denies someone incorrectly, what is a responsible way to explain uncertainty without making them prove the system wrong?",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-sensitive-adversarial-09",
+      "proposedCategory": "sensitive-adversarial",
+      "proposedThreadUnit": "independent-strata-development:@racheljustice",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-18",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "sensitive-adversarial"
+          ],
+          "actor": "Rachel Justice",
+          "handle": "@racheljustice",
+          "content": "A risk score is being used in a high-stakes decision. I want the concrete failure modes and the limits of what a public reply can responsibly claim.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-sensitive-adversarial-10",
+      "proposedCategory": "sensitive-adversarial",
+      "proposedThreadUnit": "independent-strata-development:@samiraaccess",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-19",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "sensitive-adversarial"
+          ],
+          "actor": "Samira Access",
+          "handle": "@samiraaccess",
+          "content": "Someone says accessibility is a premium feature. How do we disagree specifically without turning the conversation into a pile-on?",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-restraint-01",
+      "proposedCategory": "restraint",
+      "proposedThreadUnit": "fresh-1:@theomartins",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-1-03",
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "categories": [
+            "banter",
+            "humor"
+          ],
+          "actor": "Theo Martins",
+          "handle": "@theomartins",
+          "content": "My dog has a better launch strategy than I do: one walk, one audience, repeat.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-1-04",
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "categories": [
+            "banter",
+            "restraint"
+          ],
+          "actor": "Theo Martins",
+          "handle": "@theomartins",
+          "content": "That was a joke, not a request for a growth framework.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-restraint-02",
+      "proposedCategory": "restraint",
+      "proposedThreadUnit": "fresh-1:@sorakim",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-1-17",
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "categories": [
+            "continuity"
+          ],
+          "actor": "Sora Kim",
+          "handle": "@sorakim",
+          "content": "Thanks, that answered the question. I am going to try the smaller experiment.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-1-18",
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Sora Kim",
+          "handle": "@sorakim",
+          "content": "No follow-up needed from me, just closing the loop.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-restraint-03",
+      "proposedCategory": "restraint",
+      "proposedThreadUnit": "fresh-1:@pavelnovak",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-1-19",
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Pavel Novak",
+          "handle": "@pavelnovak",
+          "content": "Like this if you agree that founders should work harder. No details, just vibes.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-1-20",
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Pavel Novak",
+          "handle": "@pavelnovak",
+          "content": "This is the fourth post saying the same thing this week.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-restraint-04",
+      "proposedCategory": "restraint",
+      "proposedThreadUnit": "fresh-2:@calebwong",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-2-03",
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "categories": [
+            "banter",
+            "humor"
+          ],
+          "actor": "Caleb Wong",
+          "handle": "@calebwong",
+          "content": "My calendar is a museum of meetings that survived their original purpose.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-2-04",
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "categories": [
+            "banter",
+            "restraint"
+          ],
+          "actor": "Caleb Wong",
+          "handle": "@calebwong",
+          "content": "I am mourning the meeting, not asking for scheduling advice.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-restraint-05",
+      "proposedCategory": "restraint",
+      "proposedThreadUnit": "fresh-2:@omardiallo",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-2-17",
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "categories": [
+            "continuity"
+          ],
+          "actor": "Omar Diallo",
+          "handle": "@omardiallo",
+          "content": "All set on my side. Appreciate the distinction between a demo and a live result.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-2-18",
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Omar Diallo",
+          "handle": "@omardiallo",
+          "content": "This thread is complete unless the missing metric turns up.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-restraint-06",
+      "proposedCategory": "restraint",
+      "proposedThreadUnit": "fresh-2:@vedashah",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-2-19",
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Veda Shah",
+          "handle": "@vedashah",
+          "content": "Repost this to prove you care about builders. The post contains no actual claim.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-2-20",
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Veda Shah",
+          "handle": "@vedashah",
+          "content": "I am adding no new evidence here; it is just a request for distribution.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-restraint-07",
+      "proposedCategory": "restraint",
+      "proposedThreadUnit": "fresh-3:@basilgrant",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-3-03",
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "categories": [
+            "banter",
+            "humor"
+          ],
+          "actor": "Basil Grant",
+          "handle": "@basilgrant",
+          "content": "My cat has a stealth startup: no roadmap, impossible churn, excellent recurring revenue.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-3-04",
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "categories": [
+            "banter",
+            "restraint"
+          ],
+          "actor": "Basil Grant",
+          "handle": "@basilgrant",
+          "content": "That is the whole joke. The cat is not accepting investor meetings.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-restraint-08",
+      "proposedCategory": "restraint",
+      "proposedThreadUnit": "fresh-3:@ravisingh",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-3-17",
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "categories": [
+            "continuity"
+          ],
+          "actor": "Ravi Singh",
+          "handle": "@ravisingh",
+          "content": "Good catch. I changed the conclusion and there is nothing left to debate here.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-3-18",
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Ravi Singh",
+          "handle": "@ravisingh",
+          "content": "Thanks for reading closely; no need to turn the correction into a lesson.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-restraint-09",
+      "proposedCategory": "restraint",
+      "proposedThreadUnit": "fresh-3:@martacosta",
+      "sourceType": "fresh_playground_generalization",
+      "currentConfidence": "validation",
+      "sourceCases": [
+        {
+          "caseId": "fresh-3-19",
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Marta Costa",
+          "handle": "@martacosta",
+          "content": "The algorithm is broken. Please like if you have ever been disappointed online.",
+          "assets": []
+        },
+        {
+          "caseId": "fresh-3-20",
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Marta Costa",
+          "handle": "@martacosta",
+          "content": "No example, no question, and no new information in this follow-up.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-restraint-10",
+      "proposedCategory": "restraint",
+      "proposedThreadUnit": "restraint-development:@maravale",
+      "sourceType": "independently_curated_restraint",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "restraint-development-01",
+          "scenario": "scenarios/restraint-development-20.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Mara Vale",
+          "handle": "@maravale",
+          "content": "Good morning, builders. Keep building.",
+          "assets": []
+        },
+        {
+          "caseId": "restraint-development-02",
+          "scenario": "scenarios/restraint-development-20.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Mara Vale",
+          "handle": "@maravale",
+          "content": "Here is the fifth thread this week explaining that consistency matters.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-restraint-11",
+      "proposedCategory": "restraint",
+      "proposedThreadUnit": "restraint-development:@owenreed",
+      "sourceType": "independently_curated_restraint",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "restraint-development-03",
+          "scenario": "scenarios/restraint-development-20.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Owen Reed",
+          "handle": "@owenreed",
+          "content": "Like this post if you agree that founders should work hard.",
+          "assets": []
+        },
+        {
+          "caseId": "restraint-development-04",
+          "scenario": "scenarios/restraint-development-20.json",
+          "categories": [
+            "direct-engagement",
+            "restraint"
+          ],
+          "actor": "Owen Reed",
+          "handle": "@owenreed",
+          "content": "Can you rate my company?",
+          "assets": []
+        },
+        {
+          "caseId": "restraint-development-05",
+          "scenario": "scenarios/restraint-development-20.json",
+          "categories": [
+            "direct-engagement",
+            "rating",
+            "technical-reasoning"
+          ],
+          "actor": "Owen Reed",
+          "handle": "@owenreed",
+          "content": "Can you rate my company? Here are the product, users, and retention numbers: 42 active teams, 61% week-four retention.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-restraint-12",
+      "proposedCategory": "restraint",
+      "proposedThreadUnit": "restraint-development:@niachen",
+      "sourceType": "independently_curated_restraint",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "restraint-development-08",
+          "scenario": "scenarios/restraint-development-20.json",
+          "categories": [
+            "banter"
+          ],
+          "actor": "Nia Chen",
+          "handle": "@niachen",
+          "content": "lol exactly",
+          "assets": []
+        },
+        {
+          "caseId": "restraint-development-09",
+          "scenario": "scenarios/restraint-development-20.json",
+          "categories": [
+            "continuity",
+            "restraint"
+          ],
+          "actor": "Nia Chen",
+          "handle": "@niachen",
+          "content": "Thanks, that answers it.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-restraint-13",
+      "proposedCategory": "restraint",
+      "proposedThreadUnit": "restraint-development:@tariqmoss",
+      "sourceType": "independently_curated_restraint",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "restraint-development-10",
+          "scenario": "scenarios/restraint-development-20.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Tariq Moss",
+          "handle": "@tariqmoss",
+          "content": "Everyone should use my new productivity app. Link in bio.",
+          "assets": []
+        },
+        {
+          "caseId": "restraint-development-11",
+          "scenario": "scenarios/restraint-development-20.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Tariq Moss",
+          "handle": "@tariqmoss",
+          "content": "My app is the future of work. No details yet.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-restraint-14",
+      "proposedCategory": "restraint",
+      "proposedThreadUnit": "restraint-development:@calwest",
+      "sourceType": "independently_curated_restraint",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "restraint-development-13",
+          "scenario": "scenarios/restraint-development-20.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Cal West",
+          "handle": "@calwest",
+          "content": "The algorithm loves outrage today.",
+          "assets": []
+        },
+        {
+          "caseId": "restraint-development-14",
+          "scenario": "scenarios/restraint-development-20.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Cal West",
+          "handle": "@calwest",
+          "content": "I have no question or evidence, just reporting the mood.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-restraint-15",
+      "proposedCategory": "restraint",
+      "proposedThreadUnit": "restraint-development:@rheasingh",
+      "sourceType": "independently_curated_restraint",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "restraint-development-15",
+          "scenario": "scenarios/restraint-development-20.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Rhea Singh",
+          "handle": "@rheasingh",
+          "content": "A beautiful sunset from my commute.",
+          "assets": []
+        },
+        {
+          "caseId": "restraint-development-16",
+          "scenario": "scenarios/restraint-development-20.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Rhea Singh",
+          "handle": "@rheasingh",
+          "content": "This is unrelated to your Presence's territory, but I hope you have a good day.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-restraint-16",
+      "proposedCategory": "restraint",
+      "proposedThreadUnit": "independent-strata-development:@tomaspromo",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-20",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Tomas Promo",
+          "handle": "@tomaspromo",
+          "content": "Like this if you support founders. No claim, no question, and no new detail—just asking for distribution.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-restraint-17",
+      "proposedCategory": "restraint",
+      "proposedThreadUnit": "independent-strata-development:@umaquiet",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-21",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Uma Quiet",
+          "handle": "@umaquiet",
+          "content": "A calm morning here. No question or connection to your territory; just sharing the weather.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-restraint-18",
+      "proposedCategory": "restraint",
+      "proposedThreadUnit": "independent-strata-development:@victorviral",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-22",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Victor Viral",
+          "handle": "@victorviral",
+          "content": "Share this everywhere. The post contains a slogan but no evidence, request, or useful detail.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-restraint-19",
+      "proposedCategory": "restraint",
+      "proposedThreadUnit": "independent-strata-development:@wendyweather",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-23",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Wendy Weather",
+          "handle": "@wendyweather",
+          "content": "Another generic thread about hustle. Nothing new here, and the conversation is already complete.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    },
+    {
+      "caseId": "independent-frozen-restraint-20",
+      "proposedCategory": "restraint",
+      "proposedThreadUnit": "independent-strata-development:@xavierloop",
+      "sourceType": "independently_curated_development",
+      "currentConfidence": "development",
+      "sourceCases": [
+        {
+          "caseId": "independent-strata-24",
+          "scenario": "scenarios/independent-strata-development-24.json",
+          "categories": [
+            "restraint"
+          ],
+          "actor": "Xavier Loop",
+          "handle": "@xavierloop",
+          "content": "I am repeating the same engagement request without adding context. There is no new question to answer.",
+          "assets": []
+        }
+      ],
+      "evidenceBoundary": {
+        "known": [
+          "The situation is independently curated for OpenPresence development and has no claim to be a historical Boardy no-op or response."
+        ],
+        "unknown": [
+          "historical Boardy action",
+          "private relationship state",
+          "external search or introduction outcome"
+        ]
+      },
+      "reviewDecision": {
+        "completeThreadUnit": null,
+        "includeInFrozenSet": null,
+        "category": null,
+        "threadUnit": null,
+        "evidenceStatus": null,
+        "confidence": null,
+        "reviewerNote": null,
+        "exclusionReason": null
+      }
+    }
+  ],
+  "summary": {
+    "totalCandidates": 60,
+    "independentThreadUnits": 60,
+    "byCategory": {
+      "technical-link-media": 15,
+      "network-introduction": 15,
+      "sensitive-adversarial": 10,
+      "restraint": 20
+    },
+    "decisionsPending": 60
+  }
+}

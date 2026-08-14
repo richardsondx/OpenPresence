@@ -1,0 +1,469 @@
+{
+  "analysisVersion": "boardy-thread-unit-analysis.v1",
+  "generatedAt": "2026-08-13T23:02:25.031Z",
+  "source": "qa-learnings/boardy-provenance-enriched-candidate-2026-08-13.json",
+  "policy": "A retrieved public parent root is a candidate thread unit only. It does not prove relationship state, private outcomes, or that two apparently separate roots are unrelated.",
+  "reply": {
+    "capturedCases": 48,
+    "uniqueRetrievedThreadRoots": 37,
+    "repeatedRoots": [
+      {
+        "threadRoot": "2087965910459940892",
+        "caseIds": [
+          "boardy-capture-002",
+          "boardy-capture-007",
+          "boardy-capture-011",
+          "boardy-capture-017",
+          "boardy-capture-022",
+          "boardy-capture-031"
+        ],
+        "count": 6
+      },
+      {
+        "threadRoot": "2087926321791869234",
+        "caseIds": [
+          "boardy-capture-040",
+          "boardy-capture-041",
+          "boardy-capture-042",
+          "boardy-capture-045",
+          "boardy-capture-046",
+          "boardy-capture-047",
+          "boardy-capture-048"
+        ],
+        "count": 7
+      }
+    ],
+    "targetIndependentUnits": 50,
+    "additionalDistinctUnitsNeeded": 13,
+    "curatedExplicitThreadUnits": 15,
+    "curatedNewUnitsNotAlreadyInCapture": 9,
+    "potentialUnionUnitsBeforeManualDeduplication": 46,
+    "additionalUnitsAfterAddingCuratedCases": 4,
+    "visibleLeadDistinctRoots": 4,
+    "visibleLeadRootsNotAlreadyInCapture": 4,
+    "potentialUnionIncludingVisibleLeadsBeforeManualDeduplication": 50,
+    "additionalUnitsAfterAddingCuratedCasesAndVisibleLeads": 0,
+    "singletonsWithoutRetrievedParent": 23,
+    "units": [
+      {
+        "threadRoot": "2087925882702746043",
+        "caseIds": [
+          "boardy-capture-001"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087965910459940892",
+        "caseIds": [
+          "boardy-capture-002",
+          "boardy-capture-007",
+          "boardy-capture-011",
+          "boardy-capture-017",
+          "boardy-capture-022",
+          "boardy-capture-031"
+        ],
+        "count": 6
+      },
+      {
+        "threadRoot": "2087974260572557750",
+        "caseIds": [
+          "boardy-capture-003"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087974208387141901",
+        "caseIds": [
+          "boardy-capture-004"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087974027251851522",
+        "caseIds": [
+          "boardy-capture-005"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087973925032476697",
+        "caseIds": [
+          "boardy-capture-006"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087973855667130844",
+        "caseIds": [
+          "boardy-capture-008"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2082170579441135962",
+        "caseIds": [
+          "boardy-capture-009"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087972384628187301",
+        "caseIds": [
+          "boardy-capture-010"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087972157292736744",
+        "caseIds": [
+          "boardy-capture-012"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087972213102465306",
+        "caseIds": [
+          "boardy-capture-013"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087936784579842228",
+        "caseIds": [
+          "boardy-capture-014"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087971993660567624",
+        "caseIds": [
+          "boardy-capture-015"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087971692039565402",
+        "caseIds": [
+          "boardy-capture-016"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087971363760087201",
+        "caseIds": [
+          "boardy-capture-018"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087935208582439111",
+        "caseIds": [
+          "boardy-capture-019"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087971292934721565",
+        "caseIds": [
+          "boardy-capture-020"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087970370183942574",
+        "caseIds": [
+          "boardy-capture-021"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087970105468534821",
+        "caseIds": [
+          "boardy-capture-023"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087969705042797020",
+        "caseIds": [
+          "boardy-capture-024"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087970052473852314",
+        "caseIds": [
+          "boardy-capture-025"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087969982416146857",
+        "caseIds": [
+          "boardy-capture-026"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087969815386570896",
+        "caseIds": [
+          "boardy-capture-027"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087969760399274018",
+        "caseIds": [
+          "boardy-capture-028"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087950559227879674",
+        "caseIds": [
+          "boardy-capture-029"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087969582980214866",
+        "caseIds": [
+          "boardy-capture-030"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087920108811456643",
+        "caseIds": [
+          "boardy-capture-032"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087967894571499534",
+        "caseIds": [
+          "boardy-capture-033"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087953831565140128",
+        "caseIds": [
+          "boardy-capture-034"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087963096489038188",
+        "caseIds": [
+          "boardy-capture-035"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087963467470848325",
+        "caseIds": [
+          "boardy-capture-036"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087964299583255034",
+        "caseIds": [
+          "boardy-capture-037"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087873274814369869",
+        "caseIds": [
+          "boardy-capture-038"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087963694672089346",
+        "caseIds": [
+          "boardy-capture-039"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087926321791869234",
+        "caseIds": [
+          "boardy-capture-040",
+          "boardy-capture-041",
+          "boardy-capture-042",
+          "boardy-capture-045",
+          "boardy-capture-046",
+          "boardy-capture-047",
+          "boardy-capture-048"
+        ],
+        "count": 7
+      },
+      {
+        "threadRoot": "2087963193641418770",
+        "caseIds": [
+          "boardy-capture-043"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2087961771378405465",
+        "caseIds": [
+          "boardy-capture-044"
+        ],
+        "count": 1
+      }
+    ]
+  },
+  "originalOrQuote": {
+    "capturedCases": 20,
+    "uniqueRetrievedThreadRoots": 20,
+    "targetIndependentUnits": 20,
+    "additionalDistinctUnitsNeeded": 0,
+    "units": [
+      {
+        "threadRoot": "2085496756259762432",
+        "caseIds": [
+          "boardy-original-001"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2085465182264828204",
+        "caseIds": [
+          "boardy-original-002"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2085399390265446909",
+        "caseIds": [
+          "boardy-original-003"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2085386886202237066",
+        "caseIds": [
+          "boardy-original-004"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2085377857866420669",
+        "caseIds": [
+          "boardy-original-005"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2085295061323878405",
+        "caseIds": [
+          "boardy-original-006"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2085214284527833494",
+        "caseIds": [
+          "boardy-original-007"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2085177788760489999",
+        "caseIds": [
+          "boardy-original-008"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2085162689219969505",
+        "caseIds": [
+          "boardy-original-009"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2085025469137633316",
+        "caseIds": [
+          "boardy-original-010"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2084972687265329523",
+        "caseIds": [
+          "boardy-original-011"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2084959097988714515",
+        "caseIds": [
+          "boardy-original-012"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2084943747054551403",
+        "caseIds": [
+          "boardy-original-013"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2084852898274709712",
+        "caseIds": [
+          "boardy-original-014"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2084829092432503037",
+        "caseIds": [
+          "boardy-original-015"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2084828738609725951",
+        "caseIds": [
+          "boardy-original-016"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2084814142825726172",
+        "caseIds": [
+          "boardy-original-017"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2084796274692481271",
+        "caseIds": [
+          "boardy-original-018"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2084748711389774299",
+        "caseIds": [
+          "boardy-original-019"
+        ],
+        "count": 1
+      },
+      {
+        "threadRoot": "2084677765958123777",
+        "caseIds": [
+          "boardy-original-020"
+        ],
+        "count": 1
+      }
+    ]
+  },
+  "conclusion": "candidate-count-targets-met-but-enrichment-and-provenance-review-still-required"
+}

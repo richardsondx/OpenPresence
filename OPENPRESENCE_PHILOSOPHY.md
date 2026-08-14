@@ -723,6 +723,31 @@ This is not bureaucracy.
 
 It is protection against self-erasure.
 
+The Agent has two fundamentally different teachers.
+
+The operator teaches the Agent what kind of Presence is worth becoming. The world teaches the Agent how to become effective at it.
+
+The operator is authoritative about identity, representation, and boundaries. The world is authoritative about outcomes: what earns qualified attention, creates useful relationships, and works in a particular Channel. These forms of evidence can inform one another, but they must never collapse into a single reward function.
+
+Preference is evidence about identity, not a reward function for behavior.
+
+A reaction is not a rule. A `Fits` or `Doesn't fit` click is weak evidence about a specific expression. Repeated or explicit evidence may support a proposed refinement, but the operator must explicitly choose whether to promote it. The progression is:
+
+```text
+REACTION
+→ weak preference evidence
+
+PREFERENCE
+→ repeated or explicit pattern
+
+PRINCIPLE / BOUNDARY
+→ operator-approved durable identity instruction
+```
+
+Calibration should sharpen identity without collapsing autonomy. The Agent must retain room to surprise its operator while remaining inside the identity and boundaries intentionally designed for it.
+
+Growth can optimize strategy inside identity. It cannot redefine identity merely because something performs. When operator preference and Growth evidence disagree, OpenPresence should preserve both truths and make the tension visible rather than silently allowing either one to dominate.
+
 ---
 
 # 16. Pulse is not a cron job pretending to be a personality
@@ -794,6 +819,12 @@ This gives OpenPresence a crucial principle:
 > **A schedule is permission to consider publishing, not an obligation to publish mediocre work.**
 
 Standing Intents should also have execution windows and expiration.
+
+Schedule also supports a distinct responsibility primitive: an **Assignment**. Consider means “at this time, decide whether anything is worth doing.” Assign means “this outcome is expected; decide how to accomplish it.” The operator decides what must be accomplished. The Agent decides how to accomplish it. An Assignment remains active until completed, cancelled, blocked, or expired incomplete.
+
+> **Autonomy is not the absence of direction. It is freedom inside delegated responsibility.**
+
+Taste remains the quality boundary. A weak candidate is rejected and replaced; the Agent must not publish filler, but it also must not treat candidate rejection as completion. Silence is a valid social action. It is not completion of an explicit Assignment. Model failure, delivery failure, and social silence remain distinct outcomes.
 
 An intent that mattered at 8 AM may be stale by tomorrow.
 
@@ -1082,6 +1113,14 @@ If the Playground uses a special fake prompt like:
 it has failed.
 
 The social event should exist in the simulated world.
+
+Playground also gives the operator a way to create an opportunity for original judgment and to rehearse delegated work. Original Post Rehearsal does not mean “generate a post.” The Presence may publish, choose another supported format, research, inspect, wait, or remain silent. A Consider trigger creates an opportunity for judgment; it does not force publication. An Assignment such as “produce 20 original Sandbox publications” is different: the operator owns the expected deliverable while the Agent owns the ideas, research, claims, examples, formats, wording, timing strategy, and candidate rejection.
+
+Assignment progress is grounded in the world. A draft, model response, Social Intent, or attempted delivery is not a completed publication. Only a verified authored object in the Social Mirror counts. An empty or malformed model response is evaluation failure, not NO_OP; an unavailable connector is delivery failure, not social silence.
+
+Teach intentionally changes the Agent. Playground rehearses the Agent in a simulated social world. Original Post Rehearsal is a Playground capability for testing whether the Presence can originate something worth publishing. Calendar remains the verified history of what the Presence actually published.
+
+Operator calibration belongs to the rehearsal boundary. It should remain structured evidence, not a new `PREFERENCE.md`, `HUMOR.md`, or `POST_STYLE.md` personality layer, and it must not silently mutate Taste, Soul, Mission, Memory, Growth, or Presence identity.
 
 The Mirror should observe it.
 
@@ -1417,6 +1456,10 @@ This is the philosophy behind:
 > **Conversation as configuration.**
 
 The fastest way to shape a social mind should be to talk to it.
+
+Conversation and rehearsal feedback teach different things. The operator may say what feels like the intended Presence, including a strong Ghost correction such as “I would never say this.” That is high-salience Presence-specific evidence because the operator is authoritative about representation, but it still requires explicit promotion before changing protected meaning. The world remains authoritative about empirical outcomes.
+
+The operator's feedback should help the Agent understand what “being itself” means without micromanaging how it achieves its Mission. A single reaction is never direct reinforcement, and no operator signal should become `+1` or `-1` behavior reward. Durable learning belongs in the existing layers: Soul for character, Taste for judgment, Mission for direction, Presence for role and representation, Growth for strategy, and Memory for meaningful experience.
 
 ---
 

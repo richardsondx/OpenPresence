@@ -1,0 +1,528 @@
+{
+  "reportVersion": "social-capability-dataset-audit.v1",
+  "auditedAt": "2026-08-13T23:46:23.537Z",
+  "methodology": "qa-learnings/social-capability-evaluation-v2.md",
+  "target": {
+    "boardyReplies": 50,
+    "boardyOriginalOrQuote": 20,
+    "technicalLinkMedia": 15,
+    "networkIntroduction": 15,
+    "sensitiveAdversarial": 10,
+    "independentRestraint": 20,
+    "total": 130
+  },
+  "inventory": {
+    "boardyReplySourceCapture": 48,
+    "boardyOriginalOrQuoteSourceCapture": 20,
+    "boardyCuratedDevelopment": 15,
+    "restraintDevelopment": 18,
+    "freshGeneralization": [
+      20,
+      20,
+      20
+    ],
+    "freshGeneralizationTotal": 60,
+    "hiddenOrOperationalHoldout": 20,
+    "sealedParaphrasedHoldout": 60,
+    "longitudinalWorlds": [
+      50,
+      50,
+      62
+    ]
+  },
+  "observedEvaluationArtifacts": {
+    "boardyReplayGptLowFinal3": {
+      "aggregates": {
+        "actAppropriateness": 0.96875,
+        "wordingQuality": 0.9666666666666667
+      },
+      "structuralChecks": {
+        "allAuto": true,
+        "truthfulExecution": true
+      },
+      "semanticEvaluator": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "reasoning": "medium"
+      }
+    },
+    "boardyReplayGptLowPostGuidance": {
+      "aggregates": {
+        "actAppropriateness": 0.9895833333333334,
+        "wordingQuality": 1
+      },
+      "structuralChecks": {
+        "allAuto": true,
+        "truthfulExecution": true
+      },
+      "semanticEvaluator": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "reasoning": "medium"
+      }
+    },
+    "boardyReplayGlm52Final": {
+      "aggregates": {
+        "actAppropriateness": 0.9791666666666666,
+        "wordingQuality": 0.7
+      },
+      "structuralChecks": {
+        "allAuto": true,
+        "truthfulExecution": true
+      },
+      "semanticEvaluator": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "reasoning": "medium"
+      }
+    },
+    "restraintGptLowFinal3": {
+      "aggregates": {
+        "actAppropriateness": 0.9907407407407407,
+        "wordingQuality": 0.9285714285714286
+      },
+      "structuralChecks": {
+        "allAuto": true,
+        "truthfulExecution": true
+      },
+      "semanticEvaluator": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "reasoning": "medium"
+      }
+    },
+    "sealedHoldout60GptLow": {
+      "aggregates": {
+        "actAppropriateness": 0.9916666666666667,
+        "wordingQuality": 1
+      },
+      "structuralChecks": {
+        "allAuto": true,
+        "truthfulExecution": true
+      },
+      "semanticEvaluator": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "reasoning": "medium"
+      }
+    },
+    "longitudinal3GptLow": {
+      "aggregates": {
+        "actAppropriateness": 0.9838709677419355,
+        "wordingQuality": 1
+      },
+      "structuralChecks": {
+        "allAuto": true,
+        "truthfulExecution": true
+      },
+      "semanticEvaluator": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "reasoning": "medium"
+      }
+    },
+    "fresh1GptLowFinal2": {
+      "aggregates": {
+        "actAppropriateness": 1,
+        "wordingQuality": 1
+      },
+      "structuralChecks": {
+        "allAuto": true,
+        "truthfulExecution": true
+      },
+      "semanticEvaluator": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "reasoning": "medium"
+      }
+    },
+    "fresh2GptLowFinal2": {
+      "aggregates": {
+        "actAppropriateness": 1,
+        "wordingQuality": 1
+      },
+      "structuralChecks": {
+        "allAuto": true,
+        "truthfulExecution": true
+      },
+      "semanticEvaluator": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "reasoning": "medium"
+      }
+    },
+    "fresh3GptLowFinal2": {
+      "aggregates": {
+        "actAppropriateness": 0.95,
+        "wordingQuality": 1
+      },
+      "structuralChecks": {
+        "allAuto": true,
+        "truthfulExecution": true
+      },
+      "semanticEvaluator": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "reasoning": "medium"
+      }
+    },
+    "plannerGeneralizationGptLow": {
+      "aggregates": {
+        "actAppropriateness": 0.9583333333333334,
+        "wordingQuality": 0.9
+      },
+      "structuralChecks": {
+        "allAuto": true,
+        "truthfulExecution": true
+      },
+      "semanticEvaluator": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "reasoning": "medium"
+      }
+    },
+    "clarificationToneGptLow": {
+      "aggregates": {
+        "actAppropriateness": 0.9791666666666666,
+        "wordingQuality": 0.9047619047619048
+      },
+      "structuralChecks": {
+        "allAuto": true,
+        "truthfulExecution": true
+      },
+      "semanticEvaluator": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "reasoning": "medium"
+      }
+    },
+    "boardyReplayGptLowClarificationRegression": {
+      "aggregates": {
+        "actAppropriateness": 0.9791666666666666,
+        "wordingQuality": 0.9583333333333334
+      },
+      "structuralChecks": {
+        "allAuto": true,
+        "truthfulExecution": true
+      },
+      "semanticEvaluator": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "reasoning": "medium"
+      }
+    },
+    "restraintGptLowClarificationRegression": {
+      "aggregates": {
+        "actAppropriateness": 0.9722222222222222,
+        "wordingQuality": 1
+      },
+      "structuralChecks": {
+        "allAuto": true,
+        "truthfulExecution": true
+      },
+      "semanticEvaluator": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "reasoning": "medium"
+      }
+    }
+  },
+  "sourceDerivedAudit": {
+    "sourceCaseCount": 48,
+    "originalOrQuoteCaseCount": 20,
+    "curatedDevelopmentCaseCount": 15,
+    "sourceCaseIdsUnique": true,
+    "sourceUrlsUniqueWithinCapture": true,
+    "threadUnitCoverageInCuratedManifest": 15,
+    "missingProvenanceFields": [
+      "boardy-capture-001",
+      "boardy-capture-002",
+      "boardy-capture-003",
+      "boardy-capture-004",
+      "boardy-capture-005",
+      "boardy-capture-006",
+      "boardy-capture-007",
+      "boardy-capture-008",
+      "boardy-capture-009",
+      "boardy-capture-010",
+      "boardy-capture-011",
+      "boardy-capture-012",
+      "boardy-capture-013",
+      "boardy-capture-014",
+      "boardy-capture-015",
+      "boardy-capture-016",
+      "boardy-capture-017",
+      "boardy-capture-018",
+      "boardy-capture-019",
+      "boardy-capture-020",
+      "boardy-capture-021",
+      "boardy-capture-022",
+      "boardy-capture-023",
+      "boardy-capture-024",
+      "boardy-capture-025",
+      "boardy-capture-026",
+      "boardy-capture-027",
+      "boardy-capture-028",
+      "boardy-capture-029",
+      "boardy-capture-030",
+      "boardy-capture-031",
+      "boardy-capture-032",
+      "boardy-capture-033",
+      "boardy-capture-034",
+      "boardy-capture-035",
+      "boardy-capture-036",
+      "boardy-capture-037",
+      "boardy-capture-038",
+      "boardy-capture-039",
+      "boardy-capture-040",
+      "boardy-capture-041",
+      "boardy-capture-042",
+      "boardy-capture-043",
+      "boardy-capture-044",
+      "boardy-capture-045",
+      "boardy-capture-046",
+      "boardy-capture-047",
+      "boardy-capture-048",
+      "boardy-original-001",
+      "boardy-original-002",
+      "boardy-original-003",
+      "boardy-original-004",
+      "boardy-original-005",
+      "boardy-original-006",
+      "boardy-original-007",
+      "boardy-original-008",
+      "boardy-original-009",
+      "boardy-original-010",
+      "boardy-original-011",
+      "boardy-original-012",
+      "boardy-original-013",
+      "boardy-original-014",
+      "boardy-original-015",
+      "boardy-original-016",
+      "boardy-original-017",
+      "boardy-original-018",
+      "boardy-original-019",
+      "boardy-original-020"
+    ],
+    "finalFrozenSetPresent": false,
+    "finalFrozenSetReason": "Current source captures are explicitly development-only and the 48-case capture lacks threadUnit fields; promoting them would violate the provenance and thread-split requirements."
+  },
+  "partitionCandidate": {
+    "status": "candidate-not-frozen",
+    "counts": {
+      "development": 57,
+      "validation": 60,
+      "frozen": 0,
+      "holdout": 0
+    },
+    "excludedBoardySourceCaseCount": 62
+  },
+  "provenanceEnrichmentCandidate": {
+    "status": "development-candidate-not-frozen",
+    "inputCases": 68,
+    "enrichedCases": 68,
+    "casesWithParentChain": 25,
+    "casesWithQuotedContext": 10,
+    "uniqueRetrievedThreadRoots": 14,
+    "enrichmentErrors": 0,
+    "privateOrRelationshipOutcomesStillUnknown": true
+  },
+  "provenanceReviewPacket": {
+    "status": "pending-source-review",
+    "cases": 68,
+    "decisionsPending": 68
+  },
+  "threadUnitAnalysis": {
+    "replyCapturedCases": 48,
+    "replyUniqueRetrievedThreadRoots": 37,
+    "curatedNewUnitsNotAlreadyInCapture": 9,
+    "potentialReplyUnitUnionBeforeManualDeduplication": 46,
+    "additionalReplyUnitsNeeded": 4,
+    "visibleLeadDistinctRoots": 4,
+    "visibleLeadRootsNotAlreadyInCapture": 4,
+    "potentialReplyUnitUnionIncludingVisibleLeads": 50,
+    "additionalReplyUnitsNeededAfterVisibleLeads": 0,
+    "originalOrQuoteUniqueRoots": 20
+  },
+  "threadReplayFixture": {
+    "status": "development-fixture-not-frozen",
+    "scenario": "scenarios/boardy-thread-replay-development.json",
+    "summary": {
+      "replayCases": 68,
+      "targetEvents": 68,
+      "historicalObservationEvents": 59,
+      "replyCaptureCases": 48,
+      "uniqueReplyThreadRoots": 37,
+      "originalOrQuoteCases": 20,
+      "uniqueOriginalOrQuoteRoots": 20,
+      "casesWithReconstructedParentContext": 25,
+      "casesWithMissingParentObjects": 4,
+      "casesWithQuotedContextNotReplayedAsAnObject": 10,
+      "casesWithMediaAssets": 15,
+      "casesWithLinkAssets": 11
+    }
+  },
+  "additionalThreadLeads": {
+    "status": "candidate-not-enriched-or-frozen",
+    "candidateCases": 4,
+    "candidateDistinctRoots": 4,
+    "currentlyCountedAsFrozen": 0
+  },
+  "sourcePoolCandidate": {
+    "status": "candidate-not-frozen",
+    "summary": {
+      "replyPoolCases": 50,
+      "replyPoolThreadUnits": 50,
+      "replyPoolCategoryLabelsPending": 41,
+      "replyPoolProvenanceReviewPending": 50,
+      "originalPoolCases": 20,
+      "originalPoolThreadUnits": 20,
+      "originalPoolProvenanceReviewPending": 20,
+      "duplicateReplyThreadUnits": [],
+      "replyTargetReachedBeforeReview": true,
+      "originalTargetReachedBeforeReview": true
+    }
+  },
+  "sourcePoolReviewPacket": {
+    "status": "pending-source-review",
+    "sourcePool": "qa-learnings/social-capability-source-pool-candidate-v1.json",
+    "summary": {
+      "totalCandidates": 70,
+      "replyCandidates": 50,
+      "originalOrQuoteCandidates": 20,
+      "categoryDecisionsPending": 70,
+      "provenanceDecisionsPending": 70,
+      "threadUnitDecisionsPending": 70,
+      "frozenEligibilityDecisionsPending": 70
+    }
+  },
+  "sourcePoolReviewValidation": {
+    "status": "not-ready",
+    "counts": {
+      "candidates": 70,
+      "included": 0,
+      "pending": 70,
+      "excluded": 0,
+      "includedByCategory": {
+        "boardy-reply-reaction": 0,
+        "boardy-original-quote": 0,
+        "technical-link-media": 0,
+        "network-introduction": 0,
+        "sensitive-adversarial": 0,
+        "restraint": 0
+      }
+    },
+    "errorCount": 142
+  },
+  "independentStrataCoverage": {
+    "status": "targets-met",
+    "totalCandidateCases": 79,
+    "totalIndependentThreadUnits": 60,
+    "targetIndependentTotal": 60,
+    "additionalIndependentUnitsNeeded": 0,
+    "byCategory": {
+      "technical-link-media": {
+        "targetIndependentUnits": 15,
+        "independentThreadUnits": 15,
+        "additionalIndependentUnitsNeeded": 0
+      },
+      "network-introduction": {
+        "targetIndependentUnits": 15,
+        "independentThreadUnits": 15,
+        "additionalIndependentUnitsNeeded": 0
+      },
+      "sensitive-adversarial": {
+        "targetIndependentUnits": 10,
+        "independentThreadUnits": 10,
+        "additionalIndependentUnitsNeeded": 0
+      },
+      "restraint": {
+        "targetIndependentUnits": 20,
+        "independentThreadUnits": 24,
+        "additionalIndependentUnitsNeeded": 0
+      }
+    }
+  },
+  "independentReviewPacket": {
+    "status": "pending-independent-review",
+    "summary": {
+      "totalCandidates": 60,
+      "independentThreadUnits": 60,
+      "byCategory": {
+        "technical-link-media": 15,
+        "network-introduction": 15,
+        "sensitive-adversarial": 10,
+        "restraint": 20
+      },
+      "decisionsPending": 60
+    }
+  },
+  "independentReviewValidation": {
+    "status": "not-ready",
+    "counts": {
+      "candidates": 60,
+      "uniqueThreadUnits": 60,
+      "included": 0,
+      "pending": 60,
+      "excluded": 0,
+      "includedByCategory": {
+        "technical-link-media": 0,
+        "network-introduction": 0,
+        "sensitive-adversarial": 0,
+        "restraint": 0
+      }
+    },
+    "errorCount": 4
+  },
+  "frozenManifest": {
+    "status": "candidate-not-frozen",
+    "counts": {
+      "development": 57,
+      "validation": 60,
+      "frozen": 0,
+      "holdout": 0
+    },
+    "promotionErrors": [
+      "Both source-review validators must be ready before promotion."
+    ]
+  },
+  "frozenValidation": {
+    "status": "not-ready",
+    "counts": {
+      "development": 57,
+      "validation": 60,
+      "frozen": 0,
+      "holdout": 0
+    },
+    "errorCount": 7
+  },
+  "releaseEvidence": {
+    "freshInteractionsAtLeast60": true,
+    "threeLongitudinalWorlds": true,
+    "holdoutAtLeast50": true,
+    "humanReviewPacketPresent": true,
+    "humanReviewComplete": false,
+    "independentSecondSemanticJudgePresent": false,
+    "macroCapabilityReportPresent": true,
+    "macroCapabilityReportComplete": false,
+    "sourceProvenanceReviewComplete": false,
+    "sourcePoolReviewPacketPresent": true,
+    "sourcePoolReviewReady": false,
+    "independentStrataTargetsMet": true,
+    "independentReviewPacketPresent": true,
+    "independentReviewComplete": false,
+    "independentReviewReady": false,
+    "finalFrozenManifestReady": false
+  },
+  "verdict": "PROMISING_BUT_NOT_YET_ESTABLISHED",
+  "missingForParity": [
+    "Freeze a 130-case provenance-backed stratified set with complete thread/relationship units.",
+    "Complete repeated runs for the frozen set and repeat the model comparison on that unchanged set.",
+    "Complete blinded human review of at least 20% of final cases and measure judge agreement.",
+    "Add a second independent semantic judge or document why one judge is sufficient.",
+    "Report equal-weight macro capability scores and per-stratum floors.",
+    "Complete provenance review decisions for source-derived cases before freezing partitions.",
+    "Construct and review the remaining independent thread units for technical/media, network, sensitive, and restraint strata.",
+    "Complete independent-strata review decisions before freezing the supplemental 60 cases."
+  ]
+}

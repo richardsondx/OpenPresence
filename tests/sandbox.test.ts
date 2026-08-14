@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { writeState } from "../lib/db";
 import { POST as statePost } from "../app/api/state/route";
-import { addSandboxEvent, advanceSandboxTime, applyOperation, confirmAutoMode, createAgent, deliverSandboxExecution, expireSandboxIntents, formSandboxIntent, resetPlaygroundSession, startPlaygroundSession } from "../lib/runtime";
+import { addSandboxEvent, advanceSandboxTime, applyOperation, beginOriginalPostRehearsal, completeOriginalPostRehearsal, confirmAutoMode, createAgent, deliverSandboxExecution, expireSandboxIntents, formSandboxIntent, recordPreferenceEvidence, resetPlaygroundSession, startPlaygroundSession } from "../lib/runtime";
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
@@ -54,6 +54,31 @@ describe("Sandbox and Playground boundaries", () => {
     expect(object?.externalRef.type).toBe("x.post");
     expect(state.mirrorEvents[0]?.sessionId).toBe(session.id);
     expect(state.events.find((item) => item.title === "Sandbox event observed")?.sourceObjectId).toBe(object?.id);
+  });
+
+  it("can load replay history without triggering social cognition", async () => {
+    const state = startPlaygroundSession(createAgent(input));
+    const session = state.playgroundSessions[0]!;
+    writeState(state);
+
+    const response = await statePost(new Request("http://localhost/api/state", {
+      method: "POST",
+      body: JSON.stringify({
+        type: "addSandboxEvent",
+        sessionId: session.id,
+        actionId: "post",
+        actorName: "Historical author",
+        content: "A parent post loaded as public replay context.",
+        observeOnly: true,
+      }),
+      headers: { "content-type": "application/json" },
+    }));
+    const next = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(next.mirrorObjects.filter((item: { sessionId: string }) => item.sessionId === session.id)).toHaveLength(1);
+    expect(next.socialIntents.filter((item: { sessionId: string }) => item.sessionId === session.id)).toHaveLength(0);
+    expect(next.events.some((event: { title: string; sessionId?: string }) => event.sessionId === session.id && event.title === "Social plan formed")).toBe(false);
   });
 
   it("keeps targeted Sandbox decision lineage on the observed target", () => {
@@ -282,4 +307,40 @@ describe("Sandbox and Playground boundaries", () => {
     const updated = applyOperation(agentState, { type: "setPresence", patch: { mediaPerceptionPolicy: "always-review" } });
     expect(updated.presence?.mediaPerceptionPolicy).toBe("always-review");
   });
+
+  it("records original-post rehearsal provenance and preference evidence without mutating identity", () => {
+    const originalTaste = createAgent(input).files.find((file) => file.kind === "TASTE")?.content;
+    let state = startPlaygroundSession(createAgent(input));
+    const session = state.playgroundSessions[0]!;
+    state = beginOriginalPostRehearsal(state, { sessionId: session.id, inspiration: "A concrete note about durable memory." });
+    const attempt = state.originalPostRehearsals[0]!;
+    state = formSandboxIntent(state, { sessionId: session.id, affordance: "post", text: "Memory should preserve decisions, not every transcript.", rehearsalAttemptId: attempt.id });
+    const execution = state.executions[0]!;
+    state = deliverSandboxExecution(state, execution.id);
+    state = completeOriginalPostRehearsal(state, attempt.id);
+    const completed = state.originalPostRehearsals[0]!;
+    expect(completed.result).toBe("published");
+    expect(completed.publicationId).toBeDefined();
+    expect(state.mirrorObjects[0]?.originExecutionId).toBe(execution.id);
+    expect(state.mirrorObjects[0]?.content?.text).not.toContain("durable memory");
+
+    state = recordPreferenceEvidence(state, { sessionId: session.id, attemptId: attempt.id, reaction: "does_not_fit", reasons: ["too_generic"], note: "Prefer a more concrete mechanism." });
+    expect(state.preferenceEvidence[0]).toMatchObject({ reaction: "does_not_fit", reasons: ["too_generic"], scopeHint: "agent", environment: "sandbox" });
+    expect(state.files.find((file) => file.kind === "TASTE")?.content).toBe(originalTaste);
+    expect(state.events[0]?.title).toBe("Preference evidence saved");
+  });
+
+  it("keeps a no-op rehearsal calibratable as good silence", () => {
+    let state = startPlaygroundSession(createAgent(input));
+    const session = state.playgroundSessions[0]!;
+    state = beginOriginalPostRehearsal(state, { sessionId: session.id });
+    const attempt = state.originalPostRehearsals[0]!;
+    state = completeOriginalPostRehearsal(state, attempt.id);
+    expect(state.originalPostRehearsals[0]?.result).toBe("no_op");
+    expect(state.events[0]?.detail).toContain("chose silence in this context");
+    state = recordPreferenceEvidence(state, { sessionId: session.id, attemptId: attempt.id, reaction: "good_silence" });
+    expect(state.preferenceEvidence[0]?.subjectRef).toEqual({ type: "decision", id: attempt.id });
+    expect(state.preferenceEvidence[0]?.source).toBe("playground_no_op");
+  });
+
 });

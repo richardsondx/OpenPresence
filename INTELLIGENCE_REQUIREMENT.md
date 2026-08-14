@@ -923,6 +923,10 @@ These principles should remain stable:
 
 > **Exact wording is rarely the invariant of good social behavior.**
 
+> **Low-information cues are context, not obligations.**
+
+> A fragment, punctuation mark, emoji, brief acknowledgment, or casual greeting may deserve a tiny social response or silence. Judge the thread and relationship first; never expand it into assistant onboarding or invent a topic.
+
 > **Tests should evaluate judgment, not memorize responses.**
 
 > **Semantic heuristics are technical debt unless they represent true mechanical facts.**

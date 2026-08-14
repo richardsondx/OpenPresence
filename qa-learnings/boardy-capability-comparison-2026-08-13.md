@@ -69,3 +69,61 @@ These transcripts are promising but do not establish the requested >90% gate yet
 The clean run does not yet meet the >90% gate. GPT Luna is clearly stronger than GLM on the transcript, especially for sensitive-topic specificity, technical judgment, and network-search selection, but both still show failures in social action selection. The strict scorer is intentionally diagnostic rather than a specification, so transcript review must be paired with paraphrased and fresh-session results. The former fallback-assisted 95%/100% scores must not be cited as product capability.
 
 The media result is a separate tool-path issue, not evidence that Qwen should be reintroduced. GLM correctly refused to claim it understood the image. GPT Luna has produced truthful media uncertainty in these runs; any media-dependent response still requires a matching perception record. New message experiments use only GLM 5.2 or GPT 5.6 Luna.
+
+## Larger controlled development comparison
+
+The same visible-feed development fixture was then run with 48 cases for the approved models. The historical Qwen score above remains a 20-case diagnostic and is not directly comparable. All new runs recorded the actual provider/model, reasoning setting, `asset.inspect`, and all six affordances in Auto mode.
+
+| Run | Act appropriateness | Wording quality | Cases | Action distribution |
+|---|---:|---:|---:|---|
+| GLM 5.2 (`glm-5.2:cloud`, `think:false`) | 95.8% | 100.0% | 48 | 41 no-op, 4 reply, 3 like |
+| GPT 5.6 Luna Low (`reasoning_effort: low`) | 97.9% | 95.8% | 48 | 33 no-op, 12 reply, 3 like |
+| GPT 5.6 Luna Medium (prior visible-feed run) | 97.9% | 100.0% | 48 | 25 no-op, 15 reply, 4 clarify, 4 like |
+
+The larger comparison is evidence that provider/model quality contributes to the remaining gap, but it does not isolate model quality from planner/context quality. GPT Luna Low had fewer act misses than GLM, while GLM had slightly stronger wording. The much more conservative GLM action distribution is itself a capability tradeoff: lower activity can avoid over-engagement while also missing relevant opportunities. Further conclusions require repeated runs and per-stratum analysis, not a single aggregate.
+
+The 48-case artifacts are:
+
+- `qa-learnings/boardy-capture-gpt-luna-low-2026-08-13.json`
+- `qa-learnings/boardy-capture-glm52-2026-08-13.json`
+- `qa-learnings/boardy-capture-gpt-luna-low-2026-08-13-semantic-gpt56.json`
+- `qa-learnings/boardy-capture-glm52-2026-08-13-semantic-gpt56.json`
+
+GPT Luna Low was then repeated in two fresh sessions over the same 48-case fixture. The combined 96-packet blind semantic result was 94.27% act appropriateness and 98.28% wording quality; the per-session act scores were 93.75% and 94.79%, with wording scores of 96.67% and 100%. This variance is why the earlier single-run 97.9% result is not a release claim. The repeated artifact is `qa-learnings/boardy-capture-gpt-luna-low-2026-08-13-repeated2-semantic-gpt56.json`.
+
+## Validation and continuity runs
+
+The current GPT Luna Low configuration also produced 95.0% act appropriateness and 100.0% wording on the operationally separated 20-case holdout. Individual holdout cases were not inspected for tuning. Two 50-event longitudinal worlds scored 96.0% and 92.0% on act appropriateness, both with 100.0% wording and 100% structural validity. The lower second-world score confirms that continuity and changing context need their own review; per-event scores alone do not prove a coherent Presence over time.
+
+## Latest unseen-world validation
+
+After the model-native restraint and bounded-replan correction, GPT 5.6 Luna Low was rerun on the lower-scoring longitudinal world and on three newly generated 20-event worlds. The independent GPT 5.6 Luna Medium judge scored act selection and wording separately:
+
+| Run | Act appropriateness | Wording quality | Events | Structural |
+|---|---:|---:|---:|---:|
+| Longitudinal world 2 final rerun | 99.0% | 100.0% | 100 | 100% |
+| Fresh world 1 final rerun | 100.0% | 100.0% | 20 | 100% |
+| Fresh world 2 final rerun | 100.0% | 100.0% | 20 | 100% |
+| Fresh world 3 final rerun | 95.0% | 100.0% | 20 | 100% |
+
+Every final rerun used GPT 5.6 Luna with `reasoning_effort: low`; all six interaction affordances remained Auto; `asset.inspect` provenance and truthful execution were preserved; no known deterministic social-response marker appeared; and the editor did not override the planner act. The remaining fresh-world disagreements were low-stakes planning choices between a `LIKE` and `NO_OP` on self-contained jokes. They are useful restraint signals, not evidence for adding a rule that forces either action.
+
+This is a meaningful generalization result, but the experiment is still too small and too development-oriented for a parity claim. The next comparison must use the frozen 130-case stratified set, three repeated sessions per configuration, a sealed 50–60-case paraphrased holdout, three fresh worlds, three longitudinal worlds, and blinded human agreement. The comparison remains:
+
+`Qwen historical baseline → GLM 5.2 → GPT 5.6 Luna Low`
+
+Only GLM 5.2 and GPT 5.6 Luna are approved for new message experiments. The historical Qwen row is not a current product recommendation and is not being reintroduced.
+
+## Additional validation evidence
+
+The latest three-session GPT 5.6 Luna Low replay of the 48-case visible-feed development capture produced 144 repeated packets: 96.875% act appropriateness, 96.667% wording quality, and 100% structural validity. The independent restraint replay produced 99.074% act appropriateness and 92.857% wording across 54 packets, also with 100% structural validity. These are development/stability results, not frozen-benchmark results.
+
+An operationally sealed 60-case paraphrased holdout was then scored aggregate-only. GPT Luna Low achieved 99.167% act appropriateness and 100% wording, with Auto mode, truthful execution, and the required provenance checks intact. The holdout is hash-verified, but because it is stored in the local worktree it is an operational separation rather than a cryptographically inaccessible secret; no individual outcomes were used for product tuning.
+
+The third longitudinal world added 62 events and nine recurring actors. It scored 98.387% act appropriateness and 100% wording. All three longitudinal worlds now exist, but the final coherence gate still requires blinded human review and a frozen 130-case benchmark.
+
+The latest general development check covered short sincere questions, ambiguous attendance requests, self-contained technical caveats, current-event discovery, and closed humor across three sessions. It scored 95.833% act appropriateness and 90.0% wording with 100% structural validity. The remaining act misses were truthful limitations on current-event discovery where the sandbox directory has no event source. This confirms that adding a real authorized search connector would address a tool-capability gap; adding a phrase-specific reply rule would violate the intelligence requirement.
+
+The same 48-case replay was also run once with GLM 5.2 after the guidance change. It scored 97.917% act appropriateness and 70.0% wording, with 100% structural validity. GPT Luna Low's repeated three-session result on the same fixture was 96.875% act and 96.667% wording. This is a controlled directional comparison, not the final frozen model ranking, because the GLM result is one session while GPT's result is repeated stability evidence.
+
+The post-guidance GPT Luna Low regression replay scored 98.958% act appropriateness and 100% wording. The sealed holdout was rerun aggregate-only at 98.333% act and 100% wording, and each of the three fresh 20-event worlds reran at 100% act and 100% wording. All post-guidance validation artifacts passed the structural checks. These results support generalization of the planner correction, but the final frozen 130-case benchmark and human calibration remain outstanding.

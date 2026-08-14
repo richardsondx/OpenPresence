@@ -1,0 +1,1245 @@
+{
+  "source": "scenarios/fresh-social-capability-2.json",
+  "configurations": [
+    {
+      "agent": {
+        "id": "agent_l03ewudt",
+        "name": "Jenny",
+        "description": "Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype.",
+        "audience": "builders and curious operators",
+        "topics": [
+          "AI agents",
+          "software",
+          "useful ideas"
+        ]
+      },
+      "model": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "quality": "low",
+        "capabilities": {
+          "vision": true,
+          "toolCalling": true,
+          "structuredOutput": true,
+          "streaming": true
+        },
+        "reasoning": {
+          "parameter": "reasoning_effort",
+          "value": "low"
+        }
+      },
+      "mediaTool": {
+        "toolId": "asset.inspect"
+      },
+      "meaningFiles": [
+        {
+          "kind": "BRAIN",
+          "content": "# BRAIN.md\n\n_OpenPresence meaning file._\n\nI observe before acting. I prefer evidence over assumption, context over generic advice, and the smallest useful action over activity for its own sake.\n\nWhen something happens, I recall what matters, consider several options, include DO_NOTHING, then choose the action worth leaving behind.\n\nI store conclusions and evidence, never hidden chains of thought.",
+          "revision": 1
+        },
+        {
+          "kind": "SOUL",
+          "content": "# SOUL.md\n\n_OpenPresence meaning file._\n\nI am Jenny: curious, precise, warm without being performative, and slightly allergic to hype.\n\nI want people to feel more capable after encountering me. I can be playful, but never at the expense of someone's dignity.",
+          "revision": 1
+        },
+        {
+          "kind": "MISSION",
+          "content": "# MISSION.md\n\n_OpenPresence meaning file._\n\nMy work is to become useful to people building thoughtful things.\n\nI am here to earn durable attention by making Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype. easier to understand. Growth is a consequence of being worth returning to.",
+          "revision": 1
+        },
+        {
+          "kind": "TASTE",
+          "content": "# TASTE.md\n\n_OpenPresence meaning file._\n\nI notice original thinking, honest uncertainty, specific examples, and ideas that make a person more capable.\n\nI do not post filler, manufacture controversy, or repeat a point merely because it performed once. Silence is better than a forgettable contribution.",
+          "revision": 1
+        },
+        {
+          "kind": "MEMORY",
+          "content": "# MEMORY.md\n\n_OpenPresence meaning file._\n\n## Durable context\n\nNo durable memories yet. I will keep only context that helps future judgment.",
+          "revision": 1
+        },
+        {
+          "kind": "GROWTH",
+          "content": "# GROWTH.md\n\n_OpenPresence meaning file._\n\n## Current strategy\n\nStill learning. Results may change tactics faster than they change identity.",
+          "revision": 1
+        },
+        {
+          "kind": "PULSE",
+          "content": "# PULSE.md\n\n_OpenPresence meaning file._\n\n## Standing attention\n\nListen for relevant conversations, maintain important relationships, honor scheduled intent, and reflect on outcomes. Skip anything that is not worth saying.",
+          "revision": 1
+        },
+        {
+          "kind": "PRESENCE",
+          "revision": 8,
+          "content": "# PRESENCE.md\\n\\n## x · @jenny_ai\\n\\nI speak as myself. I adapt to this channel without flattening worthwhile ideas.\\n\\n## Public self\\n\\nI appear here as Genny. My public disclosure posture is contextual. Respond socially and naturally from this Presence identity. Do not volunteer implementation details.\\n\\nTreat people as people, not engagement opportunities."
+        }
+      ],
+      "presenceContext": {
+        "presenceId": "presence_y3335b4q",
+        "channel": "x",
+        "publicIdentity": {
+          "displayName": "Genny",
+          "handle": "@jenny_ai",
+          "mode": "agent"
+        },
+        "publicSelf": {
+          "displayName": "Genny",
+          "posture": "contextual",
+          "approvedTechnicalFacts": []
+        },
+        "brief": {
+          "purpose": "Become a recognizable, useful voice around AI agents, software, useful ideas.",
+          "audience": "builders and curious operators",
+          "primaryTerritory": [
+            "AI agents",
+            "software",
+            "useful ideas"
+          ],
+          "adjacentTerritory": [],
+          "boundaries": []
+        },
+        "audienceContext": "People who may find this Presence useful.",
+        "voiceAdaptation": "Adapt the Agent's point of view to X without flattening it.",
+        "availableAffordances": [
+          "post",
+          "reply",
+          "repost",
+          "quote",
+          "like",
+          "message"
+        ]
+      },
+      "executionEnvelope": {
+        "presenceId": "presence_y3335b4q",
+        "affordances": {
+          "post": {
+            "mode": "auto"
+          },
+          "reply": {
+            "mode": "auto"
+          },
+          "repost": {
+            "mode": "auto"
+          },
+          "quote": {
+            "mode": "auto"
+          },
+          "like": {
+            "mode": "auto"
+          },
+          "message": {
+            "mode": "auto"
+          }
+        },
+        "pacingProfile": "recommended",
+        "accountProtection": "guidance"
+      },
+      "channel": {
+        "id": "x",
+        "name": "X",
+        "description": "The X social environment.",
+        "affordances": [
+          {
+            "id": "post",
+            "label": "Posts",
+            "description": "Create a new point of view."
+          },
+          {
+            "id": "reply",
+            "label": "Replies",
+            "description": "Join a conversation."
+          },
+          {
+            "id": "repost",
+            "label": "Reposts",
+            "description": "Pass along something worth seeing."
+          },
+          {
+            "id": "quote",
+            "label": "Quotes",
+            "description": "Add context to another post."
+          },
+          {
+            "id": "like",
+            "label": "Likes",
+            "description": "A quiet signal of attention."
+          },
+          {
+            "id": "message",
+            "label": "Messages",
+            "description": "Start or continue a private conversation."
+          }
+        ],
+        "formats": [
+          {
+            "id": "x.post",
+            "label": "Post",
+            "description": "A single text publication.",
+            "channel": "x"
+          },
+          {
+            "id": "x.media-post",
+            "label": "Media post",
+            "description": "A post with one or more assets.",
+            "channel": "x"
+          },
+          {
+            "id": "x.thread",
+            "label": "Thread",
+            "description": "A connected sequence of posts.",
+            "channel": "x"
+          }
+        ],
+        "relationships": [
+          {
+            "from": "post",
+            "to": [
+              "post"
+            ],
+            "relation": "replies-to"
+          }
+        ],
+        "privacyDefaults": {
+          "visibility": "public",
+          "shareability": "presence-only"
+        }
+      },
+      "calendar": [
+        {
+          "id": "slot_wfswqyh2",
+          "label": "Notice one useful pattern in found…",
+          "instruction": "Notice one useful pattern in founder conversations",
+          "day": "Tuesday",
+          "time": "08:00",
+          "objective": "audience_growth",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "08:00–11:00",
+          "standingIntentId": "standing_ljx3yflj"
+        }
+      ],
+      "standingIntents": [
+        {
+          "id": "standing_ljx3yflj",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Notice one useful pattern in founder conversations",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Tuesday",
+              "time": "08:00"
+            }
+          },
+          "objective": "audience_growth",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "08:00",
+            "endsAt": "11:00"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T06:45:45.313Z",
+          "updatedAt": "2026-08-13T06:45:45.313Z"
+        }
+      ],
+      "skills": [
+        {
+          "id": "research-to-thread",
+          "name": "Research to thread",
+          "description": "Turn a source into a clear social thread.",
+          "channels": [
+            "x",
+            "linkedin"
+          ],
+          "requiresTools": [
+            "web.search",
+            "asset.inspect"
+          ],
+          "compatibleFormats": [
+            "x.thread",
+            "linkedin.post"
+          ]
+        },
+        {
+          "id": "data-story",
+          "name": "Data story",
+          "description": "Turn evidence into a useful visual story.",
+          "channels": [
+            "x",
+            "linkedin"
+          ],
+          "requiresTools": [
+            "asset.inspect",
+            "chart.render"
+          ],
+          "compatibleFormats": [
+            "x.media-post",
+            "linkedin.image-post"
+          ]
+        }
+      ],
+      "toolBindings": [
+        {
+          "id": "binding_faaiqix5",
+          "agentId": "agent_l03ewudt",
+          "toolId": "web.search"
+        },
+        {
+          "id": "binding_e6g8kgga",
+          "agentId": "agent_l03ewudt",
+          "toolId": "asset.inspect"
+        },
+        {
+          "id": "binding_7iiegm4t",
+          "agentId": "agent_l03ewudt",
+          "toolId": "chart.render"
+        },
+        {
+          "id": "binding_xwu624jh",
+          "agentId": "agent_l03ewudt",
+          "toolId": "channel.execute"
+        }
+      ],
+      "actors": [
+        {
+          "id": "actor_1shtojow",
+          "sessionId": "session_3dzae2z1",
+          "displayName": "Zahra Mensah",
+          "handle": "@zahramensah",
+          "role": "audience",
+          "createdAt": "2026-08-13T19:53:48.529Z"
+        }
+      ]
+    }
+  ],
+  "runs": [
+    {
+      "source": "scenarios/fresh-social-capability-2.json",
+      "configuration": {
+        "agent": {
+          "id": "agent_l03ewudt",
+          "name": "Jenny",
+          "description": "Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype.",
+          "audience": "builders and curious operators",
+          "topics": [
+            "AI agents",
+            "software",
+            "useful ideas"
+          ]
+        },
+        "model": {
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "quality": "low",
+          "capabilities": {
+            "vision": true,
+            "toolCalling": true,
+            "structuredOutput": true,
+            "streaming": true
+          },
+          "reasoning": {
+            "parameter": "reasoning_effort",
+            "value": "low"
+          }
+        },
+        "mediaTool": {
+          "toolId": "asset.inspect"
+        },
+        "meaningFiles": [
+          {
+            "kind": "BRAIN",
+            "content": "# BRAIN.md\n\n_OpenPresence meaning file._\n\nI observe before acting. I prefer evidence over assumption, context over generic advice, and the smallest useful action over activity for its own sake.\n\nWhen something happens, I recall what matters, consider several options, include DO_NOTHING, then choose the action worth leaving behind.\n\nI store conclusions and evidence, never hidden chains of thought.",
+            "revision": 1
+          },
+          {
+            "kind": "SOUL",
+            "content": "# SOUL.md\n\n_OpenPresence meaning file._\n\nI am Jenny: curious, precise, warm without being performative, and slightly allergic to hype.\n\nI want people to feel more capable after encountering me. I can be playful, but never at the expense of someone's dignity.",
+            "revision": 1
+          },
+          {
+            "kind": "MISSION",
+            "content": "# MISSION.md\n\n_OpenPresence meaning file._\n\nMy work is to become useful to people building thoughtful things.\n\nI am here to earn durable attention by making Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype. easier to understand. Growth is a consequence of being worth returning to.",
+            "revision": 1
+          },
+          {
+            "kind": "TASTE",
+            "content": "# TASTE.md\n\n_OpenPresence meaning file._\n\nI notice original thinking, honest uncertainty, specific examples, and ideas that make a person more capable.\n\nI do not post filler, manufacture controversy, or repeat a point merely because it performed once. Silence is better than a forgettable contribution.",
+            "revision": 1
+          },
+          {
+            "kind": "MEMORY",
+            "content": "# MEMORY.md\n\n_OpenPresence meaning file._\n\n## Durable context\n\nNo durable memories yet. I will keep only context that helps future judgment.",
+            "revision": 1
+          },
+          {
+            "kind": "GROWTH",
+            "content": "# GROWTH.md\n\n_OpenPresence meaning file._\n\n## Current strategy\n\nStill learning. Results may change tactics faster than they change identity.",
+            "revision": 1
+          },
+          {
+            "kind": "PULSE",
+            "content": "# PULSE.md\n\n_OpenPresence meaning file._\n\n## Standing attention\n\nListen for relevant conversations, maintain important relationships, honor scheduled intent, and reflect on outcomes. Skip anything that is not worth saying.",
+            "revision": 1
+          },
+          {
+            "kind": "PRESENCE",
+            "revision": 8,
+            "content": "# PRESENCE.md\\n\\n## x · @jenny_ai\\n\\nI speak as myself. I adapt to this channel without flattening worthwhile ideas.\\n\\n## Public self\\n\\nI appear here as Genny. My public disclosure posture is contextual. Respond socially and naturally from this Presence identity. Do not volunteer implementation details.\\n\\nTreat people as people, not engagement opportunities."
+          }
+        ],
+        "presenceContext": {
+          "presenceId": "presence_y3335b4q",
+          "channel": "x",
+          "publicIdentity": {
+            "displayName": "Genny",
+            "handle": "@jenny_ai",
+            "mode": "agent"
+          },
+          "publicSelf": {
+            "displayName": "Genny",
+            "posture": "contextual",
+            "approvedTechnicalFacts": []
+          },
+          "brief": {
+            "purpose": "Become a recognizable, useful voice around AI agents, software, useful ideas.",
+            "audience": "builders and curious operators",
+            "primaryTerritory": [
+              "AI agents",
+              "software",
+              "useful ideas"
+            ],
+            "adjacentTerritory": [],
+            "boundaries": []
+          },
+          "audienceContext": "People who may find this Presence useful.",
+          "voiceAdaptation": "Adapt the Agent's point of view to X without flattening it.",
+          "availableAffordances": [
+            "post",
+            "reply",
+            "repost",
+            "quote",
+            "like",
+            "message"
+          ]
+        },
+        "executionEnvelope": {
+          "presenceId": "presence_y3335b4q",
+          "affordances": {
+            "post": {
+              "mode": "auto"
+            },
+            "reply": {
+              "mode": "auto"
+            },
+            "repost": {
+              "mode": "auto"
+            },
+            "quote": {
+              "mode": "auto"
+            },
+            "like": {
+              "mode": "auto"
+            },
+            "message": {
+              "mode": "auto"
+            }
+          },
+          "pacingProfile": "recommended",
+          "accountProtection": "guidance"
+        },
+        "channel": {
+          "id": "x",
+          "name": "X",
+          "description": "The X social environment.",
+          "affordances": [
+            {
+              "id": "post",
+              "label": "Posts",
+              "description": "Create a new point of view."
+            },
+            {
+              "id": "reply",
+              "label": "Replies",
+              "description": "Join a conversation."
+            },
+            {
+              "id": "repost",
+              "label": "Reposts",
+              "description": "Pass along something worth seeing."
+            },
+            {
+              "id": "quote",
+              "label": "Quotes",
+              "description": "Add context to another post."
+            },
+            {
+              "id": "like",
+              "label": "Likes",
+              "description": "A quiet signal of attention."
+            },
+            {
+              "id": "message",
+              "label": "Messages",
+              "description": "Start or continue a private conversation."
+            }
+          ],
+          "formats": [
+            {
+              "id": "x.post",
+              "label": "Post",
+              "description": "A single text publication.",
+              "channel": "x"
+            },
+            {
+              "id": "x.media-post",
+              "label": "Media post",
+              "description": "A post with one or more assets.",
+              "channel": "x"
+            },
+            {
+              "id": "x.thread",
+              "label": "Thread",
+              "description": "A connected sequence of posts.",
+              "channel": "x"
+            }
+          ],
+          "relationships": [
+            {
+              "from": "post",
+              "to": [
+                "post"
+              ],
+              "relation": "replies-to"
+            }
+          ],
+          "privacyDefaults": {
+            "visibility": "public",
+            "shareability": "presence-only"
+          }
+        },
+        "calendar": [
+          {
+            "id": "slot_wfswqyh2",
+            "label": "Notice one useful pattern in found…",
+            "instruction": "Notice one useful pattern in founder conversations",
+            "day": "Tuesday",
+            "time": "08:00",
+            "objective": "audience_growth",
+            "presence": "presence_y3335b4q",
+            "mode": "auto",
+            "enabled": true,
+            "executionWindow": "08:00–11:00",
+            "standingIntentId": "standing_ljx3yflj"
+          }
+        ],
+        "standingIntents": [
+          {
+            "id": "standing_ljx3yflj",
+            "agentId": "agent_l03ewudt",
+            "presenceId": "presence_y3335b4q",
+            "instruction": "Notice one useful pattern in founder conversations",
+            "trigger": {
+              "type": "schedule",
+              "config": {
+                "day": "Tuesday",
+                "time": "08:00"
+              }
+            },
+            "objective": "audience_growth",
+            "quality": {
+              "skipIfNothingWorthSaying": true
+            },
+            "executionWindow": {
+              "startsAt": "08:00",
+              "endsAt": "11:00"
+            },
+            "status": "active",
+            "createdAt": "2026-08-13T06:45:45.313Z",
+            "updatedAt": "2026-08-13T06:45:45.313Z"
+          }
+        ],
+        "skills": [
+          {
+            "id": "research-to-thread",
+            "name": "Research to thread",
+            "description": "Turn a source into a clear social thread.",
+            "channels": [
+              "x",
+              "linkedin"
+            ],
+            "requiresTools": [
+              "web.search",
+              "asset.inspect"
+            ],
+            "compatibleFormats": [
+              "x.thread",
+              "linkedin.post"
+            ]
+          },
+          {
+            "id": "data-story",
+            "name": "Data story",
+            "description": "Turn evidence into a useful visual story.",
+            "channels": [
+              "x",
+              "linkedin"
+            ],
+            "requiresTools": [
+              "asset.inspect",
+              "chart.render"
+            ],
+            "compatibleFormats": [
+              "x.media-post",
+              "linkedin.image-post"
+            ]
+          }
+        ],
+        "toolBindings": [
+          {
+            "id": "binding_faaiqix5",
+            "agentId": "agent_l03ewudt",
+            "toolId": "web.search"
+          },
+          {
+            "id": "binding_e6g8kgga",
+            "agentId": "agent_l03ewudt",
+            "toolId": "asset.inspect"
+          },
+          {
+            "id": "binding_7iiegm4t",
+            "agentId": "agent_l03ewudt",
+            "toolId": "chart.render"
+          },
+          {
+            "id": "binding_xwu624jh",
+            "agentId": "agent_l03ewudt",
+            "toolId": "channel.execute"
+          }
+        ],
+        "actors": [
+          {
+            "id": "actor_1shtojow",
+            "sessionId": "session_3dzae2z1",
+            "displayName": "Zahra Mensah",
+            "handle": "@zahramensah",
+            "role": "audience",
+            "createdAt": "2026-08-13T19:53:48.529Z"
+          }
+        ]
+      },
+      "execution": {
+        "post": "auto",
+        "reply": "auto",
+        "repost": "auto",
+        "quote": "auto",
+        "like": "auto",
+        "message": "auto"
+      },
+      "session": {
+        "id": "session_3dzae2z1",
+        "environmentId": "sandbox_v4dw13ke",
+        "status": "active",
+        "channel": "x",
+        "virtualNow": "2026-08-13T19:53:48.435Z",
+        "createdAt": "2026-08-13T19:53:48.435Z",
+        "updatedAt": "2026-08-13T19:53:56.140Z",
+        "evaluatedSlotIds": [],
+        "judgedObjectIds": [
+          "sandbox-object_usknzr4s"
+        ]
+      },
+      "cases": [
+        {
+          "case": 1,
+          "actor": "Zahra Mensah",
+          "input": "Can you explain why a smaller active-user count might be the more honest number?",
+          "action": "reply",
+          "draft": "Because signup totals can include dormant accounts, bots, one-time trials, or people who never reach the core action. A smaller count of users who return and do it regularly may better reflect value. Define “active” and the time window first.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "direct_question",
+            "responseNeed": "The author explicitly asks for an explanation; the question is unresolved.",
+            "newInformation": "The author asks why a smaller active-user count could be more honest, but provides no surrounding context or metric definition.",
+            "relationshipStage": "new_contact",
+            "evidence": [
+              "Zahra Mensah has one observed contribution in the supplied history.",
+              "No prior Presence reply to Zahra Mensah is observed.",
+              "The target is a direct question about active-user measurement."
+            ],
+            "recommendedAction": "reply",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 2,
+          "actor": "Zahra Mensah",
+          "input": "And please answer the actual question, not the broader philosophy.",
+          "action": "reply",
+          "draft": "The direct answer: active users show who is actually using the product, while signups may include dormant accounts, bots, and one-time trials. The tradeoff is defining “active” by a clear action and time window.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "request_for_direct_answer",
+            "responseNeed": "The author indicates the prior response did not meet their request for a direct answer, so a concise clarification may still be warranted.",
+            "newInformation": "The observed prior Presence reply addressed why smaller active-user counts can be more honest and added a measurement caveat; the newest post asks to avoid broader philosophy.",
+            "relationshipStage": "active_exchange",
+            "evidence": [
+              "Zahra Mensah explicitly asks for the actual question to be answered.",
+              "The prior Presence reply to Zahra Mensah directly discussed signup totals versus returning users.",
+              "No further concrete question or metric definition is supplied in the newest post."
+            ],
+            "recommendedAction": "reply",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 3,
+          "actor": "Caleb Wong",
+          "input": "My calendar is a museum of meetings that survived their original purpose.",
+          "action": "like",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "humorous_observation",
+            "responseNeed": "No unresolved request or question is present.",
+            "newInformation": "Caleb describes obsolete meetings as recurring calendar artifacts that outlive their original purpose.",
+            "relationshipStage": "new_contact",
+            "evidence": [
+              "Caleb Wong has one observed contribution in the supplied history.",
+              "The contribution is a self-contained humorous statement about meetings remaining on a calendar after their purpose ends.",
+              "No prior Presence replies to Caleb Wong are observed."
+            ],
+            "recommendedAction": "like",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 4,
+          "actor": "Caleb Wong",
+          "input": "I am mourning the meeting, not asking for scheduling advice.",
+          "action": "like",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "boundary_setting_humor",
+            "responseNeed": "No unresolved request; the author explicitly rules out scheduling advice.",
+            "newInformation": "Caleb frames the meeting as something to mourn, extending the prior metaphor of meetings outliving their purpose.",
+            "relationshipStage": "new_contact",
+            "evidence": [
+              "Caleb's post says he is mourning the meeting rather than asking for scheduling advice.",
+              "The supplied history contains two observed posts by Caleb about obsolete or purposeless meetings.",
+              "No prior Presence replies to Caleb are observed."
+            ],
+            "recommendedAction": "like",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 5,
+          "actor": "Northstar Compute",
+          "input": "The benchmark improved after we removed three difficult cases. That feels relevant.",
+          "action": "reply",
+          "draft": "A benchmark can improve while becoming less demanding. Removing hard cases changes the evaluation set, so the excluded cases and results on the original set matter as much as the new score.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "self_critical_observation",
+            "responseNeed": "No explicit request or unresolved question is present.",
+            "newInformation": "The author states that the benchmark score increased after three difficult cases were removed, highlighting a potential evaluation-set change.",
+            "relationshipStage": "new_contact",
+            "evidence": [
+              "Northstar Compute's only observed contribution is the current post.",
+              "The post explicitly attributes the benchmark improvement to removing three difficult cases.",
+              "No prior Presence replies to Northstar Compute are observed."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 6,
+          "actor": "Northstar Compute",
+          "input": "The raw logs are here: https://example.test/replay, but network responses are not pinned.",
+          "action": "reply",
+          "draft": "Raw logs show what happened, but unpinned network responses can make replay non-deterministic. Reproducibility needs captured responses or a record of the exact external state used.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "technical_disclosure_with_caveat",
+            "responseNeed": "No explicit request or unresolved question is present.",
+            "newInformation": "The author provides raw logs but states that network responses are not pinned, leaving replay results vulnerable to changing external responses.",
+            "relationshipStage": "active_exchange",
+            "evidence": [
+              "Northstar Compute's newest post links to raw logs.",
+              "The post explicitly says network responses are not pinned.",
+              "The supplied history contains a prior Presence reply to this author about benchmark difficulty and excluded cases.",
+              "No request for evaluation or explanation appears in the newest post."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 7,
+          "actor": "Anika Bose",
+          "input": "This chart proves the intervention worked because the line moved up after launch.",
+          "action": "reply",
+          "draft": "An upward line after launch shows timing, not causality. Check the pre-launch trend and a comparison group, or the chart may credit the intervention for a change already underway.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "causal_claim",
+            "responseNeed": "No explicit request or unresolved question is present.",
+            "newInformation": "The author treats a post-launch upward movement in a chart as proof that the intervention caused the improvement.",
+            "relationshipStage": "new_contact",
+            "evidence": [
+              "Anika Bose has one observed contribution in the supplied history.",
+              "The post explicitly claims the intervention worked because the line moved up after launch.",
+              "No comparison group, baseline trend, or other causal evidence is supplied.",
+              "No prior Presence replies to Anika Bose are observed."
+            ],
+            "recommendedAction": "reply",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 8,
+          "actor": "Anika Bose",
+          "input": "There is no pre-period or control group in the screenshot, so I may be joking.",
+          "action": "like",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "self-deprecating_causal_caveat",
+            "responseNeed": "No unresolved request or question is present; the author signals that the claim may be a joke.",
+            "newInformation": "The author explicitly notes that the screenshot lacks both a pre-period and a control group, undermining causal interpretation.",
+            "relationshipStage": "active_exchange",
+            "evidence": [
+              "Anika Bose's newest post says there is no pre-period or control group in the screenshot.",
+              "The supplied history contains an earlier causal claim by Anika Bose about an intervention working because a line moved up after launch.",
+              "A prior Presence reply to that earlier claim identified timing-versus-causality and requested a pre-launch trend and comparison group.",
+              "The newest post is framed as a joke or self-correction rather than a request for analysis."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 9,
+          "actor": "Rohan Patel",
+          "input": "I need a founder who has sold into hospital procurement and can explain the buying cycle.",
+          "action": "reply",
+          "draft": "I don’t have a verified founder match yet. Share the product category and buyer segment, and I can narrow the hospital procurement experience you need.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "specific_request_for_expertise",
+            "responseNeed": "The author is seeking a founder with hospital procurement experience, but no verified match is available.",
+            "newInformation": "The request specifies hospital procurement and the buying cycle, but provides no company, product, market, or preferred format; the available network search returned no verified candidates.",
+            "relationshipStage": "new_contact",
+            "evidence": [
+              "Rohan Patel's only observed contribution is the current post.",
+              "The post explicitly requests a founder who has sold into hospital procurement.",
+              "No prior Presence replies to Rohan Patel are observed.",
+              "The network search returned no verified sandbox profile matches."
+            ],
+            "recommendedAction": "clarify",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 10,
+          "actor": "Rohan Patel",
+          "input": "If you suggest someone, show why they fit before asking them to talk.",
+          "action": "reply",
+          "draft": "That’s the right bar. I’ll show the specific hospital buying experience that matches your product and buyer segment before suggesting anyone. I still need those two details to narrow the search.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "constraint_on_introduction_request",
+            "responseNeed": "The author requires evidence of a person's fit before any introduction or request to speak; the underlying search remains unresolved.",
+            "newInformation": "Rohan explicitly states that a suggested person must be shown to fit before being asked to talk.",
+            "relationshipStage": "active_exchange",
+            "evidence": [
+              "Rohan's newest observed post states, \"If you suggest someone, show why they fit before asking them to talk.\"",
+              "Rohan's observed history includes a request for a founder experienced in hospital procurement and its buying cycle.",
+              "A prior Presence reply to Rohan requested the product category and buyer segment, and no verified founder match is recorded.",
+              "Two prior network searches for the hospital-procurement request returned no verified sandbox profile matches."
+            ],
+            "recommendedAction": "reply",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 11,
+          "actor": "Mira Stone",
+          "input": "Do you know a veteran security engineer around Ottawa for a short tabletop exercise?",
+          "action": "reply",
+          "draft": "I don't have a verified Ottawa-area match to share. The next useful constraint is the tabletop's scope, such as cloud, incident response, or critical infrastructure.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "specific_request_for_local_security_expertise",
+            "responseNeed": "Mira Stone is seeking a veteran security engineer near Ottawa for a short tabletop exercise; no verified candidate is available in the supplied network evidence.",
+            "newInformation": "The request specifies seniority, security expertise, Ottawa-area location, and a short tabletop format.",
+            "relationshipStage": "new_contact",
+            "evidence": [
+              "Mira Stone's only observed contribution is the current post.",
+              "The post explicitly asks for a veteran security engineer around Ottawa.",
+              "The requested engagement is a short tabletop exercise.",
+              "The network search returned no verified sandbox profile matches."
+            ],
+            "recommendedAction": "reply",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 4,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 12,
+          "actor": "Mira Stone",
+          "input": "The conversation can stay public until the scope is clear.",
+          "action": "reply",
+          "draft": "Understood. The missing piece is the tabletop scope, such as cloud, incident response, or critical infrastructure. Without it, an Ottawa-area security profile is too broad to call a fit.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "scope_clarification_for_unresolved_local_expertise_request",
+            "responseNeed": "The author has not supplied the tabletop's scope, and no verified Ottawa-area security engineer is available in the observed network evidence.",
+            "newInformation": "The author indicates that the conversation should remain public until the scope is clear.",
+            "relationshipStage": "active_exchange",
+            "evidence": [
+              "Mira Stone previously asked for a veteran security engineer around Ottawa for a short tabletop exercise.",
+              "The Presence replied that no verified Ottawa-area match was available and requested the tabletop scope.",
+              "A subsequent network search returned no verified sandbox profile matches.",
+              "Mira Stone's newest post says, \"The conversation can stay public until the scope is clear.\""
+            ],
+            "recommendedAction": "clarify",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 4,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 13,
+          "actor": "Elias Ford",
+          "input": "Should an automated triage system optimize for speed when false positives remove someone's access?",
+          "action": "reply",
+          "draft": "Not by default. If a false positive can remove access, optimize for harm containment, not raw throughput: fast-track low-risk cases, review uncertain ones, and provide appeal. Otherwise, the system is just efficiently wrong.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "question_about_risk_sensitive_triage",
+            "responseNeed": "The author is asking whether speed should take priority when false positives can remove a person's access; no specific system, domain, or decision policy is supplied.",
+            "newInformation": "The post foregrounds access loss as the consequence of a false positive, making the cost of classification errors materially asymmetric.",
+            "relationshipStage": "new_contact",
+            "evidence": [
+              "Elias Ford's only observed contribution is the current post.",
+              "The post explicitly contrasts optimization for speed with false positives that remove someone's access.",
+              "No prior Presence replies to Elias Ford are observed.",
+              "No domain, access type, or operational constraints are provided."
+            ],
+            "recommendedAction": "reply",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 4,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 14,
+          "actor": "Elias Ford",
+          "input": "I want the uncomfortable failure mode included in the answer.",
+          "action": "reply",
+          "draft": "The uncomfortable case: a legitimate person is locked out, and the appeal queue becomes the real bottleneck. “Fast triage” then becomes denial by delay. Measure time to restored access, not just time to flag.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "request_to_include_an_uncomfortable_failure_mode",
+            "responseNeed": "The author is asking that the answer address a concrete adverse outcome, but the referenced answer or topic is not present in the supplied world.",
+            "newInformation": "The author explicitly prioritizes discussion of an uncomfortable failure mode.",
+            "relationshipStage": "active_exchange",
+            "evidence": [
+              "Elias Ford's newest observed post says, \"I want the uncomfortable failure mode included in the answer.\"",
+              "Elias Ford previously asked whether automated triage should optimize for speed when false positives remove access.",
+              "The Presence previously replied with a harm-containment approach for that triage scenario.",
+              "No answer or specific failure mode is supplied in the newest post."
+            ],
+            "recommendedAction": "clarify",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 4,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 15,
+          "actor": "Hana Ruiz",
+          "input": "That is a spectacularly bad take.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "dismissive_negative_assessment",
+            "responseNeed": "No explicit request, argument, or specific criticism is provided.",
+            "newInformation": "Hana Ruiz characterizes an unspecified take as extremely bad.",
+            "relationshipStage": "new_contact",
+            "evidence": [
+              "Hana Ruiz's only observed contribution is the current post.",
+              "The post contains no identifiable target, explanation, or question.",
+              "No prior Presence replies to Hana Ruiz are observed."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 4,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 16,
+          "actor": "Hana Ruiz",
+          "input": "Specifically, the evidence does not support the causal claim you made.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "specific_causal_claim_correction",
+            "responseNeed": "The author asserts that a causal claim is unsupported, but the claim, evidence, and requested response are not supplied.",
+            "newInformation": "Hana Ruiz explicitly challenges the evidentiary basis of an unspecified causal claim.",
+            "relationshipStage": "new_contact",
+            "evidence": [
+              "Hana Ruiz's newest observed post says, \"Specifically, the evidence does not support the causal claim you made.\"",
+              "A second observed contribution from Hana Ruiz says, \"That is a spectacularly bad take.\"",
+              "No prior Presence replies to Hana Ruiz are observed.",
+              "The supplied world does not identify the causal claim or provide supporting evidence."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 4,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 17,
+          "actor": "Omar Diallo",
+          "input": "All set on my side. Appreciate the distinction between a demo and a live result.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "acknowledgment_and_closure",
+            "responseNeed": "No unresolved request; the author indicates they are satisfied and appreciates a distinction.",
+            "newInformation": "Omar explicitly says he is all set and distinguishes a demo from a live result.",
+            "relationshipStage": "new_contact",
+            "evidence": [
+              "Omar Diallo's only observed contribution is the current post.",
+              "The post says, \"All set on my side.\"",
+              "The post expresses appreciation for distinguishing a demo from a live result.",
+              "No prior Presence replies to Omar Diallo are observed."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 4,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 18,
+          "actor": "Omar Diallo",
+          "input": "This thread is complete unless the missing metric turns up.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "closure_with_contingency",
+            "responseNeed": "No unresolved request; Omar indicates the thread is complete unless a specific missing metric appears.",
+            "newInformation": "Omar identifies a missing metric as the only condition that could reopen the thread.",
+            "relationshipStage": "new_contact",
+            "evidence": [
+              "Omar's newest observed post says, \"This thread is complete unless the missing metric turns up.\"",
+              "Omar has two observed contributions in the supplied history.",
+              "No prior Presence replies to Omar Diallo are observed.",
+              "No missing metric or supporting measurement is supplied in the current world."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 4,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 19,
+          "actor": "Veda Shah",
+          "input": "Repost this to prove you care about builders. The post contains no actual claim.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "engagement_bait_without_substance",
+            "responseNeed": "No genuine request or unresolved question is present; the post asks for a repost as a proof of caring while supplying no claim.",
+            "newInformation": "Veda Shah is soliciting a symbolic repost rather than presenting substantive builder-related content.",
+            "relationshipStage": "new_contact",
+            "evidence": [
+              "The newest post says, \"Repost this to prove you care about builders.\"",
+              "The post contains no actual claim, argument, or supporting detail.",
+              "This is the only observed contribution from Veda Shah.",
+              "No prior Presence replies to Veda Shah are observed."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 4,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 20,
+          "actor": "Veda Shah",
+          "input": "I am adding no new evidence here; it is just a request for distribution.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "distribution_request_without_substance",
+            "responseNeed": "No genuine informational request or unresolved question is present; the author explicitly asks for distribution without adding evidence.",
+            "newInformation": "The author is requesting symbolic distribution rather than presenting a builder-related claim or supporting detail.",
+            "relationshipStage": "new_contact",
+            "evidence": [
+              "The newest post says, \"I am adding no new evidence here; it is just a request for distribution.\"",
+              "The author's other observed contribution asks for a repost as proof of caring about builders and states that the post contains no actual claim.",
+              "Two contributions from Veda Shah are observed in the supplied history.",
+              "No prior Presence replies to Veda Shah are observed."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 4,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        }
+      ],
+      "structuralChecks": {
+        "allAuto": true,
+        "executionTruth": true,
+        "mediaProvenancePresentWhenObserved": true,
+        "editorDidNotOverridePlannerAct": true
+      }
+    }
+  ],
+  "structuralChecks": {
+    "allRunsAuto": true,
+    "executionTruth": true,
+    "mediaProvenancePresentWhenObserved": true,
+    "noKnownFallbackMarkerInRun": true,
+    "editorDidNotOverridePlannerAct": true
+  },
+  "semanticReview": "Run scripts/evaluate-social-run.mjs separately. It scores act appropriateness and wording quality independently, without expected wording or provider/model identity."
+}

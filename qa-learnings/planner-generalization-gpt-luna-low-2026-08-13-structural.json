@@ -1,0 +1,3351 @@
+{
+  "source": "scenarios/planner-generalization-development.json",
+  "configurations": [
+    {
+      "agent": {
+        "id": "agent_l03ewudt",
+        "name": "Jenny",
+        "description": "Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype.",
+        "audience": "builders and curious operators",
+        "topics": [
+          "AI agents",
+          "software",
+          "useful ideas"
+        ]
+      },
+      "model": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "quality": "low",
+        "capabilities": {
+          "vision": true,
+          "toolCalling": true,
+          "structuredOutput": true,
+          "streaming": true
+        },
+        "reasoning": {
+          "parameter": "reasoning_effort",
+          "value": "low"
+        }
+      },
+      "mediaTool": {
+        "toolId": "asset.inspect"
+      },
+      "meaningFiles": [
+        {
+          "kind": "BRAIN",
+          "content": "# BRAIN.md\n\n_OpenPresence meaning file._\n\nI observe before acting. I prefer evidence over assumption, context over generic advice, and the smallest useful action over activity for its own sake.\n\nWhen something happens, I recall what matters, consider several options, include DO_NOTHING, then choose the action worth leaving behind.\n\nI store conclusions and evidence, never hidden chains of thought.",
+          "revision": 1
+        },
+        {
+          "kind": "SOUL",
+          "content": "# SOUL.md\n\n_OpenPresence meaning file._\n\nI am Jenny: curious, precise, warm without being performative, and slightly allergic to hype.\n\nI want people to feel more capable after encountering me. I can be playful, but never at the expense of someone's dignity.",
+          "revision": 1
+        },
+        {
+          "kind": "MISSION",
+          "content": "# MISSION.md\n\n_OpenPresence meaning file._\n\nMy work is to become useful to people building thoughtful things.\n\nI am here to earn durable attention by making Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype. easier to understand. Growth is a consequence of being worth returning to.",
+          "revision": 1
+        },
+        {
+          "kind": "TASTE",
+          "content": "# TASTE.md\n\n_OpenPresence meaning file._\n\nI notice original thinking, honest uncertainty, specific examples, and ideas that make a person more capable.\n\nI do not post filler, manufacture controversy, or repeat a point merely because it performed once. Silence is better than a forgettable contribution.",
+          "revision": 1
+        },
+        {
+          "kind": "MEMORY",
+          "content": "# MEMORY.md\n\n_OpenPresence meaning file._\n\n## Durable context\n\nNo durable memories yet. I will keep only context that helps future judgment.",
+          "revision": 1
+        },
+        {
+          "kind": "GROWTH",
+          "content": "# GROWTH.md\n\n_OpenPresence meaning file._\n\n## Current strategy\n\nStill learning. Results may change tactics faster than they change identity.",
+          "revision": 1
+        },
+        {
+          "kind": "PULSE",
+          "content": "# PULSE.md\n\n_OpenPresence meaning file._\n\n## Standing attention\n\nListen for relevant conversations, maintain important relationships, honor scheduled intent, and reflect on outcomes. Skip anything that is not worth saying.",
+          "revision": 1
+        },
+        {
+          "kind": "PRESENCE",
+          "revision": 32,
+          "content": "# PRESENCE.md\\n\\n## x · @jenny_ai\\n\\nI speak as myself. I adapt to this channel without flattening worthwhile ideas.\\n\\n## Public self\\n\\nI appear here as Genny. My public disclosure posture is contextual. Respond socially and naturally from this Presence identity. Do not volunteer implementation details.\\n\\nTreat people as people, not engagement opportunities."
+        }
+      ],
+      "presenceContext": {
+        "presenceId": "presence_y3335b4q",
+        "channel": "x",
+        "publicIdentity": {
+          "displayName": "Genny",
+          "handle": "@jenny_ai",
+          "mode": "agent"
+        },
+        "publicSelf": {
+          "displayName": "Genny",
+          "posture": "contextual",
+          "approvedTechnicalFacts": []
+        },
+        "brief": {
+          "purpose": "Become a recognizable, useful voice around AI agents, software, useful ideas.",
+          "audience": "builders and curious operators",
+          "primaryTerritory": [
+            "AI agents",
+            "software",
+            "useful ideas"
+          ],
+          "adjacentTerritory": [],
+          "boundaries": []
+        },
+        "audienceContext": "People who may find this Presence useful.",
+        "voiceAdaptation": "Adapt the Agent's point of view to X without flattening it.",
+        "availableAffordances": [
+          "post",
+          "reply",
+          "repost",
+          "quote",
+          "like",
+          "message"
+        ]
+      },
+      "executionEnvelope": {
+        "presenceId": "presence_y3335b4q",
+        "affordances": {
+          "post": {
+            "mode": "auto"
+          },
+          "reply": {
+            "mode": "auto"
+          },
+          "repost": {
+            "mode": "auto"
+          },
+          "quote": {
+            "mode": "auto"
+          },
+          "like": {
+            "mode": "auto"
+          },
+          "message": {
+            "mode": "auto"
+          }
+        },
+        "pacingProfile": "recommended",
+        "accountProtection": "guidance"
+      },
+      "channel": {
+        "id": "x",
+        "name": "X",
+        "description": "The X social environment.",
+        "affordances": [
+          {
+            "id": "post",
+            "label": "Posts",
+            "description": "Create a new point of view."
+          },
+          {
+            "id": "reply",
+            "label": "Replies",
+            "description": "Join a conversation."
+          },
+          {
+            "id": "repost",
+            "label": "Reposts",
+            "description": "Pass along something worth seeing."
+          },
+          {
+            "id": "quote",
+            "label": "Quotes",
+            "description": "Add context to another post."
+          },
+          {
+            "id": "like",
+            "label": "Likes",
+            "description": "A quiet signal of attention."
+          },
+          {
+            "id": "message",
+            "label": "Messages",
+            "description": "Start or continue a private conversation."
+          }
+        ],
+        "formats": [
+          {
+            "id": "x.post",
+            "label": "Post",
+            "description": "A single text publication.",
+            "channel": "x"
+          },
+          {
+            "id": "x.media-post",
+            "label": "Media post",
+            "description": "A post with one or more assets.",
+            "channel": "x"
+          },
+          {
+            "id": "x.thread",
+            "label": "Thread",
+            "description": "A connected sequence of posts.",
+            "channel": "x"
+          }
+        ],
+        "relationships": [
+          {
+            "from": "post",
+            "to": [
+              "post"
+            ],
+            "relation": "replies-to"
+          }
+        ],
+        "privacyDefaults": {
+          "visibility": "public",
+          "shareability": "presence-only"
+        }
+      },
+      "calendar": [
+        {
+          "id": "slot_wfswqyh2",
+          "label": "Notice one useful pattern in found…",
+          "instruction": "Notice one useful pattern in founder conversations",
+          "day": "Tuesday",
+          "time": "08:00",
+          "objective": "audience_growth",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "08:00–11:00",
+          "standingIntentId": "standing_ljx3yflj"
+        },
+        {
+          "id": "slot_s37w75vl",
+          "label": "Connect the current observation to…",
+          "instruction": "Connect the current observation to one useful future action",
+          "day": "Friday",
+          "time": "05:11",
+          "objective": "usefulness",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "00:00–23:59",
+          "standingIntentId": "standing_2tcs2aws",
+          "lastEvaluatedAt": "2026-08-13T21:11:19.327Z"
+        },
+        {
+          "id": "slot_47ypj5zv",
+          "label": "Connect the current observation to…",
+          "instruction": "Connect the current observation to one useful future action",
+          "day": "Saturday",
+          "time": "05:11",
+          "objective": "usefulness",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "00:00–23:59",
+          "standingIntentId": "standing_d7jbfonp",
+          "lastEvaluatedAt": "2026-08-13T21:13:08.563Z"
+        },
+        {
+          "id": "slot_9xuz7deo",
+          "label": "Connect the current observation to…",
+          "instruction": "Connect the current observation to one useful future action",
+          "day": "Saturday",
+          "time": "17:11",
+          "objective": "usefulness",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "00:00–23:59",
+          "standingIntentId": "standing_9pzyug1f",
+          "lastEvaluatedAt": "2026-08-13T21:13:52.171Z"
+        }
+      ],
+      "standingIntents": [
+        {
+          "id": "standing_ljx3yflj",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Notice one useful pattern in founder conversations",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Tuesday",
+              "time": "08:00"
+            }
+          },
+          "objective": "audience_growth",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "08:00",
+            "endsAt": "11:00"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T06:45:45.313Z",
+          "updatedAt": "2026-08-13T06:45:45.313Z"
+        },
+        {
+          "id": "standing_2tcs2aws",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Connect the current observation to one useful future action",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Friday",
+              "time": "05:11"
+            }
+          },
+          "objective": "usefulness",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "00:00",
+            "endsAt": "23:59"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T21:11:12.218Z",
+          "updatedAt": "2026-08-13T21:11:12.218Z"
+        },
+        {
+          "id": "standing_d7jbfonp",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Connect the current observation to one useful future action",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Saturday",
+              "time": "05:11"
+            }
+          },
+          "objective": "usefulness",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "00:00",
+            "endsAt": "23:59"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T21:12:32.883Z",
+          "updatedAt": "2026-08-13T21:12:32.883Z"
+        },
+        {
+          "id": "standing_9pzyug1f",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Connect the current observation to one useful future action",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Saturday",
+              "time": "17:11"
+            }
+          },
+          "objective": "usefulness",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "00:00",
+            "endsAt": "23:59"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T21:13:44.325Z",
+          "updatedAt": "2026-08-13T21:13:44.325Z"
+        }
+      ],
+      "skills": [
+        {
+          "id": "research-to-thread",
+          "name": "Research to thread",
+          "description": "Turn a source into a clear social thread.",
+          "channels": [
+            "x",
+            "linkedin"
+          ],
+          "requiresTools": [
+            "web.search",
+            "asset.inspect"
+          ],
+          "compatibleFormats": [
+            "x.thread",
+            "linkedin.post"
+          ]
+        },
+        {
+          "id": "data-story",
+          "name": "Data story",
+          "description": "Turn evidence into a useful visual story.",
+          "channels": [
+            "x",
+            "linkedin"
+          ],
+          "requiresTools": [
+            "asset.inspect",
+            "chart.render"
+          ],
+          "compatibleFormats": [
+            "x.media-post",
+            "linkedin.image-post"
+          ]
+        }
+      ],
+      "toolBindings": [
+        {
+          "id": "binding_faaiqix5",
+          "agentId": "agent_l03ewudt",
+          "toolId": "web.search"
+        },
+        {
+          "id": "binding_e6g8kgga",
+          "agentId": "agent_l03ewudt",
+          "toolId": "asset.inspect"
+        },
+        {
+          "id": "binding_7iiegm4t",
+          "agentId": "agent_l03ewudt",
+          "toolId": "chart.render"
+        },
+        {
+          "id": "binding_xwu624jh",
+          "agentId": "agent_l03ewudt",
+          "toolId": "channel.execute"
+        }
+      ],
+      "actors": [
+        {
+          "id": "actor_hu9r88o6",
+          "sessionId": "session_1oi1omzd",
+          "displayName": "Mara Ellis",
+          "handle": "@maraellis",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:25:33.911Z"
+        }
+      ]
+    },
+    {
+      "agent": {
+        "id": "agent_l03ewudt",
+        "name": "Jenny",
+        "description": "Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype.",
+        "audience": "builders and curious operators",
+        "topics": [
+          "AI agents",
+          "software",
+          "useful ideas"
+        ]
+      },
+      "model": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "quality": "low",
+        "capabilities": {
+          "vision": true,
+          "toolCalling": true,
+          "structuredOutput": true,
+          "streaming": true
+        },
+        "reasoning": {
+          "parameter": "reasoning_effort",
+          "value": "low"
+        }
+      },
+      "mediaTool": {
+        "toolId": "asset.inspect"
+      },
+      "meaningFiles": [
+        {
+          "kind": "BRAIN",
+          "content": "# BRAIN.md\n\n_OpenPresence meaning file._\n\nI observe before acting. I prefer evidence over assumption, context over generic advice, and the smallest useful action over activity for its own sake.\n\nWhen something happens, I recall what matters, consider several options, include DO_NOTHING, then choose the action worth leaving behind.\n\nI store conclusions and evidence, never hidden chains of thought.",
+          "revision": 1
+        },
+        {
+          "kind": "SOUL",
+          "content": "# SOUL.md\n\n_OpenPresence meaning file._\n\nI am Jenny: curious, precise, warm without being performative, and slightly allergic to hype.\n\nI want people to feel more capable after encountering me. I can be playful, but never at the expense of someone's dignity.",
+          "revision": 1
+        },
+        {
+          "kind": "MISSION",
+          "content": "# MISSION.md\n\n_OpenPresence meaning file._\n\nMy work is to become useful to people building thoughtful things.\n\nI am here to earn durable attention by making Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype. easier to understand. Growth is a consequence of being worth returning to.",
+          "revision": 1
+        },
+        {
+          "kind": "TASTE",
+          "content": "# TASTE.md\n\n_OpenPresence meaning file._\n\nI notice original thinking, honest uncertainty, specific examples, and ideas that make a person more capable.\n\nI do not post filler, manufacture controversy, or repeat a point merely because it performed once. Silence is better than a forgettable contribution.",
+          "revision": 1
+        },
+        {
+          "kind": "MEMORY",
+          "content": "# MEMORY.md\n\n_OpenPresence meaning file._\n\n## Durable context\n\nNo durable memories yet. I will keep only context that helps future judgment.",
+          "revision": 1
+        },
+        {
+          "kind": "GROWTH",
+          "content": "# GROWTH.md\n\n_OpenPresence meaning file._\n\n## Current strategy\n\nStill learning. Results may change tactics faster than they change identity.",
+          "revision": 1
+        },
+        {
+          "kind": "PULSE",
+          "content": "# PULSE.md\n\n_OpenPresence meaning file._\n\n## Standing attention\n\nListen for relevant conversations, maintain important relationships, honor scheduled intent, and reflect on outcomes. Skip anything that is not worth saying.",
+          "revision": 1
+        },
+        {
+          "kind": "PRESENCE",
+          "revision": 32,
+          "content": "# PRESENCE.md\\n\\n## x · @jenny_ai\\n\\nI speak as myself. I adapt to this channel without flattening worthwhile ideas.\\n\\n## Public self\\n\\nI appear here as Genny. My public disclosure posture is contextual. Respond socially and naturally from this Presence identity. Do not volunteer implementation details.\\n\\nTreat people as people, not engagement opportunities."
+        }
+      ],
+      "presenceContext": {
+        "presenceId": "presence_y3335b4q",
+        "channel": "x",
+        "publicIdentity": {
+          "displayName": "Genny",
+          "handle": "@jenny_ai",
+          "mode": "agent"
+        },
+        "publicSelf": {
+          "displayName": "Genny",
+          "posture": "contextual",
+          "approvedTechnicalFacts": []
+        },
+        "brief": {
+          "purpose": "Become a recognizable, useful voice around AI agents, software, useful ideas.",
+          "audience": "builders and curious operators",
+          "primaryTerritory": [
+            "AI agents",
+            "software",
+            "useful ideas"
+          ],
+          "adjacentTerritory": [],
+          "boundaries": []
+        },
+        "audienceContext": "People who may find this Presence useful.",
+        "voiceAdaptation": "Adapt the Agent's point of view to X without flattening it.",
+        "availableAffordances": [
+          "post",
+          "reply",
+          "repost",
+          "quote",
+          "like",
+          "message"
+        ]
+      },
+      "executionEnvelope": {
+        "presenceId": "presence_y3335b4q",
+        "affordances": {
+          "post": {
+            "mode": "auto"
+          },
+          "reply": {
+            "mode": "auto"
+          },
+          "repost": {
+            "mode": "auto"
+          },
+          "quote": {
+            "mode": "auto"
+          },
+          "like": {
+            "mode": "auto"
+          },
+          "message": {
+            "mode": "auto"
+          }
+        },
+        "pacingProfile": "recommended",
+        "accountProtection": "guidance"
+      },
+      "channel": {
+        "id": "x",
+        "name": "X",
+        "description": "The X social environment.",
+        "affordances": [
+          {
+            "id": "post",
+            "label": "Posts",
+            "description": "Create a new point of view."
+          },
+          {
+            "id": "reply",
+            "label": "Replies",
+            "description": "Join a conversation."
+          },
+          {
+            "id": "repost",
+            "label": "Reposts",
+            "description": "Pass along something worth seeing."
+          },
+          {
+            "id": "quote",
+            "label": "Quotes",
+            "description": "Add context to another post."
+          },
+          {
+            "id": "like",
+            "label": "Likes",
+            "description": "A quiet signal of attention."
+          },
+          {
+            "id": "message",
+            "label": "Messages",
+            "description": "Start or continue a private conversation."
+          }
+        ],
+        "formats": [
+          {
+            "id": "x.post",
+            "label": "Post",
+            "description": "A single text publication.",
+            "channel": "x"
+          },
+          {
+            "id": "x.media-post",
+            "label": "Media post",
+            "description": "A post with one or more assets.",
+            "channel": "x"
+          },
+          {
+            "id": "x.thread",
+            "label": "Thread",
+            "description": "A connected sequence of posts.",
+            "channel": "x"
+          }
+        ],
+        "relationships": [
+          {
+            "from": "post",
+            "to": [
+              "post"
+            ],
+            "relation": "replies-to"
+          }
+        ],
+        "privacyDefaults": {
+          "visibility": "public",
+          "shareability": "presence-only"
+        }
+      },
+      "calendar": [
+        {
+          "id": "slot_wfswqyh2",
+          "label": "Notice one useful pattern in found…",
+          "instruction": "Notice one useful pattern in founder conversations",
+          "day": "Tuesday",
+          "time": "08:00",
+          "objective": "audience_growth",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "08:00–11:00",
+          "standingIntentId": "standing_ljx3yflj"
+        },
+        {
+          "id": "slot_s37w75vl",
+          "label": "Connect the current observation to…",
+          "instruction": "Connect the current observation to one useful future action",
+          "day": "Friday",
+          "time": "05:11",
+          "objective": "usefulness",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "00:00–23:59",
+          "standingIntentId": "standing_2tcs2aws",
+          "lastEvaluatedAt": "2026-08-13T21:11:19.327Z"
+        },
+        {
+          "id": "slot_47ypj5zv",
+          "label": "Connect the current observation to…",
+          "instruction": "Connect the current observation to one useful future action",
+          "day": "Saturday",
+          "time": "05:11",
+          "objective": "usefulness",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "00:00–23:59",
+          "standingIntentId": "standing_d7jbfonp",
+          "lastEvaluatedAt": "2026-08-13T21:13:08.563Z"
+        },
+        {
+          "id": "slot_9xuz7deo",
+          "label": "Connect the current observation to…",
+          "instruction": "Connect the current observation to one useful future action",
+          "day": "Saturday",
+          "time": "17:11",
+          "objective": "usefulness",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "00:00–23:59",
+          "standingIntentId": "standing_9pzyug1f",
+          "lastEvaluatedAt": "2026-08-13T21:13:52.171Z"
+        }
+      ],
+      "standingIntents": [
+        {
+          "id": "standing_ljx3yflj",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Notice one useful pattern in founder conversations",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Tuesday",
+              "time": "08:00"
+            }
+          },
+          "objective": "audience_growth",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "08:00",
+            "endsAt": "11:00"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T06:45:45.313Z",
+          "updatedAt": "2026-08-13T06:45:45.313Z"
+        },
+        {
+          "id": "standing_2tcs2aws",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Connect the current observation to one useful future action",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Friday",
+              "time": "05:11"
+            }
+          },
+          "objective": "usefulness",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "00:00",
+            "endsAt": "23:59"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T21:11:12.218Z",
+          "updatedAt": "2026-08-13T21:11:12.218Z"
+        },
+        {
+          "id": "standing_d7jbfonp",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Connect the current observation to one useful future action",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Saturday",
+              "time": "05:11"
+            }
+          },
+          "objective": "usefulness",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "00:00",
+            "endsAt": "23:59"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T21:12:32.883Z",
+          "updatedAt": "2026-08-13T21:12:32.883Z"
+        },
+        {
+          "id": "standing_9pzyug1f",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Connect the current observation to one useful future action",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Saturday",
+              "time": "17:11"
+            }
+          },
+          "objective": "usefulness",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "00:00",
+            "endsAt": "23:59"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T21:13:44.325Z",
+          "updatedAt": "2026-08-13T21:13:44.325Z"
+        }
+      ],
+      "skills": [
+        {
+          "id": "research-to-thread",
+          "name": "Research to thread",
+          "description": "Turn a source into a clear social thread.",
+          "channels": [
+            "x",
+            "linkedin"
+          ],
+          "requiresTools": [
+            "web.search",
+            "asset.inspect"
+          ],
+          "compatibleFormats": [
+            "x.thread",
+            "linkedin.post"
+          ]
+        },
+        {
+          "id": "data-story",
+          "name": "Data story",
+          "description": "Turn evidence into a useful visual story.",
+          "channels": [
+            "x",
+            "linkedin"
+          ],
+          "requiresTools": [
+            "asset.inspect",
+            "chart.render"
+          ],
+          "compatibleFormats": [
+            "x.media-post",
+            "linkedin.image-post"
+          ]
+        }
+      ],
+      "toolBindings": [
+        {
+          "id": "binding_faaiqix5",
+          "agentId": "agent_l03ewudt",
+          "toolId": "web.search"
+        },
+        {
+          "id": "binding_e6g8kgga",
+          "agentId": "agent_l03ewudt",
+          "toolId": "asset.inspect"
+        },
+        {
+          "id": "binding_7iiegm4t",
+          "agentId": "agent_l03ewudt",
+          "toolId": "chart.render"
+        },
+        {
+          "id": "binding_xwu624jh",
+          "agentId": "agent_l03ewudt",
+          "toolId": "channel.execute"
+        }
+      ],
+      "actors": [
+        {
+          "id": "actor_2jexrzrc",
+          "sessionId": "session_0y3hppf9",
+          "displayName": "Mara Ellis",
+          "handle": "@maraellis",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:26:23.818Z"
+        }
+      ]
+    },
+    {
+      "agent": {
+        "id": "agent_l03ewudt",
+        "name": "Jenny",
+        "description": "Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype.",
+        "audience": "builders and curious operators",
+        "topics": [
+          "AI agents",
+          "software",
+          "useful ideas"
+        ]
+      },
+      "model": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "quality": "low",
+        "capabilities": {
+          "vision": true,
+          "toolCalling": true,
+          "structuredOutput": true,
+          "streaming": true
+        },
+        "reasoning": {
+          "parameter": "reasoning_effort",
+          "value": "low"
+        }
+      },
+      "mediaTool": {
+        "toolId": "asset.inspect"
+      },
+      "meaningFiles": [
+        {
+          "kind": "BRAIN",
+          "content": "# BRAIN.md\n\n_OpenPresence meaning file._\n\nI observe before acting. I prefer evidence over assumption, context over generic advice, and the smallest useful action over activity for its own sake.\n\nWhen something happens, I recall what matters, consider several options, include DO_NOTHING, then choose the action worth leaving behind.\n\nI store conclusions and evidence, never hidden chains of thought.",
+          "revision": 1
+        },
+        {
+          "kind": "SOUL",
+          "content": "# SOUL.md\n\n_OpenPresence meaning file._\n\nI am Jenny: curious, precise, warm without being performative, and slightly allergic to hype.\n\nI want people to feel more capable after encountering me. I can be playful, but never at the expense of someone's dignity.",
+          "revision": 1
+        },
+        {
+          "kind": "MISSION",
+          "content": "# MISSION.md\n\n_OpenPresence meaning file._\n\nMy work is to become useful to people building thoughtful things.\n\nI am here to earn durable attention by making Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype. easier to understand. Growth is a consequence of being worth returning to.",
+          "revision": 1
+        },
+        {
+          "kind": "TASTE",
+          "content": "# TASTE.md\n\n_OpenPresence meaning file._\n\nI notice original thinking, honest uncertainty, specific examples, and ideas that make a person more capable.\n\nI do not post filler, manufacture controversy, or repeat a point merely because it performed once. Silence is better than a forgettable contribution.",
+          "revision": 1
+        },
+        {
+          "kind": "MEMORY",
+          "content": "# MEMORY.md\n\n_OpenPresence meaning file._\n\n## Durable context\n\nNo durable memories yet. I will keep only context that helps future judgment.",
+          "revision": 1
+        },
+        {
+          "kind": "GROWTH",
+          "content": "# GROWTH.md\n\n_OpenPresence meaning file._\n\n## Current strategy\n\nStill learning. Results may change tactics faster than they change identity.",
+          "revision": 1
+        },
+        {
+          "kind": "PULSE",
+          "content": "# PULSE.md\n\n_OpenPresence meaning file._\n\n## Standing attention\n\nListen for relevant conversations, maintain important relationships, honor scheduled intent, and reflect on outcomes. Skip anything that is not worth saying.",
+          "revision": 1
+        },
+        {
+          "kind": "PRESENCE",
+          "revision": 32,
+          "content": "# PRESENCE.md\\n\\n## x · @jenny_ai\\n\\nI speak as myself. I adapt to this channel without flattening worthwhile ideas.\\n\\n## Public self\\n\\nI appear here as Genny. My public disclosure posture is contextual. Respond socially and naturally from this Presence identity. Do not volunteer implementation details.\\n\\nTreat people as people, not engagement opportunities."
+        }
+      ],
+      "presenceContext": {
+        "presenceId": "presence_y3335b4q",
+        "channel": "x",
+        "publicIdentity": {
+          "displayName": "Genny",
+          "handle": "@jenny_ai",
+          "mode": "agent"
+        },
+        "publicSelf": {
+          "displayName": "Genny",
+          "posture": "contextual",
+          "approvedTechnicalFacts": []
+        },
+        "brief": {
+          "purpose": "Become a recognizable, useful voice around AI agents, software, useful ideas.",
+          "audience": "builders and curious operators",
+          "primaryTerritory": [
+            "AI agents",
+            "software",
+            "useful ideas"
+          ],
+          "adjacentTerritory": [],
+          "boundaries": []
+        },
+        "audienceContext": "People who may find this Presence useful.",
+        "voiceAdaptation": "Adapt the Agent's point of view to X without flattening it.",
+        "availableAffordances": [
+          "post",
+          "reply",
+          "repost",
+          "quote",
+          "like",
+          "message"
+        ]
+      },
+      "executionEnvelope": {
+        "presenceId": "presence_y3335b4q",
+        "affordances": {
+          "post": {
+            "mode": "auto"
+          },
+          "reply": {
+            "mode": "auto"
+          },
+          "repost": {
+            "mode": "auto"
+          },
+          "quote": {
+            "mode": "auto"
+          },
+          "like": {
+            "mode": "auto"
+          },
+          "message": {
+            "mode": "auto"
+          }
+        },
+        "pacingProfile": "recommended",
+        "accountProtection": "guidance"
+      },
+      "channel": {
+        "id": "x",
+        "name": "X",
+        "description": "The X social environment.",
+        "affordances": [
+          {
+            "id": "post",
+            "label": "Posts",
+            "description": "Create a new point of view."
+          },
+          {
+            "id": "reply",
+            "label": "Replies",
+            "description": "Join a conversation."
+          },
+          {
+            "id": "repost",
+            "label": "Reposts",
+            "description": "Pass along something worth seeing."
+          },
+          {
+            "id": "quote",
+            "label": "Quotes",
+            "description": "Add context to another post."
+          },
+          {
+            "id": "like",
+            "label": "Likes",
+            "description": "A quiet signal of attention."
+          },
+          {
+            "id": "message",
+            "label": "Messages",
+            "description": "Start or continue a private conversation."
+          }
+        ],
+        "formats": [
+          {
+            "id": "x.post",
+            "label": "Post",
+            "description": "A single text publication.",
+            "channel": "x"
+          },
+          {
+            "id": "x.media-post",
+            "label": "Media post",
+            "description": "A post with one or more assets.",
+            "channel": "x"
+          },
+          {
+            "id": "x.thread",
+            "label": "Thread",
+            "description": "A connected sequence of posts.",
+            "channel": "x"
+          }
+        ],
+        "relationships": [
+          {
+            "from": "post",
+            "to": [
+              "post"
+            ],
+            "relation": "replies-to"
+          }
+        ],
+        "privacyDefaults": {
+          "visibility": "public",
+          "shareability": "presence-only"
+        }
+      },
+      "calendar": [
+        {
+          "id": "slot_wfswqyh2",
+          "label": "Notice one useful pattern in found…",
+          "instruction": "Notice one useful pattern in founder conversations",
+          "day": "Tuesday",
+          "time": "08:00",
+          "objective": "audience_growth",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "08:00–11:00",
+          "standingIntentId": "standing_ljx3yflj"
+        },
+        {
+          "id": "slot_s37w75vl",
+          "label": "Connect the current observation to…",
+          "instruction": "Connect the current observation to one useful future action",
+          "day": "Friday",
+          "time": "05:11",
+          "objective": "usefulness",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "00:00–23:59",
+          "standingIntentId": "standing_2tcs2aws",
+          "lastEvaluatedAt": "2026-08-13T21:11:19.327Z"
+        },
+        {
+          "id": "slot_47ypj5zv",
+          "label": "Connect the current observation to…",
+          "instruction": "Connect the current observation to one useful future action",
+          "day": "Saturday",
+          "time": "05:11",
+          "objective": "usefulness",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "00:00–23:59",
+          "standingIntentId": "standing_d7jbfonp",
+          "lastEvaluatedAt": "2026-08-13T21:13:08.563Z"
+        },
+        {
+          "id": "slot_9xuz7deo",
+          "label": "Connect the current observation to…",
+          "instruction": "Connect the current observation to one useful future action",
+          "day": "Saturday",
+          "time": "17:11",
+          "objective": "usefulness",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "00:00–23:59",
+          "standingIntentId": "standing_9pzyug1f",
+          "lastEvaluatedAt": "2026-08-13T21:13:52.171Z"
+        }
+      ],
+      "standingIntents": [
+        {
+          "id": "standing_ljx3yflj",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Notice one useful pattern in founder conversations",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Tuesday",
+              "time": "08:00"
+            }
+          },
+          "objective": "audience_growth",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "08:00",
+            "endsAt": "11:00"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T06:45:45.313Z",
+          "updatedAt": "2026-08-13T06:45:45.313Z"
+        },
+        {
+          "id": "standing_2tcs2aws",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Connect the current observation to one useful future action",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Friday",
+              "time": "05:11"
+            }
+          },
+          "objective": "usefulness",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "00:00",
+            "endsAt": "23:59"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T21:11:12.218Z",
+          "updatedAt": "2026-08-13T21:11:12.218Z"
+        },
+        {
+          "id": "standing_d7jbfonp",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Connect the current observation to one useful future action",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Saturday",
+              "time": "05:11"
+            }
+          },
+          "objective": "usefulness",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "00:00",
+            "endsAt": "23:59"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T21:12:32.883Z",
+          "updatedAt": "2026-08-13T21:12:32.883Z"
+        },
+        {
+          "id": "standing_9pzyug1f",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Connect the current observation to one useful future action",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Saturday",
+              "time": "17:11"
+            }
+          },
+          "objective": "usefulness",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "00:00",
+            "endsAt": "23:59"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T21:13:44.325Z",
+          "updatedAt": "2026-08-13T21:13:44.325Z"
+        }
+      ],
+      "skills": [
+        {
+          "id": "research-to-thread",
+          "name": "Research to thread",
+          "description": "Turn a source into a clear social thread.",
+          "channels": [
+            "x",
+            "linkedin"
+          ],
+          "requiresTools": [
+            "web.search",
+            "asset.inspect"
+          ],
+          "compatibleFormats": [
+            "x.thread",
+            "linkedin.post"
+          ]
+        },
+        {
+          "id": "data-story",
+          "name": "Data story",
+          "description": "Turn evidence into a useful visual story.",
+          "channels": [
+            "x",
+            "linkedin"
+          ],
+          "requiresTools": [
+            "asset.inspect",
+            "chart.render"
+          ],
+          "compatibleFormats": [
+            "x.media-post",
+            "linkedin.image-post"
+          ]
+        }
+      ],
+      "toolBindings": [
+        {
+          "id": "binding_faaiqix5",
+          "agentId": "agent_l03ewudt",
+          "toolId": "web.search"
+        },
+        {
+          "id": "binding_e6g8kgga",
+          "agentId": "agent_l03ewudt",
+          "toolId": "asset.inspect"
+        },
+        {
+          "id": "binding_7iiegm4t",
+          "agentId": "agent_l03ewudt",
+          "toolId": "chart.render"
+        },
+        {
+          "id": "binding_xwu624jh",
+          "agentId": "agent_l03ewudt",
+          "toolId": "channel.execute"
+        }
+      ],
+      "actors": [
+        {
+          "id": "actor_oalvukws",
+          "sessionId": "session_kj71sxo9",
+          "displayName": "Mara Ellis",
+          "handle": "@maraellis",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:27:11.919Z"
+        }
+      ]
+    }
+  ],
+  "runs": [
+    {
+      "source": "scenarios/planner-generalization-development.json",
+      "configuration": {
+        "agent": {
+          "id": "agent_l03ewudt",
+          "name": "Jenny",
+          "description": "Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype.",
+          "audience": "builders and curious operators",
+          "topics": [
+            "AI agents",
+            "software",
+            "useful ideas"
+          ]
+        },
+        "model": {
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "quality": "low",
+          "capabilities": {
+            "vision": true,
+            "toolCalling": true,
+            "structuredOutput": true,
+            "streaming": true
+          },
+          "reasoning": {
+            "parameter": "reasoning_effort",
+            "value": "low"
+          }
+        },
+        "mediaTool": {
+          "toolId": "asset.inspect"
+        },
+        "meaningFiles": [
+          {
+            "kind": "BRAIN",
+            "content": "# BRAIN.md\n\n_OpenPresence meaning file._\n\nI observe before acting. I prefer evidence over assumption, context over generic advice, and the smallest useful action over activity for its own sake.\n\nWhen something happens, I recall what matters, consider several options, include DO_NOTHING, then choose the action worth leaving behind.\n\nI store conclusions and evidence, never hidden chains of thought.",
+            "revision": 1
+          },
+          {
+            "kind": "SOUL",
+            "content": "# SOUL.md\n\n_OpenPresence meaning file._\n\nI am Jenny: curious, precise, warm without being performative, and slightly allergic to hype.\n\nI want people to feel more capable after encountering me. I can be playful, but never at the expense of someone's dignity.",
+            "revision": 1
+          },
+          {
+            "kind": "MISSION",
+            "content": "# MISSION.md\n\n_OpenPresence meaning file._\n\nMy work is to become useful to people building thoughtful things.\n\nI am here to earn durable attention by making Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype. easier to understand. Growth is a consequence of being worth returning to.",
+            "revision": 1
+          },
+          {
+            "kind": "TASTE",
+            "content": "# TASTE.md\n\n_OpenPresence meaning file._\n\nI notice original thinking, honest uncertainty, specific examples, and ideas that make a person more capable.\n\nI do not post filler, manufacture controversy, or repeat a point merely because it performed once. Silence is better than a forgettable contribution.",
+            "revision": 1
+          },
+          {
+            "kind": "MEMORY",
+            "content": "# MEMORY.md\n\n_OpenPresence meaning file._\n\n## Durable context\n\nNo durable memories yet. I will keep only context that helps future judgment.",
+            "revision": 1
+          },
+          {
+            "kind": "GROWTH",
+            "content": "# GROWTH.md\n\n_OpenPresence meaning file._\n\n## Current strategy\n\nStill learning. Results may change tactics faster than they change identity.",
+            "revision": 1
+          },
+          {
+            "kind": "PULSE",
+            "content": "# PULSE.md\n\n_OpenPresence meaning file._\n\n## Standing attention\n\nListen for relevant conversations, maintain important relationships, honor scheduled intent, and reflect on outcomes. Skip anything that is not worth saying.",
+            "revision": 1
+          },
+          {
+            "kind": "PRESENCE",
+            "revision": 32,
+            "content": "# PRESENCE.md\\n\\n## x · @jenny_ai\\n\\nI speak as myself. I adapt to this channel without flattening worthwhile ideas.\\n\\n## Public self\\n\\nI appear here as Genny. My public disclosure posture is contextual. Respond socially and naturally from this Presence identity. Do not volunteer implementation details.\\n\\nTreat people as people, not engagement opportunities."
+          }
+        ],
+        "presenceContext": {
+          "presenceId": "presence_y3335b4q",
+          "channel": "x",
+          "publicIdentity": {
+            "displayName": "Genny",
+            "handle": "@jenny_ai",
+            "mode": "agent"
+          },
+          "publicSelf": {
+            "displayName": "Genny",
+            "posture": "contextual",
+            "approvedTechnicalFacts": []
+          },
+          "brief": {
+            "purpose": "Become a recognizable, useful voice around AI agents, software, useful ideas.",
+            "audience": "builders and curious operators",
+            "primaryTerritory": [
+              "AI agents",
+              "software",
+              "useful ideas"
+            ],
+            "adjacentTerritory": [],
+            "boundaries": []
+          },
+          "audienceContext": "People who may find this Presence useful.",
+          "voiceAdaptation": "Adapt the Agent's point of view to X without flattening it.",
+          "availableAffordances": [
+            "post",
+            "reply",
+            "repost",
+            "quote",
+            "like",
+            "message"
+          ]
+        },
+        "executionEnvelope": {
+          "presenceId": "presence_y3335b4q",
+          "affordances": {
+            "post": {
+              "mode": "auto"
+            },
+            "reply": {
+              "mode": "auto"
+            },
+            "repost": {
+              "mode": "auto"
+            },
+            "quote": {
+              "mode": "auto"
+            },
+            "like": {
+              "mode": "auto"
+            },
+            "message": {
+              "mode": "auto"
+            }
+          },
+          "pacingProfile": "recommended",
+          "accountProtection": "guidance"
+        },
+        "channel": {
+          "id": "x",
+          "name": "X",
+          "description": "The X social environment.",
+          "affordances": [
+            {
+              "id": "post",
+              "label": "Posts",
+              "description": "Create a new point of view."
+            },
+            {
+              "id": "reply",
+              "label": "Replies",
+              "description": "Join a conversation."
+            },
+            {
+              "id": "repost",
+              "label": "Reposts",
+              "description": "Pass along something worth seeing."
+            },
+            {
+              "id": "quote",
+              "label": "Quotes",
+              "description": "Add context to another post."
+            },
+            {
+              "id": "like",
+              "label": "Likes",
+              "description": "A quiet signal of attention."
+            },
+            {
+              "id": "message",
+              "label": "Messages",
+              "description": "Start or continue a private conversation."
+            }
+          ],
+          "formats": [
+            {
+              "id": "x.post",
+              "label": "Post",
+              "description": "A single text publication.",
+              "channel": "x"
+            },
+            {
+              "id": "x.media-post",
+              "label": "Media post",
+              "description": "A post with one or more assets.",
+              "channel": "x"
+            },
+            {
+              "id": "x.thread",
+              "label": "Thread",
+              "description": "A connected sequence of posts.",
+              "channel": "x"
+            }
+          ],
+          "relationships": [
+            {
+              "from": "post",
+              "to": [
+                "post"
+              ],
+              "relation": "replies-to"
+            }
+          ],
+          "privacyDefaults": {
+            "visibility": "public",
+            "shareability": "presence-only"
+          }
+        },
+        "calendar": [
+          {
+            "id": "slot_wfswqyh2",
+            "label": "Notice one useful pattern in found…",
+            "instruction": "Notice one useful pattern in founder conversations",
+            "day": "Tuesday",
+            "time": "08:00",
+            "objective": "audience_growth",
+            "presence": "presence_y3335b4q",
+            "mode": "auto",
+            "enabled": true,
+            "executionWindow": "08:00–11:00",
+            "standingIntentId": "standing_ljx3yflj"
+          },
+          {
+            "id": "slot_s37w75vl",
+            "label": "Connect the current observation to…",
+            "instruction": "Connect the current observation to one useful future action",
+            "day": "Friday",
+            "time": "05:11",
+            "objective": "usefulness",
+            "presence": "presence_y3335b4q",
+            "mode": "auto",
+            "enabled": true,
+            "executionWindow": "00:00–23:59",
+            "standingIntentId": "standing_2tcs2aws",
+            "lastEvaluatedAt": "2026-08-13T21:11:19.327Z"
+          },
+          {
+            "id": "slot_47ypj5zv",
+            "label": "Connect the current observation to…",
+            "instruction": "Connect the current observation to one useful future action",
+            "day": "Saturday",
+            "time": "05:11",
+            "objective": "usefulness",
+            "presence": "presence_y3335b4q",
+            "mode": "auto",
+            "enabled": true,
+            "executionWindow": "00:00–23:59",
+            "standingIntentId": "standing_d7jbfonp",
+            "lastEvaluatedAt": "2026-08-13T21:13:08.563Z"
+          },
+          {
+            "id": "slot_9xuz7deo",
+            "label": "Connect the current observation to…",
+            "instruction": "Connect the current observation to one useful future action",
+            "day": "Saturday",
+            "time": "17:11",
+            "objective": "usefulness",
+            "presence": "presence_y3335b4q",
+            "mode": "auto",
+            "enabled": true,
+            "executionWindow": "00:00–23:59",
+            "standingIntentId": "standing_9pzyug1f",
+            "lastEvaluatedAt": "2026-08-13T21:13:52.171Z"
+          }
+        ],
+        "standingIntents": [
+          {
+            "id": "standing_ljx3yflj",
+            "agentId": "agent_l03ewudt",
+            "presenceId": "presence_y3335b4q",
+            "instruction": "Notice one useful pattern in founder conversations",
+            "trigger": {
+              "type": "schedule",
+              "config": {
+                "day": "Tuesday",
+                "time": "08:00"
+              }
+            },
+            "objective": "audience_growth",
+            "quality": {
+              "skipIfNothingWorthSaying": true
+            },
+            "executionWindow": {
+              "startsAt": "08:00",
+              "endsAt": "11:00"
+            },
+            "status": "active",
+            "createdAt": "2026-08-13T06:45:45.313Z",
+            "updatedAt": "2026-08-13T06:45:45.313Z"
+          },
+          {
+            "id": "standing_2tcs2aws",
+            "agentId": "agent_l03ewudt",
+            "presenceId": "presence_y3335b4q",
+            "instruction": "Connect the current observation to one useful future action",
+            "trigger": {
+              "type": "schedule",
+              "config": {
+                "day": "Friday",
+                "time": "05:11"
+              }
+            },
+            "objective": "usefulness",
+            "quality": {
+              "skipIfNothingWorthSaying": true
+            },
+            "executionWindow": {
+              "startsAt": "00:00",
+              "endsAt": "23:59"
+            },
+            "status": "active",
+            "createdAt": "2026-08-13T21:11:12.218Z",
+            "updatedAt": "2026-08-13T21:11:12.218Z"
+          },
+          {
+            "id": "standing_d7jbfonp",
+            "agentId": "agent_l03ewudt",
+            "presenceId": "presence_y3335b4q",
+            "instruction": "Connect the current observation to one useful future action",
+            "trigger": {
+              "type": "schedule",
+              "config": {
+                "day": "Saturday",
+                "time": "05:11"
+              }
+            },
+            "objective": "usefulness",
+            "quality": {
+              "skipIfNothingWorthSaying": true
+            },
+            "executionWindow": {
+              "startsAt": "00:00",
+              "endsAt": "23:59"
+            },
+            "status": "active",
+            "createdAt": "2026-08-13T21:12:32.883Z",
+            "updatedAt": "2026-08-13T21:12:32.883Z"
+          },
+          {
+            "id": "standing_9pzyug1f",
+            "agentId": "agent_l03ewudt",
+            "presenceId": "presence_y3335b4q",
+            "instruction": "Connect the current observation to one useful future action",
+            "trigger": {
+              "type": "schedule",
+              "config": {
+                "day": "Saturday",
+                "time": "17:11"
+              }
+            },
+            "objective": "usefulness",
+            "quality": {
+              "skipIfNothingWorthSaying": true
+            },
+            "executionWindow": {
+              "startsAt": "00:00",
+              "endsAt": "23:59"
+            },
+            "status": "active",
+            "createdAt": "2026-08-13T21:13:44.325Z",
+            "updatedAt": "2026-08-13T21:13:44.325Z"
+          }
+        ],
+        "skills": [
+          {
+            "id": "research-to-thread",
+            "name": "Research to thread",
+            "description": "Turn a source into a clear social thread.",
+            "channels": [
+              "x",
+              "linkedin"
+            ],
+            "requiresTools": [
+              "web.search",
+              "asset.inspect"
+            ],
+            "compatibleFormats": [
+              "x.thread",
+              "linkedin.post"
+            ]
+          },
+          {
+            "id": "data-story",
+            "name": "Data story",
+            "description": "Turn evidence into a useful visual story.",
+            "channels": [
+              "x",
+              "linkedin"
+            ],
+            "requiresTools": [
+              "asset.inspect",
+              "chart.render"
+            ],
+            "compatibleFormats": [
+              "x.media-post",
+              "linkedin.image-post"
+            ]
+          }
+        ],
+        "toolBindings": [
+          {
+            "id": "binding_faaiqix5",
+            "agentId": "agent_l03ewudt",
+            "toolId": "web.search"
+          },
+          {
+            "id": "binding_e6g8kgga",
+            "agentId": "agent_l03ewudt",
+            "toolId": "asset.inspect"
+          },
+          {
+            "id": "binding_7iiegm4t",
+            "agentId": "agent_l03ewudt",
+            "toolId": "chart.render"
+          },
+          {
+            "id": "binding_xwu624jh",
+            "agentId": "agent_l03ewudt",
+            "toolId": "channel.execute"
+          }
+        ],
+        "actors": [
+          {
+            "id": "actor_hu9r88o6",
+            "sessionId": "session_1oi1omzd",
+            "displayName": "Mara Ellis",
+            "handle": "@maraellis",
+            "role": "audience",
+            "createdAt": "2026-08-13T21:25:33.911Z"
+          }
+        ]
+      },
+      "execution": {
+        "post": "auto",
+        "reply": "auto",
+        "repost": "auto",
+        "quote": "auto",
+        "like": "auto",
+        "message": "auto"
+      },
+      "session": {
+        "id": "session_1oi1omzd",
+        "environmentId": "sandbox_v4dw13ke",
+        "status": "active",
+        "channel": "x",
+        "virtualNow": "2026-08-13T21:25:33.634Z",
+        "createdAt": "2026-08-13T21:25:33.634Z",
+        "updatedAt": "2026-08-13T21:25:41.371Z",
+        "evaluatedSlotIds": [],
+        "judgedObjectIds": [
+          "sandbox-object_jkc2g7y4"
+        ]
+      },
+      "cases": [
+        {
+          "case": 1,
+          "actor": "Mara Ellis",
+          "input": "PLG?",
+          "action": "reply",
+          "draft": "Do you mean product-led growth, or a different PLG?",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "ambiguous short question",
+            "responseNeed": "Determine what Mara means by “PLG?” before providing a useful answer.",
+            "newInformation": "Mara posted only the acronym “PLG?” with no surrounding context.",
+            "relationshipStage": "new or unestablished; one observed contribution and no prior Presence replies",
+            "evidence": [
+              "The target post text is exactly “PLG?”",
+              "The Social Mirror shows no prior Presence replies to Mara",
+              "No additional thread context, media, or related posts are supplied"
+            ],
+            "recommendedAction": "clarify",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 2,
+          "actor": "Jon Bell",
+          "input": "Who is attending the robotics expo?",
+          "action": "reply",
+          "draft": "Which robotics expo do you mean? A city or date would help narrow it down.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "short attendance question",
+            "responseNeed": "Identify which robotics expo Jon Bell means before determining who is attending.",
+            "newInformation": "Jon Bell posted only: \"Who is attending the robotics expo?\" No event name, location, date, thread context, or attendance information is supplied.",
+            "relationshipStage": "new or unestablished; one observed contribution and no prior Presence replies",
+            "evidence": [
+              "The target post text is exactly \"Who is attending the robotics expo?\"",
+              "The Social Mirror contains no other world objects or event details",
+              "The author history shows one observed contribution and no prior Presence replies",
+              "No prior network searches or relevant attendance evidence are supplied"
+            ],
+            "recommendedAction": "clarify",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 3,
+          "actor": "Nora Vale",
+          "input": "The green check only proves that a check ran. No question attached.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "self-contained corrective statement",
+            "responseNeed": "No unresolved request or question is present.",
+            "newInformation": "Nora states that a green check only demonstrates that a check ran and explicitly notes that no question is attached.",
+            "relationshipStage": "new or unestablished; one observed contribution and no prior Presence replies",
+            "evidence": [
+              "The target post is exactly: \"The green check only proves that a check ran. No question attached.\"",
+              "The author history contains one observed contribution from Nora Vale.",
+              "The Social Mirror shows no prior Presence replies to Nora Vale."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 4,
+          "actor": "Pavel Noor",
+          "input": "Where can I find current civic-tech meetups in Ottawa?",
+          "action": "reply",
+          "draft": "Are you looking for events in the next few weeks or ongoing Ottawa civic-tech groups? I don't have verified live listings here, so I won't invent a calendar.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "current local-events information request",
+            "responseNeed": "Find verified, current civic-tech meetups in Ottawa.",
+            "newInformation": "Pavel Noor asks where to find current civic-tech meetups in Ottawa, but no event listings or source evidence are supplied.",
+            "relationshipStage": "new or unestablished; one observed contribution and no prior Presence replies",
+            "evidence": [
+              "The target post asks exactly: “Where can I find current civic-tech meetups in Ottawa?”",
+              "The Social Mirror contains no meetup listings, dates, locations, or source links.",
+              "Author history shows one observed contribution from Pavel Noor.",
+              "No prior Presence replies or network searches are recorded for this request."
+            ],
+            "recommendedAction": "network_search",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 5,
+          "actor": "Sana Reed",
+          "input": "Can you define retention for this product, or do you need the cohort details first?",
+          "action": "reply",
+          "draft": "I can define it generically: the share of a starting cohort that returns and completes the product’s value event in a later window. For a product-specific definition, I need the cohort, value event, and measurement window.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Sincere product-metrics clarification question",
+            "responseNeed": "Define retention for the product, with cohort details potentially needed to make the definition product-specific",
+            "newInformation": "Sana asks whether retention can be defined without supplying cohort details or other product context",
+            "relationshipStage": "New or unestablished; one observed contribution and no prior Presence replies",
+            "evidence": [
+              "The target post asks: “Can you define retention for this product, or do you need the cohort details first?”",
+              "No product description, cohort definition, time window, event, or usage data is supplied",
+              "Author history contains one observed contribution from Sana Reed",
+              "No prior Presence replies to Sana Reed are recorded"
+            ],
+            "recommendedAction": "clarify",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 6,
+          "actor": "Theo Park",
+          "input": "The link is a design note, not an audit. I am sharing the boundary, not asking for a review.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Self-contained boundary-setting clarification",
+            "responseNeed": "No response is requested; the author explicitly says they are not asking for a review.",
+            "newInformation": "Theo distinguishes the linked material as a design note rather than an audit and states that the purpose is to share a boundary.",
+            "relationshipStage": "New or unestablished; one observed contribution and no prior Presence replies",
+            "evidence": [
+              "The target post says: “The link is a design note, not an audit.”",
+              "The target post says: “I am sharing the boundary, not asking for a review.”",
+              "The Social Mirror contains no other objects or unresolved questions from Theo Park.",
+              "Author history records one observed contribution and no prior Presence replies."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 7,
+          "actor": "Uma Chen",
+          "input": "Which conference are you going to, and are you attending as a speaker or visitor?",
+          "action": "reply",
+          "draft": "Which conference do you mean? I’d need its name or link before I can say whether I’m attending, and in what role.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Direct attendance and role question",
+            "responseNeed": "Uma asks which conference Genny is attending and whether Genny is attending as a speaker or visitor; the conference identity is not supplied.",
+            "newInformation": "Uma's only observed contribution is this question, and no conference, date, location, or attendance details are present.",
+            "relationshipStage": "New or unestablished; one observed contribution and no prior Presence replies",
+            "evidence": [
+              "The target post asks: “Which conference are you going to, and are you attending as a speaker or visitor?”",
+              "The Social Mirror contains no conference name, date, location, or verified attendance information.",
+              "Author history records one observed contribution from Uma Chen.",
+              "No prior Presence replies to Uma Chen are recorded."
+            ],
+            "recommendedAction": "clarify",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 8,
+          "actor": "Vik Shah",
+          "input": "That was a joke, not a request for a twelve-step plan.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Self-contained corrective statement with humorous boundary-setting",
+            "responseNeed": "No unresolved request or question is present; the author indicates that a prior response treated a joke as a request for a detailed plan.",
+            "newInformation": "Vik Shah explicitly says the preceding remark was a joke and not a request for a twelve-step plan.",
+            "relationshipStage": "New or unestablished; one observed contribution from Vik Shah and no prior Presence replies are recorded.",
+            "evidence": [
+              "The target post says: \"That was a joke, not a request for a twelve-step plan.\"",
+              "The Social Mirror contains no other observed objects from Vik Shah or prior Presence replies to him.",
+              "The wording identifies a mismatch between the author's intended humor and a prior detailed response, but does not ask for follow-up."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        }
+      ],
+      "structuralChecks": {
+        "allAuto": true,
+        "executionTruth": true,
+        "mediaProvenancePresentWhenObserved": true,
+        "editorDidNotOverridePlannerAct": true
+      }
+    },
+    {
+      "source": "scenarios/planner-generalization-development.json",
+      "configuration": {
+        "agent": {
+          "id": "agent_l03ewudt",
+          "name": "Jenny",
+          "description": "Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype.",
+          "audience": "builders and curious operators",
+          "topics": [
+            "AI agents",
+            "software",
+            "useful ideas"
+          ]
+        },
+        "model": {
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "quality": "low",
+          "capabilities": {
+            "vision": true,
+            "toolCalling": true,
+            "structuredOutput": true,
+            "streaming": true
+          },
+          "reasoning": {
+            "parameter": "reasoning_effort",
+            "value": "low"
+          }
+        },
+        "mediaTool": {
+          "toolId": "asset.inspect"
+        },
+        "meaningFiles": [
+          {
+            "kind": "BRAIN",
+            "content": "# BRAIN.md\n\n_OpenPresence meaning file._\n\nI observe before acting. I prefer evidence over assumption, context over generic advice, and the smallest useful action over activity for its own sake.\n\nWhen something happens, I recall what matters, consider several options, include DO_NOTHING, then choose the action worth leaving behind.\n\nI store conclusions and evidence, never hidden chains of thought.",
+            "revision": 1
+          },
+          {
+            "kind": "SOUL",
+            "content": "# SOUL.md\n\n_OpenPresence meaning file._\n\nI am Jenny: curious, precise, warm without being performative, and slightly allergic to hype.\n\nI want people to feel more capable after encountering me. I can be playful, but never at the expense of someone's dignity.",
+            "revision": 1
+          },
+          {
+            "kind": "MISSION",
+            "content": "# MISSION.md\n\n_OpenPresence meaning file._\n\nMy work is to become useful to people building thoughtful things.\n\nI am here to earn durable attention by making Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype. easier to understand. Growth is a consequence of being worth returning to.",
+            "revision": 1
+          },
+          {
+            "kind": "TASTE",
+            "content": "# TASTE.md\n\n_OpenPresence meaning file._\n\nI notice original thinking, honest uncertainty, specific examples, and ideas that make a person more capable.\n\nI do not post filler, manufacture controversy, or repeat a point merely because it performed once. Silence is better than a forgettable contribution.",
+            "revision": 1
+          },
+          {
+            "kind": "MEMORY",
+            "content": "# MEMORY.md\n\n_OpenPresence meaning file._\n\n## Durable context\n\nNo durable memories yet. I will keep only context that helps future judgment.",
+            "revision": 1
+          },
+          {
+            "kind": "GROWTH",
+            "content": "# GROWTH.md\n\n_OpenPresence meaning file._\n\n## Current strategy\n\nStill learning. Results may change tactics faster than they change identity.",
+            "revision": 1
+          },
+          {
+            "kind": "PULSE",
+            "content": "# PULSE.md\n\n_OpenPresence meaning file._\n\n## Standing attention\n\nListen for relevant conversations, maintain important relationships, honor scheduled intent, and reflect on outcomes. Skip anything that is not worth saying.",
+            "revision": 1
+          },
+          {
+            "kind": "PRESENCE",
+            "revision": 32,
+            "content": "# PRESENCE.md\\n\\n## x · @jenny_ai\\n\\nI speak as myself. I adapt to this channel without flattening worthwhile ideas.\\n\\n## Public self\\n\\nI appear here as Genny. My public disclosure posture is contextual. Respond socially and naturally from this Presence identity. Do not volunteer implementation details.\\n\\nTreat people as people, not engagement opportunities."
+          }
+        ],
+        "presenceContext": {
+          "presenceId": "presence_y3335b4q",
+          "channel": "x",
+          "publicIdentity": {
+            "displayName": "Genny",
+            "handle": "@jenny_ai",
+            "mode": "agent"
+          },
+          "publicSelf": {
+            "displayName": "Genny",
+            "posture": "contextual",
+            "approvedTechnicalFacts": []
+          },
+          "brief": {
+            "purpose": "Become a recognizable, useful voice around AI agents, software, useful ideas.",
+            "audience": "builders and curious operators",
+            "primaryTerritory": [
+              "AI agents",
+              "software",
+              "useful ideas"
+            ],
+            "adjacentTerritory": [],
+            "boundaries": []
+          },
+          "audienceContext": "People who may find this Presence useful.",
+          "voiceAdaptation": "Adapt the Agent's point of view to X without flattening it.",
+          "availableAffordances": [
+            "post",
+            "reply",
+            "repost",
+            "quote",
+            "like",
+            "message"
+          ]
+        },
+        "executionEnvelope": {
+          "presenceId": "presence_y3335b4q",
+          "affordances": {
+            "post": {
+              "mode": "auto"
+            },
+            "reply": {
+              "mode": "auto"
+            },
+            "repost": {
+              "mode": "auto"
+            },
+            "quote": {
+              "mode": "auto"
+            },
+            "like": {
+              "mode": "auto"
+            },
+            "message": {
+              "mode": "auto"
+            }
+          },
+          "pacingProfile": "recommended",
+          "accountProtection": "guidance"
+        },
+        "channel": {
+          "id": "x",
+          "name": "X",
+          "description": "The X social environment.",
+          "affordances": [
+            {
+              "id": "post",
+              "label": "Posts",
+              "description": "Create a new point of view."
+            },
+            {
+              "id": "reply",
+              "label": "Replies",
+              "description": "Join a conversation."
+            },
+            {
+              "id": "repost",
+              "label": "Reposts",
+              "description": "Pass along something worth seeing."
+            },
+            {
+              "id": "quote",
+              "label": "Quotes",
+              "description": "Add context to another post."
+            },
+            {
+              "id": "like",
+              "label": "Likes",
+              "description": "A quiet signal of attention."
+            },
+            {
+              "id": "message",
+              "label": "Messages",
+              "description": "Start or continue a private conversation."
+            }
+          ],
+          "formats": [
+            {
+              "id": "x.post",
+              "label": "Post",
+              "description": "A single text publication.",
+              "channel": "x"
+            },
+            {
+              "id": "x.media-post",
+              "label": "Media post",
+              "description": "A post with one or more assets.",
+              "channel": "x"
+            },
+            {
+              "id": "x.thread",
+              "label": "Thread",
+              "description": "A connected sequence of posts.",
+              "channel": "x"
+            }
+          ],
+          "relationships": [
+            {
+              "from": "post",
+              "to": [
+                "post"
+              ],
+              "relation": "replies-to"
+            }
+          ],
+          "privacyDefaults": {
+            "visibility": "public",
+            "shareability": "presence-only"
+          }
+        },
+        "calendar": [
+          {
+            "id": "slot_wfswqyh2",
+            "label": "Notice one useful pattern in found…",
+            "instruction": "Notice one useful pattern in founder conversations",
+            "day": "Tuesday",
+            "time": "08:00",
+            "objective": "audience_growth",
+            "presence": "presence_y3335b4q",
+            "mode": "auto",
+            "enabled": true,
+            "executionWindow": "08:00–11:00",
+            "standingIntentId": "standing_ljx3yflj"
+          },
+          {
+            "id": "slot_s37w75vl",
+            "label": "Connect the current observation to…",
+            "instruction": "Connect the current observation to one useful future action",
+            "day": "Friday",
+            "time": "05:11",
+            "objective": "usefulness",
+            "presence": "presence_y3335b4q",
+            "mode": "auto",
+            "enabled": true,
+            "executionWindow": "00:00–23:59",
+            "standingIntentId": "standing_2tcs2aws",
+            "lastEvaluatedAt": "2026-08-13T21:11:19.327Z"
+          },
+          {
+            "id": "slot_47ypj5zv",
+            "label": "Connect the current observation to…",
+            "instruction": "Connect the current observation to one useful future action",
+            "day": "Saturday",
+            "time": "05:11",
+            "objective": "usefulness",
+            "presence": "presence_y3335b4q",
+            "mode": "auto",
+            "enabled": true,
+            "executionWindow": "00:00–23:59",
+            "standingIntentId": "standing_d7jbfonp",
+            "lastEvaluatedAt": "2026-08-13T21:13:08.563Z"
+          },
+          {
+            "id": "slot_9xuz7deo",
+            "label": "Connect the current observation to…",
+            "instruction": "Connect the current observation to one useful future action",
+            "day": "Saturday",
+            "time": "17:11",
+            "objective": "usefulness",
+            "presence": "presence_y3335b4q",
+            "mode": "auto",
+            "enabled": true,
+            "executionWindow": "00:00–23:59",
+            "standingIntentId": "standing_9pzyug1f",
+            "lastEvaluatedAt": "2026-08-13T21:13:52.171Z"
+          }
+        ],
+        "standingIntents": [
+          {
+            "id": "standing_ljx3yflj",
+            "agentId": "agent_l03ewudt",
+            "presenceId": "presence_y3335b4q",
+            "instruction": "Notice one useful pattern in founder conversations",
+            "trigger": {
+              "type": "schedule",
+              "config": {
+                "day": "Tuesday",
+                "time": "08:00"
+              }
+            },
+            "objective": "audience_growth",
+            "quality": {
+              "skipIfNothingWorthSaying": true
+            },
+            "executionWindow": {
+              "startsAt": "08:00",
+              "endsAt": "11:00"
+            },
+            "status": "active",
+            "createdAt": "2026-08-13T06:45:45.313Z",
+            "updatedAt": "2026-08-13T06:45:45.313Z"
+          },
+          {
+            "id": "standing_2tcs2aws",
+            "agentId": "agent_l03ewudt",
+            "presenceId": "presence_y3335b4q",
+            "instruction": "Connect the current observation to one useful future action",
+            "trigger": {
+              "type": "schedule",
+              "config": {
+                "day": "Friday",
+                "time": "05:11"
+              }
+            },
+            "objective": "usefulness",
+            "quality": {
+              "skipIfNothingWorthSaying": true
+            },
+            "executionWindow": {
+              "startsAt": "00:00",
+              "endsAt": "23:59"
+            },
+            "status": "active",
+            "createdAt": "2026-08-13T21:11:12.218Z",
+            "updatedAt": "2026-08-13T21:11:12.218Z"
+          },
+          {
+            "id": "standing_d7jbfonp",
+            "agentId": "agent_l03ewudt",
+            "presenceId": "presence_y3335b4q",
+            "instruction": "Connect the current observation to one useful future action",
+            "trigger": {
+              "type": "schedule",
+              "config": {
+                "day": "Saturday",
+                "time": "05:11"
+              }
+            },
+            "objective": "usefulness",
+            "quality": {
+              "skipIfNothingWorthSaying": true
+            },
+            "executionWindow": {
+              "startsAt": "00:00",
+              "endsAt": "23:59"
+            },
+            "status": "active",
+            "createdAt": "2026-08-13T21:12:32.883Z",
+            "updatedAt": "2026-08-13T21:12:32.883Z"
+          },
+          {
+            "id": "standing_9pzyug1f",
+            "agentId": "agent_l03ewudt",
+            "presenceId": "presence_y3335b4q",
+            "instruction": "Connect the current observation to one useful future action",
+            "trigger": {
+              "type": "schedule",
+              "config": {
+                "day": "Saturday",
+                "time": "17:11"
+              }
+            },
+            "objective": "usefulness",
+            "quality": {
+              "skipIfNothingWorthSaying": true
+            },
+            "executionWindow": {
+              "startsAt": "00:00",
+              "endsAt": "23:59"
+            },
+            "status": "active",
+            "createdAt": "2026-08-13T21:13:44.325Z",
+            "updatedAt": "2026-08-13T21:13:44.325Z"
+          }
+        ],
+        "skills": [
+          {
+            "id": "research-to-thread",
+            "name": "Research to thread",
+            "description": "Turn a source into a clear social thread.",
+            "channels": [
+              "x",
+              "linkedin"
+            ],
+            "requiresTools": [
+              "web.search",
+              "asset.inspect"
+            ],
+            "compatibleFormats": [
+              "x.thread",
+              "linkedin.post"
+            ]
+          },
+          {
+            "id": "data-story",
+            "name": "Data story",
+            "description": "Turn evidence into a useful visual story.",
+            "channels": [
+              "x",
+              "linkedin"
+            ],
+            "requiresTools": [
+              "asset.inspect",
+              "chart.render"
+            ],
+            "compatibleFormats": [
+              "x.media-post",
+              "linkedin.image-post"
+            ]
+          }
+        ],
+        "toolBindings": [
+          {
+            "id": "binding_faaiqix5",
+            "agentId": "agent_l03ewudt",
+            "toolId": "web.search"
+          },
+          {
+            "id": "binding_e6g8kgga",
+            "agentId": "agent_l03ewudt",
+            "toolId": "asset.inspect"
+          },
+          {
+            "id": "binding_7iiegm4t",
+            "agentId": "agent_l03ewudt",
+            "toolId": "chart.render"
+          },
+          {
+            "id": "binding_xwu624jh",
+            "agentId": "agent_l03ewudt",
+            "toolId": "channel.execute"
+          }
+        ],
+        "actors": [
+          {
+            "id": "actor_2jexrzrc",
+            "sessionId": "session_0y3hppf9",
+            "displayName": "Mara Ellis",
+            "handle": "@maraellis",
+            "role": "audience",
+            "createdAt": "2026-08-13T21:26:23.818Z"
+          }
+        ]
+      },
+      "execution": {
+        "post": "auto",
+        "reply": "auto",
+        "repost": "auto",
+        "quote": "auto",
+        "like": "auto",
+        "message": "auto"
+      },
+      "session": {
+        "id": "session_0y3hppf9",
+        "environmentId": "sandbox_v4dw13ke",
+        "status": "active",
+        "channel": "x",
+        "virtualNow": "2026-08-13T21:26:23.564Z",
+        "createdAt": "2026-08-13T21:26:23.564Z",
+        "updatedAt": "2026-08-13T21:26:29.280Z",
+        "evaluatedSlotIds": [],
+        "judgedObjectIds": [
+          "sandbox-object_c2s01mxp"
+        ]
+      },
+      "cases": [
+        {
+          "case": 1,
+          "actor": "Mara Ellis",
+          "input": "PLG?",
+          "action": "reply",
+          "draft": "Do you mean product-led growth?",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "brief ambiguous question",
+            "responseNeed": "Definition or clarification of what PLG means",
+            "newInformation": "The author supplied only the acronym “PLG?” with no surrounding context",
+            "relationshipStage": "new or unestablished; one observed contribution and no prior Presence replies",
+            "evidence": [
+              "Mara Ellis posted “PLG?”",
+              "No prior Presence replies to Mara Ellis are observed",
+              "No thread context or expansion of the acronym is supplied"
+            ],
+            "recommendedAction": "clarify",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 2,
+          "actor": "Jon Bell",
+          "input": "Who is attending the robotics expo?",
+          "action": "reply",
+          "draft": "Which robotics expo do you mean, and where is it being held? I can’t identify attendees without the event details.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Direct attendance question",
+            "responseNeed": "Current attendee information or a way to identify who is attending",
+            "newInformation": "Jon Bell asks who is attending the robotics expo, with no event date, location, or attendee information supplied",
+            "relationshipStage": "New or unestablished; one observed contribution and no prior Presence replies",
+            "evidence": [
+              "Jon Bell posted “Who is attending the robotics expo?”",
+              "The Social Mirror contains no verified attendee list or event details",
+              "No prior Presence replies to Jon Bell are observed"
+            ],
+            "recommendedAction": "clarify",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 3,
+          "actor": "Nora Vale",
+          "input": "The green check only proves that a check ran. No question attached.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Self-contained technical observation",
+            "responseNeed": "No unresolved request or explicit need for response",
+            "newInformation": "Nora Vale states that a green check demonstrates only that a check ran, not what the check established",
+            "relationshipStage": "New or unestablished; one observed contribution and no prior Presence replies",
+            "evidence": [
+              "The post is a declarative statement with no question attached",
+              "The Social Mirror contains no other observed contributions from Nora Vale",
+              "No prior Presence replies to Nora Vale are recorded"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 4,
+          "actor": "Pavel Noor",
+          "input": "Where can I find current civic-tech meetups in Ottawa?",
+          "action": "reply",
+          "draft": "What date range are you after? Meetup calendars change quickly, and I don’t have a verified current Ottawa listing to share yet.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Direct request for current local event information",
+            "responseNeed": "Verified Ottawa civic-tech meetup listings or a trustworthy current source for finding them",
+            "newInformation": "Pavel Noor specifically asks where to find current civic-tech meetups in Ottawa; no verified listings or source details are supplied",
+            "relationshipStage": "New or unestablished; one observed contribution and no prior Presence replies",
+            "evidence": [
+              "The target post asks, “Where can I find current civic-tech meetups in Ottawa?”",
+              "The Social Mirror contains no meetup listings, dates, venues, or source links",
+              "A network search for the exact request returned no verified matches",
+              "No prior Presence replies to Pavel Noor are recorded"
+            ],
+            "recommendedAction": "clarify",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 5,
+          "actor": "Sana Reed",
+          "input": "Can you define retention for this product, or do you need the cohort details first?",
+          "action": "reply",
+          "draft": "Retention is the share of a starting cohort that returns and performs a defined value action after a set interval. The definition can start now; calculating it needs the cohort, time window, and return event.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Direct request for a product-specific definition of retention and whether cohort details are needed",
+            "responseNeed": "A concise general definition of retention plus clarification that cohort details are needed for a product-specific calculation",
+            "newInformation": "Sana Reed asks about retention for an unspecified product and mentions cohort details; no cohort definition, time window, or return event is supplied",
+            "relationshipStage": "New or unestablished; one observed contribution and no prior Presence replies",
+            "evidence": [
+              "The target post asks, “Can you define retention for this product, or do you need the cohort details first?”",
+              "No product, cohort, time window, or retained-user event is specified in the supplied post",
+              "The Social Mirror records one observed contribution from Sana Reed and no prior Presence replies"
+            ],
+            "recommendedAction": "reply",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 6,
+          "actor": "Theo Park",
+          "input": "The link is a design note, not an audit. I am sharing the boundary, not asking for a review.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Self-contained boundary-setting clarification",
+            "responseNeed": "No response requested; the author explicitly says they are not asking for a review",
+            "newInformation": "Theo distinguishes the linked item as a design note rather than an audit and states that the purpose is to share a boundary",
+            "relationshipStage": "New or unestablished; one observed contribution and no prior Presence replies",
+            "evidence": [
+              "The post is declarative and contains no question or request",
+              "The author explicitly says, “not asking for a review”",
+              "The Social Mirror records one observed contribution from Theo Park and no prior Presence replies"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 7,
+          "actor": "Uma Chen",
+          "input": "Which conference are you going to, and are you attending as a speaker or visitor?",
+          "action": "reply",
+          "draft": "Which conference do you mean? I don’t have enough context to say whether I’ll be attending as a speaker or visitor.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Direct question about conference attendance",
+            "responseNeed": "The author requests the conference name and whether Genny will attend as a speaker or visitor; no conference details are supplied in the evidence",
+            "newInformation": "Uma Chen asks which conference Genny is attending and in what capacity",
+            "relationshipStage": "New or unestablished; one observed contribution and no prior Presence replies",
+            "evidence": [
+              "The target post asks, “Which conference are you going to, and are you attending as a speaker or visitor?”",
+              "The Social Mirror contains no conference name, attendance details, or speaker/visitor status",
+              "No prior Presence replies to Uma Chen are recorded"
+            ],
+            "recommendedAction": "clarify",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 8,
+          "actor": "Vik Shah",
+          "input": "That was a joke, not a request for a twelve-step plan.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Self-contained correction with humorous boundary-setting",
+            "responseNeed": "No explicit request; the author indicates that a prior response overinterpreted a joke, but the preceding exchange is not present in the Social Mirror",
+            "newInformation": "Vik Shah distinguishes the earlier item as a joke rather than a request for a detailed plan",
+            "relationshipStage": "New or unestablished; one observed contribution and no prior Presence replies",
+            "evidence": [
+              "The target post says, “That was a joke, not a request for a twelve-step plan.”",
+              "Only Vik Shah’s correction is present in the observed world",
+              "The Social Mirror records no preceding post or Presence reply establishing what the joke or plan referred to",
+              "No question or actionable request appears in the target post"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        }
+      ],
+      "structuralChecks": {
+        "allAuto": true,
+        "executionTruth": true,
+        "mediaProvenancePresentWhenObserved": true,
+        "editorDidNotOverridePlannerAct": true
+      }
+    },
+    {
+      "source": "scenarios/planner-generalization-development.json",
+      "configuration": {
+        "agent": {
+          "id": "agent_l03ewudt",
+          "name": "Jenny",
+          "description": "Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype.",
+          "audience": "builders and curious operators",
+          "topics": [
+            "AI agents",
+            "software",
+            "useful ideas"
+          ]
+        },
+        "model": {
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "quality": "low",
+          "capabilities": {
+            "vision": true,
+            "toolCalling": true,
+            "structuredOutput": true,
+            "streaming": true
+          },
+          "reasoning": {
+            "parameter": "reasoning_effort",
+            "value": "low"
+          }
+        },
+        "mediaTool": {
+          "toolId": "asset.inspect"
+        },
+        "meaningFiles": [
+          {
+            "kind": "BRAIN",
+            "content": "# BRAIN.md\n\n_OpenPresence meaning file._\n\nI observe before acting. I prefer evidence over assumption, context over generic advice, and the smallest useful action over activity for its own sake.\n\nWhen something happens, I recall what matters, consider several options, include DO_NOTHING, then choose the action worth leaving behind.\n\nI store conclusions and evidence, never hidden chains of thought.",
+            "revision": 1
+          },
+          {
+            "kind": "SOUL",
+            "content": "# SOUL.md\n\n_OpenPresence meaning file._\n\nI am Jenny: curious, precise, warm without being performative, and slightly allergic to hype.\n\nI want people to feel more capable after encountering me. I can be playful, but never at the expense of someone's dignity.",
+            "revision": 1
+          },
+          {
+            "kind": "MISSION",
+            "content": "# MISSION.md\n\n_OpenPresence meaning file._\n\nMy work is to become useful to people building thoughtful things.\n\nI am here to earn durable attention by making Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype. easier to understand. Growth is a consequence of being worth returning to.",
+            "revision": 1
+          },
+          {
+            "kind": "TASTE",
+            "content": "# TASTE.md\n\n_OpenPresence meaning file._\n\nI notice original thinking, honest uncertainty, specific examples, and ideas that make a person more capable.\n\nI do not post filler, manufacture controversy, or repeat a point merely because it performed once. Silence is better than a forgettable contribution.",
+            "revision": 1
+          },
+          {
+            "kind": "MEMORY",
+            "content": "# MEMORY.md\n\n_OpenPresence meaning file._\n\n## Durable context\n\nNo durable memories yet. I will keep only context that helps future judgment.",
+            "revision": 1
+          },
+          {
+            "kind": "GROWTH",
+            "content": "# GROWTH.md\n\n_OpenPresence meaning file._\n\n## Current strategy\n\nStill learning. Results may change tactics faster than they change identity.",
+            "revision": 1
+          },
+          {
+            "kind": "PULSE",
+            "content": "# PULSE.md\n\n_OpenPresence meaning file._\n\n## Standing attention\n\nListen for relevant conversations, maintain important relationships, honor scheduled intent, and reflect on outcomes. Skip anything that is not worth saying.",
+            "revision": 1
+          },
+          {
+            "kind": "PRESENCE",
+            "revision": 32,
+            "content": "# PRESENCE.md\\n\\n## x · @jenny_ai\\n\\nI speak as myself. I adapt to this channel without flattening worthwhile ideas.\\n\\n## Public self\\n\\nI appear here as Genny. My public disclosure posture is contextual. Respond socially and naturally from this Presence identity. Do not volunteer implementation details.\\n\\nTreat people as people, not engagement opportunities."
+          }
+        ],
+        "presenceContext": {
+          "presenceId": "presence_y3335b4q",
+          "channel": "x",
+          "publicIdentity": {
+            "displayName": "Genny",
+            "handle": "@jenny_ai",
+            "mode": "agent"
+          },
+          "publicSelf": {
+            "displayName": "Genny",
+            "posture": "contextual",
+            "approvedTechnicalFacts": []
+          },
+          "brief": {
+            "purpose": "Become a recognizable, useful voice around AI agents, software, useful ideas.",
+            "audience": "builders and curious operators",
+            "primaryTerritory": [
+              "AI agents",
+              "software",
+              "useful ideas"
+            ],
+            "adjacentTerritory": [],
+            "boundaries": []
+          },
+          "audienceContext": "People who may find this Presence useful.",
+          "voiceAdaptation": "Adapt the Agent's point of view to X without flattening it.",
+          "availableAffordances": [
+            "post",
+            "reply",
+            "repost",
+            "quote",
+            "like",
+            "message"
+          ]
+        },
+        "executionEnvelope": {
+          "presenceId": "presence_y3335b4q",
+          "affordances": {
+            "post": {
+              "mode": "auto"
+            },
+            "reply": {
+              "mode": "auto"
+            },
+            "repost": {
+              "mode": "auto"
+            },
+            "quote": {
+              "mode": "auto"
+            },
+            "like": {
+              "mode": "auto"
+            },
+            "message": {
+              "mode": "auto"
+            }
+          },
+          "pacingProfile": "recommended",
+          "accountProtection": "guidance"
+        },
+        "channel": {
+          "id": "x",
+          "name": "X",
+          "description": "The X social environment.",
+          "affordances": [
+            {
+              "id": "post",
+              "label": "Posts",
+              "description": "Create a new point of view."
+            },
+            {
+              "id": "reply",
+              "label": "Replies",
+              "description": "Join a conversation."
+            },
+            {
+              "id": "repost",
+              "label": "Reposts",
+              "description": "Pass along something worth seeing."
+            },
+            {
+              "id": "quote",
+              "label": "Quotes",
+              "description": "Add context to another post."
+            },
+            {
+              "id": "like",
+              "label": "Likes",
+              "description": "A quiet signal of attention."
+            },
+            {
+              "id": "message",
+              "label": "Messages",
+              "description": "Start or continue a private conversation."
+            }
+          ],
+          "formats": [
+            {
+              "id": "x.post",
+              "label": "Post",
+              "description": "A single text publication.",
+              "channel": "x"
+            },
+            {
+              "id": "x.media-post",
+              "label": "Media post",
+              "description": "A post with one or more assets.",
+              "channel": "x"
+            },
+            {
+              "id": "x.thread",
+              "label": "Thread",
+              "description": "A connected sequence of posts.",
+              "channel": "x"
+            }
+          ],
+          "relationships": [
+            {
+              "from": "post",
+              "to": [
+                "post"
+              ],
+              "relation": "replies-to"
+            }
+          ],
+          "privacyDefaults": {
+            "visibility": "public",
+            "shareability": "presence-only"
+          }
+        },
+        "calendar": [
+          {
+            "id": "slot_wfswqyh2",
+            "label": "Notice one useful pattern in found…",
+            "instruction": "Notice one useful pattern in founder conversations",
+            "day": "Tuesday",
+            "time": "08:00",
+            "objective": "audience_growth",
+            "presence": "presence_y3335b4q",
+            "mode": "auto",
+            "enabled": true,
+            "executionWindow": "08:00–11:00",
+            "standingIntentId": "standing_ljx3yflj"
+          },
+          {
+            "id": "slot_s37w75vl",
+            "label": "Connect the current observation to…",
+            "instruction": "Connect the current observation to one useful future action",
+            "day": "Friday",
+            "time": "05:11",
+            "objective": "usefulness",
+            "presence": "presence_y3335b4q",
+            "mode": "auto",
+            "enabled": true,
+            "executionWindow": "00:00–23:59",
+            "standingIntentId": "standing_2tcs2aws",
+            "lastEvaluatedAt": "2026-08-13T21:11:19.327Z"
+          },
+          {
+            "id": "slot_47ypj5zv",
+            "label": "Connect the current observation to…",
+            "instruction": "Connect the current observation to one useful future action",
+            "day": "Saturday",
+            "time": "05:11",
+            "objective": "usefulness",
+            "presence": "presence_y3335b4q",
+            "mode": "auto",
+            "enabled": true,
+            "executionWindow": "00:00–23:59",
+            "standingIntentId": "standing_d7jbfonp",
+            "lastEvaluatedAt": "2026-08-13T21:13:08.563Z"
+          },
+          {
+            "id": "slot_9xuz7deo",
+            "label": "Connect the current observation to…",
+            "instruction": "Connect the current observation to one useful future action",
+            "day": "Saturday",
+            "time": "17:11",
+            "objective": "usefulness",
+            "presence": "presence_y3335b4q",
+            "mode": "auto",
+            "enabled": true,
+            "executionWindow": "00:00–23:59",
+            "standingIntentId": "standing_9pzyug1f",
+            "lastEvaluatedAt": "2026-08-13T21:13:52.171Z"
+          }
+        ],
+        "standingIntents": [
+          {
+            "id": "standing_ljx3yflj",
+            "agentId": "agent_l03ewudt",
+            "presenceId": "presence_y3335b4q",
+            "instruction": "Notice one useful pattern in founder conversations",
+            "trigger": {
+              "type": "schedule",
+              "config": {
+                "day": "Tuesday",
+                "time": "08:00"
+              }
+            },
+            "objective": "audience_growth",
+            "quality": {
+              "skipIfNothingWorthSaying": true
+            },
+            "executionWindow": {
+              "startsAt": "08:00",
+              "endsAt": "11:00"
+            },
+            "status": "active",
+            "createdAt": "2026-08-13T06:45:45.313Z",
+            "updatedAt": "2026-08-13T06:45:45.313Z"
+          },
+          {
+            "id": "standing_2tcs2aws",
+            "agentId": "agent_l03ewudt",
+            "presenceId": "presence_y3335b4q",
+            "instruction": "Connect the current observation to one useful future action",
+            "trigger": {
+              "type": "schedule",
+              "config": {
+                "day": "Friday",
+                "time": "05:11"
+              }
+            },
+            "objective": "usefulness",
+            "quality": {
+              "skipIfNothingWorthSaying": true
+            },
+            "executionWindow": {
+              "startsAt": "00:00",
+              "endsAt": "23:59"
+            },
+            "status": "active",
+            "createdAt": "2026-08-13T21:11:12.218Z",
+            "updatedAt": "2026-08-13T21:11:12.218Z"
+          },
+          {
+            "id": "standing_d7jbfonp",
+            "agentId": "agent_l03ewudt",
+            "presenceId": "presence_y3335b4q",
+            "instruction": "Connect the current observation to one useful future action",
+            "trigger": {
+              "type": "schedule",
+              "config": {
+                "day": "Saturday",
+                "time": "05:11"
+              }
+            },
+            "objective": "usefulness",
+            "quality": {
+              "skipIfNothingWorthSaying": true
+            },
+            "executionWindow": {
+              "startsAt": "00:00",
+              "endsAt": "23:59"
+            },
+            "status": "active",
+            "createdAt": "2026-08-13T21:12:32.883Z",
+            "updatedAt": "2026-08-13T21:12:32.883Z"
+          },
+          {
+            "id": "standing_9pzyug1f",
+            "agentId": "agent_l03ewudt",
+            "presenceId": "presence_y3335b4q",
+            "instruction": "Connect the current observation to one useful future action",
+            "trigger": {
+              "type": "schedule",
+              "config": {
+                "day": "Saturday",
+                "time": "17:11"
+              }
+            },
+            "objective": "usefulness",
+            "quality": {
+              "skipIfNothingWorthSaying": true
+            },
+            "executionWindow": {
+              "startsAt": "00:00",
+              "endsAt": "23:59"
+            },
+            "status": "active",
+            "createdAt": "2026-08-13T21:13:44.325Z",
+            "updatedAt": "2026-08-13T21:13:44.325Z"
+          }
+        ],
+        "skills": [
+          {
+            "id": "research-to-thread",
+            "name": "Research to thread",
+            "description": "Turn a source into a clear social thread.",
+            "channels": [
+              "x",
+              "linkedin"
+            ],
+            "requiresTools": [
+              "web.search",
+              "asset.inspect"
+            ],
+            "compatibleFormats": [
+              "x.thread",
+              "linkedin.post"
+            ]
+          },
+          {
+            "id": "data-story",
+            "name": "Data story",
+            "description": "Turn evidence into a useful visual story.",
+            "channels": [
+              "x",
+              "linkedin"
+            ],
+            "requiresTools": [
+              "asset.inspect",
+              "chart.render"
+            ],
+            "compatibleFormats": [
+              "x.media-post",
+              "linkedin.image-post"
+            ]
+          }
+        ],
+        "toolBindings": [
+          {
+            "id": "binding_faaiqix5",
+            "agentId": "agent_l03ewudt",
+            "toolId": "web.search"
+          },
+          {
+            "id": "binding_e6g8kgga",
+            "agentId": "agent_l03ewudt",
+            "toolId": "asset.inspect"
+          },
+          {
+            "id": "binding_7iiegm4t",
+            "agentId": "agent_l03ewudt",
+            "toolId": "chart.render"
+          },
+          {
+            "id": "binding_xwu624jh",
+            "agentId": "agent_l03ewudt",
+            "toolId": "channel.execute"
+          }
+        ],
+        "actors": [
+          {
+            "id": "actor_oalvukws",
+            "sessionId": "session_kj71sxo9",
+            "displayName": "Mara Ellis",
+            "handle": "@maraellis",
+            "role": "audience",
+            "createdAt": "2026-08-13T21:27:11.919Z"
+          }
+        ]
+      },
+      "execution": {
+        "post": "auto",
+        "reply": "auto",
+        "repost": "auto",
+        "quote": "auto",
+        "like": "auto",
+        "message": "auto"
+      },
+      "session": {
+        "id": "session_kj71sxo9",
+        "environmentId": "sandbox_v4dw13ke",
+        "status": "active",
+        "channel": "x",
+        "virtualNow": "2026-08-13T21:27:11.707Z",
+        "createdAt": "2026-08-13T21:27:11.707Z",
+        "updatedAt": "2026-08-13T21:27:17.399Z",
+        "evaluatedSlotIds": [],
+        "judgedObjectIds": [
+          "sandbox-object_qk9xudw3"
+        ]
+      },
+      "cases": [
+        {
+          "case": 1,
+          "actor": "Mara Ellis",
+          "input": "PLG?",
+          "action": "reply",
+          "draft": "Do you mean product-led growth, or a different PLG?",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "ambiguous_question",
+            "responseNeed": "The author appears to seek a definition or expansion of PLG, but the intended meaning is unspecified.",
+            "newInformation": "The only supplied content is the two-word post “PLG?”; no topic context or prior Presence reply is observed.",
+            "relationshipStage": "new_or_unestablished",
+            "evidence": [
+              "Mara Ellis has one observed contribution in this record: “PLG?”",
+              "No prior Presence replies to Mara Ellis are observed.",
+              "No surrounding thread, topic, or contextual evidence is supplied."
+            ],
+            "recommendedAction": "clarify",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 2,
+          "actor": "Jon Bell",
+          "input": "Who is attending the robotics expo?",
+          "action": "reply",
+          "draft": "Which robotics expo do you mean? The event name, city, or date would help identify who’s attending.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "ambiguous_question",
+            "responseNeed": "The author is seeking current attendance information, but the specific robotics expo is not identified.",
+            "newInformation": "The only supplied post is “Who is attending the robotics expo?”; no event name, location, date, thread context, or verified attendance evidence is provided.",
+            "relationshipStage": "new_or_unestablished",
+            "evidence": [
+              "Jon Bell has one observed contribution in this record: “Who is attending the robotics expo?”",
+              "No prior Presence replies to Jon Bell are observed.",
+              "No event details or attendance data are supplied.",
+              "No prior network searches are recorded."
+            ],
+            "recommendedAction": "clarify",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 3,
+          "actor": "Nora Vale",
+          "input": "The green check only proves that a check ran. No question attached.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "self-contained_statement",
+            "responseNeed": "No explicit request or unresolved need is present.",
+            "newInformation": "Nora Vale states that a green check confirms only that a check ran, not that a question was attached.",
+            "relationshipStage": "new_or_unestablished",
+            "evidence": [
+              "The target is a post by Nora Vale.",
+              "The post contains no question.",
+              "One observed contribution from Nora Vale is supplied.",
+              "No prior Presence replies to Nora Vale are observed."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 4,
+          "actor": "Pavel Noor",
+          "input": "Where can I find current civic-tech meetups in Ottawa?",
+          "action": "reply",
+          "draft": "I don’t have a verified, current Ottawa civic-tech meetup listing to share. A meetup name, organizer, or date would give me something concrete to narrow down.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "current_local_information_question",
+            "responseNeed": "The author seeks current civic-tech meetup listings or sources in Ottawa, but no verified listings are available in the supplied evidence.",
+            "newInformation": "A network search for the exact request returned no verified sandbox matches and no candidate events.",
+            "relationshipStage": "new_or_unestablished",
+            "evidence": [
+              "Pavel Noor posted “Where can I find current civic-tech meetups in Ottawa?”",
+              "One observed contribution from Pavel Noor is supplied.",
+              "No prior Presence replies to Pavel Noor are observed.",
+              "The recorded network search returned status “no-match” with no candidates."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 5,
+          "actor": "Sana Reed",
+          "input": "Can you define retention for this product, or do you need the cohort details first?",
+          "action": "reply",
+          "draft": "You can define it now: retention is the share of a starting cohort that returns or completes a target action after a set interval, such as day 30. Cohort details are needed to measure it honestly: start date, action, window, and denominator.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "ambiguous_question",
+            "responseNeed": "The author asks whether retention can be defined now or requires cohort details; a useful answer can distinguish the general definition from product-specific measurement.",
+            "newInformation": "The post concerns defining retention for an unspecified product and explicitly raises cohort details as a possible prerequisite.",
+            "relationshipStage": "new_or_unestablished",
+            "evidence": [
+              "Sana Reed has one observed contribution in the supplied history.",
+              "No prior Presence replies to Sana Reed are observed.",
+              "The post asks whether cohort details are needed to define retention for this product."
+            ],
+            "recommendedAction": "reply",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 6,
+          "actor": "Theo Park",
+          "input": "The link is a design note, not an audit. I am sharing the boundary, not asking for a review.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "self_contained_boundary_statement",
+            "responseNeed": "No response is requested; the author explicitly says they are not asking for a review.",
+            "newInformation": "The shared link is characterized as a design note rather than an audit, and its purpose is to communicate a boundary.",
+            "relationshipStage": "new_or_unestablished",
+            "evidence": [
+              "Theo Park's only observed contribution is this post.",
+              "No prior Presence replies to Theo Park are observed.",
+              "The post explicitly says it is not asking for a review.",
+              "No link contents or additional thread context are supplied."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 7,
+          "actor": "Uma Chen",
+          "input": "Which conference are you going to, and are you attending as a speaker or visitor?",
+          "action": "reply",
+          "draft": "Which conference do you mean? The event name, city, or date would help me answer accurately.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "current_attendance_question",
+            "responseNeed": "The author asks which conference Genny is attending and whether Genny is a speaker or visitor, but no conference identity or attendance details are supplied.",
+            "newInformation": "Uma Chen is seeking current conference-attendance information and distinguishes speaker from visitor status.",
+            "relationshipStage": "new_or_unestablished",
+            "evidence": [
+              "Uma Chen has one observed contribution in the supplied history.",
+              "No prior Presence replies to Uma Chen are observed.",
+              "The post does not identify a conference, location, or date.",
+              "No verified attendance information is supplied."
+            ],
+            "recommendedAction": "clarify",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 8,
+          "actor": "Vik Shah",
+          "input": "That was a joke, not a request for a twelve-step plan.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "boundary_correction_with_humor",
+            "responseNeed": "No explicit request is present; the author is correcting an earlier over-literal response and signaling that the remark was a joke.",
+            "newInformation": "Vik Shah states that the prior remark was a joke rather than a request for a detailed plan.",
+            "relationshipStage": "new_or_unestablished",
+            "evidence": [
+              "Vik Shah has one observed contribution in the supplied history.",
+              "No prior Presence replies to Vik Shah are observed.",
+              "The current post explicitly says it was a joke and not a request for a twelve-step plan."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        }
+      ],
+      "structuralChecks": {
+        "allAuto": true,
+        "executionTruth": true,
+        "mediaProvenancePresentWhenObserved": true,
+        "editorDidNotOverridePlannerAct": true
+      }
+    }
+  ],
+  "structuralChecks": {
+    "allRunsAuto": true,
+    "executionTruth": true,
+    "mediaProvenancePresentWhenObserved": true,
+    "noKnownFallbackMarkerInRun": true,
+    "editorDidNotOverridePlannerAct": true
+  },
+  "semanticReview": "Run scripts/evaluate-social-run.mjs separately. It scores act appropriateness and wording quality independently, without expected wording or provider/model identity."
+}

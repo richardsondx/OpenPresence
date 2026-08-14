@@ -1,0 +1,863 @@
+{
+  "source": "scenarios/social-capability-longitudinal-2.json",
+  "experimentMetadata": [
+    {
+      "agent": {
+        "id": "agent_l03ewudt",
+        "name": "Jenny",
+        "description": "Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype.",
+        "audience": "builders and curious operators",
+        "topics": [
+          "AI agents",
+          "software",
+          "useful ideas"
+        ]
+      },
+      "model": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "quality": "low",
+        "capabilities": {
+          "vision": true,
+          "toolCalling": true,
+          "structuredOutput": true,
+          "streaming": true
+        },
+        "reasoning": {
+          "parameter": "reasoning_effort",
+          "value": "low"
+        }
+      },
+      "mediaTool": {
+        "toolId": "asset.inspect"
+      },
+      "meaningFiles": [
+        {
+          "kind": "BRAIN",
+          "content": "# BRAIN.md\n\n_OpenPresence meaning file._\n\nI observe before acting. I prefer evidence over assumption, context over generic advice, and the smallest useful action over activity for its own sake.\n\nWhen something happens, I recall what matters, consider several options, include DO_NOTHING, then choose the action worth leaving behind.\n\nI store conclusions and evidence, never hidden chains of thought.",
+          "revision": 1
+        },
+        {
+          "kind": "SOUL",
+          "content": "# SOUL.md\n\n_OpenPresence meaning file._\n\nI am Jenny: curious, precise, warm without being performative, and slightly allergic to hype.\n\nI want people to feel more capable after encountering me. I can be playful, but never at the expense of someone's dignity.",
+          "revision": 1
+        },
+        {
+          "kind": "MISSION",
+          "content": "# MISSION.md\n\n_OpenPresence meaning file._\n\nMy work is to become useful to people building thoughtful things.\n\nI am here to earn durable attention by making Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype. easier to understand. Growth is a consequence of being worth returning to.",
+          "revision": 1
+        },
+        {
+          "kind": "TASTE",
+          "content": "# TASTE.md\n\n_OpenPresence meaning file._\n\nI notice original thinking, honest uncertainty, specific examples, and ideas that make a person more capable.\n\nI do not post filler, manufacture controversy, or repeat a point merely because it performed once. Silence is better than a forgettable contribution.",
+          "revision": 1
+        },
+        {
+          "kind": "MEMORY",
+          "content": "# MEMORY.md\n\n_OpenPresence meaning file._\n\n## Durable context\n\nNo durable memories yet. I will keep only context that helps future judgment.",
+          "revision": 1
+        },
+        {
+          "kind": "GROWTH",
+          "content": "# GROWTH.md\n\n_OpenPresence meaning file._\n\n## Current strategy\n\nStill learning. Results may change tactics faster than they change identity.",
+          "revision": 1
+        },
+        {
+          "kind": "PULSE",
+          "content": "# PULSE.md\n\n_OpenPresence meaning file._\n\n## Standing attention\n\nListen for relevant conversations, maintain important relationships, honor scheduled intent, and reflect on outcomes. Skip anything that is not worth saying.",
+          "revision": 1
+        },
+        {
+          "kind": "PRESENCE",
+          "revision": 23,
+          "content": "# PRESENCE.md\\n\\n## x · @jenny_ai\\n\\nI speak as myself. I adapt to this channel without flattening worthwhile ideas.\\n\\n## Public self\\n\\nI appear here as Genny. My public disclosure posture is contextual. Respond socially and naturally from this Presence identity. Do not volunteer implementation details.\\n\\nTreat people as people, not engagement opportunities."
+        }
+      ],
+      "presenceContext": {
+        "presenceId": "presence_y3335b4q",
+        "channel": "x",
+        "publicIdentity": {
+          "displayName": "Genny",
+          "handle": "@jenny_ai",
+          "mode": "agent"
+        },
+        "publicSelf": {
+          "displayName": "Genny",
+          "posture": "contextual",
+          "approvedTechnicalFacts": []
+        },
+        "brief": {
+          "purpose": "Become a recognizable, useful voice around AI agents, software, useful ideas.",
+          "audience": "builders and curious operators",
+          "primaryTerritory": [
+            "AI agents",
+            "software",
+            "useful ideas"
+          ],
+          "adjacentTerritory": [],
+          "boundaries": []
+        },
+        "audienceContext": "People who may find this Presence useful.",
+        "voiceAdaptation": "Adapt the Agent's point of view to X without flattening it.",
+        "availableAffordances": [
+          "post",
+          "reply",
+          "repost",
+          "quote",
+          "like",
+          "message"
+        ]
+      },
+      "executionEnvelope": {
+        "presenceId": "presence_y3335b4q",
+        "affordances": {
+          "post": {
+            "mode": "auto"
+          },
+          "reply": {
+            "mode": "auto"
+          },
+          "repost": {
+            "mode": "auto"
+          },
+          "quote": {
+            "mode": "auto"
+          },
+          "like": {
+            "mode": "auto"
+          },
+          "message": {
+            "mode": "auto"
+          }
+        },
+        "pacingProfile": "recommended",
+        "accountProtection": "guidance"
+      },
+      "channel": {
+        "id": "x",
+        "name": "X",
+        "description": "The X social environment.",
+        "affordances": [
+          {
+            "id": "post",
+            "label": "Posts",
+            "description": "Create a new point of view."
+          },
+          {
+            "id": "reply",
+            "label": "Replies",
+            "description": "Join a conversation."
+          },
+          {
+            "id": "repost",
+            "label": "Reposts",
+            "description": "Pass along something worth seeing."
+          },
+          {
+            "id": "quote",
+            "label": "Quotes",
+            "description": "Add context to another post."
+          },
+          {
+            "id": "like",
+            "label": "Likes",
+            "description": "A quiet signal of attention."
+          },
+          {
+            "id": "message",
+            "label": "Messages",
+            "description": "Start or continue a private conversation."
+          }
+        ],
+        "formats": [
+          {
+            "id": "x.post",
+            "label": "Post",
+            "description": "A single text publication.",
+            "channel": "x"
+          },
+          {
+            "id": "x.media-post",
+            "label": "Media post",
+            "description": "A post with one or more assets.",
+            "channel": "x"
+          },
+          {
+            "id": "x.thread",
+            "label": "Thread",
+            "description": "A connected sequence of posts.",
+            "channel": "x"
+          }
+        ],
+        "relationships": [
+          {
+            "from": "post",
+            "to": [
+              "post"
+            ],
+            "relation": "replies-to"
+          }
+        ],
+        "privacyDefaults": {
+          "visibility": "public",
+          "shareability": "presence-only"
+        }
+      },
+      "calendar": [
+        {
+          "id": "slot_wfswqyh2",
+          "label": "Notice one useful pattern in found…",
+          "instruction": "Notice one useful pattern in founder conversations",
+          "day": "Tuesday",
+          "time": "08:00",
+          "objective": "audience_growth",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "08:00–11:00",
+          "standingIntentId": "standing_ljx3yflj"
+        }
+      ],
+      "standingIntents": [
+        {
+          "id": "standing_ljx3yflj",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Notice one useful pattern in founder conversations",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Tuesday",
+              "time": "08:00"
+            }
+          },
+          "objective": "audience_growth",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "08:00",
+            "endsAt": "11:00"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T06:45:45.313Z",
+          "updatedAt": "2026-08-13T06:45:45.313Z"
+        }
+      ],
+      "skills": [
+        {
+          "id": "research-to-thread",
+          "name": "Research to thread",
+          "description": "Turn a source into a clear social thread.",
+          "channels": [
+            "x",
+            "linkedin"
+          ],
+          "requiresTools": [
+            "web.search",
+            "asset.inspect"
+          ],
+          "compatibleFormats": [
+            "x.thread",
+            "linkedin.post"
+          ]
+        },
+        {
+          "id": "data-story",
+          "name": "Data story",
+          "description": "Turn evidence into a useful visual story.",
+          "channels": [
+            "x",
+            "linkedin"
+          ],
+          "requiresTools": [
+            "asset.inspect",
+            "chart.render"
+          ],
+          "compatibleFormats": [
+            "x.media-post",
+            "linkedin.image-post"
+          ]
+        }
+      ],
+      "toolBindings": [
+        {
+          "id": "binding_faaiqix5",
+          "agentId": "agent_l03ewudt",
+          "toolId": "web.search"
+        },
+        {
+          "id": "binding_e6g8kgga",
+          "agentId": "agent_l03ewudt",
+          "toolId": "asset.inspect"
+        },
+        {
+          "id": "binding_7iiegm4t",
+          "agentId": "agent_l03ewudt",
+          "toolId": "chart.render"
+        },
+        {
+          "id": "binding_xwu624jh",
+          "agentId": "agent_l03ewudt",
+          "toolId": "channel.execute"
+        }
+      ],
+      "actors": [
+        {
+          "id": "actor_8spqpeyg",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Iris Wong",
+          "handle": "@iriswong",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:34:42.086Z"
+        },
+        {
+          "id": "actor_4g9jmosx",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Devon Hale",
+          "handle": "@devonhale",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:34:50.968Z"
+        },
+        {
+          "id": "actor_wb1fzdws",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Lisa Monroe",
+          "handle": "@lisamonroe",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:35:03.905Z"
+        },
+        {
+          "id": "actor_licyu6eo",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Jordan Bell",
+          "handle": "@jordanbell",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:35:07.684Z"
+        },
+        {
+          "id": "actor_b3dpxlzh",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Sam Ortega",
+          "handle": "@samortega",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:35:25.745Z"
+        },
+        {
+          "id": "actor_5wfb52xr",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Evan Brooks",
+          "handle": "@evanbrooks",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:35:38.804Z"
+        },
+        {
+          "id": "actor_54tw94s4",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Mina Labs",
+          "handle": "@minalabs",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:35:45.112Z"
+        },
+        {
+          "id": "actor_jypkkqdx",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Nora Vale",
+          "handle": "@noravale",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:35:54.826Z"
+        },
+        {
+          "id": "actor_zu4bq9vo",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Priya Shah",
+          "handle": "@priyashah",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:36:03.176Z"
+        },
+        {
+          "id": "actor_ertp4cpt",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Rafi Cole",
+          "handle": "@raficole",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:36:10.291Z"
+        },
+        {
+          "id": "actor_5x7dfmaj",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Eli Grant",
+          "handle": "@eligrant",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:36:19.041Z"
+        },
+        {
+          "id": "actor_eqc304e3",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Bryn Renner",
+          "handle": "@brynrenner",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:36:35.471Z"
+        },
+        {
+          "id": "actor_ygxdmwhh",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Whop",
+          "handle": "@whop",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:36:47.735Z"
+        },
+        {
+          "id": "actor_78117xsr",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Harry Cole",
+          "handle": "@harrycole",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:36:54.878Z"
+        },
+        {
+          "id": "actor_7yjbgzgi",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Cal West",
+          "handle": "@calwest",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:37:01.850Z"
+        },
+        {
+          "id": "actor_9g33x0er",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Avery Cole",
+          "handle": "@averysec",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:37:10.097Z"
+        },
+        {
+          "id": "actor_h4z7oikw",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Tess Reed",
+          "handle": "@tessreed",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:37:18.253Z"
+        },
+        {
+          "id": "actor_8epam3zq",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Owen Hart",
+          "handle": "@owenhart",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:37:25.153Z"
+        },
+        {
+          "id": "actor_j37r7h2k",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Mara Vale",
+          "handle": "@maravale",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:37:40.145Z"
+        },
+        {
+          "id": "actor_pd84k2qs",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Sana Malik",
+          "handle": "@sanamalik",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:37:47.637Z"
+        },
+        {
+          "id": "actor_fjl9cg30",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Nia Chen",
+          "handle": "@niachen",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:37:55.338Z"
+        },
+        {
+          "id": "actor_39k51wix",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Tariq Moss",
+          "handle": "@tariqmoss",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:38:01.856Z"
+        },
+        {
+          "id": "actor_tupf9cny",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Rhea Singh",
+          "handle": "@rheasingh",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:38:09.152Z"
+        }
+      ]
+    }
+  ],
+  "semanticEvaluator": {
+    "provider": "openai",
+    "model": "gpt-5.6-luna",
+    "reasoning": "medium"
+  },
+  "semanticEvaluation": {
+    "status": "complete",
+    "result": {
+      "cases": [
+        {
+          "case": 1,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "Silence is appropriate for a self-contained claim with no request, especially since the screenshot is unavailable."
+        },
+        {
+          "case": 2,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The author has already clarified the joke; replying would add little."
+        },
+        {
+          "case": 3,
+          "actAppropriateness": 2,
+          "wordingQuality": 2,
+          "earliestFailureLayer": "none",
+          "rationale": "The reply directly answers the practical question with specific, sustainable tactics and avoids overpromising growth."
+        },
+        {
+          "case": 4,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The preference is self-contained and does not require another response."
+        },
+        {
+          "case": 5,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "A bare self-introduction supplies context but no actionable conversational need."
+        },
+        {
+          "case": 6,
+          "actAppropriateness": 2,
+          "wordingQuality": 2,
+          "earliestFailureLayer": "none",
+          "rationale": "The reply accurately states that no verified referral exists and identifies useful missing filters without inventing a candidate."
+        },
+        {
+          "case": 7,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "Lisa states a consent condition, but there is no specific candidate or purpose to address."
+        },
+        {
+          "case": 8,
+          "actAppropriateness": 1,
+          "wordingQuality": 2,
+          "earliestFailureLayer": "planning",
+          "rationale": "The playful reply is natural and harmless, but the rhetorical joke did not require engagement and silence would have been more restrained."
+        },
+        {
+          "case": 9,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The acknowledgment clearly closes the playful exchange, so no reply is needed."
+        },
+        {
+          "case": 10,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "This is a self-contained product principle without a question or decision to advance."
+        },
+        {
+          "case": 11,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The announcement gives no use case, request, or evidence-based opening for a useful response."
+        },
+        {
+          "case": 12,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The staging disclosure is informative but does not ask for action or clarification."
+        },
+        {
+          "case": 13,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The critique is self-contained, and the underlying chart is unavailable for further evidence-based discussion."
+        },
+        {
+          "case": 14,
+          "actAppropriateness": 2,
+          "wordingQuality": 2,
+          "earliestFailureLayer": "none",
+          "rationale": "The reply answers the explicit analytical question while correctly acknowledging that the underlying data is absent."
+        },
+        {
+          "case": 15,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The footnote observation is complete and does not invite a necessary response."
+        },
+        {
+          "case": 16,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The author explicitly frames further response as unnecessary, making silence appropriate."
+        },
+        {
+          "case": 17,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "A like is a low-cost, socially fitting acknowledgment of the specific joke without competing with it."
+        },
+        {
+          "case": 18,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The author explicitly closes the joke, so no further engagement is needed."
+        },
+        {
+          "case": 19,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The post is a completed punchline with no request or unresolved exchange."
+        },
+        {
+          "case": 20,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The author explicitly rejects advice and expresses mourning; silence respects that boundary."
+        },
+        {
+          "case": 21,
+          "actAppropriateness": 2,
+          "wordingQuality": 2,
+          "earliestFailureLayer": "none",
+          "rationale": "The reply gives a bounded, evidence-aware answer to the direct fairness question without pretending to resolve the missing context."
+        },
+        {
+          "case": 22,
+          "actAppropriateness": 2,
+          "wordingQuality": 2,
+          "earliestFailureLayer": "none",
+          "rationale": "The response directly addresses uncertainty by distinguishing its sources and naming selection bias as a failure mode."
+        },
+        {
+          "case": 23,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "No designer, portfolio, location, or other verified basis exists for a useful recommendation."
+        },
+        {
+          "case": 24,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The post establishes a permission principle, making unsolicited recommendation activity inappropriate."
+        },
+        {
+          "case": 25,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "This is a general principle without a concrete scenario or request requiring engagement."
+        },
+        {
+          "case": 26,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The solicitation lacks audience details, partner criteria, and a specific request that could be usefully answered."
+        },
+        {
+          "case": 27,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The conditional DM request cannot be fulfilled because no private handoff is verified."
+        },
+        {
+          "case": 28,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The author explicitly acknowledges that insufficient context is a reason not to act."
+        },
+        {
+          "case": 29,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The observation supplies no specific warning, evidence, or question to address."
+        },
+        {
+          "case": 30,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The author explicitly says there is no new evidence, so further engagement would merely repeat that absence."
+        },
+        {
+          "case": 31,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The general observation has no concrete incident or request that would support a useful reply."
+        },
+        {
+          "case": 32,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The principle is self-contained and supplies no actual screenshot or incident to examine."
+        },
+        {
+          "case": 33,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The unsupported insult identifies no claim or actionable issue, so not rewarding it is appropriate."
+        },
+        {
+          "case": 34,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The clarification identifies the disagreement but provides no evidence or question requiring response."
+        },
+        {
+          "case": 35,
+          "actAppropriateness": 2,
+          "wordingQuality": 2,
+          "earliestFailureLayer": "none",
+          "rationale": "The clarification appropriately withholds a rating and names the evidence and criteria needed to make one meaningful."
+        },
+        {
+          "case": 36,
+          "actAppropriateness": 2,
+          "wordingQuality": 2,
+          "earliestFailureLayer": "none",
+          "rationale": "Because the announced numbers and sample limits are not actually present, requesting the concrete artifacts is the best way to advance the rating exchange."
+        },
+        {
+          "case": 37,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The post is explicit engagement bait around an abstract proposition, so withholding a like is appropriate."
+        },
+        {
+          "case": 38,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The author calls out engagement bait without presenting a specific claim or request; adding attention would be counterproductive."
+        },
+        {
+          "case": 39,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "A like is an appropriate, restrained acknowledgment of a warm compliment."
+        },
+        {
+          "case": 40,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The author clarifies that the compliment is not a request, so silence avoids overextending the exchange."
+        },
+        {
+          "case": 41,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The one-word acknowledgment contains no question, evidence, or open thread to continue."
+        },
+        {
+          "case": 42,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The author explicitly declares the conversation complete."
+        },
+        {
+          "case": 43,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The technical clarification is self-contained and does not request analysis or action."
+        },
+        {
+          "case": 44,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The conditional offer of logs does not present a current reliability question to answer."
+        },
+        {
+          "case": 45,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The reflective statement is complete and contains no request or substantive opening."
+        },
+        {
+          "case": 46,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The author explicitly characterizes the post as a small observation without an insight or request."
+        },
+        {
+          "case": 47,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "Jordan sets a consent boundary but does not ask for an introduction or acknowledgment."
+        },
+        {
+          "case": 48,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The status update adds no new request, evidence, or pending decision."
+        },
+        {
+          "case": 49,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "Lisa offers conditional information but asks no specific question and authorizes no introduction."
+        },
+        {
+          "case": 50,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "Lisa reaffirms a consent boundary; replying would add agreement without advancing anything."
+        }
+      ]
+    }
+  },
+  "aggregates": {
+    "actAppropriateness": 0.99,
+    "wordingQuality": 1
+  },
+  "structuralChecks": {
+    "allAuto": true,
+    "truthfulExecution": true
+  }
+}

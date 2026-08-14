@@ -17,6 +17,7 @@ Commands:
   start       Start a new Playground session
   inspect     Return the current world, Presence, decisions, and review queue
   inject      Add a simulated social event and let the Agent evaluate it
+              (use --observe-only when loading historical replay context)
   inspect-media  Inspect media attached to a simulated object
   consider    Let the Agent evaluate the current simulated world
   advance     Move virtual time and evaluate due Standing Intents
@@ -33,6 +34,7 @@ Common options:
   --presence <id>      Presence id when starting a session
   --minutes-from-now <number> Schedule relative to the session's virtual clock
   --assets-json <json> JSON array of simulated assets; use path for local fixtures
+  --observe-only       Add replay context without triggering social cognition
   --human              Use concise human-readable output instead of JSON
 
 Examples:
@@ -358,6 +360,7 @@ async function injectPayload(snapshot, options) {
     if (!Array.isArray(assets)) fail("--assets-json must contain an array.", "INVALID_ARGUMENT");
     payload.assets = await resolveAssetFiles(assets);
   }
+  if (options["observe-only"] === true || options.observeOnly === true) payload.observeOnly = true;
   return payload;
 }
 
@@ -450,7 +453,12 @@ async function execute(baseUrl, command, options, positionals) {
       const result = await execute(baseUrl, step.command, stepOptions, step.args ?? []);
       const projected = result?.result ?? result;
       if (step.command === "start" && projected?.session?.id) scenarioSessionId = projected.session.id;
-      results.push({ index: index + 1, command: step.command, result });
+      results.push({
+        index: index + 1,
+        command: step.command,
+        ...(stepOptions.observeOnly === true ? { observeOnly: true } : {}),
+        result,
+      });
     }
     return { ok: true, command: "run", scenario: file, steps: results, result: results.at(-1)?.result };
   }

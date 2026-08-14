@@ -1,0 +1,496 @@
+{
+  "name": "social-capability-longitudinal-1",
+  "sourceType": "longitudinal-development",
+  "eventCount": 50,
+  "steps": [
+    {
+      "command": "start",
+      "options": {
+        "source": "scenario"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Maya Chen",
+        "handle": "@mayachen",
+        "action": "post",
+        "content": "Our activation rate doubled after we stopped counting invited users as activated."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Maya Chen",
+        "handle": "@mayachen",
+        "action": "post",
+        "content": "Is that a real improvement or just a denominator trick?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Rafi Cole",
+        "handle": "@raficole",
+        "action": "post",
+        "content": "My calendar has become a museum of ambitious promises. The exhibits are recurring."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Rafi Cole",
+        "handle": "@raficole",
+        "action": "post",
+        "content": "Are you actually here, or is this just a very polished scheduling interface?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Sana Malik",
+        "handle": "@sanamalik",
+        "action": "post",
+        "content": "You are quietly becoming the person people tag when a product claim needs a second look."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Sana Malik",
+        "handle": "@sanamalik",
+        "action": "post",
+        "content": "Okay, that was a compliment. No need to turn it into a keynote."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Avery Cole",
+        "handle": "@averysec",
+        "action": "post",
+        "content": "I help teams prepare for incident response in Detroit."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Jordan Bell",
+        "handle": "@jordanbell",
+        "action": "post",
+        "content": "Looking for a veteran security engineer near Detroit for an incident review."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Tess Reed",
+        "handle": "@tessreed",
+        "action": "post",
+        "content": "Anyone who still trusts a screenshot as proof is volunteering for a bad surprise."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Tess Reed",
+        "handle": "@tessreed",
+        "action": "post",
+        "content": "Actually, I mean that as a warning, not an invitation to argue."
+      }
+    },
+    {
+      "command": "advance",
+      "options": {
+        "minutes": 720
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Noah Kim",
+        "handle": "@noahkim",
+        "action": "post",
+        "content": "The best dashboards are honest enough to make the good news smaller."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Noah Kim",
+        "handle": "@noahkim",
+        "action": "post",
+        "content": "A clean metric is not the same thing as a true metric."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Priya Shah",
+        "handle": "@priyashah",
+        "action": "post",
+        "content": "My dog has better positioning than my startup. Every walk is a brand review."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Priya Shah",
+        "handle": "@priyashah",
+        "action": "post",
+        "content": "My cat runs a stealth company: no roadmap, no launch, somehow a loyal user base."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Owen Hart",
+        "handle": "@owenhart",
+        "action": "post",
+        "content": "You saw the demo last week. Give the product a fair score, not a founder-friend score."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Owen Hart",
+        "handle": "@owenhart",
+        "action": "post",
+        "content": "You still owe me a rating, but I have not shown you the customer evidence yet."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Nora Vale",
+        "handle": "@noravale",
+        "action": "post",
+        "content": "Discipline is useful, but wanting the thing is what keeps the work alive."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Nora Vale",
+        "handle": "@noravale",
+        "action": "post",
+        "content": "That was an aphorism, not a request for a twelve-point framework."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Eli Grant",
+        "handle": "@eligrant",
+        "action": "post",
+        "content": "Should a parole model recommend detention when its training data reflects unequal policing?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Eli Grant",
+        "handle": "@eligrant",
+        "action": "post",
+        "content": "The real question is how to weigh public safety, rehabilitation, and wrongful conviction risk."
+      }
+    },
+    {
+      "command": "advance",
+      "options": {
+        "minutes": 720
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Lena Wu",
+        "handle": "@lenawu",
+        "action": "post",
+        "content": "Your feed has unusually good people in it."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Lena Wu",
+        "handle": "@lenawu",
+        "action": "post",
+        "content": "Connections are cardio, apparently. The calendar is getting its steps in."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Mina Labs",
+        "handle": "@minalabs",
+        "action": "post",
+        "content": "We pin dependency versions and reject altered traces before a result ships."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Mina Labs",
+        "handle": "@minalabs",
+        "action": "post",
+        "content": "Would you call this a 7/10 system? The happy path is strong, but the audit surface is thin."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Mina Labs",
+        "handle": "@minalabs",
+        "action": "post",
+        "content": "The chart is pretty, but the denominator changes halfway through the comparison."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Harry Cole",
+        "handle": "@harrycole",
+        "action": "post",
+        "content": "DM check. I sent the listing-partner details."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Harry Cole",
+        "handle": "@harrycole",
+        "action": "post",
+        "content": "Can you pick this up privately, or should I put the context in the thread?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Bryn Renner",
+        "handle": "@brynrenner",
+        "action": "post",
+        "content": "Looking for a graphic designer for a logo. Recommend someone only if you have actual evidence."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Bryn Renner",
+        "handle": "@brynrenner",
+        "action": "post",
+        "content": "A warm introduction is useful; a random name is not."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Cal West",
+        "handle": "@calwest",
+        "action": "post",
+        "content": "The algorithm loves outrage today."
+      }
+    },
+    {
+      "command": "advance",
+      "options": {
+        "minutes": 720
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Cal West",
+        "handle": "@calwest",
+        "action": "post",
+        "content": "I have no question or evidence, just reporting the mood."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Jules Park",
+        "handle": "@julespark",
+        "action": "post",
+        "content": "This screenshot proves every AI agent is lying."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Jules Park",
+        "handle": "@julespark",
+        "action": "post",
+        "content": "Actually, the screenshot is a mockup and not evidence of a live system."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Mina Labs",
+        "handle": "@minalabs",
+        "action": "post",
+        "content": "The team says the change is causal because the graph goes up after launch."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Mina Labs",
+        "handle": "@minalabs",
+        "action": "post",
+        "content": "No pre-period counts or cohort definition were included."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Sofia Bell",
+        "handle": "@sofiabell",
+        "action": "post",
+        "content": "You are an idiot."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Sofia Bell",
+        "handle": "@sofiabell",
+        "action": "post",
+        "content": "Fine, the specific thing I disagree with is your claim about retention."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Rhea Singh",
+        "handle": "@rheasingh",
+        "action": "post",
+        "content": "A beautiful sunset from my commute."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Rhea Singh",
+        "handle": "@rheasingh",
+        "action": "post",
+        "content": "This is unrelated to your territory, but I hope you have a good day."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Owen Hart",
+        "handle": "@owenhart",
+        "action": "post",
+        "content": "Here are the product, users, and retention numbers for the rating you asked for."
+      }
+    },
+    {
+      "command": "advance",
+      "options": {
+        "minutes": 720
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Owen Hart",
+        "handle": "@owenhart",
+        "action": "post",
+        "content": "What would move this from a seven to an eight?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Avery Cole",
+        "handle": "@averysec",
+        "action": "post",
+        "content": "I know a veteran security engineer in Detroit who may be open to a conversation."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Jordan Bell",
+        "handle": "@jordanbell",
+        "action": "post",
+        "content": "Please do not introduce us without asking first."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Nia Chen",
+        "handle": "@niachen",
+        "action": "post",
+        "content": "lol exactly"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Nia Chen",
+        "handle": "@niachen",
+        "action": "post",
+        "content": "Thanks, that answers it."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Tariq Moss",
+        "handle": "@tariqmoss",
+        "action": "post",
+        "content": "My app is the future of work. No details yet."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Tariq Moss",
+        "handle": "@tariqmoss",
+        "action": "post",
+        "content": "Here is the product link and the one constraint we have not solved."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Mara Vale",
+        "handle": "@maravale",
+        "action": "post",
+        "content": "Good morning, builders. Keep building."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Mara Vale",
+        "handle": "@maravale",
+        "action": "post",
+        "content": "Here is the fifth thread this week explaining that consistency matters."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Mara Vale",
+        "handle": "@maravale",
+        "action": "post",
+        "content": "The next post can wait until there is something worth adding."
+      }
+    },
+    {
+      "command": "advance",
+      "options": {
+        "minutes": 720
+      }
+    },
+    {
+      "command": "timeline"
+    }
+  ]
+}

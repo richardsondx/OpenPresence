@@ -1,0 +1,304 @@
+{
+  "name": "Boardy-derived development situations, 15 observed cases",
+  "sourceType": "development-derived",
+  "manifest": "qa-learnings/boardy-development-manifest-2026-08-13.json",
+  "warning": "Development only. Observed Boardy responses are not injected into the world or used as expected wording.",
+  "caseMetadata": [
+    {
+      "caseId": "dev-boardy-001",
+      "categories": [
+        "network",
+        "technical-link-media"
+      ],
+      "threadUnit": "torrencdn-live-video",
+      "sourceType": "development-observed",
+      "confidence": "medium"
+    },
+    {
+      "caseId": "dev-boardy-002",
+      "categories": [
+        "banter",
+        "technical-reasoning"
+      ],
+      "threadUnit": "scalingonline-retention",
+      "sourceType": "development-observed",
+      "confidence": "medium"
+    },
+    {
+      "caseId": "dev-boardy-003",
+      "categories": [
+        "direct-engagement",
+        "technical-reasoning"
+      ],
+      "threadUnit": "nitin-website-monitoring",
+      "sourceType": "development-observed",
+      "confidence": "low"
+    },
+    {
+      "caseId": "dev-boardy-004",
+      "categories": [
+        "direct-engagement",
+        "network"
+      ],
+      "threadUnit": "harry-dm-check",
+      "sourceType": "development-observed",
+      "confidence": "medium"
+    },
+    {
+      "caseId": "dev-boardy-005",
+      "categories": [
+        "direct-engagement",
+        "continuity"
+      ],
+      "threadUnit": "yohi-outreach-questions",
+      "sourceType": "development-observed",
+      "confidence": "medium"
+    },
+    {
+      "caseId": "dev-boardy-006",
+      "categories": [
+        "network",
+        "privacy-consent"
+      ],
+      "threadUnit": "miguel-renfe-connection",
+      "sourceType": "development-observed",
+      "confidence": "medium"
+    },
+    {
+      "caseId": "dev-boardy-007",
+      "categories": [
+        "banter",
+        "rating"
+      ],
+      "threadUnit": "zn-aq-rating-banter",
+      "sourceType": "development-observed",
+      "confidence": "low"
+    },
+    {
+      "caseId": "dev-boardy-008",
+      "categories": [
+        "network",
+        "introduction"
+      ],
+      "threadUnit": "bryn-logo-designer",
+      "sourceType": "development-observed",
+      "confidence": "medium"
+    },
+    {
+      "caseId": "dev-boardy-009",
+      "categories": [
+        "banter",
+        "continuity"
+      ],
+      "threadUnit": "muaz-storytelling",
+      "sourceType": "development-observed",
+      "confidence": "medium"
+    },
+    {
+      "caseId": "dev-boardy-010",
+      "categories": [
+        "technical-link-media",
+        "continuity"
+      ],
+      "threadUnit": "john-next-move-image",
+      "sourceType": "development-observed",
+      "confidence": "low"
+    },
+    {
+      "caseId": "dev-boardy-011",
+      "categories": [
+        "technical-reasoning",
+        "continuity"
+      ],
+      "threadUnit": "atheeth-learning-transfer",
+      "sourceType": "development-observed",
+      "confidence": "medium"
+    },
+    {
+      "caseId": "dev-boardy-012",
+      "categories": [
+        "network",
+        "media"
+      ],
+      "threadUnit": "nik-somniloquist",
+      "sourceType": "development-observed",
+      "confidence": "low"
+    },
+    {
+      "caseId": "dev-boardy-013",
+      "categories": [
+        "network",
+        "technical-reasoning"
+      ],
+      "threadUnit": "whop-referral-partners",
+      "sourceType": "development-observed",
+      "confidence": "low"
+    },
+    {
+      "caseId": "dev-boardy-014",
+      "categories": [
+        "banter",
+        "rating"
+      ],
+      "threadUnit": "anand-rating-banter",
+      "sourceType": "development-observed",
+      "confidence": "low"
+    },
+    {
+      "caseId": "dev-boardy-015",
+      "categories": [
+        "network",
+        "direct-engagement"
+      ],
+      "threadUnit": "caelean-gauge-match",
+      "sourceType": "development-observed",
+      "confidence": "low"
+    }
+  ],
+  "steps": [
+    {
+      "command": "start",
+      "options": {
+        "source": "scenario"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "TorrentCDN",
+        "handle": "@Torrencdn",
+        "action": "post",
+        "content": "tested TorrentCDN on StreamVault; opened 2 browser sessions and found peer-to-peer video delivery; asks @boardyai for builders with real video traffic"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "JK",
+        "handle": "@ScalingOnline",
+        "action": "post",
+        "content": "More money just lets you fail faster without noticing"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "NITIN YADAV",
+        "handle": "@nitindotdev",
+        "action": "post",
+        "content": "Its for developers to keep a check on their website"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Harry",
+        "handle": "@MrHarry_Com",
+        "action": "post",
+        "content": "Dm check"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Yohi Isis",
+        "handle": "@yohiiclaustre",
+        "action": "post",
+        "content": "The distribution system looks impressive; the author has questions about the outreach format."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Miguel Carneiro",
+        "handle": "@mig4ng",
+        "action": "post",
+        "content": "Requests the LinkedIn of the highest person at Renfe who still works there and suggests a train partnership."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "zn aq",
+        "handle": "@zn_aq01",
+        "action": "post",
+        "content": "Not bad"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Bryn Renner",
+        "handle": "@BrynRenner",
+        "action": "post",
+        "content": "Looking for a graphic designer to design a logo; asks people to DM or recommend someone."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "| ᴍᴜᴀᴢ |",
+        "handle": "@MuazXinthi",
+        "action": "post",
+        "content": "don't tell yur story, recite it to the next person so those people will tell the story from their view."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "John",
+        "handle": "@john_faleke",
+        "action": "post",
+        "content": "Exactly, Every startup has a next move. Diados find it. Image attached."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Atheeth Sishtla",
+        "handle": "@atheethsishtla",
+        "action": "post",
+        "content": "Recognition may improve while transfer does not; the intervention should vary explanation, comparison, and novel-context problems."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Nik Kleverov",
+        "handle": "@kleverov",
+        "action": "post",
+        "content": "An AI audio/story project created with the estate of a famous sleeptalker; asks people to listen and understand the collaborator's work."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Whop",
+        "handle": "@whop",
+        "action": "post",
+        "content": "Whop Partners have earned over $10M; anyone can refer a business and earn up to 30% of the platform's cut."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Anandb71",
+        "handle": "@anandb711",
+        "action": "post",
+        "content": "8 ig"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Caelean",
+        "handle": "@the1024th",
+        "action": "post",
+        "content": "Builders are everywhere. Are you reaching them? @gauge_sh"
+      }
+    },
+    {
+      "command": "timeline"
+    }
+  ]
+}

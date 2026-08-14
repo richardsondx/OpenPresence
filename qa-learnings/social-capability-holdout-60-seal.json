@@ -1,0 +1,7 @@
+{
+  "file": "scenarios/social-capability-holdout-60.json",
+  "sha256": "a7d91b88e27cd1a236fb9bfe05cf3005b73fbd7a2c8a5e4d9ccac50dd78ef751",
+  "caseCount": 60,
+  "sealedAt": "2026-08-13T21:16:31.208Z",
+  "individualCaseInspection": "prohibited"
+}

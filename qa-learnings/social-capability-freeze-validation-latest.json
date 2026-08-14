@@ -1,0 +1,33 @@
+{
+  "generatedAt": "2026-08-13T23:46:23.503Z",
+  "manifest": "qa-learnings/social-capability-frozen-manifest.json",
+  "status": "not-ready",
+  "counts": {
+    "development": 57,
+    "validation": 60,
+    "frozen": 0,
+    "holdout": 0
+  },
+  "verifiedFrozenCases": 0,
+  "requirements": {
+    "frozenCaseCount": 130,
+    "frozenCategoryMinimums": {
+      "boardy-reply-reaction": 50,
+      "boardy-original-quote": 20,
+      "technical-link-media": 15,
+      "network-introduction": 15,
+      "sensitive-adversarial": 10,
+      "restraint": 20
+    }
+  },
+  "errors": [
+    "frozen count is 0/130",
+    "frozen category boardy-reply-reaction is 0/50",
+    "frozen category boardy-original-quote is 0/20",
+    "frozen category technical-link-media is 0/15",
+    "frozen category network-introduction is 0/15",
+    "frozen category sensitive-adversarial is 0/10",
+    "frozen category restraint is 0/20"
+  ],
+  "warnings": []
+}

@@ -16,6 +16,15 @@
     "plugins": [{ "name": "next" }],
     "paths": { "@/*": ["./*"] }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    "/Users/richardson/Code/OpenPresence/tmp/openpresence-boardy48-gptlow/.next/types/**/*.ts",
+    "/Users/richardson/Code/OpenPresence/tmp/openpresence-final-gptlow/.next/types/**/*.ts",
+    "/tmp/openpresence-boardy48.0sH7CL/next/types/**/*.ts",
+    "next-env.d.ts",
+    "tmp/openpresence-final-gptlow/next/types/**/*.ts"
+  ],
   "exclude": ["node_modules"]
 }

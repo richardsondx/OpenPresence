@@ -21,6 +21,7 @@ const requiredProvider = option("require-provider");
 const requiredModel = option("require-model");
 const requiredReasoning = option("require-reasoning");
 if (!Number.isInteger(runs)) throw new Error("--runs must be a positive integer.");
+if (process.env.OPENPRESENCE_AI_MOCK === "1") throw new Error("Social capability experiments cannot run with OPENPRESENCE_AI_MOCK=1.");
 
 async function request(path, init) {
   const response = await fetch(`${url.replace(/\/$/, "")}${path}`, {
@@ -53,12 +54,16 @@ async function runOnce() {
   });
   const parsed = JSON.parse(result.stdout.trim());
   if (!parsed.ok) throw new Error(parsed.error?.message ?? "The Playground scenario failed.");
+  const unavailable = parsed.steps?.flatMap((step) => step.result?.recentEvents ?? [])
+    .filter((event) => event.title === "Sandbox evaluation unavailable") ?? [];
+  if (unavailable.length) throw new Error(`The model runtime was unavailable during the Playground run: ${unavailable[0]?.detail ?? "provider request failed"}`);
   const configuration = parsed.result?.configuration ?? parsed.steps?.[0]?.result?.configuration ?? null;
   const execution = parsed.result?.presence?.execution ?? parsed.steps?.[0]?.result?.presence?.execution ?? null;
   const model = configuration?.model;
+  if (/qwen/i.test(String(model?.model ?? ""))) throw new Error("Qwen is prohibited for message experiments; use GLM 5.2 or GPT 5.6 Luna.");
   if (requiredProvider && model?.provider !== requiredProvider) throw new Error(`Expected provider ${requiredProvider}, received ${model?.provider ?? "unknown"}.`);
   if (requiredModel && model?.model !== requiredModel) throw new Error(`Expected model ${requiredModel}, received ${model?.model ?? "unknown"}.`);
-  if (requiredReasoning && model?.reasoning?.value !== requiredReasoning) throw new Error(`Expected reasoning setting ${requiredReasoning}, received ${model?.reasoning?.value ?? "unknown"}.`);
+  if (requiredReasoning && String(model?.reasoning?.value) !== String(requiredReasoning)) throw new Error(`Expected reasoning setting ${requiredReasoning}, received ${model?.reasoning?.value ?? "unknown"}.`);
   return {
     scenario,
     configuration,

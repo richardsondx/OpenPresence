@@ -1,5 +1,90 @@
 # Active QA Work
 
+## COMPLETE — Implement Assignment control layer
+
+- **Started:** 2026-08-13
+- **Scope:** Add the first-class Assign authority alongside existing Consider behavior, with prompt-driven compilation, verified Sandbox progress, distinct failure states, and focused Playground/Schedule/Operating Status/Activity/Feed UX.
+- **Product boundary:** Preserve `User → Agent → Presence`, Taste, silence for ambient consideration, the separation of cognition from execution/delivery/outcome, and the Sandbox-only boundary during QA. Assignment progress counts only verified Social Mirror publications.
+- **Acceptance:** An operator can create or rehearse an Assignment, review what OpenPresence understood, start it, see truthful progress, and distinguish candidate rejection, model failure, delivery failure, incomplete work, and completion. Existing Consider flows remain behaviorally unchanged.
+- **Verification:** 56 runtime tests, 23 Sandbox tests, and 12 AI tests passed; desktop and 390px mobile Sandbox browser QA passed with no console warnings or horizontal overflow; Assignment rehearsal reached 2/2 verified publications in the Sandbox Mirror; Schedule, Activity, Feed, and provenance surfaces were inspected; typecheck, changed-file lint, production build, and `git diff --check` passed.
+
+## COMPLETE — Make Feed the canonical Presence public-history surface
+
+- **Started:** 2026-08-13
+- **Scope:** Replace the Presence-level Calendar navigation item with Feed; keep Calendar as a view over the same verified public-history projection.
+- **Product boundary:** Feed shows what the Presence actually put into the world; Activity remains operational history; Schedule remains future consideration permission. No drafts, no-ops, failed executions, private messages, or internal events enter Feed.
+- **Acceptance:** Feed opens newest-first with lightweight date headings, All/Originals/Replies/Quotes/Reposts filters, inspectable publications, and Sandbox/live provenance. Calendar remains reachable inside Feed and continues to visualize the same records.
+- **Verification:** 4/4 focused Feed/Calendar Chromium tests, 4/4 focused mobile tests, compact desktop layout regression, 132 unit tests, typecheck, changed-file lint, production build, and `git diff --check` passed. Full Chromium E2E was started and exposed an unrelated pre-existing Brain provider-selection failure before later legacy cases; no Feed-focused test failed.
+
+## COMPLETE — Keep Teach person-shaped for low-information operator cues
+
+- **Started:** 2026-08-13
+- **Scope:** Stop Teach from treating punctuation or symbol-only operator turns as invitations to perform generic assistant onboarding, and make the operator-facing prompt explicitly person-shaped.
+- **Product boundary:** Teach is the operator-facing conversation that shapes the private Agent; Chat is the selected Presence's public-self rehearsal. Neither surface should collapse the Agent into a generic support assistant.
+- **Acceptance:** A punctuation-only Teach turn persists as operator context without an Agent reply or model call; substantive Teach turns retain durable-change handling; historical transcripts remain intact.
+- **Verification:** 129 unit tests, focused Chromium Teach/Presence Chat E2E (4/4), typecheck, changed-file ESLint, isolated production build, and \`git diff --check\` passed.
+
+## COMPLETE — Remove the ambiguous channel label from the Playground Presence chip
+
+- **Started:** 2026-08-13
+- **Scope:** Remove the trailing `X` channel label from the top-right Presence identity chip in Playground because it visually resembles a close control.
+- **Product boundary:** Keep the Presence identity clear and preserve channel context in the surrounding `Simulated X` and Sandbox labels; this is a presentation-only change.
+- **Acceptance:** The chip shows the channel icon and Presence name without a trailing close-like label; the actual channel remains legible elsewhere in Playground; desktop and mobile remain usable.
+- **Verification:** Isolated Chromium and mobile E2E checks pass: the chip renders only the Presence name while `Simulated X` remains visible. Production build, typecheck, changed-file ESLint, 89 feature-relevant unit tests, and `git diff --check` pass. The broader existing Playground scenario still stops later at its unrelated `Media needs inspection` assertion after media attachment; the chip assertions pass before that point.
+
+## COMPLETE — Make low-information social cues context-sensitive
+
+- **Started:** 2026-08-13
+- **Scope:** Teach the Agent to interpret fragments, punctuation, emoji, brief acknowledgments, and casual greetings from thread and relationship context rather than treating them as automatic questions or reply obligations.
+- **Product boundary:** Preserve silence as a successful social act; permit the smallest natural signal or acknowledgment when a cue genuinely opens an exchange; never expand a one-character cue into assistant-style onboarding or invent a topic.
+- **Acceptance:** Fresh Playground cases distinguish noise (`.` / `?` / `👀` / `ok` / `Thanks`) from a casual opening (`What's good?`) without phrase-specific runtime branches.
+- **Verification:** 127 unit tests, Brain/system-prompt regression, isolated Chrome Playground experiment, typecheck, changed-file lint, isolated production build, and `git diff --check` passed. The real-model experiment chose `no_op` for `.` and a short Sandbox reply for `What's good?`; exact wording remains intentionally unconstrained.
+
+## COMPLETE — Keep Playground Control Room inside the viewport
+
+- **Started:** 2026-08-13
+- **Scope:** Prevent long Control Room decision details, especially the `Now` container, from expanding the Playground beyond the visible viewport.
+- **Product boundary:** Preserve the Control Room as an operator-readable explanation of Agent judgment; contain overflow through layout and wrapping rather than hiding the decision or exposing implementation mechanics.
+- **Acceptance:** Desktop Playground has no horizontal overflow; long `Now` details wrap within the rail; the rail and rehearsal history remain visible; the responsive layout remains usable at mobile widths.
+- **Verification:** Before the fix, the 264px rail's sections rendered at about 413px and pushed document width to 1373px at a 1280px viewport. After the fix, desktop and 390px mobile browser checks report document width equal to the viewport, Control Room sections contained within the rail, and no horizontal overflow. Focused Original Post Rehearsal E2E passed on Chromium and Pixel 5 with viewport-fit assertions, 87 feature-relevant unit tests, typecheck, changed-file ESLint, production build, and `git diff --check` passing.
+
+## COMPLETE — Make Original Post Rehearsal input inspectable
+
+- **Started:** 2026-08-13
+- **Scope:** Make the exact operator-submitted inspiration easy to find and open from every Original Post Rehearsal attempt, including silence/no-op outcomes.
+- **Product boundary:** Preserve the submitted text as operator context, keep it out of the simulated social world, and do not imply that the input commanded publication or served as a reward.
+- **Acceptance:** After a rehearsal completes, the history card visibly offers a `View what you submitted` action; opening it shows the exact submitted text (or clearly states that no inspiration was supplied) and explains how the context was used. The control works on desktop and mobile and remains available when Genny chooses silence.
+- **Verification:** Focused Chromium + Pixel 5 E2E confirms the exact submitted text opens in the expanded detail panel, the context-only boundary remains visible, and the rehearsal history stays viewport-contained; 87 feature-relevant unit tests, typecheck, changed-file ESLint, production build, and `git diff --check` pass. Direct browser checks also confirmed the disclosure at desktop and mobile widths with no console or request failures.
+
+## COMPLETE — Make Original Post Rehearsal produce a usable original-post outcome
+
+- **Started:** 2026-08-13
+- **Scope:** Diagnose and fix the narrow Original Post Rehearsal flow when an explicit consideration ends in “no sufficiently worthwhile original expression,” including AI decision parsing, Sandbox intent formation, and the operator-visible outcome.
+- **Product boundary:** Preserve Agent judgment and the right to remain silent; an explicit rehearsal must still yield a truthful, inspectable result and must not publish to a live connector or turn preference evidence into a reward.
+- **Verification:** 126 unit tests, typecheck, changed-file ESLint, production build, `git diff --check`, and focused Original Post Rehearsal E2E passed on Chromium and Pixel 5. The browser flow verifies a Sandbox publication, private inspiration non-leakage, persisted `fits` preference evidence, Sandbox-only execution lineage, responsive interaction, and no console errors or failed requests. Deliberate no-op state remains covered by runtime tests; real-model quality evaluation was not run because no model call was required for this regression.
+
+## COMPLETE — Preserve commas while editing Presence Brief territories
+
+- **Started:** 2026-08-13
+- **Scope:** Keep comma-separated Presence Brief textarea input stable while typing, then normalize territory values only at save time.
+- **Acceptance:** Commas remain visible in Primary territory, Adjacent territory, and Keep out drafts; saved values are trimmed arrays; cancel restores the saved Brief; desktop and mobile editing remain usable.
+- **Verification:** 123 unit tests, typecheck, isolated production build, changed-file ESLint, `git diff --check`, and focused Settings E2E on Chromium + Pixel 5 passed. The browser flow verifies trailing commas remain visible before save and comma-separated values persist after reopening. Repository-wide lint remains blocked by unrelated generated bundled files under `tmp/openpresence-social-v2.78dZil/next`; changed files lint cleanly.
+
+## COMPLETE — Make Schedule timing progressive and intention-centered
+
+- **Started:** 2026-08-13
+- **Scope:** Keep the internal consideration/execution window while removing the implementation-shaped field from the default Schedule form.
+- **Acceptance:** The default form shows Standing instruction, When, Objective, and Save; Timing options is collapsed by default and explains Flexible, Exact, and Custom relevance; existing runtime data remains compatible; desktop and mobile layouts remain usable.
+- **Verification:** 123 unit tests, typecheck, production build, lint, `git diff --check`, and focused Schedule E2E on Chromium + Pixel 5 passed. The browser flow verifies the raw field is absent by default, Timing options starts collapsed, Flexible is explained as the recommendation, and Custom values persist as consideration copy.
+
+## COMPLETE — Render submitted turns before Chat and Teach responses
+
+- **Started:** 2026-08-13
+- **Scope:** Make Presence Chat and Teach render the submitted operator message immediately, show an explicit in-flight thinking state while the model runs, then reconcile to the authoritative Agent response without duplicate turns.
+- **Product boundary:** The loading state communicates that cognition is in progress without exposing hidden chain-of-thought, provider details, or execution mechanics. Teach remains Agent-wide durable-shaping conversation; Presence Chat remains session-only public-self rehearsal.
+- **Acceptance:** Both surfaces show `You → Thinking → Agent`; delayed responses do not leave a blank transcript; one submission persists as one user turn and one response; duplicate submits are ignored; desktop and mobile remain usable.
+- **Verification:** 123 unit tests, production build, typecheck, lint, delayed-response Chromium + mobile E2E coverage for Chat and Teach, transcript cardinality assertions, and responsive chat viewport assertions passed.
+
 ## COMPLETE — Explain Activity decision provenance
 
 - **Started:** 2026-08-13
@@ -389,3 +474,143 @@
 - **Product boundary:** The observed post remains world data; it is shown as context for the Agent's judgment, never as an instruction. Approval remains the operator's decision about delivery, not a rewrite of the Agent's judgment.
 - **Acceptance:** A context-bearing Activity event says why it is clickable, the current action identifies its source post when available, “View post” opens the full observed post, and internal terms such as `x.post`, `execution envelope`, and raw status names are not required to understand the screen.
 - **Verification:** 83 unit tests, typecheck, lint, production build after rotating a stale generated `.next` directory, `git diff --check`, and focused Chromium coverage for Add Presence viewport centering plus Activity review/manual lifecycles passed.
+
+## IN PROGRESS — Establish robust social capability evidence
+
+- **Started:** 2026-08-13
+- **Scope:** Continue the frozen-methodology evaluation loop without benchmark-specific social rules. Strengthen the model-driven planner only from general development failures; record provider/model/reasoning/media/tool metadata; keep all six sandbox affordances Auto; separate act and wording evaluation; validate hidden, fresh, and longitudinal generalization.
+- **Latest evidence:** GPT 5.6 Luna Low scored 96.875% act / 96.667% wording across three repeated 48-case development replays; 99.074% / 92.857% on repeated restraint; 98.333% / 100% on a sealed aggregate-only 60-case holdout after the latest change; and 100% / 100% on each of three post-guidance fresh worlds. GLM 5.2 scored 97.917% act / 70% wording on the same 48-case fixture. Structural checks passed for all recorded runs.
+- **Current blockers to parity claim:** no frozen 130-case provenance-backed source set with complete thread-level partitions; human packet is generated but pending review; macro capability report is defined but incomplete; no independent second semantic judge; repeated frozen comparison is not yet complete.
+- **Latest development iteration:** A general clarification-breadth/neutral-expression guidance change was tested on three GPT 5.6 Luna Low sessions: 97.917% act / 90.476% wording across 24 packets. One-session 48-case Boardy and 18-case restraint regressions remained structurally valid at 97.917% / 95.833% and 97.222% / 100%. The change is retained provisionally as general model-facing guidance; it did not justify any benchmark-specific patch.
+- **Partition progress:** A transparent candidate manifest now records 33 development cases, 60 validation cases, 0 frozen cases, and 62 excluded Boardy source cases requiring complete thread/relationship provenance. The fail-closed validator reports `candidate-not-frozen` and will not promote incomplete captures.
+- **Provenance progress:** A public-status enrichment pass successfully added timestamps, authors, reply-parent chains, quoted-post context, and public media/link metadata to all 68 captured Boardy cases; 25 reply captures expose a retrieved parent chain, representing 14 unique retrieved thread roots across the 48 visible-feed cases. Private outcomes and complete relationship history remain explicitly unknown, so the enriched artifact is still development-only.
+- **Review packet:** A 68-case provenance review packet is ready with explicit open evidence gaps and blank thread-unit/frozen-eligibility decisions. It is pending source review and is not treated as benchmark evidence yet.
+- **Thread-unit analysis:** The 48 visible reply captures collapse to 37 retrieved roots; adding the 9 non-overlapping curated thread units gives a potential 46-unit reply pool before manual deduplication, leaving at least 4 additional distinct reply/reaction units needed for the 50-unit target. The 20 original/quote captures provide 20 distinct public roots, but still require provenance review.
+- **Verification:** 14 targeted AI/perception tests, seal verifier, semantic/structural audit scripts, repeated-run stability summaries, and `git diff --check` pass. The release verdict remains `PROMISING_BUT_NOT_YET_ESTABLISHED`.
+# 2026-08-13 — Provenance-backed parent-chain replay fixture
+
+The source enrichment work produced a development-only replay at
+`scenarios/boardy-thread-replay-development.json`. It uses one fresh
+Playground session per captured source object, loads public parent-chain
+history with `observeOnly`, and evaluates only the final captured object.
+The inventory records 68 targets, 59 historical observations, 37 distinct
+reply roots, and 20 original/quote roots. It is explicitly not frozen: source
+review, relationship/private evidence, and four missing parent objects remain
+open.
+
+The observation-only ingestion seam is a mechanical replay capability, not a
+social rule. It prevents setup history from becoming accidental new prompts;
+the Social Planner still owns the target act and the editor cannot override it.
+
+# 2026-08-13 — Source-pool review packet for the 130-case freeze
+
+The deduplicated source pool now contains 50 Boardy reply/reaction thread
+units and 20 Boardy original/quote units. A separate review packet at
+`qa-learnings/social-capability-source-pool-review-packet-v1.json` records one
+explicit decision slot per candidate for available-thread completeness,
+category, stable thread unit, evidence status, confidence, and frozen-set
+eligibility. It contains no expected action or expected wording fields.
+
+The packet is intentionally `pending-source-review`: all 70 provenance and
+thread-unit decisions remain open, and 61 category decisions still need manual
+normalization. The dataset audit now reports the packet separately from the
+candidate pool, so reaching the numeric source count cannot be mistaken for a
+frozen parity set.
+
+`scripts/validate-social-source-pool-review.mjs` now fails closed on blank
+decisions, duplicate thread units, incomplete evidence, invalid categories, or
+any expected-answer field. Its current result is `not-ready` with 70 pending
+cases and zero promoted cases, which is the expected state before source
+review.
+
+## 2026-08-13 — Independent-strata unit coverage audit
+
+The fresh and restraint fixtures initially contained 55 candidate cases but
+only 36 independent thread units. A separate development fixture,
+`scenarios/independent-strata-development-24.json`, now adds 24 single-turn
+cases with new actors and thread units. The coverage audit at
+`qa-learnings/social-capability-strata-coverage-latest.json` now records 79
+candidate cases and 60 independent units, meeting the technical/media,
+network, sensitive, and restraint unit targets at the candidate level. The
+fixture still requires model runs, semantic review, and final partition
+assignment; it is not frozen evidence.
+
+The selected 60-unit supplemental review packet is
+`qa-learnings/social-capability-independent-review-packet-v1.json`. Its
+validator is currently `not-ready` with 60 pending decisions and zero promoted
+cases. The audit therefore distinguishes coverage availability from frozen
+evidence.
+
+The fail-closed promotion path is now represented by
+`scripts/build-social-frozen-manifest.mjs`. Because both review packets remain
+pending, `qa-learnings/social-capability-frozen-manifest.json` has zero frozen
+cases and `scripts/validate-social-freeze.mjs` correctly reports `not-ready`.
+
+The social experiment runner now refuses `OPENPRESENCE_AI_MOCK=1` and rejects
+any Qwen message model before accepting a run. This is an experiment-integrity
+guard, not social behavior or a benchmark rule.
+
+## Next executable experiment
+
+With a permitted local listener and the app's GPT connection available, the
+first new development run is:
+
+```text
+node scripts/run-social-experiment.mjs scenarios/independent-strata-development-24.json --runs 3 --require-provider openai --require-model gpt-5.6-luna --require-reasoning low --output qa-learnings/independent-strata-gpt-luna-low-r3-2026-08-13.json
+node scripts/evaluate-social-run.mjs qa-learnings/independent-strata-gpt-luna-low-r3-2026-08-13.json > qa-learnings/independent-strata-gpt-luna-low-r3-2026-08-13-semantic.json
+```
+
+The evaluator must use GPT 5.6 Luna Medium independently, remain blind to
+scenario metadata and provider identity, and record act selection separately
+from wording. The current environment cannot run this command because
+`next start` is denied listener access with `EPERM`.
+
+## 2026-08-13 — In-process runner and provider preflight
+
+To remove the listener dependency without touching the UI, a narrow
+`scripts/run-social-experiment-in-process.mjs` runner now invokes the compiled
+state route directly. It records the actual message provider/model/reasoning,
+the `asset.inspect` provider/model, all six Auto modes, Sandbox-only lineage,
+and the full projected Playground packets. It rejects mock mode and Qwen, and
+both experiment runners now fail closed when the runtime emits
+`Sandbox evaluation unavailable`, so provider outages cannot be scored as
+silence.
+
+The first attempt against `data/skill-edit-qa.db` found an inconsistent QA
+snapshot: its state claimed an OpenAI credential was configured, but its
+encrypted `provider_credentials` table had no matching row. A verified prior
+GPT QA database contained a decryptable credential; re-saving it through the
+route proved that credential lookup works. The subsequent real 24-case GPT
+5.6 Luna Low attempt was then blocked before model judgment because this
+shell cannot reach `api.openai.com` (`fetch failed` with no HTTP status). The
+packets were not scored and the invalid diagnostic outputs were moved out of
+`qa-learnings/`.
+
+No UI, typecheck, infrastructure, or Qwen rerun was performed. The next
+valid run remains the 24-case independent-strata development replay once the
+app/server execution environment has outbound provider connectivity; it must
+complete with model decisions and usable media provenance before semantic
+evaluation.
+
+## 2026-08-13 — Human-review workbooks
+
+Added `scripts/render-social-review-packet.mjs`, a read-only renderer for the
+fail-closed provenance packets. It generated:
+
+- `qa-learnings/social-capability-source-review-workbook-v1.md` — 70 Boardy
+  source candidates;
+- `qa-learnings/social-capability-independent-review-workbook-v1.md` — 60
+  independent thread units.
+
+The workbooks expose source links, available context, provenance-only Boardy
+observations, known/unknown evidence, and blank decisions for thread
+completeness, category, confidence, and frozen eligibility. They contain no
+expected action or expected wording fields. Both existing validators still
+report `not-ready` with zero promoted cases, so the workbooks improve review
+accessibility without changing the evidence status.
+
+Added `scripts/import-social-review-workbook.mjs` to import a completed
+workbook into a new packet. It rejects missing or ambiguous decisions, requires
+exclusion reasons, and only permits `--approve-for-freeze` after every case is
+reviewed and the required category counts are met. An untouched workbook was
+tested and rejected fail-closed; no review decisions were promoted.

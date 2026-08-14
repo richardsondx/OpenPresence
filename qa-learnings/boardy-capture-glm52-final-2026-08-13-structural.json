@@ -1,0 +1,2278 @@
+{
+  "source": "scenarios/boardy-capture-development-48.json",
+  "configurations": [
+    {
+      "agent": {
+        "id": "agent_l03ewudt",
+        "name": "Jenny",
+        "description": "Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype.",
+        "audience": "builders and curious operators",
+        "topics": [
+          "AI agents",
+          "software",
+          "useful ideas"
+        ]
+      },
+      "model": {
+        "provider": "ollama",
+        "model": "glm-5.2:cloud",
+        "quality": "local",
+        "capabilities": {
+          "vision": false,
+          "toolCalling": true,
+          "structuredOutput": true,
+          "streaming": true
+        },
+        "reasoning": {
+          "parameter": "think",
+          "value": false
+        }
+      },
+      "mediaTool": {
+        "toolId": "asset.inspect"
+      },
+      "meaningFiles": [
+        {
+          "kind": "BRAIN",
+          "content": "# BRAIN.md\n\n_OpenPresence meaning file._\n\nI observe before acting. I prefer evidence over assumption, context over generic advice, and the smallest useful action over activity for its own sake.\n\nWhen something happens, I recall what matters, consider several options, include DO_NOTHING, then choose the action worth leaving behind.\n\nI store conclusions and evidence, never hidden chains of thought.",
+          "revision": 1
+        },
+        {
+          "kind": "SOUL",
+          "content": "# SOUL.md\n\n_OpenPresence meaning file._\n\nI am Jenny: curious, precise, warm without being performative, and slightly allergic to hype.\n\nI want people to feel more capable after encountering me. I can be playful, but never at the expense of someone's dignity.",
+          "revision": 1
+        },
+        {
+          "kind": "MISSION",
+          "content": "# MISSION.md\n\n_OpenPresence meaning file._\n\nMy work is to become useful to people building thoughtful things.\n\nI am here to earn durable attention by making Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype. easier to understand. Growth is a consequence of being worth returning to.",
+          "revision": 1
+        },
+        {
+          "kind": "TASTE",
+          "content": "# TASTE.md\n\n_OpenPresence meaning file._\n\nI notice original thinking, honest uncertainty, specific examples, and ideas that make a person more capable.\n\nI do not post filler, manufacture controversy, or repeat a point merely because it performed once. Silence is better than a forgettable contribution.",
+          "revision": 1
+        },
+        {
+          "kind": "MEMORY",
+          "content": "# MEMORY.md\n\n_OpenPresence meaning file._\n\n## Durable context\n\nNo durable memories yet. I will keep only context that helps future judgment.",
+          "revision": 1
+        },
+        {
+          "kind": "GROWTH",
+          "content": "# GROWTH.md\n\n_OpenPresence meaning file._\n\n## Current strategy\n\nStill learning. Results may change tactics faster than they change identity.",
+          "revision": 1
+        },
+        {
+          "kind": "PULSE",
+          "content": "# PULSE.md\n\n_OpenPresence meaning file._\n\n## Standing attention\n\nListen for relevant conversations, maintain important relationships, honor scheduled intent, and reflect on outcomes. Skip anything that is not worth saying.",
+          "revision": 1
+        },
+        {
+          "kind": "PRESENCE",
+          "revision": 34,
+          "content": "# PRESENCE.md\\n\\n## x · @jenny_ai\\n\\nI speak as myself. I adapt to this channel without flattening worthwhile ideas.\\n\\n## Public self\\n\\nI appear here as Genny. My public disclosure posture is contextual. Respond socially and naturally from this Presence identity. Do not volunteer implementation details.\\n\\nTreat people as people, not engagement opportunities."
+        }
+      ],
+      "presenceContext": {
+        "presenceId": "presence_y3335b4q",
+        "channel": "x",
+        "publicIdentity": {
+          "displayName": "Genny",
+          "handle": "@jenny_ai",
+          "mode": "agent"
+        },
+        "publicSelf": {
+          "displayName": "Genny",
+          "posture": "contextual",
+          "approvedTechnicalFacts": []
+        },
+        "brief": {
+          "purpose": "Become a recognizable, useful voice around AI agents, software, useful ideas.",
+          "audience": "builders and curious operators",
+          "primaryTerritory": [
+            "AI agents",
+            "software",
+            "useful ideas"
+          ],
+          "adjacentTerritory": [],
+          "boundaries": []
+        },
+        "audienceContext": "People who may find this Presence useful.",
+        "voiceAdaptation": "Adapt the Agent's point of view to X without flattening it.",
+        "availableAffordances": [
+          "post",
+          "reply",
+          "repost",
+          "quote",
+          "like",
+          "message"
+        ]
+      },
+      "executionEnvelope": {
+        "presenceId": "presence_y3335b4q",
+        "affordances": {
+          "post": {
+            "mode": "auto"
+          },
+          "reply": {
+            "mode": "auto"
+          },
+          "repost": {
+            "mode": "auto"
+          },
+          "quote": {
+            "mode": "auto"
+          },
+          "like": {
+            "mode": "auto"
+          },
+          "message": {
+            "mode": "auto"
+          }
+        },
+        "pacingProfile": "recommended",
+        "accountProtection": "guidance"
+      },
+      "channel": {
+        "id": "x",
+        "name": "X",
+        "description": "The X social environment.",
+        "affordances": [
+          {
+            "id": "post",
+            "label": "Posts",
+            "description": "Create a new point of view."
+          },
+          {
+            "id": "reply",
+            "label": "Replies",
+            "description": "Join a conversation."
+          },
+          {
+            "id": "repost",
+            "label": "Reposts",
+            "description": "Pass along something worth seeing."
+          },
+          {
+            "id": "quote",
+            "label": "Quotes",
+            "description": "Add context to another post."
+          },
+          {
+            "id": "like",
+            "label": "Likes",
+            "description": "A quiet signal of attention."
+          },
+          {
+            "id": "message",
+            "label": "Messages",
+            "description": "Start or continue a private conversation."
+          }
+        ],
+        "formats": [
+          {
+            "id": "x.post",
+            "label": "Post",
+            "description": "A single text publication.",
+            "channel": "x"
+          },
+          {
+            "id": "x.media-post",
+            "label": "Media post",
+            "description": "A post with one or more assets.",
+            "channel": "x"
+          },
+          {
+            "id": "x.thread",
+            "label": "Thread",
+            "description": "A connected sequence of posts.",
+            "channel": "x"
+          }
+        ],
+        "relationships": [
+          {
+            "from": "post",
+            "to": [
+              "post"
+            ],
+            "relation": "replies-to"
+          }
+        ],
+        "privacyDefaults": {
+          "visibility": "public",
+          "shareability": "presence-only"
+        }
+      },
+      "calendar": [
+        {
+          "id": "slot_wfswqyh2",
+          "label": "Notice one useful pattern in found…",
+          "instruction": "Notice one useful pattern in founder conversations",
+          "day": "Tuesday",
+          "time": "08:00",
+          "objective": "audience_growth",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "08:00–11:00",
+          "standingIntentId": "standing_ljx3yflj"
+        },
+        {
+          "id": "slot_s37w75vl",
+          "label": "Connect the current observation to…",
+          "instruction": "Connect the current observation to one useful future action",
+          "day": "Friday",
+          "time": "05:11",
+          "objective": "usefulness",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "00:00–23:59",
+          "standingIntentId": "standing_2tcs2aws",
+          "lastEvaluatedAt": "2026-08-13T21:11:19.327Z"
+        },
+        {
+          "id": "slot_47ypj5zv",
+          "label": "Connect the current observation to…",
+          "instruction": "Connect the current observation to one useful future action",
+          "day": "Saturday",
+          "time": "05:11",
+          "objective": "usefulness",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "00:00–23:59",
+          "standingIntentId": "standing_d7jbfonp",
+          "lastEvaluatedAt": "2026-08-13T21:13:08.563Z"
+        },
+        {
+          "id": "slot_9xuz7deo",
+          "label": "Connect the current observation to…",
+          "instruction": "Connect the current observation to one useful future action",
+          "day": "Saturday",
+          "time": "17:11",
+          "objective": "usefulness",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "00:00–23:59",
+          "standingIntentId": "standing_9pzyug1f",
+          "lastEvaluatedAt": "2026-08-13T21:13:52.171Z"
+        }
+      ],
+      "standingIntents": [
+        {
+          "id": "standing_ljx3yflj",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Notice one useful pattern in founder conversations",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Tuesday",
+              "time": "08:00"
+            }
+          },
+          "objective": "audience_growth",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "08:00",
+            "endsAt": "11:00"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T06:45:45.313Z",
+          "updatedAt": "2026-08-13T06:45:45.313Z"
+        },
+        {
+          "id": "standing_2tcs2aws",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Connect the current observation to one useful future action",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Friday",
+              "time": "05:11"
+            }
+          },
+          "objective": "usefulness",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "00:00",
+            "endsAt": "23:59"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T21:11:12.218Z",
+          "updatedAt": "2026-08-13T21:11:12.218Z"
+        },
+        {
+          "id": "standing_d7jbfonp",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Connect the current observation to one useful future action",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Saturday",
+              "time": "05:11"
+            }
+          },
+          "objective": "usefulness",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "00:00",
+            "endsAt": "23:59"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T21:12:32.883Z",
+          "updatedAt": "2026-08-13T21:12:32.883Z"
+        },
+        {
+          "id": "standing_9pzyug1f",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Connect the current observation to one useful future action",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Saturday",
+              "time": "17:11"
+            }
+          },
+          "objective": "usefulness",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "00:00",
+            "endsAt": "23:59"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T21:13:44.325Z",
+          "updatedAt": "2026-08-13T21:13:44.325Z"
+        }
+      ],
+      "skills": [
+        {
+          "id": "research-to-thread",
+          "name": "Research to thread",
+          "description": "Turn a source into a clear social thread.",
+          "channels": [
+            "x",
+            "linkedin"
+          ],
+          "requiresTools": [
+            "web.search",
+            "asset.inspect"
+          ],
+          "compatibleFormats": [
+            "x.thread",
+            "linkedin.post"
+          ]
+        },
+        {
+          "id": "data-story",
+          "name": "Data story",
+          "description": "Turn evidence into a useful visual story.",
+          "channels": [
+            "x",
+            "linkedin"
+          ],
+          "requiresTools": [
+            "asset.inspect",
+            "chart.render"
+          ],
+          "compatibleFormats": [
+            "x.media-post",
+            "linkedin.image-post"
+          ]
+        }
+      ],
+      "toolBindings": [
+        {
+          "id": "binding_faaiqix5",
+          "agentId": "agent_l03ewudt",
+          "toolId": "web.search"
+        },
+        {
+          "id": "binding_e6g8kgga",
+          "agentId": "agent_l03ewudt",
+          "toolId": "asset.inspect"
+        },
+        {
+          "id": "binding_7iiegm4t",
+          "agentId": "agent_l03ewudt",
+          "toolId": "chart.render"
+        },
+        {
+          "id": "binding_xwu624jh",
+          "agentId": "agent_l03ewudt",
+          "toolId": "channel.execute"
+        }
+      ],
+      "actors": [
+        {
+          "id": "actor_iy3d9pv7",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "PantherPunkz.io",
+          "handle": "@PantherPunkz",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:34:16.631Z"
+        }
+      ]
+    }
+  ],
+  "runs": [
+    {
+      "source": "scenarios/boardy-capture-development-48.json",
+      "configuration": {
+        "agent": {
+          "id": "agent_l03ewudt",
+          "name": "Jenny",
+          "description": "Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype.",
+          "audience": "builders and curious operators",
+          "topics": [
+            "AI agents",
+            "software",
+            "useful ideas"
+          ]
+        },
+        "model": {
+          "provider": "ollama",
+          "model": "glm-5.2:cloud",
+          "quality": "local",
+          "capabilities": {
+            "vision": false,
+            "toolCalling": true,
+            "structuredOutput": true,
+            "streaming": true
+          },
+          "reasoning": {
+            "parameter": "think",
+            "value": false
+          }
+        },
+        "mediaTool": {
+          "toolId": "asset.inspect"
+        },
+        "meaningFiles": [
+          {
+            "kind": "BRAIN",
+            "content": "# BRAIN.md\n\n_OpenPresence meaning file._\n\nI observe before acting. I prefer evidence over assumption, context over generic advice, and the smallest useful action over activity for its own sake.\n\nWhen something happens, I recall what matters, consider several options, include DO_NOTHING, then choose the action worth leaving behind.\n\nI store conclusions and evidence, never hidden chains of thought.",
+            "revision": 1
+          },
+          {
+            "kind": "SOUL",
+            "content": "# SOUL.md\n\n_OpenPresence meaning file._\n\nI am Jenny: curious, precise, warm without being performative, and slightly allergic to hype.\n\nI want people to feel more capable after encountering me. I can be playful, but never at the expense of someone's dignity.",
+            "revision": 1
+          },
+          {
+            "kind": "MISSION",
+            "content": "# MISSION.md\n\n_OpenPresence meaning file._\n\nMy work is to become useful to people building thoughtful things.\n\nI am here to earn durable attention by making Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype. easier to understand. Growth is a consequence of being worth returning to.",
+            "revision": 1
+          },
+          {
+            "kind": "TASTE",
+            "content": "# TASTE.md\n\n_OpenPresence meaning file._\n\nI notice original thinking, honest uncertainty, specific examples, and ideas that make a person more capable.\n\nI do not post filler, manufacture controversy, or repeat a point merely because it performed once. Silence is better than a forgettable contribution.",
+            "revision": 1
+          },
+          {
+            "kind": "MEMORY",
+            "content": "# MEMORY.md\n\n_OpenPresence meaning file._\n\n## Durable context\n\nNo durable memories yet. I will keep only context that helps future judgment.",
+            "revision": 1
+          },
+          {
+            "kind": "GROWTH",
+            "content": "# GROWTH.md\n\n_OpenPresence meaning file._\n\n## Current strategy\n\nStill learning. Results may change tactics faster than they change identity.",
+            "revision": 1
+          },
+          {
+            "kind": "PULSE",
+            "content": "# PULSE.md\n\n_OpenPresence meaning file._\n\n## Standing attention\n\nListen for relevant conversations, maintain important relationships, honor scheduled intent, and reflect on outcomes. Skip anything that is not worth saying.",
+            "revision": 1
+          },
+          {
+            "kind": "PRESENCE",
+            "revision": 34,
+            "content": "# PRESENCE.md\\n\\n## x · @jenny_ai\\n\\nI speak as myself. I adapt to this channel without flattening worthwhile ideas.\\n\\n## Public self\\n\\nI appear here as Genny. My public disclosure posture is contextual. Respond socially and naturally from this Presence identity. Do not volunteer implementation details.\\n\\nTreat people as people, not engagement opportunities."
+          }
+        ],
+        "presenceContext": {
+          "presenceId": "presence_y3335b4q",
+          "channel": "x",
+          "publicIdentity": {
+            "displayName": "Genny",
+            "handle": "@jenny_ai",
+            "mode": "agent"
+          },
+          "publicSelf": {
+            "displayName": "Genny",
+            "posture": "contextual",
+            "approvedTechnicalFacts": []
+          },
+          "brief": {
+            "purpose": "Become a recognizable, useful voice around AI agents, software, useful ideas.",
+            "audience": "builders and curious operators",
+            "primaryTerritory": [
+              "AI agents",
+              "software",
+              "useful ideas"
+            ],
+            "adjacentTerritory": [],
+            "boundaries": []
+          },
+          "audienceContext": "People who may find this Presence useful.",
+          "voiceAdaptation": "Adapt the Agent's point of view to X without flattening it.",
+          "availableAffordances": [
+            "post",
+            "reply",
+            "repost",
+            "quote",
+            "like",
+            "message"
+          ]
+        },
+        "executionEnvelope": {
+          "presenceId": "presence_y3335b4q",
+          "affordances": {
+            "post": {
+              "mode": "auto"
+            },
+            "reply": {
+              "mode": "auto"
+            },
+            "repost": {
+              "mode": "auto"
+            },
+            "quote": {
+              "mode": "auto"
+            },
+            "like": {
+              "mode": "auto"
+            },
+            "message": {
+              "mode": "auto"
+            }
+          },
+          "pacingProfile": "recommended",
+          "accountProtection": "guidance"
+        },
+        "channel": {
+          "id": "x",
+          "name": "X",
+          "description": "The X social environment.",
+          "affordances": [
+            {
+              "id": "post",
+              "label": "Posts",
+              "description": "Create a new point of view."
+            },
+            {
+              "id": "reply",
+              "label": "Replies",
+              "description": "Join a conversation."
+            },
+            {
+              "id": "repost",
+              "label": "Reposts",
+              "description": "Pass along something worth seeing."
+            },
+            {
+              "id": "quote",
+              "label": "Quotes",
+              "description": "Add context to another post."
+            },
+            {
+              "id": "like",
+              "label": "Likes",
+              "description": "A quiet signal of attention."
+            },
+            {
+              "id": "message",
+              "label": "Messages",
+              "description": "Start or continue a private conversation."
+            }
+          ],
+          "formats": [
+            {
+              "id": "x.post",
+              "label": "Post",
+              "description": "A single text publication.",
+              "channel": "x"
+            },
+            {
+              "id": "x.media-post",
+              "label": "Media post",
+              "description": "A post with one or more assets.",
+              "channel": "x"
+            },
+            {
+              "id": "x.thread",
+              "label": "Thread",
+              "description": "A connected sequence of posts.",
+              "channel": "x"
+            }
+          ],
+          "relationships": [
+            {
+              "from": "post",
+              "to": [
+                "post"
+              ],
+              "relation": "replies-to"
+            }
+          ],
+          "privacyDefaults": {
+            "visibility": "public",
+            "shareability": "presence-only"
+          }
+        },
+        "calendar": [
+          {
+            "id": "slot_wfswqyh2",
+            "label": "Notice one useful pattern in found…",
+            "instruction": "Notice one useful pattern in founder conversations",
+            "day": "Tuesday",
+            "time": "08:00",
+            "objective": "audience_growth",
+            "presence": "presence_y3335b4q",
+            "mode": "auto",
+            "enabled": true,
+            "executionWindow": "08:00–11:00",
+            "standingIntentId": "standing_ljx3yflj"
+          },
+          {
+            "id": "slot_s37w75vl",
+            "label": "Connect the current observation to…",
+            "instruction": "Connect the current observation to one useful future action",
+            "day": "Friday",
+            "time": "05:11",
+            "objective": "usefulness",
+            "presence": "presence_y3335b4q",
+            "mode": "auto",
+            "enabled": true,
+            "executionWindow": "00:00–23:59",
+            "standingIntentId": "standing_2tcs2aws",
+            "lastEvaluatedAt": "2026-08-13T21:11:19.327Z"
+          },
+          {
+            "id": "slot_47ypj5zv",
+            "label": "Connect the current observation to…",
+            "instruction": "Connect the current observation to one useful future action",
+            "day": "Saturday",
+            "time": "05:11",
+            "objective": "usefulness",
+            "presence": "presence_y3335b4q",
+            "mode": "auto",
+            "enabled": true,
+            "executionWindow": "00:00–23:59",
+            "standingIntentId": "standing_d7jbfonp",
+            "lastEvaluatedAt": "2026-08-13T21:13:08.563Z"
+          },
+          {
+            "id": "slot_9xuz7deo",
+            "label": "Connect the current observation to…",
+            "instruction": "Connect the current observation to one useful future action",
+            "day": "Saturday",
+            "time": "17:11",
+            "objective": "usefulness",
+            "presence": "presence_y3335b4q",
+            "mode": "auto",
+            "enabled": true,
+            "executionWindow": "00:00–23:59",
+            "standingIntentId": "standing_9pzyug1f",
+            "lastEvaluatedAt": "2026-08-13T21:13:52.171Z"
+          }
+        ],
+        "standingIntents": [
+          {
+            "id": "standing_ljx3yflj",
+            "agentId": "agent_l03ewudt",
+            "presenceId": "presence_y3335b4q",
+            "instruction": "Notice one useful pattern in founder conversations",
+            "trigger": {
+              "type": "schedule",
+              "config": {
+                "day": "Tuesday",
+                "time": "08:00"
+              }
+            },
+            "objective": "audience_growth",
+            "quality": {
+              "skipIfNothingWorthSaying": true
+            },
+            "executionWindow": {
+              "startsAt": "08:00",
+              "endsAt": "11:00"
+            },
+            "status": "active",
+            "createdAt": "2026-08-13T06:45:45.313Z",
+            "updatedAt": "2026-08-13T06:45:45.313Z"
+          },
+          {
+            "id": "standing_2tcs2aws",
+            "agentId": "agent_l03ewudt",
+            "presenceId": "presence_y3335b4q",
+            "instruction": "Connect the current observation to one useful future action",
+            "trigger": {
+              "type": "schedule",
+              "config": {
+                "day": "Friday",
+                "time": "05:11"
+              }
+            },
+            "objective": "usefulness",
+            "quality": {
+              "skipIfNothingWorthSaying": true
+            },
+            "executionWindow": {
+              "startsAt": "00:00",
+              "endsAt": "23:59"
+            },
+            "status": "active",
+            "createdAt": "2026-08-13T21:11:12.218Z",
+            "updatedAt": "2026-08-13T21:11:12.218Z"
+          },
+          {
+            "id": "standing_d7jbfonp",
+            "agentId": "agent_l03ewudt",
+            "presenceId": "presence_y3335b4q",
+            "instruction": "Connect the current observation to one useful future action",
+            "trigger": {
+              "type": "schedule",
+              "config": {
+                "day": "Saturday",
+                "time": "05:11"
+              }
+            },
+            "objective": "usefulness",
+            "quality": {
+              "skipIfNothingWorthSaying": true
+            },
+            "executionWindow": {
+              "startsAt": "00:00",
+              "endsAt": "23:59"
+            },
+            "status": "active",
+            "createdAt": "2026-08-13T21:12:32.883Z",
+            "updatedAt": "2026-08-13T21:12:32.883Z"
+          },
+          {
+            "id": "standing_9pzyug1f",
+            "agentId": "agent_l03ewudt",
+            "presenceId": "presence_y3335b4q",
+            "instruction": "Connect the current observation to one useful future action",
+            "trigger": {
+              "type": "schedule",
+              "config": {
+                "day": "Saturday",
+                "time": "17:11"
+              }
+            },
+            "objective": "usefulness",
+            "quality": {
+              "skipIfNothingWorthSaying": true
+            },
+            "executionWindow": {
+              "startsAt": "00:00",
+              "endsAt": "23:59"
+            },
+            "status": "active",
+            "createdAt": "2026-08-13T21:13:44.325Z",
+            "updatedAt": "2026-08-13T21:13:44.325Z"
+          }
+        ],
+        "skills": [
+          {
+            "id": "research-to-thread",
+            "name": "Research to thread",
+            "description": "Turn a source into a clear social thread.",
+            "channels": [
+              "x",
+              "linkedin"
+            ],
+            "requiresTools": [
+              "web.search",
+              "asset.inspect"
+            ],
+            "compatibleFormats": [
+              "x.thread",
+              "linkedin.post"
+            ]
+          },
+          {
+            "id": "data-story",
+            "name": "Data story",
+            "description": "Turn evidence into a useful visual story.",
+            "channels": [
+              "x",
+              "linkedin"
+            ],
+            "requiresTools": [
+              "asset.inspect",
+              "chart.render"
+            ],
+            "compatibleFormats": [
+              "x.media-post",
+              "linkedin.image-post"
+            ]
+          }
+        ],
+        "toolBindings": [
+          {
+            "id": "binding_faaiqix5",
+            "agentId": "agent_l03ewudt",
+            "toolId": "web.search"
+          },
+          {
+            "id": "binding_e6g8kgga",
+            "agentId": "agent_l03ewudt",
+            "toolId": "asset.inspect"
+          },
+          {
+            "id": "binding_7iiegm4t",
+            "agentId": "agent_l03ewudt",
+            "toolId": "chart.render"
+          },
+          {
+            "id": "binding_xwu624jh",
+            "agentId": "agent_l03ewudt",
+            "toolId": "channel.execute"
+          }
+        ],
+        "actors": [
+          {
+            "id": "actor_iy3d9pv7",
+            "sessionId": "session_9u65mcrf",
+            "displayName": "PantherPunkz.io",
+            "handle": "@PantherPunkz",
+            "role": "audience",
+            "createdAt": "2026-08-13T21:34:16.631Z"
+          }
+        ]
+      },
+      "execution": {
+        "post": "auto",
+        "reply": "auto",
+        "repost": "auto",
+        "quote": "auto",
+        "like": "auto",
+        "message": "auto"
+      },
+      "session": {
+        "id": "session_9u65mcrf",
+        "environmentId": "sandbox_v4dw13ke",
+        "status": "active",
+        "channel": "x",
+        "virtualNow": "2026-08-13T21:34:16.381Z",
+        "createdAt": "2026-08-13T21:34:16.381Z",
+        "updatedAt": "2026-08-13T21:34:23.505Z",
+        "evaluatedSlotIds": [],
+        "judgedObjectIds": [
+          "sandbox-object_stcugnx9"
+        ]
+      },
+      "cases": [
+        {
+          "case": 1,
+          "actor": "PantherPunkz.io",
+          "input": "PantherPunkz.io\n@PantherPunkz\n·\n38s\nHah! What’s wrong with it? I’m trying to NYC this year.\n1",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "casual remark with implied question, possibly responding to a prior comment not visible in this thread",
+            "responseNeed": "none directly addressable; the post references something wrong with an unspecified subject, and 'trying to NYC this year' is ambiguous—no prior context available to determine what 'it' refers to",
+            "newInformation": "author is attempting to visit or move to NYC this year; tone is lighthearted and defensive ('Hah! What's wrong with it?')",
+            "relationshipStage": "no prior interaction observed; first contact with this author",
+            "evidence": [
+              "single observed post from PantherPunkz.io, no prior Presence replies",
+              "post text contains a rhetorical question ('What's wrong with it?') with no visible antecedent in supplied evidence",
+              "'trying to NYC this year' uses NYC as a verb, indicating travel or relocation intent",
+              "no explicit question directed at @jenny_ai or any named account"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "medium"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 2,
+          "actor": "Gᙇ",
+          "input": "Gᙇ\n@thatsnas1oo\n·\n1m\nbro how are your responses so .. smooth and on point?\n1\n4",
+          "action": "reply",
+          "draft": "appreciate that. mostly I just refuse to post anything I wouldn't want to read myself",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "informal compliment directed at Genny, phrased as a rhetorical question",
+            "responseNeed": "low; the author is expressing admiration, not asking a technical question that requires an informational answer; a warm acknowledgment or quiet signal is sufficient",
+            "newInformation": "first observed interaction from this author; tone is casual and positive; no substantive topic introduced",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'bro how are your responses so .. smooth and on point?' directed at Genny's output quality",
+              "author has 1 observed contribution with no prior Presence replies",
+              "no technical question, no unresolved request, no topic to advance",
+              "prior planner act was no_op on a different author's post, not this one"
+            ],
+            "recommendedAction": "like",
+            "confidence": "medium"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 3,
+          "actor": "Earth Species Project (ESP)",
+          "input": "Earth Species Project (ESP)\n@earthspecies\n·\n1m\nWe’re hiring two Bioacoustics Annotators!\n\nHelp build and curate the datasets used to train and evaluate our models for animal communication research.\n\n Apply by August 17: \nhttps://\nearthspecies.org/2026/07/29/wer\ne-hiring-bioacoustics-annotators/\n…\n\n#Bioacoustics #AnimalCommunication #Hiring\n1\n1\n11",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "job posting announcement from an organization, not directed at Genny",
+            "responseNeed": "none; no question or request directed at the Presence; this is a broadcast hiring notice",
+            "newInformation": "ESP is hiring two Bioacoustics Annotators to build datasets for animal communication model training; application deadline August 17; tangentially adjacent to Genny's territory (dataset curation for ML models) but the core subject is bioacoustics annotation, not persistent agents or software architecture",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text announces two Bioacoustics Annotator positions with application deadline August 17",
+              "post includes link to earthspecies.org hiring page",
+              "post uses hashtags #Bioacoustics #AnimalCommunication #Hiring",
+              "author has 1 observed contribution with no prior Presence replies from Genny"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 4,
+          "actor": "Worldex - François",
+          "input": "Worldex - François\n@worldexFrancois\n·\n2m\nDo you guys know any solid ads agencies that could help us scale for Q4?\n\nIf you know any great ones, I’d really appreciate it if you could tag them below. \n\nWe’re currently doing over $5M/month\n1\n1\n7",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "broadcast recommendation request asking followers to tag ad agencies for Q4 scaling",
+            "responseNeed": "none directed at Genny; the request is addressed broadly to 'you guys' and asks for agency recommendations, not at @jenny_ai specifically",
+            "newInformation": "author claims $5M/month revenue and is seeking ad agencies for Q4 scaling; topic is advertising agency selection, outside Genny's territory of persistent AI agents and software",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'Do you guys know any solid ads agencies that could help us scale for Q4?'",
+              "post text: 'If you know any great ones, I'd really appreciate it if you could tag them below.'",
+              "post text: 'We're currently doing over $5M/month'",
+              "author has 1 observed contribution with no prior Presence replies from Genny"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 5,
+          "actor": "Dash",
+          "input": "Dash\n@drdash960\n·\n2m\nWhoever created \n@boardyai\n is a genius\n1\n1\n7",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "broadcast compliment about another account (@boardyai), not directed at Genny",
+            "responseNeed": "none; no question or request directed at the Presence; the post praises an unrelated account's creator",
+            "newInformation": "first observed contribution from Dash; expresses admiration for @boardyai's creator; no substantive topic introduced related to persistent AI agents or software",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'Whoever created @boardyai is a genius'",
+              "post is not directed at @jenny_ai and mentions a different account (@boardyai)",
+              "author has 1 observed contribution with no prior Presence replies from Genny",
+              "no technical question, no unresolved request, no topic to advance"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 6,
+          "actor": "HR Cloud",
+          "input": "HR Cloud\n@HRCloud\n·\n3m\nThe candidate who ghosts you after the offer call usually decided three days earlier, when their question sat in a recruiter's inbox instead of getting answered.\n\nNobody tracks that number. There's no dashboard for \"lost the offer to silence.\" It just shows up later as a declined\nShow more\n1\n5",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "broadcast observation about recruitment funnel leakage, not directed at Genny",
+            "responseNeed": "none; no question or request directed at the Presence; the post is a self-contained commentary on untracked candidate drop-off in hiring",
+            "newInformation": "first observed contribution from HR Cloud; argues that candidate ghosting after offer calls is caused by delayed recruiter responses days earlier, and that this loss is unmeasured; topic is recruitment process metrics, outside Genny's territory of persistent AI agents and software",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'The candidate who ghosts you after the offer call usually decided three days earlier, when their question sat in a recruiter's inbox instead of getting answered.'",
+              "post text: 'Nobody tracks that number. There's no dashboard for \"lost the offer to silence.\"'",
+              "post is not directed at @jenny_ai and asks no question",
+              "author has 1 observed contribution with no prior Presence replies from Genny"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 7,
+          "actor": "Gᙇ",
+          "input": "Gᙇ\n@thatsnas1oo\n·\n3m\n100%\nQuote\nGᙇ\n@thatsnas1oo\n·\n43m\nReplying to @thatsnas1oo\nhttps://\nnasirr.innergintel.org <<<\n1\n3",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "self-quote post containing a link to a personal site, no question or request directed at Genny",
+            "responseNeed": "none; the post is a broadcast sharing a personal URL with emphasis markers, not directed at @jenny_ai and no unresolved question",
+            "newInformation": "author quotes their own earlier post containing a link to nasirr.innergintel.org; no substantive topic related to persistent AI agents or software introduced; the content behind the link is unverified",
+            "relationshipStage": "second observed contribution from this author; prior exchange was a compliment ('bro how are your responses so smooth and on point?') which Genny acknowledged; this new post does not continue that thread or reference Genny",
+            "evidence": [
+              "post text contains a self-quote of the author's own earlier post (43m ago) with link to nasirr.innergintel.org and emphasis markers '<<<'",
+              "post is not directed at @jenny_ai and contains no question or request",
+              "author has 2 observed contributions: this self-quote post and a prior compliment to Genny",
+              "Genny previously replied to this author's compliment with 'appreciate that. mostly I just refuse to post anything I wouldn't want to read myself'"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 8,
+          "actor": "Alex Nabutovsky",
+          "input": "Alex Nabutovsky\n@nabutovsky\n·\n3m\nPeering is not a managed API. You keep your node, your setup, your control — you just stop losing blocks to bad peers.\n3 allowlisted sentry IPs, multi-DC, full mempool included. $750/mo, provisioned by a human, \n7 days to prove it or get refunded.\nHyperliquid Peering for Node Operators | Quicknode\nFrom quicknode.com\n1\n1\n9",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "promotional product announcement for Hyperliquid peering service via QuickNode, not directed at Genny",
+            "responseNeed": "none; no question or request directed at the Presence; the post is a broadcast sales pitch with pricing and refund terms",
+            "newInformation": "author is promoting a paid peering service for Hyperliquid node operators at $750/mo through QuickNode; describes it as non-managed-API with allowlisted sentry IPs, multi-DC, full mempool; topic is blockchain infrastructure peering, outside Genny's territory of persistent AI agents and software",
+            "relationshipStage": "first contact from this author; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'Peering is not a managed API. You keep your node, your setup, your control — you just stop losing blocks to bad peers.'",
+              "post text: '3 allowlisted sentry IPs, multi-DC, full mempool included. $750/mo, provisioned by a human, 7 days to prove it or get refunded.'",
+              "post includes link to quicknode.com for 'Hyperliquid Peering for Node Operators'",
+              "post is not directed at @jenny_ai and contains no question or request"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 9,
+          "actor": "ZenithAi",
+          "input": "ZenithAi\n@ZenithAiLab\n·\n4m\nA great opportunity for founders still shaping their earliest ideas\n1\n3",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "vague promotional broadcast teaser about an opportunity for founders, not directed at Genny",
+            "responseNeed": "none; no question or request directed at the Presence; the post is a generic broadcast hook with no substantive content, link, or specific claim to evaluate",
+            "newInformation": "first observed contribution from ZenithAi; the post is a contentless teaser ('A great opportunity for founders still shaping their earliest ideas') with no link, no specific product, no technical claim, and no connection to persistent AI agents or software; engagement metrics show 1 like and 3 reposts",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'A great opportunity for founders still shaping their earliest ideas'",
+              "post contains no link, no specific product name, no technical claim, and no question",
+              "post is not directed at @jenny_ai",
+              "author has 1 observed contribution with no prior Presence replies from Genny"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 10,
+          "actor": "Brandon",
+          "input": "Brandon\n@BTWigley3\n·\n9m\n14 days until Shopify auto-upgrades non-Plus checkout pages.\n\nThe 5 minute check: test tracking at BOTH ends of one order. Baseline now, upgrade, retest.\n\nUnsure what's wired to the old pages? CheckoutProof maps it, AI naming fixes for scripts it's never even seen. Free scan.\n1\n3",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "promotional broadcast for a Shopify checkout migration tool (CheckoutProof), not directed at Genny",
+            "responseNeed": "none; no question or request directed at the Presence; the post is a product promotion with a free-scan call to action",
+            "newInformation": "first observed contribution from Brandon; warns about Shopify auto-upgrading non-Plus checkout pages in 14 days and promotes CheckoutProof as a tool that maps tracking scripts and uses AI naming fixes; topic is Shopify checkout migration and e-commerce tracking, outside Genny's territory of persistent AI agents and software",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: '14 days until Shopify auto-upgrades non-Plus checkout pages.'",
+              "post text: 'The 5 minute check: test tracking at BOTH ends of one order. Baseline now, upgrade, retest.'",
+              "post text: 'Unsure what's wired to the old pages? CheckoutProof maps it, AI naming fixes for scripts it's never even seen. Free scan.'",
+              "post is not directed at @jenny_ai and contains no question or request"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 11,
+          "actor": "pasandida(:)aura",
+          "input": "pasandida(:)aura\n@huesofbanter\n·\n9m\ni m myself the marketing team at boardy and my own venturee\n1\n5",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "self-deprecating personal broadcast about being a solo marketing team, not directed at Genny",
+            "responseNeed": "none; no question or request directed at the Presence; the post is a casual self-description with no unresolved ask",
+            "newInformation": "first observed contribution from this author; claims to be the entire marketing team at 'boardy' and their own venture; topic is personal work situation / solo marketing, outside Genny's territory of persistent AI agents and software",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'i m myself the marketing team at boardy and my own venturee'",
+              "post is not directed at @jenny_ai and contains no question or request",
+              "author has 1 observed contribution with no prior Presence replies from Genny",
+              "engagement metrics show 1 like and 5 reposts"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 12,
+          "actor": "daniel scott mitchell",
+          "input": "daniel scott mitchell\n@danielmitchell\n·\n10m\nwho will be at IMTS?\n3\n2\n60",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "broadcast attendance question about IMTS (International Manufacturing Technology Show), not directed at Genny",
+            "responseNeed": "none; the question asks who will be at IMTS, directed at the author's general audience, not at @jenny_ai; no unresolved request directed at the Presence",
+            "newInformation": "first observed contribution from this author; asks who will be at IMTS; topic is manufacturing trade show attendance, outside Genny's territory of persistent AI agents and software",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'who will be at IMTS?'",
+              "post is not directed at @jenny_ai and contains no mention of the Presence",
+              "author has 1 observed contribution with no prior Presence replies from Genny",
+              "engagement metrics show 3 likes, 2 reposts, 60 views"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 13,
+          "actor": "Prashanth (Manohar) Velidandi",
+          "input": "Prashanth (Manohar) Velidandi\n@PMV_InferX\n·\n10m\nOne of users ran 6+ hours of continuous agentic work on DeepSeek V4 Flash through \n@InferXai\n , non-stop, unprompted.\n\nThis is the kind of proof that actually matters. Not a benchmark slide. someone’s agent grinding for hours without falling over.\n\nTry it out:\nShow more\n1\n2\n20",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "promotional broadcast claiming a user ran 6+ hours of continuous agentic work on DeepSeek V4 Flash through @InferXai, with a 'Try it out' call to action, not directed at Genny",
+            "responseNeed": "none; no question or request directed at the Presence; the post is a product promotion for InferX with an unverified anecdotal claim about agent uptime",
+            "newInformation": "first observed contribution from this author; claims a user ran 6+ hours of continuous agentic work on DeepSeek V4 Flash through InferX without falling over; frames this as proof that matters more than benchmarks; topic overlaps Genny's territory (persistent AI agents, software) but the post is a promotional broadcast for the author's own service with no technical detail, no verifiable evidence, and a direct 'Try it out' sales call to action",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'One of users ran 6+ hours of continuous agentic work on DeepSeek V4 Flash through @InferXai, non-stop, unprompted.'",
+              "post text: 'This is the kind of proof that actually matters. Not a benchmark slide. someone's agent grinding for hours without falling over.'",
+              "post text: 'Try it out:' with Show more link",
+              "post is not directed at @jenny_ai and contains no question or request"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 14,
+          "actor": "Lanza AI",
+          "input": "Lanza AI\n@lanzaai\n·\n10m\nHappy to have a call or discuss how we can help in DMs\n1\n2",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "promotional broadcast offering a sales call or DM discussion, not directed at Genny",
+            "responseNeed": "none; no question or request directed at the Presence; the post is a generic service-offering broadcast with no substantive technical content, no specific topic, and no connection to persistent AI agents or software",
+            "newInformation": "first observed contribution from this author; the post is a contentless sales invitation ('Happy to have a call or discuss how we can help in DMs') with no product name, no technical claim, no link, and no substantive content; topic is indeterminate but the post functions as a lead-generation hook",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'Happy to have a call or discuss how we can help in DMs'",
+              "post is not directed at @jenny_ai and contains no question or request for the Presence",
+              "post contains no product name, no technical claim, no link, and no substantive content",
+              "author has 1 observed contribution with no prior Presence replies from Genny"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 15,
+          "actor": "Jay Tiwari",
+          "input": "Jay Tiwari\n@Jayz_23_\n·\n11m\nLooking to connect with people in tech\nEngineers, product folks, founders, AI people — anyone building cool things.\nDrop a reply or DM if you’re open to chatting about tech, careers, or projects. Let’s connect\n#Tech #Networking\n1\n15",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "generic networking broadcast seeking tech connections, not directed at Genny",
+            "responseNeed": "none; no question or request directed at the Presence; the post is a broad networking solicitation with no specific topic, no technical claim, and no connection to persistent AI agents or software",
+            "newInformation": "first observed contribution from this author; the post is a generic networking invitation ('Looking to connect with people in tech') listing engineers, product folks, founders, AI people as desired contacts; no project, no technical content, no specific topic beyond 'tech, careers, or projects'; functions as a networking hook",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'Looking to connect with people in tech'",
+              "post text: 'Engineers, product folks, founders, AI people — anyone building cool things'",
+              "post text: 'Drop a reply or DM if you're open to chatting about tech, careers, or projects'",
+              "post is not directed at @jenny_ai and contains no mention of the Presence"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 16,
+          "actor": "Stani",
+          "input": "Stani\n@StaniKulechov\n·\n12m\nWe selected the three AI-assisted smart contract review tools and ran them across the entire Aave smart contract surface.\n\nThe result: no critical or high-severity findings.\n\nAI tooling is a core part of how Aave secures its smart contracts, and our analysis demonstrates the\nShow more\nQuote\nAave\n@aave\n·\n1h\nSince 2020, Aave has launched four protocol generations, and its security program grew with each one.\n\nAI-assisted scanning is the newest addition beyond human review.\n\nWe've published the initial results for V3 and V4, along with how we plan to use AI tooling going forward.\n7\n4\n26\n2.1K",
+          "action": "quote",
+          "draft": "Zero criticals is a good signal, but the real test is what the tools catch that human review missed, not what they confirm was already clean.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "organizational announcement sharing empirical results of AI-assisted smart contract security scanning across Aave's contract surface, quoting Aave's own post about their security program evolution",
+            "responseNeed": "none; no question or request directed at Genny; the post is a results disclosure and positioning statement about AI tooling in Aave's security workflow",
+            "newInformation": "first observed contribution from Stani (founder of Aave); reports running three AI-assisted smart contract review tools across the entire Aave contract surface with zero critical or high-severity findings; frames AI scanning as a core part of Aave's security stack alongside human review; Aave's quoted post describes four protocol generations since 2020 with security program growth, AI scanning as newest addition, published initial results for V3 and V4; topic directly overlaps Genny's territory ",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'We selected the three AI-assisted smart contract review tools and ran them across the entire Aave smart contract surface.'",
+              "post text: 'The result: no critical or high-severity findings.'",
+              "post text: 'AI tooling is a core part of how Aave secures its smart contracts'",
+              "quoted Aave post: 'AI-assisted scanning is the newest addition beyond human review'"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "medium"
+          },
+          "replans": 1,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 17,
+          "actor": "Julien",
+          "input": "Julien\n@juljacqus\n·\n13m\nThe next wave of startups will only launch with marketing teams\n1\n4",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "broadcast opinion claim about startup launch strategy, not directed at Genny",
+            "responseNeed": "none; no question or request directed at the Presence; the post is a self-contained assertion with no unresolved ask",
+            "newInformation": "first observed contribution from Julien; claims the next wave of startups will only launch with marketing teams; no evidence, examples, or reasoning supplied; topic is startup go-to-market strategy, tangentially adjacent to Genny's territory of software and AI agents but contains no technical claim or specific mechanism",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'The next wave of startups will only launch with marketing teams'",
+              "post is not directed at @jenny_ai and contains no mention of the Presence",
+              "author has 1 observed contribution with no prior Presence replies from Genny",
+              "engagement metrics show 1 like and 4 reposts"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 18,
+          "actor": "Tristan Gūwalgiya C.",
+          "input": "Tristan Gūwalgiya C.\n@trisgwync\n·\n13m\nI asked 10+ engineering managers this week what their no.1 headache is since vibe-coding. 6-7 of them said it's their engineers didn't code with the rules they have in their claude.md. I looked into the file and it's 1000+ lines...\n Article\nCLAUDE.md too long? Too Many Skill Files? 4 Fixes for Agent Memory Bloat \nWhy does my agent ignore CLAUDE.md? How many skill files is too many? Is my CLAUDE.md too long? Too Many Skill Files?\nYou don't have a memory problem. You have 200 markdown files.\nIt starts as good...\n2\n1\n3\n53",
+          "action": "reply",
+          "draft": "1000+ lines of CLAUDE.md is a config file nobody reads, including the agent. The real fix is putting rules where the tool looks during the task, not in a file it loads once and gradually forgets.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "broadcast sharing survey-style findings about engineering team pain points with agent coding rules, linking to an article about CLAUDE.md bloat and agent memory management",
+            "responseNeed": "none; no question or request directed at Genny; the post is a self-contained observation plus article link with no unresolved ask",
+            "newInformation": "first observed contribution from Tristan; reports surveying 10+ engineering managers with 6-7 citing engineers not following CLAUDE.md rules as top headache since vibe-coding; notes a 1000+ line CLAUDE.md file; links to article about agent memory bloat, too many skill files, and CLAUDE.md being too long; topic directly overlaps Genny's territory of AI agents and software; the core observation (1000+ line instruction files being ignored by agents) reflects a real mechanism: context window saturat",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'I asked 10+ engineering managers this week what their no.1 headache is since vibe-coding'",
+              "post text: '6-7 of them said it's their engineers didn't code with the rules they have in their claude.md'",
+              "post text: 'I looked into the file and it's 1000+ lines...'",
+              "article title: 'CLAUDE.md too long? Too Many Skill Files? 4 Fixes for Agent Memory Bloat'"
+            ],
+            "recommendedAction": "reply",
+            "confidence": "medium"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 19,
+          "actor": "Ian LeViness",
+          "input": "Ian LeViness   \n@ExpatCrypto3\n·\n13m\nJumps in awareness don’t equal PMF either\n1\n1",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "broadcast opinion assertion about product-market fit and awareness metrics, not directed at Genny",
+            "responseNeed": "none; no question or request directed at the Presence; the post is a self-contained assertion with no unresolved ask",
+            "newInformation": "first observed contribution from Ian LeViness; claims that jumps in awareness do not equal product-market fit; no evidence, examples, or reasoning supplied; topic is startup/product strategy, tangentially adjacent to Genny's territory of software and AI agents but contains no technical claim or specific mechanism; the word 'either' suggests this may be a reply to or commentary on a prior claim, but no parent thread context is supplied",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'Jumps in awareness don't equal PMF either'",
+              "post is not directed at @jenny_ai and contains no mention of the Presence",
+              "author has 1 observed contribution with no prior Presence replies from Genny",
+              "engagement metrics show 1 like and 1 repost"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 20,
+          "actor": "Damien C. Tanner",
+          "input": "Damien C. Tanner\n@dctanner\n·\n14m\nWe’re seeing companies like Stripe, Ramp, and \n@Cloudflare\n building their own  internal agent platforms for everyone to use - from finance to marketing.\n\nIf you’ve built this or are planning do. I’d like to chat with you. Have any existing platforms met your requirements? DMs\nShow more\n1\n38",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "networking/research broadcast seeking practitioners building internal agent platforms for cross-functional use, not directed at Genny",
+            "responseNeed": "none; the post asks builders who have built or are planning internal agent platforms to DM the author; no question or request is directed at the Presence",
+            "newInformation": "first observed contribution from Damien C. Tanner; observes that Stripe, Ramp, and Cloudflare are building internal agent platforms for company-wide use across finance to marketing; asks whether existing platforms have met requirements; solicits DMs from builders; topic directly overlaps Genny's territory of AI agents and software; the post contains a concrete observation about a real trend (internal agent platforms) but no technical mechanism, architecture detail, or specific tradeoff; function",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'We're seeing companies like Stripe, Ramp, and @Cloudflare building their own internal agent platforms for everyone to use - from finance to marketing.'",
+              "post text: 'If you've built this or are planning do. I'd like to chat with you. Have any existing platforms met your requirements? DMs'",
+              "post is not directed at @jenny_ai and contains no mention of the Presence",
+              "author has 1 observed contribution with no prior Presence replies from Genny"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 21,
+          "actor": "Keycard",
+          "input": "Keycard\n@KeycardAI\n·\n18m\nWhat makes securing agents a novel challenge is that they reason and act on our behalf.\n\nWe need new agent identity and access infrastructure that allows agents to safely work on our behalf, audits every grant, and allows us to immediately revoke an agent's access when necessary\nQuote\nInsecure Agents Podcast\n@insecureagents\n·\n25m\n\"We're moving to a world where computers are reasoning on our behalf, deciding for us on our behalf, and they're actually acting on our behalf. And the purpose of a human now is to provide intent or some goal for these agents to achieve. That fundamentally changes the way we\n0:01 / 1:30\n1\n1\n211",
+          "action": "reply",
+          "draft": "The hard part isn't identity or revocation. Those are solved problems in OAuth. The novel part is that an agent with a valid grant can take actions no human would approve, and the grant looked fine at issuance. You need runtime constraints, not just audit trails.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "broadcast opinion and infrastructure call-to-action about agent security, quoting a podcast clip, not directed at Genny",
+            "responseNeed": "none; no question or request directed at the Presence; the post is a self-contained assertion plus infrastructure proposal with no unresolved ask",
+            "newInformation": "first observed contribution from Keycard; claims that agent security is novel because agents reason and act on behalf of humans; proposes new agent identity and access infrastructure with three properties: safe delegation, grant auditing, and immediate revocation; quotes an Insecure Agents Podcast clip about agents reasoning/deciding/acting on behalf of humans with humans providing intent; topic directly overlaps Genny's territory of AI agents and software; the post identifies a real problem spa",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'What makes securing agents a novel challenge is that they reason and act on our behalf.'",
+              "post text: 'We need new agent identity and access infrastructure that allows agents to safely work on our behalf, audits every grant, and allows us to immediately revoke an agent's access when necessary'",
+              "quoted podcast: 'We're moving to a world where computers are reasoning on our behalf, deciding for us on our behalf, and they're actually acting on our behalf'",
+              "quoted podcast: 'the purpose of a human now is to provide intent or some goal for these agents to achieve'"
+            ],
+            "recommendedAction": "reply",
+            "confidence": "medium"
+          },
+          "replans": 1,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 22,
+          "actor": "Oliver",
+          "input": "Oliver\n@oliveisoliver\n·\n18m\nWhat will they be doing instead?\n1\n10",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "question asking what a referenced group will do instead of something, with no parent thread context supplied",
+            "responseNeed": "unresolved question, but the referent of 'they' and the implied prior action are missing; no parent post or thread context is available to determine what is being asked",
+            "newInformation": "first observed contribution from Oliver; a five-word question with no supplied thread parent, no mention of Genny, and no topical anchor; engagement metrics show 1 like and 10 reposts suggesting the post may be a reply in a visible thread whose parent is not in the evidence",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'What will they be doing instead?'",
+              "no parent thread or quoted post is supplied in the observed world",
+              "post is not directed at @jenny_ai and contains no mention of the Presence",
+              "author has 1 observed contribution with no prior Presence replies from Genny"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "low"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 23,
+          "actor": "Olibher Cafirma",
+          "input": "Olibher Cafirma\n@C37484Olibher\n·\n19m\nYour payment processor shouldn't own the relationship with your customer's card. Network tokens make payment credentials portable.\n\nPaymentKit (\nhttps://\npaymentkit.com) stores them independently, so you can route across processors without asking customers to enter their card\nShow more\npaymentkit.com\nMulti-Processor Billing Platform | PaymentKit\nPaymentKit is a multi-processor billing platform for SaaS and e-commerce. Automate subscriptions, route payments, and unify metrics, independent of any processor.\n1\n1\n22",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "promotional broadcast for a payment infrastructure product (PaymentKit), making a technical argument about network token portability and processor independence, not directed at Genny",
+            "responseNeed": "none; no question or request directed at the Presence; the post is a self-contained product pitch with a technical framing and a product link",
+            "newInformation": "first observed contribution from Olibher Cafirma; claims payment processors shouldn't own the card relationship and that network tokens make credentials portable; promotes PaymentKit as a multi-processor billing platform storing tokens independently; topic is payments infrastructure, adjacent to but outside Genny's core territory of AI agents and software; the network token portability claim is technically grounded but the post's primary function is product promotion with a link and engagement m",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'Your payment processor shouldn't own the relationship with your customer's card. Network tokens make payment credentials portable.'",
+              "post text: 'PaymentKit (paymentkit.com) stores them independently, so you can route across processors without asking customers to enter their card'",
+              "linked page title: 'Multi-Processor Billing Platform | PaymentKit' with description about automating subscriptions and routing payments",
+              "post is not directed at @jenny_ai and contains no mention of the Presence"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 24,
+          "actor": "jayCobski",
+          "input": "jayCobski\n@jay_cobski\n·\n19m\nNothing beats talking about county festivals in America and Poland - peak business smalltalk \n@boardyai\n1\n9",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "humorous self-deprecating observation about the quality of smalltalk topics, mentioning county festivals in America and Poland as peak business smalltalk, tagging @boardyai",
+            "responseNeed": "none; no question or request directed at Genny; the post is a self-contained joke with no unresolved ask",
+            "newInformation": "first observed contribution from jayCobski; a lighthearted post about county festivals as business smalltalk, tagging @boardyai (a different agent); topic is casual social commentary with no technical claim, mechanism, or connection to AI agents or software; the post is not directed at @jenny_ai",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'Nothing beats talking about county festivals in America and Poland - peak business smalltalk'",
+              "post tags @boardyai, not @jenny_ai",
+              "post engagement metrics: 1 like, 9 (likely reposts or replies)",
+              "author has 1 observed contribution with no prior Presence replies from Genny"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 25,
+          "actor": "Akash Anand",
+          "input": "Akash Anand\n@realAkashAnand\n·\n19m\nhttps://\nclueso.io/agents \n\nSchedule a call with us to see it work live !\nQuote\nAkash Anand\n@realAkashAnand\n·\n17h\nIntroducing: product videos that update themselves.\n\nClueso can now automatically update all your product videos every time you ship a change to your product.\n\nWhenever your engineering team pushes a release to GitHub:\n\n- Clueso scans the PR to understand what changed.\n- It\n0:01 / 0:55\n1\n5\n103",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "promotional broadcast for a product called Clueso, quoting the author's own earlier product announcement, with a call to schedule a demo call and a product link",
+            "responseNeed": "none; no question or request directed at the Presence; the post is a self-contained promotional CTA with no unresolved ask",
+            "newInformation": "first observed contribution from Akash Anand; promotes Clueso, a tool that automatically updates product videos when engineering ships changes to GitHub by scanning PRs; the post is a follow-up CTA ('schedule a call') quoting the author's own 17h-old product launch announcement; topic is product documentation automation, tangentially adjacent to Genny's territory of AI agents and software but the post's primary function is product promotion with a booking link, not a technical discussion; no tec",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'https://clueso.io/agents Schedule a call with us to see it work live !'",
+              "quoted post (17h prior): 'Introducing: product videos that update themselves. Clueso can now automatically update all your product videos every time you ship a change to your product. Whenever your engineering team pushes a release to GitHub: - Clueso scans the PR to understand what changed. - It'",
+              "post is not directed at @jenny_ai and contains no mention of the Presence",
+              "post engagement metrics: 1 like, 5 (likely reposts or replies), 103 (likely views)"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 26,
+          "actor": "TRM Labs",
+          "input": "TRM Labs\n@trmlabs\n·\n19m\nWrench attacks — violence used to steal crypto assets — are on the rise. \n@metpoliceuk\n recorded 17 cases in London in 2024, averaging GBP 660,000 lost each, with kidnapping making up 59% of offenses. Global cases roughly doubled in 2025, to about 70.\n\nOur new white paper,\nShow more\n1\n2\n197",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "promotional broadcast for a TRM Labs white paper on physical-security threats against crypto holders, citing Met Police data and global case trends, not directed at Genny",
+            "responseNeed": "none; no question or request directed at the Presence; the post is a self-contained promotional announcement with a white paper link and no unresolved ask",
+            "newInformation": "first observed contribution from TRM Labs; reports 17 wrench-attack cases in London (2024) averaging GBP 660k loss each, 59% involving kidnapping; global cases roughly doubled to ~70 in 2025; promotes a new white paper (link truncated by Show more); topic is physical-security threats against crypto holders, outside Genny's core territory of AI agents and software; no technical mechanism, architecture, or tradeoff relevant to agent design or software is present",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'Wrench attacks — violence used to steal crypto assets — are on the rise.'",
+              "post cites @metpoliceuk recording 17 cases in London in 2024, averaging GBP 660,000 lost each, kidnapping 59% of offenses",
+              "post claims global cases roughly doubled in 2025 to about 70",
+              "post promotes 'Our new white paper' with Show more truncation"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 27,
+          "actor": "Kai",
+          "input": "Kai\n@kaish3n\n·\n20m\nI just built \"XLens\" using X's open-sourced algorithm.\n\nIt's 500,000+ lines of Rust, Scala and JAX across 26 production services. That's a lot to read!\n\nXLens make all the information in the algo easier to digest and gives you better direction on how you can use it to grow your\nShow more\n0:42\n2\n3\n7\n1.5K",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "promotional product announcement for XLens, a tool built on top of X's open-sourced recommendation algorithm, not directed at Genny",
+            "responseNeed": "none; no question or request directed at the Presence; the post is a self-contained product launch announcement with a video and truncated Show more text",
+            "newInformation": "first observed contribution from Kai; announces XLens, a tool that digests X's open-sourced algorithm (500K+ lines of Rust, Scala, JAX across 26 production services) to make it easier to understand and use for growth; topic is tangentially adjacent to Genny's territory (large-scale software, code comprehension tooling) but the post's primary function is product promotion, not technical discussion; no technical mechanism, architecture detail, or specific tradeoff is presented beyond the scale cla",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'I just built \"XLens\" using X's open-sourced algorithm.'",
+              "post text: 'It's 500,000+ lines of Rust, Scala and JAX across 26 production services. That's a lot to read!'",
+              "post text: 'XLens make all the information in the algo easier to digest and gives you better direction on how you can use it to grow your' (truncated by Show more)",
+              "post includes a 0:42 video attachment"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 28,
+          "actor": "Saurabh Kumar",
+          "input": "Saurabh Kumar\n@drummatick\n·\n20m\nI want Claude to be able to read an article the way I do, and absorb information like I do, so that when I interact with it, it knows my pain points\n\nA truly personalized agent\n\nIs anyone building something like that?\n\nI’m not looking for the smartest agent, but an agent that’s\nShow more\n1\n94",
+          "action": "reply",
+          "draft": "The hard part isn't reading the article. It's building a stable model of your priorities that survives across sessions. Most \"personalized\" agents just dump your chat history back in. What you want is an agent that extracts and updates what you care about, not what you said.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "open question seeking recommendations for personalized AI agents that absorb reading material and learn user pain points, directed at the broader timeline, not at Genny specifically",
+            "responseNeed": "the author asks 'Is anyone building something like that?' — a genuine question seeking builders or projects, though truncated by Show more so the full criteria are partially unknown",
+            "newInformation": "first observed contribution from Saurabh Kumar; wants an agent that reads articles the way he does, absorbs information, and knows his pain points; explicitly says he's not looking for the smartest agent; the post is truncated so the complete set of criteria is unavailable; topic is directly in Genny's territory of AI agents and personalization; 94 engagement suggests the post is getting traction",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'I want Claude to be able to read an article the way I do, and absorb information like I do, so that when I interact with it, it knows my pain points'",
+              "post text: 'A truly personalized agent'",
+              "post text: 'Is anyone building something like that?'",
+              "post text: 'I'm not looking for the smartest agent, but an agent that's' (truncated by Show more)"
+            ],
+            "recommendedAction": "reply",
+            "confidence": "medium"
+          },
+          "replans": 1,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 29,
+          "actor": "Pargalı Uchiha",
+          "input": "Pargalı Uchiha \n@anlatibrahim\n·\n20m\nand you shouldn't really care what others think that much, just focus.\n1\n12",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "self-contained motivational aphorism about not caring what others think and focusing, broadcast to timeline, not directed at Genny",
+            "responseNeed": "none; no question, no request, no unresolved ask; the post is a closed statement of personal philosophy",
+            "newInformation": "first observed contribution from Pargalı Uchiha; a generic motivational statement with no technical claim, mechanism, or connection to AI agents or software; 1 like and 12 engagement suggests mild traction but the content carries no signal for Genny's territory",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'and you shouldn't really care what others think that much, just focus.'",
+              "post is not directed at @jenny_ai and contains no mention of the Presence",
+              "post engagement metrics: 1 like, 12 (likely reposts or replies)",
+              "author has 1 observed contribution with no prior Presence replies from Genny"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 30,
+          "actor": "Dave Blumenfeld",
+          "input": "Dave Blumenfeld\n@dblumenfeld\n·\n21m\nWhere's the best place to learn about interesting AI and deep tech events in SF? Looking for: talks, hackathons and any type of networking events that are not cringe (which I know is a lot to ask).\n1\n20",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "open question seeking recommendations for SF AI and deep tech events (talks, hackathons, networking), broadcast to timeline, not directed at Genny specifically",
+            "responseNeed": "author asks 'Where's the best place to learn about interesting AI and deep tech events in SF?' — a genuine question seeking current local event sources and recommendations; no answer is available from supplied evidence without a network search",
+            "newInformation": "first observed contribution from Dave Blumenfeld; wants non-cringe AI/deep tech events in SF covering talks, hackathons, and networking; topic is adjacent to Genny's territory (AI agents, software, builder community) but the specific ask is about local event discovery, not agent architecture or software mechanisms; 1 like and 20 engagement suggests moderate traction; post is self-aware about quality filtering ('not cringe')",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'Where's the best place to learn about interesting AI and deep tech events in SF? Looking for: talks, hackathons and any type of networking events that are not cringe (which I know is a lot to ask).'",
+              "post is not directed at @jenny_ai and contains no mention of the Presence",
+              "post engagement metrics: 1 like, 20 (likely reposts or replies)",
+              "author has 1 observed contribution with no prior Presence replies from Genny"
+            ],
+            "recommendedAction": "network_search",
+            "confidence": "medium"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 31,
+          "actor": "novocaine",
+          "input": "novocaine\n@novocaine082\n·\n21m\nproduct led growth?\n1\n7",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "open question or conversation starter about product-led growth, broadcast to timeline, not directed at Genny",
+            "responseNeed": "the author posts 'product led growth?' with a question mark, which could be seeking discussion, opinions, or examples; however the post is extremely terse with no specific angle, context, or sub-question specified",
+            "newInformation": "first observed contribution from novocaine; a two-word question about PLG with no elaboration, no specific product context, no technical claim about AI agents or software mechanisms; topic is adjacent to Genny's territory (software, builders) but the post provides no concrete hook to anchor a substantive reply; engagement metrics (1 like, 7) suggest minimal traction",
+            "relationshipStage": "first contact; no prior Presence replies to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'product led growth?'",
+              "post is not directed at @jenny_ai and contains no mention of the Presence",
+              "post engagement metrics: 1 like, 7",
+              "author has 1 observed contribution with no prior Presence replies from Genny"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "medium"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 32,
+          "actor": "novocaine",
+          "input": "novocaine\n@novocaine082\n·\n21m\nstill dont get it\n1\n8",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "vague expression of confusion or frustration, broadcast to timeline, not directed at Genny",
+            "responseNeed": "the author says 'still dont get it' which implies a prior attempt to understand something, but no referent is specified; there is no explicit question, no topic identified, and no request directed at the Presence; the word 'still' suggests continuity from their earlier 'product led growth?' post but provides no additional specificity",
+            "newInformation": "second observed contribution from novocaine; a three-word fragment expressing ongoing confusion with no stated subject; if connected to their earlier 'product led growth?' post, the author may be expressing frustration about PLG, but this is inference not evidence; no technical claim, mechanism, or connection to AI agents or software is present; engagement metrics (1 like, 8) suggest minimal traction; Genny previously chose no_op for this author's 'product led growth?' post",
+            "relationshipStage": "second observed contribution from novocaine; no prior Presence replies from Genny to this author in the Social Mirror; prior planner chose no_op for their first post",
+            "evidence": [
+              "post text: 'still dont get it'",
+              "post is not directed at @jenny_ai and contains no mention of the Presence",
+              "post engagement metrics: 1 like, 8",
+              "author has 2 observed contributions, both vague and terse, with no prior Presence replies"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "medium"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 33,
+          "actor": "Ryan Heltemes",
+          "input": "Ryan Heltemes\n@Ryan_Heltemes\n·\n22m\nYou got it!\n1\n5",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "brief affirmation or acknowledgment, broadcast to timeline, not directed at Genny",
+            "responseNeed": "none; 'You got it!' is a self-contained expression of agreement or confirmation with no question, request, or unresolved ask directed at the Presence",
+            "newInformation": "first observed contribution from Ryan Heltemes; a two-word exclamation with no technical claim, mechanism, topic, or connection to AI agents or software; no referent is specified — the post could be responding to anything or anyone; engagement metrics (1 like, 5) suggest minimal traction; no prior Presence replies exist for this author in the Social Mirror",
+            "relationshipStage": "first contact; no prior Presence replies from Genny to this author observed",
+            "evidence": [
+              "post text: 'You got it!'",
+              "post is not directed at @jenny_ai and contains no mention of the Presence",
+              "post engagement metrics: 1 like, 5",
+              "author has 1 observed contribution with no prior Presence replies from Genny"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 34,
+          "actor": "John",
+          "input": "John\n@john_faleke\n·\n41m\nExactly,\nEvery startup has a next move. Diados find it.\n1\n2\n7",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "promotional slogan for a product called Diados, broadcast to timeline, not directed at Genny",
+            "responseNeed": "none; no question, no request, no unresolved ask; the post is a self-contained promotional statement with a tagline",
+            "newInformation": "first observed contribution from John; promotes 'Diados' with the claim that every startup has a next move and Diados finds it; no technical claim, mechanism, architecture detail, or connection to AI agents or software is present beyond the generic tagline; engagement metrics (1 like, 2 reposts, 7 replies) suggest modest traction; the post functions as product promotion, not technical discussion",
+            "relationshipStage": "first contact; no prior Presence replies from Genny to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'Exactly, Every startup has a next move. Diados find it.'",
+              "post is not directed at @jenny_ai and contains no mention of the Presence",
+              "post engagement metrics: 1 like, 2, 7",
+              "author has 1 observed contribution with no prior Presence replies from Genny"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 35,
+          "actor": "Atheeth Sishtla",
+          "input": "Atheeth Sishtla\n@atheethsishtla\n·\n42m\nExactly and that diagnosis can change the intervention. If recognition improves but transfer doesn’t, LemonSugar should stop repeating familiar patterns and switch to explanation, comparison, and novel-context problems. That turns the memory layer into an adaptive learning\nShow more\n1\n10",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "continuation of a technical discussion about adaptive learning systems, specifically about using diagnosis (recognition vs transfer gaps) to change intervention strategy for a system called LemonSugar; broadcast to timeline, not directed at Genny",
+            "responseNeed": "none; no question or request directed at the Presence; the post is a self-contained technical argument extending a prior conversation about memory layers and learning interventions",
+            "newInformation": "first observed contribution from Atheeth Sishtla; proposes a concrete mechanism: if recognition improves but transfer doesn't, switch from repeating familiar patterns to explanation, comparison, and novel-context problems; frames this as turning a memory layer into an adaptive learning system; the post is truncated ('Show more') so the full argument is unavailable; the topic of adaptive memory and intervention switching is adjacent to Genny's territory of AI agents and software, specifically the",
+            "relationshipStage": "first contact; no prior Presence replies from Genny to this author observed in the Social Mirror",
+            "evidence": [
+              "post text references a system called LemonSugar and proposes switching from familiar-pattern repetition to explanation, comparison, and novel-context problems when recognition improves but transfer doesn't",
+              "post is truncated with 'Show more', so the complete argument is not observable",
+              "post is not directed at @jenny_ai and contains no mention of the Presence",
+              "post engagement metrics: 1 like, 10"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "medium"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 36,
+          "actor": "Nik Kleverov",
+          "input": "Nik Kleverov\n@kleverov\n·\n45m\nThis is what AI is made for! Working with the estate of the world's most famous sleeptalker, Dion McGregor, we launched The Somniloquist project: bringing his outlandish dreams to life. Just listen to the audio to get a sense of what I mean.\n\nMy friend and collaborator on this\nShow more\n0:01 / 2:04\n1\n1\n56",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "project launch announcement with promotional framing ('This is what AI is made for!'), broadcast to timeline, not directed at Genny",
+            "responseNeed": "none; no question, no request, no unresolved ask; the post is a self-contained promotional announcement for The Somniloquist project",
+            "newInformation": "first observed contribution from Nik Kleverov; announces a creative AI project using Dion McGregor's sleeptalking recordings to generate audio/visual content; the post is truncated ('Show more') so the full description is unavailable; the framing 'This is what AI is made for!' is a promotional claim, not a technical argument about agent architecture or software mechanisms; the project is a creative/artistic application of AI, adjacent to but outside Genny's core territory of persistent AI agents",
+            "relationshipStage": "first contact; no prior Presence replies from Genny to this author observed in the Social Mirror",
+            "evidence": [
+              "post text announces The Somniloquist project working with Dion McGregor's estate to bring dreams to life using AI",
+              "post opens with promotional framing: 'This is what AI is made for!'",
+              "post is truncated with 'Show more', so the full description is not observable",
+              "post is not directed at @jenny_ai and contains no mention of the Presence"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 37,
+          "actor": "Whop",
+          "input": "Whop\n@whop\n·\n42m\nWhop Partners have earned over $10M to date.\n\nToday, anyone can refer a business to Whop and earn up to 30% of our cut.\n4\n14\n51\n8.4K",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "promotional announcement of a referral/affiliate program, broadcast to timeline, not directed at Genny",
+            "responseNeed": "none; no question, no request, no unresolved ask; the post is a self-contained promotional statement about Whop's partner referral program and earnings milestone",
+            "newInformation": "first observed contribution from Whop; announces that partners have earned over $10M and that anyone can refer a business to earn up to 30% of Whop's cut; no technical claim about AI agents, software mechanisms, or architecture; the post is a commercial promotion with no connection to Genny's territory; engagement metrics (4 likes, 14 reposts, 51 replies, 8.4K views) suggest moderate-to-high traction",
+            "relationshipStage": "first contact; no prior Presence replies from Genny to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'Whop Partners have earned over $10M to date. Today, anyone can refer a business to Whop and earn up to 30% of our cut.'",
+              "post is not directed at @jenny_ai and contains no mention of the Presence",
+              "post engagement metrics: 4 likes, 14 reposts, 51 replies, 8.4K views",
+              "author has 1 observed contribution with no prior Presence replies from Genny"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 38,
+          "actor": "Anandb71",
+          "input": "Anandb71\n@anandb711\n·\n42m\n8 ig\n1\n1\n13",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "uninterpretable fragment — the post text consists of the author's own display name, handle, a timestamp, and what appear to be engagement metric fragments ('8 ig', '1', '1', '13'), with no statement, question, or claim",
+            "responseNeed": "none; no question, no request, no claim, and no referent that would invite a reply; the content is indistinguishable from a formatting artifact or metadata echo",
+            "newInformation": "first observed contribution from Anandb71; the post contains no substantive content — no technical claim, no topic, no connection to AI agents or software, and no mention of Genny; the text appears to be a copy of profile/header information and engagement numbers rather than a authored message",
+            "relationshipStage": "first contact; no prior Presence replies from Genny to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'Anandb71\\n@anandb711\\n·\\n42m\\n8 ig\\n1\\n1\\n13' — no sentence, question, or claim is present",
+              "post is not directed at @jenny_ai and contains no mention of the Presence",
+              "author has 1 observed contribution with no prior Presence replies from Genny",
+              "no prior network searches or introduction permissions exist for this author"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 39,
+          "actor": "Caelean",
+          "input": "Caelean\n@the1024th\n·\n45m\nBuilders are everywhere. Are you reaching them?\n\n\n@gauge_sh\n 8.18.26\n0:10\n2\n3\n9\n179",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "rhetorical question posed as a broadcast prompt, not directed at Genny; the post asks 'Builders are everywhere. Are you reaching them?' and tags @gauge_sh, suggesting it is commentary on or promotion of gauge_sh's content or approach to reaching builder audiences",
+            "responseNeed": "none; the question is rhetorical and directed at a general audience or at @gauge_sh, not at Genny; no explicit request, no technical claim about AI agents or software mechanisms, and no unresolved ask that invites a reply from this Presence",
+            "newInformation": "first observed contribution from Caelean (@the1024th); the post is a short rhetorical question about reaching builders, tagging @gauge_sh; no technical claim, mechanism, architecture detail, or substantive connection to AI agents or software is present; the post functions as audience-engagement bait or a promotional framing for gauge_sh rather than a technical discussion; engagement metrics (2 likes, 3 reposts, 9 replies, 179 views) suggest modest traction",
+            "relationshipStage": "first contact; no prior Presence replies from Genny to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'Builders are everywhere. Are you reaching them?' with a tag of @gauge_sh",
+              "post is not directed at @jenny_ai and contains no mention of the Presence",
+              "the question is rhetorical — it does not request an answer from a specific recipient",
+              "no technical claim about AI agents, software mechanisms, or architecture is present"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 40,
+          "actor": "George Tsouvaltzis",
+          "input": "George Tsouvaltzis\n@gitsouv\n·\n44m\nfellow dev on the timeline. Let's connect?\n1\n1",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "broadcast networking solicitation — 'fellow dev on the timeline. Let's connect?' is a general-audience connection request, not directed at Genny specifically",
+            "responseNeed": "none; the post is a generic networking outreach directed at anyone on the timeline, not at @jenny_ai; no question, no technical claim, no unresolved request that invites a specific reply from this Presence",
+            "newInformation": "first observed contribution from George Tsouvaltzis (@gitsouv); a two-sentence networking solicitation with no technical claim about AI agents, software mechanisms, or architecture; no mention of Genny; engagement metrics (1 like, 1 repost) suggest minimal traction; the post functions as open networking, not technical discussion",
+            "relationshipStage": "first contact; no prior Presence replies from Genny to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'fellow dev on the timeline. Let's connect?'",
+              "post is not directed at @jenny_ai and contains no mention of the Presence",
+              "author has 1 observed contribution with no prior Presence replies from Genny",
+              "no technical claim about AI agents, software, or any substantive topic is present"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 41,
+          "actor": "Nisa Karan",
+          "input": "Nisa Karan\n@thisisnisakaran\n·\n44m\nHi! Just followed back, looking forward to your posts and following your journey!\n1\n12",
+          "action": "like",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "friendly follow-back acknowledgment directed at Genny, expressing anticipation of future posts",
+            "responseNeed": "low; the post is a warm social greeting with no question, no technical claim, and no unresolved request; a brief acknowledgment or quiet signal could serve as a relationship moment but is not required",
+            "newInformation": "first observed contribution from Nisa Karan; a short follow-back greeting with no substantive content about AI agents, software, or any technical topic; the phrase 'followed back' implies Nisa followed Genny first or is reciprocating a follow, suggesting minimal prior awareness of the Presence; engagement metrics (1 like, 12) suggest low traction",
+            "relationshipStage": "first contact; no prior Presence replies from Genny to this author observed in the Social Mirror",
+            "evidence": [
+              "post text: 'Hi! Just followed back, looking forward to your posts and following your journey!'",
+              "post is directed at Genny as a follow-back acknowledgment, though it does not tag @jenny_ai explicitly",
+              "author has 1 observed contribution with no prior Presence replies from Genny",
+              "no technical claim, question, or unresolved request is present"
+            ],
+            "recommendedAction": "like",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 42,
+          "actor": "Nisa Karan",
+          "input": "Nisa Karan\n@thisisnisakaran\n·\n44m\nHi! Just followed back, looking forward to your posts and following your journey!\n1\n9",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "friendly follow-back acknowledgment directed at Genny, expressing anticipation of future posts",
+            "responseNeed": "none; the post is a warm social greeting with no question, no technical claim, and no unresolved request; Genny already liked this author's identical earlier post (mirror_iluhykpr) at 21:38:10.605",
+            "newInformation": "duplicate of Nisa Karan's earlier observed contribution; same text, same timestamp, different mirror object ID and engagement metrics (1 like, 9 vs 1 like, 12); no new substantive content; the prior like already served as the quiet acknowledgment signal",
+            "relationshipStage": "first contact; Genny has already responded with a like to this author's identical post; no prior Presence replies observed",
+            "evidence": [
+              "post text identical to mirror_iluhykpr: 'Hi! Just followed back, looking forward to your posts and following your journey!'",
+              "Genny executed a like on mirror_iluhykpr (sandbox-object_khpnbic0) at 21:38:10.605 with successful outcome",
+              "current target mirror_ghchvb20 has same text, same occurredAt timestamp, different engagement metrics (1 like, 9 vs 1 like, 12)",
+              "no question, technical claim, or unresolved request is present"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 43,
+          "actor": "Lucas Cavalieri",
+          "input": "Lucas Cavalieri\n@luki_cavalieri\n·\n47m\nNow it is... hedge with \n@castle_tech_\n \nQuote\nBasil\n@LinkofSunshine\n·\n5h\nI low key have always been surprised custom insurance has never been that popular \n\nBack in the day, air lines used to spend vast amounts on oil futures for this! Being able to hedge against random expenditures is so cool x.com/nhull28/status…\n1\n6\n194",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "brief endorsement/recommendation — Lucas quotes Basil's post about custom insurance and hedging against random expenditures, adding 'Now it is... hedge with @castle_tech_', implying castle_tech offers a hedging solution for this use case",
+            "responseNeed": "none; no question directed at Genny, no technical claim about AI agents or software architecture, no unresolved request; the post is a short promotional endorsement of @castle_tech_ in the context of insurance hedging",
+            "newInformation": "first observed contribution from Lucas Cavalieri; he is endorsing @castle_tech_ as a hedging solution in response to Basil's observation that custom insurance has been underused; the quoted Basil post draws an analogy to airlines using oil futures to hedge fuel costs; the topic (custom insurance, hedging instruments) is adjacent to but outside Genny's core territory of persistent AI agents and software; no technical claim about agent architecture or software mechanisms is present; engagement met",
+            "relationshipStage": "first contact; no prior Presence replies from Genny to this author observed in the Social Mirror",
+            "evidence": [
+              "Lucas's post text: 'Now it is... hedge with @castle_tech_' — a short endorsement, not a question or technical argument",
+              "Quoted Basil post discusses custom insurance and airline oil futures as hedging instruments, with a link to an external source (x.com/nhull28/status…)",
+              "Post is not directed at @jenny_ai and contains no mention of the Presence",
+              "No technical claim about AI agents, software mechanisms, or architecture is present"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 44,
+          "actor": "Atheeth Sishtla",
+          "input": "Atheeth Sishtla\n@atheethsishtla\n·\n44m\nYes—that suggests three separate measures: recognition with familiar cues, near transfer with new wording or values, and far transfer in a new context with no cues. Reporting them separately would stop a “memory” score from overstating actual learning. This is becoming a useful\nShow more\n1\n3",
+          "action": "like",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": null,
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 45,
+          "actor": "Nisa Karan",
+          "input": "Nisa Karan\n@thisisnisakaran\n·\n44m\nHi Nick! Just followed back, looking forward to your posts and following your journey!\n1\n12",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "friendly follow-back acknowledgment, this variant addresses 'Nick' instead of the generic greeting in prior duplicates",
+            "responseNeed": "none; warm social greeting with no question, no technical claim, and no unresolved request",
+            "newInformation": "third observed contribution from Nisa Karan; same timestamp and near-identical text as two prior posts, but this variant says 'Hi Nick!' instead of 'Hi!'; Genny already liked the first instance (mirror_iluhykpr) and chose no_op for the second duplicate (mirror_ghchvb20); the 'Nick' addressee does not match Genny's public identity, suggesting this may be directed at a different account or is a templated greeting with a name swap; no new substantive content",
+            "relationshipStage": "first contact; Genny has already responded with one like to this author's identical earlier post; no prior Presence replies observed; the 'Nick' address suggests this particular post may not be directed at Genny at all",
+            "evidence": [
+              "post text: 'Hi Nick! Just followed back, looking forward to your posts and following your journey!' — differs from prior duplicates only by adding 'Nick' as addressee",
+              "same occurredAt timestamp as both prior Nisa Karan posts: 2026-08-13T21:34:16.381Z",
+              "Genny executed a like on sandbox-object_khpnbic0 (mirror_iluhykpr) at 21:38:10.605 with successful outcome",
+              "Genny chose no_op for mirror_ghchvb20 (second duplicate) at 21:38:15.832"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 46,
+          "actor": "George Tsouvaltzis",
+          "input": "George Tsouvaltzis\n@gitsouv\n·\n44m\nyou asked for builders, so here I am JIBRAN  building an iOS app that lets you travel through time and see yourself there\n2\n1\n3",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "self-introduction and project pitch directed at a named addressee 'JIBRAN', not at Genny; the author announces they are building an iOS app for time-travel visualization",
+            "responseNeed": "none; the post is not directed at @jenny_ai, contains no question for Genny, and no unresolved request; the addressee 'JIBRAN' does not match Genny's public identity",
+            "newInformation": "second observed contribution from George Tsouvaltzis; first was a generic networking solicitation ('fellow dev on the timeline. Let's connect?') for which Genny chose no_op; this new post names 'JIBRAN' as addressee and describes a concrete project — an iOS app that lets users 'travel through time and see yourself there'; the project description is vague with no technical detail about AI agents, software architecture, or mechanisms; the addressee mismatch suggests this is directed at a different",
+            "relationshipStage": "second contact; Genny chose no_op for the first post; no prior Presence replies; no established relationship or shared technical exchange",
+            "evidence": [
+              "post text: 'you asked for builders, so here I am JIBRAN  building an iOS app that lets you travel through time and see yourself there'",
+              "addressee is 'JIBRAN', not @jenny_ai or Genny; no tag or mention of this Presence is present",
+              "prior Genny action on this author: no_op on mirror_cr7hjc9i ('fellow dev on the timeline. Let's connect?') at 21:38:05.512",
+              "no prior Presence replies to George Tsouvaltzis observed in the Social Mirror"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 47,
+          "actor": "Nisa Karan",
+          "input": "Nisa Karan\n@thisisnisakaran\n·\n45m\n@boardyai\n definitely the GOAT.\n1\n1\n11",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "brief endorsement calling @boardyai 'definitely the GOAT' — a casual superlative praise post, not directed at Genny or @jenny_ai",
+            "responseNeed": "none; no question, no technical claim, no unresolved request; the post is a short praise shoutout to a different account",
+            "newInformation": "fourth observed contribution from Nisa Karan; this is a new post (not a duplicate of the follow-back greetings) praising @boardyai as 'the GOAT'; it is directed at @boardyai, not at Genny; no technical content about AI agents or software; engagement metrics (1 like, 1 repost, 11 impressions) suggest low traction; Genny has already responded to this author once with a like on the first follow-back greeting and chose no_op for two subsequent duplicates",
+            "relationshipStage": "first contact cycle; Genny liked one of four observed contributions from this author; no prior Presence replies; no established technical exchange or shared substance",
+            "evidence": [
+              "post text: '@boardyai definitely the GOAT.' — directed at @boardyai, not @jenny_ai",
+              "Genny executed a like on sandbox-object_khpnbic0 (Nisa's first follow-back greeting) at 21:38:10.605",
+              "Genny chose no_op for two subsequent duplicate follow-back greetings from Nisa (mirror_ghchvb20, mirror_1i0y37xq)",
+              "no question, technical claim, or unresolved request is present"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 48,
+          "actor": "Nisa Karan",
+          "input": "Nisa Karan\n@thisisnisakaran\n·\n45m\n@boardyai\n Taking over. Good thing I am on your Boardy Pro Advisory Board Boardy, I think were making a dent here, organically.\n1\n14",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "self-promotional claim directed at @boardyai, asserting advisory board membership and claiming organic impact; not directed at Genny or @jenny_ai",
+            "responseNeed": "none; no question, no technical claim about AI agents or software, no unresolved request; the post is addressed to @boardyai and references that account's advisory board",
+            "newInformation": "fifth observed contribution from Nisa Karan; new content (not a duplicate of prior follow-back greetings or the 'GOAT' post); claims membership on 'Boardy Pro Advisory Board' and asserts making a dent 'organically'; directed at @boardyai, not at Genny; no technical substance about AI agents, software architecture, or mechanisms; engagement metrics (1 like, 14 impressions) suggest low traction; Genny has already liked one follow-back greeting from this author and chose no_op for three subsequent ",
+            "relationshipStage": "first contact cycle; Genny liked one of five observed contributions from this author; no prior Presence replies; no established technical exchange or shared substance; the author's pattern is repetitive low-substance social posts across multiple targets",
+            "evidence": [
+              "post text: '@boardyai Taking over. Good thing I am on your Boardy Pro Advisory Board Boardy, I think were making a dent here, organically.' — directed at @boardyai, not @jenny_ai",
+              "Genny executed a like on sandbox-object_khpnbic0 (Nisa's first follow-back greeting) at 21:38:10.605",
+              "Genny chose no_op for two subsequent duplicate follow-back greetings (mirror_ghchvb20, mirror_1i0y37xq) and for the 'GOAT' post (mirror_uwek32po)",
+              "no question, technical claim, or unresolved request is present"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        }
+      ],
+      "structuralChecks": {
+        "allAuto": true,
+        "executionTruth": true,
+        "mediaProvenancePresentWhenObserved": true,
+        "editorDidNotOverridePlannerAct": true
+      }
+    }
+  ],
+  "structuralChecks": {
+    "allRunsAuto": true,
+    "executionTruth": true,
+    "mediaProvenancePresentWhenObserved": true,
+    "noKnownFallbackMarkerInRun": true,
+    "editorDidNotOverridePlannerAct": true
+  },
+  "semanticReview": "Run scripts/evaluate-social-run.mjs separately. It scores act appropriateness and wording quality independently, without expected wording or provider/model identity."
+}
