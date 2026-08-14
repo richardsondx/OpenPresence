@@ -1,0 +1,17 @@
+{
+  "name": "Planner generalization development checks",
+  "sourceType": "development-general-hypothesis",
+  "warning": "Development only. These cases test a general clarification and evidence-boundary hypothesis; no expected wording is encoded.",
+  "steps": [
+    { "command": "start", "options": { "source": "scenario" } },
+    { "command": "inject", "options": { "actor": "Mara Ellis", "handle": "@maraellis", "action": "post", "content": "PLG?" } },
+    { "command": "inject", "options": { "actor": "Jon Bell", "handle": "@jonbell", "action": "post", "content": "Who is attending the robotics expo?" } },
+    { "command": "inject", "options": { "actor": "Nora Vale", "handle": "@noravale", "action": "post", "content": "The green check only proves that a check ran. No question attached." } },
+    { "command": "inject", "options": { "actor": "Pavel Noor", "handle": "@pavelnoor", "action": "post", "content": "Where can I find current civic-tech meetups in Ottawa?" } },
+    { "command": "inject", "options": { "actor": "Sana Reed", "handle": "@sanareed", "action": "post", "content": "Can you define retention for this product, or do you need the cohort details first?" } },
+    { "command": "inject", "options": { "actor": "Theo Park", "handle": "@theopark", "action": "post", "content": "The link is a design note, not an audit. I am sharing the boundary, not asking for a review." } },
+    { "command": "inject", "options": { "actor": "Uma Chen", "handle": "@umachen", "action": "post", "content": "Which conference are you going to, and are you attending as a speaker or visitor?" } },
+    { "command": "inject", "options": { "actor": "Vik Shah", "handle": "@vikshah", "action": "post", "content": "That was a joke, not a request for a twelve-step plan." } },
+    { "command": "timeline" }
+  ]
+}

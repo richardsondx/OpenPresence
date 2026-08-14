@@ -591,6 +591,16 @@ It does not mean:
 
 A no-op can be a successful evaluation.
 
+### Assignment
+
+OpenPresence also distinguishes delegated responsibility from an opportunity for judgment. The operator may **Consider** something, in which case the Agent owns whether and how to act, or **Assign** an outcome, in which case the operator owns what must be accomplished while the Agent owns how to accomplish it. A future Direct mode may let explicit operator direction own the action itself while preserving the Presence's safety and privacy boundaries.
+
+> **Autonomy is not the absence of direction. It is freedom inside delegated responsibility.**
+
+An Assignment remains active until it is completed, cancelled, blocked, or expires incomplete. Taste still protects the quality floor: “this candidate is not good enough” means reject the candidate and keep working, not publish filler and not silently complete the Assignment. Silence remains a valid social action, but it is not completion of an explicit Assignment.
+
+Assignments preserve the separation between intent, execution, delivery, and outcome. Only a verified world outcome, such as an authored publication observed in the Sandbox Social Mirror or live Mirror, advances progress. A draft, model response, Social Intent, or attempted delivery does not. Model failure and delivery failure are operational failures, never evidence that the Agent chose silence.
+
 ---
 
 ## 14. Intent, Execution, Delivery, Outcome

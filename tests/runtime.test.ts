@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addSandboxEvent, applyOperation, compilePresenceContext, createAgent, deriveActivitySummary, derivePublicHistory, failNativeExecution, formChatPostIntent, formXReplyIntent, initialState, isActivityDecisionEvent, isExplicitXPostRequest, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, recordPublicFooting, recordStandingIntentNoOp, startPlaygroundSession } from "../lib/runtime";
+import { addSandboxEvent, applyOperation, assignmentIsSatisfied, compileAssignmentInstruction, compilePresenceContext, createAgent, deliverSandboxExecution, deriveActivitySummary, derivePublicHistory, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, initialState, isActivityDecisionEvent, isExplicitXPostRequest, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, recordPublicFooting, recordStandingIntentNoOp, startPlaygroundSession } from "../lib/runtime";
 import { acknowledgeExecution, claimExecutions, createBridgeWithKey, ingestEvents, removeBridge, revokeBridge } from "../lib/bridge";
 import { readBridgeCredentialMetadata, readState, writeState } from "../lib/db";
 import { nextObservationAt } from "../lib/native-x";
@@ -104,6 +104,32 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.actions[0]?.status).toBe("skipped");
     expect(state.metrics.opportunitiesIgnored).toBe(36);
     expect(state.events.some((item) => item.title === "Silence was the right action")).toBe(true);
+  });
+
+  it("compiles prompt-driven Assignments into hard progress and human judgment context", () => {
+    const state = createAgent(input);
+    const assignment = compileAssignmentInstruction(state, "Publish exactly 3 original posts each weekday about offers, pricing, or sales. Choose your own angles and do not repeat yourself.", state.presence!.id, "sandbox");
+    expect(assignment.deliverable).toMatchObject({ type: "original_publication", quantity: 3, quantityMode: "exact" });
+    expect(assignment.recurrence).toMatchObject({ kind: "weekdays" });
+    expect(assignment.editorialContext?.topics).toEqual(["offers", "pricing", "sales"]);
+    expect(assignment.editorialContext?.constraints).toContain("Keep the delivered ideas meaningfully distinct.");
+    expect(assignment.instruction).toContain("Choose your own angles");
+  });
+
+  it("counts only verified Sandbox Mirror publications toward an Assignment", () => {
+    let state = createAgent(input);
+    const session = startPlaygroundSession(state, state.presence!.id);
+    state = applyOperation(session, { type: "createAssignment", instruction: "Produce 2 original Sandbox posts about useful agent ideas.", presenceId: state.presence!.id, sessionId: session.playgroundSessions[0]!.id, environment: "sandbox" });
+    const assignment = state.assignments[0]!;
+    state = applyOperation(state, { type: "startAssignment", id: assignment.id, sessionId: session.playgroundSessions[0]!.id });
+    expect(state.assignments[0]).toMatchObject({ status: "active", progress: { verified: 0, required: 2 } });
+    const formed = formSandboxIntent(state, { sessionId: session.playgroundSessions[0]!.id, affordance: "post", text: "A specific idea about persistent agents.", assignmentId: assignment.id });
+    expect(formed.assignments[0]?.progress.verified).toBe(0);
+    const execution = formed.executions[0]!;
+    const delivered = deliverSandboxExecution(formed, execution.id);
+    expect(delivered.assignments[0]?.progress.verified).toBe(1);
+    expect(delivered.mirrorObjects[0]?.assignmentId).toBe(assignment.id);
+    expect(assignmentIsSatisfied(delivered.assignments[0]!)).toBe(false);
   });
 
   it("turns an explicit Chat publication request into a native X execution", () => {
@@ -324,7 +350,7 @@ describe("OpenPresence runtime boundaries", () => {
     expect(summary.current.detail).toContain("schedule grants permission");
   });
 
-  it("projects only verified public expression into Calendar history", () => {
+  it("projects only delivered public expression into Calendar history", () => {
     let state = createAgent(input);
     state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto" } } });
     state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "hourandcode", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
@@ -333,11 +359,39 @@ describe("OpenPresence runtime boundaries", () => {
     execution.status = "succeeded";
     execution.externalRef = { type: "x.post", id: "verified-1" };
     execution.executedAt = new Date().toISOString();
+    state.mirrorObjects.unshift({ id: "verified-mirror", bridgeId: "native:test", presenceId: state.presence!.id, channelId: "x", externalRef: execution.externalRef, objectType: "post", actorPresenceId: state.presence!.id, originExecutionId: execution.id, content: { text: "A durable public point of view." }, occurredAt: execution.executedAt, observedAt: execution.executedAt, visibility: "public", shareability: "presence-only" });
     state.outcomes.unshift({ id: "outcome-verified", socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, status: "succeeded", observedAt: new Date().toISOString(), metrics: { follows: 7 } });
     state.mirrorObjects.unshift({ id: "private-observation", bridgeId: "native:test", presenceId: state.presence!.id, channelId: "x", externalRef: { type: "x.post", id: "inbound-1" }, objectType: "post", author: { displayName: "Someone else" }, content: { text: "A private-to-the-model observation" }, occurredAt: new Date().toISOString(), observedAt: new Date().toISOString(), visibility: "private-thread", shareability: "presence-only" });
     const history = derivePublicHistory(state, state.presence!.id);
     expect(history).toHaveLength(1);
     expect(history[0]).toMatchObject({ kind: "post", text: "A durable public point of view.", externalRef: { id: "verified-1" }, externalUrl: "https://x.com/hourandcode/status/verified-1", metrics: { follows: 7 } });
+  });
+
+  it("projects an observed Presence-authored Mirror object without an OpenPresence execution", () => {
+    const state = createAgent(input);
+    state.mirrorObjects.unshift({ id: "ghost-mirror", bridgeId: "native:ghost", presenceId: state.presence!.id, channelId: "x", externalRef: { type: "x.post", id: "observed-1" }, objectType: "post", actorPresenceId: state.presence!.id, content: { text: "Published outside the runtime." }, occurredAt: new Date().toISOString(), observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only" });
+    const history = derivePublicHistory(state, state.presence!.id);
+    expect(history).toHaveLength(1);
+    expect(history[0]).toMatchObject({ text: "Published outside the runtime.", externalRef: { id: "observed-1" } });
+    expect(history[0]?.executionId).toBeUndefined();
+  });
+
+  it("attributes connected-channel history by the Presence identity handle", () => {
+    const state = createAgent(input);
+    state.mirrorObjects.unshift({ id: "identity-mirror", bridgeId: "bridge:identity", presenceId: state.presence!.id, channelId: "x", externalRef: { type: "x.post", id: "identity-1" }, objectType: "post", author: { displayName: "Jenny", handle: state.presence!.handle }, content: { text: "Observed from the connected account." }, occurredAt: new Date().toISOString(), observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only" });
+    const history = derivePublicHistory(state, state.presence!.id);
+    expect(history).toHaveLength(1);
+    expect(history[0]?.text).toBe("Observed from the connected account.");
+  });
+
+  it("does not create public history from a successful execution without a Mirror object", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto" } } });
+    state = formChatPostIntent(state, "Awaiting observation.");
+    const execution = state.executions[0]!;
+    execution.status = "succeeded";
+    execution.externalRef = { type: "x.post", id: "not-observed" };
+    expect(derivePublicHistory(state, state.presence!.id)).toHaveLength(0);
   });
 
   it("does not invent a live X destination for Sandbox history", () => {
@@ -471,6 +525,13 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.messages).toHaveLength(0);
     state = applyOperation(state, { type: "selectConversation", id: first });
     expect(state.messages[0]?.content).toBe("First thread");
+  });
+
+  it("lets punctuation-only Teach cues remain as operator context without a canned Agent reply", () => {
+    const state = applyOperation(createAgent(input), { type: "sendMessage", content: "?" });
+    expect(state.conversations[0]?.messages.map((message) => ({ role: message.role, content: message.content }))).toEqual([
+      { role: "operator", content: "?" },
+    ]);
   });
 
   it("keeps operator embodiment out of the cognition-safe PresenceContext", () => {
