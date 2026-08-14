@@ -18,8 +18,12 @@ const fixtureState = {
 };
 
 function runCli(url: string, args: string[]) {
+  return runCliAt(url, "playground", args);
+}
+
+function runCliAt(url: string, scope: string, args: string[]) {
   return new Promise<{ code: number | null; stdout: string; stderr: string }>((resolve) => {
-    const child = spawn(process.execPath, [cliPath, "playground", ...args, "--url", url], { cwd: process.cwd() });
+    const child = spawn(process.execPath, [cliPath, scope, ...args, "--url", url], { cwd: process.cwd() });
     let stdout = "";
     let stderr = "";
     child.stdout.on("data", (chunk) => { stdout += chunk.toString(); });
@@ -177,9 +181,93 @@ describe("Playground CLI", () => {
     expect(received).toMatchObject({ type: "addSlot", instruction: "Explain one useful boundary", day: "Thursday", time: "12:30", presenceId: "presence-1" });
   });
 
+  it("exposes scheduled Assignments through the top-level Schedule scope", async () => {
+    let received: unknown;
+    const server = await startApi((request, response) => {
+      if (request.method === "GET") return json(response, fixtureState);
+      let body = "";
+      request.on("data", (chunk) => { body += chunk.toString(); });
+      request.on("end", () => {
+        received = JSON.parse(body);
+        json(response, { ...fixtureState, assignments: [{ id: "assignment-1", presenceId: "presence-1", instruction: "Produce two posts", status: "draft", environment: "sandbox", progress: { verified: 0, required: 2 } }] });
+      });
+    });
+    const result = await runCliAt(server.url, "schedule", ["add", "--responsibility", "assign", "--instruction", "Produce two posts", "--day", "Friday", "--time", "09:15"]);
+    await server.close();
+    expect(result.code).toBe(0);
+    expect(received).toMatchObject({ type: "createAssignment", presenceId: "presence-1", environment: "sandbox", schedule: { day: "Friday", time: "09:15" } });
+    expect(JSON.parse(result.stdout).assignments[0].id).toBe("assignment-1");
+  });
+
+  it("translates Watching add and remove into Presence-scoped operations", async () => {
+    const operations: Array<Record<string, unknown>> = [];
+    let watches: unknown[] = [{ id: "watch-1", presenceId: "presence-1", title: "@Maya", query: "@Maya", kind: "creator", channel: "x", observation: { status: "watching", source: "automatic", observedCount: 0 } }];
+    const server = await startApi((request, response) => {
+      if (request.method === "GET") return json(response, { ...fixtureState, watches });
+      let body = "";
+      request.on("data", (chunk) => { body += chunk.toString(); });
+      request.on("end", () => {
+        const operation = JSON.parse(body) as Record<string, unknown>;
+        operations.push(operation);
+        watches = operation.type === "deleteWatch" ? [] : [{ id: "watch-2", presenceId: "presence-1", title: "AI founders", query: "AI founders", kind: "topic", channel: "x", observation: { status: "manual", source: "manual", observedCount: 0 } }];
+        json(response, { ...fixtureState, watches });
+      });
+    });
+    const added = await runCliAt(server.url, "watching", ["add", "--query", "AI founders", "--purpose", "Notice useful conversations"]);
+    const addedOutput = JSON.parse(added.stdout);
+    const removed = await runCliAt(server.url, "watching", ["remove", "--id", "watch-2"]);
+    await server.close();
+    expect(added.code).toBe(0);
+    expect(addedOutput.watches[0].observation.status).toBe("manual");
+    expect(operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "createWatch", presenceId: "presence-1", query: "AI founders" }),
+      expect.objectContaining({ type: "deleteWatch", id: "watch-2" }),
+    ]));
+    expect(removed.code).toBe(0);
+  });
+
+  it("exposes Assignment, original rehearsal, and calibration operations through Playground", async () => {
+    const operations: Array<Record<string, unknown>> = [];
+    const server = await startApi((request, response) => {
+      if (request.method === "GET") return json(response, { ...fixtureState, originalPostRehearsals: [{ id: "attempt-1", sessionId: "session-1", result: "published" }] });
+      let body = "";
+      request.on("data", (chunk) => { body += chunk.toString(); });
+      request.on("end", () => {
+        const operation = JSON.parse(body) as Record<string, unknown>;
+        operations.push(operation);
+        json(response, { ...fixtureState, originalPostRehearsals: [{ id: "attempt-1", sessionId: "session-1", result: "published" }] });
+      });
+    });
+    const assignment = await runCli(server.url, ["assignment", "create", "--instruction", "Produce two original posts"]);
+    const rehearsal = await runCli(server.url, ["rehearse", "--inspiration", "A useful boundary"]);
+    const feedback = await runCli(server.url, ["feedback", "--attempt", "attempt-1", "--reaction", "fits", "--reasons", "idea,voice"]);
+    await server.close();
+    expect(assignment.code).toBe(0);
+    expect(rehearsal.code).toBe(0);
+    expect(feedback.code).toBe(0);
+    expect(operations).toEqual(expect.arrayContaining([
+      expect.objectContaining({ type: "createAssignment", sessionId: "session-1", environment: "sandbox" }),
+      expect.objectContaining({ type: "considerOriginalPublication", sessionId: "session-1", inspiration: "A useful boundary" }),
+      expect.objectContaining({ type: "recordPreferenceEvidence", sessionId: "session-1", attemptId: "attempt-1", reaction: "fits", reasons: ["idea", "voice"] }),
+    ]));
+  });
+
   it("returns structured errors for a missing server", async () => {
     const result = await runCli("http://127.0.0.1:1", ["inspect"]);
     expect(result.code).toBe(1);
     expect(JSON.parse(result.stdout)).toMatchObject({ ok: false, error: { code: "SERVER_UNAVAILABLE" } });
+  });
+
+  it("blocks Schedule evaluation when the Presence is not explicitly Sandbox-scoped", async () => {
+    let posted = false;
+    const server = await startApi((request, response) => {
+      if (request.method === "POST") posted = true;
+      json(response, { ...fixtureState, calendar: [{ id: "slot-1", presence: "presence-1", instruction: "Evaluate this", day: "Friday", time: "12:00", objective: "usefulness", executionWindow: "12:00–12:00", enabled: true }] });
+    });
+    const result = await runCliAt(server.url, "schedule", ["run", "--id", "slot-1"]);
+    await server.close();
+    expect(result.code).toBe(1);
+    expect(JSON.parse(result.stdout)).toMatchObject({ ok: false, error: { code: "LIVE_SCOPE_BLOCKED" } });
+    expect(posted).toBe(false);
   });
 });

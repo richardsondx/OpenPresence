@@ -1,6 +1,6 @@
 import { readProviderSecret } from "./db";
 import { publicSelfGuidance } from "./runtime";
-import type { Conversation, ModelProvider, OpenPresenceState, Presence, PresenceChatMessage } from "./types";
+import type { Conversation, ModelProvider, OpenPresenceState, Presence, PresenceChatMessage, SocialAssetKind } from "./types";
 
 const REQUEST_TIMEOUT_MS = 60_000;
 
@@ -298,6 +298,22 @@ export async function generateAgentReply(state: OpenPresenceState, content: stri
 export async function generatePresenceChatReply(state: OpenPresenceState, presenceId: string, content: string, history: Array<Pick<PresenceChatMessage, "role" | "content">>, socialEvidence?: string, socialThreadContext?: string) {
   const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   if (!presence) throw new AiRuntimeError("Choose a Presence before starting a Presence Chat.");
+  if (process.env.OPENPRESENCE_AI_MOCK === "1") {
+    const normalized = content.toLowerCase().replace(/\s+/g, " ").trim();
+    const publicName = presence.publicSelf?.displayName ?? presence.name;
+    if (/(?:why are you responding|didn't mention|didn’t mention|not mention)/.test(normalized)) {
+      return "You're right: a standalone post is not automatically an invitation. I should stay quiet unless there is a real question, an open thread, or a useful contribution.";
+    }
+    if (/(?:who are you|what are you)/.test(normalized)) {
+      return `I'm ${publicName}. I show up here to make useful observations about the ideas and conversations in front of me, not to narrate the machinery behind them.`;
+    }
+    if (/(?:introduc|investor|founder fit|superconnector)/.test(normalized)) return "i'd name the specific fit first, then ask before making the introduction. a warm intro without evidence is just noise.";
+    if (/(?:memory|context|decision)/.test(normalized)) return "the useful test is whether the memory makes the next decision easier; anything that cannot change the next move is probably just transcript.";
+    if (/(?:test first|stay quiet|small ai agent|small agent)/.test(normalized)) return "I'd test the quiet decision first: replay posts with a real unresolved question beside clever but closed prompts, then check whether the Presence can decline the latter without sounding absent.";
+    if (normalized.includes("edge cases")) return "That is where the product tells the truth: happy paths demonstrate possibility; edge cases reveal whether the judgment holds.";
+    if (normalized.includes("my name is")) return "That is a memorable introduction. I'd keep the next move tied to what the person is actually trying to change, not just the biography.";
+    return "The post is worth answering on its own terms. I'd keep the next move tied to one concrete detail in the conversation rather than explain the system behind it.";
+  }
   return generateAgentReply(state, content, undefined, { social: true, presence, socialHistory: history, socialEvidence, socialThreadContext });
 }
 
@@ -305,6 +321,7 @@ export interface AgentSocialDecision {
   action: string;
   text: string;
   rationale?: string;
+  assets?: Array<{ kind: SocialAssetKind; name?: string; sourceUrl?: string }>;
 }
 
 export interface AgentSocialJudgment {
@@ -391,7 +408,21 @@ export function parseAgentSocialDecision(raw: string, allowedActions: string[]):
   const rationale = cleanDecisionText(parsed.rationale ?? parsed.reason);
   if (action === "no_op") return { action, text: "", rationale: rationale || undefined };
   if (!allowed.has(action)) return { action: "no_op", text: "", rationale: `Unsupported action returned by the Agent: ${action}.` };
-  return { action, text, rationale: rationale || undefined };
+  const supportedAssetKinds = new Set<SocialAssetKind>(["image", "video", "gif", "chart", "link"]);
+  const assets = Array.isArray(parsed.assets)
+    ? parsed.assets.map((value) => {
+      if (!value || typeof value !== "object") return undefined;
+      const item = value as Record<string, unknown>;
+      const rawKind = typeof item.kind === "string" ? item.kind.toLowerCase() : typeof item.type === "string" ? item.type.toLowerCase() : "";
+      if (!supportedAssetKinds.has(rawKind as SocialAssetKind)) return undefined;
+      return {
+        kind: rawKind as SocialAssetKind,
+        name: typeof item.name === "string" ? item.name.trim() || undefined : undefined,
+        sourceUrl: typeof item.sourceUrl === "string" ? item.sourceUrl.trim() || undefined : typeof item.url === "string" ? item.url.trim() || undefined : undefined,
+      };
+    }).filter((item): item is { kind: SocialAssetKind; name: string | undefined; sourceUrl: string | undefined } => Boolean(item)).slice(0, 4)
+    : undefined;
+  return { action, text, rationale: rationale || undefined, assets: assets?.length ? assets : undefined };
 }
 
 function cleanJudgmentField(value: unknown, fallback = "") {
@@ -459,17 +490,95 @@ export async function generateAgentSocialEdit(state: OpenPresenceState, instruct
   return parseAgentSocialEdit(raw, plannedAction);
 }
 
-function mockSocialDecision(instruction: string, actions: string[]): AgentSocialDecision {
+function assignmentMockCandidates(state: OpenPresenceState, instruction: string) {
+  // The Sandbox prompt contains private execution/context prose after the
+  // operator's Assignment. Classify from the Assignment itself plus the
+  // selected Agent/Presence profile, otherwise words such as "execution"
+  // from the runtime envelope can select the wrong fixture family.
+  const assignmentInstruction = instruction.match(/Assignment instruction:\s*([\s\S]*?)(?:\n\nHard progress state:|$)/i)?.[1]?.trim() ?? instruction;
+  const profile = [
+    state.agent?.name,
+    state.agent?.description,
+    state.presence?.name,
+    state.presence?.brief?.purpose,
+    state.presence?.brief?.audience,
+    state.presence?.brief?.primaryTerritory?.join(" "),
+    assignmentInstruction,
+  ].filter(Boolean).join(" ").toLowerCase();
+  if (/\b(?:dan klone|strategic thinking|self-directed|creator-educator|dan koe)\b/.test(profile)) {
+    return [
+      "Most people do not need a better productivity system. They need a harder question about what their work is actually for.",
+      "A business gets clearer when you stop asking what to add and start asking which promise the customer already pays to believe.",
+      "Self-directed work is not freedom from structure. It is choosing a constraint that makes the next decision obvious.",
+      "The fastest way to improve your strategy is to publish the assumption you are testing, then watch what thoughtful people challenge.",
+      "A useful idea should change your calendar, your offer, or your next conversation. Otherwise it is just an interesting sentence.",
+      "Most creators are not short on ideas. They are short on a point of view strong enough to make some ideas irrelevant.",
+      "You do not find focus by thinking harder about every option. You find it by deciding what you are willing to ignore.",
+      "A small experiment beats a large plan when the plan is mostly a way to avoid hearing what the market says.",
+      "The goal is not to work harder at the thing you started. It is to notice when the thing you started no longer deserves your best hours.",
+      "A personal brand becomes useful when it helps someone make a decision before they know your name.",
+      "If the lesson cannot survive contact with a real project, it is probably content about work rather than useful work.",
+      "The best distribution strategy is a precise idea that gives the right person language for a problem they already feel.",
+    ];
+  }
+  const explicitOperatorProfile = /\b(?:alex klonemozi|blunt operator|offers?|customer value|pricing|sales|execution|hormozi)\b/.test(profile);
+  if (!explicitOperatorProfile && /\b(?:genny|boardly|builder|product-building|founder|ai\/product)\b/.test(profile)) {
+    return [
+      "A useful builder does not automate the judgment. It removes the blank page so judgment has something concrete to improve.",
+      "The best AI product is often the one that leaves a person with a better next decision, not a longer output.",
+      "Founders do not need another dashboard. They need one honest signal that changes what they do next.",
+      "A strong product loop is observe, choose, act, and check what actually reached the user.",
+      "Good automation handles repetition while keeping the context that makes a contribution worth trusting.",
+      "A public point of view should be recognizable without borrowing someone else’s identity or vocabulary.",
+      "The smallest reliable feature is the one that shortens a real decision without hiding the tradeoff.",
+      "A better prompt cannot rescue a workflow that gives the agent no evidence about what happened after the action.",
+      "Trust grows when the system can say what it knows, what it inferred, and what it still needs to inspect.",
+      "The right metric is not how much an agent produces. It is whether the next human decision gets easier and sharper.",
+      "A calm product can still move quickly when every action has a visible owner, outcome, and recovery path.",
+      "The best agent loop is not maximum activity. It is useful attention followed by evidence that the action mattered.",
+    ];
+  }
+  if (explicitOperatorProfile) {
+    return [
+      "Your offer is not weak because the copy is boring. It is weak because the customer cannot see the expensive problem it removes.",
+      "More leads will not rescue an offer nobody understands. Make the outcome concrete before you buy more attention.",
+      "If the buyer has to do the math, you already lost leverage. Name the result, the time saved, and the risk removed.",
+      "A sale is not a persuasion contest. It is a clear exchange where the value of the outcome beats the cost of the decision.",
+      "The fastest pricing test is not another survey. Put a sharper promise in front of a real buyer and see where the conversation breaks.",
+      "Retention is a product signal, not a victory lap. If customers stay but do not expand, find the missing next outcome.",
+      "A funnel with more steps is not a better funnel. Remove every step that does not increase belief or reduce risk.",
+      "If your team needs you to close every deal, the problem is not motivation. The offer and the sales process are still trapped in your head.",
+      "Charge for the result you create, then make the path to that result easier to believe and easier to deliver.",
+      "The market does not reward effort. It rewards a valuable outcome delivered with less uncertainty than the alternatives.",
+      "A cheap customer is expensive when the promise is vague. Specificity is what makes acquisition and delivery compound.",
+      "The best growth lever is usually the bottleneck you can measure, not the tactic that sounds most impressive in a thread.",
+    ];
+  }
+  return [
+    "A useful agent keeps the evidence behind a decision, not just the decision itself.",
+    "The smallest reliable loop is observe, choose, act, and check what reached the world.",
+    "A point of view becomes useful when it changes the next decision.",
+    "Good work gets clearer when the tradeoff is named instead of hidden behind broad advice.",
+  ];
+}
+
+function mockSocialDecision(state: OpenPresenceState, instruction: string, actions: string[]): AgentSocialDecision {
   const normalized = instruction.toLowerCase();
   const can = (action: string) => actions.includes(action);
   if (normalized.includes("hard progress state") && can("post")) {
-    const secondCandidate = /1\s+of\s+\d+\s+verified publications/.test(normalized);
+    const progress = Number(normalized.match(/hard progress state:\s*(\d+)\s+of\s+\d+\s+verified publications/)?.[1] ?? 0);
+    const rejectedCandidates = Number(normalized.match(/previous candidate rejections:\s*(\d+)/)?.[1] ?? 0);
+    const candidates = assignmentMockCandidates(state, instruction);
+    const requestedKinds = [...new Set((["image", "chart", "gif", "link", "video"] as const).filter((kind) => new RegExp(`\\b${kind}\\b`, "i").test(normalized)))];
+    const assetKind = requestedKinds.length ? requestedKinds[progress % requestedKinds.length] : undefined;
     return {
       action: "post",
-      text: secondCandidate
-        ? "A useful agent keeps a small record of the evidence behind a decision, so the next move starts with context instead of a blank page."
-        : "Agent memory earns its keep when it preserves the reason a choice made sense, not just the choice itself.",
+      // A new Assignment can share the same Sandbox session as an earlier
+      // one. Offset mock candidates after a rejection so the runtime can
+      // make progress instead of proposing the same first candidate forever.
+      text: candidates[(progress + rejectedCandidates) % candidates.length]!,
       rationale: "The deterministic Sandbox fixture produced a distinct Assignment candidate grounded in the Agent context.",
+      assets: assetKind ? [{ kind: assetKind, name: `Genny ${assetKind} rehearsal asset` }] : undefined,
     };
   }
   if ((normalized.includes("consider an original publication") || normalized.includes("fresh simulated")) && can("post")) {
@@ -480,9 +589,23 @@ function mockSocialDecision(instruction: string, actions: string[]): AgentSocial
     };
   }
   if (normalized.includes("evaluate the current simulated") && can("reply")) {
+    const replyFixtures = [
+      { markers: ["lmao yeah introductions", "tired of people"], text: "the irony is doing cardio. i'm a people person with a very selective admissions policy." },
+      { markers: ["networking as a service"], text: "networking as a service is just friendship with a pricing page." },
+      { markers: ["less features the better"], text: "the less features the better, until the missing one is the reason someone leaves." },
+      { markers: ["every answer is just learn sales", "learn sales"], text: "sales is not a personality transplant. it is finding out what the other person already needs." },
+      { markers: ["paragraph to explain the magic", "magic trick"], text: "if the explanation is the product, ship the explanation before the demo." },
+      { markers: ["warm if both people", "both people know why"], text: "warm means both sides know why the room exists. otherwise it is just a calendar ambush." },
+      { markers: ["roadmap says solved", "keeps showing up"], text: "a roadmap can mark done. only the next conversation can prove useful." },
+      { markers: ["selective admissions"], text: "selective admissions is networking with a boundary and, frankly, better manners." },
+      { markers: ["dashboard cannot", "another chart"], text: "a chart can show motion. it cannot supply a point of view." },
+      { markers: ["next human message", "more interesting"], text: "the best reply leaves the next person with a sharper thought, not a longer thread." },
+    ];
+    const newestObject = normalized.match(/newest unjudged relevant object is from [^:]+:\s*[“"]([^”"]+)[”"]/i)?.[1] ?? normalized;
+    const fixture = replyFixtures.find((candidate) => candidate.markers.some((marker) => newestObject.includes(marker)));
     return {
       action: "reply",
-      text: "The useful test is whether the memory makes the next decision easier.",
+      text: fixture?.text ?? "the useful test is whether the next message makes the decision easier, not whether it makes the thread longer.",
       rationale: "The deterministic Sandbox fixture answers the simulated inbound object with one concrete point.",
     };
   }
@@ -491,7 +614,7 @@ function mockSocialDecision(instruction: string, actions: string[]): AgentSocial
 
 export async function generateAgentSocialDecision(state: OpenPresenceState, instruction: string, allowedActions: string[]) {
   const actions = [...new Set(allowedActions.filter(Boolean))];
-  if (process.env.OPENPRESENCE_AI_MOCK === "1") return mockSocialDecision(instruction, actions);
-  const raw = await generateAgentReply(state, `${instruction}\n\nChoose exactly one action from: ${actions.join(", ")}, or no_op. Return JSON only in this shape: {"action":"...","text":"...","rationale":"short explanation"}. The rationale is for the internal audit and must not contain hidden chain-of-thought. Use an empty text for no_op, like, or reaction.`, undefined, { social: true });
+  if (process.env.OPENPRESENCE_AI_MOCK === "1") return mockSocialDecision(state, instruction, actions);
+  const raw = await generateAgentReply(state, `${instruction}\n\nChoose exactly one action from: ${actions.join(", ")}, or no_op. Return JSON only in this shape: {"action":"...","text":"...","rationale":"short explanation","assets":[{"kind":"image|video|gif|chart|link","name":"optional label","sourceUrl":"optional URL"}]}. Include assets only when the supplied context or an explicitly configured Sandbox asset capability supports them; never invent a URL or claim an asset was created when it was not. The rationale is for the internal audit and must not contain hidden chain-of-thought. Use an empty text for no_op, like, or reaction.`, undefined, { social: true });
   return parseAgentSocialDecision(raw, actions);
 }

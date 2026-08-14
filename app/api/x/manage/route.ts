@@ -4,6 +4,7 @@ import { z } from "zod";
 import { readState, writeState } from "@/lib/db";
 import { disconnectNativeX, saveNativeXCredentials, testXCredentials, upsertNativeXConnection } from "@/lib/x";
 import { reconcileNativeX } from "@/lib/native-x";
+import { stateForContext } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
 
@@ -28,7 +29,10 @@ const input = z.discriminatedUnion("action", [
 export async function POST(request: Request) {
   try {
     const parsed = input.parse(await request.json());
-    const state = readState();
+    const state = stateForContext(readState(), {
+      agentId: request.headers.get("x-openpresence-agent-id"),
+      presenceId: request.headers.get("x-openpresence-presence-id"),
+    });
     const presence = state.presences.find((item) => item.id === parsed.presenceId);
     if (!presence || presence.channel !== "x") throw new Error("An X credential can only be attached to an X Presence.");
     if (parsed.action === "disconnect") {

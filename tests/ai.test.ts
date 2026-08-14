@@ -27,6 +27,90 @@ describe("Agent social decision parsing", () => {
     });
   });
 
+  it("keeps assignment fixtures grounded in the selected Agent context", async () => {
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
+    const hardProgress = (instruction: string) => `Work inside this explicit Assignment. Assignment instruction: ${instruction}\nHard progress state: 0 of 10 verified publications. Previous candidate rejections: 0.`;
+    const builder = createAgent({ name: "Genny", description: "A builder-focused product Presence for practical AI lessons.", mode: "agent", handle: "@genny_ai", accent: "#D68754" });
+    const creator = createAgent({ name: "Dan Klone", description: "A concise, contrarian creator-educator focused on strategic thinking and self-directed work.", mode: "agent", handle: "@dan_klone", accent: "#7A8FD8" });
+    const operator = createAgent({ name: "Alex Klonemozi", description: "A blunt operator focused on offers, customer value, sales, and execution.", mode: "agent", handle: "@alex_klonemozi", accent: "#C96B45" });
+
+    const [builderDecision, creatorDecision, operatorDecision] = await Promise.all([
+      generateAgentSocialDecision(builder, hardProgress("Produce Boardly-inspired product-building posts."), ["post", "no_op"]),
+      generateAgentSocialDecision(creator, hardProgress("Produce Dan Koe-inspired strategic thinking posts."), ["post", "no_op"]),
+      generateAgentSocialDecision(operator, hardProgress("Produce Alex Hormozi-inspired offers and sales posts."), ["post", "no_op"]),
+    ]);
+
+    expect(builderDecision.text).toContain("builder");
+    expect(creatorDecision.text).toContain("productivity");
+    expect(operatorDecision.text).toContain("offer");
+    expect(new Set([builderDecision.text, creatorDecision.text, operatorDecision.text]).size).toBe(3);
+  });
+
+  it("does not let private execution prose steer the selected Presence fixture", async () => {
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
+    const state = createAgent({ name: "Jenny", description: "Explain how persistent AI agents are changing software.", audience: "founders, builders, operators, and curious people exploring AI", mode: "agent", handle: "@genny_ai", accent: "#D68754" });
+    state.presence = { ...state.presence!, name: "Genny", brief: { ...state.presence!.brief, purpose: "A useful AI superconnector for builders: surface thoughtful people, ideas, and next steps around AI agents and software.", primaryTerritory: ["AI agents", "founder questions", "thoughtful introductions"] } };
+    state.presences = [state.presence];
+    const prompt = `Work inside this explicit Assignment. Assignment instruction: Produce exactly 2 original Sandbox posts about practical AI and product-building lessons, using a concise builder style.\n\nHard progress state: 0 of 2 verified publications. Previous candidate rejections: 0.\n\nExecution envelope: post=auto, reply=review. Do not mention internal systems.`;
+    const decision = await generateAgentSocialDecision(state, prompt, ["post", "no_op"]);
+    expect(decision.text).toContain("builder");
+    expect(decision.text).not.toContain("offer");
+  });
+
+  it("keeps local reply rehearsal specific instead of recycling one response", async () => {
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
+    const state = createAgent({ name: "Genny", description: "Make useful founder observations.", mode: "agent", handle: "@genny_ai", accent: "#D68754" });
+    const first = await generateAgentSocialDecision(state, "Evaluate the current simulated X world. Newest object: lmao yeah introductions but for the people tired of people ultimate self own right there", ["reply", "no_op"]);
+    const second = await generateAgentSocialDecision(state, "Evaluate the current simulated X world. Newest object: networking as a service sounds like a feature request from a person who hates networking", ["reply", "no_op"]);
+    expect(first.text).toContain("selective admissions policy");
+    expect(second.text).toContain("pricing page");
+    expect(first.text).not.toBe(second.text);
+  });
+
+  it("parses supported publication asset metadata without inventing unsupported kinds", () => {
+    expect(parseAgentSocialDecision(JSON.stringify({
+      action: "post",
+      text: "A post with evidence.",
+      assets: [
+        { kind: "image", name: "diagram" },
+        { kind: "chart", sourceUrl: "https://example.com/chart" },
+        { kind: "audio", name: "ignored" },
+      ],
+    }), ["post", "no_op"])).toMatchObject({
+      action: "post",
+      assets: [
+        { kind: "image", name: "diagram" },
+        { kind: "chart", sourceUrl: "https://example.com/chart" },
+      ],
+    });
+  });
+
+  it("keeps local Presence Chat rehearsal specific to the social context", async () => {
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
+    const state = createAgent({ name: "Genny", description: "Make thoughtful founder introductions.", mode: "agent", handle: "@genny_ai", accent: "#D68754" });
+    const reply = await generatePresenceChatReply(state, state.presence!.id, "A founder wants an investor introduction. What would you do?", []);
+    expect(reply).toContain("specific fit");
+    expect(reply).not.toContain("Agent runtime");
+  });
+
+  it("does not let prior rehearsal context make the Presence answer the wrong post", async () => {
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
+    const state = createAgent({ name: "Genny", description: "Make useful founder observations.", mode: "agent", handle: "@genny_ai", accent: "#D68754" });
+    const reply = await generatePresenceChatReply(state, state.presence!.id, "The edge cases are where the product tells the truth.", [
+      { role: "presence", content: "The useful test is whether the memory makes the next decision easier." },
+    ]);
+    expect(reply).toContain("happy paths");
+    expect(reply).not.toContain("memory makes the next decision easier");
+  });
+
+  it("keeps unmatched local Chat posts out of the Agent-runtime fallback", async () => {
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
+    const state = createAgent({ name: "Genny", description: "Make useful founder observations.", mode: "agent", handle: "@genny_ai", accent: "#D68754" });
+    const reply = await generatePresenceChatReply(state, state.presence!.id, "A quiet product observation with no fixture marker.", []);
+    expect(reply).toContain("one concrete detail");
+    expect(reply).not.toContain("Agent runtime");
+  });
+
   it("recovers a decision when a local model emits literal newlines inside JSON text", () => {
     const raw = '{"action":"post","text":"A calendar grants permission, not obligation.\nSilence can be the useful choice.","rationale":"Uses a concrete source detail."}';
     expect(parseAgentSocialDecision(raw, ["post", "no_op"])).toEqual({ action: "post", text: "A calendar grants permission, not obligation.\nSilence can be the useful choice.", rationale: "Uses a concrete source detail." });

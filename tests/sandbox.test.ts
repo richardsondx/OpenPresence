@@ -6,6 +6,30 @@ import { addSandboxEvent, advanceSandboxTime, applyOperation, beginOriginalPostR
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
 describe("Sandbox and Playground boundaries", () => {
+  it("isolates every Playground world by Presence while keeping the Agent mind shared", () => {
+    let state = createAgent(input);
+    const agentId = state.agent!.id;
+    const firstPresenceId = state.presence!.id;
+    const sharedMind = state.files.filter((file) => ["BRAIN", "SOUL", "MISSION", "TASTE", "MEMORY", "SKILLS"].includes(file.kind)).map((file) => `${file.kind}:${file.content}`).join("\n");
+    state = startPlaygroundSession(state, firstPresenceId);
+    const firstSession = state.playgroundSessions.find((session) => session.presenceId === firstPresenceId)!;
+    state = addSandboxEvent(state, { sessionId: firstSession.id, actionId: "post", actorName: "X audience", actorHandle: "@x_audience", content: "X-only rehearsal context." });
+
+    state = applyOperation(state, { type: "createPresence", input: { channel: "linkedin", name: "Jenny LinkedIn", handle: "@jenny_linkedin", mode: "agent", accent: "#4F7CAC" } });
+    const secondPresenceId = state.presence!.id;
+    state = startPlaygroundSession(state, secondPresenceId);
+    const secondSession = state.playgroundSessions.find((session) => session.presenceId === secondPresenceId)!;
+
+    expect(secondSession.id).not.toBe(firstSession.id);
+    expect(secondSession.environmentId).not.toBe(firstSession.environmentId);
+    expect(secondSession.channelId).toBe("linkedin");
+    expect(state.mirrorObjects.filter((object) => object.sessionId === secondSession.id)).toHaveLength(0);
+    expect(state.sandboxActors.filter((actor) => actor.sessionId === secondSession.id)).toHaveLength(0);
+    expect(state.agent?.id).toBe(agentId);
+    expect(state.files.filter((file) => ["BRAIN", "SOUL", "MISSION", "TASTE", "MEMORY", "SKILLS"].includes(file.kind)).map((file) => `${file.kind}:${file.content}`).join("\n")).toBe(sharedMind);
+
+  });
+
   it("creates a persistent simulated environment for a new Presence", () => {
     const state = createAgent(input);
     expect(state.presence?.environment).toBe("sandbox");
@@ -54,6 +78,22 @@ describe("Sandbox and Playground boundaries", () => {
     expect(object?.externalRef.type).toBe("x.post");
     expect(state.mirrorEvents[0]?.sessionId).toBe(session.id);
     expect(state.events.find((item) => item.title === "Sandbox event observed")?.sourceObjectId).toBe(object?.id);
+  });
+
+  it("removes one Sandbox feed object without removing the rest of the rehearsal", () => {
+    let state = startPlaygroundSession(createAgent(input));
+    const session = state.playgroundSessions[0]!;
+    state = addSandboxEvent(state, { sessionId: session.id, actionId: "post", actorName: "Maya Chen", content: "Keep this post visible." });
+    const post = state.mirrorObjects[0]!;
+    state = addSandboxEvent(state, { sessionId: session.id, actionId: "reply", actorName: "Jenny", content: "Remove only this reply.", targetExternalRef: post.externalRef });
+    const reply = state.mirrorObjects.find((item) => item.objectType === "reply")!;
+
+    state = applyOperation(state, { type: "removeSandboxObject", sessionId: session.id, objectId: reply.id });
+    expect(state.mirrorObjects.map((item) => item.id)).toEqual([post.id]);
+    expect(state.events[0]?.title).toBe("Sandbox item removed");
+
+    state = applyOperation(state, { type: "removeSandboxObject", sessionId: session.id, objectId: post.id });
+    expect(state.mirrorObjects).toHaveLength(0);
   });
 
   it("can load replay history without triggering social cognition", async () => {
@@ -152,6 +192,29 @@ describe("Sandbox and Playground boundaries", () => {
     expect(state.executions[0]?.externalRef?.id).toMatch(/^sandbox-/);
     expect(state.mirrorObjects[0]?.actorPresenceId).toBe(state.presence?.id);
     expect(state.nativeConnections).toHaveLength(0);
+  });
+
+  it("delivers a Sandbox execution idempotently and carries publication assets into the Mirror", () => {
+    let state = startPlaygroundSession(createAgent(input));
+    const session = state.playgroundSessions[0]!;
+    state = formSandboxIntent(state, {
+      sessionId: session.id,
+      affordance: "post",
+      text: "A post with an evidence trail.",
+      assets: [
+        { name: "evidence chart", kind: "chart", mimeType: "image/svg+xml", dataUrl: "data:image/svg+xml,%3Csvg%3E%3C/svg%3E" },
+        { name: "reference", kind: "link", sourceUrl: "https://openpresence.ai" },
+      ],
+    });
+    const execution = state.executions[0]!;
+    state = deliverSandboxExecution(state, execution.id);
+    const once = state;
+    state = deliverSandboxExecution(state, execution.id);
+    expect(state.mirrorObjects.filter((item) => item.originExecutionId === execution.id)).toHaveLength(1);
+    expect(state.outcomes.filter((item) => item.executionId === execution.id)).toHaveLength(1);
+    expect(state.assignments).toEqual(once.assignments);
+    expect(state.mirrorObjects[0]?.assetRefs?.map((ref) => ref.kind)).toEqual(["chart", "link"]);
+    expect(state.publications[0]?.assetIds).toHaveLength(2);
   });
 
   it("keeps review-mode replies pending instead of silently delivering them", () => {

@@ -30,7 +30,7 @@ test("Feed is verified history and Calendar remains a view over it", async ({ pa
   await page.getByRole("button", { name: "Schedule", exact: true }).first().click();
   await expect(page.getByRole("heading", { name: "Schedule", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Add intent", exact: true })).toBeVisible();
-  await expect(page.getByText("Words come later, from the moment.", { exact: false })).toBeVisible();
+  await expect(page.getByText("Give Jenny time-bound permission to notice, decide, and work toward delegated outcomes.", { exact: false })).toBeVisible();
 });
 
 test("Feed explains why a Sandbox expression has no live X destination", async ({ page }) => {

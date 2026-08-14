@@ -1,7 +1,8 @@
 import { z } from "zod";
 import { applyOperation } from "./runtime";
-import { authenticateBridgeKey, deleteBridgeCredential, issueBridgeKey, readState, revokeBridgeKey, writeState } from "./db";
+import { authenticateBridgeKey, deleteBridgeCredential, issueBridgeKey, readBridgeCredentialMetadata, readState, revokeBridgeKey, writeState } from "./db";
 import type { Bridge, Execution, LiveEvent, MirrorObject, OpenPresenceState, Outcome } from "./types";
+import { bridgeAdapterStatus } from "./bridge-contract";
 
 const entityRef = z.object({ type: z.string().min(1).max(80), id: z.string().min(1).max(240) });
 const author = z.object({ externalRef: entityRef.optional(), displayName: z.string().min(1).max(160), handle: z.string().max(160).optional() }).optional();
@@ -10,6 +11,7 @@ export const inboundEventInput = z.object({ sourceEventId: z.string().min(1).max
 export const eventsInput = z.object({ events: z.array(inboundEventInput).min(1).max(500) });
 export const reconcileInput = z.object({ cursor: z.string().max(500).optional(), objects: z.array(mirrorObjectInput).max(2_000) });
 export const claimInput = z.object({ executorId: z.string().min(1).max(160), limit: z.number().int().min(1).max(50).default(10) });
+export const heartbeatInput = z.object({ executorId: z.string().min(1).max(160) });
 export const ackInput = z.object({ executorId: z.string().min(1).max(160), externalRef: entityRef, observedAt: z.string().datetime().optional() });
 export const failInput = z.object({ executorId: z.string().min(1).max(160), code: z.string().max(80).optional(), message: z.string().min(1).max(1_000), retryable: z.boolean().default(false) });
 export const outcomeInput = z.object({ executionId: z.string().min(1), status: z.enum(["succeeded", "failed", "unknown"]), metrics: z.record(z.number()).default({}), evidence: z.array(entityRef).default([]) });
@@ -49,7 +51,7 @@ export function rotateBridgeKey(source: OpenPresenceState, bridgeId: string) {
   return { state: next, key };
 }
 
-export function revokeBridge(source: OpenPresenceState, bridgeId: string) { const next = applyOperation(source, { type: "revokeBridge", id: bridgeId }); revokeBridgeKey(bridgeId); writeState(next); return readState(); }
+export function revokeBridge(source: OpenPresenceState, bridgeId: string) { const next = applyOperation(source, { type: "revokeBridge", id: bridgeId }); revokeBridgeKey(bridgeId); const metadata = readBridgeCredentialMetadata(bridgeId); const revoked = next.bridges.find((bridge) => bridge.id === bridgeId); if (metadata && revoked) Object.assign(revoked, metadata); writeState(next); return next; }
 
 export function removeBridge(source: OpenPresenceState, bridgeId: string) {
   const bridge = source.bridges.find((item) => item.id === bridgeId);
@@ -58,13 +60,32 @@ export function removeBridge(source: OpenPresenceState, bridgeId: string) {
   const next = applyOperation(source, { type: "removeBridge", id: bridgeId });
   deleteBridgeCredential(bridgeId);
   writeState(next);
-  return readState();
+  return next;
 }
 
 function touchBridge(state: OpenPresenceState, bridge: Bridge, synced = false) {
-  const now = timestamp(); bridge.state = "online"; bridge.lastSeenAt = now; if (synced) bridge.lastSyncAt = now; bridge.updatedAt = now;
+  const now = timestamp(); bridge.state = "online"; bridge.adapterStatus = "connected"; bridge.lastSeenAt = now; if (synced) bridge.lastSyncAt = now; bridge.updatedAt = now;
   const sync = state.bridgeSync.find((item) => item.bridgeId === bridge.id) ?? ({ bridgeId: bridge.id, status: "idle" } as OpenPresenceState["bridgeSync"][number]);
   sync.status = "healthy"; sync.lastSyncAt = synced ? now : sync.lastSyncAt; sync.error = undefined; if (!state.bridgeSync.some((item) => item.bridgeId === bridge.id)) state.bridgeSync.unshift(sync);
+}
+
+export function heartbeatBridge(bridge: Bridge, executorId: string) {
+  const state = readState();
+  const current = state.bridges.find((item) => item.id === bridge.id);
+  if (!current) throw new Error("Bridge not found");
+  const now = timestamp();
+  current.adapterStatus = "connected";
+  current.lastHeartbeatAt = now;
+  current.lastSeenAt = now;
+  current.state = "online";
+  current.updatedAt = now;
+  const sync = state.bridgeSync.find((item) => item.bridgeId === current.id) ?? ({ bridgeId: current.id, status: "idle" } as OpenPresenceState["bridgeSync"][number]);
+  sync.status = "healthy";
+  sync.error = undefined;
+  if (!state.bridgeSync.some((item) => item.bridgeId === current.id)) state.bridgeSync.unshift(sync);
+  state.events.unshift(bridgeEvent(state, "Bridge adapter checked in", `${executorId} is connected and ready for ${current.name}.`, "positive"));
+  writeState(state);
+  return { bridge: current, status: bridgeAdapterStatus(current) };
 }
 
 function upsertObject(state: OpenPresenceState, bridge: Bridge, input: z.infer<typeof mirrorObjectInput>, sourceEventId?: string, archived = false): MirrorObject {

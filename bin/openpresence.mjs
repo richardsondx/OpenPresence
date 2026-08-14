@@ -11,9 +11,9 @@ const HELP = `OpenPresence agent CLI
 The CLI is sandbox-only and emits JSON by default so another agent can consume it.
 
 Usage:
-  openpresence playground <command> [options]
+  openpresence <scope> <command> [options]
 
-Commands:
+Playground commands:
   start       Start a new Playground session
   inspect     Return the current world, Presence, decisions, and review queue
   inject      Add a simulated social event and let the Agent evaluate it
@@ -23,15 +23,33 @@ Commands:
   advance     Move virtual time and evaluate due Standing Intents
   schedule    Add a Calendar Standing Intent used by later Playground time advances
   timeline    Return the session's auditable event/intent/execution timeline
+  rehearse    Consider an original publication and record the result
+  feedback    Record preference evidence for the latest or selected rehearsal
+  assignment  Create, start, continue, inspect, or cancel a Sandbox Assignment
   approve-introduction  Approve a consent-aware sandbox introduction
   decline-introduction  Decline a proposed sandbox introduction
   reset       Reset the selected session to a fresh simulated world
   run         Execute a JSON scenario file step by step
 
+Schedule commands:
+  list         Return Presence-scoped standing intentions and Assignments
+  add          Add a Consider standing intention or a scheduled Assignment
+  edit         Edit an existing Consider standing intention
+  run          Evaluate one standing intention now (Sandbox-safe)
+  cancel       Cancel a scheduled Assignment
+
+Watching commands:
+  list         Return Presence-scoped Watches and source status
+  add          Add a creator, topic, conversation, or opportunity Watch
+  remove       Remove a Watch
+
 Common options:
   --url <url>          OpenPresence server URL (default: $OPENPRESENCE_URL or localhost:3000)
   --session <id>       Playground session id
   --presence <id>      Presence id when starting a session
+  --responsibility <mode>  Schedule mode: consider (default) or assign
+  --id <id>            Existing Watch, Assignment, Calendar, or rehearsal id
+  --reasons <list>     Comma-separated preference reasons for feedback
   --minutes-from-now <number> Schedule relative to the session's virtual clock
   --assets-json <json> JSON array of simulated assets; use path for local fixtures
   --observe-only       Add replay context without triggering social cognition
@@ -43,6 +61,9 @@ Examples:
   openpresence playground inject --actor Maya --handle @maya --action reply --content "What are you building?"
   openpresence playground consider --session session_123
   openpresence playground advance --session session_123 --minutes 60
+  openpresence playground assignment create --instruction "Produce 2 original posts about useful agent decisions"
+  openpresence schedule add --instruction "Teach one useful idea" --day Tuesday --time 08:00
+  openpresence watching add --query "@AlexHormozi" --purpose "Study offer clarity"
   openpresence playground run scenarios/reply.json
 `;
 
@@ -117,6 +138,14 @@ function sessionFor(state, explicitSessionId) {
 
 function presenceFor(state, session) {
   return state.presences?.find((item) => item.id === session.presenceId) ?? state.presence;
+}
+
+function selectedPresence(state, explicitPresenceId) {
+  const presence = explicitPresenceId
+    ? state.presences?.find((item) => item.id === explicitPresenceId) ?? (state.presence?.id === explicitPresenceId ? state.presence : undefined)
+    : state.presences?.find((item) => item.id === state.activePresenceId) ?? state.presence;
+  if (!presence) fail("No Presence exists. Create an Agent and Presence first.", "NO_PRESENCE");
+  return presence;
 }
 
 function scopedMeaningFiles(state, presence) {
@@ -248,6 +277,28 @@ function projectState(state, explicitSessionId, mode = "inspect") {
         publication: item.publication,
       })),
     network: { searches: networkSearches, introductions: networkIntroductions },
+    assignments: (state.assignments ?? [])
+      .filter((item) => item.sessionId === session.id || (item.status === "draft" && item.presenceId === presence.id))
+      .map((item) => ({
+        id: item.id,
+        instruction: item.instruction,
+        status: item.status,
+        environment: item.environment,
+        presenceId: item.presenceId,
+        sessionId: item.sessionId,
+        schedule: item.schedule,
+        progress: item.progress,
+        rejectedCandidates: item.rejectedCandidates,
+        lastOutcome: item.lastOutcome,
+        createdAt: item.createdAt,
+        updatedAt: item.updatedAt,
+      })),
+    rehearsals: (state.originalPostRehearsals ?? [])
+      .filter((item) => item.sessionId === session.id)
+      .map((item) => ({ ...item })),
+    preferenceEvidence: (state.preferenceEvidence ?? [])
+      .filter((item) => item.sessionId === session.id)
+      .map((item) => ({ ...item })),
     recentEvents: events.slice(0, 12).map((item) => ({
       id: item.id,
       type: item.type,
@@ -271,6 +322,101 @@ function projectState(state, explicitSessionId, mode = "inspect") {
     ].sort((left, right) => String(right.at ?? "").localeCompare(String(left.at ?? "")));
   }
   return result;
+}
+
+function projectSchedule(state, explicitPresenceId, mode = "list") {
+  const presence = selectedPresence(state, explicitPresenceId);
+  const calendar = (state.calendar ?? [])
+    .filter((item) => item.presence === presence.id)
+    .map((item) => ({
+      id: item.id,
+      instruction: item.instruction,
+      label: item.label,
+      day: item.day,
+      time: item.time,
+      objective: item.objective,
+      executionWindow: item.executionWindow,
+      enabled: item.enabled,
+      lastEvaluatedAt: item.lastEvaluatedAt,
+      standingIntentId: item.standingIntentId,
+    }));
+  const standingIntents = (state.standingIntents ?? [])
+    .filter((item) => !item.presenceId || item.presenceId === presence.id)
+    .map((item) => ({
+      id: item.id,
+      instruction: item.instruction,
+      objective: item.objective,
+      status: item.status,
+      trigger: item.trigger,
+      executionWindow: item.executionWindow,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+    }));
+  const assignments = (state.assignments ?? [])
+    .filter((item) => item.presenceId === presence.id)
+    .map((item) => ({
+      id: item.id,
+      instruction: item.instruction,
+      status: item.status,
+      environment: item.environment,
+      sessionId: item.sessionId,
+      schedule: item.schedule,
+      progress: item.progress,
+      rejectedCandidates: item.rejectedCandidates,
+      lastOutcome: item.lastOutcome,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+    }));
+  const intents = (state.socialIntents ?? []).filter((item) => item.presenceId === presence.id);
+  const executions = (state.executions ?? []).filter((item) => item.presenceId === presence.id);
+  const outcomes = (state.outcomes ?? []).filter((item) => item.presenceId === presence.id);
+  const events = (state.events ?? []).filter((item) => item.presenceId === presence.id).slice(0, 12);
+  return {
+    ok: true,
+    command: mode,
+    environment: "sandbox",
+    presence: { id: presence.id, name: presence.name, handle: presence.handle, channel: presence.channel, connectionMode: presence.connectionMode },
+    calendar,
+    standingIntents,
+    assignments,
+    evaluations: intents.map((intent) => ({
+      id: intent.id,
+      affordance: intent.affordance,
+      standingIntentId: intent.standingIntentId,
+      state: intent.state,
+      formedAt: intent.formedAt,
+      publication: intent.publicationId ? state.publications?.find((item) => item.id === intent.publicationId)?.payload : undefined,
+      execution: executions.find((item) => item.socialIntentId === intent.id),
+      outcome: outcomes.find((item) => item.socialIntentId === intent.id),
+    })),
+    recentEvents: events.map((item) => ({ id: item.id, title: item.title, detail: item.detail, tone: item.tone, time: item.time })),
+  };
+}
+
+function projectWatching(state, explicitPresenceId, mode = "list") {
+  const presence = selectedPresence(state, explicitPresenceId);
+  const watches = (state.watches ?? [])
+    .filter((item) => item.presenceId === presence.id)
+    .map((item) => ({
+      id: item.id,
+      title: item.title,
+      query: item.query,
+      purpose: item.purpose,
+      kind: item.kind,
+      channel: item.channel,
+      observation: item.observation,
+      createdAt: item.createdAt,
+      updatedAt: item.updatedAt,
+    }));
+  return {
+    ok: true,
+    command: mode,
+    environment: "sandbox",
+    presence: { id: presence.id, name: presence.name, handle: presence.handle, channel: presence.channel },
+    watches,
+    noticed: [],
+    observationState: watches.some((item) => item.observation.observedCount > 0) ? "observations-available" : "no-observations",
+  };
 }
 
 async function requestJson(baseUrl, path, init = {}) {
@@ -364,7 +510,28 @@ async function injectPayload(snapshot, options) {
   return payload;
 }
 
-async function execute(baseUrl, command, options, positionals) {
+function scheduleFields(options, existing, baseDate = new Date()) {
+  let day = options.day ?? existing?.day;
+  let time = options.time ?? existing?.time;
+  if (options["minutes-from-now"] !== undefined) {
+    const future = new Date(baseDate);
+    future.setMinutes(future.getMinutes() + parseInteger(options["minutes-from-now"], "minutes-from-now"));
+    day = future.toLocaleDateString("en-US", { weekday: "long" });
+    time = future.toLocaleTimeString("en-US", { hour: "2-digit", minute: "2-digit", hour12: false });
+  }
+  if (typeof day !== "string" || !day.trim()) fail("Provide --day or --minutes-from-now.", "INVALID_ARGUMENT");
+  if (typeof time !== "string" || !/^([01]\d|2[0-3]):[0-5]\d$/.test(time)) fail("Provide --time in HH:MM format or use --minutes-from-now.", "INVALID_ARGUMENT");
+  const executionWindow = options.window ?? existing?.executionWindow ?? `${time}–${time}`;
+  return { day: day.trim(), time, executionWindow };
+}
+
+function idOption(options, positionals, label) {
+  const id = typeof options.id === "string" ? options.id : positionals[0];
+  if (!id) fail(`Provide ${label} with --id or as the first argument.`, "INVALID_ARGUMENT");
+  return id;
+}
+
+async function executePlayground(baseUrl, command, options, positionals) {
   if (command === "start") {
     const next = await postOperation(baseUrl, { type: "startPlayground", presenceId: options.presence, source: options.source ?? "fresh" });
     const startedSessionId = options.session ?? next.playgroundSessions
@@ -417,6 +584,52 @@ async function execute(baseUrl, command, options, positionals) {
     const executionWindow = options.window ?? `${time}–${time}`;
     return projectState(await postOperation(baseUrl, { type: "addSlot", instruction, day, time, objective, executionWindow, presenceId: session.presenceId }), session.id, command);
   }
+  if (["rehearse", "consider-original"].includes(command)) {
+    const current = await getState(baseUrl);
+    const session = sessionForOperation(current, options);
+    const next = await postOperation(baseUrl, { type: "considerOriginalPublication", sessionId: session.id, inspiration: typeof options.inspiration === "string" ? options.inspiration : undefined });
+    return projectState(next, session.id, "rehearse");
+  }
+  if (["feedback", "calibrate"].includes(command)) {
+    const current = await getState(baseUrl);
+    const session = sessionForOperation(current, options);
+    const attempt = typeof options.attempt === "string"
+      ? options.attempt
+      : typeof options.id === "string"
+        ? options.id
+        : current.originalPostRehearsals?.find((item) => item.sessionId === session.id)?.id;
+    if (!attempt) fail("No rehearsal exists to calibrate. Run `playground rehearse` first.", "NO_REHEARSAL");
+    const reaction = required(options, "reaction");
+    const reasons = typeof options.reasons === "string" ? options.reasons.split(",").map((item) => item.trim()).filter(Boolean) : undefined;
+    const next = await postOperation(baseUrl, { type: "recordPreferenceEvidence", sessionId: session.id, attemptId: attempt, reaction, reasons, note: typeof options.note === "string" ? options.note : undefined });
+    return projectState(next, session.id, "feedback");
+  }
+  if (["assignment", "assign", "start-assignment", "work-assignment", "cancel-assignment"].includes(command)) {
+    const current = await getState(baseUrl);
+    const session = sessionForOperation(current, options);
+    const subcommand = command === "assignment" ? (positionals[0] ?? "inspect") : command.replace("-assignment", "");
+    if (subcommand === "inspect" || subcommand === "list" || subcommand === "status") return projectState(current, session.id, "assignment");
+    if (["create", "add"].includes(subcommand)) {
+      const instruction = required(options, "instruction");
+      const schedule = options.day || options.time || options["minutes-from-now"] !== undefined ? scheduleFields(options, undefined, new Date(session.virtualNow)) : undefined;
+      const next = await postOperation(baseUrl, { type: "createAssignment", instruction, presenceId: session.presenceId, sessionId: session.id, environment: "sandbox", ...(schedule ? { schedule } : {}) });
+      return projectState(next, session.id, "assignment");
+    }
+    const assignmentId = idOption(options, positionals.slice(command === "assignment" ? 1 : 0), "an Assignment id");
+    if (subcommand === "start" || subcommand === "run") {
+      const next = await postOperation(baseUrl, { type: "startAssignment", id: assignmentId, sessionId: session.id });
+      return projectState(next, session.id, "assignment");
+    }
+    if (subcommand === "work" || subcommand === "continue") {
+      const next = await postOperation(baseUrl, { type: "workAssignment", id: assignmentId, sessionId: session.id });
+      return projectState(next, session.id, "assignment");
+    }
+    if (subcommand === "cancel") {
+      const next = await postOperation(baseUrl, { type: "cancelAssignment", id: assignmentId });
+      return projectState(next, session.id, "assignment");
+    }
+    fail(`Unknown Playground Assignment command: ${subcommand}.`, "INVALID_ARGUMENT");
+  }
   if (command === "inject") {
     const current = await getState(baseUrl);
     const payload = await injectPayload(current, options);
@@ -450,12 +663,16 @@ async function execute(baseUrl, command, options, positionals) {
         ...(Array.isArray(resolvedOptions.assets) ? { "assets-json": JSON.stringify(resolvedOptions.assets) } : {}),
       };
       if (!stepOptions.session && scenarioSessionId) stepOptions.session = scenarioSessionId;
-      const result = await execute(baseUrl, step.command, stepOptions, step.args ?? []);
+      const scopedCommand = typeof step.command === "string" && step.command.includes(".") ? step.command.split(".") : undefined;
+      const stepScope = step.scope ?? scopedCommand?.[0] ?? "playground";
+      const stepCommand = scopedCommand?.[1] ?? step.command;
+      const result = await executeScope(baseUrl, stepScope, stepCommand, stepOptions, step.args ?? []);
       const projected = result?.result ?? result;
-      if (step.command === "start" && projected?.session?.id) scenarioSessionId = projected.session.id;
+      if (stepScope === "playground" && stepCommand === "start" && projected?.session?.id) scenarioSessionId = projected.session.id;
       results.push({
         index: index + 1,
-        command: step.command,
+        scope: stepScope,
+        command: stepCommand,
         ...(stepOptions.observeOnly === true ? { observeOnly: true } : {}),
         result,
       });
@@ -465,14 +682,94 @@ async function execute(baseUrl, command, options, positionals) {
   fail(`Unknown Playground command: ${command}.`, "INVALID_ARGUMENT");
 }
 
+async function executeSchedule(baseUrl, command = "list", options, positionals) {
+  const current = await getState(baseUrl);
+  if (["list", "inspect", "status"].includes(command)) return projectSchedule(current, options.presence, "list");
+  if (["add", "create", "assign"].includes(command)) {
+    const presence = selectedPresence(current, options.presence);
+    const instruction = required(options, "instruction");
+    const schedule = scheduleFields(options, undefined, new Date());
+    const responsibility = options.assign === true || command === "assign" || options.responsibility === "assign" ? "assign" : "consider";
+    if (responsibility === "assign") {
+      const session = options.session ? sessionFor(current, options.session) : undefined;
+      if (session && session.presenceId !== presence.id) fail("--session must belong to the selected --presence.", "INVALID_ARGUMENT");
+      const next = await postOperation(baseUrl, { type: "createAssignment", instruction, presenceId: presence.id, environment: "sandbox", ...(session ? { sessionId: session.id } : {}), schedule });
+      return projectSchedule(next, presence.id, "add");
+    }
+    const next = await postOperation(baseUrl, { type: "addSlot", instruction, day: schedule.day, time: schedule.time, objective: options.objective ?? "usefulness", executionWindow: schedule.executionWindow, presenceId: presence.id });
+    return projectSchedule(next, presence.id, "add");
+  }
+  if (command === "edit") {
+    const id = idOption(options, positionals, "a Calendar id");
+    const slot = current.calendar?.find((item) => item.id === id);
+    if (!slot) fail(`Calendar item ${id} was not found.`, "NOT_FOUND");
+    const presence = selectedPresence(current, options.presence ?? slot.presence);
+    const schedule = scheduleFields(options, slot, new Date());
+    const next = await postOperation(baseUrl, { type: "editSlot", id, instruction: typeof options.instruction === "string" ? options.instruction : slot.instruction, day: schedule.day, time: schedule.time, objective: options.objective ?? slot.objective ?? "usefulness", executionWindow: schedule.executionWindow });
+    return projectSchedule(next, presence.id, "edit");
+  }
+  if (command === "run" || command === "evaluate") {
+    const id = idOption(options, positionals, "a Calendar id");
+    const slot = current.calendar?.find((item) => item.id === id);
+    if (!slot) fail(`Calendar item ${id} was not found.`, "NOT_FOUND");
+    const presence = selectedPresence(current, slot.presence);
+    const hasLiveNative = (current.nativeConnections ?? []).some((item) => item.presenceId === presence.id && item.status === "connected" && item.access === "read-write");
+    const hasLiveBridge = (current.bridges ?? []).some((item) => item.presenceId === presence.id && item.state !== "offline");
+    if (presence.connectionMode !== "sandbox" || hasLiveNative || hasLiveBridge) fail("The CLI only evaluates Schedule items in Sandbox mode; live connector execution is blocked.", "LIVE_SCOPE_BLOCKED");
+    const next = await postOperation(baseUrl, { type: "runSlot", id, scheduled: options.scheduled === true });
+    return projectSchedule(next, presence.id, "run");
+  }
+  if (["cancel", "cancel-assignment"].includes(command)) {
+    const id = idOption(options, positionals, "an Assignment id");
+    const assignment = current.assignments?.find((item) => item.id === id);
+    if (!assignment) fail(`Assignment ${id} was not found.`, "NOT_FOUND");
+    const next = await postOperation(baseUrl, { type: "cancelAssignment", id });
+    return projectSchedule(next, assignment.presenceId, "cancel");
+  }
+  fail(`Unknown Schedule command: ${command}.`, "INVALID_ARGUMENT");
+}
+
+async function executeWatching(baseUrl, command = "list", options, positionals) {
+  const current = await getState(baseUrl);
+  if (["list", "inspect", "status"].includes(command)) return projectWatching(current, options.presence, "list");
+  if (["add", "create"].includes(command)) {
+    const presence = selectedPresence(current, options.presence);
+    const query = typeof options.query === "string" ? options.query : positionals[0];
+    if (typeof query !== "string" || !query.trim()) fail("Provide --query or the Watch description as the first argument.", "INVALID_ARGUMENT");
+    const next = await postOperation(baseUrl, { type: "createWatch", presenceId: presence.id, query: query.trim(), purpose: typeof options.purpose === "string" ? options.purpose : undefined });
+    return projectWatching(next, presence.id, "add");
+  }
+  if (["remove", "delete"].includes(command)) {
+    const id = idOption(options, positionals, "a Watch id");
+    const watch = current.watches?.find((item) => item.id === id);
+    if (!watch) fail(`Watch ${id} was not found.`, "NOT_FOUND");
+    const next = await postOperation(baseUrl, { type: "deleteWatch", id });
+    return projectWatching(next, watch.presenceId, "remove");
+  }
+  fail(`Unknown Watching command: ${command}.`, "INVALID_ARGUMENT");
+}
+
+async function executeScope(baseUrl, scope, command, options, positionals) {
+  if (scope === "playground") return executePlayground(baseUrl, command, options, positionals);
+  if (scope === "schedule") return executeSchedule(baseUrl, command, options, positionals);
+  if (scope === "watching") return executeWatching(baseUrl, command, options, positionals);
+  fail(`Unknown scope: ${scope}. Use playground, schedule, or watching.`, "INVALID_ARGUMENT");
+}
+
 function humanize(result) {
   const session = result.result?.session ?? result.session;
-  const lastEvent = result.result?.recentEvents?.[0] ?? result.recentEvents?.[0];
+  const lastEvent = session ? result.result?.recentEvents?.[0] ?? result.recentEvents?.[0] : undefined;
   const decisions = result.result?.decisions ?? result.decisions ?? [];
   const latest = decisions[0];
+  const watches = result.result?.watches ?? result.watches;
+  const calendar = result.result?.calendar ?? result.calendar;
+  const assignments = result.result?.assignments ?? result.assignments;
   return [
     `${result.command}: ${result.ok ? "ok" : "failed"}`,
     session ? `session ${session.id} · ${session.channel} · virtual time ${session.virtualNow}` : "",
+    watches ? `${watches.length} watch${watches.length === 1 ? "" : "es"}` : "",
+    calendar ? `${calendar.length} calendar item${calendar.length === 1 ? "" : "s"}` : "",
+    assignments ? `${assignments.length} assignment${assignments.length === 1 ? "" : "s"}` : "",
     latest ? `decision ${latest.affordance} · ${latest.execution?.status ?? "formed"}` : "",
     lastEvent ? `${lastEvent.title}: ${lastEvent.detail}` : "",
   ].filter(Boolean).join("\n");
@@ -485,8 +782,7 @@ async function main() {
     return;
   }
   const [scope, command, ...args] = positionals;
-  if (scope !== "playground") fail("Only the `playground` scope is available in this version.", "INVALID_ARGUMENT");
-  const result = await execute(options.url ?? DEFAULT_URL, command, options, args);
+  const result = await executeScope(options.url ?? DEFAULT_URL, scope, command ?? (scope === "playground" ? undefined : "list"), options, args);
   if (options.human) process.stdout.write(`${humanize(result)}\n`);
   else process.stdout.write(`${JSON.stringify(result)}\n`);
 }
