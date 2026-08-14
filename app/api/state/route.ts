@@ -646,6 +646,7 @@ const operation: z.ZodType<RuntimeOperation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("createAssignment"), instruction: z.string().trim().min(1).max(4000), presenceId: z.string().min(1).optional(), sessionId: z.string().min(1).optional(), environment: z.enum(["sandbox", "live"]).optional() }),
   z.object({ type: z.literal("startAssignment"), id: z.string().min(1), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("workAssignment"), id: z.string().min(1), sessionId: z.string().min(1) }),
+  z.object({ type: z.literal("cancelAssignment"), id: z.string().min(1) }),
   z.object({ type: z.literal("runSlot"), id: z.string().min(1), scheduled: z.boolean().optional() }),
   z.object({ type: z.literal("approveExecution"), id: z.string().min(1) }),
   z.object({ type: z.literal("executeIntent"), id: z.string().min(1) }),

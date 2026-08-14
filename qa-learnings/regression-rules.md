@@ -16,6 +16,22 @@
 
 **Added:** 2026-08-13
 
+## Rule: Delegated Assignments need visible cancellation
+
+**Defect class:** Assignment lifecycle / action completeness
+
+**General principle:** Any delegated workflow that can remain drafted or active must expose a clear cancellation action, preserve its history, and prevent cancelled work from restarting.
+
+**Project-specific risk:** Assignments had a `cancelled` status in the data model but no Schedule control, leaving operators unable to stop or dismiss a draft and making the lifecycle incomplete.
+
+**Project enforcement:** Schedule renders `Cancel` for non-terminal Assignments; `cancelAssignment` marks the record cancelled and records a decision event; completed and cancelled Assignments cannot be restarted or cancelled again.
+
+**Executable protection:** `tests/runtime.test.ts` covers draft and active cancellation plus restart prevention. `tests/e2e/playground-rehearsal.spec.ts` covers the Schedule confirmation flow and cancelled-history state on Chromium and Pixel 5.
+
+**Apply when:** Adding or changing delegated workflows, Assignment statuses, Schedule rows, background work, or terminal lifecycle actions.
+
+**Added:** 2026-08-13
+
 ## Rule: UI forms must enforce runtime contracts before submission
 
 **Defect class:** Form validation / API contract mismatch
