@@ -14,6 +14,7 @@ Usage:
   openpresence <scope> <command> [options]
 
 Playground commands:
+  scenario    List, create, import, export, run, inspect, resume, rerun, or evaluate a Scenario
   start       Start a new Playground session
   inspect     Return the current world, Presence, decisions, and review queue
   inject      Add a simulated social event and let the Agent evaluate it
@@ -65,6 +66,9 @@ Examples:
   openpresence schedule add --instruction "Teach one useful idea" --day Tuesday --time 08:00
   openpresence watching add --query "@AlexHormozi" --purpose "Study offer clarity"
   openpresence playground run scenarios/reply.json
+  openpresence playground scenario list
+  openpresence playground scenario create --prompt "Rehearse a privacy-sensitive hostile reply"
+  openpresence playground scenario run <scenario-id> --presence presence_123
 `;
 
 function parseArgs(argv) {
@@ -532,6 +536,50 @@ function idOption(options, positionals, label) {
 }
 
 async function executePlayground(baseUrl, command, options, positionals) {
+  if (command === "scenario") {
+    const subcommand = positionals[0] ?? "list";
+    const current = await getState(baseUrl);
+    const presence = selectedPresence(current, options.presence);
+    const scenarios = (current.scenarios ?? []).filter((scenario) => scenario.ownerScope !== "presence" || scenario.presenceId === presence.id);
+    if (["list", "status"].includes(subcommand)) {
+      return { ok: true, command: "scenario list", presence: { id: presence.id, name: presence.name, channel: presence.channel }, scenarios: scenarios.map((scenario) => ({ ...scenario, version: (current.scenarioVersions ?? []).find((version) => version.id === scenario.currentVersionId), runs: (current.scenarioRuns ?? []).filter((run) => run.scenarioId === scenario.id && run.presenceId === presence.id).map((run) => ({ ...run, evaluation: (current.scenarioEvaluations ?? []).find((evaluation) => evaluation.runId === run.id) })) })) };
+    }
+    if (["create", "new"].includes(subcommand)) {
+      const prompt = typeof options.prompt === "string" ? options.prompt : positionals.slice(1).join(" ");
+      if (!prompt.trim()) fail("Provide --prompt or the Scenario description after `scenario create`.", "INVALID_ARGUMENT");
+      const next = await postOperation(baseUrl, { type: "createScenarioFromPrompt", prompt: prompt.trim(), presenceId: presence.id });
+      const scenario = next.scenarios?.[0];
+      return { ok: true, command: "scenario create", scenario, version: next.scenarioVersions?.find((version) => version.id === scenario?.currentVersionId) };
+    }
+    if (["import"].includes(subcommand)) {
+      const file = typeof options.file === "string" ? options.file : positionals[1];
+      if (!file) fail("Provide a Scenario JSON file after `scenario import` or with --file.", "INVALID_ARGUMENT");
+      let payload;
+      try { payload = JSON.parse(await readFile(file, "utf8")); } catch (error) { fail(`Could not read Scenario ${file}.`, "INVALID_SCENARIO", { cause: error instanceof Error ? error.message : String(error) }); }
+      const next = await postOperation(baseUrl, { type: "importScenario", payload, presenceId: presence.id });
+      const scenario = next.scenarios?.[0];
+      return { ok: true, command: "scenario import", scenario, version: next.scenarioVersions?.find((version) => version.id === scenario?.currentVersionId) };
+    }
+    if (["export"].includes(subcommand)) {
+      const scenarioId = idOption(options, positionals.slice(1), "a Scenario id");
+      const scenario = scenarios.find((item) => item.id === scenarioId);
+      if (!scenario) fail(`Scenario ${scenarioId} was not found.`, "NOT_FOUND");
+      return { ok: true, command: "scenario export", scenario, version: (current.scenarioVersions ?? []).find((version) => version.id === scenario.currentVersionId) };
+    }
+    if (["run", "start", "resume", "rerun", "evaluate", "inspect"].includes(subcommand)) {
+      const id = idOption(options, positionals.slice(1), subcommand === "inspect" ? "a Scenario Run id" : "a Scenario or Run id");
+      if (subcommand === "run" || subcommand === "start") {
+        const next = await postOperation(baseUrl, { type: "startScenarioRun", scenarioId: id, presenceId: presence.id });
+        const run = next.scenarioRuns?.[0];
+        return { ok: true, command: "scenario run", run, scenario: next.scenarios?.find((item) => item.id === run?.scenarioId), version: next.scenarioVersions?.find((version) => version.id === run?.scenarioVersionId), evaluation: next.scenarioEvaluations?.find((evaluation) => evaluation.runId === run?.id) };
+      }
+      const operationType = subcommand === "resume" ? "resumeScenarioRun" : subcommand === "rerun" ? "rerunScenario" : subcommand === "evaluate" ? "evaluateScenarioRun" : undefined;
+      const next = operationType ? await postOperation(baseUrl, { type: operationType, runId: id }) : current;
+      const run = next.scenarioRuns?.find((item) => item.id === id) ?? (subcommand === "rerun" ? next.scenarioRuns?.[0] : undefined);
+      return { ok: true, command: `scenario ${subcommand}`, run, scenario: next.scenarios?.find((item) => item.id === run?.scenarioId), version: next.scenarioVersions?.find((version) => version.id === run?.scenarioVersionId), provenance: next.scenarioRunProvenance?.find((item) => item.id === run?.provenanceId), evaluation: next.scenarioEvaluations?.find((evaluation) => evaluation.runId === run?.id), trace: next.events?.filter((event) => event.sessionId === run?.playgroundSessionId) };
+    }
+    fail(`Unknown Scenario command: ${subcommand}.`, "INVALID_ARGUMENT");
+  }
   if (command === "start") {
     const next = await postOperation(baseUrl, { type: "startPlayground", presenceId: options.presence, source: options.source ?? "fresh" });
     const startedSessionId = options.session ?? next.playgroundSessions

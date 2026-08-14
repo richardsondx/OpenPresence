@@ -1,0 +1,39 @@
+{
+  "$schema": "https://json-schema.org/draft/2020-12/schema",
+  "title": "OpenPresence Scenario V1 import",
+  "type": "object",
+  "required": ["scenario", "version"],
+  "properties": {
+    "scenario": {
+      "type": "object",
+      "required": ["title", "description", "purpose", "riskCategories"],
+      "properties": {
+        "title": { "type": "string", "minLength": 1 },
+        "description": { "type": "string", "minLength": 1 },
+        "purpose": { "type": "string", "minLength": 1 },
+        "riskCategories": { "type": "array", "items": { "type": "string" } },
+        "supportedChannels": { "type": "array", "items": { "type": "string" } }
+      },
+      "additionalProperties": true
+    },
+    "version": {
+      "type": "object",
+      "required": ["worldSpec", "evaluationSpec", "runPolicy"],
+      "properties": {
+        "worldSpec": {
+          "type": "object",
+          "required": ["stimuli"],
+          "properties": {
+            "startingWorld": { "type": "object" },
+            "stimuli": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["content", "actorRef"], "properties": { "content": { "type": "string" }, "actorRef": { "type": "string" }, "targetRef": { "type": "string" }, "sequence": { "type": "integer" }, "type": { "type": "string" } }, "additionalProperties": true } }
+          },
+          "additionalProperties": true
+        },
+        "evaluationSpec": { "type": "object", "required": ["purpose", "structuralCriteria", "socialCriteria"] },
+        "runPolicy": { "type": "object", "required": ["maxSteps", "maxDurationMinutes"] }
+      },
+      "additionalProperties": true
+    }
+  },
+  "additionalProperties": false
+}

@@ -302,6 +302,28 @@ export async function generateAgentReply(state: OpenPresenceState, content: stri
   return runOpenAiCompatible(profile.provider, connection.endpoint || "https://api.openai.com/v1", secret!, profile.model, prompt, profile.quality === "low" || profile.quality === "medium" || profile.quality === "high" ? profile.quality : undefined);
 }
 
+/**
+ * Run a separate evaluator/builder role. It deliberately does not use the
+ * Agent's meaning prompt, social history, or mutation-capable tools.
+ */
+export async function generateIndependentModelText(state: OpenPresenceState, system: string, content: string) {
+  if (isAiMockEnabled()) return JSON.stringify({ findings: [], title: "Scenario draft", purpose: content.slice(0, 160) });
+  if (!state.agent) throw new AiRuntimeError("Create an Agent before using the independent runtime.");
+  const profile = state.modelProfiles.find((item) => item.agentId === state.agent?.id);
+  if (!profile) throw new AiRuntimeError("No model is selected. Open Brain and choose a model runtime.");
+  const connection = (profile.connectionId && state.providerConnections.find((item) => item.id === profile.connectionId && item.provider === profile.provider)) ?? state.providerConnections.find((item) => item.provider === profile.provider);
+  if (!connection || connection.status === "needs-configuration") throw new AiRuntimeError(`${providerLabel(profile.provider)} is selected but not connected.`);
+  const secret = profile.provider === "ollama" || profile.provider === "custom" && !connection.secretConfigured ? undefined : connection.id ? readProviderSecret(connection.id) : undefined;
+  if (["openai", "anthropic", "gemini", "openrouter"].includes(profile.provider) && !secret) throw new AiRuntimeError(`${providerLabel(profile.provider)} is selected but no API key is stored.`);
+  const prompt = { system, messages: [{ role: "user" as const, content }] };
+  if (profile.provider === "ollama") return runOllama(connection.endpoint || "http://localhost:11434", profile.model, prompt);
+  if (profile.provider === "anthropic") return runAnthropic(secret!, profile.model, prompt);
+  if (profile.provider === "gemini") return runGemini(secret!, profile.model, prompt);
+  if (profile.provider === "openrouter") return runOpenAiCompatible(profile.provider, connection.endpoint || "https://openrouter.ai/api/v1", secret!, profile.model, prompt);
+  if (profile.provider === "custom") return runOpenAiCompatible(profile.provider, connection.endpoint || "http://localhost:11434/v1", secret || "", profile.model, prompt);
+  return runOpenAiCompatible(profile.provider, connection.endpoint || "https://api.openai.com/v1", secret!, profile.model, prompt, profile.quality === "low" || profile.quality === "medium" || profile.quality === "high" ? profile.quality : undefined);
+}
+
 export async function generatePresenceChatReply(state: OpenPresenceState, presenceId: string, content: string, history: Array<Pick<PresenceChatMessage, "role" | "content">>, socialEvidence?: string, socialThreadContext?: string) {
   const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   if (!presence) throw new AiRuntimeError("Choose a Presence before starting a Presence Chat.");

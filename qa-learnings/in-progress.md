@@ -1,5 +1,22 @@
 # Active QA Work
 
+## COMPLETE — Make Scenario Runs channel-native and operator-first
+
+- **Started:** 2026-08-14
+- **Scope:** Reframe completed Scenario Runs around the social behavior being rehearsed: channel-native Replay first, concise Review second, and technical evidence in Details. Reuse the existing Playground thread renderer, preserve Sandbox provenance and append-only evidence, and keep operator review explicit and non-mutating.
+- **QA learning:** Evidence-backed social features must be browser-verified at the level of the user’s trust question. A passing structural evaluation is not enough; the regression flow must assert that the actual Sandbox world objects and Presence outcome are visible before technical details.
+- **Executable protection:** `tests/e2e/scenario-rehearsal.spec.ts` asserts Replay, Details, Review, isolated Run provenance, unchanged Memory/Growth, and fresh rerun isolation.
+- **Verification:** TypeScript passed; Scenario unit tests passed 4/4; Scenario Chromium E2E passed 1/1; targeted ESLint reported 0 errors; `git diff --check` passed; connected Chrome visual QA inspected Replay, Review, and Details at desktop size. Repository-wide ESLint remains blocked by generated `tmp/**/.next` artifacts unrelated to this change. No live connector activity occurred.
+- **Status:** Complete.
+
+## IN_PROGRESS — Implement Scenario Rehearsal Runs for Playground
+
+- **Started:** 2026-08-14
+- **Scope:** Execute the corrected Scenario Rehearsal Runs plan: natural-language Scenario authoring frozen into versioned fixed replays, Presence-scoped isolated Runs backed by existing Playground sessions, structured import/export, narrow structural checks, independent model-review boundary, provenance, resume/rerun semantics, and philosophy integration.
+- **Product boundary:** Keep `User → Agent → Presence`, Sandbox/Live isolation, Social Mirror provenance, worldSpec/evaluationSpec separation, and explicit learning promotion. No live connector activity is authorized.
+- **Verification:** `pnpm typecheck` passed; full Vitest passed 174/174; feature-scoped ESLint passed with no errors; Scenario Chromium E2E passed 1/1; connected Chrome verified natural-language authoring, world/evaluation preview separation, isolated Sandbox Run, append-only evidence, conservative `Needs review` handling, and fresh rerun behavior with no console errors; CLI Scenario list returned versioned Runs and provenance. The broader legacy Chromium suite was started for regression context and exposed unrelated baseline failures in Calendar Week selector strictness and an Activity navigation timeout; no Scenario test failed. No live connector activity occurred.
+- **Status:** Complete.
+
 ## COMPLETE — Language & Phrasing V1
 
 - **Started:** 2026-08-14
