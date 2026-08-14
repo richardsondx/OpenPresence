@@ -132,6 +132,29 @@ describe("OpenPresence runtime boundaries", () => {
     expect(assignmentIsSatisfied(delivered.assignments[0]!)).toBe(false);
   });
 
+  it("cancels draft and active Assignments without deleting their history or allowing restart", () => {
+    let state = createAgent(input);
+    const session = startPlaygroundSession(state, state.presence!.id);
+    const sessionId = session.playgroundSessions[0]!.id;
+    state = applyOperation(session, { type: "createAssignment", instruction: "Produce 2 original Sandbox posts about useful agent ideas.", presenceId: state.presence!.id, sessionId, environment: "sandbox" });
+    const assignmentId = state.assignments[0]!.id;
+
+    state = applyOperation(state, { type: "cancelAssignment", id: assignmentId });
+    expect(state.assignments).toHaveLength(1);
+    expect(state.assignments[0]).toMatchObject({ id: assignmentId, status: "cancelled" });
+    expect(state.events[0]?.title).toBe("Assignment cancelled");
+
+    const restarted = applyOperation(state, { type: "startAssignment", id: assignmentId, sessionId });
+    expect(restarted.assignments[0]?.status).toBe("cancelled");
+
+    const activeDraft = applyOperation(restarted, { type: "createAssignment", instruction: "Produce 1 original Sandbox post about a useful agent idea.", presenceId: state.presence!.id, sessionId, environment: "sandbox" });
+    const activeAssignmentId = activeDraft.assignments[0]!.id;
+    const active = applyOperation(activeDraft, { type: "startAssignment", id: activeAssignmentId, sessionId });
+    expect(active.assignments.find((item) => item.id === activeAssignmentId)?.status).toBe("active");
+    const cancelledActive = applyOperation(active, { type: "cancelAssignment", id: activeAssignmentId });
+    expect(cancelledActive.assignments.find((item) => item.id === activeAssignmentId)?.status).toBe("cancelled");
+  });
+
   it("turns an explicit Chat publication request into a native X execution", () => {
     let state = createAgent(input);
     state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "hourandcode", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];

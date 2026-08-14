@@ -1157,7 +1157,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
   }
   if (operation.type === "startAssignment") {
     const assignment = state.assignments.find((item) => item.id === operation.id);
-    if (!assignment) return state;
+    if (!assignment || assignment.status === "completed" || assignment.status === "cancelled") return state;
     assignment.status = "active";
     assignment.sessionId = operation.sessionId;
     assignment.updatedAt = now();
@@ -1166,6 +1166,14 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
   }
   switch (operation.type) {
     case "reset": return initialState();
+    case "cancelAssignment": {
+      const assignment = state.assignments.find((item) => item.id === operation.id);
+      if (!assignment || assignment.status === "completed" || assignment.status === "cancelled") return state;
+      assignment.status = "cancelled";
+      assignment.updatedAt = now();
+      state.events.unshift(event("decision", "Assignment cancelled", `${assignment.progress.verified} / ${assignment.progress.required} verified publications remain recorded, but this Assignment will not continue.`, "quiet", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
+      return state;
+    }
     case "setToolBinding": {
       if (!state.agent || !operation.toolId.trim()) return state;
       const toolId = operation.toolId.trim();

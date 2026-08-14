@@ -4137,6 +4137,10 @@ function ScheduleView({
     setConsiderationEnd(end);
     setShowForm(true);
   };
+  const cancelAssignment = async (assignment: OpenPresenceState["assignments"][number]) => {
+    if (!window.confirm(`Cancel this Assignment?\n\n${assignment.instruction}`)) return;
+    await mutate({ type: "cancelAssignment", id: assignment.id });
+  };
   return (
     <div className="page">
       <div className="page-heading">
@@ -4265,7 +4269,7 @@ function ScheduleView({
           </Button>
         </form>
       )}
-      {state.assignments.filter((item) => item.presenceId === presenceId).length > 0 && <section className="schedule-assignment-list" aria-label="Assignments"><div className="section-heading"><div><SectionEyebrow>Delegated responsibility</SectionEyebrow><h2>Assignments</h2></div></div>{state.assignments.filter((item) => item.presenceId === presenceId).map((assignment) => <article className="schedule-assignment-row" key={assignment.id}><div><strong>{assignment.instruction}</strong><small>{assignment.recurrence?.label ?? "Once"} · {assignment.progress.verified} / {assignment.progress.required} verified · {assignment.status.replaceAll("_", " ")}</small></div><span className="assignment-authority">ASSIGN</span></article>)}</section>}
+      {state.assignments.filter((item) => item.presenceId === presenceId).length > 0 && <section className="schedule-assignment-list" aria-label="Assignments"><div className="section-heading"><div><SectionEyebrow>Delegated responsibility</SectionEyebrow><h2>Assignments</h2></div></div>{state.assignments.filter((item) => item.presenceId === presenceId).map((assignment) => { const canCancel = assignment.status !== "completed" && assignment.status !== "cancelled"; return <article className="schedule-assignment-row" key={assignment.id}><div><strong>{assignment.instruction}</strong><small>{assignment.recurrence?.label ?? "Once"} · {assignment.progress.verified} / {assignment.progress.required} verified · {assignment.status.replaceAll("_", " ")}</small></div><div className="schedule-assignment-actions">{canCancel && <Button variant="danger" disabled={busy} onClick={() => void cancelAssignment(assignment)}>Cancel</Button>}<span className="assignment-authority">ASSIGN</span></div></article>; })}</section>}
       {viewMode === "week" ? (
         <WeekCalendar slots={visibleSlots} state={state} presenceName={presenceName} onEdit={beginEdit} onAdd={() => setShowForm(true)} />
       ) : (
