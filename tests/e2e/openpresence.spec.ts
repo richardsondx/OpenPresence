@@ -182,6 +182,7 @@ test("Presence Chat speaks as the selected public self without teaching the Agen
   await expect(page.getByText("My name is Bob and I own a submarine.", { exact: true })).toBeVisible();
   await expect(page.getByRole("status").getByText("Considering", { exact: true })).toBeVisible();
   await expect(page.getByText(/I understood “My name is Bob/)).toBeVisible();
+  await expect(page.getByText("Not published · private rehearsal", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("status")).toHaveCount(0);
   const afterChat = await (await request.get("/api/state")).json();
   expect(afterChat.presenceChatSessions[0].messages.map((message: { role: string }) => message.role)).toEqual(["user", "presence"]);

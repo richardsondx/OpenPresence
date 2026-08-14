@@ -2999,7 +2999,6 @@ function PresenceChatView({
                       </details>
                     </div>
                   ))}
-                  {item.role === "presence" && <div className="presence-chat-proof"><Check size={13} /> Public-self response · not published</div>}
                 </article>
               ))
             )}
