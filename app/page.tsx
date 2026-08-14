@@ -45,10 +45,12 @@ import {
   X,
 } from "lucide-react";
 import { AGENT_TOOL_DEFINITIONS, CHANNEL_CAPABILITIES, simulationForChannel } from "@/lib/types";
+import { bridgeAdapterPrompt, bridgeAdapterStatus, bridgeAdapterStatusLabel, bridgeApiExamples, bridgeEnvironmentExample } from "@/lib/bridge-contract";
 import { latestPerception } from "@/lib/perception";
 import { deriveActivitySummary, derivePublicHistory, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities } from "@/lib/runtime";
 import type {
   CalendarSlot,
+  Assignment,
   ChannelDefinition,
   ChannelId,
   ChannelSimulationDefinition,
@@ -103,8 +105,8 @@ const navItems: { id: View; label: string; icon: typeof MessageCircle }[] = [
   { id: "teach", label: "Teach", icon: MessageCircle },
   { id: "playground", label: "Playground", icon: FlaskConical },
 ];
-const presenceNavItems = navItems.filter(({ id }) => id === "live" || id === "chat" || id === "watching" || id === "feed" || id === "schedule" || id === "presence");
-const agentNavItems = navItems.filter(({ id }) => id === "teach" || id === "playground");
+const presenceNavItems = navItems.filter(({ id }) => id === "live" || id === "chat" || id === "watching" || id === "feed" || id === "schedule" || id === "presence" || id === "playground");
+const agentNavItems = navItems.filter(({ id }) => id === "teach");
 const channelLabel = (channel: ChannelId, definitions?: ChannelDefinition[]) =>
   definitions?.find((item) => item.id === channel)?.name ??
   (channel === "x"
@@ -123,6 +125,10 @@ const formatTime = (value: string) => {
         minute: "2-digit",
       }).format(date);
 };
+const historyDisplayAt = (item: Pick<PublicHistoryItem, "occurredAt" | "observedAt" | "environment">) => item.environment === "sandbox" ? item.observedAt : item.occurredAt;
+const historyTimeTitle = (item: Pick<PublicHistoryItem, "occurredAt" | "observedAt" | "environment">) => item.environment === "sandbox"
+  ? `Observed in Sandbox at ${new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.observedAt))}. Simulated world time: ${new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.occurredAt))}.`
+  : new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.occurredAt));
 const initials = (name: string) =>
   name
     .split(" ")
@@ -200,6 +206,15 @@ function clientErrorMessage(reason: unknown, fallback: string) {
     return "The OpenPresence runtime could not be reached. Try again; if it persists, restart the local app server.";
   }
   return reason instanceof Error ? reason.message : fallback;
+}
+
+function syncBrowserWorkspaceContext(state: OpenPresenceState) {
+  if (typeof window === "undefined" || !state.activeAgentId) return;
+  const url = new URL(window.location.href);
+  url.searchParams.set("agentId", state.activeAgentId);
+  if (state.activePresenceId) url.searchParams.set("presenceId", state.activePresenceId);
+  else url.searchParams.delete("presenceId");
+  window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
 const runtimeModels = [
@@ -458,12 +473,17 @@ export default function Home() {
   const calendarRunInFlight = useRef<string | null>(null);
   const playgroundStartInFlight = useRef<string | null>(null);
   useEffect(() => {
-    fetch(`/api/state?read=${Date.now()}`, { cache: "no-store" })
+    const query = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
+    query.set("read", Date.now().toString());
+    fetch(`/api/state?${query.toString()}`, { cache: "no-store" })
       .then(async (response) => {
         if (!response.ok) throw new Error("Unable to load local state");
         return readJsonResponse<OpenPresenceState>(response);
       })
-      .then(setState)
+      .then((payload) => {
+        setState(payload);
+        syncBrowserWorkspaceContext(payload);
+      })
       .catch((reason: unknown) => setError(clientErrorMessage(reason, "Unable to load local state")))
       .finally(() => setLoading(false));
   }, []);
@@ -478,13 +498,18 @@ export default function Home() {
     try {
       const response = await fetch("/api/state", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(state?.activeAgentId ? { "x-openpresence-agent-id": state.activeAgentId } : {}),
+          ...(state?.activePresenceId ? { "x-openpresence-presence-id": state.activePresenceId } : {}),
+        },
         body: JSON.stringify(operation),
       });
       const payload = await readJsonResponse<OpenPresenceState & { error?: string }>(response);
       if (!response.ok)
         throw new Error(payload.error ?? "That change could not be saved.");
       setState(payload);
+      syncBrowserWorkspaceContext(payload);
       return payload as OpenPresenceState;
     } catch (reason) {
       setError(clientErrorMessage(reason, "That change could not be saved."));
@@ -492,6 +517,16 @@ export default function Home() {
     } finally {
       if (tracksAttention) setPendingOperation(null);
     }
+  }
+  async function refreshState() {
+    const query = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
+    query.set("read", Date.now().toString());
+    const response = await fetch(`/api/state?${query.toString()}`, { cache: "no-store" });
+    const payload = await readJsonResponse<OpenPresenceState>(response);
+    if (!response.ok) throw new Error("Unable to refresh local state.");
+    setState(payload);
+    syncBrowserWorkspaceContext(payload);
+    return payload;
   }
   function openView(nextView: View) {
     setView(nextView);
@@ -504,6 +539,19 @@ export default function Home() {
       playgroundStartInFlight.current = null;
     });
   }
+  useEffect(() => {
+    const presence = state?.presence;
+    if (view !== "playground" || !state?.onboarded || !presence || playgroundStartInFlight.current === presence.id) return;
+    if (state.playgroundSessions.some((item) => item.presenceId === presence.id && item.status === "active")) return;
+    const timer = window.setTimeout(() => {
+      if (playgroundStartInFlight.current === presence.id) return;
+      playgroundStartInFlight.current = presence.id;
+      void mutate({ type: "startPlayground", presenceId: presence.id, source: "fresh" }).finally(() => {
+        playgroundStartInFlight.current = null;
+      });
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [view, state?.onboarded, state?.activePresenceId, state?.playgroundSessions, state?.presence]);
   useEffect(() => {
     if (pendingOperation === "wakePresence" || pendingOperation === "runPulse") return;
     const presence = state?.presence;
@@ -578,7 +626,11 @@ export default function Home() {
     try {
       const response = await fetch("/api/bridge/manage", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(state?.activeAgentId ? { "x-openpresence-agent-id": state.activeAgentId } : {}),
+          ...(state?.activePresenceId ? { "x-openpresence-presence-id": state.activePresenceId } : {}),
+        },
         body: JSON.stringify(operation),
       });
       const payload = await readJsonResponse<{ state?: OpenPresenceState; key?: string; error?: string }>(response);
@@ -588,6 +640,7 @@ export default function Home() {
         );
       if (!payload.state) throw new Error("The Bridge service returned no state.");
       setState(payload.state);
+      syncBrowserWorkspaceContext(payload.state);
       return payload as { state: OpenPresenceState; key?: string };
     } catch (reason) {
       setError(clientErrorMessage(reason, "That Bridge change could not be saved."));
@@ -599,12 +652,19 @@ export default function Home() {
     try {
       const response = await fetch("/api/x/manage", {
         method: "POST",
-        headers: { "Content-Type": "application/json" },
+        headers: {
+          "Content-Type": "application/json",
+          ...(state?.activeAgentId ? { "x-openpresence-agent-id": state.activeAgentId } : {}),
+          ...(state?.activePresenceId ? { "x-openpresence-presence-id": state.activePresenceId } : {}),
+        },
         body: JSON.stringify(operation),
       });
       const payload = await readJsonResponse<{ state?: OpenPresenceState; result?: { account: { id: string; username: string; name: string }; access: "read" | "read-write" }; error?: string }>(response);
       if (!response.ok) throw new Error(payload.error ?? "The X connection could not be completed.");
-      if (payload.state) setState(payload.state);
+      if (payload.state) {
+        setState(payload.state);
+        syncBrowserWorkspaceContext(payload.state);
+      }
       return payload;
     } catch (reason) {
       setError(clientErrorMessage(reason, "The X connection could not be completed."));
@@ -642,6 +702,7 @@ export default function Home() {
       selectedFile={selectedFile}
       setSelectedFile={setSelectedFile}
       mutate={mutate}
+      refreshState={refreshState}
       pendingOperation={pendingOperation}
       manageBridge={manageBridge}
       manageX={manageX}
@@ -1157,6 +1218,7 @@ function AgentWorkspaceShell({
   selectedFile,
   setSelectedFile,
   mutate,
+  refreshState,
   pendingOperation,
   manageBridge,
   manageX,
@@ -1168,6 +1230,7 @@ function AgentWorkspaceShell({
   selectedFile: FileKind;
   setSelectedFile: (file: FileKind) => void;
   mutate: Mutate;
+  refreshState: () => Promise<OpenPresenceState>;
   pendingOperation: string | null;
   manageBridge: BridgeManage;
   manageX: XManage;
@@ -1175,6 +1238,8 @@ function AgentWorkspaceShell({
 }) {
   const agent = state.agent!;
   const presence = state.presence ?? state.presences[0]!;
+  const presenceBridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
+  const presenceBridgeStatus = presenceBridge ? bridgeAdapterStatus(presenceBridge) : undefined;
   const [showPresenceModal, setShowPresenceModal] = useState(false);
   const pageLabel =
     view === "brain"
@@ -1185,7 +1250,7 @@ function AgentWorkspaceShell({
           ? "Activity"
           : view === "feed"
             ? "Feed"
-          : view[0].toUpperCase() + view.slice(1);
+        : view[0].toUpperCase() + view.slice(1);
   const pendingExecutionCount = state.executions.filter(
     (item) =>
       item.presenceId === presence.id && item.status === "awaiting-review",
@@ -1280,13 +1345,15 @@ function AgentWorkspaceShell({
               <span className="status-dot" />{" "}
               {presence.status === "paused"
                 ? "Asleep"
-                : state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "needs-attention") || state.bridges.some((item) => item.presenceId === presence.id && item.state === "degraded")
+                : state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "needs-attention") || presenceBridgeStatus === "stale"
                   ? "Needs attention"
                   : presence.connectionMode === "sandbox"
                     ? "Sandbox"
-                    : (state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "connected") || state.bridges.some((item) => item.presenceId === presence.id && item.state === "online"))
-                      ? "Connected"
-                      : "Not connected"}
+                    : presenceBridgeStatus === "waiting"
+                      ? "Waiting for adapter"
+                      : (state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "connected") || presenceBridgeStatus === "connected")
+                        ? "Connected"
+                        : "Not connected"}
             </span>
           </div>}
         </header>
@@ -1303,7 +1370,7 @@ function AgentWorkspaceShell({
             <PlaygroundView state={state} mutate={mutate} />
           )}
           {view === "live" && (
-            <LiveView state={state} mutate={mutate} setView={setView} pendingOperation={pendingOperation} />
+            <LiveView state={state} mutate={mutate} pendingOperation={pendingOperation} />
           )}
           {view === "feed" && (
             <PublicHistoryView state={state} setView={setView} />
@@ -1325,6 +1392,7 @@ function AgentWorkspaceShell({
               key={presence.id}
               state={state}
               mutate={mutate}
+              refreshState={refreshState}
               setView={setView}
               pendingOperation={pendingOperation}
               manageBridge={manageBridge}
@@ -1386,6 +1454,7 @@ function LegacyAppShell({
   selectedFile,
   setSelectedFile,
   mutate,
+  refreshState,
   manageBridge,
   manageX,
   error,
@@ -1396,6 +1465,7 @@ function LegacyAppShell({
   selectedFile: FileKind;
   setSelectedFile: (file: FileKind) => void;
   mutate: Mutate;
+  refreshState: () => Promise<OpenPresenceState>;
   manageBridge: BridgeManage;
   manageX: XManage;
   error: string | null;
@@ -1412,7 +1482,9 @@ function LegacyAppShell({
           ? "Activity"
           : view === "feed"
             ? "Feed"
-          : view[0].toUpperCase() + view.slice(1);
+        : view[0].toUpperCase() + view.slice(1);
+  const presenceBridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
+  const presenceBridgeStatus = presenceBridge ? bridgeAdapterStatus(presenceBridge) : "disconnected";
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -1518,13 +1590,13 @@ function LegacyAppShell({
                   ? "Paused"
                   : state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "needs-attention")
                     ? "Needs attention"
-                  : state.bridges.some(
-                        (item) =>
-                          item.presenceId === presence.id &&
-                          item.state === "online",
-                      )
-                    ? "Connected"
-                    : "Not connected"
+                  : presenceBridgeStatus === "stale"
+                    ? "Needs attention"
+                    : presenceBridgeStatus === "waiting"
+                      ? "Waiting for adapter"
+                      : presenceBridgeStatus === "connected"
+                        ? "Connected"
+                        : "Not connected"
                 : view === "brain"
                   ? "Agent workspace"
                   : "All Presences"}
@@ -1564,6 +1636,7 @@ function LegacyAppShell({
               key={presence.id}
               state={state}
               mutate={mutate}
+              refreshState={refreshState}
               manageBridge={manageBridge}
               manageX={manageX}
             />
@@ -1629,14 +1702,10 @@ function AddPresenceDialog({
   const [customId, setCustomId] = useState("custom-channel");
   const [customDomain, setCustomDomain] = useState("");
   const [customIcon, setCustomIcon] = useState("community");
-  const [affordances, setAffordances] = useState("post, reply, react, message");
+  const [affordances, setAffordances] = useState<string[]>(["post", "comment", "like"]);
   const customDefinition = (): ChannelDefinition => {
     const timestamp = new Date().toISOString();
-    const ids = affordances
-      .split(",")
-      .map((item) => item.trim().toLowerCase().replace(/\s+/g, "-"))
-      .filter(Boolean);
-    const capabilities = [...new Set(ids)].map((id) => ({
+    const capabilities = affordances.map((id) => ({
       id,
       label: id
         .replace(/-/g, " ")
@@ -1656,6 +1725,7 @@ function AddPresenceDialog({
         { id: "message", label: "Message" },
       ],
       affordances: capabilities,
+      supportedAssetKinds: [],
       formats: [
         {
           id: `${customId.trim().toLowerCase()}.text-post`,
@@ -1702,6 +1772,7 @@ function AddPresenceDialog({
     setSubmitting(false);
   };
   const preview = channel === "__custom__" ? customDefinition() : null;
+  const toggleAffordance = (id: string) => setAffordances((current) => current.includes(id) ? current.filter((item) => item !== id) : [...current, id]);
   const handleLabel = channel === "x" ? "X handle" : "Platform handle";
   const handleHint = connectionMode === "sandbox"
     ? "Used by the Social Mirror when this Presence speaks in rehearsal."
@@ -1789,7 +1860,7 @@ function AddPresenceDialog({
               />
             </label>
             <label>
-              Channel ID
+              Technical channel ID <small className="muted">Advanced</small>
               <input
                 aria-label="Custom channel ID"
                 value={customId}
@@ -1827,17 +1898,23 @@ function AddPresenceDialog({
                 })}
               </div>
             </fieldset>
-            <label>
-              Affordances
-              <input
-                aria-label="Custom affordances"
-                value={affordances}
-                onChange={(event) => setAffordances(event.target.value)}
-              />
-              <small className="muted">
-                Comma-separated actions people can take.
-              </small>
-            </label>
+            <fieldset className="capability-picker">
+              <legend>What can people do here?</legend>
+              <small className="muted">Choose the social actions this adapter is allowed to carry out.</small>
+              <div className="capability-picker-options">
+                {[
+                  ["post", "Post", "Publish a new community post."],
+                  ["comment", "Comment / reply", "Respond inside an existing conversation."],
+                  ["like", "Like", "React to a community object."],
+                ].map(([id, label, description]) => (
+                  <label key={id}>
+                    <input type="checkbox" checked={affordances.includes(id)} onChange={() => toggleAffordance(id)} />
+                    <span><strong>{label}</strong><small>{description}</small></span>
+                  </label>
+                ))}
+              </div>
+              <p className="media-capability-note"><strong>Media delivery not enabled yet.</strong> Image and GIF uploads will be negotiated separately when the Bridge supports asset transfer.</p>
+            </fieldset>
             <details>
               <summary>Advanced channel blueprint</summary>
               <pre className="blueprint-preview">
@@ -2057,6 +2134,7 @@ function SocialObjectCard({
   presenceId,
   presenceName,
   onSelect,
+  onRemove,
   threadDepth = 0,
 }: {
   item: MirrorObject;
@@ -2065,6 +2143,7 @@ function SocialObjectCard({
   presenceId: string;
   presenceName: string;
   onSelect: (id: string) => void;
+  onRemove: (id: string) => void;
   threadDepth?: number;
 }) {
   const itemAssets = (item.assetRefs ?? [])
@@ -2096,6 +2175,7 @@ function SocialObjectCard({
             <small>{authorHandle}</small>
           </span>
           <time>{formatTime(item.occurredAt ?? item.observedAt)}</time>
+          <button type="button" className="social-card-remove" aria-label={`Remove ${item.objectType} from Playground`} title="Remove from rehearsal" onClick={() => onRemove(item.id)}><X size={13} /></button>
         </div>
       ) : (
         <div className="social-card-meta">
@@ -2107,6 +2187,7 @@ function SocialObjectCard({
             </small>
           </span>
           <time>{formatTime(item.occurredAt ?? item.observedAt)}</time>
+          <button type="button" className="social-card-remove" aria-label={`Remove ${item.objectType} from Playground`} title="Remove from rehearsal" onClick={() => onRemove(item.id)}><X size={13} /></button>
         </div>
       )}
       {isLike ? (
@@ -2164,12 +2245,14 @@ function PlaygroundThreadFeed({
   presenceId,
   presenceName,
   onSelect,
+  onRemove,
 }: {
   objects: MirrorObject[];
   assets: OpenPresenceState["assets"];
   presenceId: string;
   presenceName: string;
   onSelect: (id: string) => void;
+  onRemove: (id: string) => void;
 }) {
   const refKey = (object: MirrorObject) => `${object.externalRef.type}:${object.externalRef.id}`;
   const objectsByRef = new Map(objects.map((object) => [refKey(object), object]));
@@ -2195,7 +2278,7 @@ function PlaygroundThreadFeed({
     });
   const renderThread = (object: MirrorObject, depth = 0): React.ReactNode => (
     <Fragment key={object.id}>
-      <SocialObjectCard item={object} objects={objects} assets={assets} presenceId={presenceId} presenceName={presenceName} onSelect={onSelect} threadDepth={depth} />
+      <SocialObjectCard item={object} objects={objects} assets={assets} presenceId={presenceId} presenceName={presenceName} onSelect={onSelect} onRemove={onRemove} threadDepth={depth} />
       {(childrenByParent.get(refKey(object)) ?? []).sort((left, right) => timestamp(left) - timestamp(right)).map((child) => renderThread(child, depth + 1))}
     </Fragment>
   );
@@ -2258,7 +2341,7 @@ function PlaygroundEventDetail({ event }: { event: OpenPresenceState["events"][n
 
 function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: Mutate }) {
   const presence = state.presence ?? state.presences[0];
-  const session = state.playgroundSessions.find((item) => item.presenceId === presence?.id && item.status === "active") ?? state.playgroundSessions[0];
+  const session = state.playgroundSessions.find((item) => item.presenceId === presence?.id && item.status === "active");
   const channelDefinition = state.channelDefinitions.find((item) => item.id === presence?.channel);
   const simulation = simulationForChannel(presence?.channel ?? "x", channelDefinition);
   const objects = session ? state.mirrorObjects.filter((item) => item.sessionId === session.id && item.channelId === session.channelId).sort((left, right) => (right.occurredAt ?? right.observedAt).localeCompare(left.occurredAt ?? left.observedAt)) : [];
@@ -2276,11 +2359,12 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
   const [feedbackAttemptId, setFeedbackAttemptId] = useState<string | null>(null);
   const [feedbackReasons, setFeedbackReasons] = useState<PreferenceReason[]>([]);
   const [feedbackNote, setFeedbackNote] = useState("");
+  const sessionId = session?.id;
   const targetObjects = objects.filter((item) => item.actorPresenceId === presence?.id && item.objectType !== "like");
   const assetKinds = channelDefinition?.supportedAssetKinds ?? ["image", "video", "gif", "link"] as SocialAssetKind[];
   const selectedObject = selectedObjectId ? objects.find((item) => item.id === selectedObjectId) : undefined;
-  const rehearsalAttempts = state.originalPostRehearsals.filter((item) => item.sessionId === session.id).slice(0, 5);
-  const sessionAssignments = state.assignments.filter((item) => item.sessionId === session.id || (item.status === "draft" && item.presenceId === presence?.id));
+  const rehearsalAttempts = sessionId ? state.originalPostRehearsals.filter((item) => item.sessionId === sessionId).slice(0, 5) : [];
+  const sessionAssignments = state.assignments.filter((item) => (sessionId && item.sessionId === sessionId) || (item.status === "draft" && item.presenceId === presence?.id));
   const assignmentDraft = assignmentDraftId ? sessionAssignments.find((item) => item.id === assignmentDraftId) : undefined;
   const activeAssignment = sessionAssignments.find((item) => ["active", "working", "blocked"].includes(item.status));
   const originalLabel = presence.channel === "x"
@@ -2294,6 +2378,11 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
     { id: "idea", label: "Idea" }, { id: "voice", label: "Voice" }, { id: "topic", label: "Topic" }, { id: "humor", label: "Humor" }, { id: "format", label: "Format" }, { id: "technical_depth", label: "Technical depth" }, { id: "too_generic", label: "Too generic" }, { id: "too_promotional", label: "Too promotional" }, { id: "too_long", label: "Too long" }, { id: "too_risky", label: "Too risky" }, { id: "factually_wrong", label: "Factually wrong" }, { id: "not_something_i_would_say", label: "Not something I'd say" },
   ];
   const run = async (operation: unknown) => { setBusy(true); try { await mutate(operation); } finally { setBusy(false); } };
+  const removeSandboxObject = async (objectId: string) => {
+    if (!session) return;
+    await run({ type: "removeSandboxObject", sessionId: session.id, objectId });
+    setSelectedObjectId((selected) => selected === objectId ? null : selected);
+  };
   const wakeOrCheck = async () => {
     if (!session) return;
     if (presence?.status === "paused") {
@@ -2303,16 +2392,19 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
     await run({ type: "runSandboxPulse", sessionId: session.id });
   };
   const considerOriginal = async (value?: string) => {
+    if (!session) return;
     await run({ type: "considerOriginalPublication", sessionId: session.id, inspiration: value?.trim() || undefined });
     setInspiration("");
     setRehearsalOpen(false);
   };
   const reviewAssignment = async () => {
+    if (!session) return;
     const next = await mutate({ type: "createAssignment", sessionId: session.id, presenceId: presence.id, environment: "sandbox", instruction: assignmentInstruction });
     const created = next?.assignments.find((item) => item.sessionId === session.id) ?? next?.assignments[0];
     if (created) setAssignmentDraftId(created.id);
   };
   const saveFeedback = async (attemptId: string, reaction: "fits" | "does_not_fit" | "good_silence" | "expected_action") => {
+    if (!session) return;
     await run({ type: "recordPreferenceEvidence", sessionId: session.id, attemptId, reaction, reasons: feedbackReasons, note: feedbackNote.trim() || undefined });
     setFeedbackAttemptId(null);
     setFeedbackReasons([]);
@@ -2324,7 +2416,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
     <div className="playground-page">
       <div className="playground-toolbar">
         <div>
-          <div className="eyebrow">Agent rehearsal</div>
+          <div className="eyebrow">Presence rehearsal</div>
           <div className="playground-title-row"><h1>Playground</h1><span className="environment-chip"><span className="status-dot" /> Sandbox</span></div>
           <p>{simulation.worldDescription}</p>
           <p className="playground-handle-hint">Agent handle: <strong>{presence.handle}</strong>. Use @mentions in Chat when addressing {presence.name}.</p>
@@ -2351,14 +2443,14 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
           {!assignmentDraft ? <><label>Assignment instruction<textarea aria-label="Assignment instruction" value={assignmentInstruction} onChange={(event) => setAssignmentInstruction(event.target.value)} placeholder="Produce 3 original X posts about offers, pricing, sales, or execution. Choose your own angles and do not repeat yourself." rows={4} /></label><div className="original-rehearsal-actions"><small>The original instruction stays attached to the Assignment.</small><Button variant="primary" disabled={busy || !assignmentInstruction.trim()} onClick={() => void reviewAssignment()}><Check size={14} /> Review assignment</Button></div></> : <div className="assignment-review" aria-label="Assignment review"><div><span>Deliverable</span><strong>{assignmentDraft.progress.required} original {channelLabel(assignmentDraft.channelId, state.channelDefinitions)} publications</strong></div><div><span>Completion</span><strong>{assignmentDraft.progress.required} verified publications</strong></div><div><span>Agent decides how</span><strong>Topics · thesis · evidence · format · wording · timing strategy</strong></div><p>{assignmentDraft.instruction}</p><div className="original-rehearsal-actions"><Button variant="ghost" onClick={() => setAssignmentDraftId(null)}>Adjust</Button><Button variant="primary" disabled={busy} onClick={() => void run({ type: "startAssignment", id: assignmentDraft.id, sessionId: session.id })}><Play size={14} /> Start rehearsal</Button></div></div>}
         </>}
       </section>}
-      {(activeAssignment || assignmentDraft) && <section className="assignment-progress-panel" aria-label="Assignment progress"><div><div className="eyebrow">Posting Assignment</div><h2>{(activeAssignment ?? assignmentDraft)?.instruction}</h2></div><div className="assignment-progress-bar"><span style={{ width: `${Math.min(100, (((activeAssignment ?? assignmentDraft)?.progress.verified ?? 0) / Math.max(1, (activeAssignment ?? assignmentDraft)?.progress.required ?? 1)) * 100)}%` }} /></div><div className="assignment-progress-meta"><strong>{(activeAssignment ?? assignmentDraft)?.progress.verified} / {(activeAssignment ?? assignmentDraft)?.progress.required} delivered</strong><span>{(activeAssignment ?? assignmentDraft)?.status === "completed" ? "Completed" : (activeAssignment ?? assignmentDraft)?.status === "blocked" ? "Blocked" : `${(activeAssignment ?? assignmentDraft)?.rejectedCandidates} candidate rejections`}</span></div>{(activeAssignment ?? assignmentDraft)?.status === "blocked" && <p className="assignment-warning">{(activeAssignment ?? assignmentDraft)?.lastOutcome?.message}</p>}{(activeAssignment ?? assignmentDraft)?.status === "active" && <Button variant="secondary" disabled={busy} onClick={() => void run({ type: "workAssignment", id: (activeAssignment ?? assignmentDraft)!.id, sessionId: session.id })}><Play size={14} /> Continue working</Button>}</section>}
+      {(activeAssignment || assignmentDraft) && <section className="assignment-progress-panel" aria-label="Assignment progress"><div><div className="eyebrow">Posting Assignment</div><h2>{(activeAssignment ?? assignmentDraft)?.instruction}</h2></div><div className="assignment-progress-bar"><span style={{ width: `${Math.min(100, (((activeAssignment ?? assignmentDraft)?.progress.verified ?? 0) / Math.max(1, (activeAssignment ?? assignmentDraft)?.progress.required ?? 1)) * 100)}%` }} /></div><div className="assignment-progress-meta"><strong>{(activeAssignment ?? assignmentDraft)?.progress.verified} / {(activeAssignment ?? assignmentDraft)?.progress.required} delivered</strong><span>{(activeAssignment ?? assignmentDraft)?.status === "completed" ? "Completed" : (activeAssignment ?? assignmentDraft)?.status === "blocked" ? "Blocked" : `${(activeAssignment ?? assignmentDraft)?.rejectedCandidates} candidate rejections`}</span></div>{(activeAssignment ?? assignmentDraft)?.status === "blocked" && <p className="assignment-warning">{(activeAssignment ?? assignmentDraft)?.lastOutcome?.message}</p>}{["active", "blocked"].includes((activeAssignment ?? assignmentDraft)?.status ?? "") && <Button variant="secondary" disabled={busy} onClick={() => void run({ type: (activeAssignment ?? assignmentDraft)?.status === "blocked" ? "startAssignment" : "workAssignment", id: (activeAssignment ?? assignmentDraft)!.id, sessionId: session.id })}><Play size={14} /> {(activeAssignment ?? assignmentDraft)?.status === "blocked" ? "Retry Assignment" : "Continue working"}</Button>}</section>}
       <div className="playground-grid">
           <aside className="playground-rail">
             <section className="playground-panel"><div className="eyebrow">Starting world</div><strong>{simulation.startingStateLabel}</strong><p>Nothing here is live. Simulated history stays in this session.</p><div className="session-status"><span className="status-dot" /> {presence.status === "paused" ? "Paused" : "Awake"}</div></section>
             <section className="playground-panel"><div className="eyebrow">People in the room</div>{state.sandboxActors.filter((actor) => actor.sessionId === session.id).length ? state.sandboxActors.filter((actor) => actor.sessionId === session.id).map((actor) => <div className="playground-actor" key={actor.id}><span className="actor-avatar">{initials(actor.displayName)}</span><span><strong>{actor.displayName}</strong><small>{actor.handle ?? "Audience"}</small></span></div>) : <p className="playground-muted">Add a person below to make the first social event.</p>}</section>
             <section className="playground-panel playground-time"><div className="eyebrow"><Clock3 size={12} /> Virtual time</div><strong>{new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(session.virtualNow))}</strong><div className="time-actions"><button onClick={() => void run({ type: "advanceSandboxTime", sessionId: session.id, minutes: 15 })}>+15m</button><button onClick={() => void run({ type: "advanceSandboxTime", sessionId: session.id, minutes: 60 })}>+1h</button><button onClick={() => void run({ type: "advanceSandboxTime", sessionId: session.id, minutes: 1440 })}>Tomorrow</button></div></section>
           </aside>
-          <main className="playground-world"><div className="world-heading"><div><div className="eyebrow">{simulation.worldLabel}</div><h2>What {presence.name} can see</h2></div><Button variant="primary" disabled={busy} onClick={() => void wakeOrCheck()}><Sparkles size={14} /> {presence.status === "paused" ? `Wake ${presence.name}` : "Check now"}</Button></div>{objects.length ? <PlaygroundThreadFeed objects={objects} assets={state.assets} presenceId={presence.id} presenceName={presence.name} onSelect={setSelectedObjectId} /> : <div className="world-blank"><MessageSquare size={20} /><p>The simulated {channelLabel(session.channelId, state.channelDefinitions)} world is quiet.</p><small>Check now to let {state.agent?.name ?? "the Agent"} choose a first move, or add an event from the control room.</small></div>}{selectedObject && <section className="perception-panel" aria-label={`What ${presence.name} sees`}><div className="section-heading compact"><div><div className="eyebrow">Perception</div><h3>What {presence.name} sees</h3></div><div className="perception-actions"><button type="button" className="what-sees-button" disabled={busy} onClick={() => void run({ type: "inspectSandboxMedia", sessionId: session.id, objectId: selectedObject.id })}>Inspect media</button><button type="button" className="perception-close" onClick={() => setSelectedObjectId(null)}>Close</button></div></div>{selectedObject.assetRefs?.map((ref) => { const asset = state.assets.find((item) => item.id === ref.assetId); const perception = latestPerception(state.perceptions, ref.assetId); return <div className="perception-item" key={ref.assetId}><strong>{asset?.type === "link" ? asset.provenance.sourceUrl : asset?.type ?? ref.kind}</strong><dl><div><dt>Appears to mean</dt><dd>{perception?.result.interpretation ?? perception?.result.observation ?? "No perception recorded."}</dd></div><div><dt>Uncertainty</dt><dd>{perception?.result.uncertainty ?? "insufficient"}</dd></div><div><dt>Missing context</dt><dd>{perception?.result.missingContext?.join(" ") ?? "None recorded."}</dd></div></dl></div>; })}<p className="perception-boundary">Perception explains what media appears to mean. Taste decides whether it is worth acting on. {presence.name} will not infer an uninspected asset.</p></section>}</main>
+          <main className="playground-world"><div className="world-heading"><div><div className="eyebrow">{simulation.worldLabel}</div><h2>What {presence.name} can see</h2></div><Button variant="primary" disabled={busy} onClick={() => void wakeOrCheck()}><Sparkles size={14} /> {presence.status === "paused" ? `Wake ${presence.name}` : "Check now"}</Button></div>{objects.length ? <PlaygroundThreadFeed objects={objects} assets={state.assets} presenceId={presence.id} presenceName={presence.name} onSelect={setSelectedObjectId} onRemove={(objectId) => void removeSandboxObject(objectId)} /> : <div className="world-blank"><MessageSquare size={20} /><p>The simulated {channelLabel(session.channelId, state.channelDefinitions)} world is quiet.</p><small>Check now to let {state.agent?.name ?? "the Agent"} choose a first move, or add an event from the control room.</small></div>}{selectedObject && <section className="perception-panel" aria-label={`What ${presence.name} sees`}><div className="section-heading compact"><div><div className="eyebrow">Perception</div><h3>What {presence.name} sees</h3></div><div className="perception-actions"><button type="button" className="what-sees-button" disabled={busy} onClick={() => void run({ type: "inspectSandboxMedia", sessionId: session.id, objectId: selectedObject.id })}>Inspect media</button><button type="button" className="perception-close" onClick={() => setSelectedObjectId(null)}>Close</button></div></div>{selectedObject.assetRefs?.map((ref) => { const asset = state.assets.find((item) => item.id === ref.assetId); const perception = latestPerception(state.perceptions, ref.assetId); return <div className="perception-item" key={ref.assetId}><strong>{asset?.type === "link" ? asset.provenance.sourceUrl : asset?.type ?? ref.kind}</strong><dl><div><dt>Appears to mean</dt><dd>{perception?.result.interpretation ?? perception?.result.observation ?? "No perception recorded."}</dd></div><div><dt>Uncertainty</dt><dd>{perception?.result.uncertainty ?? "insufficient"}</dd></div><div><dt>Missing context</dt><dd>{perception?.result.missingContext?.join(" ") ?? "None recorded."}</dd></div></dl></div>; })}<p className="perception-boundary">Perception explains what media appears to mean. Taste decides whether it is worth acting on. {presence.name} will not infer an uninspected asset.</p></section>}</main>
           <aside className="playground-activity">
             <div className="activity-rail-heading"><div className="eyebrow">Control room</div><span className="environment-chip">{channelLabel(session.channelId, state.channelDefinitions)} · Sandbox</span></div>
             <section>
@@ -3184,12 +3276,10 @@ void TeachView;
 function LiveView({
   state,
   mutate,
-  setView,
   pendingOperation,
 }: {
   state: OpenPresenceState;
   mutate: Mutate;
-  setView?: (view: View) => void;
   pendingOperation?: string | null;
 }) {
   const selected = state.presence;
@@ -3446,18 +3536,6 @@ function LiveView({
               <h3>{activity.nextAttention.label}</h3>
               <p>{presenceCopy(activity.nextAttention.detail)}</p>
               <small>{activity.nextIntent.label} · {presenceCopy(activity.nextIntent.detail)}</small>
-            </div>
-            <div className="activity-rhythm-block">
-              <SectionEyebrow>Rhythm</SectionEyebrow>
-              <h3>When {presenceName} pays attention</h3>
-              <p className="activity-rhythm-description">Rhythm controls when this Presence looks for something worth considering. It does not decide what to say or force a publication.</p>
-              <div className="rhythm-summary">
-                <span>Attention <strong>{activity.rhythm.attention}</strong></span>
-                <span>Publishing <strong>{activity.rhythm.publishing}</strong></span>
-                <span>Replies <strong>{activity.rhythm.replies}</strong></span>
-                <span>Quiet hours <strong>{activity.rhythm.quietHours}</strong></span>
-              </div>
-              {setView && <button type="button" className="rhythm-manage-link" onClick={() => setView("presence")}><Settings2 size={13} /> Manage attention rhythm</button>}
             </div>
           </section>
           <div id="decision-and-action">
@@ -3844,7 +3922,7 @@ function ExecutionLedger({
 void ExecutionLedger;
 
 const calendarWeekDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
-const calendarHours = Array.from({ length: 17 }, (_, index) => index + 6);
+const calendarHours = Array.from({ length: 24 }, (_, index) => index);
 const objectiveLabel = (objective: string) => objective.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 const objectiveTone = (objective: string) => objective.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "other";
 const timeToMinutes = (value: string) => { const [hours, minutes] = value.split(":").map(Number); return (Number.isFinite(hours) ? hours : 8) * 60 + (Number.isFinite(minutes) ? minutes : 0); };
@@ -4035,10 +4113,11 @@ function FeedHistory({ history, state, presenceName, onSelect }: { history: Publ
     return date.toLocaleDateString("en", { month: "short", day: "numeric" }).toUpperCase();
   };
   history.forEach((item) => {
-    const key = dateKey(item.occurredAt);
+    const displayAt = historyDisplayAt(item);
+    const key = dateKey(displayAt);
     const group = groups.find((candidate) => candidate.key === key);
     if (group) group.items.push(item);
-    else groups.push({ key, label: dateLabel(item.occurredAt), items: [item] });
+    else groups.push({ key, label: dateLabel(displayAt), items: [item] });
   });
   return <div className="feed-history">{groups.map((group) => <section className="feed-date-group" key={group.key} aria-label={group.label}><div className="feed-date-heading">{group.label}</div><div className="feed-items">{group.items.map((item) => <FeedItem key={item.id} item={item} state={state} presenceName={presenceName} onSelect={onSelect} />)}</div></section>)}</div>;
 }
@@ -4046,21 +4125,24 @@ function FeedHistory({ history, state, presenceName, onSelect }: { history: Publ
 function FeedItem({ item, state, presenceName, onSelect }: { item: PublicHistoryItem; state: OpenPresenceState; presenceName: string; onSelect: (item: PublicHistoryItem) => void }) {
   const presence = state.presences.find((candidate) => candidate.id === item.presenceId);
   const kindLabel = item.kind === "post" ? "Original" : item.kind[0].toUpperCase() + item.kind.slice(1);
-  const assets = (item.assetIds ?? []).map((id) => state.assets.find((asset) => asset.id === id)).filter(Boolean);
+  const assets = (item.assetIds ?? []).map((id) => state.assets.find((asset) => asset.id === id)).filter((asset): asset is OpenPresenceState["assets"][number] => Boolean(asset));
+  const displayAt = historyDisplayAt(item);
   return <button type="button" className={`feed-item feed-item-${item.kind}`} onClick={() => onSelect(item)}>
-    <span className="feed-item-header"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span className="feed-item-identity"><strong>{presence?.name ?? presenceName}</strong><small>{presence?.handle ?? ""} · {kindLabel}</small></span><time>{formatTime(item.occurredAt)}</time></span>
+    <span className="feed-item-header"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span className="feed-item-identity"><strong>{presence?.name ?? presenceName}</strong><small>{presence?.handle ?? ""} · {kindLabel}</small></span><time dateTime={displayAt} title={historyTimeTitle(item)}>{formatTime(displayAt)}</time></span>
     {item.kind === "reply" || item.kind === "comment" ? <span className="feed-item-context">Replying in a public conversation</span> : null}
     <span className="feed-item-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "Public expression without returned text.")}</span>
-    {assets.length > 0 && <span className="feed-item-assets">{assets.map((asset) => asset?.dataUrl && (asset.type === "image" || asset.type === "gif" || asset.type === "chart") ? <Image unoptimized width={180} height={120} key={asset.id} src={asset.dataUrl} alt={`Published ${asset.type}`} /> : asset?.dataUrl && asset.type === "video" ? <video key={asset.id} controls src={asset.dataUrl} aria-label="Published video" /> : <span className="social-link-asset" key={asset?.id}>{asset?.type === "link" ? asset.provenance.sourceUrl : `${asset?.type ?? "Asset"} published`}</span>)}</span>}
+    {assets.length > 0 && <span className="feed-item-assets">{assets.map((asset) => { const source = asset?.dataUrl ?? asset?.provenance.sourceUrl; return source && (asset.type === "image" || asset.type === "gif" || asset.type === "chart") ? <img key={asset.id} src={source} alt={`Published ${asset.type}`} /> : source && asset.type === "video" ? <video key={asset.id} controls src={source} aria-label="Published video" /> : <span className="social-link-asset" key={asset?.id}>{asset?.type === "link" ? asset.provenance.sourceUrl : `${asset?.type ?? "Asset"} published`}</span>; })}</span>}
     <span className="feed-item-footer"><span>View details <ChevronRight size={13} /></span></span>
   </button>;
 }
 
 function HistoryCard({ item, onSelect, compact = false }: { item: PublicHistoryItem; onSelect: (item: PublicHistoryItem) => void; compact?: boolean }) {
   const label = item.kind === "post" ? "POST" : item.kind.toUpperCase();
+  const displayAt = historyDisplayAt(item);
   return <button type="button" className={`history-card history-card-${item.kind} ${compact ? "compact" : ""}`} onClick={() => onSelect(item)}>
-    <span className="history-card-kicker"><strong>{label}</strong><time>{formatTime(item.occurredAt)}</time></span>
+    <span className="history-card-kicker"><strong>{label}</strong><time dateTime={displayAt} title={historyTimeTitle(item)}>{formatTime(displayAt)}</time></span>
     {item.text ? <span className="history-card-text">{item.text}</span> : <span className="history-card-text quiet">{item.kind === "repost" ? "Passed along publicly" : "Public expression"}</span>}
+    <span className="history-card-proof">{item.environment === "sandbox" ? "Verified in Sandbox Mirror · simulated only" : item.externalUrl ? "Verified on X" : "Verified in Social Mirror"}</span>
   </button>;
 }
 
@@ -4075,8 +4157,8 @@ function WeekHistory({ anchor, history, presenceName, onSelect }: { anchor: Date
     <div className="history-week-grid">
       <div className="history-week-header"><span>Local time</span>{days.map((date) => <span key={date.toISOString()}>{date.toLocaleDateString("en", { weekday: "short" })}<small>{date.getDate()}</small></span>)}</div>
       <div className="history-week-body"><div className="history-time-rail">{hours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>{days.map((date) => {
-        const dayItems = history.filter((item) => new Date(item.occurredAt).toDateString() === date.toDateString());
-        return <div className="history-day-column" key={date.toISOString()}>{hours.map((hour) => <div className="history-hour-cell" key={hour} />)}{dayItems.map((item) => { const timestamp = new Date(item.occurredAt); const top = Math.max(2, ((timestamp.getHours() + timestamp.getMinutes() / 60) * 56)); return <div key={item.id} className="history-positioned-card" style={{ top }}><HistoryCard item={item} onSelect={onSelect} compact={item.kind === "reply" || item.kind === "comment"} /></div>; })}</div>;
+        const dayItems = history.filter((item) => new Date(historyDisplayAt(item)).toDateString() === date.toDateString());
+        return <div className="history-day-column" key={date.toISOString()}>{hours.map((hour) => <div className="history-hour-cell" key={hour} />)}{dayItems.map((item) => { const timestamp = new Date(historyDisplayAt(item)); const top = Math.max(2, ((timestamp.getHours() + timestamp.getMinutes() / 60) * 56)); return <div key={item.id} className="history-positioned-card" style={{ top }}><HistoryCard item={item} onSelect={onSelect} compact={item.kind === "reply" || item.kind === "comment"} /></div>; })}</div>;
       })}</div>
     </div>
   </div>;
@@ -4086,12 +4168,12 @@ function MonthHistory({ anchor, history, onSelect }: { anchor: Date; history: Pu
   const monthStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
   const start = new Date(monthStart); const day = start.getDay(); start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
   const days = Array.from({ length: 42 }, (_, index) => new Date(start.getTime() + index * 86400000));
-  return <div className="history-month"><div className="history-month-header">{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => <span key={day}>{day}</span>)}</div><div className="history-month-grid">{days.map((date) => { const items = history.filter((item) => new Date(item.occurredAt).toDateString() === date.toDateString()); return <div className={`history-month-day ${date.getMonth() !== anchor.getMonth() ? "outside" : ""}`} key={date.toISOString()}><strong>{date.getDate()}</strong>{items.slice(0, 4).map((item) => <HistoryCard key={item.id} item={item} onSelect={onSelect} compact />)}{items.length > 4 && <small className="history-more">+ {items.length - 4} more</small>}</div>; })}</div></div>;
+  return <div className="history-month"><div className="history-month-header">{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => <span key={day}>{day}</span>)}</div><div className="history-month-grid">{days.map((date) => { const items = history.filter((item) => new Date(historyDisplayAt(item)).toDateString() === date.toDateString()); return <div className={`history-month-day ${date.getMonth() !== anchor.getMonth() ? "outside" : ""}`} key={date.toISOString()}><strong>{date.getDate()}</strong>{items.slice(0, 4).map((item) => <HistoryCard key={item.id} item={item} onSelect={onSelect} compact />)}{items.length > 4 && <small className="history-more">+ {items.length - 4} more</small>}</div>; })}</div></div>;
 }
 
 function DayHistory({ date, history, onSelect }: { date: Date; history: PublicHistoryItem[]; onSelect: (item: PublicHistoryItem) => void }) {
   const hours = Array.from({ length: 24 }, (_, index) => index);
-  return <div className="history-day"><div className="history-day-header"><SectionEyebrow>{date.toLocaleDateString("en", { weekday: "long" })}</SectionEyebrow><h2>{date.toLocaleDateString("en", { month: "long", day: "numeric", year: "numeric" })}</h2><p>Public history appears here.</p></div><div className="history-day-timeline">{hours.map((hour) => <div className="history-timeline-row" key={hour}><span>{String(hour).padStart(2, "0")}:00</span><div>{history.filter((item) => new Date(item.occurredAt).getHours() === hour).map((item) => <HistoryCard key={item.id} item={item} onSelect={onSelect} />)}</div></div>)}</div></div>;
+  return <div className="history-day"><div className="history-day-header"><SectionEyebrow>{date.toLocaleDateString("en", { weekday: "long" })}</SectionEyebrow><h2>{date.toLocaleDateString("en", { month: "long", day: "numeric", year: "numeric" })}</h2><p>Public history appears here.</p></div><div className="history-day-timeline">{hours.map((hour) => <div className="history-timeline-row" key={hour}><span>{String(hour).padStart(2, "0")}:00</span><div>{history.filter((item) => new Date(historyDisplayAt(item)).getHours() === hour).map((item) => <HistoryCard key={item.id} item={item} onSelect={onSelect} />)}</div></div>)}</div></div>;
 }
 
 function PublicHistoryInspector({ item, state, index, total, onNavigate, onClose, onActivity }: { item: PublicHistoryItem; state: OpenPresenceState; index: number; total: number; onNavigate: (offset: number) => void; onClose: () => void; onActivity: () => void }) {
@@ -4102,7 +4184,8 @@ function PublicHistoryInspector({ item, state, index, total, onNavigate, onClose
   const metrics = Object.entries(item.metrics);
   const kindLabel = item.kind === "post" ? "Post" : item.kind[0].toUpperCase() + item.kind.slice(1);
   const position = Math.max(0, index) + 1;
-  return <aside className="history-inspector" aria-label={`${kindLabel} details`}><div className="history-inspector-header"><div><SectionEyebrow>{kindLabel} details</SectionEyebrow><h2>{kindLabel}</h2><small>{new Date(item.occurredAt).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" })}</small></div><button type="button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button></div><div className="history-inspector-navigation" aria-label="Browse public posts"><span aria-live="polite"><strong>Post {position}</strong> of {total}</span><div><button type="button" aria-label="Previous post" disabled={index <= 0} onClick={() => onNavigate(-1)}><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /></button><button type="button" aria-label="Next post" disabled={index < 0 || index >= total - 1} onClick={() => onNavigate(1)}><ChevronRight size={14} /></button></div></div><div className="history-inspector-identity"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span><strong>{presence?.name ?? "Presence"}</strong><small>{presence?.handle ?? ""}</small></span></div>{parent?.content?.text && <div className="history-parent-context"><SectionEyebrow>Replying to</SectionEyebrow><p>{parent.content.text}</p><small>{parent.author?.displayName ?? "Public conversation"}</small></div>}<p className="history-inspector-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "No text was returned by the channel.")}</p><div className="history-proof"><Check size={14} /><span>Observed in Social Mirror · {item.externalRef.type} · {item.externalRef.id}</span></div><section className="history-provenance"><SectionEyebrow>Provenance</SectionEyebrow><p>{item.executionId ? "Published by OpenPresence and verified in the Social Mirror." : "Observed on the connected channel and attributed to this Presence."}</p>{assignment && <p>Assignment output · {assignment.progress.verified} / {assignment.progress.required} verified publications</p>}{mirrorObject?.environment === "sandbox" && <small>Simulated social reality · this expression has no live destination.</small>}</section><section className="history-outcome"><SectionEyebrow>Outcome</SectionEyebrow>{metrics.length ? <div className="history-outcome-grid">{metrics.map(([key, value]) => <div key={key}><strong>{value}</strong><small>{key.replaceAll("_", " ")}</small></div>)}</div> : <p>No channel outcome evidence is attached to this expression yet.</p>}</section><div className="history-inspector-actions">{item.externalUrl ? <a className="history-external-link" href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> Open on X</a> : item.environment === "sandbox" && item.channel === "x" ? <p className="history-sandbox-note">Sandbox rehearsal only. This expression has no live X URL.</p> : null}<Button variant="secondary" onClick={onActivity}><Activity size={14} /> View in Activity</Button></div></aside>;
+  const displayAt = historyDisplayAt(item);
+  return <aside className="history-inspector" aria-label={`${kindLabel} details`}><div className="history-inspector-header"><div><SectionEyebrow>{kindLabel} details</SectionEyebrow><h2>{kindLabel}</h2><small title={historyTimeTitle(item)}>{formatTime(displayAt)}{item.environment === "sandbox" ? " · Sandbox observed" : ""}</small></div><button type="button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button></div><div className="history-inspector-navigation" aria-label="Browse public posts"><span aria-live="polite"><strong>Post {position}</strong> of {total}</span><div><button type="button" aria-label="Previous post" disabled={index <= 0} onClick={() => onNavigate(-1)}><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /></button><button type="button" aria-label="Next post" disabled={index < 0 || index >= total - 1} onClick={() => onNavigate(1)}><ChevronRight size={14} /></button></div></div><div className="history-inspector-identity"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span><strong>{presence?.name ?? "Presence"}</strong><small>{presence?.handle ?? ""}</small></span></div>{parent?.content?.text && <div className="history-parent-context"><SectionEyebrow>Replying to</SectionEyebrow><p>{parent.content.text}</p><small>{parent.author?.displayName ?? "Public conversation"}</small></div>}<p className="history-inspector-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "No text was returned by the channel.")}</p><div className="history-proof"><Check size={14} /><span>Observed in Social Mirror · {item.externalRef.type} · {item.externalRef.id}</span></div><section className="history-provenance"><SectionEyebrow>Provenance</SectionEyebrow><p>{item.executionId ? "Published by OpenPresence and verified in the Social Mirror." : "Observed on the connected channel and attributed to this Presence."}</p>{assignment && <p>Assignment output · {assignment.progress.verified} / {assignment.progress.required} verified publications</p>}{mirrorObject?.environment === "sandbox" && <small>Simulated social reality · this expression has no live destination. Sandbox world time: {formatTime(item.occurredAt)}.</small>}</section><section className="history-outcome"><SectionEyebrow>Outcome</SectionEyebrow>{metrics.length ? <div className="history-outcome-grid">{metrics.map(([key, value]) => <div key={key}><strong>{value}</strong><small>{key.replaceAll("_", " ")}</small></div>)}</div> : <p>No channel outcome evidence is attached to this expression yet.</p>}</section><div className="history-inspector-actions">{item.externalUrl ? <a className="history-external-link" href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> Open on X</a> : item.environment === "sandbox" && item.channel === "x" ? <p className="history-sandbox-note">Sandbox rehearsal only. This expression has no live X URL.</p> : null}<Button variant="secondary" onClick={onActivity}><Activity size={14} /> View in Activity</Button></div></aside>;
 }
 
 function ScheduleView({
@@ -4127,6 +4210,7 @@ function ScheduleView({
   const [considerationEnd, setConsiderationEnd] = useState("11:00");
   const [editingSlot, setEditingSlot] = useState<CalendarSlot | null>(null);
   const [viewMode, setViewMode] = useState<"list" | "week">("week");
+  const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null);
   const presenceId = state.activePresenceId ?? state.presence?.id ?? "";
   const selectedPresence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   const presenceName = selectedPresence?.name ?? "this Presence";
@@ -4187,6 +4271,7 @@ function ScheduleView({
     }
   };
   const visibleSlots = state.calendar.filter((slot) => slot.presence === presenceId);
+  const visibleAssignments = state.assignments.filter((item) => item.presenceId === presenceId && item.status !== "cancelled");
   const beginEdit = (slot: CalendarSlot) => {
     const { start, end } = splitConsiderationWindow(slot.executionWindow, slot.time);
     setEditingSlot(slot);
@@ -4203,8 +4288,23 @@ function ScheduleView({
   };
   const cancelAssignment = async (assignment: OpenPresenceState["assignments"][number]) => {
     if (!window.confirm(`Cancel this Assignment?\n\n${assignment.instruction}`)) return;
-    await mutate({ type: "cancelAssignment", id: assignment.id });
+    const next = await mutate({ type: "cancelAssignment", id: assignment.id });
+    if (next) setSelectedAssignmentId(null);
   };
+  const runAssignmentInPlayground = async (assignment: Assignment) => {
+    if (!selectedPresence || assignment.status === "completed" || assignment.status === "cancelled") return;
+    let next = state;
+    let session = next.playgroundSessions.find((item) => item.presenceId === selectedPresence.id && item.status === "active");
+    if (!session) {
+      next = (await mutate({ type: "startPlayground", presenceId: selectedPresence.id, source: "scenario" })) ?? next;
+      session = next.playgroundSessions.find((item) => item.presenceId === selectedPresence.id && item.status === "active");
+    }
+    if (!session) return;
+    await mutate({ type: "startAssignment", id: assignment.id, sessionId: session.id });
+    setView("playground");
+  };
+  const openAssignment = (assignment: Assignment) => setSelectedAssignmentId(assignment.id);
+  const selectedAssignment = visibleAssignments.find((assignment) => assignment.id === selectedAssignmentId) ?? null;
   return (
     <div className="page">
       <div className="page-heading">
@@ -4212,8 +4312,7 @@ function ScheduleView({
           <SectionEyebrow>Future attention</SectionEyebrow>
           <h1>Schedule</h1>
           <p className="muted">
-            Tell {presenceName} when to pay
-            attention. Words come later, from the moment.
+            Give {presenceName} time-bound permission to notice, decide, and work toward delegated outcomes.
           </p>
         </div>
         <div className="heading-actions calendar-heading-actions">
@@ -4333,9 +4432,30 @@ function ScheduleView({
           </Button>
         </form>
       )}
-      {state.assignments.filter((item) => item.presenceId === presenceId).length > 0 && <section className="schedule-assignment-list" aria-label="Assignments"><div className="section-heading"><div><SectionEyebrow>Delegated responsibility</SectionEyebrow><h2>Assignments</h2></div></div>{state.assignments.filter((item) => item.presenceId === presenceId).map((assignment) => { const canCancel = assignment.status !== "completed" && assignment.status !== "cancelled"; const timing = assignment.schedule ? `${assignment.schedule.day} at ${assignment.schedule.time} · ${assignment.schedule.executionWindow === `${assignment.schedule.time}–${assignment.schedule.time}` ? "exact time" : assignment.schedule.executionWindow}` : assignment.recurrence?.label ?? "Once"; return <article className="schedule-assignment-row" key={assignment.id}><div><strong>{assignment.instruction}</strong><small>{timing} · {assignment.progress.verified} / {assignment.progress.required} verified · {assignment.status.replaceAll("_", " ")}</small></div><div className="schedule-assignment-actions">{canCancel && <Button variant="danger" onClick={() => void cancelAssignment(assignment)}>Cancel</Button>}</div></article>; })}</section>}
+      {selectedAssignment && (
+        <aside className="assignment-inspector" aria-label="Assignment details">
+          <div className="assignment-inspector-header">
+            <div>
+              <SectionEyebrow>Delegated outcome</SectionEyebrow>
+              <h2>Assignment details</h2>
+            </div>
+            <button type="button" aria-label="Close Assignment details" onClick={() => setSelectedAssignmentId(null)}><X size={16} /></button>
+          </div>
+          <p className="assignment-inspector-instruction">{selectedAssignment.instruction}</p>
+          <div className="assignment-inspector-meta">
+            <div><span>Window</span><strong>{selectedAssignment.schedule ? `${selectedAssignment.schedule.day} at ${selectedAssignment.schedule.time}` : "Unscheduled"}</strong><small>{selectedAssignment.schedule?.executionWindow ?? "Ready to start when you choose."}</small></div>
+            <div><span>Progress</span><strong>{selectedAssignment.progress.verified} / {selectedAssignment.progress.required} verified</strong><small>{selectedAssignment.status === "draft" ? "Not started" : selectedAssignment.status.replaceAll("_", " ")}</small></div>
+          </div>
+          <p className="assignment-inspector-note">The outcome is delegated; {presenceName} still chooses the approach and may remain quiet when the social context does not warrant a post.</p>
+          <div className="assignment-inspector-actions">
+            {selectedAssignment.status !== "completed" && <Button variant="secondary" onClick={() => void runAssignmentInPlayground(selectedAssignment)}>{selectedAssignment.status === "blocked" ? "Retry in Playground" : "Run in Playground"}</Button>}
+            {selectedAssignment.status !== "completed" && <Button variant="danger" onClick={() => void cancelAssignment(selectedAssignment)}>Cancel Assignment</Button>}
+          </div>
+        </aside>
+      )}
+      {visibleAssignments.length > 0 && viewMode === "list" && <section className="schedule-assignment-list" aria-label="Assignments"><div className="section-heading"><div><SectionEyebrow>Delegated responsibility</SectionEyebrow><h2>Assignments</h2><p className="muted">Assignments delegate an outcome to work toward. Open one to review its window and progress, run a Sandbox rehearsal, or cancel it. A completed Assignment is verified work, not a promise to publish.</p></div></div>{visibleAssignments.map((assignment) => { const timing = assignment.schedule ? `${assignment.schedule.day} at ${assignment.schedule.time} · ${assignment.schedule.executionWindow === `${assignment.schedule.time}–${assignment.schedule.time}` ? "exact time" : assignment.schedule.executionWindow}` : "Unscheduled · ready to start"; const status = assignment.status === "draft" ? "not started" : assignment.status.replaceAll("_", " "); return <article className="schedule-assignment-row" key={assignment.id}><div><strong>{assignment.instruction}</strong><small>{timing} · {assignment.progress.verified} / {assignment.progress.required} verified · {status}</small></div><div className="schedule-assignment-actions"><Button variant="secondary" onClick={() => openAssignment(assignment)}>Open details</Button></div></article>; })}</section>}
       {viewMode === "week" ? (
-        <WeekCalendar slots={visibleSlots} state={state} presenceName={presenceName} onEdit={beginEdit} onAdd={() => setShowForm(true)} />
+        <WeekCalendar slots={visibleSlots} assignments={visibleAssignments} state={state} presenceName={presenceName} onEdit={beginEdit} onAssignment={openAssignment} onAdd={() => setShowForm(true)} />
       ) : (
       <div className="calendar-layout">
         <section>
@@ -4388,33 +4508,41 @@ function ScheduleView({
 
 function WeekCalendar({
   slots,
+  assignments,
   state,
   presenceName,
   onEdit,
+  onAssignment,
   onAdd,
 }: {
   slots: CalendarSlot[];
+  assignments: Assignment[];
   state: OpenPresenceState;
   presenceName: string;
   onEdit: (slot: CalendarSlot) => void;
+  onAssignment: (assignment: Assignment) => void;
   onAdd: () => void;
 }) {
   const scheduledSlots = slots.filter((slot) => slot.enabled);
+  const scheduledAssignments = assignments.filter((assignment) => assignment.schedule && assignment.status !== "cancelled");
   const daySlots = new Map(calendarWeekDays.map((day) => [day, scheduledSlots.filter((slot) => slot.day === day)]));
+  const dayAssignments = new Map(calendarWeekDays.map((day) => [day, scheduledAssignments.filter((assignment) => assignment.schedule?.day === day)]));
   const gridHeight = calendarHours.length * 64;
+  const hasItems = scheduledSlots.length > 0 || scheduledAssignments.length > 0;
   return (
-    <section className="week-calendar" aria-label="Weekly intent schedule">
+    <section className="week-calendar" aria-label="Weekly schedule">
       <div className="week-calendar-toolbar">
         <div>
           <SectionEyebrow>Visual schedule</SectionEyebrow>
-          <h2>When {presenceName} is meant to pay attention</h2>
-          <p>Standing intents are shown by day and time. Nothing here is a promised post.</p>
+          <h2>When {presenceName} can notice and act</h2>
+          <p>Standing intents invite {presenceName} to notice and decide. Assignments delegate an outcome for a time window. Open an Assignment to review or cancel it; neither one guarantees a post.</p>
         </div>
-        <div className="week-calendar-legend" aria-label="Intent objectives">
+        <div className="week-calendar-legend" aria-label="Schedule legend">
           {["audience_growth", "education", "relationship", "reflection"].map((objective) => <span key={objective}><i className={`legend-dot objective-${objectiveTone(objective)}`} />{objectiveLabel(objective)}</span>)}
+          <span><i className="legend-dot assignment-legend-dot" />Assignment</span>
         </div>
       </div>
-      {scheduledSlots.length === 0 ? <EmptyState title="Nothing scheduled for this Presence" body={`Add a standing intent to see when ${presenceName} will pay attention during the week.`} action={<Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add first intent</Button>} /> : <div className="week-grid-scroll"><div className="week-grid" style={{ "--week-grid-height": `${gridHeight}px` } as React.CSSProperties}><div className="week-grid-header"><span className="week-time-header">Local time</span>{calendarWeekDays.map((day) => <span key={day}>{day.slice(0, 3)}<small>{day}</small></span>)}</div><div className="week-grid-body"><div className="week-time-rail">{calendarHours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>{calendarWeekDays.map((day) => <div className="week-day-column" key={day}>{calendarHours.map((hour) => <div className="week-hour-cell" key={hour} />)}{(daySlots.get(day) ?? []).map((slot) => { const start = timeToMinutes(slot.time); const firstHour = calendarHours[0] * 60; const top = Math.max(0, ((start - firstHour) / 60) * 64); const windowParts = slot.executionWindow.split(/[–-]/).map((part) => part.trim()); const end = windowParts[1] ? timeToMinutes(windowParts[1]) : start + 60; const height = Math.max(54, Math.min(gridHeight - top - 8, ((Math.max(start + 60, end) - start) / 60) * 64 - 8)); const target = state.presences.find((item) => item.id === slot.presence); return <button type="button" key={slot.id} className={`week-intent objective-${objectiveTone(slot.objective)}`} style={{ top, height }} onClick={() => onEdit(slot)} aria-label={`Edit ${slot.label}, ${slot.day} at ${slot.time}`} title={`${slot.label} · ${slot.day} ${slot.time} · ${considerationSummary(slot.time, slot.executionWindow)}`}><span className="week-intent-time">{slot.time}</span><strong>{slot.label}</strong><small>{target?.name ?? presenceName} · {objectiveLabel(slot.objective)}</small><em>{slot.mode === "auto" ? "Auto" : "Review"}</em></button>; })}</div>)}</div></div></div>}
+      {!hasItems ? <EmptyState title="Nothing scheduled for this Presence" body={`Add a standing intent or schedule an Assignment to see when ${presenceName} can notice and act during the week.`} action={<Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add first intent</Button>} /> : <div className="week-grid-scroll"><div className="week-grid" style={{ "--week-grid-height": `${gridHeight}px` } as React.CSSProperties}><div className="week-grid-header"><span className="week-time-header">Local time</span>{calendarWeekDays.map((day) => <span key={day}>{day.slice(0, 3)}<small>{day}</small></span>)}</div><div className="week-grid-body"><div className="week-time-rail">{calendarHours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>{calendarWeekDays.map((day) => <div className="week-day-column" key={day}>{calendarHours.map((hour) => <div className="week-hour-cell" key={hour} />)}{(daySlots.get(day) ?? []).map((slot) => { const start = timeToMinutes(slot.time); const firstHour = calendarHours[0] * 60; const top = Math.max(0, ((start - firstHour) / 60) * 64); const windowParts = slot.executionWindow.split(/[–-]/).map((part) => part.trim()); const end = windowParts[1] ? timeToMinutes(windowParts[1]) : start + 60; const height = Math.max(54, Math.min(gridHeight - top - 8, ((Math.max(start + 60, end) - start) / 60) * 64 - 8)); const target = state.presences.find((item) => item.id === slot.presence); return <button type="button" key={slot.id} className={`week-intent objective-${objectiveTone(slot.objective)}`} style={{ top, height }} onClick={() => onEdit(slot)} aria-label={`Edit ${slot.label}, ${slot.day} at ${slot.time}`} title={`${slot.label} · ${slot.day} ${slot.time} · ${considerationSummary(slot.time, slot.executionWindow)}`}><span className="week-intent-time">{slot.time}</span><strong>{slot.label}</strong><small>{target?.name ?? presenceName} · {objectiveLabel(slot.objective)}</small><em>{slot.mode === "auto" ? "Auto" : "Review"}</em></button>; })}{(dayAssignments.get(day) ?? []).map((assignment) => { const schedule = assignment.schedule!; const start = timeToMinutes(schedule.time); const firstHour = calendarHours[0] * 60; const top = Math.max(0, ((start - firstHour) / 60) * 64); const windowParts = schedule.executionWindow.split(/[–-]/).map((part) => part.trim()); const end = windowParts[1] ? timeToMinutes(windowParts[1]) : start + 60; const height = Math.max(58, Math.min(gridHeight - top - 8, ((Math.max(start + 60, end) - start) / 60) * 64 - 8)); const status = assignment.status === "draft" ? "Not started" : assignment.status.replaceAll("_", " "); return <button type="button" key={assignment.id} className="week-assignment" style={{ top, height }} onClick={() => onAssignment(assignment)} aria-label={`Open Assignment ${assignment.instruction}, ${schedule.day} at ${schedule.time}`} title={`Open Assignment details · ${assignment.instruction} · ${schedule.day} ${schedule.time}`}><span className="week-intent-time">{schedule.time}</span><strong>Assignment</strong><small>{assignment.instruction}</small><em>{assignment.progress.verified} / {assignment.progress.required} · {status}</em></button>; })}</div>)}</div></div></div>}
     </section>
   );
 }
@@ -4582,7 +4710,7 @@ function BrainView({
                     const nextModel = provider === "ollama"
                       ? ollamaModels[0]
                         ? { model: ollamaModels[0].name, provider: "ollama" as const, quality: "local" as const, vision: ollamaModels[0].capabilities.includes("vision") }
-                        : undefined
+                        : { model: model?.model ?? "qwen2.5:7b", provider: "ollama" as const, quality: "local" as const, vision: false }
                       : runtimeModels.find(
                           (item) =>
                             item.provider === provider &&
@@ -4832,6 +4960,7 @@ function ProposalRow({
 function PresenceView({
   state,
   mutate,
+  refreshState,
   setView,
   pendingOperation,
   manageBridge,
@@ -4839,6 +4968,7 @@ function PresenceView({
 }: {
   state: OpenPresenceState;
   mutate: Mutate;
+  refreshState: () => Promise<OpenPresenceState>;
   setView?: (view: View) => void;
   pendingOperation?: string | null;
   manageBridge: BridgeManage;
@@ -4853,10 +4983,16 @@ function PresenceView({
     ] ??
     [];
   const connectionMode = presence.connectionMode ?? (presence.environment === "sandbox" ? "sandbox" : presence.channel === "x" ? "native" : "bridge");
-  const simulation = simulationForChannel(presence.channel, state.channelDefinitions.find((item) => item.id === presence.channel));
+  const channelDefinition = state.channelDefinitions.find((item) => item.id === presence.channel);
+  const simulation = simulationForChannel(presence.channel, channelDefinition);
   const nativeConnection = state.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x");
   const activeBridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
   const [customizing, setCustomizing] = useState(true);
+  const [editingChannel, setEditingChannel] = useState(false);
+  const [channelNameDraft, setChannelNameDraft] = useState(channelDefinition?.name ?? channelLabel(presence.channel, state.channelDefinitions));
+  const [channelDomainDraft, setChannelDomainDraft] = useState(channelDefinition?.domain ?? "");
+  const [channelAffordancesDraft, setChannelAffordancesDraft] = useState(() => channelDefinition?.affordances ?? capabilities);
+  const [channelAssetsDraft, setChannelAssetsDraft] = useState<SocialAssetKind[]>(() => channelDefinition?.supportedAssetKinds ?? []);
   const [presenceNameDraft, setPresenceNameDraft] = useState(presence.name);
   const [briefDraft, setBriefDraft] = useState<PresenceBrief>(presence.brief);
   const [briefTerritoryText, setBriefTerritoryText] = useState(() => ({
@@ -4874,6 +5010,20 @@ function PresenceView({
     ? [{ id: "representational", label: "Representational", detail: "Speak as the person or organization this Presence extends." }, { id: "open-about-assistance", label: "Open about assistance", detail: "Acknowledge AI assistance when it is relevant." }]
     : [{ id: "contextual", label: "Contextual", detail: "Answer socially and acknowledge AI only when it matters." }, { id: "ai-forward", label: "AI-forward", detail: "Be direct that this is an AI presence when relevant." }, { id: "private", label: "Private", detail: "Keep technical identity private in public conversation." }];
   const savePublicSelf = () => void mutate({ type: "setPresence", patch: { publicSelf: { ...publicSelfDraft, displayName: presenceNameDraft.trim() || presence.name }, mediaPerceptionPolicy: mediaPolicyDraft } });
+  const openChannelEditor = () => {
+    setChannelNameDraft(channelDefinition?.name ?? channelLabel(presence.channel, state.channelDefinitions));
+    setChannelDomainDraft(channelDefinition?.domain ?? "");
+    setChannelAffordancesDraft(channelDefinition?.affordances ?? capabilities);
+    setChannelAssetsDraft(channelDefinition?.supportedAssetKinds ?? []);
+    setEditingChannel(true);
+  };
+  const saveChannel = () => {
+    if (!channelDefinition || !channelNameDraft.trim()) return;
+    void mutate({ type: "updateChannel", definition: { ...channelDefinition, name: channelNameDraft.trim(), domain: channelDomainDraft.trim() || undefined, affordances: channelAffordancesDraft, supportedAssetKinds: channelAssetsDraft, updatedAt: new Date().toISOString() } });
+    setEditingChannel(false);
+  };
+  const toggleChannelAffordance = (id: string) => setChannelAffordancesDraft((items) => items.some((item) => item.id === id) ? items.filter((item) => item.id !== id) : [...items, channelDefinition?.affordances.find((item) => item.id === id) ?? { id, label: id, description: "Channel action" }]);
+  const toggleChannelAsset = (kind: SocialAssetKind) => setChannelAssetsDraft((items) => items.includes(kind) ? items.filter((item) => item !== kind) : [...items, kind]);
   const territoryValues = (value: string) => value.split(",").map((item) => item.trim()).filter(Boolean);
   const openBriefEditor = () => {
     setBriefDraft(presence.brief);
@@ -4989,6 +5139,25 @@ function PresenceView({
           <Globe2 size={17} />
         </div>
         <p className="muted channel-settings-intro">Choose one destination for {simulation.worldLabel}. Sandbox is safe to rehearse; X and Bridge are live routes.</p>
+        {channelDefinition && (
+          <div className="channel-definition-editor">
+            {!editingChannel ? (
+              <div className="channel-definition-summary">
+                <div><span>Channel</span><strong>{channelDefinition.name}</strong><small>{channelDefinition.domain || "No destination set"}</small></div>
+                <Button type="button" variant="secondary" onClick={openChannelEditor}><Pencil size={14} /> Edit Channel</Button>
+              </div>
+            ) : (
+              <div className="channel-definition-form" aria-label="Edit Channel">
+                <div className="section-heading compact"><div><SectionEyebrow>Edit Channel</SectionEyebrow><h3>Update this destination</h3></div><Button type="button" variant="ghost" onClick={() => setEditingChannel(false)}>Cancel</Button></div>
+                <label>Channel name<input aria-label="Channel name" value={channelNameDraft} onChange={(event) => setChannelNameDraft(event.target.value)} maxLength={120} /></label>
+                <label>Destination URL<input aria-label="Channel destination" type="url" value={channelDomainDraft} onChange={(event) => setChannelDomainDraft(event.target.value)} placeholder="https://www.skool.com/saaspreneur-academy" /></label>
+                <fieldset className="channel-edit-capabilities"><legend>Channel actions</legend><div>{channelDefinition.affordances.map((item) => <label key={item.id}><input type="checkbox" checked={channelAffordancesDraft.some((current) => current.id === item.id)} onChange={() => toggleChannelAffordance(item.id)} /><span><strong>{item.label}</strong><small>{item.description}</small></span></label>)}</div></fieldset>
+                <fieldset className="channel-edit-capabilities"><legend>Channel media support</legend><div>{(["image", "gif"] as SocialAssetKind[]).map((kind) => <label key={kind}><input type="checkbox" checked={channelAssetsDraft.includes(kind)} onChange={() => toggleChannelAsset(kind)} /><span><strong>{kind === "image" ? "Images" : "GIFs"}</strong><small>Supported by this destination. Bridge uploads are not available yet.</small></span></label>)}</div><p className="form-hint">Image/GIF uploads are not available through the Bridge yet. Media executions will be rejected until asset transfer is implemented.</p></fieldset>
+                <div className="inline-form-actions"><Button type="button" variant="primary" disabled={!channelNameDraft.trim()} onClick={saveChannel}><Check size={14} /> Save Channel</Button></div>
+              </div>
+            )}
+          </div>
+        )}
         <div className="channel-mode-options">
           <button className={connectionMode === "sandbox" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { connectionMode: "sandbox" } })}>
             <FlaskConical size={17} />
@@ -5006,9 +5175,9 @@ function PresenceView({
         <div className="channel-selection-status">
           {connectionMode === "sandbox" && <div className="channel-sandbox-summary"><div><strong>This world is simulated.</strong><p>{simulation.worldLabel} history stays in this rehearsal session; Jenny’s mind is shared.</p></div><Button variant="secondary" onClick={() => setView?.("playground")}><FlaskConical size={14} /> Open Playground</Button></div>}
           {connectionMode === "native" && presence.channel === "x" && <XConnection state={state} presence={presence} manageX={manageX} />}
-          {connectionMode === "bridge" && <BridgeManager state={state} presence={presence} manageBridge={manageBridge} />}
+          {connectionMode === "bridge" && <BridgeManager state={state} presence={presence} manageBridge={manageBridge} refreshState={refreshState} />}
         </div>
-        {connectionMode !== "sandbox" && !(connectionMode === "native" ? nativeConnection?.status === "connected" : activeBridge?.state === "online") && <p className="channel-not-connected">No live connection is active yet. Configure the selected route below when you’re ready.</p>}
+        {connectionMode !== "sandbox" && !(connectionMode === "native" ? nativeConnection?.status === "connected" : activeBridge && bridgeAdapterStatus(activeBridge) === "connected") && <p className="channel-not-connected">{connectionMode === "bridge" && activeBridge ? "The Bridge is configured; waiting for the external adapter to check in." : "No live connection is active yet. Configure the selected route below when you’re ready."}</p>}
       </section>
       <section className="identity-card settings-card">
         <div>
@@ -5376,15 +5545,20 @@ function BridgeManager({
   state,
   presence,
   manageBridge,
+  refreshState,
 }: {
   state: OpenPresenceState;
-  presence: OpenPresenceState["presence"];
+  presence: NonNullable<OpenPresenceState["presence"]>;
   manageBridge: BridgeManage;
+  refreshState: () => Promise<OpenPresenceState>;
 }) {
   const [name, setName] = useState("Community Bridge");
   const [kind, setKind] = useState<ConnectorKind>("bridge");
   const [key, setKey] = useState<string | undefined>();
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
+  const [guideOpen, setGuideOpen] = useState(true);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const bridges = state.bridges.filter(
     (item) => item.presenceId === presence?.id,
   );
@@ -5392,7 +5566,24 @@ function BridgeManager({
   const channel = state.channelDefinitions.find(
     (item) => item.id === presence?.channel,
   );
-  if (!presence) return null;
+  const baseUrl = typeof window === "undefined" ? "<OPENPRESENCE_BASE_URL>" : window.location.origin;
+  const bridge = activeBridges[0];
+  const supervisedTest = bridge ? {
+    checkedIn: bridgeAdapterStatus(bridge) === "connected",
+    observed: state.mirrorObjects.some((item) => item.bridgeId === bridge.id && item.presenceId === presence.id),
+    acknowledged: state.executions.some((item) => item.bridgeId === bridge.id && item.presenceId === presence.id && item.status === "succeeded"),
+  } : { checkedIn: false, observed: false, acknowledged: false };
+  const bridgeCapabilities = bridge?.capabilities ?? {
+    inbound: true,
+    reconcile: true,
+    affordances: presence.capabilities.map((item) => item.id),
+    formats: channel?.formats.map((item) => item.id) ?? [],
+    metrics: ["replies", "reactions"],
+    assetKinds: [],
+  };
+  const prompt = bridgeAdapterPrompt({ baseUrl, presence, channelName: channelLabel(presence.channel, state.channelDefinitions), channelDomain: channel?.domain, capabilities: bridgeCapabilities });
+  const environmentExample = bridgeEnvironmentExample(baseUrl);
+  const apiExamples = bridgeApiExamples(baseUrl);
   const create = async () => {
     const result = await manageBridge({
       action: "create",
@@ -5403,8 +5594,9 @@ function BridgeManager({
         inbound: true,
         reconcile: true,
         affordances: presence.capabilities.map((item) => item.id),
-        formats: [],
+        formats: channel?.formats.map((item) => item.id) ?? [],
         metrics: ["replies", "reactions"],
+        assetKinds: [],
       },
     });
     if (result?.key) setKey(result.key);
@@ -5421,8 +5613,18 @@ function BridgeManager({
     setDisconnecting(null);
     if (result) setKey(undefined);
   };
-  const externalEventsEndpoint = "/api/bridge/v1/events";
-  const externalExecutionsEndpoint = "/api/bridge/v1/executions/claim";
+  const refresh = async () => {
+    setRefreshing(true);
+    try { await refreshState(); } finally { setRefreshing(false); }
+  };
+  const copy = (value: string, label: string) => {
+    const write = navigator.clipboard?.writeText(value);
+    if (write) void write.catch(() => undefined);
+    setCopied(label);
+    window.setTimeout(() => setCopied((current) => current === label ? null : current), 1600);
+  };
+  const externalEventsEndpoint = `${baseUrl}/api/bridge/v1/events`;
+  const externalExecutionsEndpoint = `${baseUrl}/api/bridge/v1/executions/claim`;
   const bridgeRows = bridges.map((bridge) => (
     <div className="bridge-row" key={bridge.id}>
       <div>
@@ -5452,14 +5654,10 @@ function BridgeManager({
       </div>
       <div className="bridge-row-actions">
         <span
-          className={`live-pill ${bridge.state === "online" ? "" : "paused"}`}
+          className={`live-pill ${bridgeAdapterStatus(bridge) === "connected" ? "" : "paused"}`}
         >
           <span className="status-dot" />{" "}
-          {bridge.state === "online"
-            ? "Connected"
-            : bridge.state === "degraded"
-              ? "Needs attention"
-              : "Disconnected"}
+          {bridgeAdapterStatusLabel(bridgeAdapterStatus(bridge))}
         </span>
         {bridge.state !== "offline" && (
           <Button
@@ -5487,7 +5685,7 @@ function BridgeManager({
       <div className="section-heading compact">
         <div>
           <SectionEyebrow>External Bridge</SectionEyebrow>
-          <h2>{activeBridges.length ? "Connected through Bridge" : "Connect this Presence through Bridge"}</h2>
+          <h2>{activeBridges.length ? "External adapter setup" : "Connect this Presence through Bridge"}</h2>
         </div>
         <ShieldCheck size={17} />
       </div>
@@ -5531,6 +5729,18 @@ function BridgeManager({
       {bridges.length > 0 && (
         <div className="bridge-list">
           {bridgeRows}
+          {bridge && (
+            <div className="adapter-status-summary" role="status">
+              <div>
+                <span className="eyebrow">Adapter status</span>
+                <strong>{bridgeAdapterStatusLabel(bridgeAdapterStatus(bridge))}</strong>
+                <small>{bridge.lastSeenAt ? `Last check-in ${formatTime(bridge.lastSeenAt)}` : "No authenticated adapter request has arrived yet."}</small>
+              </div>
+              <Button variant="ghost" disabled={refreshing} onClick={() => void refresh()}>
+                <RotateCcw size={13} /> {refreshing ? "Refreshing…" : "Refresh status"}
+              </Button>
+            </div>
+          )}
           {key && (
             <div className="bridge-key" role="status">
               <strong>Connect your external adapter</strong>
@@ -5543,9 +5753,9 @@ function BridgeManager({
               <code>{key}</code>
               <Button
                 variant="ghost"
-                onClick={() => void navigator.clipboard?.writeText(key)}
+                onClick={() => void copy(key, "key")}
               >
-                Copy key
+                {copied === "key" ? "Copied" : "Copy key"}
               </Button>
               <div className="bridge-endpoints">
                 <div>
@@ -5561,6 +5771,53 @@ function BridgeManager({
                 Use <code>Authorization: Bearer &lt;key&gt;</code>. The key will
                 not be shown again.
               </small>
+            </div>
+          )}
+          {bridge && (
+            <div className="adapter-guide">
+              <div className="adapter-guide-heading">
+                <div>
+                  <SectionEyebrow>External browser adapter</SectionEyebrow>
+                  <h3>Set up the adapter that gives this Presence eyes and hands</h3>
+                  <p className="muted">OpenPresence decides what is worth doing. Your external browser agent observes this channel and carries out only approved executions.</p>
+                </div>
+                <Button variant="ghost" onClick={() => setGuideOpen((value) => !value)}>{guideOpen ? "Hide setup" : "Show setup"}</Button>
+              </div>
+              {guideOpen && (
+                <>
+                  <div className="adapter-summary-grid">
+                    <div><span>Presence</span><strong>{presence.name}</strong><small>{presence.handle}</small></div>
+                    <div><span>Channel</span><strong>{channelLabel(presence.channel, state.channelDefinitions)}</strong><small>{channel?.domain ?? "Custom destination"}</small></div>
+                    <div><span>Allowed actions</span><strong>{bridge.capabilities.affordances.join(", ") || "None"}</strong><small>Governed by the Execution Envelope</small></div>
+                    <div><span>Media</span><strong>{channel?.supportedAssetKinds?.length ? `Channel: ${channel.supportedAssetKinds.join(", ")}` : "Not declared"}</strong><small>Bridge delivery: Image/GIF transfer is not supported yet</small></div>
+                  </div>
+                  <div className="adapter-guide-actions">
+                    <Button variant="secondary" onClick={() => void copy(prompt, "prompt")}>{copied === "prompt" ? "Prompt copied" : "Copy adapter instructions"}</Button>
+                    <Button variant="secondary" onClick={() => void copy(environmentExample, "environment")}>{copied === "environment" ? "Environment copied" : "Copy environment config"}</Button>
+                  </div>
+                  <section className="adapter-test" aria-label="Supervised adapter test">
+                    <div>
+                      <SectionEyebrow>Supervised test</SectionEyebrow>
+                      <h4>Verify the adapter before it acts</h4>
+                      <p className="muted">Have the external agent follow the prompt, then refresh. This test stays inside the Bridge and never performs a live Skool action by itself.</p>
+                    </div>
+                    <ol>
+                      <li className={supervisedTest.checkedIn ? "complete" : "pending"}><span>{supervisedTest.checkedIn ? "✓" : "1"}</span> Adapter checked in</li>
+                      <li className={supervisedTest.observed ? "complete" : "pending"}><span>{supervisedTest.observed ? "✓" : "2"}</span> Inbound observation received</li>
+                      <li className={supervisedTest.acknowledged ? "complete" : "pending"}><span>{supervisedTest.acknowledged ? "✓" : "3"}</span> Claimed test execution acknowledged</li>
+                    </ol>
+                    <Button variant="ghost" onClick={() => void refresh()} disabled={refreshing}>{refreshing ? "Refreshing…" : "Refresh test status"}</Button>
+                  </section>
+                  <details className="adapter-details">
+                    <summary>View API examples</summary>
+                    <pre>{apiExamples}</pre>
+                  </details>
+                  <details className="adapter-details">
+                    <summary>View browser-agent prompt</summary>
+                    <pre>{prompt}</pre>
+                  </details>
+                </>
+              )}
             </div>
           )}
         </div>

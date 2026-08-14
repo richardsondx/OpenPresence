@@ -1,5 +1,83 @@
 # Regression rules
 
+## Rule: New Agents must start on the requested OpenAI runtime
+
+**Defect class:** Default model/provider selection / legacy seed migration
+
+**General principle:** A new Agent should begin with the product’s declared default runtime, and an old untouched seed should not silently keep selecting a different provider after the default changes. Explicitly configured model choices remain user-owned.
+
+**Incident:** New Agents opened Brain with Anthropic selected, and Chat reported that Anthropic was selected but not connected even though OpenAI GPT 5.6 Luna was the intended default.
+
+**Project enforcement:** `createAgent` seeds OpenAI `gpt-5.6-luna` with medium reasoning and an OpenAI connection. `normalizeState` migrates only the exact unconfigured legacy Anthropic seed (`claude`/high) and preserves configured Anthropic selections.
+
+**Executable protection:** `tests/runtime.test.ts` asserts the new default and both sides of the narrow legacy migration; `tests/e2e/openpresence.spec.ts` verifies the default Brain selection after Agent creation.
+
+**Apply when:** Changing model/provider defaults, onboarding, Brain runtime selection, provider access, or persisted Agent workspace normalization.
+
+**Added:** 2026-08-14
+
+## Rule: Sandbox Assignment drafts must not publish internal QA markers
+
+**Defect class:** Internal test-context leakage / public-copy hygiene
+
+**General principle:** Assignment instructions belong to the operator and runtime. A Presence may use them to decide what to do, but must not expose internal QA identifiers in a public Sandbox expression.
+
+**Incident:** A diagnostic Assignment explicitly containing `QA-TEN-RUN-2026-08-14` produced historical Sandbox posts carrying that marker, making test output look like repetitive public content and obscuring whether the model or harness was speaking.
+
+**Project enforcement:** Every text candidate passes through `cleanSandboxDraft` before editing, length checks, duplicate checks, and delivery. Internal `QA-*` markers are removed; a marker-only candidate becomes `no_op` instead of an empty publication.
+
+**Executable protection:** `tests/runtime.test.ts` covers marker removal and preserves ordinary QA subject matter; `tests/e2e/playground-rehearsal.spec.ts` verifies the Assignment-to-Feed path never renders the diagnostic marker.
+
+**Apply when:** Changing Assignment prompts, AI candidate editing, Sandbox delivery, Feed projection, or QA instructions that contain internal identifiers.
+
+**Added:** 2026-08-14
+
+## Rule: Sandbox style fixtures classify only public Assignment intent
+
+**Defect class:** Presence-style contamination from private runtime context
+
+**General principle:** A Sandbox fixture must be selected from the Agent/Presence profile and the operator's explicit Assignment, not from private execution-envelope or prompt-scaffolding text. Internal runtime language is not public style evidence.
+
+**Incident:** A Genny-shaped workspace received Alex-style offer/sales candidates because the mock classifier scanned the complete private Assignment prompt. Runtime words such as `execution` could win over the selected Presence's builder territory.
+
+**Project enforcement:** `assignmentMockCandidates` extracts the explicit Assignment instruction before profile matching and uses word-bounded, Presence-aware precedence. The full prompt remains available to cognition, but cannot steer the local style fixture.
+
+**Executable protection:** `tests/ai.test.ts` covers the three configured fixture families and a Genny-shaped profile with private execution prose; the latter must remain builder-specific and must not select an offer candidate.
+
+**Apply when:** Changing Assignment prompt construction, mock AI fixtures, Presence style selection, or private execution context passed to social cognition.
+
+**Added:** 2026-08-14
+
+## Rule: Playground removal must be item-scoped and Sandbox-only
+
+**Defect class:** Playground feed curation / destructive action scope
+
+**General principle:** A rehearsal feed needs a low-friction way to remove one noisy social object without resetting the whole experiment or implying that live channel content was deleted.
+
+**Project enforcement:** Each Sandbox post, reply, and social event exposes an accessible `Remove … from Playground` control. The server accepts only a matching Sandbox session/object pair, removes the selected Mirror object and derived perception records, and leaves the rest of the rehearsal intact.
+
+**Executable protection:** `tests/sandbox.test.ts` verifies one-object removal preserves the remaining object; `tests/e2e/openpresence.spec.ts` verifies removing a reply and then a post in Chromium and Pixel 5, including persistence after reload.
+
+**Apply when:** Changing Playground cards, Social Mirror state, rehearsal reset/curation, or any UI that can remove simulated social-world context.
+
+**Added:** 2026-08-14
+
+## Rule: Presence Chat must answer as the selected public self
+
+**Defect class:** Chat identity boundary / social-context fallback
+
+**General principle:** A simulated feed post is social-world evidence. Chat responses must stay in the selected Presence's public voice and may not fall through to private Agent/Teach language or expose runtime mechanics.
+
+**Incident:** In local/mock Chat, a normal post was stored correctly but the response fell through to the generic Agent reply fixture: `I understood ... This response came through the Agent runtime.` Prior rehearsal history could also make a later post receive an unrelated memory response.
+
+**Project enforcement:** `generatePresenceChatReply` uses context-sensitive public-self fixtures for local rehearsal inputs and matches the current post before history-derived cues. Provider-backed Chat continues to receive the explicit social prompt, selected Presence, session history, and optional reply target.
+
+**Executable protection:** `tests/ai.test.ts` rejects runtime wording and proves a current edge-case post is not overridden by prior memory context; `tests/e2e/openpresence.spec.ts` verifies a normal post and an explicit Reply in Chromium, including selected-thread context.
+
+**Apply when:** Changing Presence Chat, social rehearsal prompts, mock/runtime fallbacks, or any route that translates simulated world posts into Presence replies.
+
+**Added:** 2026-08-14
+
 ## Rule: Teach must require an explicit Presence-mode command
 
 **Defect class:** Conversational command parsing / quoted social context
@@ -70,11 +148,11 @@
 
 **General principle:** Any delegated workflow that can remain drafted or active must expose a clear cancellation action, preserve its history, and prevent cancelled work from restarting.
 
-**Project-specific risk:** Assignments had a `cancelled` status in the data model but no Schedule control, leaving operators unable to stop or dismiss a draft and making the lifecycle incomplete.
+**Project-specific risk:** Assignments had a `cancelled` status in the data model but the calendar did not provide a clear review-and-cancel interaction, leaving operators unable to stop or dismiss a scheduled draft without hunting through a separate list.
 
-**Project enforcement:** Schedule renders `Cancel` for non-terminal Assignments; `cancelAssignment` marks the record cancelled and records a decision event; completed and cancelled Assignments cannot be restarted or cancelled again.
+**Project enforcement:** Scheduled Assignments are distinct cards in the Week calendar. Opening a card reveals timing, verified progress, Sandbox run/retry, and `Cancel Assignment` for non-terminal work; `cancelAssignment` marks the record cancelled and records a decision event; completed and cancelled Assignments cannot be restarted or cancelled again.
 
-**Executable protection:** `tests/runtime.test.ts` covers draft and active cancellation plus restart prevention. `tests/e2e/playground-rehearsal.spec.ts` covers the Schedule confirmation flow and cancelled-history state on Chromium and Pixel 5.
+**Executable protection:** `tests/runtime.test.ts` covers draft and active cancellation plus restart prevention. `tests/e2e/playground-rehearsal.spec.ts` covers opening the Assignment detail surface, confirming cancellation, exact-time calendar placement, and cancelled-history state on Chromium and Pixel 5.
 
 **Apply when:** Adding or changing delegated workflows, Assignment statuses, Schedule rows, background work, or terminal lifecycle actions.
 
@@ -279,6 +357,20 @@
 **Apply when:** Changing Playground, MirrorObject lineage, Activity, Presence routing, channel selection, event context, or review execution projections.
 
 **Added:** 2026-08-13
+
+## Rule: Playground worlds must be Presence-scoped
+
+**Defect class:** Cross-Presence rehearsal leakage
+
+**General principle:** Selecting a Presence changes the entire simulated social room. Agent-level meaning remains shared, but channel, Sandbox environment, actors, Social Mirror objects, rehearsal history, assignments, and calibration evidence must remain isolated to the selected Presence/session.
+
+**Project enforcement:** Playground selects only an active session whose `presenceId` matches the selected Presence, automatically opens that Presence's session when switching in-place, and never falls back to another Presence's first session. The navigation and “Presence rehearsal” scope marker make the current embodiment explicit.
+
+**Executable protection:** `tests/sandbox.test.ts` verifies distinct Presence/session/environment/channel roots and shared Agent mind; `tests/e2e/playground-rehearsal.spec.ts` verifies an X-only marker is absent from a LinkedIn world and returns when switching back on Chromium and Pixel 5.
+
+**Apply when:** Changing Playground state projection, Presence switching, Sandbox sessions/environments, Social Mirror history, actor simulation, rehearsal calibration, or Agent-vs-Presence boundaries.
+
+**Added:** 2026-08-14
 
 ## Rule: Chat must contain intentional conversation turns only
 
@@ -510,13 +602,13 @@
 
 **General principle:** AI agents should be able to drive Playground without parsing UI copy or receiving unrelated application state. Every CLI command must return structured JSON by default, identify the selected sandbox session, preserve the observation → decision → execution → outcome chain, and never enable live delivery.
 
-**Project enforcement:** `openpresence playground` targets `/api/state` only with Playground operations, projects state into Presence/world/decisions/review/timeline records, supports deterministic virtual time and JSON scenarios, and requires `--human` for non-machine output. Documentation uses `pnpm --silent` so package-manager banners cannot corrupt JSON streams.
+**Project enforcement:** `openpresence playground`, `openpresence schedule`, and `openpresence watching` target `/api/state` only with sandbox-safe operations, project Presence/session-scoped records, and require `--human` for non-machine output. Playground supports deterministic virtual time, Assignments, original-post calibration, and JSON scenarios; Schedule preserves Consider versus Assign semantics and blocks non-Sandbox evaluation; Watching preserves automatic/manual source status without inventing observations. Documentation uses `pnpm --silent` so package-manager banners cannot corrupt JSON streams.
 
-**Executable protection:** `tests/playground-cli.test.ts` verifies projection redaction, operation translation, and structured server errors. Local smoke verification covers `start`, `inspect`, `inject`, `advance`, `timeline`, and scenario replay against the production-shaped app.
+**Executable protection:** `tests/playground-cli.test.ts` verifies projection redaction, operation translation for Playground/Schedule/Watching, and structured server errors. Local smoke verification covers `start`, `inspect`, `inject`, `advance`, `timeline`, Assignments, rehearsal feedback, Schedule mutation/evaluation, Watch lifecycle, and live-scope blocking against the production-shaped app.
 
 **Apply when:** Changing the Playground CLI, scenario format, agent-facing state projections, sandbox commands, or command output formatting.
 
-**Added:** 2026-08-13
+**Added:** 2026-08-13; expanded 2026-08-14
 
 ## Rule: Presence marks must stay legible and channel-scoped
 
@@ -1337,10 +1429,71 @@
 **Apply when:** Changing Ghost boundaries, Assignment candidate QA, public subject-matter posts, or model/provider disclosure rules.
 
 **Added:** 2026-08-13
-\n+## Assignment schedule metadata must survive the review handoff
+
+## Assignment schedule metadata must survive the review handoff
 
 **Incident:** The Schedule Assignment form accepted a day, time, and exact/flexible timing choice, but the `createAssignment` operation discarded those fields. The resulting row falsely collapsed a near-term Assignment to `Once`, leaving the operator unable to verify when it was intended to run.
 
 **Product boundary:** Assignment timing is an operator-provided execution window, not a command to publish regardless of context. The Agent still owns how it fulfills the outcome, and Sandbox verification remains the only source of progress.
 
 **Executable protection:** `Assignment.schedule` is carried through the typed operation, runtime compiler, state route, and Schedule row; the runtime test asserts that exact timing remains attached to the created Assignment.
+
+## Rule: Assignment candidates must be distinct and delivery must be idempotent
+
+**Defect class:** Repeated publication / duplicate execution
+
+**General principle:** An outcome Assignment is not complete when the system has emitted the same draft repeatedly. Candidate quality must reject already-verified text, and retrying a succeeded execution must not create another public object or count progress twice.
+
+**Project enforcement:** Sandbox Assignment cycles compare normalized drafts against that Assignment's verified Mirror publications; `deliverSandboxExecution` returns the existing state for a succeeded execution and refuses statuses that are not ready for delivery.
+
+**Executable protection:** `tests/ai.test.ts` covers structured decision parsing; `tests/sandbox.test.ts` covers exactly-once delivery and asset lineage; `tests/e2e/playground-rehearsal.spec.ts` asserts five distinct delivered posts.
+
+**Apply when:** Changing Assignment generation, retries, execution claiming, delivery, progress counters, or deterministic AI fixtures.
+
+## Rule: Scheduled Assignments belong on the Week calendar with Standing Intents
+
+**Defect class:** Schedule visibility / operator discoverability
+
+**General principle:** A scheduled Assignment is a delegated outcome with a time window. It should be visible in the same weekly planning surface as Standing Intents, while remaining visually distinct because a schedule grants attention and does not guarantee publication.
+
+**Project enforcement:** The Week calendar projects scheduled Assignments, includes the full 00:00–23:00 local-time range, labels them as Assignments, and provides a direct Run/Retry in Playground action. The list remains the detail and cancellation surface.
+
+**Executable protection:** `tests/e2e/playground-rehearsal.spec.ts` asserts a 23:35 Assignment appears as a calendar card and retains its status/timing.
+
+**Apply when:** Changing Schedule, Assignment timing, calendar projection, late-night schedules, or operator actions for draft/blocked work.
+
+## Rule: Sandbox media must survive decision → publication → Mirror → Feed
+
+**Defect class:** Multimodal rehearsal false positive
+
+**General principle:** An asset claim is only useful when the simulated publication stores its asset provenance and the Feed renders the resulting image, chart, GIF, video, or link instead of dropping it at an intermediate layer.
+
+**Project enforcement:** Social decisions carry supported asset metadata; local mock rehearsals use deterministic Sandbox fixtures; publication asset IDs become Mirror asset references; Feed renders local and source URLs without changing the live connector boundary.
+
+**Executable protection:** `tests/sandbox.test.ts` verifies asset lineage; `tests/e2e/playground-rehearsal.spec.ts` verifies the requested five-media set in Feed.
+
+**Apply when:** Changing social decision schemas, asset uploads, Sandbox fixtures, publication storage, Social Mirror projection, or Feed rendering.
+
+## Rule: Assignment quantity must equal Feed quantity, and replies must use current inbound context
+
+**Defect class:** Partial Assignment completion / stale social context
+
+**General principle:** An Assignment that asks for N original publications must either deliver N distinct verified publications or remain visibly incomplete; a reply decision must be grounded in the newest inbound object, not whichever matching phrase appeared earlier in the thread.
+
+**Project enforcement:** Sandbox Assignment work derives a bounded attempt budget from remaining quantity and rejects only verified duplicate drafts. Deterministic reply rehearsal extracts the newest inbound object before selecting a context fixture. Feed is the acceptance surface for successful original publications and includes each verified Sandbox publication exactly once.
+
+**Executable protection:** `tests/e2e/playground-rehearsal.spec.ts` asserts 10/10 delivered and exactly 10 Feed items; `tests/ai.test.ts` asserts distinct context-specific reply decisions; Chrome QA verifies 10 unique replies in the rendered rehearsal.
+
+**Apply when:** Changing Assignment quantity parsing, candidate retry budgets, deterministic AI fixtures, Social Mirror context assembly, or Feed projections.
+
+## Rule: Assignment quantities must ignore incidental numbers
+
+**Defect class:** Quantity parsing / destructive overproduction
+
+**General principle:** Natural-language quantity extraction must prioritize explicit quantity phrases or numbers attached to the requested deliverable, and must not interpret dates, years, URLs, or QA markers as the requested count.
+
+**Project enforcement:** `assignmentQuantity` prioritizes modifiers such as `exactly 1`, then recognizes numbers followed by a bounded deliverable phrase such as `10 original X posts`; review must show the same quantity before rehearsal starts.
+
+**Executable protection:** `tests/runtime.test.ts` asserts that `QA-ONE-2026-08-14 ... exactly 1 ...` and `QA-TEN-2026-08-14 ... exactly 10 ...` compile to 1 and 10 respectively.
+
+**Apply when:** Changing Assignment instruction parsing, review-card quantities, schedule Assignment compilation, or QA-marker/test instructions.

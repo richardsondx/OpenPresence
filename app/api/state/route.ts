@@ -3,10 +3,11 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { readState, saveProviderSecret, writeState } from "@/lib/db";
 import { generateAgentReply, generateAgentSocialDecision, generateAgentSocialEdit, generateAgentSocialJudgment, generatePresenceChatReply } from "@/lib/ai";
-import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntroduction, beginOriginalPostRehearsal, completeNativeExecution, completeOriginalPostRehearsal, confirmAutoMode, declineSandboxIntroduction, deliverSandboxExecution, expireSandboxIntents, failNativeExecution, finishPulse, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, identityLeakageReason, isExplicitXPostRequest, isLaunchCandidate, isLowInformationCue, markCalendarSlotEvaluated, markInboundJudged, markNativeConnectionNeedsAttention, publicSelfGuidance, recordPreferenceEvidence, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, resetPlaygroundSession, startPlaygroundSession } from "@/lib/runtime";
+import type { AgentSocialDecision } from "@/lib/ai";
+import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntroduction, beginOriginalPostRehearsal, cleanSandboxDraft, completeNativeExecution, completeOriginalPostRehearsal, confirmAutoMode, declineSandboxIntroduction, deliverSandboxExecution, expireSandboxIntents, failNativeExecution, finishPulse, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, identityLeakageReason, isExplicitXPostRequest, isLaunchCandidate, isLowInformationCue, markCalendarSlotEvaluated, markInboundJudged, markNativeConnectionNeedsAttention, publicSelfGuidance, recordPreferenceEvidence, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, resetPlaygroundSession, stateForContext, startPlaygroundSession } from "@/lib/runtime";
 import { publishXPost, readNativeXCredentials } from "@/lib/x";
 import { reconcileNativeX } from "@/lib/native-x";
-import type { Asset, MirrorObject, OpenPresenceState, Operation, RuntimeOperation } from "@/lib/types";
+import type { Asset, MirrorObject, OpenPresenceState, Operation, RuntimeOperation, SandboxAssetInput } from "@/lib/types";
 import { cognitionSafeAssetSummary, hasUsablePerception } from "@/lib/perception";
 import { inspectSandboxObject } from "@/lib/perception-runtime";
 import { networkSearchInstruction, searchSandboxNetwork } from "@/lib/network";
@@ -115,12 +116,23 @@ async function runNativePulse(source: OpenPresenceState, presenceId: string) {
   return finishPulse(next, presenceId, detail);
 }
 
-function cleanSandboxDraft(value: string) {
-  return value
-    .trim()
-    .replace(/^['"]|['"]$/g, "")
-    .replace(/^[^:\n]{1,80}\s*\((?:post|reply|quote|repost|like|reaction)\):\s*/i, "")
-    .trim();
+const sandboxFixtureSvg = (label: string, accent: string) =>
+  `data:image/svg+xml,${encodeURIComponent(`<svg xmlns="http://www.w3.org/2000/svg" width="960" height="540" viewBox="0 0 960 540"><rect width="960" height="540" fill="#fff8f1"/><path d="M80 410 C180 330 240 390 340 270 S500 340 620 190 S770 230 880 100" fill="none" stroke="${accent}" stroke-width="18" stroke-linecap="round"/><text x="80" y="105" font-family="sans-serif" font-size="42" font-weight="700" fill="#231f1b">${label}</text><text x="80" y="475" font-family="monospace" font-size="20" fill="#756e66">Sandbox rehearsal asset</text></svg>`)}`;
+
+const sandboxDecisionAssets = (decision: AgentSocialDecision): SandboxAssetInput[] => (decision.assets ?? []).map((asset) => {
+  const name = asset.name ?? `Genny ${asset.kind} rehearsal asset`;
+  if (asset.sourceUrl) return { name, kind: asset.kind, sourceUrl: asset.sourceUrl };
+  if (process.env.OPENPRESENCE_AI_MOCK !== "1") return { name, kind: asset.kind };
+  if (asset.kind === "image") return { name, kind: asset.kind, mimeType: "image/svg+xml", dataUrl: sandboxFixtureSvg("Image note", "#d68754") };
+  if (asset.kind === "chart") return { name, kind: asset.kind, mimeType: "image/svg+xml", dataUrl: sandboxFixtureSvg("Chart note", "#7eafc7") };
+  if (asset.kind === "gif") return { name, kind: asset.kind, mimeType: "image/gif", dataUrl: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" };
+  if (asset.kind === "video") return { name, kind: asset.kind, mimeType: "video/mp4", sourceUrl: "https://interactive-examples.mdn.mozilla.net/media/cc0-videos/flower.mp4" };
+  if (asset.kind === "link") return { name, kind: asset.kind, sourceUrl: "https://openpresence.ai" };
+  return { name, kind: asset.kind };
+});
+
+function normalizedDraft(value: string) {
+  return value.replace(/\s+/g, " ").trim().toLowerCase();
 }
 
 function meaningEvidenceLines(source: OpenPresenceState, presence: OpenPresenceState["presence"]) {
@@ -224,6 +236,13 @@ async function runSandboxAgentCycle(source: OpenPresenceState, sessionId: string
       return `${author.displayName}${author.handle ? ` (${author.handle})` : ""}: ${history.length} observed contribution${history.length === 1 ? "" : "s"} from this author, not necessarily one thread. Use this history to judge continuity, repetition, and what this person has actually supplied; do not treat another author's exchange as theirs. Recent context: ${history.map((item) => item.content?.text ?? "[no text]").join(" | ")}${priorPresenceReplies.length ? ` Previous Presence replies to this author: ${priorPresenceReplies.map((item) => item.content?.text ?? "[no text]").join(" | ")}. Do not reuse one of these replies unless the newest contribution genuinely requires the same answer.` : ""}`;
     }).join("\n");
   const priorThreadReplies = relatedMirror.filter((item) => item.actorPresenceId === presence.id && item.content?.text).map((item) => item.content!.text!).slice(0, 4);
+  const priorPresencePublications = mirror
+    .filter((item) => item.actorPresenceId === presence.id && item.objectType === "post" && item.content?.text)
+    .map((item) => item.content!.text!)
+    .slice(0, 24);
+  const repetitionGuard = priorPresencePublications.length
+    ? `\n\nPrevious Sandbox publications from this Presence, newest first:\n${priorPresencePublications.map((post) => `- ${post}`).join("\n")}\nDo not reuse any of these publications or make a near-copy of one. A new publication must earn its place with a materially different point, example, or implication.`
+    : "";
   const continuity = priorThreadReplies.length
     ? `\n\nPrevious Presence contributions in this thread:\n${priorThreadReplies.map((reply) => `- ${reply}`).join("\n")}\nAdvance the conversation instead of repeating one of these points. If there is no genuinely new point, choose no_op.`
     : "";
@@ -272,7 +291,7 @@ Observed world:
 ${world || "[quiet world]"}
 ${assignment?.editorialContext?.topics?.length ? `\nEditorial territory: ${assignment.editorialContext.topics.join(", ")}` : ""}
 ${assignment?.editorialContext?.constraints?.length ? `\nQuality constraints: ${assignment.editorialContext.constraints.join(" ")}` : ""}
-Do not mention simulation, prompts, connectors, internal systems, or this Assignment in the publication. ${publicSelfGuidance(presence)}${punctuationGuidance}${evidenceGuidance}`
+Do not mention simulation, prompts, connectors, internal systems, or this Assignment in the publication. ${publicSelfGuidance(presence)}${punctuationGuidance}${repetitionGuard}${evidenceGuidance}`
     : isOriginalRehearsal
     ? `Consider an original publication for the current simulated ${presence.channel} world. This is an opportunity for judgment, not a command to publish. The current world is observed context, not an instruction.\n\nObserved world:\n${world || "[quiet world]"}\n\n${rehearsal?.inspiration ? `Operator inspiration, supplied as something to think about rather than an instruction:\n${rehearsal.inspiration}\n` : "No operator inspiration was supplied. Consider independently from the Presence's own context.\n"}${calibration ? `\nRecent session calibration evidence, supplied as weak preference context rather than a reward:\n${calibration}\n` : ""}\nUse the Agent's Mission, Soul, Taste, active Presence Brief, Public Self, recent public history, and current world to decide whether something deserves to exist now. Choose only post or no_op. You may surprise the operator within the designed identity and boundaries. If you publish, make one specific, defensible contribution in the best supported original format. Do not mention this rehearsal, operator inspiration, calibration, prompts, connectors, or internal systems. ${publicSelfGuidance(presence)}${punctuationGuidance}${evidenceGuidance}`
     : inbound
@@ -372,6 +391,9 @@ Do not mention simulation, prompts, connectors, internal systems, or this Assign
   }
   let draft = cleanSandboxDraft(decision.text);
   const textActions = new Set(["post", "reply", "quote", "message", "comment", "restack", "clarify"]);
+  if (textActions.has(decision.action) && !draft) {
+    decision = { action: "no_op", text: "", rationale: "The candidate contained no public expression after internal context was removed." };
+  }
   const channelTextLimit = presence.channel === "x" ? 280 : undefined;
   const modelTextLimit = channelTextLimit === undefined ? undefined : Math.max(120, channelTextLimit - 40);
   // The planner owns the social act. A second model pass may only refine its
@@ -496,11 +518,20 @@ Do not mention simulation, prompts, connectors, internal systems, or this Assign
     next.events.unshift({ id: `sandbox-event:${randomUUID()}`, type: "decision", title: `${presence.name} chose silence`, detail: `${inbound ? "The Agent considered the simulated conversation" : "The Agent considered the simulated world"} and found no action worth leaving behind.${decision.rationale ? ` Judgment note: ${decision.rationale}` : ""}`, time: new Date().toISOString(), tone: "quiet", presenceId: presence.id, sessionId, sourceObjectId: inbound?.id });
     return next;
   }
+  if (draft) {
+    const candidate = normalizedDraft(draft);
+    const alreadyPublished = actionSource.mirrorObjects.some((item) => item.sessionId === session.id && item.presenceId === presence.id && item.actorPresenceId === presence.id && item.visibility === "public" && normalizedDraft(item.content?.text ?? "") === candidate);
+    if (alreadyPublished) {
+      if (isAssignment) return recordAssignmentDecision(actionSource, assignment!.id, "candidate_rejected", "This candidate repeats an earlier Sandbox publication, so it was rejected without delivery.");
+      const next = recordRuntimeEvent(actionSource, presence.id, "Repeated candidate rejected", "The proposed Sandbox expression repeats an earlier publication, so no duplicate was formed.", "quiet", { sessionId, sourceObjectId: inbound?.id });
+      return inbound ? markSandboxObjectJudged(next, sessionId, inbound.externalRef.id) : next;
+    }
+  }
   const executionAffordance = decision.action === "clarify"
     ? (presence.capabilities.some((capability) => capability.id === "reply") ? "reply" : "message")
     : decision.action;
   const planRecorded = recordRuntimeEvent(actionSource, presence.id, "Social plan formed", JSON.stringify({ action: decision.action, executionAffordance, rationale: decision.rationale }), "neutral", { sessionId, sourceObjectId: inbound?.id });
-  let next = formSandboxIntent(planRecorded, { sessionId, affordance: executionAffordance, text: draft, target, perceptionTarget: inbound?.assetRefs?.length ? inbound.externalRef : undefined, rehearsalAttemptId: rehearsal?.attemptId, assignmentId: assignment?.id });
+  let next = formSandboxIntent(planRecorded, { sessionId, affordance: executionAffordance, text: draft, target, perceptionTarget: inbound?.assetRefs?.length ? inbound.externalRef : undefined, rehearsalAttemptId: rehearsal?.attemptId, assignmentId: assignment?.id, assets: sandboxDecisionAssets(decision) });
   const execution = next.executions.find((item) => item.sessionId === sessionId);
   const blockedByMedia = next.events[0]?.title === "Media needs inspection";
   if (!blockedByMedia && inbound) next = markSandboxObjectJudged(next, sessionId, inbound.externalRef.id);
@@ -513,7 +544,9 @@ Do not mention simulation, prompts, connectors, internal systems, or this Assign
 
 async function runSandboxAssignment(source: OpenPresenceState, assignmentId: string, sessionId: string) {
   let next = JSON.parse(JSON.stringify(source)) as OpenPresenceState;
-  const maxCandidateAttempts = 8;
+  const initialAssignment = next.assignments.find((item) => item.id === assignmentId);
+  const remaining = initialAssignment ? Math.max(1, initialAssignment.progress.required - initialAssignment.progress.verified) : 1;
+  const maxCandidateAttempts = Math.min(40, Math.max(8, remaining * 4));
   for (let attempt = 0; attempt < maxCandidateAttempts; attempt += 1) {
     const assignment = next.assignments.find((item) => item.id === assignmentId);
     if (!assignment || assignment.status === "completed" || assignment.status === "blocked" || assignment.status === "cancelled") return next;
@@ -530,9 +563,9 @@ async function runSandboxAssignment(source: OpenPresenceState, assignmentId: str
     const latestExecution = next.executions.find((item) => item.assignmentId === assignmentId && item.sessionId === sessionId);
     if (latestExecution && latestExecution.status !== "succeeded") return recordAssignmentDecision(next, assignmentId, "delivery_failed", latestExecution.failure?.message ?? "The candidate was formed, but Sandbox delivery did not complete. No publication was counted.");
   }
-  const assignment = next.assignments.find((item) => item.id === assignmentId);
-  if (assignment && assignment.status === "working") assignment.status = "active";
-  if (assignment) { assignment.updatedAt = new Date().toISOString(); assignment.lastOutcome = { class: "candidate_rejected", message: "The Assignment remains active after several quality rejections. Continue working or adjust the instruction.", at: new Date().toISOString() }; }
+  const finalAssignment = next.assignments.find((item) => item.id === assignmentId);
+  if (finalAssignment && finalAssignment.status === "working") finalAssignment.status = "active";
+  if (finalAssignment) { finalAssignment.updatedAt = new Date().toISOString(); finalAssignment.lastOutcome = { class: "candidate_rejected", message: "The Assignment remains active after several quality rejections. Continue working or adjust the instruction.", at: new Date().toISOString() }; }
   return next;
 }
 
@@ -625,6 +658,7 @@ const operation: z.ZodType<RuntimeOperation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("renameAgent"), name: z.string().trim().min(1).max(80) }),
   z.object({ type: z.literal("createPresence"), input: presenceInput }),
   z.object({ type: z.literal("createChannel"), definition: channelDefinition }),
+  z.object({ type: z.literal("updateChannel"), definition: channelDefinition }),
   z.object({ type: z.literal("createBridge"), input: z.object({ presenceId: z.string().min(1), name: z.string().trim().min(1).max(120), kind: z.enum(["simulated", "native", "bridge", "manual"]), capabilities }) }),
   z.object({ type: z.literal("rotateBridgeKey"), id: z.string().min(1) }),
   z.object({ type: z.literal("revokeBridge"), id: z.string().min(1) }),
@@ -661,6 +695,7 @@ const operation: z.ZodType<RuntimeOperation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("declineSandboxIntroduction"), id: z.string().min(1) }),
   z.object({ type: z.literal("startPlayground"), presenceId: z.string().min(1).optional(), source: z.enum(["fresh", "scenario", "replay"]).optional() }),
   z.object({ type: z.literal("resetPlayground"), sessionId: z.string().min(1) }),
+  z.object({ type: z.literal("removeSandboxObject"), sessionId: z.string().min(1), objectId: z.string().min(1) }),
   z.object({ type: z.literal("inspectSandboxMedia"), sessionId: z.string().min(1), objectId: z.string().min(1) }),
   z.object({ type: z.literal("addSandboxEvent"), sessionId: z.string().min(1), kind: z.string().trim().min(1).max(40).optional(), actionId: z.string().trim().min(1).max(60).optional(), actorId: z.string().trim().min(1).max(100).optional(), actorName: z.string().trim().max(120).optional(), actorHandle: z.string().trim().max(80).optional(), profile: z.object({ bio: z.string().trim().max(1000).optional(), location: z.string().trim().max(200).optional(), roles: z.array(z.string().trim().min(1).max(120)).max(10).optional(), skills: z.array(z.string().trim().min(1).max(120)).max(20).optional(), introductionPermission: z.enum(["allowed", "ask-first", "not-available"]).optional() }).optional(), content: z.string().trim().max(4000).optional(), assets: z.array(z.object({ name: z.string().trim().min(1).max(160), kind: z.enum(["image", "video", "gif", "audio", "document", "chart", "link"]), mimeType: z.string().trim().max(120).optional(), dataUrl: z.string().max(2_500_000).optional(), sourceUrl: z.string().url().max(2000).optional() })).max(4).optional(), targetExternalRef: z.object({ type: z.string().min(1), id: z.string().min(1) }).optional(), parentExternalRef: z.object({ type: z.string().min(1), id: z.string().min(1) }).optional(), observeOnly: z.boolean().optional() }),
   z.object({ type: z.literal("advanceSandboxTime"), sessionId: z.string().min(1), minutes: z.number().int().min(-1440).max(43200) }),
@@ -670,7 +705,20 @@ const operation: z.ZodType<RuntimeOperation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("setPresence"), patch: z.object({ name: z.string().trim().min(1).max(120).optional(), mode: z.enum(["agent", "ghost"]).optional(), status: z.enum(["live", "paused", "disconnected"]).optional(), pacing: z.enum(["recommended", "gentle", "custom"]).optional(), attentionIntervalMinutes: z.number().int().min(5).max(120).optional(), quietHours: z.object({ enabled: z.boolean(), start: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), end: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/) }).optional(), connectionMode: z.enum(["sandbox", "native", "bridge"]).optional(), mediaPerceptionPolicy: z.enum(["use-judgment", "review-uncertain", "always-review"]).optional(), execution: z.record(executionMode).optional(), brief: z.object({ purpose: z.string().trim().min(1).max(1000), audience: z.string().trim().min(1).max(500), primaryTerritory: z.array(z.string().trim().min(1).max(160)).max(20), adjacentTerritory: z.array(z.string().trim().min(1).max(160)).max(20), boundaries: z.array(z.string().trim().min(1).max(160)).max(20) }).optional(), ghostProfile: z.object({ subject: z.string().trim().min(1).max(160), priorities: z.string().trim().max(2000), preferences: z.string().trim().max(2000), voice: z.string().trim().max(2000), boundaries: z.string().trim().max(2000) }).optional(), publicSelf: z.object({ displayName: z.string().trim().min(1).max(120), posture: z.enum(["contextual", "ai-forward", "private", "representational", "open-about-assistance"]), approvedTechnicalFacts: z.array(z.enum(["ai-presence", "open-source", "built-with-openpresence", "model-provider", "exact-model", "tools"])).max(6) }).optional() }) }),
 ]);
 
-export async function GET() { return NextResponse.json(readState()); }
+function requestContext(request: Request) {
+  return {
+    agentId: request.headers.get("x-openpresence-agent-id")?.trim() || undefined,
+    presenceId: request.headers.get("x-openpresence-presence-id")?.trim() || undefined,
+  };
+}
+
+export async function GET(request: Request) {
+  const url = new URL(request.url);
+  return NextResponse.json(stateForContext(readState(), {
+    agentId: url.searchParams.get("agentId"),
+    presenceId: url.searchParams.get("presenceId"),
+  }));
+}
 
 export async function POST(request: Request) {
   try {
@@ -678,7 +726,7 @@ export async function POST(request: Request) {
     const parsed = operation.parse(raw);
     if (parsed.type === "reset" && process.env.OPENPRESENCE_TEST_MODE !== "1") throw new Error("Reset is available only in test mode.");
     if (parsed.type === "addSandboxEvent" && !parsed.actionId && !parsed.kind) throw new Error("Choose a simulated situation.");
-    const current = readState();
+    const current = stateForContext(readState(), requestContext(request));
     if (parsed.type === "executeIntent") {
       const execution = current.executions.find((item) => item.socialIntentId === parsed.id && item.connector === "native");
       if (execution) {

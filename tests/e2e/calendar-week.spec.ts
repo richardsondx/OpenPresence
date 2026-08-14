@@ -16,11 +16,11 @@ test("Calendar Week mode visualizes intent timing without pretending to show pos
   await page.getByLabel("Objective", { exact: true }).selectOption("education");
   await page.getByRole("button", { name: "Save standing intent", exact: true }).click();
   await expect(page.getByRole("button", { name: "Week", exact: true })).toHaveAttribute("aria-pressed", "true");
-  await expect(page.getByRole("region", { name: "Weekly intent schedule" })).toBeVisible();
-  await expect(page.getByText("When Jenny is meant to pay attention")).toBeVisible();
+  await expect(page.getByRole("region", { name: "Weekly schedule" })).toBeVisible();
+  await expect(page.getByText("When Jenny can notice and act")).toBeVisible();
   await expect(page.getByText("Tue")).toBeVisible();
   await expect(page.getByRole("button", { name: /Edit Teach one useful idea.*Tuesday at 08:00/ })).toBeVisible();
-  await expect(page.getByText("Nothing here is a promised post.")).toBeVisible();
+  await expect(page.getByText("Standing intents invite Jenny to notice and decide.", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "List", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Standing intentions" })).toBeVisible();
 });

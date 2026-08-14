@@ -1,12 +1,18 @@
 import { describe, expect, it } from "vitest";
-import { addSandboxEvent, applyOperation, assignmentIsSatisfied, compileAssignmentInstruction, compilePresenceContext, compileWatch, createAgent, deliverSandboxExecution, deriveActivitySummary, derivePublicHistory, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, identityLeakageReason, initialState, isActivityDecisionEvent, isExplicitGhostModeRequest, isExplicitXPostRequest, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, recordPublicFooting, recordStandingIntentNoOp, startPlaygroundSession } from "../lib/runtime";
-import { acknowledgeExecution, claimExecutions, createBridgeWithKey, ingestEvents, removeBridge, revokeBridge } from "../lib/bridge";
+import { addSandboxEvent, applyOperation, assignmentIsSatisfied, cleanSandboxDraft, compileAssignmentInstruction, compilePresenceContext, compileWatch, createAgent, deliverSandboxExecution, deriveActivitySummary, derivePublicHistory, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, identityLeakageReason, initialState, isActivityDecisionEvent, isExplicitGhostModeRequest, isExplicitXPostRequest, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, recordPublicFooting, recordStandingIntentNoOp, startPlaygroundSession } from "../lib/runtime";
+import { acknowledgeExecution, claimExecutions, createBridgeWithKey, heartbeatBridge, ingestEvents, removeBridge, revokeBridge } from "../lib/bridge";
 import { readBridgeCredentialMetadata, readState, writeState } from "../lib/db";
 import { nextObservationAt } from "../lib/native-x";
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
 describe("OpenPresence runtime boundaries", () => {
+  it("keeps internal QA identifiers out of Sandbox publications", () => {
+    expect(cleanSandboxDraft("A useful point. QA-TEN-RUN-2026-08-14")).toBe("A useful point.");
+    expect(cleanSandboxDraft("QA-ONE-2026-08-14")).toBe("");
+    expect(cleanSandboxDraft("A real QA process is worth discussing.")).toBe("A real QA process is worth discussing.");
+  });
+
   it("compiles Watches as Presence-scoped attention without changing Agent identity", () => {
     const state = createAgent(input);
     const creator = compileWatch(state.agent!.id, state.presence!.id, "x", "https://x.com/AlexHormozi", "Learn from strong offers without imitating the voice.");
@@ -51,6 +57,27 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.agent?.id).not.toBe(state.presence?.id);
     expect(state.files.map((file) => file.kind)).toEqual(["BRAIN", "SOUL", "MISSION", "TASTE", "MEMORY", "GROWTH", "PULSE", "PRESENCE"]);
     expect(state.files.find((file) => file.kind === "TASTE")?.protected).toBe(true);
+  });
+
+  it("defaults new Agents to OpenAI GPT 5.6 Luna at medium reasoning", () => {
+    const state = createAgent(input);
+    expect(state.modelProfiles[0]).toMatchObject({ provider: "openai", model: "gpt-5.6-luna", quality: "medium" });
+    expect(state.providerConnections).toContainEqual(expect.objectContaining({ provider: "openai", label: "OpenAI", status: "needs-configuration" }));
+    expect(state.providerConnections).not.toContainEqual(expect.objectContaining({ provider: "anthropic" }));
+  });
+
+  it("migrates only the untouched Anthropic seed to the new default", () => {
+    const legacy = createAgent(input);
+    legacy.modelProfiles[0] = { ...legacy.modelProfiles[0]!, provider: "anthropic", model: "claude", quality: "high" };
+    legacy.providerConnections = [{ id: "legacy-anthropic", provider: "anthropic", label: "Anthropic", status: "needs-configuration", createdAt: new Date().toISOString() }];
+    const migrated = normalizeState(legacy);
+    expect(migrated.modelProfiles[0]).toMatchObject({ provider: "openai", model: "gpt-5.6-luna", quality: "medium" });
+    expect(migrated.providerConnections).toContainEqual(expect.objectContaining({ provider: "openai", label: "OpenAI" }));
+
+    legacy.modelProfiles[0] = { ...legacy.modelProfiles[0]!, provider: "anthropic", model: "claude", quality: "high" };
+    legacy.providerConnections[0]!.status = "available";
+    const preserved = normalizeState(legacy);
+    expect(preserved.modelProfiles[0]).toMatchObject({ provider: "anthropic", model: "claude", quality: "high" });
   });
 
   it("keeps Presence Chat session memory separate from durable Agent state", () => {
@@ -136,6 +163,15 @@ describe("OpenPresence runtime boundaries", () => {
     expect(assignment.editorialContext?.topics).toEqual(["offers", "pricing", "sales"]);
     expect(assignment.editorialContext?.constraints).toContain("Keep the delivered ideas meaningfully distinct.");
     expect(assignment.instruction).toContain("Choose your own angles");
+  });
+
+  it("does not treat dates or QA markers as Assignment quantities", () => {
+    const state = createAgent(input);
+    const one = compileAssignmentInstruction(state, "QA-ONE-2026-08-14: Produce exactly 1 original X post about a practical lesson.", state.presence!.id, "sandbox");
+    const ten = compileAssignmentInstruction(state, "QA-TEN-2026-08-14: Produce exactly 10 original X posts about practical lessons.", state.presence!.id, "sandbox");
+
+    expect(one.deliverable).toMatchObject({ quantity: 1, quantityMode: "exact" });
+    expect(ten.deliverable).toMatchObject({ quantity: 10, quantityMode: "exact" });
   });
 
   it("preserves an Assignment's scheduled timing instead of reducing it to Once", () => {
@@ -463,9 +499,9 @@ describe("OpenPresence runtime boundaries", () => {
 
   it("does not invent a live X destination for Sandbox history", () => {
     const state = createAgent(input);
-    state.mirrorObjects.unshift({ id: "sandbox-post", bridgeId: "sandbox:test", presenceId: state.presence!.id, channelId: "x", externalRef: { type: "x.post", id: "sandbox-1" }, objectType: "post", actorPresenceId: state.presence!.id, content: { text: "A rehearsal only." }, occurredAt: new Date().toISOString(), observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", environment: "sandbox", sessionId: "sandbox-session" });
+    state.mirrorObjects.unshift({ id: "sandbox-post", bridgeId: "sandbox:test", presenceId: state.presence!.id, channelId: "x", externalRef: { type: "x.post", id: "sandbox-1" }, objectType: "post", actorPresenceId: state.presence!.id, content: { text: "A rehearsal only." }, occurredAt: "2026-08-13T23:03:35.853Z", observedAt: "2026-08-14T05:54:55.172Z", visibility: "public", shareability: "presence-only", environment: "sandbox", sessionId: "sandbox-session" });
     const history = derivePublicHistory(state, state.presence!.id);
-    expect(history[0]).toMatchObject({ externalRef: { id: "sandbox-1" }, environment: "sandbox" });
+    expect(history[0]).toMatchObject({ externalRef: { id: "sandbox-1" }, environment: "sandbox", occurredAt: "2026-08-13T23:03:35.853Z", observedAt: "2026-08-14T05:54:55.172Z" });
     expect(history[0]?.externalUrl).toBeUndefined();
   });
 
@@ -676,6 +712,8 @@ describe("OpenPresence runtime boundaries", () => {
     state = applyOperation(state, { type: "createPresence", input: { channel: definition.id, handle: "Jenny in Founders", mode: "agent", accent: "#D68754", channelDefinition: definition } });
     expect(state.channelDefinitions.find((item) => item.id === definition.id)?.domain).toBe("https://www.skool.com/");
     expect(state.presence?.name).toBe("Jenny in Founders");
+    state = applyOperation(state, { type: "updateChannel", definition: { ...definition, name: "SaaSpreneur Academy", domain: "https://www.skool.com/saaspreneur-academy", supportedAssetKinds: ["image", "gif"], updatedAt: new Date().toISOString() } });
+    expect(state.channelDefinitions.find((item) => item.id === definition.id)).toMatchObject({ name: "SaaSpreneur Academy", domain: "https://www.skool.com/saaspreneur-academy", supportedAssetKinds: ["image", "gif"] });
     state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto" } } });
     const result = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "Founder Bridge", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["post"], formats: ["founder-community.text-post"], metrics: [] } } });
     state = result.state;
@@ -685,6 +723,10 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.executions[0]?.publication?.payload).toEqual({ text: "Ask the founders what they are learning" });
     writeState(state);
     const bridge = state.bridges[0]!;
+    expect(bridge.adapterStatus).toBe("waiting");
+    const heartbeat = heartbeatBridge(bridge, "bridge-test");
+    expect(heartbeat.status).toBe("connected");
+    expect(heartbeat.bridge.lastHeartbeatAt).toBeTruthy();
     const ingested = ingestEvents(bridge, { events: [{ sourceEventId: "evt-1", event: "created", object: { externalRef: { type: "post", id: "28381" }, objectType: "post", author: { displayName: "Maya" }, content: { text: "How are people handling memory?" }, visibility: "private-community", shareability: "presence-only" } }] });
     expect(ingested.mirrorObjects[0]?.externalRef.id).toBe("28381");
     const claimed = claimExecutions(bridge, { executorId: "bridge-test", limit: 1 });
