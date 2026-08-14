@@ -11,7 +11,7 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: `OPENPRESENCE_DB_PATH=data/playwright.db OPENPRESENCE_TEST_MODE=1 OPENPRESENCE_X_API_MOCK=1 OPENPRESENCE_AI_MOCK=1 OPENPRESENCE_NEXT_DIST_DIR=.next-e2e pnpm exec next start -p ${testPort}`,
+    command: `OPENPRESENCE_DB_PATH=data/playwright.db OPENPRESENCE_TEST_MODE=1 OPENPRESENCE_TEST_RUNTIME=1 OPENPRESENCE_X_API_MOCK=1 OPENPRESENCE_AI_MOCK=1 OPENPRESENCE_NEXT_DIST_DIR=.next-e2e pnpm exec next start -p ${testPort}`,
     url: `http://localhost:${testPort}`,
     reuseExistingServer: false,
     timeout: 120_000,

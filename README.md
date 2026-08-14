@@ -121,6 +121,7 @@ Other useful environment variables:
 | <code>OPENPRESENCE_ANTHROPIC_MODEL</code> | Override the Anthropic model sent to the API. |
 | <code>OPENPRESENCE_AI_MOCK=1</code> | Use deterministic AI replies in local tests only. |
 | <code>OPENPRESENCE_TEST_MODE=1</code> | Enable test-only state reset behavior. Never use in production. |
+| <code>OPENPRESENCE_TEST_RUNTIME=1</code> | Explicit test-harness gate for local mocks. Never use in production. |
 
 Never commit <code>.env.local</code>, <code>data/.secret-key</code>, SQLite databases, API keys, or channel credentials.
 

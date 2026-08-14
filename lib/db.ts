@@ -177,7 +177,7 @@ function masterKey() {
     if (key.length === 32) return key;
     throw new Error("OPENPRESENCE_SECRET_KEY must be a 32-byte base64 or 64-character hex value.");
   }
-  if (process.env.NODE_ENV === "production" && process.env.OPENPRESENCE_TEST_MODE !== "1") throw new Error("Set OPENPRESENCE_SECRET_KEY before storing channel credentials.");
+  if (process.env.NODE_ENV === "production" && process.env.OPENPRESENCE_TEST_RUNTIME !== "1") throw new Error("Set OPENPRESENCE_SECRET_KEY before storing channel credentials.");
   const fallbackPath = path.join(dataDir, ".secret-key");
   try {
     const existing = fs.readFileSync(fallbackPath);

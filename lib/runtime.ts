@@ -1,6 +1,7 @@
 import type { ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, Asset, Assignment, AssignmentQuantityMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, FileKind, FileProposal, GhostProfile, JsonValue, LiveEvent, OpenPresenceState, Operation, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, SandboxAssetInput, SocialAssetKind, SocialIntent, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind } from "./types";
 import { CHANNEL_CAPABILITIES, CHANNEL_EXTENSIONS, simulationForChannel } from "./types";
 import { createAssetPerception, createUninterpretedPerception, hasUsablePerception, mediaRequiresReview, perceptionRequirement } from "./perception";
+import { isTestRuntime } from "./test-runtime";
 
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -1092,7 +1093,7 @@ function addSocialEvaluation(state: OpenPresenceState, standing: StandingIntent,
   if (mode !== "off") {
     const bridge = presence.connectionMode === "bridge" ? bridgeFor(state, presence.id, "post") : undefined;
     const nativeX = presence.channel === "x" && presence.connectionMode !== "bridge" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.status === "connected" && connection.access === "read-write") : undefined;
-    const simulated = !bridge && !nativeX && presence.channel === "x" && process.env.OPENPRESENCE_TEST_MODE === "1";
+    const simulated = !bridge && !nativeX && presence.channel === "x" && isTestRuntime();
     const connector = nativeX ? "native" as const : bridge ? bridge.kind : simulated ? "simulated" as const : undefined;
     const status = simulated ? (mode === "auto" ? "succeeded" : mode === "review" ? "awaiting-review" : "awaiting-manual") : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
     const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance, mode: mode as Exclude<import("./types").ExecutionMode, "off">, status, attempts: simulated && mode === "auto" ? 1 : 0, bridgeId: bridge?.id, connector, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, createdAt: formedAt, updatedAt: formedAt, executedAt: simulated && mode === "auto" ? formedAt : undefined, environment: presence.environment ?? "live" };
@@ -1164,7 +1165,7 @@ export function formStandingPostIntent(source: OpenPresenceState, text: string, 
   }
   const bridge = presence.connectionMode === "bridge" ? bridgeFor(state, presence.id, "post") : undefined;
   const nativeX = presence.channel === "x" && presence.connectionMode !== "bridge" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.status === "connected" && connection.access === "read-write") : undefined;
-  const simulated = !bridge && !nativeX && presence.channel === "x" && process.env.OPENPRESENCE_TEST_MODE === "1";
+  const simulated = !bridge && !nativeX && presence.channel === "x" && isTestRuntime();
   const connector = nativeX ? "native" as const : bridge ? bridge.kind : simulated ? "simulated" as const : undefined;
   const status = simulated ? (mode === "auto" ? "succeeded" : mode === "review" ? "awaiting-review" : "awaiting-manual") : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
   const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance, mode, status, attempts: simulated && mode === "auto" ? 1 : 0, bridgeId: bridge?.id, connector, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, createdAt: formedAt, updatedAt: formedAt, executedAt: simulated && mode === "auto" ? formedAt : undefined, environment: presence.environment ?? "live" };
