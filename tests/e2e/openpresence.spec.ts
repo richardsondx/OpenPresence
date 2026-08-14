@@ -163,6 +163,9 @@ test("Presence Chat speaks as the selected public self without teaching the Agen
   await expect(page.getByRole("heading", { name: "See Jenny in the feed." })).toBeVisible();
   await expect(page.getByText("Public self · @jenny_ai", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Chat · X", { exact: true })).toBeVisible();
+  await expect(page.getByText("X · Jenny", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Start the rehearsal.", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Write a post or reply that Jenny might encounter in X. Nothing publishes or changes the Agent during this rehearsal.", { exact: true })).toBeVisible();
   await expect(page.getByRole("complementary", { name: "Context & Changes sidebar" })).toHaveCount(0);
   await expect(page.getByText("Private thread · not published", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Model")).toHaveCount(0);
@@ -188,7 +191,8 @@ test("Presence Chat speaks as the selected public self without teaching the Agen
   await navigate(page, "Chat");
   await expect(page.getByText("My name is Bob and I own a submarine.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "New rehearsal", exact: true }).click();
-  await expect(page.getByText("Start the rehearsal.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Start the rehearsal.", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Write a post or reply that Jenny might encounter in X. Nothing publishes or changes the Agent during this rehearsal.", { exact: true })).toBeVisible();
   expect(duplicateKeyErrors).toEqual([]);
 });
 
@@ -462,7 +466,7 @@ test("Calendar stores a real Standing Intent and evaluates it now", async ({ pag
   await page.getByRole("button", { name: "Save changes", exact: true }).click();
   await expect(page.getByText("Teach the audience one edited useful idea about persistent agents.")).toBeVisible();
   await expect(page.locator(".slot-row")).toContainText("09:15");
-  await page.getByRole("button", { name: "Run now" }).click();
+  await page.getByRole("button", { name: "Evaluate this intent" }).click();
   await navigate(page, "Activity");
   await expect(page.locator(".event-title").filter({ hasText: /Calendar evaluation complete|Standing intention held/ }).first()).toBeVisible();
   await expect(page.getByText("0.94", { exact: true })).toHaveCount(0);
@@ -554,7 +558,7 @@ test("Activity completes review and manual execution lifecycles", async ({ page 
   await page.getByRole("button", { name: "Add intent" }).click();
   await page.getByLabel("What should Jenny do?").fill("Review one useful idea before it is sent.");
   await page.getByRole("button", { name: "Save standing intent" }).click();
-  await page.getByRole("button", { name: "Run now" }).click();
+  await page.getByRole("button", { name: "Evaluate this intent" }).click();
   await page.waitForTimeout(150);
   await page.reload();
   const reviewButton = page.getByRole("button", { name: "Approve execution" });
@@ -576,7 +580,7 @@ test("Activity completes review and manual execution lifecycles", async ({ page 
   await page.getByRole("button", { name: "Add intent" }).click();
   await page.getByLabel("What should Jenny do?").fill("Carry one useful idea to the channel manually.");
   await page.getByRole("button", { name: "Save standing intent" }).click();
-  await page.locator(".slot-row").filter({ hasText: "Carry one useful idea to the channel manually" }).getByRole("button", { name: "Run now" }).click();
+  await page.locator(".slot-row").filter({ hasText: "Carry one useful idea to the channel manually" }).getByRole("button", { name: "Evaluate this intent" }).click();
   await page.waitForTimeout(150);
   await page.reload();
   await expect(page.getByLabel("External reference", { exact: true })).toBeVisible();
@@ -728,14 +732,14 @@ test("Chat stays quiet when Presence identity changes outside Chat", async ({ pa
   await navigate(page, "Chat");
   await expect(page.getByText("I noticed this Presence is now Ghost.", { exact: false })).toHaveCount(0);
   await expect(page.getByText("I noticed the Ghost profile changed.", { exact: false })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Start the rehearsal." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "See Jenny in the feed." })).toBeVisible();
 
   await navigate(page, "Settings");
   await identityOptions.getByRole("button", { name: /^Jenny Agent-owned/ }).click();
   await expect(identityOptions.getByRole("button", { name: /^Jenny Agent-owned/ })).toHaveClass(/selected/);
   await navigate(page, "Chat");
   await expect(page.getByText("I noticed this Presence is now Agent-owned.", { exact: false })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "Start the rehearsal." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "See Jenny in the feed." })).toBeVisible();
 });
 
 test("desktop shell keeps sidebar and runtime status available", async ({ page }) => {
@@ -1104,7 +1108,7 @@ test("Custom Channel connects a Bridge, receives Mirror events, and completes qu
   await page.getByRole("button", { name: "Add intent" }).click();
   await page.getByLabel("What should Jenny in Founders do?").fill("Share one useful memory idea with the founders.");
   await page.getByRole("button", { name: "Save standing intent" }).click();
-  await page.getByRole("button", { name: "Run now" }).click();
+  await page.getByRole("button", { name: "Evaluate this intent" }).click();
   const stateAfterRun = await (await request.get("/api/state")).json();
   const execution = stateAfterRun.executions[0];
   expect(execution.status).toBe("queued");

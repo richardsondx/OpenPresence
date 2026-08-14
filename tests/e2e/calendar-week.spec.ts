@@ -24,17 +24,3 @@ test("Calendar Week mode visualizes intent timing without pretending to show pos
   await page.getByRole("button", { name: "List", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Standing intentions" })).toBeVisible();
 });
-
-test("Run now evaluates an immediate instruction without adding a calendar item", async ({ page }) => {
-  await page.goto("/");
-  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await page.getByRole("button", { name: "Schedule", exact: true }).click();
-  await page.getByRole("button", { name: "Run now", exact: true }).click();
-  await page.getByLabel("What should Jenny consider now?").fill("Show one useful idea about persistent agents.");
-  await page.getByRole("button", { name: "Run now", exact: true }).last().click();
-  await page.getByRole("button", { name: "Activity", exact: true }).click();
-  await expect(page.getByText(/Now evaluation (complete|started|unavailable)|Now held/).first()).toBeVisible();
-  await page.getByRole("button", { name: "List", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Standing intentions" })).toBeVisible();
-  await expect(page.getByText("No standing intentions")).toBeVisible();
-});

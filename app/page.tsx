@@ -1305,7 +1305,7 @@ function AgentWorkspaceShell({
             <PublicHistoryView state={state} setView={setView} />
           )}
           {view === "schedule" && (
-            <ScheduleView state={state} mutate={mutate} />
+            <ScheduleView state={state} mutate={mutate} setView={setView} />
           )}
           {view === "brain" && (
             <BrainView
@@ -1543,7 +1543,7 @@ function LegacyAppShell({
             <PublicHistoryView state={state} setView={setView} />
           )}
           {view === "schedule" && (
-            <ScheduleView state={state} mutate={mutate} />
+            <ScheduleView state={state} mutate={mutate} setView={setView} />
           )}
           {view === "brain" && (
             <BrainView
@@ -2356,18 +2356,18 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
         </div>
         <div className="playground-toolbar-actions">
           <span className="playground-presence"><PresenceLogo channel={presence.channel} definitions={state.channelDefinitions} /> <strong>{presence.name}</strong></span>
-          <Button variant="secondary" disabled={busy} onClick={() => setRehearsalOpen((open) => !open)}><Sparkles size={14} /> Rehearse posting <ChevronDown size={14} /></Button>
+          <Button variant="secondary" disabled={busy} onClick={() => setRehearsalOpen((open) => !open)}><Sparkles size={14} /> Try a post <ChevronDown size={14} /></Button>
           <Button variant="ghost" disabled={busy} onClick={() => void run({ type: "resetPlayground", sessionId: session.id })}><RotateCcw size={14} /> Reset</Button>
         </div>
       </div>
       {rehearsalOpen && <section className="original-rehearsal-panel" aria-label="Posting rehearsal controls">
         <div className="rehearsal-mode-menu" role="group" aria-label="Posting rehearsal mode">
-          <button type="button" className={rehearsalMode === "consider" ? "selected" : ""} onClick={() => { setRehearsalMode("consider"); setAssignmentDraftId(null); }}><strong>On its own</strong><small>Let {presence.name} decide whether anything is worth originating.</small></button>
+          <button type="button" className={rehearsalMode === "consider" ? "selected" : ""} onClick={() => { setRehearsalMode("consider"); setAssignmentDraftId(null); }}><strong>Let Jenny choose</strong><small>Let {presence.name} decide whether anything is worth originating.</small></button>
           <button type="button" className={rehearsalMode === "topic" ? "selected" : ""} onClick={() => { setRehearsalMode("topic"); setAssignmentDraftId(null); }}><strong>Give a topic</strong><small>Explore a direction while preserving Agent judgment.</small></button>
           <button type="button" className={rehearsalMode === "assign" ? "selected" : ""} onClick={() => setRehearsalMode("assign")}><strong>Give an Assignment</strong><small>Delegate an outcome. The Agent decides how to accomplish it.</small></button>
         </div>
         {(rehearsalMode === "consider" || rehearsalMode === "topic") && <>
-          <div><div className="eyebrow">{rehearsalMode === "topic" ? "Topic rehearsal" : "Original post rehearsal"}</div><h2>{rehearsalMode === "topic" ? "What should Alex explore?" : originalLabel}</h2><p>{rehearsalMode === "topic" ? `${presence.name} chooses the angle, evidence, format, and wording. Silence remains possible.` : `Let ${presence.name} decide whether there is something worth publishing in this simulated world.`}</p></div>
+          <div><div className="eyebrow">{rehearsalMode === "topic" ? "Topic rehearsal" : "Original post rehearsal"}</div><h2>{rehearsalMode === "topic" ? `What should ${presence.name} explore?` : originalLabel}</h2><p>{rehearsalMode === "topic" ? `${presence.name} chooses the angle, evidence, format, and wording. Silence remains possible.` : `Let ${presence.name} decide whether there is something worth publishing in this simulated world.`}</p></div>
           <label>{rehearsalMode === "topic" ? "Topic" : "Optional inspiration"}<textarea aria-label={rehearsalMode === "topic" ? "Topic" : "Optional inspiration"} value={inspiration} onChange={(event) => setInspiration(event.target.value)} placeholder={rehearsalMode === "topic" ? "Why founder-led sales stops scaling" : "Add a topic, link, or thought to consider…"} rows={3} /></label>
           <div className="original-rehearsal-actions"><small>{rehearsalMode === "topic" ? "The topic is context, not a command to publish." : `No inspiration means ${presence.name} considers independently.`}</small><Button variant="primary" disabled={busy} onClick={() => void considerOriginal(inspiration)}><Sparkles size={14} /> {rehearsalMode === "topic" ? "Rehearse" : "Consider now"}</Button></div>
         </>}
@@ -2961,12 +2961,8 @@ function PresenceChatView({
           <SectionEyebrow>Chat · {channelLabel(presence.channel, state.channelDefinitions)}</SectionEyebrow>
           <h1>See {presence.name} in the feed.</h1>
           <p className="muted">
-            Rehearse how {presence.name} responds to a post or reply in this
-            channel.
+            Write a post or reply that {presence.name} might encounter in {channelLabel(presence.channel, state.channelDefinitions)}. Nothing publishes or changes the Agent during this rehearsal.
           </p>
-        </div>
-        <div className="heading-actions">
-          <span className="scope-summary">{channelLabel(presence.channel, state.channelDefinitions)} · {presence.name}</span>
         </div>
       </div>
       <div className="chat-layout">
@@ -2974,14 +2970,6 @@ function PresenceChatView({
           <div className="chat-history">
             {messages.length === 0 && !pendingMessage ? (
               <div className="chat-blank">
-                <div className="blank-glyph">
-                  <PresenceGlyph accent={presence.accent} />
-                </div>
-                <h2>Start the rehearsal.</h2>
-                <p>
-                  Write a post or reply that {presence.name} might encounter in {channelLabel(presence.channel, state.channelDefinitions)}.
-                  Nothing publishes or changes the Agent during this rehearsal.
-                </p>
                 <div className="blank-suggestions">
                   <button onClick={() => setMessage("I just shipped a small tool and learned more from the edge cases than the happy path.")}>Share a field note</button>
                   <button onClick={() => setMessage("What do you think about building an audience before building a product?")}>Ask a real question</button>
@@ -4056,9 +4044,11 @@ function PublicHistoryInspector({ item, state, index, total, onNavigate, onClose
 function ScheduleView({
   state,
   mutate,
+  setView,
 }: {
   state: OpenPresenceState;
   mutate: Mutate;
+  setView: (view: View) => void;
 }) {
   const [showForm, setShowForm] = useState(false);
   const [instruction, setInstruction] = useState("");
@@ -4072,8 +4062,6 @@ function ScheduleView({
   const [considerationStart, setConsiderationStart] = useState("08:00");
   const [considerationEnd, setConsiderationEnd] = useState("11:00");
   const [editingSlot, setEditingSlot] = useState<CalendarSlot | null>(null);
-  const [runNowMode, setRunNowMode] = useState(false);
-  const [runNowBusy, setRunNowBusy] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "week">("week");
   const presenceId = state.activePresenceId ?? state.presence?.id ?? "";
   const selectedPresence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
@@ -4081,7 +4069,6 @@ function ScheduleView({
   const resetForm = () => {
     setInstruction("");
     setEditingSlot(null);
-    setRunNowMode(false);
     setDay("Tuesday");
     setTime("08:00");
     setObjective("audience_growth");
@@ -4116,19 +4103,6 @@ function ScheduleView({
   };
   const add = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (runNowMode) {
-      setRunNowBusy(true);
-      try {
-        const next = await mutate({ type: "runNow", instruction, presenceId });
-        if (next) {
-          resetForm();
-          setShowForm(false);
-        }
-      } finally {
-        setRunNowBusy(false);
-      }
-      return;
-    }
     if (responsibility === "assign") {
       const next = await mutate({ type: "createAssignment", instruction, presenceId, environment: selectedPresence?.connectionMode === "sandbox" ? "sandbox" : "live" });
       if (next) { resetForm(); setShowForm(false); }
@@ -4163,11 +4137,6 @@ function ScheduleView({
     setConsiderationEnd(end);
     setShowForm(true);
   };
-  const openRunNow = () => {
-    resetForm();
-    setRunNowMode(true);
-    setShowForm(true);
-  };
   return (
     <div className="page">
       <div className="page-heading">
@@ -4185,8 +4154,8 @@ function ScheduleView({
             <button type="button" aria-pressed={viewMode === "list"} className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}>List</button>
             <button type="button" aria-pressed={viewMode === "week"} className={viewMode === "week" ? "active" : ""} onClick={() => setViewMode("week")}>Week</button>
           </div>
-          <Button variant="secondary" onClick={openRunNow} disabled={runNowBusy}>
-            <Play size={14} /> Run now
+          <Button variant="secondary" onClick={() => setView("playground")}>
+            <FlaskConical size={14} /> Try a post
           </Button>
           <Button variant="primary" onClick={() => { setShowForm(!showForm); if (showForm) resetForm(); }}>
             {showForm ? <X size={15} /> : <Plus size={15} />}{" "}
@@ -4195,25 +4164,24 @@ function ScheduleView({
         </div>
       </div>
       {showForm && (
-        <form className={`add-slot-form ${runNowMode ? "now-run-form" : ""}`} onSubmit={add}>
+        <form className="add-slot-form" onSubmit={add}>
           <label className="instruction-field">
-            {runNowMode ? "Immediate instruction" : responsibility === "assign" ? "Assignment" : "Standing instruction"}
+            {responsibility === "assign" ? "Assignment" : "Standing instruction"}
             <textarea
-              aria-label={runNowMode ? `What should ${presenceName} consider now?` : `What should ${presenceName} do?`}
+              aria-label={`What should ${presenceName} do?`}
               value={instruction}
               onChange={(event) => setInstruction(event.target.value)}
-              placeholder={runNowMode ? "Explore one useful idea about persistent agents right now." : "Teach the audience one useful thing about persistent agents."}
+              placeholder="Teach the audience one useful thing about persistent agents."
               rows={3}
               required
             />
           </label>
-          {runNowMode && <p className="now-run-note">Jenny will evaluate this in the current moment. She may publish, wait for review, or choose NO_OP. Nothing is added to the calendar.</p>}
-          {!runNowMode && <fieldset className="schedule-responsibility">
+          <fieldset className="schedule-responsibility">
             <legend>Responsibility</legend>
             <label className={responsibility === "consider" ? "selected" : ""}><input type="radio" name="schedule-responsibility" checked={responsibility === "consider"} onChange={() => setResponsibility("consider")} /><span><strong>Consider</strong><small>{presenceName} may reasonably choose not to act.</small></span></label>
             <label className={responsibility === "assign" ? "selected" : ""}><input type="radio" name="schedule-responsibility" checked={responsibility === "assign"} onChange={() => setResponsibility("assign")} /><span><strong>Assign</strong><small>{presenceName} is responsible for completing the outcome.</small></span></label>
-          </fieldset>}
-          {!runNowMode && <div className="when-field">
+          </fieldset>
+          <div className="when-field">
             <span className="schedule-field-label">When</span>
             <div className="when-field-controls">
               <label>
@@ -4241,8 +4209,8 @@ function ScheduleView({
                 />
               </label>
             </div>
-          </div>}
-          {!runNowMode && <label>
+          </div>
+          <label>
             Objective
             <select
               aria-label="Objective"
@@ -4254,8 +4222,8 @@ function ScheduleView({
               <option value="education">Education</option>
               <option value="reflection">Reflection</option>
             </select>
-          </label>}
-          {!runNowMode && <div className="timing-options">
+          </label>
+          <div className="timing-options">
             <button
               type="button"
               className="timing-toggle"
@@ -4291,9 +4259,9 @@ function ScheduleView({
                 )}
               </fieldset>
             )}
-          </div>}
-          <Button type="submit" variant="secondary" disabled={runNowBusy}>
-            {runNowMode ? <><Play size={14} /> Run now</> : <><Check size={14} /> {responsibility === "assign" ? "Review assignment" : editingSlot ? "Save changes" : "Save standing intent"}</>}
+          </div>
+          <Button type="submit" variant="secondary">
+            <Check size={14} /> {responsibility === "assign" ? "Review assignment" : editingSlot ? "Save changes" : "Save standing intent"}
           </Button>
         </form>
       )}
@@ -4412,7 +4380,7 @@ function SlotRow({
           {slot.mode} · {considerationSummary(slot.time, slot.executionWindow)}
         </span>
       </div>
-      <div className="slot-actions"><button className="slot-edit" onClick={onEdit} aria-label={`Edit ${slot.label}`}><Pencil size={14} /> Edit</button><button className="slot-run" onClick={onRun}><Play size={14} /> Run now</button></div>
+      <div className="slot-actions"><button className="slot-edit" onClick={onEdit} aria-label={`Edit ${slot.label}`}><Pencil size={14} /> Edit</button><button className="slot-run" onClick={onRun}><Play size={14} /> Evaluate this intent</button></div>
       <ChevronRight size={16} className="slot-chevron" />
     </div>
   );

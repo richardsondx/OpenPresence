@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addSandboxEvent, applyOperation, assignmentIsSatisfied, compileAssignmentInstruction, compilePresenceContext, createAgent, deliverSandboxExecution, deriveActivitySummary, derivePublicHistory, failNativeExecution, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, initialState, isActivityDecisionEvent, isExplicitXPostRequest, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, recordPublicFooting, recordStandingIntentNoOp, startPlaygroundSession } from "../lib/runtime";
+import { addSandboxEvent, applyOperation, assignmentIsSatisfied, compileAssignmentInstruction, compilePresenceContext, createAgent, deliverSandboxExecution, deriveActivitySummary, derivePublicHistory, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, initialState, isActivityDecisionEvent, isExplicitXPostRequest, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, recordPublicFooting, recordStandingIntentNoOp, startPlaygroundSession } from "../lib/runtime";
 import { acknowledgeExecution, claimExecutions, createBridgeWithKey, ingestEvents, removeBridge, revokeBridge } from "../lib/bridge";
 import { readBridgeCredentialMetadata, readState, writeState } from "../lib/db";
 import { nextObservationAt } from "../lib/native-x";
@@ -513,15 +513,6 @@ describe("OpenPresence runtime boundaries", () => {
     const evaluated = applyOperation(scheduled, { type: "runSlot", id: scheduled.calendar[0]!.id });
     expect(evaluated.actions[0]?.expiresAt).toBeTruthy();
     expect(evaluated.events[0]?.detail).toContain("expires in 45 minutes");
-  });
-
-  it("can form an immediate social intent without persisting a calendar Standing Intent", () => {
-    const state = createAgent(input);
-    const next = formStandingPostIntent(state, "A useful point of view right now.");
-    expect(next.calendar).toHaveLength(0);
-    expect(next.standingIntents).toHaveLength(0);
-    expect(next.socialIntents[0]?.standingIntentId).toBeUndefined();
-    expect(next.actions[0]?.reason).toContain("immediate instruction");
   });
 
   it("keeps chat transcripts bounded by explicit conversations", () => {

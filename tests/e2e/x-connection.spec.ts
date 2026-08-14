@@ -66,7 +66,7 @@ test("native X connection delivers an approved Presence action", async ({ page }
   await page.getByRole("button", { name: "Add intent" }).click();
   await page.getByLabel("What should Jenny do?").fill("Share one useful idea about persistent agents.");
   await page.getByRole("button", { name: "Save standing intent" }).click();
-  await page.getByRole("button", { name: "Run now" }).click();
+  await page.getByRole("button", { name: "Evaluate this intent" }).click();
   await navigation.getByRole("button", { name: "Activity", exact: true }).click();
   await expect(page.locator(".event-title").filter({ hasText: "Published on X" })).toBeVisible();
   await expect(page.locator(".execution-ledger").getByRole("heading", { name: "Action completed" })).toBeVisible();

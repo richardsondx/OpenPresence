@@ -3,7 +3,7 @@ import { randomUUID } from "node:crypto";
 import { z } from "zod";
 import { readState, saveProviderSecret, writeState } from "@/lib/db";
 import { generateAgentReply, generateAgentSocialDecision, generateAgentSocialEdit, generateAgentSocialJudgment, generatePresenceChatReply } from "@/lib/ai";
-import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntroduction, beginOriginalPostRehearsal, completeNativeExecution, completeOriginalPostRehearsal, confirmAutoMode, declineSandboxIntroduction, deliverSandboxExecution, expireSandboxIntents, failNativeExecution, finishPulse, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, identityLeakageReason, isExplicitXPostRequest, isLaunchCandidate, isLowInformationCue, markCalendarSlotEvaluated, markInboundJudged, markNativeConnectionNeedsAttention, publicSelfGuidance, recordImmediateNoOp, recordPreferenceEvidence, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, resetPlaygroundSession, startPlaygroundSession } from "@/lib/runtime";
+import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntroduction, beginOriginalPostRehearsal, completeNativeExecution, completeOriginalPostRehearsal, confirmAutoMode, declineSandboxIntroduction, deliverSandboxExecution, expireSandboxIntents, failNativeExecution, finishPulse, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, identityLeakageReason, isExplicitXPostRequest, isLaunchCandidate, isLowInformationCue, markCalendarSlotEvaluated, markInboundJudged, markNativeConnectionNeedsAttention, publicSelfGuidance, recordPreferenceEvidence, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, resetPlaygroundSession, startPlaygroundSession } from "@/lib/runtime";
 import { publishXPost, readNativeXCredentials } from "@/lib/x";
 import { reconcileNativeX } from "@/lib/native-x";
 import type { Asset, MirrorObject, OpenPresenceState, Operation, RuntimeOperation } from "@/lib/types";
@@ -647,7 +647,6 @@ const operation: z.ZodType<RuntimeOperation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("startAssignment"), id: z.string().min(1), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("workAssignment"), id: z.string().min(1), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("runSlot"), id: z.string().min(1), scheduled: z.boolean().optional() }),
-  z.object({ type: z.literal("runNow"), instruction: z.string().trim().min(1).max(1000), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("approveExecution"), id: z.string().min(1) }),
   z.object({ type: z.literal("executeIntent"), id: z.string().min(1) }),
   z.object({ type: z.literal("confirmAutoMode"), presenceId: z.string().min(1), capabilities: z.array(z.string().trim().min(1).max(80)).min(1).max(20), executionIds: z.array(z.string().min(1)).max(100) }),
@@ -715,9 +714,9 @@ export async function POST(request: Request) {
       const assignment = current.assignments.find((item) => item.id === parsed.id);
       const session = current.playgroundSessions.find((item) => item.id === parsed.sessionId && item.status === "active");
       if (!assignment || !session || assignment.sessionId && assignment.sessionId !== session.id) throw new Error("That Assignment or Sandbox session is no longer available.");
-      if (assignment.environment !== "sandbox" || session.presenceId !== assignment.presenceId) throw new Error("Only a matching Sandbox Presence can work this Assignment in V1.");
+      if (assignment.environment !== "sandbox" || session.presenceId !== assignment.presenceId) throw new Error("Only a matching Playground Sandbox session can work this Assignment in V1.");
       const presence = current.presences.find((item) => item.id === assignment.presenceId);
-      if (!presence || presence.connectionMode !== "sandbox") throw new Error("This Assignment needs a Sandbox Presence before it can start.");
+      if (!presence) throw new Error("That Assignment's Presence is no longer available.");
       let next = parsed.type === "startAssignment" ? applyOperation(current, parsed) : current;
       next = await runSandboxAssignment(next, assignment.id, session.id);
       writeState(next);
@@ -725,58 +724,6 @@ export async function POST(request: Request) {
     }
     if (parsed.type === "runSlot") {
       const next = await evaluateCalendarSlot(current, parsed.id, parsed.scheduled);
-      writeState(next);
-      return NextResponse.json(next);
-    }
-    if (parsed.type === "runNow") {
-      const presence = current.presences.find((item) => item.id === (parsed.presenceId ?? current.activePresenceId)) ?? current.presence;
-      if (!presence || presence.status !== "live") throw new Error("Wake this Presence before asking it to evaluate something now.");
-      let next = recordRuntimeEvent(current, presence.id, "Now evaluation started", `${presence.name} is evaluating the immediate instruction now. It may publish, wait for review, or choose NO_OP.`, "positive");
-      const prompt = `Evaluate this immediate instruction for the current moment.
-
-Immediate instruction: ${parsed.instruction}
-
-Use ${presence.name}'s meaning files, current Presence, and actual context. Decide whether a specific original ${presence.channel} publication is worth publishing now. Prefer silence when the instruction is not timely, useful, or consistent with ${presence.name}'s Taste. Return only one publication draft, or exactly NO_OP. Do not mention calendars, schedules, APIs, connectors, or internal systems.`;
-      let draft: string;
-      try {
-        draft = await generateAgentReply(next, prompt);
-      } catch (error) {
-        const message = error instanceof Error ? error.message : "The selected Agent runtime could not evaluate the immediate instruction.";
-        next = recordRuntimeEvent(next, presence.id, "Now evaluation unavailable", message, "warning");
-        writeState(next);
-        return NextResponse.json(next);
-      }
-      if (!draft.trim() || /^NO_OP$/i.test(draft.trim())) {
-        next = recordImmediateNoOp(next, presence.id, parsed.instruction);
-        writeState(next);
-        return NextResponse.json(next);
-      }
-      if (presence.channel === "x" && draft.trim().length > 280) {
-        next = recordRuntimeEvent(next, presence.id, "Now held", `${presence.name}'s candidate exceeded X's single-post limit, so no external action was attempted.`, "warning");
-        writeState(next);
-        return NextResponse.json(next);
-      }
-      const existingExecutionIds = new Set(next.executions.map((item) => item.id));
-      next = formStandingPostIntent(next, draft.trim());
-      const executionIds = new Set(next.executions.filter((item) => !existingExecutionIds.has(item.id)).map((item) => item.id));
-      next = await deliverNativeExecutions(next, executionIds);
-      const execution = next.executions.find((item) => executionIds.has(item.id));
-      if (!execution) {
-        writeState(next);
-        return NextResponse.json(next);
-      }
-      if (execution.connector === "simulated" && execution.status === "succeeded") {
-        writeState(next);
-        return NextResponse.json(next);
-      }
-      const detail = execution?.status === "succeeded"
-        ? `${presence.name} judged the immediate instruction worthwhile and published it through the authorized channel.`
-        : execution?.status === "failed"
-          ? `${presence.name} judged the immediate instruction worthwhile, but delivery failed; no external post is counted.`
-          : execution?.status === "awaiting-review"
-            ? `${presence.name} judged the immediate instruction worthwhile and is waiting for operator review.`
-            : `${presence.name} judged the immediate instruction worthwhile and left it in the Presence execution envelope.`;
-      next = recordRuntimeEvent(next, presence.id, "Now evaluation complete", detail, execution?.status === "failed" ? "warning" : "positive", { executionId: execution?.id });
       writeState(next);
       return NextResponse.json(next);
     }
