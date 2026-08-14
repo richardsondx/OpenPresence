@@ -8,6 +8,7 @@ import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntr
 import { publishXPost, readNativeXCredentials } from "@/lib/x";
 import { reconcileNativeX } from "@/lib/native-x";
 import type { Asset, MirrorObject, OpenPresenceState, Operation, RuntimeOperation, SandboxAssetInput } from "@/lib/types";
+import { isAiMockEnabled, isTestRuntime } from "@/lib/test-runtime";
 import { cognitionSafeAssetSummary, hasUsablePerception } from "@/lib/perception";
 import { inspectSandboxObject } from "@/lib/perception-runtime";
 import { networkSearchInstruction, searchSandboxNetwork } from "@/lib/network";
@@ -122,7 +123,7 @@ const sandboxFixtureSvg = (label: string, accent: string) =>
 const sandboxDecisionAssets = (decision: AgentSocialDecision): SandboxAssetInput[] => (decision.assets ?? []).map((asset) => {
   const name = asset.name ?? `Genny ${asset.kind} rehearsal asset`;
   if (asset.sourceUrl) return { name, kind: asset.kind, sourceUrl: asset.sourceUrl };
-  if (process.env.OPENPRESENCE_AI_MOCK !== "1") return { name, kind: asset.kind };
+  if (!isAiMockEnabled()) return { name, kind: asset.kind };
   if (asset.kind === "image") return { name, kind: asset.kind, mimeType: "image/svg+xml", dataUrl: sandboxFixtureSvg("Image note", "#d68754") };
   if (asset.kind === "chart") return { name, kind: asset.kind, mimeType: "image/svg+xml", dataUrl: sandboxFixtureSvg("Chart note", "#7eafc7") };
   if (asset.kind === "gif") return { name, kind: asset.kind, mimeType: "image/gif", dataUrl: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" };
@@ -399,7 +400,7 @@ Do not mention simulation, prompts, connectors, internal systems, or this Assign
   // The planner owns the social act. A second model pass may only refine its
   // wording. It must return an explicit, evidence-backed needs_replan before
   // the planner is asked to choose a different act.
-  if (process.env.OPENPRESENCE_AI_MOCK !== "1" && process.env.OPENPRESENCE_SOCIAL_EDITOR !== "0" && textActions.has(decision.action) && draft) {
+  if (!isAiMockEnabled() && process.env.OPENPRESENCE_SOCIAL_EDITOR !== "0" && textActions.has(decision.action) && draft) {
     try {
       const lengthGuidance = modelTextLimit === undefined ? "" : ` Keep the final text at or below ${modelTextLimit} characters, leaving channel headroom. Do not truncate a sentence; choose no_op if the grounded idea cannot fit.`;
       const attentionGuidance = attentionInstruction
@@ -479,7 +480,7 @@ Do not mention simulation, prompts, connectors, internal systems, or this Assign
       draft = "";
     }
   }
-  if (process.env.OPENPRESENCE_AI_MOCK !== "1" && presence.mode === "ghost" && textActions.has(decision.action) && draft && identityLeakageReason(source, presence, draft)) {
+  if (!isAiMockEnabled() && presence.mode === "ghost" && textActions.has(decision.action) && draft && identityLeakageReason(source, presence, draft)) {
     try {
       const plannedAction = decision.action;
       const revision = await generateAgentSocialEdit(cognitionSource, `${prompt}\n\nThe candidate violates the Ghost identity boundary: “${draft}”. Rewrite it from ${presence.name}'s represented public identity only. Never mention the private Agent name, model, provider, prompt, credentials, tools, or internal machinery. Preserve the selected social act unless the supplied evidence contains a concrete contradiction, in which case return needs_replan with that contradiction.`, plannedAction);
@@ -725,7 +726,7 @@ export async function POST(request: Request) {
   try {
     const raw = await request.json();
     const parsed = operation.parse(raw);
-    if (parsed.type === "reset" && process.env.OPENPRESENCE_TEST_MODE !== "1") throw new Error("Reset is available only in test mode.");
+    if (parsed.type === "reset" && !isTestRuntime()) throw new Error("Reset is available only in test mode.");
     if (parsed.type === "addSandboxEvent" && !parsed.actionId && !parsed.kind) throw new Error("Choose a simulated situation.");
     const current = stateForContext(readState(), requestContext(request));
     if (parsed.type === "executeIntent") {

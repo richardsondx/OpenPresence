@@ -1,5 +1,6 @@
 import { readProviderSecret } from "./db";
 import { publicSelfGuidance } from "./runtime";
+import { isAiMockEnabled } from "./test-runtime";
 import type { Conversation, ModelProvider, OpenPresenceState, Presence, PresenceChatMessage, SocialAssetKind } from "./types";
 
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -278,7 +279,7 @@ async function runGemini(secret: string, model: string, prompt: ReturnType<typeo
 }
 
 export async function generateAgentReply(state: OpenPresenceState, content: string, conversationId?: string, options?: { social?: boolean; presence?: Presence; socialHistory?: Array<Pick<PresenceChatMessage, "role" | "content">>; socialEvidence?: string; socialThreadContext?: string }) {
-  if (process.env.OPENPRESENCE_AI_MOCK === "1") return `I understood “${content.slice(0, 160)}”. This response came through the Agent runtime.`;
+  if (isAiMockEnabled()) return `I understood “${content.slice(0, 160)}”. This response came through the Agent runtime.`;
   if (!state.agent) throw new AiRuntimeError("Create an Agent before starting a conversation.");
   const profile = state.modelProfiles.find((item) => item.agentId === state.agent?.id);
   if (!profile) throw new AiRuntimeError("No model is selected. Open Brain and choose a model runtime.");
@@ -298,7 +299,7 @@ export async function generateAgentReply(state: OpenPresenceState, content: stri
 export async function generatePresenceChatReply(state: OpenPresenceState, presenceId: string, content: string, history: Array<Pick<PresenceChatMessage, "role" | "content">>, socialEvidence?: string, socialThreadContext?: string) {
   const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   if (!presence) throw new AiRuntimeError("Choose a Presence before starting a Presence Chat.");
-  if (process.env.OPENPRESENCE_AI_MOCK === "1") {
+  if (isAiMockEnabled()) {
     const normalized = content.toLowerCase().replace(/\s+/g, " ").trim();
     const publicName = presence.publicSelf?.displayName ?? presence.name;
     if (/(?:why are you responding|didn't mention|didn’t mention|not mention)/.test(normalized)) {
@@ -614,7 +615,7 @@ function mockSocialDecision(state: OpenPresenceState, instruction: string, actio
 
 export async function generateAgentSocialDecision(state: OpenPresenceState, instruction: string, allowedActions: string[]) {
   const actions = [...new Set(allowedActions.filter(Boolean))];
-  if (process.env.OPENPRESENCE_AI_MOCK === "1") return mockSocialDecision(state, instruction, actions);
+  if (isAiMockEnabled()) return mockSocialDecision(state, instruction, actions);
   const raw = await generateAgentReply(state, `${instruction}\n\nChoose exactly one action from: ${actions.join(", ")}, or no_op. Return JSON only in this shape: {"action":"...","text":"...","rationale":"short explanation","assets":[{"kind":"image|video|gif|chart|link","name":"optional label","sourceUrl":"optional URL"}]}. Include assets only when the supplied context or an explicitly configured Sandbox asset capability supports them; never invent a URL or claim an asset was created when it was not. The rationale is for the internal audit and must not contain hidden chain-of-thought. Use an empty text for no_op, like, or reaction.`, undefined, { social: true });
   return parseAgentSocialDecision(raw, actions);
 }

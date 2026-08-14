@@ -1,5 +1,13 @@
 # Active QA Work
 
+## COMPLETE — Production mock isolation
+
+- **Started:** 2026-08-14
+- **Scope:** Prevent deterministic AI/X fixture output from reaching production while preserving isolated test-harness coverage.
+- **Root cause:** `OPENPRESENCE_AI_MOCK=1` and `OPENPRESENCE_X_API_MOCK=1` were checked directly. The Playwright harness enabled them explicitly, but there was no separate runtime gate preventing an accidental production configuration from activating them.
+- **Fix:** Mock behavior now requires both `OPENPRESENCE_TEST_MODE=1` and the explicit `OPENPRESENCE_TEST_RUNTIME=1` harness gate. Production uses provider and connector paths; missing configuration fails with an actionable error instead of generic output.
+- **Verification:** AI, X, and Sandbox suites passed 65/65; production-mode AI mock regression passed; production build passed; focused Chromium test passed 1/1 with the isolated test harness.
+
 ## COMPLETE — Correct Playground virtual time initialization and reset
 
 - **Started:** 2026-08-14

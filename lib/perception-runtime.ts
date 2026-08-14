@@ -3,6 +3,7 @@ import { createUninterpretedPerception } from "./perception";
 import sharp from "sharp";
 import { spawn } from "node:child_process";
 import type { AgentModelProfile, Asset, AssetPerception, MirrorObject, ModelProvider, OpenPresenceState, PerceptionLevel, PerceptionResult } from "./types";
+import { isAiMockEnabled } from "./test-runtime";
 
 const REQUEST_TIMEOUT_MS = 45_000;
 
@@ -196,7 +197,7 @@ async function inspectWithProvider(state: OpenPresenceState, asset: Asset, objec
   }
   const selected = providerSupportsVision(state);
   const media = await imageParts(asset);
-  if (!selected || process.env.OPENPRESENCE_AI_MOCK === "1") return { result: createUninterpretedPerception(asset), attempted: false };
+  if (!selected || isAiMockEnabled()) return { result: createUninterpretedPerception(asset), attempted: false };
   if (!media) return providerError(asset, `The ${asset.type} asset could not be normalized into inspectable visual evidence.`);
   const { profile, connection } = selected;
   const secret = profile.provider === "ollama" || profile.provider === "custom" && !connection.secretConfigured ? undefined : connection.id ? readProviderSecret(connection.id) : undefined;
