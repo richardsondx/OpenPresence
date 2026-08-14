@@ -1,5 +1,14 @@
 # Active QA Work
 
+## COMPLETE — Correct Playground virtual time initialization and reset
+
+- **Started:** 2026-08-14
+- **Scope:** Trace why Playground cards and the Virtual time panel show a stale fixed time, then ensure a new/reloaded Playground session and Reset use the current local time while preserving intentional virtual-time advancement within a session.
+- **Product boundary:** Virtual time is Sandbox world state, not public channel truth. It must be persisted per Presence/session and must not affect Agent identity, Presence meaning, or live delivery.
+- **Root cause:** New and reset sessions already used `now()`, but reopening an existing active session returned its persisted `virtualNow` unchanged. The formatter was correct; the persisted Sandbox clock was stale.
+- **Fix:** Added persisted `virtualTimeMode` (`realtime` or `manual`), synchronized stale realtime sessions when Playground opens, preserved manually advanced virtual time, and explicitly reanchored Reset to the current clock. Legacy sessions default to realtime during normalization.
+- **Verification:** `tests/sandbox.test.ts` 27/27 passed; focused Chromium browser checks for current-on-open and current-on-Reset passed 2/2; TypeScript passed. The broader neighboring Playground rehearsal test still has an unrelated pre-existing media-inspection failure before it reaches the clock assertions.
+
 ## COMPLETE — Trace cross-Agent Presence style contamination
 
 - **Started:** 2026-08-14

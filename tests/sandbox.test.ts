@@ -1,7 +1,7 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { writeState } from "../lib/db";
 import { POST as statePost } from "../app/api/state/route";
-import { addSandboxEvent, advanceSandboxTime, applyOperation, beginOriginalPostRehearsal, completeOriginalPostRehearsal, confirmAutoMode, createAgent, deliverSandboxExecution, expireSandboxIntents, formSandboxIntent, recordPreferenceEvidence, resetPlaygroundSession, startPlaygroundSession } from "../lib/runtime";
+import { addSandboxEvent, advanceSandboxTime, applyOperation, beginOriginalPostRehearsal, completeOriginalPostRehearsal, confirmAutoMode, createAgent, deliverSandboxExecution, expireSandboxIntents, formSandboxIntent, recordPreferenceEvidence, resetPlaygroundSession, startPlaygroundSession, syncPlaygroundTime } from "../lib/runtime";
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
@@ -360,6 +360,34 @@ describe("Sandbox and Playground boundaries", () => {
     expect(state.assets).toHaveLength(0);
     expect(state.perceptions).toHaveLength(0);
     expect(state.files.map((file) => file.content)).toEqual(filesBefore);
+  });
+
+  it("refreshes the default Playground clock on load but preserves manual virtual time", () => {
+    vi.useFakeTimers();
+    try {
+      vi.setSystemTime(new Date("2026-08-14T16:00:00.000Z"));
+      let state = startPlaygroundSession(createAgent(input));
+      const session = state.playgroundSessions[0]!;
+      session.virtualNow = "2026-08-13T23:33:43.590Z";
+      delete session.virtualTimeMode;
+
+      state = syncPlaygroundTime(state, session.id);
+      expect(state.playgroundSessions[0]?.virtualNow).toBe("2026-08-14T16:00:00.000Z");
+      expect(state.playgroundSessions[0]?.virtualTimeMode).toBe("realtime");
+
+      state = advanceSandboxTime(state, session.id, 60);
+      const manuallyAdvanced = state.playgroundSessions[0]?.virtualNow;
+      vi.setSystemTime(new Date("2026-08-14T18:00:00.000Z"));
+      state = syncPlaygroundTime(state, session.id);
+      expect(state.playgroundSessions[0]?.virtualNow).toBe(manuallyAdvanced);
+      expect(state.playgroundSessions[0]?.virtualTimeMode).toBe("manual");
+
+      state = resetPlaygroundSession(state, session.id);
+      expect(state.playgroundSessions[0]?.virtualNow).toBe("2026-08-14T18:00:00.000Z");
+      expect(state.playgroundSessions[0]?.virtualTimeMode).toBe("realtime");
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("keeps media posture on the Presence boundary", () => {
