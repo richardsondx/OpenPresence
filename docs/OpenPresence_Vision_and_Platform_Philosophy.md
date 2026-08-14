@@ -1600,7 +1600,21 @@ If not, it probably does not belong in the core product yet.
 
 ---
 
-## 42. The final mental model
+## 42. Scenario rehearsal
+
+Playground Scenarios are a rehearsal path for discovering behavioral failure before it becomes public. They create a real social situation inside the existing Sandbox world, run the selected Presence through the normal cognition, Social Intent, execution, delivery, and outcome path, and preserve the evidence for review.
+
+Scenario authoring may begin in natural language, but the resulting Scenario version is frozen before a Run starts. A Run is Presence-scoped, isolated, resumable, append-only, and provenance-bound to the meaning, Presence context, channel semantics, and execution envelope that existed at start. “Run again” creates a fresh world and preserves the prior evidence.
+
+The Scenario world and its evaluation intent are separate. The Agent receives the situation it must experience; it never receives the expected answer or hidden review criteria. Structural checks judge only facts OpenPresence can prove, such as Sandbox containment, execution-envelope compliance, delivery state, untrusted-content boundaries, and the absence of simulated learning in Live Memory or Growth. Qualitative questions belong to an independent Run Reviewer and the operator, not to the Agent judging itself. Findings never silently mutate Brain, Soul, Taste, Presence, Memory, or Growth.
+
+This extends the benchmark boundary:
+
+> **Do not optimize benchmarks by teaching the benchmark. Do not optimize rehearsal by teaching the Scenario.**
+
+Built-in Scenarios must create actual hostile, privacy-sensitive, identity-pressure, prompt-injection, and low-value social situations through the normal Sandbox path. They must not teach expected answers. A report should keep structural truth, independent model review, and operator review distinct; it should never collapse them into a fake readiness score.
+
+## 43. The final mental model
 
 ```text
                      OPENPRESENCE
@@ -1659,7 +1673,7 @@ OpenPresence should make the machinery beneath that intelligence good enough tha
 
 ---
 
-## 43. The sentences to remember
+## 44. The sentences to remember
 
 When everything else is forgotten, remember these:
 

@@ -70,6 +70,7 @@ import type {
   PresenceEnvironment,
   PresenceMode,
   MirrorObject,
+  ModelReviewFinding,
   ModelProvider,
   PreferenceReason,
   SandboxActor,
@@ -2150,6 +2151,8 @@ function SocialObjectCard({
   onSelect,
   onRemove,
   threadDepth = 0,
+  readOnly = false,
+  reviewFindings = [],
 }: {
   item: MirrorObject;
   objects: MirrorObject[];
@@ -2159,6 +2162,8 @@ function SocialObjectCard({
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
   threadDepth?: number;
+  readOnly?: boolean;
+  reviewFindings?: ModelReviewFinding[];
 }) {
   const itemAssets = (item.assetRefs ?? [])
     .map((ref) => assets.find((asset) => asset.id === ref.assetId))
@@ -2173,6 +2178,15 @@ function SocialObjectCard({
     : undefined;
   const authorName = item.author?.displayName ?? "Someone";
   const authorHandle = item.author?.handle ?? "Audience";
+  const attachedFindings = reviewFindings.filter((finding) => {
+    const references = new Set([
+      `object:${item.id}`,
+      `mirror:${item.id}`,
+      `external:${item.externalRef.id}`,
+      `source:${item.sourceEventId ?? ""}`,
+    ]);
+    return finding.evidenceRefs.some((reference) => references.has(reference));
+  });
 
   return (
     <article
@@ -2189,7 +2203,7 @@ function SocialObjectCard({
             <small>{authorHandle}</small>
           </span>
           <time>{formatTime(item.occurredAt ?? item.observedAt)}</time>
-          <button type="button" className="social-card-remove" aria-label={`Remove ${item.objectType} from Playground`} title="Remove from rehearsal" onClick={() => onRemove(item.id)}><X size={13} /></button>
+          {!readOnly && <button type="button" className="social-card-remove" aria-label={`Remove ${item.objectType} from Playground`} title="Remove from rehearsal" onClick={() => onRemove(item.id)}><X size={13} /></button>}
         </div>
       ) : (
         <div className="social-card-meta">
@@ -2201,9 +2215,15 @@ function SocialObjectCard({
             </small>
           </span>
           <time>{formatTime(item.occurredAt ?? item.observedAt)}</time>
-          <button type="button" className="social-card-remove" aria-label={`Remove ${item.objectType} from Playground`} title="Remove from rehearsal" onClick={() => onRemove(item.id)}><X size={13} /></button>
+          {!readOnly && <button type="button" className="social-card-remove" aria-label={`Remove ${item.objectType} from Playground`} title="Remove from rehearsal" onClick={() => onRemove(item.id)}><X size={13} /></button>}
         </div>
       )}
+      {attachedFindings.map((finding) => (
+        <div className={`scenario-replay-finding scenario-replay-finding-${finding.status}`} key={finding.id}>
+          <strong>{finding.status === "violated" ? "Needs attention" : finding.status === "uncertain" ? "Review this moment" : "Reviewer noted"}</strong>
+          <span>{finding.explanation}</span>
+        </div>
+      ))}
       {isLike ? (
         <div className="social-event-body">
           <strong>Liked a post</strong>
@@ -2241,7 +2261,7 @@ function SocialObjectCard({
           )}
         </div>
       )}
-      {item.assetRefs?.length ? (
+      {!readOnly && item.assetRefs?.length ? (
         <button className="what-sees-button" type="button" onClick={() => onSelect(item.id)}>
           What {presenceName} sees
         </button>
@@ -2260,6 +2280,8 @@ function PlaygroundThreadFeed({
   presenceName,
   onSelect,
   onRemove,
+  readOnly = false,
+  reviewFindings = [],
 }: {
   objects: MirrorObject[];
   assets: OpenPresenceState["assets"];
@@ -2267,6 +2289,8 @@ function PlaygroundThreadFeed({
   presenceName: string;
   onSelect: (id: string) => void;
   onRemove: (id: string) => void;
+  readOnly?: boolean;
+  reviewFindings?: ModelReviewFinding[];
 }) {
   const refKey = (object: MirrorObject) => `${object.externalRef.type}:${object.externalRef.id}`;
   const objectsByRef = new Map(objects.map((object) => [refKey(object), object]));
@@ -2292,11 +2316,145 @@ function PlaygroundThreadFeed({
     });
   const renderThread = (object: MirrorObject, depth = 0): React.ReactNode => (
     <Fragment key={object.id}>
-      <SocialObjectCard item={object} objects={objects} assets={assets} presenceId={presenceId} presenceName={presenceName} onSelect={onSelect} onRemove={onRemove} threadDepth={depth} />
+      <SocialObjectCard item={object} objects={objects} assets={assets} presenceId={presenceId} presenceName={presenceName} onSelect={onSelect} onRemove={onRemove} threadDepth={depth} readOnly={readOnly} reviewFindings={reviewFindings} />
       {(childrenByParent.get(refKey(object)) ?? []).sort((left, right) => timestamp(left) - timestamp(right)).map((child) => renderThread(child, depth + 1))}
     </Fragment>
   );
   return <div className="social-feed">{roots.map((root) => <div className="social-thread" key={`thread:${root.id}`}>{renderThread(root)}</div>)}</div>;
+}
+
+type ScenarioRunView = "replay" | "review" | "details";
+
+function ScenarioRunDetail({
+  state,
+  presence,
+  selectedRun,
+  selectedRunScenario,
+  selectedRunVersion,
+  runObjects,
+  runEvents,
+  evaluation,
+  runView,
+  setRunView,
+  operatorNote,
+  setOperatorNote,
+  busy,
+  onBack,
+  onRerun,
+  onReview,
+  onRecordReview,
+}: {
+  state: OpenPresenceState;
+  presence: NonNullable<OpenPresenceState["presence"]>;
+  selectedRun: OpenPresenceState["scenarioRuns"][number];
+  selectedRunScenario?: OpenPresenceState["scenarios"][number];
+  selectedRunVersion?: OpenPresenceState["scenarioVersions"][number];
+  runObjects: MirrorObject[];
+  runEvents: OpenPresenceState["events"];
+  evaluation?: OpenPresenceState["scenarioEvaluations"][number];
+  runView: ScenarioRunView;
+  setRunView: (view: ScenarioRunView) => void;
+  operatorNote: string;
+  setOperatorNote: (note: string) => void;
+  busy: boolean;
+  onBack: () => void;
+  onRerun: () => void;
+  onReview: () => void;
+  onRecordReview: (disposition: "okay" | "concern") => void;
+}) {
+  const modelFindings = evaluation?.modelFindings ?? [];
+  const structuralFindings = evaluation?.structuralFindings ?? [];
+  const inboundObjects = runObjects.filter((item) => item.actorPresenceId !== presence.id && item.objectType !== "like");
+  const agentObjects = runObjects.filter((item) => item.actorPresenceId === presence.id && item.objectType !== "like");
+  const successfulChecks = structuralFindings.filter((finding) => finding.status === "pass").length;
+  const provenance = state.scenarioRunProvenance.find((item) => item.id === selectedRun.provenanceId);
+  const behaviorSummary = [
+    inboundObjects.length ? `${presence.name} saw ${inboundObjects.length} social moment${inboundObjects.length === 1 ? "" : "s"} in the simulated world.` : "The simulated world did not contain an incoming social post.",
+    agentObjects.length
+      ? `${presence.name} left ${agentObjects.length} public contribution${agentObjects.length === 1 ? "" : "s"} in the exchange.`
+      : `${presence.name} did not publish a reply in this rehearsal.`,
+    structuralFindings.length && successfulChecks === structuralFindings.length
+      ? "The rehearsal stayed inside the isolated Sandbox."
+      : "One or more system checks deserves attention in Details.",
+  ];
+
+  return (
+    <section className="scenario-run-detail" aria-label="Scenario Run">
+      <div className="scenario-detail-heading">
+        <div>
+          <div className="eyebrow">Scenario rehearsal</div>
+          <h2>{selectedRunScenario?.title ?? "Scenario Run"}</h2>
+          <p>{presence.name} · {channelLabel(presence.channel, state.channelDefinitions)} · {presence.mode === "ghost" ? "Ghost" : "Agent-owned"}</p>
+          <div className="scenario-run-state"><span className="status-dot" /> {selectedRun.status === "completed" ? "Completed" : selectedRun.status} · Sandbox</div>
+        </div>
+        <div className="scenario-detail-actions">
+          <Button variant="ghost" onClick={onBack}>Back to scenario</Button>
+          <Button variant="secondary" disabled={busy || selectedRun.status === "active"} onClick={onRerun}><RotateCcw size={14} /> Run again</Button>
+          {selectedRun.status !== "active" && <Button variant="primary" disabled={busy} onClick={onReview}><ShieldCheck size={14} /> {evaluation?.reviewer ? "Review again" : "Review Run"}</Button>}
+        </div>
+      </div>
+
+      <div className="scenario-run-tabs" role="tablist" aria-label="Run views">
+        {(["replay", "review", "details"] as ScenarioRunView[]).map((view) => (
+          <button type="button" role="tab" aria-selected={runView === view} className={runView === view ? "active" : ""} key={view} onClick={() => setRunView(view)}>
+            {view === "replay" ? "Replay" : view === "review" ? "Review" : "Details"}
+          </button>
+        ))}
+      </div>
+
+      {runView === "replay" && (
+        <div className="scenario-replay-view" role="tabpanel" aria-label="Replay">
+          <div className="scenario-section-intro">
+            <div className="eyebrow">Replay</div>
+            <h3>What {presence.name} experienced</h3>
+            <p>Watch the simulated {channelLabel(presence.channel, state.channelDefinitions)} exchange as it happened. This is the behavior to judge first.</p>
+          </div>
+          {runObjects.length ? (
+            <PlaygroundThreadFeed objects={runObjects} assets={state.assets} presenceId={presence.id} presenceName={presence.name} onSelect={() => undefined} onRemove={() => undefined} readOnly reviewFindings={modelFindings} />
+          ) : (
+            <div className="world-blank"><MessageSquare size={20} /><p>The simulated world stayed quiet.</p><small>No social objects were recorded in this Run.</small></div>
+          )}
+          {!agentObjects.length && runObjects.length > 0 && (
+            <div className="scenario-silence-note"><strong>{presence.name} did not respond.</strong><span>Silence is shown as a real outcome, not hidden inside a system event.</span></div>
+          )}
+          <section className="scenario-operator-review scenario-operator-review-friendly">
+            <div><div className="eyebrow">Your review</div><h3>How did this feel?</h3><p>Save your observation without changing {presence.name} automatically.</p></div>
+            <textarea aria-label="Operator review note" value={operatorNote} onChange={(event) => setOperatorNote(event.target.value)} placeholder="Optional note about the voice, judgment, privacy, or identity you noticed." rows={3} />
+            <div><Button variant="ghost" disabled={busy || !evaluation} onClick={() => onRecordReview("okay")}>Looks right</Button><Button variant="secondary" disabled={busy || !evaluation} onClick={() => onRecordReview("concern")}>Something felt wrong</Button></div>
+            {evaluation?.operatorReview && <small className="scenario-review-saved">Saved as an operator observation. It does not change the Agent automatically.</small>}
+          </section>
+        </div>
+      )}
+
+      {runView === "review" && (
+        <div className="scenario-review-view" role="tabpanel" aria-label="Review">
+          <section className="scenario-review-summary">
+            <div className="eyebrow">Review</div>
+            <h3>How {presence.name} handled it</h3>
+            <ul>{behaviorSummary.map((item) => <li key={item}>{item}</li>)}</ul>
+          </section>
+          <section className="scenario-review-summary scenario-review-attention">
+            <div className="eyebrow">What stood out</div>
+            {modelFindings.length ? modelFindings.map((finding) => <div className="scenario-review-finding" key={finding.id}><ScenarioRunStatus status={finding.status === "violated" ? "failed" : finding.status === "uncertain" ? "needs_review" : "passed"} /><strong>{scenarioCriterionLabel(finding.criterionId, selectedRunVersion)}</strong><p>{finding.explanation}</p>{finding.evidenceRefs.length > 0 && <small>Evidence linked to the replay where available.</small>}</div>) : <p>{evaluation?.reviewer ? "The independent reviewer did not flag a qualitative concern." : "Review this Run to get an independent read on the qualitative behavior."}</p>}
+          </section>
+        </div>
+      )}
+
+      {runView === "details" && (
+        <div className="scenario-details-view" role="tabpanel" aria-label="Technical details">
+          <section className="scenario-system-checks">
+            <div><div className="eyebrow">System checks</div><h3>{successfulChecks}/{structuralFindings.length || 0} passed</h3><p>These checks confirm the rehearsal stayed within its configured boundaries.</p></div>
+            {evaluation ? structuralFindings.map((finding) => <div className={`scenario-system-check scenario-system-check-${finding.status}`} key={finding.id}><span>{finding.status === "pass" ? "✓" : "!"}</span><strong>{scenarioCriterionLabel(finding.criterionId, selectedRunVersion)}</strong><small>{finding.status === "pass" ? "Passed" : "Needs attention"}</small></div>) : <p>System checks are not available yet.</p>}
+          </section>
+          <section className="scenario-run-meta scenario-run-meta-details"><span><strong>Scenario version</strong>{selectedRunVersion ? `v${selectedRunVersion.version}` : "Unavailable"}</span><span><strong>Run provenance</strong>Frozen at start</span><span><strong>Model</strong>{provenance?.model?.model ?? "Configured Agent model"}</span><span><strong>Observed records</strong>{runEvents.length + runObjects.length}</span></section>
+          <details className="scenario-technical-details">
+            <summary>Technical details <span>View run trace</span></summary>
+            <div className="scenario-trace">{runEvents.length ? runEvents.map((event) => <div className="scenario-trace-row" key={event.id}><span className={`event-dot event-${event.tone}`} /><strong>{event.title}</strong><small>{event.detail}</small></div>) : <p>No trace events recorded.</p>}</div>
+          </details>
+        </div>
+      )}
+    </section>
+  );
 }
 
 function structuredEventDetail(detail: string): Record<string, unknown> | undefined {
@@ -2353,6 +2511,129 @@ function PlaygroundEventDetail({ event }: { event: OpenPresenceState["events"][n
   return <small>{event.detail}</small>;
 }
 
+function ScenarioRunStatus({ status }: { status: string }) {
+  const label = status === "passed" ? "Passed" : status === "failed" ? "Needs attention" : status === "unavailable" ? "Review unavailable" : status === "needs_review" ? "Needs review" : status === "active" ? "Running" : "Not reviewed";
+  return <span className={`scenario-status scenario-status-${status}`}>{label}</span>;
+}
+
+const scenarioCriterionLabels: Record<string, string> = {
+  "structural-sandbox": "Sandbox boundary",
+  "structural-envelope": "Stayed within allowed actions",
+  "structural-untrusted": "Outside content stayed untrusted",
+};
+
+function scenarioCriterionLabel(criterionId: string, version?: OpenPresenceState["scenarioVersions"][number]) {
+  return scenarioCriterionLabels[criterionId] ?? version?.evaluationSpec.structuralCriteria.find((criterion) => criterion.id === criterionId)?.label ?? version?.evaluationSpec.socialCriteria.find((criterion) => criterion.id === criterionId)?.label ?? criterionId.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function ScenarioLibrary({ state, mutate, presence }: { state: OpenPresenceState; mutate: Mutate; presence: NonNullable<OpenPresenceState["presence"]> }) {
+  const [prompt, setPrompt] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
+  const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
+  const [creating, setCreating] = useState(false);
+  const [importing, setImporting] = useState(false);
+  const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [operatorNote, setOperatorNote] = useState("");
+  const [runProgress, setRunProgress] = useState<string | null>(null);
+  const [runView, setRunView] = useState<ScenarioRunView>("replay");
+  const visibleScenarios = state.scenarios.filter((scenario) => scenario.ownerScope !== "presence" || scenario.presenceId === presence.id);
+  const selectedScenario = visibleScenarios.find((scenario) => scenario.id === selectedScenarioId) ?? visibleScenarios[0];
+  const selectedVersion = selectedScenario ? state.scenarioVersions.find((version) => version.scenarioId === selectedScenario.id && version.id === selectedScenario.currentVersionId) ?? state.scenarioVersions.find((version) => version.scenarioId === selectedScenario.id) : undefined;
+  const selectedRun = state.scenarioRuns.find((run) => run.id === selectedRunId) ?? (selectedScenario ? state.scenarioRuns.find((run) => run.scenarioId === selectedScenario.id && run.presenceId === presence.id) : undefined);
+  const selectedRunScenario = selectedRun ? visibleScenarios.find((scenario) => scenario.id === selectedRun.scenarioId) : undefined;
+  const selectedRunVersion = selectedRun ? state.scenarioVersions.find((version) => version.id === selectedRun.scenarioVersionId) : undefined;
+  const selectedRunSession = selectedRun ? state.playgroundSessions.find((session) => session.id === selectedRun.playgroundSessionId) : undefined;
+  const runObjects = selectedRunSession ? state.mirrorObjects.filter((object) => object.sessionId === selectedRunSession.id).sort((left, right) => (left.occurredAt ?? left.observedAt).localeCompare(right.occurredAt ?? right.observedAt)) : [];
+  const runEvents = selectedRunSession ? state.events.filter((event) => event.sessionId === selectedRunSession.id).slice(-12).reverse() : [];
+  const evaluation = selectedRun ? state.scenarioEvaluations.find((item) => item.runId === selectedRun.id) : undefined;
+  const run = async (operation: unknown) => { setBusy(true); try { return await mutate(operation); } finally { setBusy(false); } };
+  const createFromPrompt = async () => {
+    if (!prompt.trim()) return;
+    const next = await run({ type: "createScenarioFromPrompt", prompt: prompt.trim(), presenceId: presence.id });
+    const created = next?.scenarios[0];
+    if (created) setSelectedScenarioId(created.id);
+    setPrompt("");
+    setCreating(false);
+  };
+  const runScenario = async (operation: unknown, scenarioId?: string) => {
+    setRunProgress("Preparing an isolated Sandbox world…");
+    const progressTimers = [
+      window.setTimeout(() => setRunProgress("Running the configured Agent through each situation…"), 700),
+      window.setTimeout(() => setRunProgress("Capturing the trace and structural checks…"), 2200),
+    ];
+    try {
+      const next = await run(operation);
+      const created = scenarioId ? next?.scenarioRuns.find((item) => item.scenarioId === scenarioId && item.id === next.scenarioRuns[0]?.id) : next?.scenarioRuns[0];
+      if (created) { setSelectedRunId(created.id); setRunView("replay"); }
+    } finally {
+      progressTimers.forEach((timer) => window.clearTimeout(timer));
+      setRunProgress(null);
+    }
+  };
+  const startRun = async () => {
+    if (!selectedScenario) return;
+    await runScenario({ type: "startScenarioRun", scenarioId: selectedScenario.id, presenceId: presence.id }, selectedScenario.id);
+  };
+  const rerun = async () => {
+    if (!selectedRun) return;
+    await runScenario({ type: "rerunScenario", runId: selectedRun.id });
+  };
+  const review = async () => { if (selectedRun) { await run({ type: "evaluateScenarioRun", runId: selectedRun.id }); setRunView("review"); } };
+  const deleteSelectedScenario = async () => {
+    if (!selectedScenario) return;
+    await run({ type: "deleteScenario", scenarioId: selectedScenario.id });
+    setDeleteConfirmOpen(false);
+    setSelectedScenarioId(null);
+    setSelectedRunId(null);
+  };
+  const recordReview = async (disposition: "accepted" | "okay" | "concern") => {
+    if (!selectedRun) return;
+    await run({ type: "recordScenarioReview", runId: selectedRun.id, disposition, note: operatorNote.trim() || undefined });
+    setOperatorNote("");
+  };
+  const importFile = (file: File | undefined) => {
+    if (!file) return;
+    setImporting(true);
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const payload = JSON.parse(String(reader.result));
+        const next = await run({ type: "importScenario", payload, presenceId: presence.id });
+        const created = next?.scenarios[0];
+        if (created) setSelectedScenarioId(created.id);
+      } catch { /* The API presents the validation error through the existing mutation path. */ }
+      finally { setImporting(false); }
+    };
+    reader.readAsText(file);
+  };
+  const exportScenario = () => {
+    if (!selectedScenario || !selectedVersion) return;
+    const blob = new Blob([JSON.stringify({ scenario: selectedScenario, version: selectedVersion }, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${selectedScenario.title.toLowerCase().replace(/[^a-z0-9]+/g, "-") || "scenario"}.json`;
+    anchor.click();
+    URL.revokeObjectURL(url);
+  };
+  return (
+    <div className="scenario-page">
+      <div className="scenario-toolbar">
+        <div><div className="eyebrow">Scenario rehearsal</div><h1>Scenarios</h1><p>Make it cheap to discover behavioral failure before it becomes public.</p></div>
+      </div>
+      <div className="scenario-action-bar"><div className="scenario-toolbar-actions"><label className="scenario-import-button"><FileText size={14} /> {importing ? "Importing…" : "Import JSON"}<input aria-label="Import scenario JSON" type="file" accept="application/json,.json" onChange={(event) => importFile(event.target.files?.[0])} /></label><Button variant="primary" disabled={busy} onClick={() => setCreating((open) => !open)}><Plus size={14} /> New scenario</Button></div></div>
+      {creating && <section className="scenario-builder" aria-label="Create a scenario"><div><div className="eyebrow">Natural-language authoring</div><h2>What do you want to rehearse?</h2><p>Describe the social situation in ordinary language. OpenPresence freezes the resulting world before the Run begins.</p></div><textarea aria-label="What do you want to rehearse?" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Test Alex when someone insults him and pressures him for private information." rows={4} /><div className="scenario-builder-footer"><small>The Presence sees the situation. Evaluation intent stays outside the Agent&apos;s world.</small><Button variant="primary" disabled={busy || prompt.trim().length < 12} onClick={() => void createFromPrompt()}><Sparkles size={14} /> Preview scenario</Button></div></section>}
+      <div className="scenario-layout">
+        <aside className="scenario-list" aria-label="Scenarios"><div className="eyebrow">Available rehearsals</div>{visibleScenarios.map((scenario) => { const runs = state.scenarioRuns.filter((run) => run.scenarioId === scenario.id && run.presenceId === presence.id); const latest = runs[0] ? state.scenarioEvaluations.find((item) => item.runId === runs[0].id) : undefined; const version = state.scenarioVersions.find((item) => item.id === scenario.currentVersionId); return <button type="button" key={scenario.id} className={`scenario-card ${selectedScenario?.id === scenario.id && !selectedRun ? "selected" : ""}`} onClick={() => { setSelectedScenarioId(scenario.id); setSelectedRunId(null); }}><span className="scenario-card-kicker">{version?.source === "builtin" ? "Built-in" : "Your scenario"} · {runs.length} run{runs.length === 1 ? "" : "s"}</span><strong>{scenario.title}</strong><small>{scenario.description}</small>{latest && <ScenarioRunStatus status={latest.status} />}</button>; })}{!visibleScenarios.length && <p className="scenario-empty">No scenarios yet. Describe the first situation you want to rehearse.</p>}</aside>
+        <main className="scenario-main">
+          {selectedRun ? <ScenarioRunDetail state={state} presence={presence} selectedRun={selectedRun} selectedRunScenario={selectedRunScenario} selectedRunVersion={selectedRunVersion} runObjects={runObjects} runEvents={runEvents} evaluation={evaluation} runView={runView} setRunView={setRunView} operatorNote={operatorNote} setOperatorNote={setOperatorNote} busy={busy} onBack={() => { setSelectedRunId(null); setRunView("replay"); }} onRerun={() => void rerun()} onReview={() => void review()} onRecordReview={(disposition) => void recordReview(disposition)} /> : selectedScenario && selectedVersion ? <section className="scenario-preview" aria-label="Scenario preview" aria-busy={Boolean(runProgress)}>{runProgress && <div className="scenario-progress-banner" role="status" aria-live="polite"><LoaderCircle size={18} className="scenario-progress-spinner" /><span><strong>{runProgress}</strong><small>Your isolated Run is still working. You can stay on this page while it completes.</small></span></div>}<div className="scenario-detail-heading"><div><div className="eyebrow">{selectedVersion.source === "builtin" ? "Built-in Scenario" : "Scenario preview"}</div><h2>{selectedScenario.title}</h2><p>{selectedScenario.description}</p></div><div className="scenario-detail-actions"><Button variant="ghost" disabled={busy} onClick={exportScenario}><ArrowUpRight size={14} /> Export JSON</Button>{selectedVersion.source !== "builtin" && <Button variant="ghost" disabled={busy} onClick={() => setDeleteConfirmOpen(true)}>Delete scenario</Button>}<Button variant="primary" disabled={busy} onClick={() => void startRun()}><Play size={14} /> {runProgress ? "Starting…" : "Start isolated Run"}</Button></div></div>{deleteConfirmOpen && <section className="scenario-delete-confirm" role="alertdialog" aria-label="Delete scenario confirmation"><div><strong>Delete “{selectedScenario.title}”?</strong><p>This removes the Scenario, its versions, and its saved rehearsal history. This cannot be undone.</p></div><div><Button variant="ghost" disabled={busy} onClick={() => setDeleteConfirmOpen(false)}>Keep scenario</Button><Button variant="secondary" disabled={busy} onClick={() => void deleteSelectedScenario()}>Delete scenario</Button></div></section>}<div className="scenario-preview-grid"><section><div className="eyebrow">What will happen</div><p>{selectedScenario.purpose}</p>{selectedVersion.worldSpec.stimuli.map((stimulus) => { const actor = selectedVersion.worldSpec.startingWorld?.actors?.find((item) => item.id === stimulus.actorRef); return <div className="scenario-stimulus" key={stimulus.id}><strong>{actor?.displayName ?? "Participant"}</strong><span>{stimulus.content}</span></div>; })}</section><section><div className="eyebrow">What we&apos;ll review</div><p>{selectedVersion.evaluationSpec.purpose}</p>{selectedVersion.evaluationSpec.socialCriteria.map((criterion) => <div className="scenario-criterion" key={criterion.id}><strong>{criterion.label}</strong><small>{criterion.description}</small></div>)}<small className="scenario-boundary">The Agent receives only the world situation—not these review criteria.</small></section></div><div className="scenario-history"><div className="eyebrow">Run history</div>{state.scenarioRuns.filter((run) => run.scenarioId === selectedScenario.id && run.presenceId === presence.id).length ? state.scenarioRuns.filter((run) => run.scenarioId === selectedScenario.id && run.presenceId === presence.id).map((run) => { const result = state.scenarioEvaluations.find((item) => item.runId === run.id); return <button type="button" className="scenario-history-row" key={run.id} onClick={() => setSelectedRunId(run.id)}><span>{new Date(run.startedAt).toLocaleString()}</span><strong>{run.status}</strong>{result && <ScenarioRunStatus status={result.status} />}</button>; }) : <p>No Runs yet. Start one when you are ready.</p>}</div></section> : <div className="scenario-empty-main"><FlaskConical size={22} /><h2>Choose a Scenario</h2><p>Built-ins create real social situations through the normal Sandbox world path. Custom Scenarios start with a plain-language description.</p></div>}
+        </main>
+      </div>
+    </div>
+  );
+}
+
 function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: Mutate }) {
   const presence = state.presence ?? state.presences[0];
   const session = state.playgroundSessions.find((item) => item.presenceId === presence?.id && item.status === "active");
@@ -2363,6 +2644,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
   const reviewCount = session ? state.executions.filter((item) => item.sessionId === session.id && item.status === "awaiting-review").length : 0;
   const actors = session ? state.sandboxActors.filter((item) => item.sessionId === session.id) : [];
   const [busy, setBusy] = useState(false);
+  const [scenarioMode, setScenarioMode] = useState(false);
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [rehearsalOpen, setRehearsalOpen] = useState(false);
   const [rehearsalMode, setRehearsalMode] = useState<"consider" | "topic" | "assign" | null>(null);
@@ -2442,9 +2724,11 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
     setFeedbackNote("");
   };
   if (!presence) return null;
+  if (scenarioMode) return <div className="playground-page"><div className="playground-mode-switch"><Button variant="ghost" onClick={() => setScenarioMode(false)}>Free play</Button><Button variant="primary" onClick={() => setScenarioMode(true)}>Scenarios</Button></div><ScenarioLibrary state={state} mutate={mutate} presence={presence} /></div>;
   if (!session) return <div className="playground-page"><div className="playground-loading" role="status">Opening a fresh simulated account…</div></div>;
   return (
     <div className="playground-page">
+      <div className="playground-mode-switch"><Button variant="primary" onClick={() => setScenarioMode(false)}>Free play</Button><Button variant="ghost" onClick={() => setScenarioMode(true)}>Scenarios</Button></div>
       <div className="playground-toolbar">
         <div>
           <div className="eyebrow">Presence rehearsal</div>
@@ -2453,7 +2737,6 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
           <p className="playground-handle-hint">Agent handle: <strong>{presence.handle}</strong>. Use @mentions in Chat when addressing {presence.name}.</p>
         </div>
         <div className="playground-toolbar-actions">
-          <span className="playground-presence"><PresenceLogo channel={presence.channel} definitions={state.channelDefinitions} /> <strong>{presence.name}</strong></span>
           <Button variant="secondary" disabled={busy} onClick={() => setRehearsalOpen((open) => !open)}><Sparkles size={14} /> Try a post <ChevronDown size={14} /></Button>
           <Button variant="ghost" disabled={busy} onClick={() => void run({ type: "resetPlayground", sessionId: session.id })}><RotateCcw size={14} /> Reset</Button>
         </div>

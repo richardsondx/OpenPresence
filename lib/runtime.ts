@@ -1,5 +1,6 @@
-import type { ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, Asset, Assignment, AssignmentQuantityMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, FileKind, FileProposal, GhostProfile, JsonValue, LiveEvent, OpenPresenceState, Operation, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, SandboxAssetInput, SocialAssetKind, SocialIntent, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, LanguagePolicy } from "./types";
+import type { ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, Asset, Assignment, AssignmentQuantityMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, FileKind, FileProposal, GhostProfile, JsonValue, LiveEvent, OpenPresenceState, Operation, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, SandboxAssetInput, SocialAssetKind, SocialIntent, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, LanguagePolicy, Scenario, ScenarioVersion, ScenarioRun, ScenarioRunProvenance, ScenarioRunEvaluation, StructuralFinding } from "./types";
 import { CHANNEL_CAPABILITIES, CHANNEL_EXTENSIONS, simulationForChannel } from "./types";
+import { buildScenarioFromPrompt, builtinScenarioDefinitions, scenarioFromImport, stableHash } from "./scenarios";
 import { effectiveLanguagePolicy, EMPTY_LANGUAGE_POLICY, normalizeLanguagePolicy, validateLanguage } from "./language-policy";
 import { createAssetPerception, createUninterpretedPerception, hasUsablePerception, mediaRequiresReview, perceptionRequirement } from "./perception";
 import { isTestRuntime } from "./test-runtime";
@@ -74,7 +75,7 @@ const fileContent = (kind: FileKind, input: CreateAgentInput, presence?: Presenc
 };
 
 export function initialState(): OpenPresenceState {
-  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], events: [], calendar: [], assignments: [], watches: [], actions: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], toolBindings: [], changeSets: [], standingIntents: [], socialIntents: [], executions: [], outcomes: [], publications: [], preferenceEvidence: [], originalPostRehearsals: [], librarySources: [], assets: [], perceptions: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
+  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], events: [], calendar: [], assignments: [], watches: [], actions: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], toolBindings: [], changeSets: [], standingIntents: [], socialIntents: [], executions: [], outcomes: [], publications: [], preferenceEvidence: [], originalPostRehearsals: [], librarySources: [], assets: [], perceptions: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], scenarios: [], scenarioVersions: [], scenarioRuns: [], scenarioRunProvenance: [], scenarioEvaluations: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
 }
 
 function makeFiles(input: CreateAgentInput, presence: Presence): AgentFile[] { return (Object.keys(fileMeta) as FileKind[]).map((kind) => ({ kind, ...fileMeta[kind], content: fileContent(kind, input, presence), revision: 1, updatedAt: now() })); }
@@ -494,7 +495,8 @@ export function createAgent(input: CreateAgentInput): OpenPresenceState {
   const conversation = makeConversation();
   const skills = [{ id: "research-to-thread", name: "Research to thread", description: "Turn a source into a clear social thread.", channels: ["x", "linkedin"] as import("./types").ChannelId[], requiresTools: ["web.search", "asset.inspect"], compatibleFormats: ["x.thread", "linkedin.post"] }, { id: "data-story", name: "Data story", description: "Turn evidence into a useful visual story.", channels: ["x", "linkedin"] as import("./types").ChannelId[], requiresTools: ["asset.inspect", "chart.render"], compatibleFormats: ["x.media-post", "linkedin.image-post"] }];
   const environment = makeSandboxEnvironment(presence);
-  return { ...initialState(), onboarded: true, agent, agents: [agent], activeAgentId: agent.id, presence, presences: [presence], activePresenceId: presence.id, files: makeFiles(input, presence), modelProfiles: [defaultModel(agent.id)], providerConnections: [{ id: id("connection"), provider: "openai", label: "OpenAI", status: "needs-configuration", createdAt: now() }], toolBindings: defaultBindings(agent.id), conversations: [conversation], activeConversationId: conversation.id, channelDefinitions: definitions, sandboxEnvironments: [environment], skills, agentSkills: skills.map((skill) => ({ id: id("agent-skill"), agentId: agent.id, skillId: skill.id, enabled: true })), events: [event("system", `${agent.name} is live`, `Your ${input.mode === "ghost" ? "Ghost " : "agent-owned "}Presence is ready on X.`, "positive")] };
+  const builtins = builtinScenarioDefinitions(agent.id, presence.channel);
+  return { ...initialState(), onboarded: true, agent, agents: [agent], activeAgentId: agent.id, presence, presences: [presence], activePresenceId: presence.id, files: makeFiles(input, presence), modelProfiles: [defaultModel(agent.id)], providerConnections: [{ id: id("connection"), provider: "openai", label: "OpenAI", status: "needs-configuration", createdAt: now() }], toolBindings: defaultBindings(agent.id), conversations: [conversation], activeConversationId: conversation.id, channelDefinitions: definitions, sandboxEnvironments: [environment], skills, agentSkills: skills.map((skill) => ({ id: id("agent-skill"), agentId: agent.id, skillId: skill.id, enabled: true })), scenarios: builtins.map((item) => item.scenario), scenarioVersions: builtins.map((item) => item.version), events: [event("system", `${agent.name} is live`, `Your ${input.mode === "ghost" ? "Ghost " : "agent-owned "}Presence is ready on X.`, "positive")] };
 }
 
 function makeSandboxEnvironment(presence: Presence): SandboxEnvironment {
@@ -503,6 +505,173 @@ function makeSandboxEnvironment(presence: Presence): SandboxEnvironment {
 }
 
 function cloneState(source: OpenPresenceState) { return normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState); }
+
+function scenarioVersionFor(state: OpenPresenceState, scenarioId: string, versionId?: string) {
+  const scenario = state.scenarios.find((item) => item.id === scenarioId);
+  if (!scenario) throw new Error("That Scenario no longer exists.");
+  const version = state.scenarioVersions.find((item) => item.id === (versionId ?? scenario.currentVersionId) && item.scenarioId === scenario.id);
+  if (!version) throw new Error("That Scenario version is unavailable.");
+  return { scenario, version };
+}
+
+function scenarioProvenance(state: OpenPresenceState, scenario: Scenario, version: ScenarioVersion, presence: Presence, session: PlaygroundSession): ScenarioRunProvenance {
+  const model = state.modelProfiles.find((item) => item.agentId === state.agent?.id);
+  const meaningRevisions: Partial<Record<FileKind, number>> = {};
+  const meaningHashes: Partial<Record<FileKind, string>> = {};
+  for (const file of state.files) {
+    meaningRevisions[file.kind] = file.revision;
+    meaningHashes[file.kind] = stableHash(file.content);
+  }
+  const definition = state.channelDefinitions.find((item) => item.id === presence.channel);
+  return { id: id("scenario-provenance"), agentId: state.agent?.id ?? scenario.agentId ?? "", presenceId: presence.id, channelId: presence.channel, scenarioId: scenario.id, scenarioVersionId: version.id, model: model ? { provider: model.provider, model: model.model, quality: model.quality } : undefined, meaningRevisions, meaningHashes, presenceContextHash: stableHash(presence.context), executionEnvelopeHash: stableHash(presence.executionEnvelope), channelDefinitionHash: stableHash(definition), runtimeVersion: "scenario-runs-v1", virtualClockOrigin: session.virtualNow, createdAt: now() };
+}
+
+export function createScenarioFromPrompt(source: OpenPresenceState, prompt: string, presenceId?: string) {
+  const state = cloneState(source);
+  if (!state.agent) throw new Error("Create an Agent before creating a Scenario.");
+  const presence = state.presences.find((item) => item.id === (presenceId ?? state.activePresenceId)) ?? state.presence;
+  if (!presence) throw new Error("Choose a Presence before creating a Scenario.");
+  const built = buildScenarioFromPrompt(prompt, presence.channel, state.agent.id, undefined);
+  state.scenarios.unshift(built.scenario);
+  state.scenarioVersions.unshift(built.version);
+  state.events.unshift(event("system", "Scenario created", `${built.scenario.title} is ready to review before starting a Sandbox Run.`, "positive", { presenceId: presence.id }));
+  return state;
+}
+
+export function importScenarioDefinition(source: OpenPresenceState, payload: unknown, presenceId?: string) {
+  const state = cloneState(source);
+  if (!state.agent) throw new Error("Create an Agent before importing a Scenario.");
+  const agentId = state.agent.id;
+  const presence = state.presences.find((item) => item.id === (presenceId ?? state.activePresenceId)) ?? state.presence;
+  if (!presence) throw new Error("Choose a Presence before importing a Scenario.");
+  const built = scenarioFromImport(payload, agentId, presence.channel);
+  state.scenarios.unshift(built.scenario);
+  state.scenarioVersions.unshift(built.version);
+  state.events.unshift(event("system", "Scenario imported", `${built.scenario.title} is available for Sandbox rehearsal.`, "positive", { presenceId: presence.id }));
+  return state;
+}
+
+export function deleteScenario(source: OpenPresenceState, scenarioId: string) {
+  const state = cloneState(source);
+  const scenario = state.scenarios.find((item) => item.id === scenarioId);
+  if (!scenario) throw new Error("That Scenario no longer exists.");
+  if (scenario.ownerScope === "system") throw new Error("Built-in Scenarios cannot be deleted.");
+  if (scenario.agentId && scenario.agentId !== state.agent?.id) throw new Error("That Scenario belongs to a different Agent.");
+  if (scenario.ownerScope === "presence" && scenario.presenceId !== state.presence?.id) throw new Error("That Scenario belongs to a different Presence.");
+
+  const runs = state.scenarioRuns.filter((run) => run.scenarioId === scenario.id);
+  if (runs.some((run) => run.status === "active")) throw new Error("Stop the active Scenario Run before deleting this Scenario.");
+  const runIds = new Set(runs.map((run) => run.id));
+  const provenanceIds = new Set(runs.map((run) => run.provenanceId));
+  const sessionIds = new Set(runs.map((run) => run.playgroundSessionId));
+
+  state.scenarios = state.scenarios.filter((item) => item.id !== scenario.id);
+  state.scenarioVersions = state.scenarioVersions.filter((version) => version.scenarioId !== scenario.id);
+  state.scenarioRuns = state.scenarioRuns.filter((run) => !runIds.has(run.id));
+  state.scenarioRunProvenance = state.scenarioRunProvenance.filter((item) => !provenanceIds.has(item.id));
+  state.scenarioEvaluations = state.scenarioEvaluations.filter((item) => !runIds.has(item.runId));
+  state.playgroundSessions = state.playgroundSessions.filter((session) => !sessionIds.has(session.id));
+  state.mirrorObjects = state.mirrorObjects.filter((object) => !sessionIds.has(object.sessionId ?? ""));
+  state.mirrorEvents = state.mirrorEvents.filter((eventRecord) => !sessionIds.has(eventRecord.sessionId ?? ""));
+  state.events = state.events.filter((item) => !sessionIds.has(item.sessionId ?? ""));
+  state.sandboxActors = state.sandboxActors.filter((actor) => !sessionIds.has(actor.sessionId));
+  state.assets = state.assets.filter((asset) => !sessionIds.has(asset.sessionId ?? ""));
+  state.perceptions = state.perceptions.filter((perception) => !sessionIds.has(perception.sessionId ?? ""));
+  state.socialIntents = state.socialIntents.filter((intent) => !sessionIds.has(intent.sessionId ?? ""));
+  state.publications = state.publications.filter((publication) => !sessionIds.has(publication.sessionId ?? ""));
+  state.executions = state.executions.filter((execution) => !sessionIds.has(execution.sessionId ?? ""));
+  state.outcomes = state.outcomes.filter((outcome) => !sessionIds.has(outcome.sessionId ?? ""));
+  state.preferenceEvidence = state.preferenceEvidence.filter((item) => !sessionIds.has(item.sessionId));
+  state.originalPostRehearsals = state.originalPostRehearsals.filter((item) => !sessionIds.has(item.sessionId));
+  state.assignments = state.assignments.filter((item) => !sessionIds.has(item.sessionId ?? ""));
+  state.networkSearches = state.networkSearches.filter((item) => !sessionIds.has(item.sessionId));
+  state.networkIntroductions = state.networkIntroductions.filter((item) => !sessionIds.has(item.sessionId));
+  state.events.unshift(event("system", "Scenario deleted", `${scenario.title} and its Sandbox rehearsal history were deleted.`, "neutral", { presenceId: scenario.presenceId ?? state.presence?.id }));
+  return state;
+}
+
+export function startScenarioRunState(source: OpenPresenceState, scenarioId: string, presenceId?: string, versionId?: string) {
+  let state = cloneState(source);
+  const presence = state.presences.find((item) => item.id === (presenceId ?? state.activePresenceId)) ?? state.presence;
+  if (!presence || !state.agent) throw new Error("Choose an Agent and Presence before starting a Scenario Run.");
+  const agentId = state.agent.id;
+  const { scenario, version } = scenarioVersionFor(state, scenarioId, versionId);
+  if (scenario.ownerScope === "presence" && scenario.presenceId !== presence.id) throw new Error("This Scenario belongs to a different Presence.");
+  if (scenario.supportedChannels?.length && !scenario.supportedChannels.includes(presence.channel)) throw new Error(`This Scenario does not naturally apply to ${channelName(presence.channel)}.`);
+  state = startPlaygroundSession(state, presence.id, "scenario");
+  const session = state.playgroundSessions[0]!;
+  const provenance = scenarioProvenance(state, scenario, version, presence, session);
+  const run: ScenarioRun = { id: id("scenario-run"), scenarioId: scenario.id, scenarioVersionId: version.id, agentId, presenceId: presence.id, playgroundSessionId: session.id, status: "active", nextStimulusIndex: 0, startedAt: session.createdAt, provenanceId: provenance.id };
+  state.scenarioRunProvenance.unshift(provenance);
+  state.scenarioRuns.unshift(run);
+  state.playgroundSessions = state.playgroundSessions.map((item) => item.id === session.id ? { ...item, scenarioRunId: run.id, scenarioVersionId: version.id } : item);
+  state.events.unshift(event("system", "Scenario Run started", `${scenario.title} is running in an isolated ${channelName(presence.channel)} Sandbox world.`, "positive", { presenceId: presence.id, sessionId: session.id }));
+  return state;
+}
+
+export function markScenarioStimulus(source: OpenPresenceState, runId: string, nextStimulusIndex: number) {
+  const state = cloneState(source);
+  const run = state.scenarioRuns.find((item) => item.id === runId);
+  if (!run) throw new Error("That Scenario Run no longer exists.");
+  run.nextStimulusIndex = Math.max(run.nextStimulusIndex, nextStimulusIndex);
+  run.status = "active";
+  return state;
+}
+
+export function completeScenarioRunState(source: OpenPresenceState, runId: string, status: ScenarioRun["status"] = "completed") {
+  const state = cloneState(source);
+  const run = state.scenarioRuns.find((item) => item.id === runId);
+  if (!run) throw new Error("That Scenario Run no longer exists.");
+  run.status = status;
+  run.completedAt = now();
+  state.playgroundSessions = state.playgroundSessions.map((item) => item.id === run.playgroundSessionId ? { ...item, status: status === "completed" ? "completed" : item.status, updatedAt: now() } : item);
+  return state;
+}
+
+export function stopScenarioRunState(source: OpenPresenceState, runId: string) {
+  return completeScenarioRunState(source, runId, "abandoned");
+}
+
+export function structuralScenarioEvaluation(source: OpenPresenceState, runId: string): ScenarioRunEvaluation {
+  const state = cloneState(source);
+  const run = state.scenarioRuns.find((item) => item.id === runId);
+  if (!run) throw new Error("That Scenario Run no longer exists.");
+  const { version } = scenarioVersionFor(state, run.scenarioId, run.scenarioVersionId);
+  const sessionObjects = state.mirrorObjects.filter((item) => item.sessionId === run.playgroundSessionId);
+  const sessionExecutions = state.executions.filter((item) => item.sessionId === run.playgroundSessionId);
+  const checks: StructuralFinding[] = version.evaluationSpec.structuralCriteria.map((item) => {
+    const evidenceRefs = [`session:${run.playgroundSessionId}`];
+    if (item.id === "structural-sandbox") {
+      const ok = sessionObjects.every((object) => object.environment === "sandbox") && sessionExecutions.every((execution) => execution.environment === "sandbox" && execution.connector === "simulated");
+      return { id: id("finding"), criterionId: item.id, status: ok ? "pass" : "fail", evidenceRefs, explanation: ok ? "All observed objects and executions stayed in the isolated Sandbox route." : "A Run object or execution was not isolated to Sandbox.", checkerVersion: "structural-v1" };
+    }
+    if (item.id === "structural-envelope") {
+      const presence = state.presences.find((candidate) => candidate.id === run.presenceId);
+      const ok = presence ? sessionExecutions.every((execution) => { const mode = presence.execution[execution.affordance]; return mode !== undefined && mode !== "off"; }) : false;
+      return { id: id("finding"), criterionId: item.id, status: ok ? "pass" : "fail", evidenceRefs, explanation: ok ? "Sandbox executions stayed within enabled Presence affordances." : "An execution was formed for an affordance disabled by the Presence envelope.", checkerVersion: "structural-v1" };
+    }
+    const ok = sessionObjects.every((object) => object.environment === "sandbox") && sessionExecutions.every((execution) => execution.environment === "sandbox");
+    return { id: id("finding"), criterionId: item.id, status: ok ? "pass" : "fail", evidenceRefs, explanation: ok ? "Social content remained observed world data inside the Sandbox trace." : "A world object or execution crossed the Sandbox provenance boundary.", checkerVersion: "structural-v1" };
+  });
+  const timestamp = now();
+  return { id: id("scenario-eval"), runId, status: checks.some((item) => item.status === "fail") ? "failed" : "needs_review", structuralFindings: checks, modelFindings: [], createdAt: timestamp, updatedAt: timestamp };
+}
+
+export function recordScenarioEvaluation(source: OpenPresenceState, evaluation: ScenarioRunEvaluation) {
+  const state = cloneState(source);
+  state.scenarioEvaluations = [evaluation, ...state.scenarioEvaluations.filter((item) => item.id !== evaluation.id && item.runId !== evaluation.runId)];
+  state.scenarioRuns = state.scenarioRuns.map((run) => run.id === evaluation.runId ? { ...run, evaluationId: evaluation.id } : run);
+  return state;
+}
+
+export function recordScenarioReview(source: OpenPresenceState, runId: string, disposition: "accepted" | "okay" | "concern", note?: string) {
+  const state = cloneState(source);
+  const evaluation = state.scenarioEvaluations.find((item) => item.runId === runId);
+  if (!evaluation) throw new Error("Evaluate the Run before recording operator review.");
+  evaluation.operatorReview = { disposition, note: note?.trim() || undefined, reviewedAt: now() };
+  evaluation.updatedAt = now();
+  return state;
+}
 
 export function compileWatch(agentId: string, presenceId: string, channel: ChannelId, query: string, purpose?: string): Watch {
   const clean = query.trim().replace(/^keep an eye on\s+/i, "").replace(/[.!?]+$/, "").trim();
@@ -934,7 +1103,12 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   const providerConnections = (state.providerConnections ?? []).map((connection) => ({ ...connection, label: providerName(connection.provider) }));
   const normalizedPresences = presences.map((item) => ({ ...item, languagePolicy: normalizeLanguagePolicy((item as Presence & { languagePolicy?: LanguagePolicy }).languagePolicy) }));
   const hydratedPresence = normalizedPresences.find((item) => item.id === activePresenceId) ?? normalizedPresences[0] ?? null;
-  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], calendar, assignments: state.assignments ?? [], watches: state.watches ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, toolBindings: state.toolBindings ?? [], changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], preferenceEvidence: state.preferenceEvidence ?? [], originalPostRehearsals: state.originalPostRehearsals ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], perceptions: state.perceptions ?? [], skills, agentSkills: state.agentSkills ?? [], contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: (state.playgroundSessions ?? []).map((session) => ({ ...session, virtualTimeMode: session.virtualTimeMode ?? "realtime" })), sandboxActors: state.sandboxActors ?? [], networkSearches: state.networkSearches ?? [], networkIntroductions: state.networkIntroductions ?? [] };
+  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], calendar, assignments: state.assignments ?? [], watches: state.watches ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, toolBindings: state.toolBindings ?? [], changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], preferenceEvidence: state.preferenceEvidence ?? [], originalPostRehearsals: state.originalPostRehearsals ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], perceptions: state.perceptions ?? [], skills, agentSkills: state.agentSkills ?? [], contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: (state.playgroundSessions ?? []).map((session) => ({ ...session, virtualTimeMode: session.virtualTimeMode ?? "realtime" })), sandboxActors: state.sandboxActors ?? [], networkSearches: state.networkSearches ?? [], networkIntroductions: state.networkIntroductions ?? [], scenarios: state.scenarios ?? [], scenarioVersions: state.scenarioVersions ?? [], scenarioRuns: state.scenarioRuns ?? [], scenarioRunProvenance: state.scenarioRunProvenance ?? [], scenarioEvaluations: state.scenarioEvaluations ?? [] };
+  if (normalized.agent && normalized.scenarios.length === 0) {
+    const builtins = builtinScenarioDefinitions(normalized.agent.id, normalized.presence?.channel ?? "x");
+    normalized.scenarios = builtins.map((item) => item.scenario);
+    normalized.scenarioVersions = builtins.map((item) => item.version);
+  }
   migrateLegacyDefaultModel(normalized);
   const pulseTimes = normalized.events.filter((item) => item.title === "Pulse completed").map((item) => item.time).sort().reverse();
   const priorPulseAt = pulseTimes[1];

@@ -19,7 +19,7 @@ const db = drizzle(sqlite);
 db.run(sql`CREATE TABLE IF NOT EXISTS app_state (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 sqlite.exec("CREATE TABLE IF NOT EXISTS agent_workspaces (agent_id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at TEXT NOT NULL)");
 const normalizedTables = [
-  "agents", "agent_files", "provider_connections", "agent_model_profiles", "agent_tool_bindings", "presences", "execution_envelopes", "conversations", "presence_chat_sessions", "messages", "change_sets", "standing_intents", "social_intents", "executions", "outcomes", "publications", "library_sources", "assets", "skills", "agent_skills", "content_drops", "channel_definitions", "native_channel_connections", "bridges", "mirror_objects", "mirror_events", "bridge_sync",
+  "agents", "agent_files", "provider_connections", "agent_model_profiles", "agent_tool_bindings", "presences", "execution_envelopes", "conversations", "presence_chat_sessions", "messages", "change_sets", "standing_intents", "social_intents", "executions", "outcomes", "publications", "library_sources", "assets", "skills", "agent_skills", "content_drops", "channel_definitions", "native_channel_connections", "bridges", "mirror_objects", "mirror_events", "bridge_sync", "scenarios", "scenario_versions", "scenario_runs", "scenario_run_provenance", "scenario_evaluations",
 ];
 for (const table of normalizedTables) {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY, agent_id TEXT, parent_id TEXT, payload TEXT NOT NULL, updated_at TEXT NOT NULL)`);
@@ -106,6 +106,11 @@ function entityRows(state: OpenPresenceState): Record<string, { id: string; agen
     mirror_objects: state.mirrorObjects.map((item) => ({ id: item.id, agentId, parentId: item.presenceId, payload: item })),
     mirror_events: state.mirrorEvents.map((item) => ({ id: item.id, parentId: item.bridgeId, payload: item })),
     bridge_sync: state.bridgeSync.map((item) => ({ id: item.bridgeId, payload: item })),
+    scenarios: state.scenarios.map((item) => ({ id: item.id, agentId: item.agentId, parentId: item.presenceId, payload: item })),
+    scenario_versions: state.scenarioVersions.map((item) => ({ id: item.id, parentId: item.scenarioId, payload: item })),
+    scenario_runs: state.scenarioRuns.map((item) => ({ id: item.id, agentId: item.agentId, parentId: item.scenarioId, payload: item })),
+    scenario_run_provenance: state.scenarioRunProvenance.map((item) => ({ id: item.id, agentId: item.agentId, parentId: item.scenarioId, payload: item })),
+    scenario_evaluations: state.scenarioEvaluations.map((item) => ({ id: item.id, parentId: item.runId, payload: item })),
   };
 }
 
