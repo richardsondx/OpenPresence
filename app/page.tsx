@@ -2350,8 +2350,8 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
       <div className="playground-toolbar">
         <div>
           <div className="eyebrow">Agent rehearsal</div>
-          <div className="playground-title-row"><h1>Playground</h1><span className="playground-world-label">{simulation.worldLabel}</span><span className="environment-chip"><span className="status-dot" /> Sandbox</span></div>
-          <p>{simulation.worldDescription} This world is simulated. {presence.name} is real.</p>
+          <div className="playground-title-row"><h1>Playground</h1><span className="environment-chip"><span className="status-dot" /> Sandbox</span></div>
+          <p>{simulation.worldDescription}</p>
           <p className="playground-handle-hint">Agent handle: <strong>{presence.handle}</strong>. Use @mentions in Chat when addressing {presence.name}.</p>
         </div>
         <div className="playground-toolbar-actions">
