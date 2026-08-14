@@ -132,14 +132,6 @@ export function recordStandingIntentNoOp(source: OpenPresenceState, presenceId: 
   return state;
 }
 
-export function recordImmediateNoOp(source: OpenPresenceState, presenceId: string, instruction: string) {
-  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
-  const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
-  state.actions.unshift({ id: id("act"), intent: "no_op", target: `${presence?.channel ?? "channel"}_now`, summary: instruction, status: "skipped", reason: "Jenny evaluated the immediate instruction and found no worthwhile action to publish.", createdAt: now() });
-  state.events.unshift(event("decision", "Now held", "Jenny evaluated the immediate instruction and chose silence; a no-op is a successful evaluation.", "quiet", { presenceId }));
-  return state;
-}
-
 export function recordNativeObservation(source: OpenPresenceState, presenceId: string, observation: OpenPresenceState["nativeConnections"][number]["observation"]) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   state.nativeConnections = state.nativeConnections.map((connection) => connection.presenceId === presenceId && connection.kind === "x"
@@ -1031,7 +1023,7 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
   return state;
 }
 
-export function formStandingPostIntent(source: OpenPresenceState, text: string, standingIntentId?: string) {
+export function formStandingPostIntent(source: OpenPresenceState, text: string, standingIntentId: string) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presence;
   if (!state.agent || !presence || presence.status !== "live" || !text.trim()) return state;
@@ -1039,12 +1031,12 @@ export function formStandingPostIntent(source: OpenPresenceState, text: string, 
   const expiresAt = new Date(Date.now() + 45 * 60 * 1000).toISOString();
   const affordance = `${presence.channel}.post`;
   const publication = makePublication(state, text.trim(), affordance);
-  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance, publicationId: publication.id, priority: 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, ...(standingIntentId ? { standingIntentId } : {}), environment: presence.environment ?? "live" };
+  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance, publicationId: publication.id, priority: 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, standingIntentId, environment: presence.environment ?? "live" };
   state.socialIntents.unshift(socialIntent);
   const mode = presence.execution.post ?? "off";
   if (mode === "off") {
     state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: "skipped", reason: "Posts are off in the Presence execution envelope.", createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id });
-    state.events.unshift(event("decision", standingIntentId ? "Calendar intention held" : "Now held", standingIntentId ? "Jenny formed a social intention, but Posts are off for this Presence." : "Jenny evaluated the immediate instruction, but Posts are off for this Presence.", "quiet", { presenceId: presence.id, intentId: socialIntent.id }));
+    state.events.unshift(event("decision", "Calendar intention held", "Jenny formed a social intention, but Posts are off for this Presence.", "quiet", { presenceId: presence.id, intentId: socialIntent.id }));
     return state;
   }
   const bridge = presence.connectionMode === "bridge" ? bridgeFor(state, presence.id, "post") : undefined;
@@ -1057,12 +1049,12 @@ export function formStandingPostIntent(source: OpenPresenceState, text: string, 
   if (simulated && mode === "auto") {
     const outcome: Outcome = { id: id("outcome"), socialIntentId: socialIntent.id, executionId: execution.id, presenceId: presence.id, status: "succeeded", observedAt: formedAt, metrics: {}, evidence: [], environment: presence.environment ?? "live" };
     state.outcomes.unshift(outcome);
-      state.events.unshift(event("execution", standingIntentId ? "Calendar evaluation complete" : "Now evaluation complete", standingIntentId ? "Jenny evaluated the standing intention and the simulated channel accepted the action." : "Jenny evaluated the immediate instruction and the simulated channel accepted the action.", "positive", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, outcomeId: outcome.id }));
+      state.events.unshift(event("execution", "Calendar evaluation complete", "Jenny evaluated the standing intention and the simulated channel accepted the action.", "positive", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, outcomeId: outcome.id }));
   } else {
-    const detail = status === "awaiting-connector" ? `The ${standingIntentId ? "standing intention" : "immediate instruction"} is waiting for an authorized channel connection.` : status === "queued" ? `The ${presence.channel} publication is ready for its authorized connector.` : "Jenny formed a social intention that expires in 45 minutes.";
-    state.events.unshift(event("execution", status === "queued" ? "Queued for channel delivery" : standingIntentId ? "Calendar intention awaiting review" : "Now awaiting review", detail, "neutral", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id }));
+    const detail = status === "awaiting-connector" ? "The standing intention is waiting for an authorized channel connection." : status === "queued" ? `The ${presence.channel} publication is ready for its authorized connector.` : "Jenny formed a social intention that expires in 45 minutes.";
+    state.events.unshift(event("execution", status === "queued" ? "Queued for channel delivery" : "Calendar intention awaiting review", detail, "neutral", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id }));
   }
-  state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: simulated && mode === "auto" ? "executed" : mode === "review" ? "review" : "queued", reason: standingIntentId ? "Jenny evaluated a Calendar standing intention and handed the resulting Social Intent to the Presence execution envelope." : "Jenny evaluated an immediate instruction and handed the resulting Social Intent to the Presence execution envelope.", createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
+  state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: simulated && mode === "auto" ? "executed" : mode === "review" ? "review" : "queued", reason: "Jenny evaluated a Calendar standing intention and handed the resulting Social Intent to the Presence execution envelope.", createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
   return state;
 }
 

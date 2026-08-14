@@ -198,7 +198,6 @@ fieldset { border: none; padding: 0; margin: 0 0 26px; }
 
 /* Calendar */
 .add-slot-form { display: grid; grid-template-columns: 1.7fr 1fr .8fr auto; align-items: end; gap: 12px; padding: 17px; background: var(--wash); border: 1px solid var(--line); border-radius: 8px; margin: -12px 0 42px; }
-.now-run-form { border-color: #d88b57; background: #fffaf5; }.now-run-note { grid-column: 1 / -1; margin: -4px 0 0; color: var(--muted); font-size: 11px; line-height: 1.5; }
 .add-slot-form label { min-width: 0; }.add-slot-form input, .add-slot-form select { background: white; margin-top: 7px; padding: 10px; }.add-slot-form .button { height: 40px; }
 .calendar-layout { display: grid; grid-template-columns: minmax(0, 1fr) 280px; gap: 65px; }
 .slot-list { border-top: 1px solid var(--line); }.slot-row { display: grid; grid-template-columns: 74px 1fr auto 20px; gap: 17px; align-items: center; padding: 18px 0; border-bottom: 1px solid var(--line); }.slot-time strong, .slot-time span { display: block; }.slot-time strong { font: 16px "DM Mono", monospace; letter-spacing: -.06em; }.slot-time span { color: var(--muted); font-size: 10px; margin-top: 3px; }.slot-main strong, .slot-main span { display: block; }.slot-main strong { font-size: 12px; }.slot-main span { font: 10px "DM Mono", monospace; color: var(--muted); margin-top: 5px; text-transform: capitalize; }.slot-run { border: none; background: transparent; color: var(--muted); display: flex; align-items: center; gap: 6px; font-size: 10px; }.slot-run:hover { color: var(--ink); }.slot-chevron { color: var(--faint); }.calendar-note { border-top: 2px solid var(--agent-accent); padding-top: 15px; }.note-glyph { color: var(--agent-accent); margin-bottom: 22px; }.calendar-note h3 { font-size: 21px; letter-spacing: -.06em; line-height: 1.1; margin: 9px 0 12px; }.calendar-note p { color: var(--muted); font-size: 11px; line-height: 1.65; }.note-rule, .guidance-rule { color: var(--green); border-top: 1px solid var(--line); margin-top: 22px; padding-top: 13px; display: flex; gap: 8px; align-items: center; font-size: 10px; }
@@ -544,9 +543,17 @@ fieldset { border: none; padding: 0; margin: 0 0 26px; }
 /* The fixed context rail must not be clipped by the Chat viewport wrappers. */
 .workspace.workspace-chat,
 .workspace.workspace-chat .workspace-content { overflow: visible; }
-.workspace.workspace-chat .workspace-content { padding-top: 0; padding-bottom: 0; }
+.workspace.workspace-chat .workspace-content { padding-top: 60px; padding-bottom: 0; }
 .page-chat .chat-thread { padding-bottom: 0; }
 .page-chat .composer-hint { margin-bottom: 0; }
+
+@media (min-width: 681px) and (max-width: 1280px), (min-width: 681px) and (max-height: 800px) {
+  .workspace.workspace-chat .workspace-content { padding-top: 30px; }
+}
+
+@media (max-width: 680px) {
+  .workspace.workspace-chat .workspace-content { padding-top: 35px; }
+}
 
 /* Calendar modes: List is for editing; Week is for seeing the rhythm of intent. */
 .calendar-heading-actions { flex-wrap: wrap; justify-content: flex-end; }
