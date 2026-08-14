@@ -1,1 +1,0 @@
-globalThis.__RSC_MANIFEST=(globalThis.__RSC_MANIFEST||{});globalThis.__RSC_MANIFEST["/api/state/route"]={"moduleLoading":{"prefix":"/_next/"},"ssrModuleMapping":{},"edgeSSRModuleMapping":{},"clientModules":{},"entryCSSFiles":{"/Users/richardson/Code/OpenPresence/":[],"/Users/richardson/Code/OpenPresence/app/api/state/route":[]},"rscModuleMapping":{},"edgeRscModuleMapping":{}}
