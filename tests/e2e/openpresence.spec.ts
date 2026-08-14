@@ -803,7 +803,7 @@ test("Playground Presence chip keeps identity separate from channel context", as
   await createAgent(page);
   await navigate(page, "Playground");
   await expect(page.locator(".playground-presence")).toHaveText(/^\s*Jenny\s*$/);
-  await expect(page.locator(".playground-world-label")).toHaveText("Simulated X");
+  await expect(page.locator(".playground-title-row .playground-world-label")).toHaveCount(0);
 });
 
 test("Playground rehearses a Presence inside an isolated simulated world", async ({ page }) => {
@@ -812,8 +812,8 @@ test("Playground rehearses a Presence inside an isolated simulated world", async
   await expect(page.getByRole("heading", { name: "Playground", exact: true })).toBeVisible();
   await expect(page.locator(".playground-grid")).toBeVisible();
   await expect(page.locator(".playground-presence")).toHaveText(/^\s*Jenny\s*$/);
-  await expect(page.locator(".playground-world-label")).toHaveText("Simulated X");
-  await expect(page.getByText(/Rehearse how this Presence behaves on X\. This world is simulated\. Jenny is real\./)).toBeVisible();
+  await expect(page.getByText("Rehearse how this Presence behaves on X.", { exact: true })).toBeVisible();
+  await expect(page.getByText(/This world is simulated\. Jenny is real\./)).toHaveCount(0);
   await expect(page.getByText("Sandbox", { exact: true }).first()).toBeVisible();
   await page.getByRole("button", { name: "Check now" }).click();
   await expect(page.locator(".social-card").first()).toBeVisible();
