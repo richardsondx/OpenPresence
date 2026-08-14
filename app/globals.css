@@ -784,6 +784,16 @@ fieldset { border: none; padding: 0; margin: 0 0 26px; }
 .public-facts-default strong { font-size: 11px; }
 .public-facts-default p { margin: 0; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .public-self-card > .inline-form-actions { margin-top: 20px; }
+.language-policy-card { border-top-color: var(--agent-accent); }
+.language-policy-card > .muted { max-width: 820px; line-height: 1.6; }
+.language-policy-editor { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px 16px; margin-top: 18px; }
+.language-policy-editor label { display: grid; gap: 6px; color: var(--muted); font-size: 10px; }
+.language-policy-editor label small { color: var(--faint); font-size: 9px; line-height: 1.4; }
+.language-policy-editor textarea { width: 100%; min-height: 86px; border: 1px solid var(--line); border-radius: 6px; padding: 9px 10px; color: var(--ink); background: #fffdfa; font: 11px/1.5 inherit; resize: vertical; }
+.language-inherited-rules { margin-top: 16px; padding: 11px 13px; border: 1px solid var(--line); border-radius: 6px; background: #fffdfa; color: var(--muted); font-size: 10px; }
+.language-inherited-rules strong { display: block; margin-bottom: 5px; color: var(--ink); font-size: 9px; text-transform: uppercase; letter-spacing: .08em; }
+.presence-settings-page > .presence-language-policy-card { order: 9; margin-top: 24px; padding-top: 26px; border-top: 1px solid var(--line); }
+.presence-language-policy-card > .inline-form-actions { margin-top: 20px; }
 @media (max-width: 1050px) { .playground-grid { grid-template-columns: 190px minmax(0,1fr); }.playground-activity { grid-column: 1 / -1; grid-template-columns: repeat(3, minmax(0,1fr)); align-items: start; }.activity-rail-heading { grid-column: 1 / -1; } }
 @media (max-width: 680px) { .public-facts { grid-template-columns: 1fr !important; gap: 14px; }.public-fact-grid { grid-template-columns: 1fr !important; } .playground-page { padding: 16px 14px 24px; gap: 14px; }.playground-toolbar { align-items: flex-start; flex-direction: column; gap: 12px; }.playground-toolbar-actions { justify-content: flex-start; }.playground-toolbar h1 { font-size: 24px; }.playground-grid { grid-template-columns: 1fr; }.playground-rail, .playground-activity { grid-column: auto; }.playground-world { order: -1; padding: 0; }.playground-activity { grid-template-columns: 1fr; }.activity-rail-heading { grid-column: auto; }.world-heading { align-items: flex-start; flex-direction: column; }.world-heading .button { width: 100%; justify-content: center; }.social-card { padding: 12px; }.environment-card { align-items: flex-start; flex-direction: column; }.channel-mode-options { grid-template-columns: 1fr; }.channel-mode-options button { min-height: 0; }.channel-sandbox-summary { align-items: flex-start; flex-direction: column; }.original-rehearsal-panel { grid-template-columns: 1fr; align-items: stretch; }.original-rehearsal-actions { justify-items: stretch; }.original-rehearsal-actions small { text-align: left; }.original-rehearsal-actions .button { justify-content: center; } }
 @media (max-width: 680px) { .execution-line { grid-template-columns: 1fr; gap: 5px; }.execution-line span { text-align: left; } }
@@ -951,7 +961,7 @@ fieldset { border: none; padding: 0; margin: 0 0 26px; }
   .activity-context-scrim { padding: 12px; }
   .activity-context-dialog { padding: 17px; max-height: calc(100vh - 24px); }
 }
-@media (max-width: 680px) { .presence-settings-page .presence-brief-summary, .presence-settings-page .presence-brief-editor { grid-template-columns: 1fr; }.presence-settings-page .presence-brief-summary > div:first-child, .presence-settings-page .presence-brief-editor label:first-child, .presence-settings-page .presence-brief-editor label:last-of-type { grid-column: auto; }.presence-settings-page .public-facts { grid-template-columns: 1fr; gap: 14px; }.presence-settings-page .public-fact-grid { grid-template-columns: 1fr; } }
+@media (max-width: 680px) { .presence-settings-page .presence-brief-summary, .presence-settings-page .presence-brief-editor, .language-policy-editor { grid-template-columns: 1fr; }.presence-settings-page .presence-brief-summary > div:first-child, .presence-settings-page .presence-brief-editor label:first-child, .presence-settings-page .presence-brief-editor label:last-of-type { grid-column: auto; }.presence-settings-page .public-facts { grid-template-columns: 1fr; gap: 14px; }.presence-settings-page .public-fact-grid { grid-template-columns: 1fr; } }
 
 /* Schedule timing is a relevance choice; the persisted execution window stays behind this progressive disclosure. */
 .add-slot-form { grid-template-columns: minmax(240px, 1.8fr) repeat(4, minmax(100px, 1fr)); }

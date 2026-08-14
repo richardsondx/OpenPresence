@@ -1,5 +1,13 @@
 # Active QA Work
 
+## COMPLETE — Language & Phrasing V1
+
+- **Started:** 2026-08-14
+- **Scope:** Implement the attached structured LanguagePolicy plan, add `docs/LANGUAGE.md`, update the canonical OpenPresence philosophy, and verify Agent/Presence language configuration plus deterministic outbound validation. This is feature-scoped and local/Sandbox-only; no live connector activity is authorized.
+- **Coordination:** The referenced multi-Agent browser task was asked to pause because its active worktree changes overlap this feature's UI/runtime surfaces. Existing uncommitted changes remain preserved.
+- **Verification:** docs/LANGUAGE.md is an exact copy of the attached reference. Pure matcher/merge/runtime coverage passes 6/6; full Vitest passes 169/169; TypeScript passes; production build passes; changed-source ESLint reports zero errors; focused Chromium configuration flow passes 1/1 on an isolated local test port. The referenced browser-audit task is idle and confirmed it will not edit this workspace until explicitly resumed. No live connector activity occurred.
+- **Status:** Complete.
+
 ## COMPLETE — Production mock isolation
 
 - **Started:** 2026-08-14

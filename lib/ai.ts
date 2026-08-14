@@ -1,5 +1,6 @@
 import { readProviderSecret } from "./db";
 import { publicSelfGuidance } from "./runtime";
+import { effectiveLanguagePolicy, languagePolicyGuidance } from "./language-policy";
 import { isAiMockEnabled } from "./test-runtime";
 import type { Conversation, ModelProvider, OpenPresenceState, Presence, PresenceChatMessage, SocialAssetKind } from "./types";
 
@@ -94,6 +95,7 @@ function promptFor(state: OpenPresenceState, conversationId: string | undefined,
       `Meaning files:\n${JSON.stringify(socialFiles, null, 2)}`,
       `Public Presence:\n${JSON.stringify({ channel: presence?.channel, handle: presence?.handle, mode: presence?.mode, publicIdentity: presence?.publicIdentity, publicSelf: presence?.publicSelf }, null, 2)}`,
       selectedPresence ? publicSelfGuidance(selectedPresence) : "No active Presence Public Self is selected.",
+      selectedPresence ? "LANGUAGE AND PHRASING\n" + languagePolicyGuidance(effectiveLanguagePolicy(state.agent, selectedPresence)) : "",
       selectedPresence?.mode === "ghost" ? `Represented identity:\n${JSON.stringify(selectedPresence.ghostProfile, null, 2)}` : "",
     ].join("\n\n")
     : [
@@ -283,7 +285,11 @@ export async function generateAgentReply(state: OpenPresenceState, content: stri
   if (!state.agent) throw new AiRuntimeError("Create an Agent before starting a conversation.");
   const profile = state.modelProfiles.find((item) => item.agentId === state.agent?.id);
   if (!profile) throw new AiRuntimeError("No model is selected. Open Brain and choose a model runtime.");
-  const connection = (profile.connectionId && state.providerConnections.find((item) => item.id === profile.connectionId)) ?? state.providerConnections.find((item) => item.provider === profile.provider);
+  // A model profile can outlive a provider switch. Never reuse a connection
+  // whose provider no longer matches the selected model runtime, or a stale
+  // Ollama connection can make an OpenAI profile look configured while its
+  // request has no OpenAI credential.
+  const connection = (profile.connectionId && state.providerConnections.find((item) => item.id === profile.connectionId && item.provider === profile.provider)) ?? state.providerConnections.find((item) => item.provider === profile.provider);
   if (!connection || connection.status === "needs-configuration") throw new AiRuntimeError(`${providerLabel(profile.provider)} is selected but not connected. Open Brain → Provider access and connect it before chatting.`);
   const secret = profile.provider === "ollama" || profile.provider === "custom" && !connection.secretConfigured ? undefined : connection.id ? readProviderSecret(connection.id) : undefined;
   if (["openai", "anthropic", "gemini", "openrouter"].includes(profile.provider) && !secret) throw new AiRuntimeError(`${providerLabel(profile.provider)} is selected but no API key is stored. Open Brain → Provider access and save the key.`);
