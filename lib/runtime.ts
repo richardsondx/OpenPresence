@@ -1,6 +1,6 @@
-import type { ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, Asset, Assignment, AssignmentQuantityMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, FileKind, FileProposal, GhostProfile, JsonValue, LiveEvent, OpenPresenceState, Operation, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, SandboxAssetInput, SocialAssetKind, SocialIntent, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, LanguagePolicy, Scenario, ScenarioVersion, ScenarioRun, ScenarioRunProvenance, ScenarioRunEvaluation, StructuralFinding } from "./types";
+import type { ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, Asset, Assignment, AssignmentQuantityMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, FileKind, FileProposal, GhostProfile, JsonValue, LiveEvent, MirrorObject, OpenPresenceState, Operation, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, SandboxAssetInput, SocialAssetKind, SocialIntent, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, LanguagePolicy, Scenario, ScenarioStimulus, ScenarioStimulusRequirements, ScenarioVersion, ScenarioRun, ScenarioRunProvenance, ScenarioRunEvaluation, StructuralFinding } from "./types";
 import { CHANNEL_CAPABILITIES, CHANNEL_EXTENSIONS, simulationForChannel } from "./types";
-import { buildScenarioFromPrompt, builtinScenarioDefinitions, scenarioFromImport, stableHash } from "./scenarios";
+import { buildScenarioFromPrompt, builtinScenarioDefinitions, repairScenarioStimuli, scenarioFromImport, stableHash, validateScenarioFidelity } from "./scenarios";
 import { effectiveLanguagePolicy, EMPTY_LANGUAGE_POLICY, normalizeLanguagePolicy, validateLanguage } from "./language-policy";
 import { createAssetPerception, createUninterpretedPerception, hasUsablePerception, mediaRequiresReview, perceptionRequirement } from "./perception";
 import { isTestRuntime } from "./test-runtime";
@@ -514,6 +514,30 @@ function scenarioVersionFor(state: OpenPresenceState, scenarioId: string, versio
   return { scenario, version };
 }
 
+function scenarioEditContext(state: OpenPresenceState, scenarioId: string) {
+  const { scenario, version } = scenarioVersionFor(state, scenarioId);
+  if (scenario.ownerScope === "system") throw new Error("Built-in Scenarios cannot be edited.");
+  if (scenario.agentId && scenario.agentId !== state.agent?.id) throw new Error("That Scenario belongs to a different Agent.");
+  if (scenario.ownerScope === "presence" && scenario.presenceId !== state.presence?.id) throw new Error("That Scenario belongs to a different Presence.");
+  return { scenario, version };
+}
+
+function saveScenarioEvents(source: OpenPresenceState, scenarioId: string, stimuli: ScenarioStimulus[], requirements?: ScenarioStimulusRequirements, detail = "Scenario events updated") {
+  const state = cloneState(source);
+  const { scenario, version } = scenarioEditContext(state, scenarioId);
+  if (!stimuli.length) throw new Error("Add at least one concrete world event before saving.");
+  const normalizedStimuli = stimuli.map((item, index) => ({ ...item, sequence: index + 1, origin: item.origin ?? "operator", trust: "untrusted_world_content" as const, fidelity: "verified" as const }));
+  const nextVersion: ScenarioVersion = { ...version, id: id("scenario-version"), version: version.version + 1, worldSpec: { ...version.worldSpec, stimuli: normalizedStimuli, stimulusRequirements: requirements ?? version.worldSpec.stimulusRequirements }, createdAt: now() };
+  nextVersion.fidelity = validateScenarioFidelity(nextVersion);
+  const hasPlaceholder = normalizedStimuli.some((item) => item.content.trim() === scenario.description.trim() || item.content.trim().length < 12);
+  nextVersion.generationStatus = hasPlaceholder ? "failed" : "ready";
+  nextVersion.generationError = nextVersion.generationStatus === "failed" ? "The compiler produced a placeholder instead of a concrete world event." : undefined;
+  state.scenarioVersions.unshift(nextVersion);
+  state.scenarios = state.scenarios.map((item) => item.id === scenario.id ? { ...item, currentVersionId: nextVersion.id, updatedAt: nextVersion.createdAt } : item);
+  state.events.unshift(event("system", detail, `${scenario.title} now has ${normalizedStimuli.length} concrete world event${normalizedStimuli.length === 1 ? "" : "s"}.`, "neutral", { presenceId: scenario.presenceId ?? state.presence?.id }));
+  return state;
+}
+
 function scenarioProvenance(state: OpenPresenceState, scenario: Scenario, version: ScenarioVersion, presence: Presence, session: PlaygroundSession): ScenarioRunProvenance {
   const model = state.modelProfiles.find((item) => item.agentId === state.agent?.id);
   const meaningRevisions: Partial<Record<FileKind, number>> = {};
@@ -531,7 +555,7 @@ export function createScenarioFromPrompt(source: OpenPresenceState, prompt: stri
   if (!state.agent) throw new Error("Create an Agent before creating a Scenario.");
   const presence = state.presences.find((item) => item.id === (presenceId ?? state.activePresenceId)) ?? state.presence;
   if (!presence) throw new Error("Choose a Presence before creating a Scenario.");
-  const built = buildScenarioFromPrompt(prompt, presence.channel, state.agent.id, undefined);
+  const built = buildScenarioFromPrompt(prompt, presence.channel, state.agent.id, presence.id);
   state.scenarios.unshift(built.scenario);
   state.scenarioVersions.unshift(built.version);
   state.events.unshift(event("system", "Scenario created", `${built.scenario.title} is ready to review before starting a Sandbox Run.`, "positive", { presenceId: presence.id }));
@@ -544,10 +568,47 @@ export function importScenarioDefinition(source: OpenPresenceState, payload: unk
   const agentId = state.agent.id;
   const presence = state.presences.find((item) => item.id === (presenceId ?? state.activePresenceId)) ?? state.presence;
   if (!presence) throw new Error("Choose a Presence before importing a Scenario.");
-  const built = scenarioFromImport(payload, agentId, presence.channel);
+  const built = scenarioFromImport(payload, agentId, presence.channel, presence.id);
   state.scenarios.unshift(built.scenario);
   state.scenarioVersions.unshift(built.version);
   state.events.unshift(event("system", "Scenario imported", `${built.scenario.title} is available for Sandbox rehearsal.`, "positive", { presenceId: presence.id }));
+  return state;
+}
+
+export function updateScenarioEvents(source: OpenPresenceState, scenarioId: string, stimuli: ScenarioStimulus[]) {
+  return saveScenarioEvents(source, scenarioId, stimuli, undefined, "Scenario events updated");
+}
+
+export function updateScenarioRequirements(source: OpenPresenceState, scenarioId: string, requirements: ScenarioStimulusRequirements) {
+  const state = cloneState(source);
+  const { version } = scenarioEditContext(state, scenarioId);
+  return saveScenarioEvents(state, scenarioId, version.worldSpec.stimuli, requirements, "Scenario requirements updated");
+}
+
+export function generateMissingScenarioEvents(source: OpenPresenceState, scenarioId: string) {
+  const state = cloneState(source);
+  const { scenario, version } = scenarioEditContext(state, scenarioId);
+  const presence = state.presences.find((item) => item.id === scenario.presenceId) ?? state.presence;
+  if (!presence || !state.agent) throw new Error("Choose an Agent and Presence before generating Scenario events.");
+  const requirements = version.worldSpec.stimulusRequirements ?? {};
+  const repaired = repairScenarioStimuli(scenario.description, presence.channel, state.agent.id, presence.id, version.worldSpec.stimuli, requirements);
+  return saveScenarioEvents(state, scenarioId, repaired, requirements, "Scenario events generated");
+}
+
+export function renameScenario(source: OpenPresenceState, scenarioId: string, title: string) {
+  const state = cloneState(source);
+  const scenario = state.scenarios.find((item) => item.id === scenarioId);
+  if (!scenario) throw new Error("That Scenario no longer exists.");
+  if (scenario.ownerScope === "system") throw new Error("Built-in Scenarios cannot be renamed.");
+  if (scenario.agentId && scenario.agentId !== state.agent?.id) throw new Error("That Scenario belongs to a different Agent.");
+  if (scenario.ownerScope === "presence" && scenario.presenceId !== state.presence?.id) throw new Error("That Scenario belongs to a different Presence.");
+  const nextTitle = title.trim();
+  if (!nextTitle) throw new Error("Give the Scenario a name before saving it.");
+  if (nextTitle.length > 120) throw new Error("Scenario names must be 120 characters or fewer.");
+  if (nextTitle === scenario.title) return state;
+  const updatedAt = now();
+  state.scenarios = state.scenarios.map((item) => item.id === scenario.id ? { ...item, title: nextTitle, updatedAt } : item);
+  state.events.unshift(event("system", "Scenario renamed", `${scenario.title} was renamed to ${nextTitle}.`, "neutral", { presenceId: scenario.presenceId ?? state.presence?.id }));
   return state;
 }
 
@@ -598,6 +659,9 @@ export function startScenarioRunState(source: OpenPresenceState, scenarioId: str
   const { scenario, version } = scenarioVersionFor(state, scenarioId, versionId);
   if (scenario.ownerScope === "presence" && scenario.presenceId !== presence.id) throw new Error("This Scenario belongs to a different Presence.");
   if (scenario.supportedChannels?.length && !scenario.supportedChannels.includes(presence.channel)) throw new Error(`This Scenario does not naturally apply to ${channelName(presence.channel)}.`);
+  if (version.generationStatus === "failed") throw new Error("This Scenario has no reliable world events yet. Generate or edit the missing events before rehearsing.");
+  const fidelity = version.fidelity ?? validateScenarioFidelity(version);
+  if (fidelity.status === "needs_revision") throw new Error("This Scenario is not ready. Generate or edit the missing world events before rehearsing.");
   state = startPlaygroundSession(state, presence.id, "scenario");
   const session = state.playgroundSessions[0]!;
   const provenance = scenarioProvenance(state, scenario, version, presence, session);
@@ -654,7 +718,7 @@ export function structuralScenarioEvaluation(source: OpenPresenceState, runId: s
     return { id: id("finding"), criterionId: item.id, status: ok ? "pass" : "fail", evidenceRefs, explanation: ok ? "Social content remained observed world data inside the Sandbox trace." : "A world object or execution crossed the Sandbox provenance boundary.", checkerVersion: "structural-v1" };
   });
   const timestamp = now();
-  return { id: id("scenario-eval"), runId, status: checks.some((item) => item.status === "fail") ? "failed" : "needs_review", structuralFindings: checks, modelFindings: [], createdAt: timestamp, updatedAt: timestamp };
+  return { id: id("scenario-eval"), runId, status: checks.some((item) => item.status === "fail") ? "failed" : "needs_review", structuralFindings: checks, modelFindings: [], fidelity: version.fidelity ?? validateScenarioFidelity(version), createdAt: timestamp, updatedAt: timestamp };
 }
 
 export function recordScenarioEvaluation(source: OpenPresenceState, evaluation: ScenarioRunEvaluation) {
@@ -795,10 +859,10 @@ function sandboxAssetFromInput(state: OpenPresenceState, presence: Presence, ses
   const timestamp = now();
   const sourceUrl = input.sourceUrl?.trim() || undefined;
   const dataUrl = input.dataUrl?.trim() || undefined;
-  return { id: id("asset"), agentId: state.agent?.id ?? "", presenceId: presence.id, sessionId: session.id, type: input.kind, dataUrl, checksum: `${input.name}:${input.mimeType ?? ""}:${dataUrl?.length ?? sourceUrl ?? ""}`, status: "ready", provenance: { origin: "sandbox", sourceUrl, importedAt: timestamp }, mimeType: input.mimeType, sizeBytes: dataUrl ? Math.ceil((dataUrl.length * 3) / 4) : undefined, visibility, shareability, environment: "sandbox", createdAt: timestamp, updatedAt: timestamp };
+  return { id: id("asset"), agentId: state.agent?.id ?? "", presenceId: presence.id, sessionId: session.id, type: input.kind, dataUrl, checksum: `${input.name}:${input.mimeType ?? ""}:${dataUrl?.length ?? sourceUrl ?? ""}`, status: "ready", provenance: { origin: "sandbox", sourceUrl, sourcePageUrl: input.sourcePageUrl?.trim() || undefined, publisher: input.publisher?.trim() || undefined, importedAt: timestamp }, mimeType: input.mimeType, sizeBytes: dataUrl ? Math.ceil((dataUrl.length * 3) / 4) : undefined, description: input.name, visibility, shareability, environment: "sandbox", createdAt: timestamp, updatedAt: timestamp };
 }
 
-export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: string; kind?: string; actionId?: string; actorId?: string; actorName?: string; actorHandle?: string; profile?: import("./types").SandboxActorProfile; content?: string; assets?: SandboxAssetInput[]; targetExternalRef?: EntityRef; parentExternalRef?: EntityRef }) {
+export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: string; kind?: string; actionId?: string; actorId?: string; actorName?: string; actorHandle?: string; profile?: import("./types").SandboxActorProfile; content?: string; assets?: SandboxAssetInput[]; targetExternalRef?: EntityRef; parentExternalRef?: EntityRef; source?: MirrorObject["source"]; trust?: MirrorObject["trust"]; scenarioStimulusId?: string }) {
   const state = cloneState(source);
   const session = sandboxSessionFor(state, input.sessionId);
   const presence = state.presences.find((item) => item.id === session.presenceId) ?? state.presence;
@@ -819,7 +883,9 @@ export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: s
   const objectId = id("sandbox-object");
   const objectType = action?.objectType ?? input.kind ?? actionId;
   const targetExternalRef = input.targetExternalRef ?? input.parentExternalRef;
-  const content = input.content?.trim() || `${action?.label ?? "A simulated event"} occurred.`;
+  // Scenario stimuli are exact world content. LanguagePolicy applies only to
+  // what the Presence publishes, never to what the Agent is allowed to read.
+  const content = input.content ?? `${action?.label ?? "A simulated event"} occurred.`;
   const externalRef = { type: `${session.channelId}.${objectType}`, id: objectId };
   const observedAt = session.virtualNow;
   const visibility = definition?.privacyDefaults.visibility ?? "public";
@@ -832,7 +898,7 @@ export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: s
   if (unsupportedAssets.length) throw new Error(`The simulated ${channelName(session.channelId)} world does not support these asset kinds: ${unsupportedAssets.map((item) => item.kind).join(", ")}.`);
   const assetInputs = input.assets ?? [];
   const mirrorId = id("mirror");
-  const object = { id: mirrorId, bridgeId: `sandbox:${session.environmentId}`, presenceId: presence.id, channelId: session.channelId, externalRef, parentExternalRef: targetExternalRef, objectType, simulationActionId: actionId, author: { externalRef: { type: `${session.channelId}.user`, id: actorId }, displayName: actorName, handle: (actor?.handle ?? input.actorHandle?.trim()) || undefined }, content: { text: content }, assetRefs: [] as { assetId: string; kind: SocialAssetKind; role?: "primary" | "attachment" | "link-preview" }[], occurredAt: observedAt, observedAt: now(), visibility, shareability, environment: "sandbox" as const, sessionId: session.id, sourceEventId: `sandbox-event:${objectId}` };
+  const object = { id: mirrorId, bridgeId: `sandbox:${session.environmentId}`, presenceId: presence.id, channelId: session.channelId, externalRef, parentExternalRef: targetExternalRef, objectType, simulationActionId: actionId, author: { externalRef: { type: `${session.channelId}.user`, id: actorId }, displayName: actorName, handle: (actor?.handle ?? input.actorHandle?.trim()) || undefined }, content: { text: content }, assetRefs: [] as { assetId: string; kind: SocialAssetKind; role?: "primary" | "attachment" | "link-preview" }[], occurredAt: observedAt, observedAt: now(), visibility, shareability, environment: "sandbox" as const, sessionId: session.id, sourceEventId: `sandbox-event:${objectId}`, source: input.source, trust: input.trust, scenarioStimulusId: input.scenarioStimulusId };
   for (const assetInput of assetInputs) {
     const asset = sandboxAssetFromInput(state, presence, session, assetInput, visibility, shareability);
     state.assets.unshift(asset);
@@ -925,7 +991,7 @@ export function resetPlaygroundSession(source: OpenPresenceState, sessionId: str
   return state;
 }
 
-export function formSandboxIntent(source: OpenPresenceState, input: { sessionId: string; affordance: string; text: string; target?: EntityRef; perceptionTarget?: EntityRef; rehearsalAttemptId?: string; assignmentId?: string; assets?: SandboxAssetInput[] }) {
+export function formSandboxIntent(source: OpenPresenceState, input: { sessionId: string; affordance: string; format?: string; text: string; target?: EntityRef; perceptionTarget?: EntityRef; rehearsalAttemptId?: string; assignmentId?: string; assets?: SandboxAssetInput[] }) {
   const state = cloneState(source);
   const session = sandboxSessionFor(state, input.sessionId);
   const presence = state.presences.find((item) => item.id === session.presenceId) ?? state.presence;
@@ -943,7 +1009,7 @@ export function formSandboxIntent(source: OpenPresenceState, input: { sessionId:
   const timestamp = now();
   const publicationAssets = (input.assets ?? []).map((assetInput) => sandboxAssetFromInput(state, presence, session, assetInput, "public", "presence-only"));
   state.assets.unshift(...publicationAssets);
-  const publication: Publication = { id: id("publication"), format: `${session.channelId}.${input.affordance}`, payload: { text: input.text.trim() }, assetIds: publicationAssets.map((asset) => asset.id), links: publicationAssets.filter((asset) => asset.type === "link" && asset.provenance.sourceUrl).map((asset) => ({ url: asset.provenance.sourceUrl!, label: asset.description })), createdAt: timestamp, environment: "sandbox", sessionId: session.id, rehearsalAttemptId: input.rehearsalAttemptId, assignmentId: input.assignmentId };
+  const publication: Publication = { id: id("publication"), format: input.format ?? `${session.channelId}.${input.affordance}`, payload: { text: input.text.trim() }, assetIds: publicationAssets.map((asset) => asset.id), links: publicationAssets.filter((asset) => asset.type === "link" && asset.provenance.sourceUrl).map((asset) => ({ url: asset.provenance.sourceUrl!, label: asset.description })), createdAt: timestamp, environment: "sandbox", sessionId: session.id, rehearsalAttemptId: input.rehearsalAttemptId, assignmentId: input.assignmentId };
   const intent: SocialIntent = { id: id("intent"), agentId: state.agent?.id ?? "", presenceId: presence.id, affordance: input.affordance, target: input.target, publicationId: publication.id, priority: 50, validity: { staleAfterMs: 60 * 60 * 1000 }, state: executionMode === "off" ? "withdrawn" : "active", formedAt: timestamp, updatedAt: timestamp, environment: "sandbox", sessionId: session.id, rehearsalAttemptId: input.rehearsalAttemptId, assignmentId: input.assignmentId };
   if (executionMode === "off") {
     state.publications.unshift(publication);
@@ -1223,14 +1289,17 @@ function inferPostFormattingProposal(content: string, currentTaste: string): { p
  * instructions are operator context, not content the Presence should publish.
  */
 export function cleanSandboxDraft(value: string) {
-  return value
+  const cleaned = value
     .trim()
     .replace(/^['"]|['"]$/g, "")
     .replace(/^[^:\n]{1,80}\s*\((?:post|reply|quote|repost|like|reaction)\):\s*/i, "")
     .replace(/\bQA-[A-Z0-9]+(?:-[A-Z0-9]+){2,}\b/gi, "")
-    .replace(/\s{2,}/g, " ")
-    .replace(/\s+([.!?,])/g, "$1")
+    .split(/\n/)
+    .map((line) => line.replace(/[ \t]{2,}/g, " ").replace(/[ \t]+([.!?,])/g, "$1").trim())
+    .join("\n")
+    .replace(/\n{3,}/g, "\n\n")
     .trim();
+  return cleaned;
 }
 
 export function isExplicitGhostModeRequest(content: string) {

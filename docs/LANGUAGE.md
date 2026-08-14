@@ -775,6 +775,8 @@ Likely:
 ### “Don't discuss my family on LinkedIn.”
 Presence semantic boundary, NOT LanguagePolicy.
 
+Inbound Scenario and Social Mirror content is world data, not Presence expression. LanguagePolicy must never sanitize, remove, or block what the Agent can perceive in a rehearsal; it governs only the Presence's outbound wording and delivery.
+
 ### “Never claim investment returns are guaranteed.”
 Semantic boundary, NOT a literal `guaranteed` ban.
 

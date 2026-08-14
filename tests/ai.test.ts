@@ -54,6 +54,24 @@ describe("Agent social decision parsing", () => {
     expect(new Set([builderDecision.text, creatorDecision.text, operatorDecision.text]).size).toBe(3);
   });
 
+  it("gives a market-commentary Presence distinct chart-capable Sandbox candidates", async () => {
+    vi.stubEnv("OPENPRESENCE_TEST_MODE", "1");
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
+    const state = createAgent({ name: "KobeissiKlone", description: "A clearly labeled market-commentary emulation for global capital markets and chart-led analysis.", mode: "agent", handle: "@kobeissi_klone", accent: "#D68754" });
+    state.presence = { ...state.presence!, name: "KobeissiKlone", brief: { ...state.presence!.brief, purpose: "A market-commentary emulation focused on macroeconomics, equities, rates, commodities, and data-driven charts.", primaryTerritory: ["global capital markets", "macroeconomics", "data-driven charts"] } };
+    state.presences = [state.presence];
+    const prompt = `Assignment instruction: Produce exactly 10 original Sandbox X posts about global capital markets, macroeconomics, equities, rates, commodities, and geopolitics. Include one chart or image asset on every post.\n\nHard progress state: 0 of 10 verified publications. Previous candidate rejections: 0.`;
+    const decision = await generateAgentSocialDecision(state, prompt, ["post", "no_op"]);
+    expect(decision.action).toBe("post");
+    expect(decision.text).toMatch(/market|rates|equities|commodities/i);
+    expect(decision).toMatchObject({ format: "x.long-post" });
+    expect(decision.assets?.[0]).toMatchObject({ kind: "chart", publisher: "Federal Reserve Bank of St. Louis · FRED" });
+    expect(decision.assets?.[0]?.sourceUrl).toMatch(/^https:\/\/fred\.stlouisfed\.org\/graph\/fredgraph\.png/);
+    expect(decision.assets?.[0]?.sourcePageUrl).toMatch(/^https:\/\/fred\.stlouisfed\.org\/series\//);
+    expect(decision.text.split(/\n\s*\n/).length).toBeGreaterThanOrEqual(5);
+    expect(decision.text.length).toBeGreaterThan(500);
+  });
+
   it("does not let private execution prose steer the selected Presence fixture", async () => {
     vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
     const state = createAgent({ name: "Jenny", description: "Explain how persistent AI agents are changing software.", audience: "founders, builders, operators, and curious people exploring AI", mode: "agent", handle: "@genny_ai", accent: "#D68754" });

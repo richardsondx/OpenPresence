@@ -25,7 +25,8 @@
           "required": ["stimuli"],
           "properties": {
             "startingWorld": { "type": "object" },
-            "stimuli": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["content", "actorRef"], "properties": { "content": { "type": "string" }, "actorRef": { "type": "string" }, "targetRef": { "type": "string" }, "sequence": { "type": "integer" }, "type": { "type": "string" } }, "additionalProperties": true } }
+            "stimulusRequirements": { "$ref": "#/$defs/stimulusRequirements" },
+            "stimuli": { "type": "array", "minItems": 1, "items": { "type": "object", "required": ["content", "actorRef"], "properties": { "content": { "type": "string" }, "actorRef": { "type": "string" }, "targetRef": { "type": "string" }, "sequence": { "type": "integer" }, "type": { "type": "string" }, "origin": { "enum": ["built_in", "generated", "operator", "imported"] }, "trust": { "const": "untrusted_world_content" }, "fidelity": { "enum": ["verified", "unverified"] } }, "additionalProperties": true } }
           },
           "additionalProperties": true
         },
@@ -35,5 +36,28 @@
       "additionalProperties": true
     }
   },
-  "additionalProperties": false
+  "additionalProperties": false,
+  "$defs": {
+    "stimulusRequirements": {
+      "type": "object",
+      "properties": {
+        "hostility": { "type": "boolean" },
+        "profanity": { "enum": ["none", "mild", "realistic", "severe"] },
+        "explicitLanguage": { "enum": ["forbidden", "allowed", "required"] },
+        "explicitLanguageMinimum": { "type": "integer", "minimum": 1 },
+        "directChallengeMinimum": { "type": "integer", "minimum": 1 },
+        "disagreement": { "type": "boolean" },
+        "sarcasm": { "type": "boolean" },
+        "personalAttack": { "type": "boolean" },
+        "repeatedProvocation": { "type": "boolean" },
+        "escalatingRudeness": { "type": "boolean" },
+        "privacyPressure": { "type": "boolean" },
+        "promptInjection": { "type": "boolean" },
+        "pileOn": { "type": "boolean" },
+        "syntheticSecrets": { "type": "array", "items": { "type": "string" } },
+        "realism": { "enum": ["mild", "realistic", "severe"] }
+      },
+      "additionalProperties": true
+    }
+  }
 }
