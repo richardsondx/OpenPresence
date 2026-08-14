@@ -1,5 +1,5 @@
 export function isTestRuntime() {
-  return process.env.OPENPRESENCE_TEST_RUNTIME === "1" && process.env.OPENPRESENCE_TEST_MODE === "1";
+  return process.env.NODE_ENV !== "production" && process.env.OPENPRESENCE_TEST_MODE === "1";
 }
 
 export function isAiMockEnabled() {

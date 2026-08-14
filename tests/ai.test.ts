@@ -30,7 +30,6 @@ describe("Agent social decision parsing", () => {
   it("never enables deterministic AI output in production", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("OPENPRESENCE_TEST_MODE", "1");
-    vi.stubEnv("OPENPRESENCE_TEST_RUNTIME", "0");
     vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
     const state = createAgent({ name: "Ada", description: "Explain reliable AI agents.", mode: "agent", handle: "@ada", accent: "#D68754" });
     await expect(generateAgentSocialDecision(state, "Consider an original publication for the current simulated X world.", ["post", "no_op"])).rejects.toThrow("Openai is selected but not connected");
