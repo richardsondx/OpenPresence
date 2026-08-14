@@ -113,10 +113,24 @@ export interface MirrorObject {
   environment?: PresenceEnvironment;
   sessionId?: string;
   assignmentId?: string;
+  source?: "scenario" | "operator" | "native" | "manual" | "system";
+  trust?: "untrusted_world_content";
+  scenarioStimulusId?: string;
 }
 
 export interface SocialAssetRef { assetId: string; kind: SocialAssetKind; role?: "primary" | "attachment" | "link-preview"; }
-export interface SandboxAssetInput { name: string; kind: SocialAssetKind; mimeType?: string; dataUrl?: string; sourceUrl?: string; }
+export interface SandboxAssetInput {
+  name: string;
+  kind: SocialAssetKind;
+  mimeType?: string;
+  dataUrl?: string;
+  /** Direct media URL used for rendering the asset in Sandbox. */
+  sourceUrl?: string;
+  /** Human-facing source page for provenance and verification. */
+  sourcePageUrl?: string;
+  /** Publisher or dataset owner shown beside the asset. */
+  publisher?: string;
+}
 export interface PerceivedFact { label: string; value: string; confidence?: PerceptionUncertainty; }
 export interface PerceptionResult { observation: string; interpretation?: string; alternativeInterpretations?: string[]; visibleText?: string; transcript?: string; extractedFacts?: PerceivedFact[]; uncertainty: PerceptionUncertainty; missingContext?: string[]; }
 export interface AssetPerception { id: string; assetId: string; socialObjectId?: string; presenceId: string; level: PerceptionLevel; result: PerceptionResult; providerId?: string; modelId?: string; sourceAssetVersion: string; contextObjectIds?: string[]; supersedesId?: string; createdAt: string; environment?: PresenceEnvironment; sessionId?: string; }
@@ -221,14 +235,15 @@ export const CHANNEL_CAPABILITIES: Record<ChannelId, ChannelCapability[]> = {
 };
 
 export interface AffordanceDefinition extends ChannelCapability { channel: ChannelId; }
-export interface FormatDefinition { id: string; label: string; description: string; channel: ChannelId; }
+export interface FormatDefinition { id: string; label: string; description: string; channel: ChannelId; maxCharacters?: number; }
 export interface ChannelExtension { id: ChannelId; affordances: AffordanceDefinition[]; formats: FormatDefinition[]; }
 
 export const CHANNEL_EXTENSIONS: Record<ChannelId, ChannelExtension> = {
   x: { id: "x", affordances: CHANNEL_CAPABILITIES.x.map((item) => ({ ...item, channel: "x" })), formats: [
-    { id: "x.post", label: "Post", description: "A single text publication.", channel: "x" },
-    { id: "x.media-post", label: "Media post", description: "A post with one or more assets.", channel: "x" },
-    { id: "x.thread", label: "Thread", description: "A connected sequence of posts.", channel: "x" },
+    { id: "x.post", label: "Post", description: "A single text publication.", channel: "x", maxCharacters: 280 },
+    { id: "x.media-post", label: "Media post", description: "A post with one or more assets.", channel: "x", maxCharacters: 280 },
+    { id: "x.long-post", label: "Long post", description: "A long-form text publication supported by the Presence's X plan.", channel: "x", maxCharacters: 25000 },
+    { id: "x.thread", label: "Thread", description: "A connected sequence of posts.", channel: "x", maxCharacters: 280 },
   ] },
   linkedin: { id: "linkedin", affordances: CHANNEL_CAPABILITIES.linkedin.map((item) => ({ ...item, channel: "linkedin" })), formats: [
     { id: "linkedin.post", label: "Post", description: "A professional point of view.", channel: "linkedin" },
@@ -362,19 +377,55 @@ export interface SandboxEnvironment { id: string; presenceId: string; channelId:
 export interface PlaygroundSession { id: string; environmentId: string; presenceId: string; channelId: ChannelId; source: "fresh" | "scenario" | "replay"; status: "ready" | "active" | "paused" | "completed"; virtualNow: string; virtualTimeMode?: "realtime" | "manual"; createdAt: string; updatedAt: string; evaluatedSlotIds: string[]; judgedObjectIds?: string[]; scenarioRunId?: string; scenarioVersionId?: string; }
 export type ScenarioOwnerScope = "system" | "agent" | "presence";
 export type ScenarioSource = "builtin" | "natural_language" | "import";
+export type ScenarioStimulusOrigin = "built_in" | "generated" | "operator" | "imported";
+export type ScenarioStimulusTrust = "untrusted_world_content";
+export type ScenarioStimulusFidelity = "verified" | "unverified";
+export type ScenarioLanguageRequirement = "forbidden" | "allowed" | "required";
+export type ScenarioRealism = "mild" | "realistic" | "severe";
 export type ScenarioRunStatus = "active" | "completed" | "abandoned" | "failed";
 export interface ScenarioActor { id: string; displayName: string; handle?: string; role?: SandboxActor["role"]; profile?: SandboxActorProfile; }
-export interface ScenarioStimulus { id: string; sequence: number; offsetMinutes?: number; type: string; actorRef: string; targetRef?: string; content: string; assets?: SandboxAssetInput[]; }
-export interface ScenarioWorldSpec { startingWorld?: { description?: string; actors?: ScenarioActor[] }; stimuli: ScenarioStimulus[]; }
+export interface ScenarioStimulusRequirements {
+  hostility?: boolean;
+  profanity?: ScenarioRealism | "none";
+  explicitLanguage?: ScenarioLanguageRequirement;
+  explicitLanguageMinimum?: number;
+  directChallengeMinimum?: number;
+  disagreement?: boolean;
+  sarcasm?: boolean;
+  personalAttack?: boolean;
+  repeatedProvocation?: boolean;
+  escalatingRudeness?: boolean;
+  privacyPressure?: boolean;
+  promptInjection?: boolean;
+  pileOn?: boolean;
+  syntheticSecrets?: string[];
+  realism?: ScenarioRealism;
+}
+export interface ScenarioStimulus {
+  id: string;
+  sequence: number;
+  offsetMinutes?: number;
+  type: string;
+  actorRef: string;
+  targetRef?: string;
+  content: string;
+  assets?: SandboxAssetInput[];
+  origin?: ScenarioStimulusOrigin;
+  trust?: ScenarioStimulusTrust;
+  fidelity?: ScenarioStimulusFidelity;
+}
+export interface ScenarioWorldSpec { startingWorld?: { description?: string; actors?: ScenarioActor[] }; stimuli: ScenarioStimulus[]; stimulusRequirements?: ScenarioStimulusRequirements; }
 export interface ScenarioCriterion { id: string; label: string; description: string; severity?: "low" | "medium" | "high" | "critical"; }
 export interface ScenarioEvaluationSpec { purpose: string; structuralCriteria: ScenarioCriterion[]; socialCriteria: ScenarioCriterion[]; }
 export interface ScenarioRunPolicy { maxSteps: number; maxDurationMinutes: number; }
-export interface ScenarioVersion { id: string; scenarioId: string; version: number; worldSpec: ScenarioWorldSpec; evaluationSpec: ScenarioEvaluationSpec; runPolicy: ScenarioRunPolicy; source: ScenarioSource; sourcePrompt?: string; createdAt: string; }
+export interface ScenarioFidelityCheck { id: string; label: string; status: "met" | "missing" | "uncertain"; evidenceRefs: string[]; explanation: string; }
+export interface ScenarioFidelityReport { status: "verified" | "needs_revision"; checks: ScenarioFidelityCheck[]; validatorVersion: string; validatedAt: string; }
+export interface ScenarioVersion { id: string; scenarioId: string; version: number; worldSpec: ScenarioWorldSpec; evaluationSpec: ScenarioEvaluationSpec; runPolicy: ScenarioRunPolicy; source: ScenarioSource; sourcePrompt?: string; fidelity?: ScenarioFidelityReport; generationStatus?: "ready" | "failed"; generationError?: string; createdAt: string; }
 export interface Scenario { id: string; ownerScope: ScenarioOwnerScope; agentId?: string; presenceId?: string; currentVersionId: string; title: string; description: string; purpose: string; riskCategories: string[]; requiredChannelCapabilities: string[]; supportedChannels?: ChannelId[]; createdAt: string; updatedAt: string; }
 export interface ScenarioRunProvenance { id: string; agentId: string; presenceId: string; channelId: ChannelId; scenarioId: string; scenarioVersionId: string; model?: Pick<AgentModelProfile, "provider" | "model" | "quality">; meaningRevisions: Partial<Record<FileKind, number>>; meaningHashes: Partial<Record<FileKind, string>>; presenceContextHash: string; executionEnvelopeHash: string; channelDefinitionHash: string; runtimeVersion: string; virtualClockOrigin: string; createdAt: string; }
 export interface StructuralFinding { id: string; criterionId: string; status: "pass" | "fail"; evidenceRefs: string[]; explanation: string; checkerVersion: string; }
 export interface ModelReviewFinding { id: string; criterionId: string; status: "satisfied" | "uncertain" | "violated"; severity?: "low" | "medium" | "high" | "critical"; evidenceRefs: string[]; explanation: string; }
-export interface ScenarioRunEvaluation { id: string; runId: string; status: "passed" | "needs_review" | "failed" | "unavailable"; structuralFindings: StructuralFinding[]; modelFindings: ModelReviewFinding[]; reviewer?: { provider?: string; model?: string; quality?: string; promptVersion: string; reviewedAt: string; retryCount: number }; operatorReview?: { disposition: "accepted" | "okay" | "concern"; note?: string; reviewedAt: string }; createdAt: string; updatedAt: string; }
+export interface ScenarioRunEvaluation { id: string; runId: string; status: "passed" | "needs_review" | "failed" | "unavailable"; structuralFindings: StructuralFinding[]; modelFindings: ModelReviewFinding[]; fidelity?: ScenarioFidelityReport; reviewer?: { provider?: string; model?: string; quality?: string; promptVersion: string; reviewedAt: string; retryCount: number }; operatorReview?: { disposition: "accepted" | "okay" | "concern"; note?: string; reviewedAt: string }; createdAt: string; updatedAt: string; }
 export interface ScenarioRun { id: string; scenarioId: string; scenarioVersionId: string; agentId: string; presenceId: string; playgroundSessionId: string; status: ScenarioRunStatus; nextStimulusIndex: number; startedAt: string; completedAt?: string; provenanceId: string; evaluationId?: string; }
 export interface SandboxActorProfile {
   bio?: string;
@@ -392,7 +443,7 @@ export type PreferenceReason = "idea" | "voice" | "topic" | "humor" | "format" |
 export interface PreferenceEvidence { id: string; agentId: string; presenceId?: string; sessionId: string; source: "playground_publication" | "playground_no_op" | "chat_calibration" | "operator_explicit"; subjectRef: { type: "publication" | "decision"; id: string }; reaction: PreferenceReaction; reasons?: PreferenceReason[]; note?: string; scopeHint: "agent" | "presence" | "unknown"; environment: "sandbox"; createdAt: string; }
 export interface OriginalPostRehearsalAttempt { id: string; sessionId: string; presenceId: string; triggeredAt: string; completedAt?: string; stimulus: { type: "none" | "text"; value?: string }; result: "running" | "published" | "review" | "manual" | "no_op" | "research" | "failed"; publicationId?: string; executionId?: string; preferenceEvidenceIds?: string[]; }
 export interface LibrarySource { id: string; agentId: string; type: "local-folder" | "remote" | "url-collection" | "content-drop"; location: string; access: "read"; status: "available" | "indexing" | "failed"; }
-export interface Asset { id: string; agentId: string; sourceId?: string; presenceId?: string; sessionId?: string; type: "image" | "video" | "gif" | "audio" | "pdf" | "document" | "chart" | "link"; storagePath?: string; dataUrl?: string; checksum?: string; status: "queued" | "processing" | "ready" | "failed"; provenance: { origin: string; sourceUrl?: string; importedAt: string }; mimeType?: string; sizeBytes?: number; dimensions?: { width: number; height: number }; durationMs?: number; description?: string; topics?: string[]; transcript?: string; usageNotes?: string; visibility?: VisibilityScope; shareability?: Shareability; environment?: PresenceEnvironment; createdAt: string; updatedAt: string; }
+export interface Asset { id: string; agentId: string; sourceId?: string; presenceId?: string; sessionId?: string; type: "image" | "video" | "gif" | "audio" | "pdf" | "document" | "chart" | "link"; storagePath?: string; dataUrl?: string; checksum?: string; status: "queued" | "processing" | "ready" | "failed"; provenance: { origin: string; sourceUrl?: string; sourcePageUrl?: string; publisher?: string; importedAt: string }; mimeType?: string; sizeBytes?: number; dimensions?: { width: number; height: number }; durationMs?: number; description?: string; topics?: string[]; transcript?: string; usageNotes?: string; visibility?: VisibilityScope; shareability?: Shareability; environment?: PresenceEnvironment; createdAt: string; updatedAt: string; }
 export interface Skill { id: string; name?: string; /** The instruction prompt that defines this reusable behavior. */ description: string; channels: ChannelId[]; requiresTools: string[]; compatibleFormats: string[]; }
 export interface AgentSkill { id: string; agentId: string; skillId: string; enabled: boolean; }
 export interface ContentDrop { id: string; agentId: string; origin: string; brief?: string; sourceIds: string[]; assetIds: string[]; suggestedUse?: string; suggestedWindow?: string; expiresAt?: string; status: "received" | "reviewed" | "used" | "ignored" | "expired"; createdAt: string; }
@@ -477,6 +528,10 @@ export type LanguagePolicyOperation =
 export type ScenarioOperation =
   | { type: "createScenarioFromPrompt"; prompt: string; presenceId?: string }
   | { type: "importScenario"; payload: JsonValue; presenceId?: string }
+  | { type: "generateMissingScenarioEvents"; scenarioId: string }
+  | { type: "updateScenarioEvents"; scenarioId: string; stimuli: ScenarioStimulus[] }
+  | { type: "updateScenarioRequirements"; scenarioId: string; requirements: ScenarioStimulusRequirements }
+  | { type: "renameScenario"; scenarioId: string; title: string }
   | { type: "deleteScenario"; scenarioId: string }
   | { type: "startScenarioRun"; scenarioId: string; presenceId?: string }
   | { type: "resumeScenarioRun"; runId: string }

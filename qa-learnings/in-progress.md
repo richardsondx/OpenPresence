@@ -1,5 +1,15 @@
 # Active QA Work
 
+## COMPLETE — Validate KobeissiKlone multimodal posting workflow
+
+- **Started:** 2026-08-14
+- **Scope:** Inspect the public KobeissiLetter format read-only in Chrome, create a clearly labeled KobeissiKlone emulation in the local OpenPresence Sandbox, run a sequential 10-post Playground Assignment with chart/image-capable output, and verify the Feed and Social Mirror evidence before assessing reply readiness.
+- **Product boundary:** Preserve `User → Agent → Presence`, keep cognition separate from execution and delivery, do not publish to X, and do not present the emulation as the official KobeissiLetter account or reuse its identity assets deceptively.
+- **Status:** Complete for Sandbox posting and one reviewed reply; reply-batch Assignments remain a follow-up capability.
+- **Evidence:** Connected Chrome inspection of the public target was read-only. After correcting an initial database-scope mistake, the exact main-runtime `KobeissiKlone` assignment in `data/openpresence.db` delivered 10 / 10 distinct original Sandbox X publications sequentially, with 10 / 10 attached chart/image assets visible in the exact main-runtime Feed and Social Mirror URL. The first post opened with Sandbox provenance and no live X URL. A simulated inbound market question then formed a reply, waited for review, persisted approval, and delivered one verified `x.reply` outcome in the isolated QA mirror.
+- **Architecture finding:** The normal Presence reply loop is operational. Playground Assignment progress currently compiles and executes original-publication deliverables; it does not yet expose a first-class N-reply Assignment contract. The main runtime also truthfully blocks when the selected provider is unconnected rather than fabricating output.
+- **QA:** `pnpm typecheck` passed; `pnpm test` passed (185 tests); focused Sandbox/AI tests passed (48 tests); focused lint reported 0 errors and 3 pre-existing warnings; `git diff --check` passed. The existing Playground Playwright file has stale selectors for the former `Try a post` control and hard-coded `Jenny`, so that suite is not used as evidence for this workflow.
+
 ## COMPLETE — Make Scenario Runs channel-native and operator-first
 
 - **Started:** 2026-08-14
@@ -8,6 +18,16 @@
 - **Executable protection:** `tests/e2e/scenario-rehearsal.spec.ts` asserts Replay, Details, Review, isolated Run provenance, unchanged Memory/Growth, and fresh rerun isolation.
 - **Verification:** TypeScript passed; Scenario unit tests passed 4/4; Scenario Chromium E2E passed 1/1; targeted ESLint reported 0 errors; `git diff --check` passed; connected Chrome visual QA inspected Replay, Review, and Details at desktop size. Repository-wide ESLint remains blocked by generated `tmp/**/.next` artifacts unrelated to this change. No live connector activity occurred.
 - **Status:** Complete.
+
+## IN_PROGRESS — Source-backed long-form market output
+
+- **Started:** 2026-08-14
+- **Scope:** Prevent synthetic media and short-only X assumptions from masking whether a market emulation can produce long-form, source-verifiable Sandbox publications.
+- **Human feedback:** The prior verification counted synthetic Sandbox fixtures as real charts, and the first long-form attempt was rejected because the runtime hard-coded X to 280 characters. The draft sanitizer also collapsed intentional paragraph breaks.
+- **Regression rule:** Never count an asset as source-backed unless its rendered media URL, source page URL, and publisher are persisted and reachable. Never judge long-form formatting from character count alone; verify format, paragraph breaks, and rendered Feed/inspector state.
+- **Executable protection:** `tests/ai.test.ts` asserts long-form market decisions use `x.long-post`, official FRED provenance, and 500+ characters; `tests/runtime.test.ts` asserts Sandbox draft cleaning preserves paragraph breaks.
+- **Current verification:** Main runtime `data/openpresence.db` was reset only for the invalid local Sandbox session, then rerun with 10 sequential publications. State now shows 10/10 completed, each 738–903 characters, 5 paragraphs, `x.long-post`, and 10/10 attached official FRED/Federal Reserve charts. Remote media endpoints returned HTTP 200 `image/png`.
+- **Status:** In progress until browser rendering is independently inspected and the 50–100-post corpus gate is recorded with a reproducible source manifest.
 
 ## IN_PROGRESS — Implement Scenario Rehearsal Runs for Playground
 

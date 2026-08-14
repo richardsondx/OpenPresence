@@ -41,12 +41,14 @@ import {
   Settings2,
   ShieldCheck,
   Sparkles,
+  Trash2,
   Users,
   X,
 } from "lucide-react";
 import { AGENT_TOOL_DEFINITIONS, CHANNEL_CAPABILITIES, simulationForChannel } from "@/lib/types";
 import { bridgeAdapterPrompt, bridgeAdapterStatus, bridgeAdapterStatusLabel, bridgeApiExamples, bridgeEnvironmentExample } from "@/lib/bridge-contract";
 import { latestPerception } from "@/lib/perception";
+import { validateScenarioFidelity } from "@/lib/scenarios";
 import { deriveActivitySummary, derivePublicHistory, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities } from "@/lib/runtime";
 import type {
   CalendarSlot,
@@ -75,6 +77,8 @@ import type {
   PreferenceReason,
   SandboxActor,
   SandboxAssetInput,
+  ScenarioStimulus,
+  ScenarioStimulusRequirements,
   SocialAssetKind,
   Watch,
   View,
@@ -1450,6 +1454,7 @@ function AgentWorkspaceShell({
       </nav>
       {showPresenceModal && (
         <AddPresenceDialog
+          agentName={agent.name}
           accent={agent.accent}
           onClose={() => setShowPresenceModal(false)}
           onCreate={async (input) => {
@@ -1686,6 +1691,7 @@ function LegacyAppShell({
       </nav>
       {showPresenceModal && (
         <AddPresenceDialog
+          agentName={agent.name}
           accent={agent.accent}
           onClose={() => setShowPresenceModal(false)}
           onCreate={async (input) => {
@@ -1699,10 +1705,12 @@ function LegacyAppShell({
 }
 
 function AddPresenceDialog({
+  agentName,
   accent,
   onClose,
   onCreate,
 }: {
+  agentName: string;
   accent: string;
   onClose: () => void;
   onCreate: (input: CreatePresenceInput) => Promise<void>;
@@ -1829,7 +1837,7 @@ function AddPresenceDialog({
           exists.
         </p>
         <fieldset className="channel-picker">
-          <legend>Where should Jenny show up?</legend>
+          <legend>Where should {agentName} show up?</legend>
           <label>
             <input
               type="radio"
@@ -2245,14 +2253,15 @@ function SocialObjectCard({
         <div className="social-card-assets">
           {itemAssets.map((asset) =>
             asset?.type === "image" || asset?.type === "gif" ? (
-              <Image
-                unoptimized
-                width={90}
-                height={64}
-                key={asset.id}
-                src={asset.dataUrl ?? ""}
-                alt="Attached simulated media"
-              />
+              <span className="social-card-asset" key={asset.id}>
+                <img src={asset.dataUrl ?? asset.provenance.sourceUrl ?? ""} alt={asset.description ?? "Attached simulated media"} />
+                {asset.provenance.sourcePageUrl && <a href={asset.provenance.sourcePageUrl} target="_blank" rel="noreferrer">Source: {asset.provenance.publisher ?? asset.description ?? "Open source"}</a>}
+              </span>
+            ) : asset?.type === "chart" ? (
+              <span className="social-card-asset" key={asset.id}>
+                <img src={asset.dataUrl ?? asset.provenance.sourceUrl ?? ""} alt={asset.description ?? "Attached chart"} />
+                {asset.provenance.sourcePageUrl && <a href={asset.provenance.sourcePageUrl} target="_blank" rel="noreferrer">Source: {asset.provenance.publisher ?? asset.description ?? "Open source"}</a>}
+              </span>
             ) : (
               <span className="social-link-asset" key={asset?.id}>
                 {asset?.type === "link" ? asset.provenance.sourceUrl : `${asset?.type} attached`}
@@ -2402,6 +2411,23 @@ function ScenarioRunDetail({
         ))}
       </div>
 
+      {selectedRunVersion?.fidelity && (
+        <section className="scenario-fidelity-panel" aria-label="Scenario fidelity">
+          <div>
+            <div className="eyebrow">Scenario fidelity</div>
+            <p>{selectedRunVersion.fidelity.status === "verified" ? "The Run used a frozen world that matched the requested situation." : "This Run used a world that needs revision before it can be trusted."}</p>
+          </div>
+          <div className="scenario-fidelity-checks">
+            {selectedRunVersion.fidelity.checks.map((fidelityCheck) => (
+              <div className={`scenario-fidelity-check scenario-fidelity-${fidelityCheck.status}`} key={fidelityCheck.id}>
+                <span aria-hidden="true">{fidelityCheck.status === "met" ? "✓" : fidelityCheck.status === "missing" ? "!" : "?"}</span>
+                <div><strong>{fidelityCheck.label}</strong><small>{fidelityCheck.explanation}</small></div>
+              </div>
+            ))}
+          </div>
+        </section>
+      )}
+
       {runView === "replay" && (
         <div className="scenario-replay-view" role="tabpanel" aria-label="Replay">
           <div className="scenario-section-intro">
@@ -2511,9 +2537,85 @@ function PlaygroundEventDetail({ event }: { event: OpenPresenceState["events"][n
   return <small>{event.detail}</small>;
 }
 
+function scenarioEventActionLabel(type: string) {
+  return type === "reply" ? "Reply" : type === "quote" ? "Quote-post" : type === "mention" ? "Mention" : type === "comment" ? "Comment" : "Post";
+}
+
+function ScenarioEventsEditor({ stimuli, actors, presenceName, onChange, onSave, onClose, busy }: { stimuli: ScenarioStimulus[]; actors: NonNullable<OpenPresenceState["scenarioVersions"][number]["worldSpec"]["startingWorld"]>["actors"]; presenceName: string; onChange: (stimuli: ScenarioStimulus[]) => void; onSave: () => void; onClose: () => void; busy: boolean }) {
+  const update = (index: number, patch: Partial<ScenarioStimulus>) => onChange(stimuli.map((item, itemIndex) => itemIndex === index ? { ...item, ...patch } : item));
+  const remove = (index: number) => onChange(stimuli.filter((_, itemIndex) => itemIndex !== index).map((item, itemIndex) => ({ ...item, sequence: itemIndex + 1 })));
+  const add = () => onChange([...stimuli, { id: `scenario-event-${Date.now()}`, sequence: stimuli.length + 1, type: "post", actorRef: actors?.[0]?.id ?? "actor-1", content: "", origin: "operator", trust: "untrusted_world_content", fidelity: "unverified" }]);
+  return <section className="scenario-events-editor" aria-label="Edit what the Presence will see"><div className="scenario-events-editor-heading"><div><div className="eyebrow">Edit what {presenceName} will see</div><p>These are the exact world events that will enter the Social Mirror. The scenario brief and review criteria stay outside the Presence&apos;s cognition.</p></div><Button type="button" variant="ghost" disabled={busy} onClick={onClose}>Close</Button></div><div className="scenario-event-editor-list">{stimuli.map((stimulus, index) => <article className="scenario-event-editor" key={stimulus.id}><div className="scenario-event-editor-topline"><strong>{index + 1} · {scenarioEventActionLabel(stimulus.type)}</strong><Button type="button" variant="ghost" disabled={busy || stimuli.length <= 1} onClick={() => remove(index)}>Delete</Button></div><div className="scenario-event-editor-grid"><label>Actor<select value={stimulus.actorRef} onChange={(event) => update(index, { actorRef: event.target.value })}>{(actors ?? []).map((actor) => <option key={actor.id} value={actor.id}>{actor.displayName} {actor.handle ? `· ${actor.handle}` : ""}</option>)}</select></label><label>Action<select value={stimulus.type} onChange={(event) => update(index, { type: event.target.value })}><option value="post">Post</option><option value="reply">Reply</option><option value="quote">Quote-post</option><option value="mention">Mention</option><option value="comment">Comment</option></select></label><label>Target / parent<select value={stimulus.targetRef ?? ""} onChange={(event) => update(index, { targetRef: event.target.value || undefined })}><option value="">New thread</option><option value="presence">{presenceName}</option>{stimuli.filter((candidate) => candidate.id !== stimulus.id).map((candidate, candidateIndex) => <option key={candidate.id} value={candidate.id}>Event {candidateIndex + 1}</option>)}</select></label><label>Timing (minutes after start)<input type="number" min="0" value={stimulus.offsetMinutes ?? 0} onChange={(event) => update(index, { offsetMinutes: Number(event.target.value) || 0 })} /></label></div><label className="scenario-event-content-label">Exact content<textarea value={stimulus.content} onChange={(event) => update(index, { content: event.target.value })} rows={3} placeholder="Write the exact post or reply the Presence will encounter…" /></label><div className="scenario-event-assets"><strong>Assets</strong>{stimulus.assets?.length ? <span>{stimulus.assets.map((asset) => asset.name).join(", ")}</span> : <span>No assets attached</span>}</div></article>)}</div><div className="scenario-events-editor-actions"><Button type="button" variant="ghost" disabled={busy} onClick={add}><Plus size={14} /> Add event</Button><Button type="button" variant="primary" disabled={busy || stimuli.some((stimulus) => !stimulus.content.trim())} onClick={onSave}>Save world events</Button></div></section>;
+}
+
+function ScenarioEventSequence({ stimuli, actors, presenceName }: { stimuli: ScenarioStimulus[]; actors: NonNullable<OpenPresenceState["scenarioVersions"][number]["worldSpec"]["startingWorld"]>["actors"]; presenceName: string }) {
+  return <section className="scenario-events-preview"><div className="eyebrow">What {presenceName} will encounter</div>{stimuli.length ? stimuli.map((stimulus, index) => { const actor = actors?.find((item) => item.id === stimulus.actorRef); const target = stimulus.targetRef === "presence" ? presenceName : stimulus.targetRef ? `Event ${stimuli.findIndex((item) => item.id === stimulus.targetRef) + 1}` : undefined; return <article className="scenario-event-preview" key={stimulus.id}><div className="scenario-event-preview-heading"><strong>{index + 1} · {scenarioEventActionLabel(stimulus.type)}</strong><span>{actor?.displayName ?? "Participant"} {actor?.handle ? `· ${actor.handle}` : ""}</span></div><p>{stimulus.content}</p><small>{target ? `Target / parent: ${target}` : "Starts a new thread"}{stimulus.offsetMinutes ? ` · ${stimulus.offsetMinutes}m after start` : ""}{stimulus.assets?.length ? ` · ${stimulus.assets.length} asset${stimulus.assets.length === 1 ? "" : "s"}` : ""}</small></article>; }) : <p className="scenario-empty">No concrete world events have been generated yet.</p>}</section>;
+}
+
+function ScenarioFidelityPanel({ fidelity, generationFailed, presenceName, onGenerate, onEdit, onRequirements, busy }: { fidelity?: OpenPresenceState["scenarioVersions"][number]["fidelity"]; generationFailed: boolean; presenceName: string; onGenerate: () => void; onEdit: () => void; onRequirements: () => void; busy: boolean }) {
+  const ready = fidelity?.status === "verified" && !generationFailed;
+  return <section className={`scenario-fidelity-panel ${ready ? "scenario-fidelity-ready" : "scenario-fidelity-repair"}`} aria-label="Scenario fidelity"><div><div className="eyebrow">{ready ? "Scenario fidelity" : "Scenario not ready"}</div><p>{ready ? "The frozen world matches the situation you described." : generationFailed ? "The scenario could not produce reliable world events yet." : `Your brief describes a situation, but ${presenceName} would not encounter all of the required concrete events yet.`}</p></div><div className="scenario-fidelity-checks">{(fidelity?.checks ?? []).map((check) => <div className={`scenario-fidelity-check scenario-fidelity-${check.status}`} key={check.id}><span aria-hidden="true">{check.status === "met" ? "✓" : check.status === "missing" ? "!" : "?"}</span><div><strong>{check.label}</strong><small>{check.explanation}</small></div></div>)}</div>{!ready && <div className="scenario-repair-actions"><Button type="button" variant="primary" disabled={busy} onClick={onGenerate}><Sparkles size={14} /> Generate missing events</Button><Button type="button" variant="ghost" disabled={busy} onClick={onEdit}>Edit what {presenceName} will see</Button><Button type="button" variant="ghost" disabled={busy} onClick={onRequirements}>Change scenario requirements</Button></div>}{ready && <small className="scenario-ready-label">Ready to rehearse.</small>}</section>;
+}
+
+function ScenarioRequirementsEditor({ requirements, onChange, onSave, onClose, busy }: { requirements: ScenarioStimulusRequirements; onChange: (requirements: ScenarioStimulusRequirements) => void; onSave: () => void; onClose: () => void; busy: boolean }) {
+  const explicitLanguage = requirements.explicitLanguage ?? (requirements.profanity && requirements.profanity !== "none" ? "required" : "forbidden");
+  return (
+    <section className="scenario-requirements-editor" aria-label="Change scenario requirements">
+      <div className="scenario-events-editor-heading">
+        <div>
+          <div className="eyebrow">Change scenario requirements</div>
+          <p>Adjust what the world must contain. These requirements are used for validation only; they are never sent to the Presence.</p>
+        </div>
+        <Button type="button" variant="ghost" disabled={busy} onClick={onClose}>Close</Button>
+      </div>
+      <div className="scenario-requirement-fields">
+        <fieldset>
+          <legend>Profanity in this world</legend>
+          <label className="scenario-requirement-choice">
+            <input type="radio" name="explicit-language" checked={explicitLanguage === "forbidden"} onChange={() => onChange({ ...requirements, explicitLanguage: "forbidden", profanity: "none", explicitLanguageMinimum: undefined })} />
+            <span><strong>Keep it clean</strong><small>Participants will not use profanity.</small></span>
+          </label>
+          <label className="scenario-requirement-choice">
+            <input type="radio" name="explicit-language" checked={explicitLanguage === "allowed"} onChange={() => onChange({ ...requirements, explicitLanguage: "allowed", profanity: "none", explicitLanguageMinimum: undefined })} />
+            <span><strong>Allow it naturally</strong><small>Participants may swear, but profanity is not guaranteed.</small></span>
+          </label>
+          <label className="scenario-requirement-choice">
+            <input type="radio" name="explicit-language" checked={explicitLanguage === "required"} onChange={() => onChange({ ...requirements, explicitLanguage: "required", profanity: requirements.profanity === "none" ? "realistic" : requirements.profanity, explicitLanguageMinimum: Math.max(1, requirements.explicitLanguageMinimum ?? 1) })} />
+            <span><strong>Include profanity</strong><small>The scenario must contain explicit profanity.</small></span>
+          </label>
+          {explicitLanguage === "required" && <label className="scenario-requirement-number"><span>Minimum events containing profanity</span><input type="number" min="1" max="50" value={requirements.explicitLanguageMinimum ?? 1} onChange={(event) => onChange({ ...requirements, explicitLanguageMinimum: Math.max(1, Number(event.target.value) || 1) })} /></label>}
+        </fieldset>
+        <fieldset>
+          <legend>World behavior</legend>
+          <label className="scenario-requirement-choice">
+            <input type="checkbox" checked={Boolean(requirements.directChallengeMinimum)} onChange={(event) => onChange({ ...requirements, directChallengeMinimum: event.target.checked ? Math.max(1, requirements.directChallengeMinimum ?? 2) : undefined })} />
+            <span>Direct challenges to the Presence</span>
+          </label>
+          {requirements.directChallengeMinimum ? <label className="scenario-requirement-number"><span>Minimum direct challenges</span><input type="number" min="1" max="50" value={requirements.directChallengeMinimum} onChange={(event) => onChange({ ...requirements, directChallengeMinimum: Math.max(1, Number(event.target.value) || 1) })} /></label> : null}
+          <label className="scenario-requirement-choice">
+            <input type="checkbox" checked={Boolean(requirements.disagreement)} onChange={(event) => onChange({ ...requirements, disagreement: event.target.checked })} />
+            <span>Disagreement</span>
+          </label>
+          <label className="scenario-requirement-choice">
+            <input type="checkbox" checked={Boolean(requirements.sarcasm)} onChange={(event) => onChange({ ...requirements, sarcasm: event.target.checked })} />
+            <span>Sarcasm</span>
+          </label>
+        </fieldset>
+      </div>
+      <div className="scenario-events-editor-actions">
+        <Button type="button" variant="primary" disabled={busy} onClick={onSave}>Save requirements</Button>
+      </div>
+    </section>
+  );
+}
+
 function ScenarioRunStatus({ status }: { status: string }) {
   const label = status === "passed" ? "Passed" : status === "failed" ? "Needs attention" : status === "unavailable" ? "Review unavailable" : status === "needs_review" ? "Needs review" : status === "active" ? "Running" : "Not reviewed";
   return <span className={`scenario-status scenario-status-${status}`}>{label}</span>;
+}
+
+function scenarioTimestamp(value: string) {
+  return new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(value));
 }
 
 const scenarioCriterionLabels: Record<string, string> = {
@@ -2526,20 +2628,26 @@ function scenarioCriterionLabel(criterionId: string, version?: OpenPresenceState
   return scenarioCriterionLabels[criterionId] ?? version?.evaluationSpec.structuralCriteria.find((criterion) => criterion.id === criterionId)?.label ?? version?.evaluationSpec.socialCriteria.find((criterion) => criterion.id === criterionId)?.label ?? criterionId.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 }
 
-function ScenarioLibrary({ state, mutate, presence }: { state: OpenPresenceState; mutate: Mutate; presence: NonNullable<OpenPresenceState["presence"]> }) {
+function ScenarioLibrary({ state, mutate, presence, creating, onCreatingChange }: { state: OpenPresenceState; mutate: Mutate; presence: NonNullable<OpenPresenceState["presence"]>; creating: boolean; onCreatingChange: (open: boolean) => void }) {
   const [prompt, setPrompt] = useState("");
   const [busy, setBusy] = useState(false);
   const [selectedScenarioId, setSelectedScenarioId] = useState<string | null>(null);
   const [selectedRunId, setSelectedRunId] = useState<string | null>(null);
-  const [creating, setCreating] = useState(false);
   const [importing, setImporting] = useState(false);
   const [deleteConfirmOpen, setDeleteConfirmOpen] = useState(false);
+  const [renaming, setRenaming] = useState(false);
+  const [eventEditorOpen, setEventEditorOpen] = useState(false);
+  const [eventDrafts, setEventDrafts] = useState<ScenarioStimulus[]>([]);
+  const [requirementsEditorOpen, setRequirementsEditorOpen] = useState(false);
+  const [requirementsDraft, setRequirementsDraft] = useState<ScenarioStimulusRequirements>({});
+  const [titleDraft, setTitleDraft] = useState("");
   const [operatorNote, setOperatorNote] = useState("");
   const [runProgress, setRunProgress] = useState<string | null>(null);
   const [runView, setRunView] = useState<ScenarioRunView>("replay");
   const visibleScenarios = state.scenarios.filter((scenario) => scenario.ownerScope !== "presence" || scenario.presenceId === presence.id);
   const selectedScenario = visibleScenarios.find((scenario) => scenario.id === selectedScenarioId) ?? visibleScenarios[0];
   const selectedVersion = selectedScenario ? state.scenarioVersions.find((version) => version.scenarioId === selectedScenario.id && version.id === selectedScenario.currentVersionId) ?? state.scenarioVersions.find((version) => version.scenarioId === selectedScenario.id) : undefined;
+  const selectedFidelity = selectedVersion ? selectedVersion.fidelity ?? validateScenarioFidelity(selectedVersion) : undefined;
   const selectedRun = state.scenarioRuns.find((run) => run.id === selectedRunId) ?? (selectedScenario ? state.scenarioRuns.find((run) => run.scenarioId === selectedScenario.id && run.presenceId === presence.id) : undefined);
   const selectedRunScenario = selectedRun ? visibleScenarios.find((scenario) => scenario.id === selectedRun.scenarioId) : undefined;
   const selectedRunVersion = selectedRun ? state.scenarioVersions.find((version) => version.id === selectedRun.scenarioVersionId) : undefined;
@@ -2554,7 +2662,7 @@ function ScenarioLibrary({ state, mutate, presence }: { state: OpenPresenceState
     const created = next?.scenarios[0];
     if (created) setSelectedScenarioId(created.id);
     setPrompt("");
-    setCreating(false);
+    onCreatingChange(false);
   };
   const runScenario = async (operation: unknown, scenarioId?: string) => {
     setRunProgress("Preparing an isolated Sandbox world…");
@@ -2586,6 +2694,50 @@ function ScenarioLibrary({ state, mutate, presence }: { state: OpenPresenceState
     setDeleteConfirmOpen(false);
     setSelectedScenarioId(null);
     setSelectedRunId(null);
+  };
+  const startRenaming = () => {
+    if (!selectedScenario || selectedScenario.ownerScope === "system") return;
+    setTitleDraft(selectedScenario.title);
+    setRenaming(true);
+  };
+  const cancelRenaming = () => {
+    setRenaming(false);
+    setTitleDraft("");
+  };
+  const saveScenarioTitle = async () => {
+    if (!selectedScenario) return;
+    const nextTitle = titleDraft.trim();
+    if (!nextTitle || nextTitle === selectedScenario.title) {
+      cancelRenaming();
+      return;
+    }
+    await run({ type: "renameScenario", scenarioId: selectedScenario.id, title: nextTitle });
+    cancelRenaming();
+  };
+  const openEventEditor = () => {
+    if (!selectedVersion || selectedScenario?.ownerScope === "system") return;
+    setEventDrafts(selectedVersion.worldSpec.stimuli);
+    setEventEditorOpen(true);
+    setRequirementsEditorOpen(false);
+  };
+  const saveEventDrafts = async () => {
+    if (!selectedScenario) return;
+    await run({ type: "updateScenarioEvents", scenarioId: selectedScenario.id, stimuli: eventDrafts });
+    setEventEditorOpen(false);
+  };
+  const generateMissingEvents = async () => {
+    if (!selectedScenario) return;
+    await run({ type: "generateMissingScenarioEvents", scenarioId: selectedScenario.id });
+  };
+  const openRequirementsEditor = () => {
+    setRequirementsDraft(selectedVersion?.worldSpec.stimulusRequirements ?? {});
+    setRequirementsEditorOpen(true);
+    setEventEditorOpen(false);
+  };
+  const saveRequirements = async () => {
+    if (!selectedScenario) return;
+    await run({ type: "updateScenarioRequirements", scenarioId: selectedScenario.id, requirements: requirementsDraft });
+    setRequirementsEditorOpen(false);
   };
   const recordReview = async (disposition: "accepted" | "okay" | "concern") => {
     if (!selectedRun) return;
@@ -2619,15 +2771,17 @@ function ScenarioLibrary({ state, mutate, presence }: { state: OpenPresenceState
   };
   return (
     <div className="scenario-page">
-      <div className="scenario-toolbar">
-        <div><div className="eyebrow">Scenario rehearsal</div><h1>Scenarios</h1><p>Make it cheap to discover behavioral failure before it becomes public.</p></div>
+      <div className="scenario-action-bar">
+        <div className="scenario-context-copy"><div className="eyebrow">Scenario library</div><p>Make it cheap to discover behavioral failure before it becomes public.</p></div>
+        <div className="scenario-toolbar-actions"><label className="scenario-import-button"><FileText size={14} /> {importing ? "Importing…" : "Import JSON"}<input aria-label="Import scenario JSON" type="file" accept="application/json,.json" onChange={(event) => importFile(event.target.files?.[0])} /></label><Button variant="primary" disabled={busy} onClick={() => onCreatingChange(!creating)}><Plus size={14} /> New scenario</Button></div>
       </div>
-      <div className="scenario-action-bar"><div className="scenario-toolbar-actions"><label className="scenario-import-button"><FileText size={14} /> {importing ? "Importing…" : "Import JSON"}<input aria-label="Import scenario JSON" type="file" accept="application/json,.json" onChange={(event) => importFile(event.target.files?.[0])} /></label><Button variant="primary" disabled={busy} onClick={() => setCreating((open) => !open)}><Plus size={14} /> New scenario</Button></div></div>
-      {creating && <section className="scenario-builder" aria-label="Create a scenario"><div><div className="eyebrow">Natural-language authoring</div><h2>What do you want to rehearse?</h2><p>Describe the social situation in ordinary language. OpenPresence freezes the resulting world before the Run begins.</p></div><textarea aria-label="What do you want to rehearse?" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Test Richardson when someone insults him and pressures him for private information." rows={4} /><div className="scenario-builder-footer"><small>The Presence sees the situation. Evaluation intent stays outside the Agent&apos;s world.</small><Button variant="primary" disabled={busy || prompt.trim().length < 12} onClick={() => void createFromPrompt()}><Sparkles size={14} /> Preview scenario</Button></div></section>}
+      {creating && <section className="scenario-builder" aria-label="Create a scenario"><div><div className="eyebrow">Natural-language authoring</div><h2>What do you want to rehearse?</h2><p>Describe the social situation in ordinary language. OpenPresence freezes the resulting world before the Run begins.</p></div><textarea aria-label="What do you want to rehearse?" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Test Richardson when someone insults him and pressures him for private information." rows={4} /><div className="scenario-builder-footer"><small>Your generated Scenario is saved under “Your scenario.” Built-in Scenarios are read-only defaults.</small><div className="scenario-builder-actions"><Button variant="ghost" type="button" onClick={() => onCreatingChange(false)}><X size={14} /> Close</Button><Button variant="primary" disabled={busy || prompt.trim().length < 12} onClick={() => void createFromPrompt()}><Sparkles size={14} /> Preview scenario</Button></div></div></section>}
       <div className="scenario-layout">
-        <aside className="scenario-list" aria-label="Scenarios"><div className="eyebrow">Available rehearsals</div>{visibleScenarios.map((scenario) => { const runs = state.scenarioRuns.filter((run) => run.scenarioId === scenario.id && run.presenceId === presence.id); const latest = runs[0] ? state.scenarioEvaluations.find((item) => item.runId === runs[0].id) : undefined; const version = state.scenarioVersions.find((item) => item.id === scenario.currentVersionId); return <button type="button" key={scenario.id} className={`scenario-card ${selectedScenario?.id === scenario.id && !selectedRun ? "selected" : ""}`} onClick={() => { setSelectedScenarioId(scenario.id); setSelectedRunId(null); }}><span className="scenario-card-kicker">{version?.source === "builtin" ? "Built-in" : "Your scenario"} · {runs.length} run{runs.length === 1 ? "" : "s"}</span><strong>{scenario.title}</strong><small>{scenario.description}</small>{latest && <ScenarioRunStatus status={latest.status} />}</button>; })}{!visibleScenarios.length && <p className="scenario-empty">No scenarios yet. Describe the first situation you want to rehearse.</p>}</aside>
+        <aside className="scenario-list" aria-label="Scenarios"><div className="eyebrow">Available rehearsals</div>{visibleScenarios.map((scenario) => { const runs = state.scenarioRuns.filter((run) => run.scenarioId === scenario.id && run.presenceId === presence.id); const latest = runs[0] ? state.scenarioEvaluations.find((item) => item.runId === runs[0].id) : undefined; return <div key={scenario.id} className={`scenario-card ${selectedScenario?.id === scenario.id && !selectedRun ? "selected" : ""}`}><button type="button" className="scenario-card-select" onClick={() => { cancelRenaming(); setEventEditorOpen(false); setRequirementsEditorOpen(false); setSelectedScenarioId(scenario.id); setSelectedRunId(null); }}><span className="scenario-card-kicker">{scenario.ownerScope === "system" ? "Built-in" : "Your scenario"} · {runs.length} run{runs.length === 1 ? "" : "s"}</span><strong>{scenario.title}</strong><small className="scenario-card-description">{scenario.description}</small><small className="scenario-card-created">{scenario.ownerScope === "system" ? `Built-in default · ${scenarioTimestamp(scenario.createdAt)}` : `Generated · ${scenarioTimestamp(scenario.createdAt)}`}</small>{latest && <ScenarioRunStatus status={latest.status} />}</button>{scenario.ownerScope !== "system" && <button type="button" className="scenario-card-delete" aria-label={`Delete ${scenario.title}`} title={`Delete ${scenario.title}`} onClick={(event) => { event.stopPropagation(); cancelRenaming(); setEventEditorOpen(false); setRequirementsEditorOpen(false); setSelectedScenarioId(scenario.id); setSelectedRunId(null); setDeleteConfirmOpen(true); }}><Trash2 size={13} /></button>}</div>; })}{!visibleScenarios.length && <p className="scenario-empty">No scenarios yet. Describe the first situation you want to rehearse.</p>}</aside>
         <main className="scenario-main">
-          {selectedRun ? <ScenarioRunDetail state={state} presence={presence} selectedRun={selectedRun} selectedRunScenario={selectedRunScenario} selectedRunVersion={selectedRunVersion} runObjects={runObjects} runEvents={runEvents} evaluation={evaluation} runView={runView} setRunView={setRunView} operatorNote={operatorNote} setOperatorNote={setOperatorNote} busy={busy} onBack={() => { setSelectedRunId(null); setRunView("replay"); }} onRerun={() => void rerun()} onReview={() => void review()} onRecordReview={(disposition) => void recordReview(disposition)} /> : selectedScenario && selectedVersion ? <section className="scenario-preview" aria-label="Scenario preview" aria-busy={Boolean(runProgress)}>{runProgress && <div className="scenario-progress-banner" role="status" aria-live="polite"><LoaderCircle size={18} className="scenario-progress-spinner" /><span><strong>{runProgress}</strong><small>Your isolated Run is still working. You can stay on this page while it completes.</small></span></div>}<div className="scenario-detail-heading"><div><div className="eyebrow">{selectedVersion.source === "builtin" ? "Built-in Scenario" : "Scenario preview"}</div><h2>{selectedScenario.title}</h2><p>{selectedScenario.description}</p></div><div className="scenario-detail-actions"><Button variant="ghost" disabled={busy} onClick={exportScenario}><ArrowUpRight size={14} /> Export JSON</Button>{selectedVersion.source !== "builtin" && <Button variant="ghost" disabled={busy} onClick={() => setDeleteConfirmOpen(true)}>Delete scenario</Button>}<Button variant="primary" disabled={busy} onClick={() => void startRun()}><Play size={14} /> {runProgress ? "Starting…" : "Start isolated Run"}</Button></div></div>{deleteConfirmOpen && <section className="scenario-delete-confirm" role="alertdialog" aria-label="Delete scenario confirmation"><div><strong>Delete “{selectedScenario.title}”?</strong><p>This removes the Scenario, its versions, and its saved rehearsal history. This cannot be undone.</p></div><div><Button variant="ghost" disabled={busy} onClick={() => setDeleteConfirmOpen(false)}>Keep scenario</Button><Button variant="secondary" disabled={busy} onClick={() => void deleteSelectedScenario()}>Delete scenario</Button></div></section>}<div className="scenario-preview-grid"><section><div className="eyebrow">What will happen</div><p>{selectedScenario.purpose}</p>{selectedVersion.worldSpec.stimuli.map((stimulus) => { const actor = selectedVersion.worldSpec.startingWorld?.actors?.find((item) => item.id === stimulus.actorRef); return <div className="scenario-stimulus" key={stimulus.id}><strong>{actor?.displayName ?? "Participant"}</strong><span>{stimulus.content}</span></div>; })}</section><section><div className="eyebrow">What we&apos;ll review</div><p>{selectedVersion.evaluationSpec.purpose}</p>{selectedVersion.evaluationSpec.socialCriteria.map((criterion) => <div className="scenario-criterion" key={criterion.id}><strong>{criterion.label}</strong><small>{criterion.description}</small></div>)}<small className="scenario-boundary">The Agent receives only the world situation—not these review criteria.</small></section></div><div className="scenario-history"><div className="eyebrow">Run history</div>{state.scenarioRuns.filter((run) => run.scenarioId === selectedScenario.id && run.presenceId === presence.id).length ? state.scenarioRuns.filter((run) => run.scenarioId === selectedScenario.id && run.presenceId === presence.id).map((run) => { const result = state.scenarioEvaluations.find((item) => item.runId === run.id); return <button type="button" className="scenario-history-row" key={run.id} onClick={() => setSelectedRunId(run.id)}><span>{new Date(run.startedAt).toLocaleString()}</span><strong>{run.status}</strong>{result && <ScenarioRunStatus status={result.status} />}</button>; }) : <p>No Runs yet. Start one when you are ready.</p>}</div></section> : <div className="scenario-empty-main"><FlaskConical size={22} /><h2>Choose a Scenario</h2><p>Built-ins create real social situations through the normal Sandbox world path. Custom Scenarios start with a plain-language description.</p></div>}
+          {!selectedRun && selectedScenario && selectedVersion && selectedScenario.ownerScope !== "system" && <><ScenarioFidelityPanel fidelity={selectedFidelity} generationFailed={selectedVersion.generationStatus === "failed"} presenceName={presence.name} onGenerate={() => void generateMissingEvents()} onEdit={openEventEditor} onRequirements={openRequirementsEditor} busy={busy} />{eventEditorOpen && <ScenarioEventsEditor stimuli={eventDrafts} actors={selectedVersion.worldSpec.startingWorld?.actors} presenceName={presence.name} onChange={setEventDrafts} onSave={() => void saveEventDrafts()} onClose={() => setEventEditorOpen(false)} busy={busy} />}{requirementsEditorOpen && <ScenarioRequirementsEditor requirements={requirementsDraft} onChange={setRequirementsDraft} onSave={() => void saveRequirements()} onClose={() => setRequirementsEditorOpen(false)} busy={busy} />}<ScenarioEventSequence stimuli={selectedVersion.worldSpec.stimuli} actors={selectedVersion.worldSpec.startingWorld?.actors} presenceName={presence.name} /></>}
+          {!selectedRun && selectedScenario && selectedVersion && selectedScenario.ownerScope === "system" && <ScenarioEventSequence stimuli={selectedVersion.worldSpec.stimuli} actors={selectedVersion.worldSpec.startingWorld?.actors} presenceName={presence.name} />}
+          {selectedRun ? <ScenarioRunDetail state={state} presence={presence} selectedRun={selectedRun} selectedRunScenario={selectedRunScenario} selectedRunVersion={selectedRunVersion} runObjects={runObjects} runEvents={runEvents} evaluation={evaluation} runView={runView} setRunView={setRunView} operatorNote={operatorNote} setOperatorNote={setOperatorNote} busy={busy} onBack={() => { setSelectedRunId(null); setRunView("replay"); }} onRerun={() => void rerun()} onReview={() => void review()} onRecordReview={(disposition) => void recordReview(disposition)} /> : selectedScenario && selectedVersion ? <section className="scenario-preview" aria-label="Scenario preview" aria-busy={Boolean(runProgress)}>{runProgress && <div className="scenario-progress-banner" role="status" aria-live="polite"><LoaderCircle size={18} className="scenario-progress-spinner" /><span><strong>{runProgress}</strong><small>Your isolated Run is still working. You can stay on this page while it completes.</small></span></div>}<div className="scenario-detail-heading"><div><div className="eyebrow">{selectedScenario.ownerScope === "system" ? "Built-in Scenario" : "Scenario preview"}</div>{renaming && selectedScenario.ownerScope !== "system" ? <div className="scenario-title-editor"><input autoFocus aria-label="Scenario title" value={titleDraft} onChange={(event) => setTitleDraft(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter") { event.preventDefault(); void saveScenarioTitle(); } if (event.key === "Escape") cancelRenaming(); }} /><Button type="button" variant="primary" disabled={busy || !titleDraft.trim()} onClick={() => void saveScenarioTitle()}>Save title</Button><Button type="button" variant="ghost" disabled={busy} onClick={cancelRenaming}>Cancel</Button></div> : <div className="scenario-title-row"><h2>{selectedScenario.title}</h2>{selectedScenario.ownerScope !== "system" && <button type="button" className="scenario-rename-button" aria-label={`Rename ${selectedScenario.title}`} title="Rename scenario" onClick={startRenaming}><Pencil size={13} /></button>}</div>}<p>{selectedScenario.description}</p></div><div className="scenario-detail-actions"><Button variant="ghost" disabled={busy} onClick={exportScenario}><ArrowUpRight size={14} /> Export JSON</Button>{selectedScenario.ownerScope !== "system" && <Button variant="ghost" disabled={busy} onClick={() => setDeleteConfirmOpen(true)}>Delete scenario</Button>}<Button variant="primary" disabled={busy || selectedFidelity?.status === "needs_revision"} onClick={() => void startRun()}><Play size={14} /> {selectedFidelity?.status === "needs_revision" ? "Rehearse" : runProgress ? "Starting…" : "Start isolated Run"}</Button></div></div>{deleteConfirmOpen && <section className="scenario-delete-confirm" role="alertdialog" aria-label="Delete scenario confirmation"><div><strong>Delete “{selectedScenario.title}”?</strong><p>This removes the Scenario, its versions, and its saved rehearsal history. This cannot be undone.</p></div><div><Button variant="ghost" disabled={busy} onClick={() => setDeleteConfirmOpen(false)}>Keep scenario</Button><Button variant="secondary" disabled={busy} onClick={() => void deleteSelectedScenario()}>Delete scenario</Button></div></section>}<section className="scenario-fidelity-panel" aria-label="Scenario fidelity"><div><div className="eyebrow">Scenario fidelity</div><p>{selectedFidelity?.status === "verified" ? "The frozen world matches the situation you described." : "This Scenario does not yet match the situation you described. Edit the missing world events before starting a Run."}</p></div><div className="scenario-fidelity-checks">{(selectedFidelity?.checks ?? []).map((fidelityCheck) => <div className={`scenario-fidelity-check scenario-fidelity-${fidelityCheck.status}`} key={fidelityCheck.id}><span aria-hidden="true">{fidelityCheck.status === "met" ? "✓" : fidelityCheck.status === "missing" ? "!" : "?"}</span><div><strong>{fidelityCheck.label}</strong><small>{fidelityCheck.explanation}</small></div></div>)}</div></section><div className="scenario-preview-grid"><section><div className="eyebrow">World events</div><p>{selectedScenario.purpose}</p>{selectedVersion.worldSpec.stimuli.map((stimulus) => { const actor = selectedVersion.worldSpec.startingWorld?.actors?.find((item) => item.id === stimulus.actorRef); return <div className="scenario-stimulus" key={stimulus.id}><strong>{actor?.displayName ?? "Participant"}</strong><span>{stimulus.content}</span></div>; })}</section><section><div className="eyebrow">What we&apos;ll review</div><p>{selectedVersion.evaluationSpec.purpose}</p>{selectedVersion.evaluationSpec.socialCriteria.map((criterion) => <div className="scenario-criterion" key={criterion.id}><strong>{criterion.label}</strong><small>{criterion.description}</small></div>)}<small className="scenario-boundary">The Agent receives only the world situation—not these review criteria.</small></section></div><div className="scenario-history"><div className="eyebrow">Run history</div>{state.scenarioRuns.filter((run) => run.scenarioId === selectedScenario.id && run.presenceId === presence.id).length ? state.scenarioRuns.filter((run) => run.scenarioId === selectedScenario.id && run.presenceId === presence.id).map((run) => { const result = state.scenarioEvaluations.find((item) => item.runId === run.id); return <button type="button" className="scenario-history-row" key={run.id} onClick={() => setSelectedRunId(run.id)}><span>{new Date(run.startedAt).toLocaleString()}</span><strong>{run.status}</strong>{result && <ScenarioRunStatus status={result.status} />}</button>; }) : <p>No Runs yet. Start one when you are ready.</p>}</div></section> : <div className="scenario-empty-main"><FlaskConical size={22} /><h2>Choose a Scenario</h2><p>Built-ins create real social situations through the normal Sandbox world path. Custom Scenarios start with a plain-language description.</p></div>}
         </main>
       </div>
     </div>
@@ -2645,6 +2799,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
   const actors = session ? state.sandboxActors.filter((item) => item.sessionId === session.id) : [];
   const [busy, setBusy] = useState(false);
   const [scenarioMode, setScenarioMode] = useState(false);
+  const [scenarioComposerOpen, setScenarioComposerOpen] = useState(false);
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [rehearsalOpen, setRehearsalOpen] = useState(false);
   const [rehearsalMode, setRehearsalMode] = useState<"consider" | "topic" | "assign" | null>(null);
@@ -2724,26 +2879,33 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
     setFeedbackNote("");
   };
   if (!presence) return null;
-  if (scenarioMode) return <div className="playground-page"><div className="playground-mode-switch"><Button variant="ghost" onClick={() => setScenarioMode(false)}>Free play</Button><Button variant="primary" onClick={() => setScenarioMode(true)}>Scenarios</Button></div><ScenarioLibrary state={state} mutate={mutate} presence={presence} /></div>;
-  if (!session) return <div className="playground-page"><div className="playground-loading" role="status">Opening a fresh simulated account…</div></div>;
   return (
     <div className="playground-page">
-      <div className="playground-mode-switch"><Button variant="primary" onClick={() => setScenarioMode(false)}>Free play</Button><Button variant="ghost" onClick={() => setScenarioMode(true)}>Scenarios</Button></div>
       <div className="playground-toolbar">
         <div>
           <div className="eyebrow">Presence rehearsal</div>
           <div className="playground-title-row"><h1>Playground</h1><span className="environment-chip"><span className="status-dot" /> Sandbox</span></div>
           <p>{simulation.worldDescription}</p>
-          <p className="playground-handle-hint">Agent handle: <strong>{presence.handle}</strong>. Use @mentions in Chat when addressing {presence.name}.</p>
         </div>
         <div className="playground-toolbar-actions">
-          <Button variant="secondary" disabled={busy} onClick={() => setRehearsalOpen((open) => !open)}><Sparkles size={14} /> Try a post <ChevronDown size={14} /></Button>
-          <Button variant="ghost" disabled={busy} onClick={() => void run({ type: "resetPlayground", sessionId: session.id })}><RotateCcw size={14} /> Reset</Button>
+          <Button variant="primary" disabled={busy} onClick={() => scenarioMode ? setScenarioComposerOpen((open) => !open) : setRehearsalOpen((open) => !open)}>{(scenarioMode ? scenarioComposerOpen : rehearsalOpen) ? <X size={14} /> : <Sparkles size={14} />} {(scenarioMode ? scenarioComposerOpen : rehearsalOpen) ? "Close" : "Rehearse"}</Button>
         </div>
       </div>
+      <div className="playground-mode-bar">
+        <div className="playground-mode-copy">{scenarioMode ? "Make it cheap to discover behavioral failure before it becomes public." : "A safe place to test the Presence before anything goes live."}</div>
+        <div className="playground-mode-switch" role="tablist" aria-label="Playground mode">
+          <Button role="tab" aria-selected={!scenarioMode} variant={!scenarioMode ? "primary" : "ghost"} onClick={() => setScenarioMode(false)}>Free play</Button>
+          <Button role="tab" aria-selected={scenarioMode} variant={scenarioMode ? "primary" : "ghost"} onClick={() => setScenarioMode(true)}>Scenarios</Button>
+        </div>
+      </div>
+      {scenarioMode ? <ScenarioLibrary state={state} mutate={mutate} presence={presence} creating={scenarioComposerOpen} onCreatingChange={setScenarioComposerOpen} /> : !session ? <div className="playground-loading" role="status">Opening a fresh simulated account…</div> : <>
+      <div className="playground-action-bar">
+        <Button variant="ghost" disabled={busy} onClick={() => void run({ type: "resetPlayground", sessionId: session.id })}><RotateCcw size={14} /> Reset</Button>
+      </div>
       {rehearsalOpen && <section className="original-rehearsal-panel" aria-label="Posting rehearsal controls">
+        <div className="rehearsal-panel-header"><div className="eyebrow">Rehearsal controls</div><Button variant="ghost" type="button" onClick={() => setRehearsalOpen(false)}><X size={14} /> Close</Button></div>
         <div className="rehearsal-mode-menu" role="group" aria-label="Posting rehearsal mode">
-          <button type="button" className={rehearsalMode === "consider" ? "selected" : ""} onClick={() => { setRehearsalMode("consider"); setAssignmentDraftId(null); }}><strong>Let Jenny choose</strong><small>Let {presence.name} decide whether anything is worth originating.</small></button>
+          <button type="button" className={rehearsalMode === "consider" ? "selected" : ""} onClick={() => { setRehearsalMode("consider"); setAssignmentDraftId(null); }}><strong>Let {presence.name} choose</strong><small>Let {presence.name} decide whether anything is worth originating.</small></button>
           <button type="button" className={rehearsalMode === "topic" ? "selected" : ""} onClick={() => { setRehearsalMode("topic"); setAssignmentDraftId(null); }}><strong>Give a topic</strong><small>Explore a direction while preserving Agent judgment.</small></button>
           <button type="button" className={rehearsalMode === "assign" ? "selected" : ""} onClick={() => setRehearsalMode("assign")}><strong>Give an Assignment</strong><small>Delegate an outcome. The Agent decides how to accomplish it.</small></button>
         </div>
@@ -2760,7 +2922,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
       {(activeAssignment || assignmentDraft) && <section className="assignment-progress-panel" aria-label="Assignment progress"><div><div className="eyebrow">Posting Assignment</div><h2>{(activeAssignment ?? assignmentDraft)?.instruction}</h2></div><div className="assignment-progress-bar"><span style={{ width: `${Math.min(100, (((activeAssignment ?? assignmentDraft)?.progress.verified ?? 0) / Math.max(1, (activeAssignment ?? assignmentDraft)?.progress.required ?? 1)) * 100)}%` }} /></div><div className="assignment-progress-meta"><strong>{(activeAssignment ?? assignmentDraft)?.progress.verified} / {(activeAssignment ?? assignmentDraft)?.progress.required} delivered</strong><span>{(activeAssignment ?? assignmentDraft)?.status === "completed" ? "Completed" : (activeAssignment ?? assignmentDraft)?.status === "blocked" ? "Blocked" : `${(activeAssignment ?? assignmentDraft)?.rejectedCandidates} candidate rejections`}</span></div>{(activeAssignment ?? assignmentDraft)?.status === "blocked" && <p className="assignment-warning">{(activeAssignment ?? assignmentDraft)?.lastOutcome?.message}</p>}{["active", "blocked"].includes((activeAssignment ?? assignmentDraft)?.status ?? "") && <Button variant="secondary" disabled={busy} onClick={() => void runAssignment((activeAssignment ?? assignmentDraft)!.id, (activeAssignment ?? assignmentDraft)?.status === "blocked")}><Play size={14} /> {(activeAssignment ?? assignmentDraft)?.status === "blocked" ? "Retry Assignment" : "Continue working"}</Button>}</section>}
       <div className="playground-grid">
           <aside className="playground-rail">
-            <section className="playground-panel"><div className="eyebrow">Starting world</div><strong>{simulation.startingStateLabel}</strong><p>Nothing here is live. Simulated history stays in this session.</p><div className="session-status"><span className="status-dot" /> {presence.status === "paused" ? "Paused" : "Awake"}</div></section>
+            <section className="playground-panel"><div className="eyebrow">Starting world</div><strong>{simulation.startingStateLabel}</strong><p>Nothing here is live. Simulated history stays in this session.</p><p className="playground-handle-hint">Agent handle: <strong>{presence.handle}</strong>. Use @mentions in Chat when addressing {presence.name}.</p><div className="session-status"><span className="status-dot" /> {presence.status === "paused" ? "Paused" : "Awake"}</div></section>
             <section className="playground-panel"><div className="eyebrow">People in the room</div>{state.sandboxActors.filter((actor) => actor.sessionId === session.id).length ? state.sandboxActors.filter((actor) => actor.sessionId === session.id).map((actor) => <div className="playground-actor" key={actor.id}><span className="actor-avatar">{initials(actor.displayName)}</span><span><strong>{actor.displayName}</strong><small>{actor.handle ?? "Audience"}</small></span></div>) : <p className="playground-muted">Add a person below to make the first social event.</p>}</section>
             <section className="playground-panel playground-time"><div className="eyebrow"><Clock3 size={12} /> Virtual time</div><strong>{new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(session.virtualNow))}</strong><div className="time-actions"><button onClick={() => void run({ type: "advanceSandboxTime", sessionId: session.id, minutes: 15 })}>+15m</button><button onClick={() => void run({ type: "advanceSandboxTime", sessionId: session.id, minutes: 60 })}>+1h</button><button onClick={() => void run({ type: "advanceSandboxTime", sessionId: session.id, minutes: 1440 })}>Tomorrow</button></div></section>
           </aside>
@@ -2823,6 +2985,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
             </section>
           </aside>
       </div>
+      </>}
     </div>
   );
 }
@@ -2973,6 +3136,15 @@ function TeachView({
           <PanelRightOpen size={17} />
         )}
       </button>
+      <div className="page-heading teach-heading">
+        <div>
+          <SectionEyebrow>Agent teaching</SectionEyebrow>
+          <h1>Teach the Agent through conversation.</h1>
+          <p>
+            Tell {agent.name} what to notice, protect, pursue, or leave alone. This transcript stays with {agent.name}; durable meaning belongs in Brain.
+          </p>
+        </div>
+      </div>
       <div
         className={`chat-layout ${contextOpen ? "context-open" : "context-collapsed"}`}
       >
@@ -2980,15 +3152,6 @@ function TeachView({
           <div className="chat-history">
             {messages.length === 0 && !pendingMessage ? (
               <div className="chat-blank">
-                <div className="blank-glyph">
-                  <PresenceGlyph accent={agent.accent} />
-                </div>
-                <h2>Teach the Agent through conversation.</h2>
-                <p>
-                  Tell {agent.name} what to notice, protect, pursue, or leave
-                  alone. This transcript stays with {agent.name}; durable
-                  meaning belongs in Brain.
-                </p>
                 <div className="blank-suggestions">
                   <button
                     onClick={() => setMessage("Become less promotional.")}
@@ -4183,12 +4346,12 @@ function ExecutionLedger({
       </div>
       <p className="execution-explanation">
         {needsApproval
-          ? "Ada has chosen this action. Your review decides whether it is sent."
+          ? `${presence?.name ?? "The Presence"} has chosen this action. Your review decides whether it is sent.`
           : languageBlocked
             ? latest.failure?.message ?? "The final expression contains a prohibited literal. No external artifact was delivered."
             : latest.externalRef
             ? `Sent on ${presence ? channelLabel(presence.channel, state.channelDefinitions) : "the channel"}.`
-            : "Ada’s decision, your approval, and the channel result are kept separate."}
+            : `${presence?.name ?? "The Presence"}'s decision, your approval, and the channel result are kept separate.`}
       </p>
       {needsApproval && (
         <Button
@@ -4459,7 +4622,7 @@ function FeedItem({ item, state, presenceName, onSelect }: { item: PublicHistory
     <span className="feed-item-header"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span className="feed-item-identity"><strong>{presence?.name ?? presenceName}</strong><small>{presence?.handle ?? ""} · {kindLabel}</small></span><time dateTime={displayAt} title={historyTimeTitle(item)}>{formatTime(displayAt)}</time></span>
     {item.kind === "reply" || item.kind === "comment" ? <span className="feed-item-context">Replying in a public conversation</span> : null}
     <span className="feed-item-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "Public expression without returned text.")}</span>
-    {assets.length > 0 && <span className="feed-item-assets">{assets.map((asset) => { const source = asset?.dataUrl ?? asset?.provenance.sourceUrl; return source && (asset.type === "image" || asset.type === "gif" || asset.type === "chart") ? <img key={asset.id} src={source} alt={`Published ${asset.type}`} /> : source && asset.type === "video" ? <video key={asset.id} controls src={source} aria-label="Published video" /> : <span className="social-link-asset" key={asset?.id}>{asset?.type === "link" ? asset.provenance.sourceUrl : `${asset?.type ?? "Asset"} published`}</span>; })}</span>}
+    {assets.length > 0 && <span className="feed-item-assets">{assets.map((asset) => { const source = asset?.dataUrl ?? asset?.provenance.sourceUrl; return source && (asset.type === "image" || asset.type === "gif" || asset.type === "chart") ? <span className="feed-item-asset" key={asset.id}><img src={source} alt={asset.description ?? `Published ${asset.type}`} />{asset.provenance.sourcePageUrl && <span className="feed-item-source">Source: {asset.provenance.publisher ?? asset.description ?? "Open source"}</span>}</span> : source && asset.type === "video" ? <video key={asset.id} controls src={source} aria-label="Published video" /> : <span className="social-link-asset" key={asset?.id}>{asset?.type === "link" ? asset.provenance.sourceUrl : `${asset?.type ?? "Asset"} published`}</span>; })}</span>}
     <span className="feed-item-footer"><span>View details <ChevronRight size={13} /></span></span>
   </button>;
 }
@@ -4510,10 +4673,11 @@ function PublicHistoryInspector({ item, state, index, total, onNavigate, onClose
   const assignment = mirrorObject?.assignmentId ? state.assignments.find((candidate) => candidate.id === mirrorObject.assignmentId) : undefined;
   const parent = item.parentExternalRef ? state.mirrorObjects.find((object) => object.externalRef.type === item.parentExternalRef?.type && object.externalRef.id === item.parentExternalRef?.id) : undefined;
   const metrics = Object.entries(item.metrics);
+  const itemAssets = (item.assetIds ?? []).map((id) => state.assets.find((asset) => asset.id === id)).filter((asset): asset is OpenPresenceState["assets"][number] => Boolean(asset));
   const kindLabel = item.kind === "post" ? "Post" : item.kind[0].toUpperCase() + item.kind.slice(1);
   const position = Math.max(0, index) + 1;
   const displayAt = historyDisplayAt(item);
-  return <aside className="history-inspector" aria-label={`${kindLabel} details`}><div className="history-inspector-header"><div><SectionEyebrow>{kindLabel} details</SectionEyebrow><h2>{kindLabel}</h2><small title={historyTimeTitle(item)}>{formatTime(displayAt)}{item.environment === "sandbox" ? " · Sandbox observed" : ""}</small></div><button type="button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button></div><div className="history-inspector-navigation" aria-label="Browse public posts"><span aria-live="polite"><strong>Post {position}</strong> of {total}</span><div><button type="button" aria-label="Previous post" disabled={index <= 0} onClick={() => onNavigate(-1)}><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /></button><button type="button" aria-label="Next post" disabled={index < 0 || index >= total - 1} onClick={() => onNavigate(1)}><ChevronRight size={14} /></button></div></div><div className="history-inspector-identity"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span><strong>{presence?.name ?? "Presence"}</strong><small>{presence?.handle ?? ""}</small></span></div>{parent?.content?.text && <div className="history-parent-context"><SectionEyebrow>Replying to</SectionEyebrow><p>{parent.content.text}</p><small>{parent.author?.displayName ?? "Public conversation"}</small></div>}<p className="history-inspector-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "No text was returned by the channel.")}</p><div className="history-proof"><Check size={14} /><span>Observed in Social Mirror · {item.externalRef.type} · {item.externalRef.id}</span></div><section className="history-provenance"><SectionEyebrow>Provenance</SectionEyebrow><p>{item.executionId ? "Published by OpenPresence and verified in the Social Mirror." : "Observed on the connected channel and attributed to this Presence."}</p>{assignment && <p>Assignment output · {assignment.progress.verified} / {assignment.progress.required} verified publications</p>}{mirrorObject?.environment === "sandbox" && <small>Simulated social reality · this expression has no live destination. Sandbox world time: {formatTime(item.occurredAt)}.</small>}</section><section className="history-outcome"><SectionEyebrow>Outcome</SectionEyebrow>{metrics.length ? <div className="history-outcome-grid">{metrics.map(([key, value]) => <div key={key}><strong>{value}</strong><small>{key.replaceAll("_", " ")}</small></div>)}</div> : <p>No channel outcome evidence is attached to this expression yet.</p>}</section><div className="history-inspector-actions">{item.externalUrl ? <a className="history-external-link" href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> Open on X</a> : item.environment === "sandbox" && item.channel === "x" ? <p className="history-sandbox-note">Sandbox rehearsal only. This expression has no live X URL.</p> : null}<Button variant="secondary" onClick={onActivity}><Activity size={14} /> View in Activity</Button></div></aside>;
+  return <aside className="history-inspector" aria-label={`${kindLabel} details`}><div className="history-inspector-header"><div><SectionEyebrow>{kindLabel} details</SectionEyebrow><h2>{kindLabel}</h2><small title={historyTimeTitle(item)}>{formatTime(displayAt)}{item.environment === "sandbox" ? " · Sandbox observed" : ""}</small></div><button type="button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button></div><div className="history-inspector-navigation" aria-label="Browse public posts"><span aria-live="polite"><strong>Post {position}</strong> of {total}</span><div><button type="button" aria-label="Previous post" disabled={index <= 0} onClick={() => onNavigate(-1)}><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /></button><button type="button" aria-label="Next post" disabled={index < 0 || index >= total - 1} onClick={() => onNavigate(1)}><ChevronRight size={14} /></button></div></div><div className="history-inspector-identity"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span><strong>{presence?.name ?? "Presence"}</strong><small>{presence?.handle ?? ""}</small></span></div>{parent?.content?.text && <div className="history-parent-context"><SectionEyebrow>Replying to</SectionEyebrow><p>{parent.content.text}</p><small>{parent.author?.displayName ?? "Public conversation"}</small></div>}<p className="history-inspector-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "No text was returned by the channel.")}</p>{itemAssets.length > 0 && <section className="history-provenance"><SectionEyebrow>Attached sources</SectionEyebrow>{itemAssets.map((asset) => <div key={asset.id}><a className="history-external-link" href={asset.provenance.sourcePageUrl ?? asset.provenance.sourceUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {asset.provenance.publisher ?? asset.description ?? "Open source"}</a></div>)}</section>}<div className="history-proof"><Check size={14} /><span>Observed in Social Mirror · {item.externalRef.type} · {item.externalRef.id}</span></div><section className="history-provenance"><SectionEyebrow>Provenance</SectionEyebrow><p>{item.executionId ? "Published by OpenPresence and verified in the Social Mirror." : "Observed on the connected channel and attributed to this Presence."}</p>{assignment && <p>Assignment output · {assignment.progress.verified} / {assignment.progress.required} verified publications</p>}{mirrorObject?.environment === "sandbox" && <small>Simulated social reality · this expression has no live destination. Sandbox world time: {formatTime(item.occurredAt)}.</small>}</section><section className="history-outcome"><SectionEyebrow>Outcome</SectionEyebrow>{metrics.length ? <div className="history-outcome-grid">{metrics.map(([key, value]) => <div key={key}><strong>{value}</strong><small>{key.replaceAll("_", " ")}</small></div>)}</div> : <p>No channel outcome evidence is attached to this expression yet.</p>}</section><div className="history-inspector-actions">{item.externalUrl ? <a className="history-external-link" href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> Open on X</a> : item.environment === "sandbox" && item.channel === "x" ? <p className="history-sandbox-note">Sandbox rehearsal only. This expression has no live X URL.</p> : null}<Button variant="secondary" onClick={onActivity}><Activity size={14} /> View in Activity</Button></div></aside>;
 }
 
 function ScheduleView({
@@ -5317,6 +5481,7 @@ function PresenceView({
   manageX: XManage;
 }) {
   const presence = state.presence!;
+  const agentName = state.agent?.name ?? "the Agent";
   const waking = pendingOperation === "wakePresence";
   const capabilities =
     presence.capabilities ??
@@ -5425,7 +5590,7 @@ function PresenceView({
         >
           {presence.status === "paused" ? (
             <>
-              <Play size={14} /> {waking ? "Waking Jenny…" : "Wake up Jenny"}
+              <Play size={14} /> {waking ? `Waking ${agentName}…` : `Wake up ${agentName}`}
             </>
           ) : (
             <>
@@ -5478,7 +5643,7 @@ function PresenceView({
         <div className="section-heading compact">
           <div>
             <SectionEyebrow>Channel & environment</SectionEyebrow>
-            <h2>Where should Jenny show up?</h2>
+            <h2>Where should {agentName} show up?</h2>
           </div>
           <Globe2 size={17} />
         </div>
@@ -5517,7 +5682,7 @@ function PresenceView({
           </button>
         </div>
         <div className="channel-selection-status">
-          {connectionMode === "sandbox" && <div className="channel-sandbox-summary"><div><strong>This world is simulated.</strong><p>{simulation.worldLabel} history stays in this rehearsal session; Jenny’s mind is shared.</p></div><Button variant="secondary" onClick={() => setView?.("playground")}><FlaskConical size={14} /> Open Playground</Button></div>}
+          {connectionMode === "sandbox" && <div className="channel-sandbox-summary"><div><strong>This world is simulated.</strong><p>{simulation.worldLabel} history stays in this rehearsal session; {agentName}&apos;s mind is shared.</p></div><Button variant="secondary" onClick={() => setView?.("playground")}><FlaskConical size={14} /> Open Playground</Button></div>}
           {connectionMode === "native" && presence.channel === "x" && <XConnection state={state} presence={presence} manageX={manageX} />}
           {connectionMode === "bridge" && <BridgeManager state={state} presence={presence} manageBridge={manageBridge} refreshState={refreshState} />}
         </div>
@@ -5529,8 +5694,8 @@ function PresenceView({
           <h2>Who speaks here?</h2>
           <p>
             {presence.mode === "ghost"
-              ? "Jenny extends the operator’s attention and judgment."
-              : "Jenny speaks as an agent with her own point of view."}
+              ? `${agentName} extends the operator’s attention and judgment.`
+              : `${agentName} speaks as an agent with their own point of view.`}
           </p>
         </div>
         <div className="identity-name-form">
@@ -5559,7 +5724,7 @@ function PresenceView({
               mutate({ type: "setPresence", patch: { mode: "agent" } })
             }
           >
-            <strong>Jenny</strong>
+            <strong>{agentName}</strong>
             <small>Agent-owned</small>
           </button>
           <button
@@ -5658,7 +5823,7 @@ function PresenceView({
           </div>
           <Clock3 size={17} />
         </div>
-        <p className="muted rhythm-intro">Rhythm controls when this Presence checks its connected channel for something worth considering. It never tells Jenny what to say, and it never turns a check into a forced publication.</p>
+        <p className="muted rhythm-intro">Rhythm controls when this Presence checks its connected channel for something worth considering. It never tells {agentName} what to say, and it never turns a check into a forced publication.</p>
         <div className="rhythm-options" role="group" aria-label="Attention rhythm">
           {([
             ["recommended", "Recommended", "Check about every 5 minutes when a live observer is connected."],
@@ -5722,7 +5887,7 @@ function PresenceView({
             </div>
             <Ghost size={17} />
           </div>
-          <p className="muted">This is the context Jenny uses to extend you here. It does not change Jenny&apos;s Brain, Soul, Mission, Taste, Memory, or Growth.</p>
+          <p className="muted">This is the context {agentName} uses to extend you here. It does not change {agentName}&apos;s Brain, Soul, Mission, Taste, Memory, or Growth.</p>
           <div className="ghost-profile-form">
             <label>Who or what is represented?<input aria-label="Ghost subject" value={ghostDraft.subject} onChange={(event) => setGhostDraft({ ...ghostDraft, subject: event.target.value })} placeholder="Me / my organization" /></label>
             <label>Priorities here<textarea aria-label="Ghost priorities" value={ghostDraft.priorities} onChange={(event) => setGhostDraft({ ...ghostDraft, priorities: event.target.value })} placeholder="What should this Presence help accomplish?" rows={3} /></label>
@@ -5731,7 +5896,7 @@ function PresenceView({
             <label>Boundaries and things to avoid<textarea aria-label="Ghost boundaries" value={ghostDraft.boundaries} onChange={(event) => setGhostDraft({ ...ghostDraft, boundaries: event.target.value })} placeholder="What should it never assume, disclose, or do?" rows={3} /></label>
           </div>
           <div className="ghost-understanding" role="status">
-            <div className="section-heading compact"><div><SectionEyebrow>Review before acting</SectionEyebrow><h3>What Jenny currently understands</h3></div><span className={`status-tag ${ghostDraft.priorities.trim() && ghostDraft.preferences.trim() && ghostDraft.voice.trim() && ghostDraft.boundaries.trim() ? "status-ready" : "status-incomplete"}`}>{ghostDraft.priorities.trim() && ghostDraft.preferences.trim() && ghostDraft.voice.trim() && ghostDraft.boundaries.trim() ? "Profile defined" : "Needs your input"}</span></div>
+            <div className="section-heading compact"><div><SectionEyebrow>Review before acting</SectionEyebrow><h3>What {agentName} currently understands</h3></div><span className={`status-tag ${ghostDraft.priorities.trim() && ghostDraft.preferences.trim() && ghostDraft.voice.trim() && ghostDraft.boundaries.trim() ? "status-ready" : "status-incomplete"}`}>{ghostDraft.priorities.trim() && ghostDraft.preferences.trim() && ghostDraft.voice.trim() && ghostDraft.boundaries.trim() ? "Profile defined" : "Needs your input"}</span></div>
             <dl>
               <div><dt>Represents</dt><dd>{ghostDraft.subject.trim() || "Not defined yet"}</dd></div>
               <div><dt>Priorities</dt><dd>{ghostDraft.priorities.trim() || "Not defined yet"}</dd></div>
@@ -5739,7 +5904,7 @@ function PresenceView({
               <div><dt>Voice</dt><dd>{ghostDraft.voice.trim() || "Not defined yet"}</dd></div>
               <div><dt>Boundaries</dt><dd>{ghostDraft.boundaries.trim() || "Not defined yet"}</dd></div>
             </dl>
-            <p className="form-hint">Empty fields are unknown. Jenny must not infer them from her own identity or private context.</p>
+            <p className="form-hint">Empty fields are unknown. {agentName} must not infer them from their own identity or private context.</p>
           </div>
           <div className="inline-form-actions"><Button variant="primary" disabled={!ghostDraft.subject.trim()} onClick={() => void mutate({ type: "setPresence", patch: { ghostProfile: { ...ghostDraft, subject: ghostDraft.subject.trim(), priorities: ghostDraft.priorities.trim(), preferences: ghostDraft.preferences.trim(), voice: ghostDraft.voice.trim(), boundaries: ghostDraft.boundaries.trim() } } })}><Check size={14} /> Save Ghost profile</Button></div>
         </section>

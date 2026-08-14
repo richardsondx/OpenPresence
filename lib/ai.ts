@@ -2,6 +2,7 @@ import { readProviderSecret } from "./db";
 import { publicSelfGuidance } from "./runtime";
 import { effectiveLanguagePolicy, languagePolicyGuidance } from "./language-policy";
 import { isAiMockEnabled } from "./test-runtime";
+import { marketMockCandidate } from "./market-research";
 import type { Conversation, ModelProvider, OpenPresenceState, Presence, PresenceChatMessage, SocialAssetKind } from "./types";
 
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -350,7 +351,8 @@ export interface AgentSocialDecision {
   action: string;
   text: string;
   rationale?: string;
-  assets?: Array<{ kind: SocialAssetKind; name?: string; sourceUrl?: string }>;
+  format?: string;
+  assets?: Array<{ kind: SocialAssetKind; name?: string; sourceUrl?: string; sourcePageUrl?: string; publisher?: string }>;
 }
 
 export interface AgentSocialJudgment {
@@ -448,10 +450,13 @@ export function parseAgentSocialDecision(raw: string, allowedActions: string[]):
         kind: rawKind as SocialAssetKind,
         name: typeof item.name === "string" ? item.name.trim() || undefined : undefined,
         sourceUrl: typeof item.sourceUrl === "string" ? item.sourceUrl.trim() || undefined : typeof item.url === "string" ? item.url.trim() || undefined : undefined,
+        sourcePageUrl: typeof item.sourcePageUrl === "string" ? item.sourcePageUrl.trim() || undefined : undefined,
+        publisher: typeof item.publisher === "string" ? item.publisher.trim() || undefined : undefined,
       };
-    }).filter((item): item is { kind: SocialAssetKind; name: string | undefined; sourceUrl: string | undefined } => Boolean(item)).slice(0, 4)
+    }).filter((item): item is { kind: SocialAssetKind; name: string | undefined; sourceUrl: string | undefined; sourcePageUrl: string | undefined; publisher: string | undefined } => Boolean(item)).slice(0, 4)
     : undefined;
-  return { action, text, rationale: rationale || undefined, assets: assets?.length ? assets : undefined };
+  const format = typeof parsed.format === "string" && /^[-a-z0-9.]+$/i.test(parsed.format) ? parsed.format : undefined;
+  return { action, text, rationale: rationale || undefined, ...(format ? { format } : {}), assets: assets?.length ? assets : undefined };
 }
 
 function cleanJudgmentField(value: unknown, fallback = "") {
@@ -567,6 +572,22 @@ function assignmentMockCandidates(state: OpenPresenceState, instruction: string)
       "The best agent loop is not maximum activity. It is useful attention followed by evidence that the action mattered.",
     ];
   }
+  if (/\b(?:market|capital markets|macro|macroeconomics|equities|rates|commodities|geopolitics|chart(?:-led)?|financial research)\b/.test(profile)) {
+    return [
+      "SANDBOX MARKET NOTE: A sharp move in long-term yields is starting to pressure the parts of the market that depend on cheap duration.\n\nThe first signal is not the headline move. It is how quickly leadership changes underneath it.",
+      "BREAKING: Risk is being repriced unevenly across this simulated session. Large-cap equities are holding up while rate-sensitive growth names absorb the first wave of pressure.\n\nThat divergence usually matters more than the index level.",
+      "Global energy is the market's loudest macro signal in this Sandbox exercise. A supply shock can lift headline inflation even while demand indicators soften.\n\nThat is the policy problem investors tend to underprice.",
+      "The dollar is firming as investors prefer liquidity over duration.\n\nA stronger dollar is not just a currency story: it tightens financial conditions for every market that borrowed in dollars and earns elsewhere.",
+      "SANDBOX MARKET NOTE: Credit spreads are widening before equities fully acknowledge the change in risk appetite.\n\nWhen credit leads, the next question is whether the move is a warning or simply a reset from unusually calm pricing.",
+      "BREAKING: Commodity strength and falling real activity are now appearing in the same simulated tape.\n\nThat combination leaves central banks with fewer comfortable choices and markets with less room for a policy mistake.",
+      "The most important chart is often the one that explains what stopped working.\n\nIn this exercise, breadth is narrowing even as the headline index remains resilient. A strong index can hide a fragile market underneath.",
+      "SANDBOX MARKET NOTE: Positioning is moving before the economic data does.\n\nThat does not prove the next macro outcome. It does show where investors believe the surprise would hurt most.",
+      "Rates, currencies, and commodities are telling one coherent story in this simulated market: inflation risk is not disappearing at the same speed everywhere.\n\nThe portfolio implication is dispersion, not a single directional bet.",
+      "BREAKING: The market is rewarding cash flow visibility while penalizing narratives that require lower rates to work.\n\nThat is a useful regime test: when the discount rate moves, the weakest assumptions become visible first.",
+      "A market can be expensive and still keep rising. The harder question is whether earnings are broadening enough to support the next leg.\n\nThis Sandbox chart exercise tracks participation, not prediction.",
+      "SANDBOX MARKET NOTE: Volatility is rising in the places investors treated as interchangeable.\n\nCorrelation is a convenience during calm markets. It becomes a source of risk when every position is exposed to the same macro shock.",
+    ];
+  }
   if (explicitOperatorProfile) {
     return [
       "Your offer is not weak because the copy is boring. It is weak because the customer cannot see the expensive problem it removes.",
@@ -597,6 +618,31 @@ function mockSocialDecision(state: OpenPresenceState, instruction: string, actio
   if (normalized.includes("hard progress state") && can("post")) {
     const progress = Number(normalized.match(/hard progress state:\s*(\d+)\s+of\s+\d+\s+verified publications/)?.[1] ?? 0);
     const rejectedCandidates = Number(normalized.match(/previous candidate rejections:\s*(\d+)/)?.[1] ?? 0);
+    const profile = [
+      state.agent?.name,
+      state.agent?.description,
+      state.presence?.name,
+      state.presence?.brief?.purpose,
+      state.presence?.brief?.audience,
+      state.presence?.brief?.primaryTerritory?.join(" "),
+      instruction,
+    ].filter(Boolean).join(" ").toLowerCase();
+    if (/\b(?:market|capital markets|macro|macroeconomics|equities|rates|commodities|geopolitics|chart(?:-led)?|financial research)\b/.test(profile)) {
+      const candidate = marketMockCandidate(progress, rejectedCandidates);
+      return {
+        action: "post",
+        text: candidate.text,
+        rationale: "The deterministic Sandbox fixture produced a long-form market note with a source-backed public chart.",
+        format: "x.long-post",
+        assets: [{
+          kind: candidate.asset.kind,
+          name: candidate.asset.name,
+          sourceUrl: candidate.asset.mediaUrl,
+          sourcePageUrl: candidate.asset.sourcePageUrl,
+          publisher: candidate.asset.publisher,
+        }],
+      };
+    }
     const candidates = assignmentMockCandidates(state, instruction);
     const requestedKinds = [...new Set((["image", "chart", "gif", "link", "video"] as const).filter((kind) => new RegExp(`\\b${kind}\\b`, "i").test(normalized)))];
     const assetKind = requestedKinds.length ? requestedKinds[progress % requestedKinds.length] : undefined;
@@ -607,7 +653,7 @@ function mockSocialDecision(state: OpenPresenceState, instruction: string, actio
       // make progress instead of proposing the same first candidate forever.
       text: candidates[(progress + rejectedCandidates) % candidates.length]!,
       rationale: "The deterministic Sandbox fixture produced a distinct Assignment candidate grounded in the Agent context.",
-      assets: assetKind ? [{ kind: assetKind, name: `Genny ${assetKind} rehearsal asset` }] : undefined,
+      assets: assetKind ? [{ kind: assetKind, name: `${state.presence?.name ?? state.agent?.name ?? "Sandbox"} ${assetKind} rehearsal asset` }] : undefined,
     };
   }
   if ((normalized.includes("consider an original publication") || normalized.includes("fresh simulated")) && can("post")) {
@@ -644,6 +690,6 @@ function mockSocialDecision(state: OpenPresenceState, instruction: string, actio
 export async function generateAgentSocialDecision(state: OpenPresenceState, instruction: string, allowedActions: string[]) {
   const actions = [...new Set(allowedActions.filter(Boolean))];
   if (isAiMockEnabled()) return mockSocialDecision(state, instruction, actions);
-  const raw = await generateAgentReply(state, `${instruction}\n\nChoose exactly one action from: ${actions.join(", ")}, or no_op. Return JSON only in this shape: {"action":"...","text":"...","rationale":"short explanation","assets":[{"kind":"image|video|gif|chart|link","name":"optional label","sourceUrl":"optional URL"}]}. Include assets only when the supplied context or an explicitly configured Sandbox asset capability supports them; never invent a URL or claim an asset was created when it was not. The rationale is for the internal audit and must not contain hidden chain-of-thought. Use an empty text for no_op, like, or reaction.`, undefined, { social: true });
+  const raw = await generateAgentReply(state, `${instruction}\n\nChoose exactly one action from: ${actions.join(", ")}, or no_op. Return JSON only in this shape: {"action":"...","format":"optional channel format","text":"...","rationale":"short explanation","assets":[{"kind":"image|video|gif|chart|link","name":"optional label","sourceUrl":"optional media URL","sourcePageUrl":"optional source page","publisher":"optional publisher"}]}. Include assets only when the supplied context or an explicitly configured Sandbox asset capability supports them; never invent a URL or claim an asset was created when it was not. The rationale is for the internal audit and must not contain hidden chain-of-thought. Use an empty text for no_op, like, or reaction.`, undefined, { social: true });
   return parseAgentSocialDecision(raw, actions);
 }

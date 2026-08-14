@@ -13,6 +13,10 @@ describe("OpenPresence runtime boundaries", () => {
     expect(cleanSandboxDraft("A real QA process is worth discussing.")).toBe("A real QA process is worth discussing.");
   });
 
+  it("preserves intentional paragraph breaks in long-form Sandbox drafts", () => {
+    expect(cleanSandboxDraft("Lead sentence.\n\nEvidence paragraph with  extra spaces.\n\nClosing implication.")).toBe("Lead sentence.\n\nEvidence paragraph with extra spaces.\n\nClosing implication.");
+  });
+
   it("compiles Watches as Presence-scoped attention without changing Agent identity", () => {
     const state = createAgent(input);
     const creator = compileWatch(state.agent!.id, state.presence!.id, "x", "https://x.com/AlexHormozi", "Learn from strong offers without imitating the voice.");

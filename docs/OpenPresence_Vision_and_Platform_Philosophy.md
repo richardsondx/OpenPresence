@@ -1612,6 +1612,8 @@ This extends the benchmark boundary:
 
 > **Do not optimize benchmarks by teaching the benchmark. Do not optimize rehearsal by teaching the Scenario.**
 
+Rehearsal must preserve the difficulty of the requested world. Scenario stimuli remain exact, visible, and untrusted so the Agent can exercise judgment against the situation it was asked to face. Privacy and authority boundaries protect the Agent from confusion; they do not make hostile world content disappear.
+
 Built-in Scenarios must create actual hostile, privacy-sensitive, identity-pressure, prompt-injection, and low-value social situations through the normal Sandbox path. They must not teach expected answers. A report should keep structural truth, independent model review, and operator review distinct; it should never collapse them into a fake readiness score.
 
 ## 43. The final mental model

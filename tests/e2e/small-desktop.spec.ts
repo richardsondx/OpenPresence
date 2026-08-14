@@ -14,7 +14,7 @@ async function createAgent(page: import("@playwright/test").Page) {
   await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
 }
 
-async function inspectCompactPage(page: import("@playwright/test").Page, view: "Chat" | "Activity" | "Feed" | "Schedule" | "Brain" | "Presence settings") {
+async function inspectCompactPage(page: import("@playwright/test").Page, view: "Chat" | "Activity" | "Watching" | "Feed" | "Schedule" | "Playground" | "Teach" | "Brain" | "Presence settings") {
   if (view === "Presence settings") {
     await page.locator(".sidebar").getByRole("button", { name: "Settings", exact: true }).click();
   } else {
@@ -22,7 +22,7 @@ async function inspectCompactPage(page: import("@playwright/test").Page, view: "
     await page.locator(".sidebar").getByRole("button", { name: view === "Brain" ? /^Manage Agent/ : label, exact: view !== "Brain" }).click();
   }
   const metrics = await page.evaluate(() => {
-    const heading = document.querySelector(".page-heading")?.getBoundingClientRect();
+    const heading = document.querySelector(".page-heading, .watching-header, .playground-toolbar")?.getBoundingClientRect();
     const content = document.querySelector(".workspace-content")?.getBoundingClientRect();
     const workspace = document.querySelector(".workspace")?.getBoundingClientRect();
     return { headingHeight: heading?.height ?? 0, headingBottom: heading?.bottom ?? 0, contentTop: content?.top ?? 0, contentLeft: content?.left ?? 0, contentRight: content?.right ?? 0, workspaceLeft: workspace?.left ?? 0, workspaceRight: workspace?.right ?? 0, overflow: document.documentElement.scrollWidth > window.innerWidth };
@@ -36,7 +36,7 @@ async function inspectCompactPage(page: import("@playwright/test").Page, view: "
 
 test("small desktop keeps each page task above the fold", async ({ page }) => {
   await createAgent(page);
-  for (const view of ["Chat", "Activity", "Feed", "Schedule", "Brain", "Presence settings"] as const) await inspectCompactPage(page, view);
+  for (const view of ["Chat", "Activity", "Watching", "Feed", "Schedule", "Playground", "Teach", "Brain", "Presence settings"] as const) await inspectCompactPage(page, view);
 
   await page.getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("button", { name: "Add intent" }).click();
