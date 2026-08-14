@@ -4072,6 +4072,8 @@ function ScheduleView({
   const [considerationStart, setConsiderationStart] = useState("08:00");
   const [considerationEnd, setConsiderationEnd] = useState("11:00");
   const [editingSlot, setEditingSlot] = useState<CalendarSlot | null>(null);
+  const [runNowMode, setRunNowMode] = useState(false);
+  const [runNowBusy, setRunNowBusy] = useState(false);
   const [viewMode, setViewMode] = useState<"list" | "week">("week");
   const presenceId = state.activePresenceId ?? state.presence?.id ?? "";
   const selectedPresence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
@@ -4079,6 +4081,7 @@ function ScheduleView({
   const resetForm = () => {
     setInstruction("");
     setEditingSlot(null);
+    setRunNowMode(false);
     setDay("Tuesday");
     setTime("08:00");
     setObjective("audience_growth");
@@ -4113,6 +4116,19 @@ function ScheduleView({
   };
   const add = async (event: React.FormEvent) => {
     event.preventDefault();
+    if (runNowMode) {
+      setRunNowBusy(true);
+      try {
+        const next = await mutate({ type: "runNow", instruction, presenceId });
+        if (next) {
+          resetForm();
+          setShowForm(false);
+        }
+      } finally {
+        setRunNowBusy(false);
+      }
+      return;
+    }
     if (responsibility === "assign") {
       const next = await mutate({ type: "createAssignment", instruction, presenceId, environment: selectedPresence?.connectionMode === "sandbox" ? "sandbox" : "live" });
       if (next) { resetForm(); setShowForm(false); }
@@ -4147,6 +4163,11 @@ function ScheduleView({
     setConsiderationEnd(end);
     setShowForm(true);
   };
+  const openRunNow = () => {
+    resetForm();
+    setRunNowMode(true);
+    setShowForm(true);
+  };
   return (
     <div className="page">
       <div className="page-heading">
@@ -4164,6 +4185,9 @@ function ScheduleView({
             <button type="button" aria-pressed={viewMode === "list"} className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}>List</button>
             <button type="button" aria-pressed={viewMode === "week"} className={viewMode === "week" ? "active" : ""} onClick={() => setViewMode("week")}>Week</button>
           </div>
+          <Button variant="secondary" onClick={openRunNow} disabled={runNowBusy}>
+            <Play size={14} /> Run now
+          </Button>
           <Button variant="primary" onClick={() => { setShowForm(!showForm); if (showForm) resetForm(); }}>
             {showForm ? <X size={15} /> : <Plus size={15} />}{" "}
             {showForm ? "Close" : "Add intent"}
@@ -4171,24 +4195,25 @@ function ScheduleView({
         </div>
       </div>
       {showForm && (
-        <form className="add-slot-form" onSubmit={add}>
+        <form className={`add-slot-form ${runNowMode ? "now-run-form" : ""}`} onSubmit={add}>
           <label className="instruction-field">
-            {responsibility === "assign" ? "Assignment" : "Standing instruction"}
+            {runNowMode ? "Immediate instruction" : responsibility === "assign" ? "Assignment" : "Standing instruction"}
             <textarea
-              aria-label={`What should ${presenceName} do?`}
+              aria-label={runNowMode ? `What should ${presenceName} consider now?` : `What should ${presenceName} do?`}
               value={instruction}
               onChange={(event) => setInstruction(event.target.value)}
-              placeholder="Teach the audience one useful thing about persistent agents."
+              placeholder={runNowMode ? "Explore one useful idea about persistent agents right now." : "Teach the audience one useful thing about persistent agents."}
               rows={3}
               required
             />
           </label>
-          <fieldset className="schedule-responsibility">
+          {runNowMode && <p className="now-run-note">Jenny will evaluate this in the current moment. She may publish, wait for review, or choose NO_OP. Nothing is added to the calendar.</p>}
+          {!runNowMode && <fieldset className="schedule-responsibility">
             <legend>Responsibility</legend>
             <label className={responsibility === "consider" ? "selected" : ""}><input type="radio" name="schedule-responsibility" checked={responsibility === "consider"} onChange={() => setResponsibility("consider")} /><span><strong>Consider</strong><small>{presenceName} may reasonably choose not to act.</small></span></label>
             <label className={responsibility === "assign" ? "selected" : ""}><input type="radio" name="schedule-responsibility" checked={responsibility === "assign"} onChange={() => setResponsibility("assign")} /><span><strong>Assign</strong><small>{presenceName} is responsible for completing the outcome.</small></span></label>
-          </fieldset>
-          <div className="when-field">
+          </fieldset>}
+          {!runNowMode && <div className="when-field">
             <span className="schedule-field-label">When</span>
             <div className="when-field-controls">
               <label>
@@ -4216,8 +4241,8 @@ function ScheduleView({
                 />
               </label>
             </div>
-          </div>
-          <label>
+          </div>}
+          {!runNowMode && <label>
             Objective
             <select
               aria-label="Objective"
@@ -4229,8 +4254,8 @@ function ScheduleView({
               <option value="education">Education</option>
               <option value="reflection">Reflection</option>
             </select>
-          </label>
-          <div className="timing-options">
+          </label>}
+          {!runNowMode && <div className="timing-options">
             <button
               type="button"
               className="timing-toggle"
@@ -4266,9 +4291,9 @@ function ScheduleView({
                 )}
               </fieldset>
             )}
-          </div>
-          <Button type="submit" variant="secondary">
-            <Check size={14} /> {responsibility === "assign" ? "Review assignment" : editingSlot ? "Save changes" : "Save standing intent"}
+          </div>}
+          <Button type="submit" variant="secondary" disabled={runNowBusy}>
+            {runNowMode ? <><Play size={14} /> Run now</> : <><Check size={14} /> {responsibility === "assign" ? "Review assignment" : editingSlot ? "Save changes" : "Save standing intent"}</>}
           </Button>
         </form>
       )}
