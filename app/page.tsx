@@ -472,6 +472,7 @@ export default function Home() {
   const nativeSyncInFlight = useRef<string | null>(null);
   const calendarRunInFlight = useRef<string | null>(null);
   const playgroundStartInFlight = useRef<string | null>(null);
+  const playgroundClockSyncInFlight = useRef<string | null>(null);
   useEffect(() => {
     const query = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
     query.set("read", Date.now().toString());
@@ -532,8 +533,14 @@ export default function Home() {
     setView(nextView);
     const presence = state?.presence;
     if (nextView !== "playground" || !state?.onboarded || !presence || playgroundStartInFlight.current === presence.id) return;
-    const hasActiveSession = state.playgroundSessions.some((item) => item.presenceId === presence.id && item.status === "active");
-    if (hasActiveSession) return;
+    const activeSession = state.playgroundSessions.find((item) => item.presenceId === presence.id && item.status === "active");
+    if (activeSession) {
+      if (activeSession.virtualTimeMode !== "manual" && Math.abs(Date.now() - new Date(activeSession.virtualNow).getTime()) >= 60_000 && playgroundClockSyncInFlight.current !== activeSession.id) {
+        playgroundClockSyncInFlight.current = activeSession.id;
+        void mutate({ type: "syncPlaygroundTime", sessionId: activeSession.id }).finally(() => { playgroundClockSyncInFlight.current = null; });
+      }
+      return;
+    }
     playgroundStartInFlight.current = presence.id;
     void mutate({ type: "startPlayground", presenceId: presence.id, source: "fresh" }).finally(() => {
       playgroundStartInFlight.current = null;
@@ -542,7 +549,14 @@ export default function Home() {
   useEffect(() => {
     const presence = state?.presence;
     if (view !== "playground" || !state?.onboarded || !presence || playgroundStartInFlight.current === presence.id) return;
-    if (state.playgroundSessions.some((item) => item.presenceId === presence.id && item.status === "active")) return;
+    const activeSession = state.playgroundSessions.find((item) => item.presenceId === presence.id && item.status === "active");
+    if (activeSession) {
+      if (activeSession.virtualTimeMode !== "manual" && Math.abs(Date.now() - new Date(activeSession.virtualNow).getTime()) >= 60_000 && playgroundClockSyncInFlight.current !== activeSession.id) {
+        playgroundClockSyncInFlight.current = activeSession.id;
+        void mutate({ type: "syncPlaygroundTime", sessionId: activeSession.id }).finally(() => { playgroundClockSyncInFlight.current = null; });
+      }
+      return;
+    }
     const timer = window.setTimeout(() => {
       if (playgroundStartInFlight.current === presence.id) return;
       playgroundStartInFlight.current = presence.id;

@@ -535,7 +535,7 @@ export function startPlaygroundSession(source: OpenPresenceState, presenceId?: s
   if (!presence) throw new Error("Choose a Presence before starting Playground.");
   const environment = sandboxEnvironmentFor(state, presence);
   const timestamp = now();
-  const session: PlaygroundSession = { id: id("session"), environmentId: environment.id, presenceId: presence.id, channelId: presence.channel, source: sourceType, status: "active", virtualNow: timestamp, createdAt: timestamp, updatedAt: timestamp, evaluatedSlotIds: [], judgedObjectIds: [] };
+  const session: PlaygroundSession = { id: id("session"), environmentId: environment.id, presenceId: presence.id, channelId: presence.channel, source: sourceType, status: "active", virtualNow: timestamp, virtualTimeMode: "realtime", createdAt: timestamp, updatedAt: timestamp, evaluatedSlotIds: [], judgedObjectIds: [] };
   state.playgroundSessions.unshift(session);
   state.sandboxEnvironments = state.sandboxEnvironments.map((item) => item.id === environment.id ? { ...item, status: "active", updatedAt: timestamp } : item);
   state.events.unshift(event("system", "Playground session started", `${channelName(presence.channel)} is simulated. ${presence.name} is using the real Agent runtime in an isolated world.`, "positive", { presenceId: presence.id }));
@@ -653,8 +653,22 @@ export function advanceSandboxTime(source: OpenPresenceState, sessionId: string,
   const session = sandboxSessionFor(state, sessionId);
   const safeMinutes = Math.max(-24 * 60, Math.min(30 * 24 * 60, Math.round(minutes)));
   session.virtualNow = new Date(new Date(session.virtualNow).getTime() + safeMinutes * 60_000).toISOString();
+  session.virtualTimeMode = "manual";
   session.updatedAt = now();
   state.events.unshift({ ...event("system", "Sandbox time moved", `${safeMinutes >= 0 ? "+" : ""}${safeMinutes} minutes · ${new Date(session.virtualNow).toLocaleString("en", { dateStyle: "medium", timeStyle: "short" })}`, "neutral", { presenceId: session.presenceId }), sessionId });
+  return state;
+}
+
+export function syncPlaygroundTime(source: OpenPresenceState, sessionId: string) {
+  const state = cloneState(source);
+  const session = sandboxSessionFor(state, sessionId);
+  if (session.virtualTimeMode === "manual") return state;
+  const currentTime = new Date().getTime();
+  const virtualTime = new Date(session.virtualNow).getTime();
+  if (Number.isFinite(virtualTime) && Math.abs(currentTime - virtualTime) < 60_000) return state;
+  const timestamp = now();
+  session.virtualNow = timestamp;
+  session.updatedAt = timestamp;
   return state;
 }
 
@@ -706,7 +720,7 @@ export function resetPlaygroundSession(source: OpenPresenceState, sessionId: str
   state.assignments = state.assignments.filter((item) => item.sessionId !== sessionId);
   state.actions = state.actions.filter((item) => item.sessionId !== sessionId);
   state.events = state.events.filter((item) => item.sessionId !== sessionId);
-  state.playgroundSessions = state.playgroundSessions.map((item) => item.id === sessionId ? { ...item, status: "active", virtualNow: timestamp, updatedAt: timestamp, evaluatedSlotIds: [], judgedObjectIds: [] } : item);
+  state.playgroundSessions = state.playgroundSessions.map((item) => item.id === sessionId ? { ...item, status: "active", virtualNow: timestamp, virtualTimeMode: "realtime" as const, updatedAt: timestamp, evaluatedSlotIds: [], judgedObjectIds: [] } : item);
   state.sandboxEnvironments = state.sandboxEnvironments.map((item) => item.id === environmentId ? { ...item, status: "active", updatedAt: timestamp } : item);
   state.events.unshift({ ...event("system", "Fresh Sandbox account ready", "The simulated account has been refreshed for a new rehearsal.", "positive", { presenceId: session.presenceId }), sessionId });
   return state;
@@ -877,7 +891,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   const base = initialState();
   const skills = (state.skills ?? []).map((skill) => ({ ...skill, name: skill.name ?? skill.id.replaceAll("-", " ") }));
   const providerConnections = (state.providerConnections ?? []).map((connection) => ({ ...connection, label: providerName(connection.provider) }));
-  const normalized = { ...base, ...state, agents, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], presence, presences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], calendar, assignments: state.assignments ?? [], watches: state.watches ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, toolBindings: state.toolBindings ?? [], changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], preferenceEvidence: state.preferenceEvidence ?? [], originalPostRehearsals: state.originalPostRehearsals ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], perceptions: state.perceptions ?? [], skills, agentSkills: state.agentSkills ?? [], contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: state.playgroundSessions ?? [], sandboxActors: state.sandboxActors ?? [], networkSearches: state.networkSearches ?? [], networkIntroductions: state.networkIntroductions ?? [] };
+  const normalized = { ...base, ...state, agents, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], presence, presences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], calendar, assignments: state.assignments ?? [], watches: state.watches ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, toolBindings: state.toolBindings ?? [], changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], preferenceEvidence: state.preferenceEvidence ?? [], originalPostRehearsals: state.originalPostRehearsals ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], perceptions: state.perceptions ?? [], skills, agentSkills: state.agentSkills ?? [], contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: (state.playgroundSessions ?? []).map((session) => ({ ...session, virtualTimeMode: session.virtualTimeMode ?? "realtime" })), sandboxActors: state.sandboxActors ?? [], networkSearches: state.networkSearches ?? [], networkIntroductions: state.networkIntroductions ?? [] };
   migrateLegacyDefaultModel(normalized);
   const pulseTimes = normalized.events.filter((item) => item.title === "Pulse completed").map((item) => item.time).sort().reverse();
   const priorPulseAt = pulseTimes[1];
@@ -1414,6 +1428,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     case "runPulse": { const pulsePresence = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence; if (!pulsePresence || pulsePresence.status !== "live") return state; return state.nativeConnections.some((connection) => connection.presenceId === pulsePresence.id && connection.channelId === "x" && connection.status === "connected") ? state : runAttentionCycle(state, pulsePresence); }
     case "syncNativeX": return state;
     case "startPlayground":
+    case "syncPlaygroundTime":
     case "resetPlayground":
     case "inspectSandboxMedia":
     case "addSandboxEvent":

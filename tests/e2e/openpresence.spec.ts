@@ -853,7 +853,7 @@ test("Playground Presence chip keeps identity separate from channel context", as
   await expect(page.locator(".playground-title-row .playground-world-label")).toHaveCount(0);
 });
 
-test("Playground rehearses a Presence inside an isolated simulated world", async ({ page }) => {
+test("Playground rehearses a Presence inside an isolated simulated world", async ({ page, request }) => {
   await createAgent(page);
   await navigate(page, "Playground");
   await expect(page.getByRole("heading", { name: "Playground", exact: true })).toBeVisible();
@@ -903,6 +903,36 @@ test("Playground rehearses a Presence inside an isolated simulated world", async
   await expect(page.locator(".playground-grid")).toBeVisible();
   await expect(page.locator(".social-card")).toHaveCount(0);
   await expect(page.getByText("Fresh X account", { exact: true })).toBeVisible();
+  const resetState = await (await request.get("/api/state")).json();
+  const resetSession = resetState.playgroundSessions.find((item: { status: string }) => item.status === "active");
+  expect(resetSession.virtualTimeMode).toBe("realtime");
+  expect(Math.abs(Date.now() - new Date(resetSession.virtualNow).getTime())).toBeLessThan(60_000);
+});
+
+test("Playground opens with a current default virtual clock", async ({ page, request }) => {
+  await createAgent(page);
+  await navigate(page, "Playground");
+  const state = await (await request.get("/api/state")).json();
+  const session = state.playgroundSessions.find((item: { status: string }) => item.status === "active");
+  expect(session.virtualTimeMode).toBe("realtime");
+  expect(Math.abs(Date.now() - new Date(session.virtualNow).getTime())).toBeLessThan(60_000);
+  await expect(page.locator(".playground-time")).toContainText("Virtual time");
+});
+
+test("Playground Reset returns virtual time to the current clock", async ({ page, request }) => {
+  await createAgent(page);
+  await navigate(page, "Playground");
+  await page.getByRole("button", { name: "+1h" }).click();
+  const advanced = await (await request.get("/api/state")).json();
+  const advancedSession = advanced.playgroundSessions.find((item: { status: string }) => item.status === "active");
+  expect(advancedSession.virtualTimeMode).toBe("manual");
+
+  await page.getByRole("button", { name: "Reset" }).click();
+  await expect(page.locator(".playground-grid")).toBeVisible();
+  const reset = await (await request.get("/api/state")).json();
+  const resetSession = reset.playgroundSessions.find((item: { status: string }) => item.status === "active");
+  expect(resetSession.virtualTimeMode).toBe("realtime");
+  expect(Math.abs(Date.now() - new Date(resetSession.virtualNow).getTime())).toBeLessThan(60_000);
 });
 
 test("Original Post Rehearsal stays autonomous and records calibration evidence", async ({ page, request }) => {

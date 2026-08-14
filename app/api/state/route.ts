@@ -4,7 +4,7 @@ import { z } from "zod";
 import { readState, saveProviderSecret, writeState } from "@/lib/db";
 import { generateAgentReply, generateAgentSocialDecision, generateAgentSocialEdit, generateAgentSocialJudgment, generatePresenceChatReply } from "@/lib/ai";
 import type { AgentSocialDecision } from "@/lib/ai";
-import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntroduction, beginOriginalPostRehearsal, cleanSandboxDraft, completeNativeExecution, completeOriginalPostRehearsal, confirmAutoMode, declineSandboxIntroduction, deliverSandboxExecution, expireSandboxIntents, failNativeExecution, finishPulse, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, identityLeakageReason, isExplicitXPostRequest, isLaunchCandidate, isLowInformationCue, markCalendarSlotEvaluated, markInboundJudged, markNativeConnectionNeedsAttention, publicSelfGuidance, recordPreferenceEvidence, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, resetPlaygroundSession, stateForContext, startPlaygroundSession } from "@/lib/runtime";
+import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntroduction, beginOriginalPostRehearsal, cleanSandboxDraft, completeNativeExecution, completeOriginalPostRehearsal, confirmAutoMode, declineSandboxIntroduction, deliverSandboxExecution, expireSandboxIntents, failNativeExecution, finishPulse, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, identityLeakageReason, isExplicitXPostRequest, isLaunchCandidate, isLowInformationCue, markCalendarSlotEvaluated, markInboundJudged, markNativeConnectionNeedsAttention, publicSelfGuidance, recordPreferenceEvidence, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, resetPlaygroundSession, stateForContext, startPlaygroundSession, syncPlaygroundTime } from "@/lib/runtime";
 import { publishXPost, readNativeXCredentials } from "@/lib/x";
 import { reconcileNativeX } from "@/lib/native-x";
 import type { Asset, MirrorObject, OpenPresenceState, Operation, RuntimeOperation, SandboxAssetInput } from "@/lib/types";
@@ -694,6 +694,7 @@ const operation: z.ZodType<RuntimeOperation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("approveSandboxIntroduction"), id: z.string().min(1) }),
   z.object({ type: z.literal("declineSandboxIntroduction"), id: z.string().min(1) }),
   z.object({ type: z.literal("startPlayground"), presenceId: z.string().min(1).optional(), source: z.enum(["fresh", "scenario", "replay"]).optional() }),
+  z.object({ type: z.literal("syncPlaygroundTime"), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("resetPlayground"), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("removeSandboxObject"), sessionId: z.string().min(1), objectId: z.string().min(1) }),
   z.object({ type: z.literal("inspectSandboxMedia"), sessionId: z.string().min(1), objectId: z.string().min(1) }),
@@ -785,6 +786,11 @@ export async function POST(request: Request) {
     }
     if (parsed.type === "startPlayground") {
       const next = startPlaygroundSession(current, parsed.presenceId, parsed.source ?? "fresh");
+      writeState(next);
+      return NextResponse.json(next);
+    }
+    if (parsed.type === "syncPlaygroundTime") {
+      const next = syncPlaygroundTime(current, parsed.sessionId);
       writeState(next);
       return NextResponse.json(next);
     }
