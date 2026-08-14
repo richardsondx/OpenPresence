@@ -29,6 +29,10 @@ test("Playground Assignments use the Sandbox session without requiring a Sandbox
   await page.getByRole("button", { name: /Give an Assignment/ }).click();
   await page.getByLabel("Assignment instruction").fill("Produce 2 original X posts about useful agent ideas. Choose your own angles and do not repeat yourself.");
   await page.getByRole("button", { name: "Review assignment", exact: true }).click();
+  const review = page.locator(".assignment-review");
+  await expect(review.getByText("Agent decides how", { exact: true })).toBeVisible();
+  await expect(review).toContainText("Topics · thesis · evidence · format · wording · timing strategy");
+  await expect(review).not.toContainText("Jenny decides");
   await expect(page.getByRole("button", { name: "Start rehearsal", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Start rehearsal", exact: true }).click();
   await expect(page.locator(".assignment-progress-panel")).toBeVisible();
@@ -45,8 +49,25 @@ test("Schedule can cancel a draft Assignment and keeps its cancelled history", a
   const assignmentRow = page.locator(".schedule-assignment-row").filter({ hasText: "Produce 3 original X posts about useful agent ideas." });
   await expect(assignmentRow).toContainText("draft");
   await expect(assignmentRow.getByRole("button", { name: "Cancel", exact: true })).toBeVisible();
+  await expect(assignmentRow.getByText("ASSIGN", { exact: true })).toHaveCount(0);
   page.once("dialog", (dialog) => dialog.accept());
   await assignmentRow.getByRole("button", { name: "Cancel", exact: true }).click();
   await expect(assignmentRow).toContainText("cancelled");
   await expect(assignmentRow.getByRole("button", { name: "Cancel", exact: true })).toHaveCount(0);
+});
+
+test("Schedule preserves an Assignment's exact timing", async ({ page }) => {
+  await createAgent(page);
+  await page.getByRole("button", { name: "Schedule", exact: true }).click();
+  await page.getByRole("button", { name: "Add intent", exact: true }).click();
+  await page.getByRole("radio", { name: /Assign Jenny is responsible/ }).check();
+  await page.getByLabel("What should Jenny do?", { exact: true }).fill("Produce 1 original X post about a useful AI-agent decision.");
+  await page.getByLabel("Day", { exact: true }).selectOption({ label: "Thursday" });
+  await page.getByLabel("Time", { exact: true }).fill("23:35");
+  await page.getByRole("button", { name: /Timing options/ }).click();
+  await page.getByRole("radio", { name: /Exact time/ }).check();
+  await page.getByRole("button", { name: "Review assignment", exact: true }).click();
+
+  const assignmentRow = page.locator(".schedule-assignment-row").filter({ hasText: "Produce 1 original X post about a useful AI-agent decision." });
+  await expect(assignmentRow).toContainText("Thursday at 23:35 · exact time · 0 / 1 verified · draft");
 });

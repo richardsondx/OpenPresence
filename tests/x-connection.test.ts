@@ -75,6 +75,15 @@ describe("native X connection", () => {
     vi.unstubAllGlobals();
   });
 
+  it("preserves the exact Teach acknowledgement for a recognized writing preference", async () => {
+    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "sendMessage", content: "When writing posts (not replies), write one sentence per line with a blank line between sentences." }), headers: { "content-type": "application/json" } }));
+    expect(response.status).toBe(200);
+    const body = await response.json();
+    expect(body.messages.at(-1).content).toContain("one sentence per paragraph");
+    expect(body.messages.at(-1).content).toContain("Replies can stay normally formatted");
+    expect(body.proposals[0].file).toBe("TASTE");
+  });
+
   it("explains provider setup instead of pretending to answer", async () => {
     const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "sendMessage", content: "Hello" }), headers: { "content-type": "application/json" } }));
     expect(response.status).toBe(200);

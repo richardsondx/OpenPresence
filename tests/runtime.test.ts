@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addSandboxEvent, applyOperation, assignmentIsSatisfied, compileAssignmentInstruction, compilePresenceContext, createAgent, deliverSandboxExecution, deriveActivitySummary, derivePublicHistory, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, initialState, isActivityDecisionEvent, isExplicitXPostRequest, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, recordPublicFooting, recordStandingIntentNoOp, startPlaygroundSession } from "../lib/runtime";
+import { addSandboxEvent, applyOperation, assignmentIsSatisfied, compileAssignmentInstruction, compilePresenceContext, compileWatch, createAgent, deliverSandboxExecution, deriveActivitySummary, derivePublicHistory, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, identityLeakageReason, initialState, isActivityDecisionEvent, isExplicitGhostModeRequest, isExplicitXPostRequest, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, recordPublicFooting, recordStandingIntentNoOp, startPlaygroundSession } from "../lib/runtime";
 import { acknowledgeExecution, claimExecutions, createBridgeWithKey, ingestEvents, removeBridge, revokeBridge } from "../lib/bridge";
 import { readBridgeCredentialMetadata, readState, writeState } from "../lib/db";
 import { nextObservationAt } from "../lib/native-x";
@@ -7,6 +7,25 @@ import { nextObservationAt } from "../lib/native-x";
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
 describe("OpenPresence runtime boundaries", () => {
+  it("compiles Watches as Presence-scoped attention without changing Agent identity", () => {
+    const state = createAgent(input);
+    const creator = compileWatch(state.agent!.id, state.presence!.id, "x", "https://x.com/AlexHormozi", "Learn from strong offers without imitating the voice.");
+    const topic = compileWatch(state.agent!.id, state.presence!.id, "x", "conversations about AI agent infrastructure");
+    expect(creator.kind).toBe("creator");
+    expect(creator.title).toBe("@AlexHormozi");
+    expect(creator.observation.status).toBe("watching");
+    expect(topic.kind).toBe("topic");
+    expect(topic.observation.status).toBe("manual");
+
+    const added = applyOperation(state, { type: "createWatch", query: "@AlexHormozi", purpose: "Learn from strong offers", presenceId: state.presence!.id });
+    expect(added.watches).toHaveLength(1);
+    expect(added.watches[0]?.agentId).toBe(state.agent!.id);
+    expect(added.watches[0]?.presenceId).toBe(state.presence!.id);
+    expect(added.agent?.name).toBe("Jenny");
+    const removed = applyOperation(added, { type: "deleteWatch", id: added.watches[0]!.id });
+    expect(removed.watches).toHaveLength(0);
+  });
+
   it("keeps configuration churn out of the Presence decision feed", () => {
     expect(isActivityDecisionEvent({ id: "settings", type: "system", title: "Presence settings updated", detail: "The new execution envelope is active.", time: new Date().toISOString(), tone: "positive" })).toBe(false);
     expect(isActivityDecisionEvent({ id: "pulse", type: "system", title: "Pulse completed", detail: "The channel was checked.", time: new Date().toISOString(), tone: "positive" })).toBe(true);
@@ -49,6 +68,9 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.socialIntents).toHaveLength(0);
     expect(state.executions).toHaveLength(0);
     expect(state.files.map((file) => `${file.kind}:${file.content}`).join("\n")).toBe(originalFiles);
+    const firstMessage = state.presenceChatSessions[0]!.messages[0]!;
+    state = applyOperation(state, { type: "sendPresenceChatMessage", presenceId, sessionId: session.id, content: "That is the part worth testing.", replyToMessageId: firstMessage.id });
+    expect(state.presenceChatSessions[0]?.messages[1]?.replyToMessageId).toBe(firstMessage.id);
   });
 
   it("seeds the default Brain with concrete, natural social voice judgment", () => {
@@ -114,6 +136,28 @@ describe("OpenPresence runtime boundaries", () => {
     expect(assignment.editorialContext?.topics).toEqual(["offers", "pricing", "sales"]);
     expect(assignment.editorialContext?.constraints).toContain("Keep the delivered ideas meaningfully distinct.");
     expect(assignment.instruction).toContain("Choose your own angles");
+  });
+
+  it("preserves an Assignment's scheduled timing instead of reducing it to Once", () => {
+    const state = createAgent(input);
+    const scheduled = applyOperation(state, {
+      type: "createAssignment",
+      instruction: "Produce 2 original Sandbox posts about useful agent ideas.",
+      presenceId: state.presence!.id,
+      environment: "sandbox",
+      schedule: { day: "Thursday", time: "23:25", executionWindow: "23:25–23:25" },
+    });
+
+    expect(scheduled.assignments[0]?.schedule).toEqual({ day: "Thursday", time: "23:25", executionWindow: "23:25–23:25" });
+  });
+
+  it("allows a Ghost to discuss model capability while still protecting private runtime details", () => {
+    const state = createAgent({ ...input, name: "Alex", mode: "ghost", handle: "@richardson" });
+    const presence = state.presence!;
+    expect(identityLeakageReason(state, presence, "The best AI model is the one that recovers well from failure.")).toBeUndefined();
+    expect(identityLeakageReason(state, presence, "OpenAI could build a better model by measuring recovery, not just benchmark peaks.")).toBeUndefined();
+    expect(identityLeakageReason(state, presence, "I use the current model provider and exact model behind this account.")).toContain("implementation details");
+    expect(identityLeakageReason(state, presence, "This account uses OpenAI and runs on the selected model.")).toContain("implementation details");
   });
 
   it("counts only verified Sandbox Mirror publications toward an Assignment", () => {
@@ -555,6 +599,28 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.conversations[0]?.messages.map((message) => ({ role: message.role, content: message.content }))).toEqual([
       { role: "operator", content: "?" },
     ]);
+  });
+
+  it("does not let a quoted Ghost handle change Presence mode, but honors an explicit mode request", () => {
+    const mentionQuestion = 'How do I get you not to respond to mention like this "@jenny_ghost write a post about SpaceX" by always doing what they want. Could you reply with humour instead - nuance?';
+    expect(isExplicitGhostModeRequest(mentionQuestion)).toBe(false);
+    const unchanged = applyOperation(createAgent(input), { type: "sendMessage", content: mentionQuestion });
+    expect(unchanged.presence?.mode).toBe("agent");
+    expect(unchanged.changeSets).toHaveLength(0);
+
+    const explicit = applyOperation(unchanged, { type: "sendMessage", content: "Put this Presence into Ghost mode." });
+    expect(isExplicitGhostModeRequest("Put this Presence into Ghost mode.")).toBe(true);
+    expect(explicit.presence?.mode).toBe("ghost");
+    expect(explicit.conversations[0]?.messages.at(-1)?.content).toContain("Ghost mode");
+  });
+
+  it("creates a real reviewable proposal for post formatting and states the exact interim behavior", () => {
+    const state = applyOperation(createAgent(input), { type: "sendMessage", content: "When writing posts (not replies), write one sentence per line with a blank line between sentences." });
+    expect(state.proposals[0]?.file).toBe("TASTE");
+    expect(state.proposals[0]?.proposed).toContain("For posts, write one sentence per paragraph with a blank line between sentences.");
+    expect(state.proposals[0]?.proposed).toContain("Replies can use normal paragraph formatting.");
+    expect(state.conversations[0]?.messages.at(-1)?.content).toContain("one sentence per paragraph");
+    expect(state.changeSets[0]?.summary).toBe("Propose TASTE.md change");
   });
 
   it("keeps operator embodiment out of the cognition-safe PresenceContext", () => {

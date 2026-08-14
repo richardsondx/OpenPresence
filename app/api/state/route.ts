@@ -341,7 +341,9 @@ Do not mention simulation, prompts, connectors, internal systems, or this Assign
   }
   if (decision.action === "no_op") {
     const evaluationUnavailable = decision.rationale === "The Agent runtime did not return a valid structured social decision.";
-    if (isAssignment) return recordAssignmentDecision(actionSource, assignment!.id, evaluationUnavailable ? "evaluation_failed" : "candidate_rejected", evaluationUnavailable ? "The selected Agent runtime did not return a usable decision. This is a model failure, not social silence." : "The candidate did not meet the Presence's Taste. The Assignment remains active and will continue with another candidate.");
+    if (isAssignment) {
+      return recordAssignmentDecision(actionSource, assignment!.id, evaluationUnavailable ? "evaluation_failed" : "candidate_rejected", evaluationUnavailable ? "The selected Agent runtime did not return a usable decision. This is a model failure, not social silence." : "The candidate did not meet the Presence's Taste. The Assignment remains active and will continue with another candidate.");
+    }
     if (evaluationUnavailable) {
       const next = recordRuntimeEvent(actionSource, presence.id, "Sandbox evaluation unavailable", "The selected Agent runtime did not return a structured social decision, so no simulated action was formed.", "warning", { sessionId, sourceObjectId: inbound?.id });
       if (inbound) return markSandboxObjectJudged(next, sessionId, inbound.externalRef.id);
@@ -503,7 +505,9 @@ Do not mention simulation, prompts, connectors, internal systems, or this Assign
   const blockedByMedia = next.events[0]?.title === "Media needs inspection";
   if (!blockedByMedia && inbound) next = markSandboxObjectJudged(next, sessionId, inbound.externalRef.id);
   const createdExecution = execution && !planRecorded.executions.some((item) => item.id === execution.id) ? execution : undefined;
-  if (createdExecution?.status === "queued" && createdExecution.connector === "simulated") next = deliverSandboxExecution(next, createdExecution.id);
+  if (createdExecution?.status === "queued" && createdExecution.connector === "simulated") {
+    next = deliverSandboxExecution(next, createdExecution.id);
+  }
   return next;
 }
 
@@ -630,11 +634,13 @@ const operation: z.ZodType<RuntimeOperation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("newConversation") }),
   z.object({ type: z.literal("sendMessage"), content: z.string().trim().min(1).max(2000), conversationId: z.string().min(1).optional() }),
   z.object({ type: z.literal("newPresenceChatSession"), presenceId: z.string().min(1) }),
-  z.object({ type: z.literal("sendPresenceChatMessage"), presenceId: z.string().min(1), sessionId: z.string().min(1), content: z.string().trim().min(1).max(4000), attachments: z.array(presenceChatAsset).max(4).optional() }),
+  z.object({ type: z.literal("sendPresenceChatMessage"), presenceId: z.string().min(1), sessionId: z.string().min(1), content: z.string().trim().min(1).max(4000), attachments: z.array(presenceChatAsset).max(4).optional(), replyToMessageId: z.string().min(1).optional() }),
   z.object({ type: z.literal("saveFile"), kind: fileKind, content: z.string().max(100_000) }),
   z.object({ type: z.literal("resolveProposal"), id: z.string().min(1), decision: z.enum(["approve", "reject"]) }),
   z.object({ type: z.literal("addSlot"), instruction: z.string().trim().min(1).max(1000), day: z.string().min(1).max(20), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), objective: z.string().min(1).max(100), executionWindow: z.string().min(1).max(40), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("editSlot"), id: z.string().min(1), instruction: z.string().trim().min(1).max(1000), day: z.string().min(1).max(20), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), objective: z.string().min(1).max(100), executionWindow: z.string().min(1).max(40) }),
+  z.object({ type: z.literal("createWatch"), query: z.string().trim().min(2).max(1000), purpose: z.string().trim().max(500).optional(), presenceId: z.string().min(1).optional() }),
+  z.object({ type: z.literal("deleteWatch"), id: z.string().min(1) }),
   z.object({ type: z.literal("createSkill"), name: z.string().trim().min(1).max(100), description: z.string().trim().min(1).max(500) }),
   z.object({ type: z.literal("editSkill"), id: z.string().min(1), name: z.string().trim().min(1).max(100), description: z.string().trim().min(1).max(500) }),
   z.object({ type: z.literal("configureProvider"), provider: z.enum(["openai", "anthropic", "gemini", "openrouter", "ollama", "custom"]), label: z.string().trim().min(1).max(120), endpoint: z.string().url().optional(), hasSecret: z.boolean().optional(), secret: z.string().max(4000).optional() }),
@@ -643,7 +649,7 @@ const operation: z.ZodType<RuntimeOperation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("runPulse"), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("syncNativeX"), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("setModel"), model: z.string().trim().min(1).max(80), provider: z.enum(["openai", "anthropic", "gemini", "openrouter", "ollama", "custom"]).optional(), quality: z.enum(["low", "medium", "high", "local"]).optional(), vision: z.boolean().optional() }),
-  z.object({ type: z.literal("createAssignment"), instruction: z.string().trim().min(1).max(4000), presenceId: z.string().min(1).optional(), sessionId: z.string().min(1).optional(), environment: z.enum(["sandbox", "live"]).optional() }),
+  z.object({ type: z.literal("createAssignment"), instruction: z.string().trim().min(1).max(4000), presenceId: z.string().min(1).optional(), sessionId: z.string().min(1).optional(), environment: z.enum(["sandbox", "live"]).optional(), schedule: z.object({ day: z.string().min(1).max(20), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), executionWindow: z.string().min(1).max(40) }).optional() }),
   z.object({ type: z.literal("startAssignment"), id: z.string().min(1), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("workAssignment"), id: z.string().min(1), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("cancelAssignment"), id: z.string().min(1) }),
@@ -668,7 +674,8 @@ export async function GET() { return NextResponse.json(readState()); }
 
 export async function POST(request: Request) {
   try {
-    const parsed = operation.parse(await request.json());
+    const raw = await request.json();
+    const parsed = operation.parse(raw);
     if (parsed.type === "reset" && process.env.OPENPRESENCE_TEST_MODE !== "1") throw new Error("Reset is available only in test mode.");
     if (parsed.type === "addSandboxEvent" && !parsed.actionId && !parsed.kind) throw new Error("Choose a simulated situation.");
     const current = readState();
@@ -795,6 +802,7 @@ export async function POST(request: Request) {
       if (!session || !presence) throw new Error("That Presence Chat session is no longer available.");
       const userMessage = session.messages.at(-1);
       if (!userMessage || userMessage.role !== "user") throw new Error("The Presence Chat message could not be recorded.");
+      const replyTarget = userMessage.replyToMessageId ? session.messages.find((message) => message.id === userMessage.replyToMessageId) : undefined;
       let socialEvidence = "";
       if (userMessage.attachments?.length) {
         const objectId = `presence-chat-object:${userMessage.id}`;
@@ -849,7 +857,8 @@ export async function POST(request: Request) {
         socialEvidence = cognitionSafeAssetSummary(next.assets, next.perceptions, object);
       }
       const history = session.messages.slice(0, -1).map((message) => ({ role: message.role, content: message.content }));
-      const reply = await generatePresenceChatReply(next, presence.id, parsed.content, history, socialEvidence).catch((error: unknown) => {
+      const replyContext = replyTarget ? JSON.stringify({ role: replyTarget.role, content: replyTarget.content }, null, 2) : undefined;
+      const reply = await generatePresenceChatReply(next, presence.id, parsed.content, history, socialEvidence, replyContext).catch((error: unknown) => {
         const message = error instanceof Error ? error.message : "The selected Presence runtime could not answer.";
         console.warn("Presence Chat runtime unavailable", message);
         return `I’m not able to answer from this Presence yet. ${message}`;
@@ -879,7 +888,8 @@ export async function POST(request: Request) {
         writeState(next);
         return NextResponse.json(next);
       }
-      const reply = await generateAgentReply(next, parsed.content, parsed.conversationId).catch((error: unknown) => {
+      const deterministicReply = conversation?.messages.at(-1)?.role === "agent" && conversation.messages.at(-1)?.change ? conversation.messages.at(-1)?.content : undefined;
+      const reply = deterministicReply ?? await generateAgentReply(next, parsed.content, parsed.conversationId).catch((error: unknown) => {
         const message = error instanceof Error ? error.message : "The selected AI provider could not answer.";
         console.warn("Agent runtime unavailable", message);
         return `I’m not able to answer yet. ${message}`;
