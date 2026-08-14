@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { applyOperation } from "./runtime";
+import { applyOperation, blockExecutionForLanguage, languageValidationForExecution } from "./runtime";
 import { authenticateBridgeKey, deleteBridgeCredential, issueBridgeKey, readBridgeCredentialMetadata, readState, revokeBridgeKey, writeState } from "./db";
 import type { Bridge, Execution, LiveEvent, MirrorObject, OpenPresenceState, Outcome } from "./types";
 import { bridgeAdapterStatus } from "./bridge-contract";
@@ -120,7 +120,16 @@ function expireIfNeeded(state: OpenPresenceState, execution: Execution) {
 
 export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput>) {
   const state = readState(); const current = state.bridges.find((item) => item.id === bridge.id); if (!current) throw new Error("Bridge not found"); const now = Date.now(); const expiresAt = new Date(now + 120_000).toISOString();
-  const claimed = state.executions.filter((execution) => execution.bridgeId === bridge.id && execution.status === "queued").slice(0, input.limit).filter((execution) => !expireIfNeeded(state, execution));
+  const candidates = state.executions.filter((execution) => execution.bridgeId === bridge.id && execution.status === "queued").slice(0, input.limit).filter((execution) => !expireIfNeeded(state, execution));
+  const claimed: Execution[] = [];
+  for (const execution of candidates) {
+    if (!languageValidationForExecution(state, execution).valid) {
+      const blocked = blockExecutionForLanguage(state, execution.id);
+      Object.assign(state, blocked);
+      continue;
+    }
+    claimed.push(execution);
+  }
   for (const execution of claimed) { execution.status = "claimed"; execution.attempts += 1; execution.lease = { executorId: input.executorId, claimedAt: new Date(now).toISOString(), expiresAt }; execution.updatedAt = timestamp(); }
   touchBridge(state, current); writeState(state); return { state, executions: claimed };
 }
@@ -136,7 +145,18 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
   const state = readState(); const execution = state.executions.find((item) => item.id === executionId && item.bridgeId === bridge.id);
   if (!execution) throw new Error("Execution not found");
   if (execution.status === "succeeded") { if (execution.externalRef?.id !== input.externalRef.id || execution.externalRef?.type !== input.externalRef.type) throw new Error("Execution already acknowledged with a different external reference"); return { state, execution }; }
-  leasedExecution(state, bridge, executionId, input.executorId); execution.status = "succeeded"; execution.externalRef = input.externalRef; execution.executedAt = input.observedAt ?? timestamp(); execution.updatedAt = timestamp(); execution.lease = undefined;
+  leasedExecution(state, bridge, executionId, input.executorId);
+  if (!languageValidationForExecution(state, execution).valid) {
+    execution.status = "blocked";
+    execution.failure = { code: "LANGUAGE_POLICY_VIOLATION", message: "Delivery blocked by the current Never use language policy.", retryable: false };
+    execution.lease = undefined;
+    execution.updatedAt = timestamp();
+    state.events.unshift(bridgeEvent(state, "Language policy blocked delivery", execution.failure.message, "warning", execution.id));
+    touchBridge(state, bridge);
+    writeState(state);
+    return { state, execution };
+  }
+  execution.status = "succeeded"; execution.externalRef = input.externalRef; execution.executedAt = input.observedAt ?? timestamp(); execution.updatedAt = timestamp(); execution.lease = undefined;
   const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, status: "succeeded", observedAt: timestamp(), metrics: {}, evidence: [input.externalRef] }; state.outcomes.unshift(outcome); state.events.unshift(bridgeEvent(state, "Bridge execution completed", "The external executor acknowledged the action.", "positive", execution.id)); touchBridge(state, bridge); writeState(state); return { state, execution };
 }
 

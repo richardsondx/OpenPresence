@@ -1,5 +1,6 @@
-import type { ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, Asset, Assignment, AssignmentQuantityMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, FileKind, FileProposal, GhostProfile, JsonValue, LiveEvent, OpenPresenceState, Operation, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, SandboxAssetInput, SocialAssetKind, SocialIntent, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind } from "./types";
+import type { ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, Asset, Assignment, AssignmentQuantityMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, FileKind, FileProposal, GhostProfile, JsonValue, LiveEvent, OpenPresenceState, Operation, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, SandboxAssetInput, SocialAssetKind, SocialIntent, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, LanguagePolicy } from "./types";
 import { CHANNEL_CAPABILITIES, CHANNEL_EXTENSIONS, simulationForChannel } from "./types";
+import { effectiveLanguagePolicy, EMPTY_LANGUAGE_POLICY, normalizeLanguagePolicy, validateLanguage } from "./language-policy";
 import { createAssetPerception, createUninterpretedPerception, hasUsablePerception, mediaRequiresReview, perceptionRequirement } from "./perception";
 import { isTestRuntime } from "./test-runtime";
 
@@ -468,7 +469,7 @@ function makePresence(input: CreatePresenceInput, displayName = input.name?.trim
   const publicSelf = defaultPublicSelf(name, input.mode);
   const context: PresenceContext = { presenceId, channel: input.channel, publicIdentity: { displayName: name, handle: input.handle.trim(), mode: input.mode }, publicSelf, brief, audienceContext: brief.audience, voiceAdaptation: `Adapt the Agent's point of view to ${channelName(input.channel)} without flattening it.`, availableAffordances: capabilities.map((item) => item.id) };
   const connectionMode: PresenceConnectionMode = input.connectionMode ?? (input.channel === "x" ? "native" : "bridge");
-  const presence = { id: presenceId, channel: input.channel, name, handle: input.handle.trim(), mode: input.mode, status: "live" as const, accent: input.accent, capabilities, execution, executionEnvelope: makeEnvelope(presenceId, capabilities, execution), context, brief, publicSelf, mediaPerceptionPolicy: input.mode === "ghost" ? "review-uncertain" as const : "use-judgment" as const, ghostProfile: input.mode === "ghost" ? defaultGhostProfile() : undefined, pacing: "recommended" as const, attentionIntervalMinutes: 5, quietHours: { enabled: false, start: "22:00", end: "07:00" }, accountHealth: "healthy" as const, environment: connectionMode === "sandbox" ? "sandbox" as const : "live" as const, connectionMode };
+  const presence = { id: presenceId, channel: input.channel, name, handle: input.handle.trim(), mode: input.mode, status: "live" as const, accent: input.accent, capabilities, execution, executionEnvelope: makeEnvelope(presenceId, capabilities, execution), context, brief, publicSelf, mediaPerceptionPolicy: input.mode === "ghost" ? "review-uncertain" as const : "use-judgment" as const, languagePolicy: { ...EMPTY_LANGUAGE_POLICY }, ghostProfile: input.mode === "ghost" ? defaultGhostProfile() : undefined, pacing: "recommended" as const, attentionIntervalMinutes: 5, quietHours: { enabled: false, start: "22:00", end: "07:00" }, accountHealth: "healthy" as const, environment: connectionMode === "sandbox" ? "sandbox" as const : "live" as const, connectionMode };
   presence.context = compilePresenceContext(presence);
   return presence;
 }
@@ -487,7 +488,7 @@ function defaultModel(agentId: string): AgentModelProfile { return { id: id("mod
 function defaultBindings(agentId: string): AgentToolBinding[] { return ["web.search", "asset.inspect", "chart.render", "channel.execute"].map((toolId) => ({ id: id("binding"), agentId, toolId })); }
 
 export function createAgent(input: CreateAgentInput): OpenPresenceState {
-  const agent = { id: id("agent"), name: input.name.trim(), description: input.description.trim(), audience: input.audience?.trim() || "builders and curious operators", topics: ["AI agents", "software", "useful ideas"], accent: input.accent, glyph: "◉" };
+  const agent = { id: id("agent"), name: input.name.trim(), description: input.description.trim(), audience: input.audience?.trim() || "builders and curious operators", topics: ["AI agents", "software", "useful ideas"], accent: input.accent, glyph: "◉", languagePolicy: { ...EMPTY_LANGUAGE_POLICY } };
   const definitions = builtinChannelDefinitions();
   const presence = makePresence({ channel: "x", handle: input.handle.trim() || `@${agent.name.toLowerCase().replace(/[^a-z0-9]/g, "")}`, mode: input.mode, accent: input.accent, connectionMode: "sandbox" }, agent.name, definitions[0], defaultPresenceBrief(agent));
   const conversation = makeConversation();
@@ -528,6 +529,34 @@ function sandboxSessionFor(state: OpenPresenceState, sessionId: string) {
   const session = state.playgroundSessions.find((item) => item.id === sessionId);
   if (!session) throw new Error("That Playground session no longer exists.");
   return session;
+}
+
+export function executionPublicationText(state: OpenPresenceState, execution: Execution): string {
+  const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
+  const publication = intent?.publicationId ? state.publications.find((item) => item.id === intent.publicationId) : execution.publication;
+  const payload = publication?.payload;
+  return payload && typeof payload === "object" && "text" in payload && typeof payload.text === "string" ? payload.text : "";
+}
+
+export function languageValidationForExecution(state: OpenPresenceState, execution: Execution) {
+  const policy = effectiveLanguagePolicy(state.agent, state.presences.find((item) => item.id === execution.presenceId) ?? state.presence);
+  return validateLanguage(executionPublicationText(state, execution), policy);
+}
+
+export function blockExecutionForLanguage(source: OpenPresenceState, executionId: string) {
+  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  const execution = state.executions.find((item) => item.id === executionId);
+  if (!execution) return state;
+  const result = languageValidationForExecution(state, execution);
+  if (result.valid) return state;
+  execution.status = "blocked";
+  execution.failure = { code: "LANGUAGE_POLICY_VIOLATION", message: "Delivery blocked by Never use: " + result.violations.map((item) => item.literal).join(", ") + ".", retryable: false };
+  execution.reviewReason = "The final expression violates an explicit lexical language policy.";
+  execution.updatedAt = now();
+  const action = state.actions.find((item) => item.executionId === execution.id);
+  if (action) action.status = "failed";
+  state.events.unshift(event("execution", "Language policy blocked delivery", execution.failure.message, "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }));
+  return state;
 }
 
 export function startPlaygroundSession(source: OpenPresenceState, presenceId?: string, sourceType: PlaygroundSession["source"] = "fresh") {
@@ -755,10 +784,13 @@ export function formSandboxIntent(source: OpenPresenceState, input: { sessionId:
     return state;
   }
   const leakageReason = identityLeakageReason(state, presence, input.text);
-  const reviewReason = leakageReason ?? (mediaReviewRequired ? "Attached media remains uncertain and this Presence requires review before acting." : undefined);
-  const status = reviewReason ? "awaiting-review" : executionMode === "auto" ? "queued" : executionMode === "review" ? "awaiting-review" : "awaiting-manual";
+  const languageResult = validateLanguage(input.text, effectiveLanguagePolicy(state.agent, presence));
+  const languageReason = languageResult.valid ? undefined : "The final expression violates an explicit Never use language rule.";
+  const reviewReason = languageReason ?? leakageReason ?? (mediaReviewRequired ? "Attached media remains uncertain and this Presence requires review before acting." : undefined);
+  const status = languageReason ? "blocked" as const : reviewReason ? "awaiting-review" as const : executionMode === "auto" ? "queued" as const : executionMode === "review" ? "awaiting-review" as const : "awaiting-manual" as const;
   const execution: Execution = { id: id("execution"), socialIntentId: intent.id, presenceId: presence.id, affordance: input.affordance, mode: executionMode, status, attempts: 0, bridgeId: `sandbox:${session.environmentId}`, connector: "simulated", idempotencyKey: `sandbox:${session.id}:${intent.id}`, target: input.target, publication, reviewReason, createdAt: timestamp, updatedAt: timestamp, assignmentId: input.assignmentId, environment: "sandbox", sessionId: session.id, rehearsalAttemptId: input.rehearsalAttemptId };
   state.publications.unshift(publication); state.socialIntents.unshift(intent); state.executions.unshift(execution);
+  if (languageReason) execution.failure = { code: "LANGUAGE_POLICY_VIOLATION", message: "Delivery blocked by Never use: " + languageResult.violations.map((item) => item.literal).join(", ") + ".", retryable: false };
   state.events.unshift({ ...event("decision", leakageReason ? "Identity disclosure needs review" : mediaReviewRequired ? "Media action needs review" : "Social Intent formed", reviewReason ?? `${presence.name} chose ${input.affordance} for the simulated ${channelName(session.channelId)} world.`, leakageReason || mediaReviewRequired ? "warning" : "positive", { presenceId: presence.id, intentId: intent.id, executionId: execution.id, sourceObjectId: targetObject?.id }), sessionId: session.id });
   return state;
 }
@@ -776,6 +808,15 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
   if (!text.trim() && !["like", "reaction", "repost"].includes(execution.affordance)) throw new Error("Sandbox delivery requires a publication draft.");
   const presence = state.presences.find((item) => item.id === execution.presenceId) ?? state.presence;
   if (!presence) throw new Error("The Sandbox Presence is unavailable.");
+  const languageResult = validateLanguage(text, effectiveLanguagePolicy(state.agent, presence));
+  if (!languageResult.valid) {
+    execution.status = "blocked";
+    execution.failure = { code: "LANGUAGE_POLICY_VIOLATION", message: "Delivery blocked by Never use: " + languageResult.violations.map((item) => item.literal).join(", ") + ".", retryable: false };
+    execution.reviewReason = "The final expression violates an explicit lexical language policy.";
+    execution.updatedAt = now();
+    state.events.unshift({ ...event("execution", "Language policy blocked delivery", execution.failure.message, "warning", { presenceId: presence.id, executionId: execution.id, intentId: execution.socialIntentId }), sessionId: session.id });
+    return state;
+  }
   const objectId = id("sandbox-post");
   const externalRef = { type: `${session.channelId}.${execution.affordance}`, id: objectId };
   const assetRefs = (publication?.assetIds ?? []).map((assetId, index) => {
@@ -870,14 +911,13 @@ function migrateLegacyDefaultModel(state: OpenPresenceState) {
 
 function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   const state = raw as OpenPresenceState & { presences?: Presence[]; conversations?: import("./types").Conversation[]; activeConversationId?: string | null; activePresenceId?: string | null; presenceChatSessions?: import("./types").PresenceChatSession[] };
-  const agents = state.agents?.length ? state.agents : state.agent ? [state.agent] : [];
+  const agents = (state.agents?.length ? state.agents : state.agent ? [state.agent] : []).map((agent) => ({ ...agent, languagePolicy: normalizeLanguagePolicy((agent as Agent & { languagePolicy?: LanguagePolicy }).languagePolicy) }));
   const activeAgentId = state.activeAgentId ?? state.agent?.id ?? agents[0]?.id ?? null;
   const activeAgent = agents.find((item) => item.id === activeAgentId) ?? agents[0];
   const fallbackBrief = defaultPresenceBrief(activeAgent);
   const fallbackPresence = state.presence ? hydratePresence(state.presence, fallbackBrief) : null;
   const presences = state.presences?.length ? state.presences.map((item) => hydratePresence(item, fallbackBrief)) : fallbackPresence ? [fallbackPresence] : [];
   const activePresenceId = state.activePresenceId ?? presences[0]?.id ?? null;
-  const presence = presences.find((item) => item.id === activePresenceId) ?? presences[0] ?? null;
   const legacyMessages = state.messages ?? [];
   const conversations = (state.conversations?.length ? state.conversations : [{ id: id("conversation"), title: legacyMessages.length ? "Earlier conversation" : "New conversation", createdAt: now(), updatedAt: now(), messages: legacyMessages }]).map((conversation) => ({
     ...conversation,
@@ -892,7 +932,9 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   const base = initialState();
   const skills = (state.skills ?? []).map((skill) => ({ ...skill, name: skill.name ?? skill.id.replaceAll("-", " ") }));
   const providerConnections = (state.providerConnections ?? []).map((connection) => ({ ...connection, label: providerName(connection.provider) }));
-  const normalized = { ...base, ...state, agents, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], presence, presences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], calendar, assignments: state.assignments ?? [], watches: state.watches ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, toolBindings: state.toolBindings ?? [], changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], preferenceEvidence: state.preferenceEvidence ?? [], originalPostRehearsals: state.originalPostRehearsals ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], perceptions: state.perceptions ?? [], skills, agentSkills: state.agentSkills ?? [], contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: (state.playgroundSessions ?? []).map((session) => ({ ...session, virtualTimeMode: session.virtualTimeMode ?? "realtime" })), sandboxActors: state.sandboxActors ?? [], networkSearches: state.networkSearches ?? [], networkIntroductions: state.networkIntroductions ?? [] };
+  const normalizedPresences = presences.map((item) => ({ ...item, languagePolicy: normalizeLanguagePolicy((item as Presence & { languagePolicy?: LanguagePolicy }).languagePolicy) }));
+  const hydratedPresence = normalizedPresences.find((item) => item.id === activePresenceId) ?? normalizedPresences[0] ?? null;
+  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], calendar, assignments: state.assignments ?? [], watches: state.watches ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, toolBindings: state.toolBindings ?? [], changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], preferenceEvidence: state.preferenceEvidence ?? [], originalPostRehearsals: state.originalPostRehearsals ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], perceptions: state.perceptions ?? [], skills, agentSkills: state.agentSkills ?? [], contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: (state.playgroundSessions ?? []).map((session) => ({ ...session, virtualTimeMode: session.virtualTimeMode ?? "realtime" })), sandboxActors: state.sandboxActors ?? [], networkSearches: state.networkSearches ?? [], networkIntroductions: state.networkIntroductions ?? [] };
   migrateLegacyDefaultModel(normalized);
   const pulseTimes = normalized.events.filter((item) => item.title === "Pulse completed").map((item) => item.time).sort().reverse();
   const priorPulseAt = pulseTimes[1];
@@ -918,6 +960,7 @@ function hydratePresence(raw: Presence, fallbackBrief = defaultPresenceBrief()):
   const mode = raw.mode ?? "agent";
   const publicSelf = raw.publicSelf ?? raw.context?.publicSelf ?? defaultPublicSelf(name, mode);
   const mediaPerceptionPolicy = raw.mediaPerceptionPolicy ?? (mode === "ghost" ? "review-uncertain" : "use-judgment");
+  const languagePolicy = normalizeLanguagePolicy((raw as Presence & { languagePolicy?: LanguagePolicy }).languagePolicy);
   const brief = normalizePresenceBrief(raw.brief ?? raw.context?.brief, fallbackBrief);
   const context = raw.context ?? { presenceId: idValue, channel: raw.channel ?? "x", publicIdentity: { displayName: name, handle: raw.handle, mode }, publicSelf, brief, availableAffordances: capabilities.map((item) => item.id) };
   const executionEnvelope = raw.executionEnvelope ?? makeEnvelope(idValue, capabilities, execution);
@@ -926,7 +969,7 @@ function hydratePresence(raw: Presence, fallbackBrief = defaultPresenceBrief()):
   const pacing = raw.pacing ?? "recommended";
   const attentionIntervalMinutes = Math.max(5, Math.min(120, raw.attentionIntervalMinutes ?? (pacing === "gentle" ? 15 : 5)));
   const quietHours = { enabled: Boolean(raw.quietHours?.enabled), start: raw.quietHours?.start ?? "22:00", end: raw.quietHours?.end ?? "07:00" };
-  return { ...raw, id: idValue, channel: raw.channel ?? "x", name, mode, capabilities, execution, brief, ghostProfile, publicSelf, mediaPerceptionPolicy, executionEnvelope: { ...executionEnvelope, presenceId: idValue, affordances: Object.fromEntries(capabilities.map((item) => [item.id, { mode: execution[item.id] ?? executionEnvelope.affordances?.[item.id]?.mode ?? "off" }])) }, context: compilePresenceContext({ ...raw, id: idValue, name, mode, capabilities, brief, ghostProfile, publicSelf, mediaPerceptionPolicy, executionEnvelope, context } as Presence), pacing, attentionIntervalMinutes, quietHours, accountHealth: raw.accountHealth ?? "healthy", environment: connectionMode === "sandbox" ? "sandbox" : "live", connectionMode };
+  return { ...raw, id: idValue, channel: raw.channel ?? "x", name, mode, capabilities, execution, brief, ghostProfile, publicSelf, mediaPerceptionPolicy, languagePolicy, executionEnvelope: { ...executionEnvelope, presenceId: idValue, affordances: Object.fromEntries(capabilities.map((item) => [item.id, { mode: execution[item.id] ?? executionEnvelope.affordances?.[item.id]?.mode ?? "off" }])) }, context: compilePresenceContext({ ...raw, id: idValue, name, mode, capabilities, brief, ghostProfile, publicSelf, mediaPerceptionPolicy, languagePolicy, executionEnvelope, context } as Presence), pacing, attentionIntervalMinutes, quietHours, accountHealth: raw.accountHealth ?? "healthy", environment: connectionMode === "sandbox" ? "sandbox" : "live", connectionMode };
 }
 
 function snapshotWorkspace(state: OpenPresenceState): import("./types").AgentWorkspaceSnapshot {
@@ -1119,7 +1162,7 @@ export function isExplicitXPostRequest(content: string) {
     (lower.includes("post on x") && (lower.includes("presence") || lower.includes("publish")));
 }
 
-export function formChatPostIntent(source: OpenPresenceState, text: string, standingIntentId?: string) {
+export function formChatPostIntent(source: OpenPresenceState, text: string, standingIntentId?: string, sourceKind: "agent" | "operator" = "agent") {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presence;
   if (!state.agent || !presence || presence.status !== "live" || presence.channel !== "x" || !text.trim()) return state;
@@ -1140,6 +1183,7 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
   const leakageReason = identityLeakageReason(state, presence, text);
   const status = leakageReason ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
   const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.post", mode, status, attempts: 0, bridgeId: bridge?.id, connector, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, reviewReason: leakageReason, createdAt: formedAt, updatedAt: formedAt };
+  execution.source = sourceKind;
   state.executions.unshift(execution);
   const reason = standingIntentId ? "Jenny evaluated a Calendar standing intention and handed the resulting Social Intent to the Presence execution envelope." : "The operator asked Jenny to introduce this Presence through the native X connector.";
   state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: mode === "review" ? "review" : "queued", reason, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
@@ -1213,6 +1257,15 @@ export function completeNativeExecution(source: OpenPresenceState, executionId: 
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const execution = state.executions.find((item) => item.id === executionId && item.connector === "native");
   if (!execution) throw new Error("Native execution not found.");
+  const languageResult = languageValidationForExecution(state, execution);
+  if (!languageResult.valid) {
+    execution.status = "blocked";
+    execution.failure = { code: "LANGUAGE_POLICY_VIOLATION", message: "Delivery blocked by Never use: " + languageResult.violations.map((item) => item.literal).join(", ") + ".", retryable: false };
+    execution.reviewReason = "The final expression violates an explicit lexical language policy.";
+    execution.updatedAt = now();
+    state.events.unshift(event("execution", "Language policy blocked delivery", execution.failure.message, "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }));
+    return state;
+  }
   execution.status = "succeeded";
   execution.attempts += 1;
   execution.externalRef = externalRef;
@@ -1303,6 +1356,38 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     if (!watch) return state;
     state.watches = state.watches.filter((item) => item.id !== watch.id);
     state.events.unshift(event("system", "Watch removed", `${watch.title} is no longer part of the Presence's attention.`, "quiet", { presenceId: watch.presenceId }));
+    return state;
+  }
+  if (operation.type === "setAgentLanguagePolicy") {
+    if (!state.agent) return state;
+    const policy = normalizeLanguagePolicy(operation.policy);
+    state.agent = { ...state.agent, languagePolicy: policy };
+    state.agents = state.agents.map((item) => item.id === state.agent?.id ? { ...item, languagePolicy: policy } : item);
+    state.events.unshift(event("system", "Agent language policy updated", "Taste guides expression; explicit Never use rules now apply at final expression.", "positive", { presenceId: state.presence?.id }));
+    return state;
+  }
+  if (operation.type === "setPresenceLanguagePolicy") {
+    if (!state.presence) return state;
+    const policy = normalizeLanguagePolicy(operation.policy);
+    const updated = { ...state.presence, languagePolicy: policy };
+    updated.context = compilePresenceContext(updated);
+    state.presence = updated;
+    state.presences = state.presences.map((item) => item.id === updated.id ? updated : item);
+    state.events.unshift(event("system", "Presence language policy updated", "This Presence adds local lexical boundaries without weakening inherited Agent rules.", "positive", { presenceId: updated.id }));
+    return state;
+  }
+  if (operation.type === "executeIntent" || operation.type === "markManualExecution") {
+    const execution = state.executions.find((item) => operation.type === "markManualExecution" ? item.id === operation.id : item.socialIntentId === operation.id);
+    if (execution && !languageValidationForExecution(state, execution).valid) return blockExecutionForLanguage(state, execution.id);
+  }
+  if (operation.type === "overrideLanguagePolicy") {
+    const execution = state.executions.find((item) => item.id === operation.id);
+    if (!execution || execution.status !== "blocked" || execution.failure?.code !== "LANGUAGE_POLICY_VIOLATION" || execution.source !== "operator") return state;
+    execution.failure = undefined;
+    execution.reviewReason = "Operator explicitly chose Publish anyway for this exact text.";
+    execution.status = execution.mode === "auto" ? "queued" : execution.mode === "review" ? "awaiting-review" : "awaiting-manual";
+    execution.updatedAt = now();
+    state.events.unshift(event("execution", "Operator override recorded", "The operator explicitly chose Publish anyway for this exact text. The language rule remains active for future Agent output.", "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }));
     return state;
   }
   switch (operation.type) {

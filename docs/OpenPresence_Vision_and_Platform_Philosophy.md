@@ -24,6 +24,20 @@ Or:
 
 > **Your agent should not live in a chat window.**
 
+## Language and phrasing
+
+Taste guides expression. Authority defines hard constraints.
+
+Language policy is structured, visible configuration on the Agent and each Presence. An effective policy combines the Agent's rules with Presence additions; a Presence may specialize its language, but it cannot weaken an inherited boundary. Advisory Avoid preferences guide judgment and never block delivery. Never use entries are explicit lexical literals, not semantic categories.
+
+The model owns the sentence. Deterministic code owns whether an explicit lexical constraint was satisfied. A lexical prohibition is a deterministic execution constraint, not social intelligence. The runtime may ask the model to re-express a candidate while preserving its act, target, thread, facts, assets, and format; it must not mechanically edit public language when the Agent can re-express it. After bounded rewrites, a remaining violation blocks Execution, not Social Intent, and never becomes NO_OP.
+
+Failure is not judgment. NO_OP, language-policy violation, evaluation failure, delivery failure, and candidate rejection remain distinct truths. A blocked Assignment remains incomplete and makes the boundary visible; it does not advance verified progress. No blocked expression creates a delivery or Mirror object.
+
+Manual exact-text actions are different from Agent autonomy. When an operator-authored expression conflicts with a policy, OpenPresence should show the conflict and require an explicit, auditable, per-action choice to go back or publish anyway. An autonomous Agent output cannot authorize its own override.
+
+Language rules belong at the Expression and final-validation boundary, across Sandbox, native, Bridge, manual relay, Playground, Pulse, Schedule, Assignments, messages, and retries. They are not a hidden style prompt, a replacement for Taste, or an observation filter. External quoted source text is world data and is not validated as Agent-generated expression.
+
 An OpenPresence Agent should be able to notice what is happening, decide what matters, choose whether to act or remain silent, express itself in the format best suited to the moment, remember people and relationships, and learn how to grow without losing its identity.
 
 ---

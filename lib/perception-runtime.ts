@@ -176,7 +176,7 @@ function providerSupportsVision(state: OpenPresenceState) {
   const provider = (binding?.provider as ModelProvider | undefined) ?? profile.provider;
   const model = binding?.model?.trim() || profile.model;
   if (!binding?.model && !binding?.provider && !profile.capabilities.vision) return undefined;
-  const connection = (binding?.connectionId && state.providerConnections.find((item) => item.id === binding.connectionId))
+  const connection = (binding?.connectionId && state.providerConnections.find((item) => item.id === binding.connectionId && item.provider === provider))
     ?? (profile.connectionId && state.providerConnections.find((item) => item.id === profile.connectionId && item.provider === provider))
     ?? state.providerConnections.find((item) => item.provider === provider);
   if (!connection || connection.status === "needs-configuration") return undefined;

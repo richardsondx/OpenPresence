@@ -2392,6 +2392,23 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
     { id: "idea", label: "Idea" }, { id: "voice", label: "Voice" }, { id: "topic", label: "Topic" }, { id: "humor", label: "Humor" }, { id: "format", label: "Format" }, { id: "technical_depth", label: "Technical depth" }, { id: "too_generic", label: "Too generic" }, { id: "too_promotional", label: "Too promotional" }, { id: "too_long", label: "Too long" }, { id: "too_risky", label: "Too risky" }, { id: "factually_wrong", label: "Factually wrong" }, { id: "not_something_i_would_say", label: "Not something I'd say" },
   ];
   const run = async (operation: unknown) => { setBusy(true); try { await mutate(operation); } finally { setBusy(false); } };
+  const runAssignment = async (assignmentId: string, start = false) => {
+    if (!sessionId) return;
+    setBusy(true);
+    try {
+      let next = state;
+      if (start) next = await mutate({ type: "startAssignment", id: assignmentId, sessionId }) ?? next;
+      while (true) {
+        const assignment = next.assignments.find((item) => item.id === assignmentId);
+        if (!assignment || !["active", "working"].includes(assignment.status)) break;
+        const worked = await mutate({ type: "workAssignment", id: assignmentId, sessionId });
+        if (!worked) break;
+        next = worked;
+      }
+    } finally {
+      setBusy(false);
+    }
+  };
   const removeSandboxObject = async (objectId: string) => {
     if (!session) return;
     await run({ type: "removeSandboxObject", sessionId: session.id, objectId });
@@ -2454,10 +2471,10 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
         </>}
         {rehearsalMode === "assign" && <>
           <div><div className="eyebrow">Posting Assignment</div><h2>What do you expect {presence.name} to produce?</h2><p>OpenPresence will show the structured deliverable before work begins. Verified Sandbox publications determine progress.</p></div>
-          {!assignmentDraft ? <><label>Assignment instruction<textarea aria-label="Assignment instruction" value={assignmentInstruction} onChange={(event) => setAssignmentInstruction(event.target.value)} placeholder="Produce 3 original X posts about offers, pricing, sales, or execution. Choose your own angles and do not repeat yourself." rows={4} /></label><div className="original-rehearsal-actions"><small>The original instruction stays attached to the Assignment.</small><Button variant="primary" disabled={busy || !assignmentInstruction.trim()} onClick={() => void reviewAssignment()}><Check size={14} /> Review assignment</Button></div></> : <div className="assignment-review" aria-label="Assignment review"><div><span>Deliverable</span><strong>{assignmentDraft.progress.required} original {channelLabel(assignmentDraft.channelId, state.channelDefinitions)} publications</strong></div><div><span>Completion</span><strong>{assignmentDraft.progress.required} verified publications</strong></div><div><span>Agent decides how</span><strong>Topics · thesis · evidence · format · wording · timing strategy</strong></div><p>{assignmentDraft.instruction}</p><div className="original-rehearsal-actions"><Button variant="ghost" onClick={() => setAssignmentDraftId(null)}>Adjust</Button><Button variant="primary" disabled={busy} onClick={() => void run({ type: "startAssignment", id: assignmentDraft.id, sessionId: session.id })}><Play size={14} /> Start rehearsal</Button></div></div>}
+          {!assignmentDraft ? <><label>Assignment instruction<textarea aria-label="Assignment instruction" value={assignmentInstruction} onChange={(event) => setAssignmentInstruction(event.target.value)} placeholder="Produce 3 original X posts about offers, pricing, sales, or execution. Choose your own angles and do not repeat yourself." rows={4} /></label><div className="original-rehearsal-actions"><small>The original instruction stays attached to the Assignment.</small><Button variant="primary" disabled={busy || !assignmentInstruction.trim()} onClick={() => void reviewAssignment()}><Check size={14} /> Review assignment</Button></div></> : <div className="assignment-review" aria-label="Assignment review"><div><span>Deliverable</span><strong>{assignmentDraft.progress.required} original {channelLabel(assignmentDraft.channelId, state.channelDefinitions)} publications</strong></div><div><span>Completion</span><strong>{assignmentDraft.progress.required} verified publications</strong></div><div><span>Agent decides how</span><strong>Topics · thesis · evidence · format · wording · timing strategy</strong></div><p>{assignmentDraft.instruction}</p><div className="original-rehearsal-actions"><Button variant="ghost" onClick={() => setAssignmentDraftId(null)}>Adjust</Button><Button variant="primary" disabled={busy} onClick={() => void runAssignment(assignmentDraft.id, true)}><Play size={14} /> Start rehearsal</Button></div></div>}
         </>}
       </section>}
-      {(activeAssignment || assignmentDraft) && <section className="assignment-progress-panel" aria-label="Assignment progress"><div><div className="eyebrow">Posting Assignment</div><h2>{(activeAssignment ?? assignmentDraft)?.instruction}</h2></div><div className="assignment-progress-bar"><span style={{ width: `${Math.min(100, (((activeAssignment ?? assignmentDraft)?.progress.verified ?? 0) / Math.max(1, (activeAssignment ?? assignmentDraft)?.progress.required ?? 1)) * 100)}%` }} /></div><div className="assignment-progress-meta"><strong>{(activeAssignment ?? assignmentDraft)?.progress.verified} / {(activeAssignment ?? assignmentDraft)?.progress.required} delivered</strong><span>{(activeAssignment ?? assignmentDraft)?.status === "completed" ? "Completed" : (activeAssignment ?? assignmentDraft)?.status === "blocked" ? "Blocked" : `${(activeAssignment ?? assignmentDraft)?.rejectedCandidates} candidate rejections`}</span></div>{(activeAssignment ?? assignmentDraft)?.status === "blocked" && <p className="assignment-warning">{(activeAssignment ?? assignmentDraft)?.lastOutcome?.message}</p>}{["active", "blocked"].includes((activeAssignment ?? assignmentDraft)?.status ?? "") && <Button variant="secondary" disabled={busy} onClick={() => void run({ type: (activeAssignment ?? assignmentDraft)?.status === "blocked" ? "startAssignment" : "workAssignment", id: (activeAssignment ?? assignmentDraft)!.id, sessionId: session.id })}><Play size={14} /> {(activeAssignment ?? assignmentDraft)?.status === "blocked" ? "Retry Assignment" : "Continue working"}</Button>}</section>}
+      {(activeAssignment || assignmentDraft) && <section className="assignment-progress-panel" aria-label="Assignment progress"><div><div className="eyebrow">Posting Assignment</div><h2>{(activeAssignment ?? assignmentDraft)?.instruction}</h2></div><div className="assignment-progress-bar"><span style={{ width: `${Math.min(100, (((activeAssignment ?? assignmentDraft)?.progress.verified ?? 0) / Math.max(1, (activeAssignment ?? assignmentDraft)?.progress.required ?? 1)) * 100)}%` }} /></div><div className="assignment-progress-meta"><strong>{(activeAssignment ?? assignmentDraft)?.progress.verified} / {(activeAssignment ?? assignmentDraft)?.progress.required} delivered</strong><span>{(activeAssignment ?? assignmentDraft)?.status === "completed" ? "Completed" : (activeAssignment ?? assignmentDraft)?.status === "blocked" ? "Blocked" : `${(activeAssignment ?? assignmentDraft)?.rejectedCandidates} candidate rejections`}</span></div>{(activeAssignment ?? assignmentDraft)?.status === "blocked" && <p className="assignment-warning">{(activeAssignment ?? assignmentDraft)?.lastOutcome?.message}</p>}{["active", "blocked"].includes((activeAssignment ?? assignmentDraft)?.status ?? "") && <Button variant="secondary" disabled={busy} onClick={() => void runAssignment((activeAssignment ?? assignmentDraft)!.id, (activeAssignment ?? assignmentDraft)?.status === "blocked")}><Play size={14} /> {(activeAssignment ?? assignmentDraft)?.status === "blocked" ? "Retry Assignment" : "Continue working"}</Button>}</section>}
       <div className="playground-grid">
           <aside className="playground-rail">
             <section className="playground-panel"><div className="eyebrow">Starting world</div><strong>{simulation.startingStateLabel}</strong><p>Nothing here is live. Simulated history stays in this session.</p><div className="session-status"><span className="status-dot" /> {presence.status === "paused" ? "Paused" : "Awake"}</div></section>
@@ -3789,6 +3806,7 @@ const executionStatusLabel = (status: OpenPresenceState["executions"][number]["s
   if (["approved", "queued", "claimed", "executing", "awaiting-connector"].includes(status)) return "Preparing to send";
   if (status === "succeeded") return "Sent";
   if (status === "failed") return "Could not send";
+  if (status === "blocked") return "Delivery blocked";
   if (status === "awaiting-manual") return "Waiting for you to mark sent";
   return status.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 };
@@ -3847,6 +3865,7 @@ function ExecutionLedger({
     );
   const needsApproval = latest.status === "awaiting-review";
   const needsManualRelay = latest.status === "awaiting-manual";
+  const languageBlocked = latest.status === "blocked" && latest.failure?.code === "LANGUAGE_POLICY_VIOLATION";
   return (
     <div className="decision-card execution-ledger">
       <div className="section-heading compact">
@@ -3855,7 +3874,9 @@ function ExecutionLedger({
           <h3>
             {needsApproval
               ? "Waiting for review"
-              : latest.status === "succeeded"
+              : languageBlocked
+                ? "Language policy blocked"
+                : latest.status === "succeeded"
                 ? "Action completed"
                 : "Intent ready"}
           </h3>
@@ -3880,7 +3901,9 @@ function ExecutionLedger({
       <p className="execution-explanation">
         {needsApproval
           ? "Ada has chosen this action. Your review decides whether it is sent."
-          : latest.externalRef
+          : languageBlocked
+            ? latest.failure?.message ?? "The final expression contains a prohibited literal. No external artifact was delivered."
+            : latest.externalRef
             ? `Sent on ${presence ? channelLabel(presence.channel, state.channelDefinitions) : "the channel"}.`
             : "Ada’s decision, your approval, and the channel result are kept separate."}
       </p>
@@ -3892,6 +3915,14 @@ function ExecutionLedger({
         >
           <Check size={14} /> Approve execution
         </Button>
+      )}
+      {languageBlocked && latest.source === "operator" && (
+        <div className="language-override-actions">
+          <p className="form-hint">This exact operator-authored text conflicts with a language rule. You can go back and edit it, or explicitly publish it anyway for this action.</p>
+          <Button variant="secondary" className="full-button" onClick={() => void mutate({ type: "overrideLanguagePolicy", id: latest.id })}>
+            <Check size={14} /> Publish anyway
+          </Button>
+        </div>
       )}
       {latest.status === "approved" && (
         <Button
@@ -4612,6 +4643,8 @@ function BrainView({
   const [content, setContent] = useState(file?.content ?? "");
   const agent = state.agent!;
   const [agentNameDraft, setAgentNameDraft] = useState(agent.name);
+  const [agentAvoidDraft, setAgentAvoidDraft] = useState((agent.languagePolicy?.avoid ?? []).join("\n"));
+  const [agentProhibitedDraft, setAgentProhibitedDraft] = useState((agent.languagePolicy?.prohibited ?? []).join("\n"));
   const pending = state.proposals.filter((item) => item.status === "pending");
   const model = state.modelProfiles.find((item) => item.agentId === agent.id);
   const [showSkillForm, setShowSkillForm] = useState(false);
@@ -4695,6 +4728,18 @@ function BrainView({
           </label>
           <Button type="submit" variant="secondary" disabled={!agentNameDraft.trim() || agentNameDraft.trim() === agent.name}><Check size={14} /> Save name</Button>
         </form>
+      </section>
+      <section className="settings-card language-policy-card">
+        <div className="section-heading compact">
+          <div><SectionEyebrow>Agent taste · language</SectionEyebrow><h2>Language & phrasing</h2></div>
+          <ShieldCheck size={17} />
+        </div>
+        <p className="muted">Taste guides expression. Advisory preferences help the Agent choose. Never use rules are explicit lexical boundaries enforced before delivery.</p>
+        <div className="language-policy-editor">
+          <label>Prefer to avoid <small>Advisory only. One literal word or phrase per line.</small><textarea aria-label="Agent language preferences to avoid" rows={4} value={agentAvoidDraft} onChange={(event) => setAgentAvoidDraft(event.target.value)} /></label>
+          <label>Never use <small>Hard constraint. Literal matching only; no semantic categories or inferred synonyms.</small><textarea aria-label="Agent prohibited language" rows={4} value={agentProhibitedDraft} onChange={(event) => setAgentProhibitedDraft(event.target.value)} /></label>
+        </div>
+        <div className="inline-form-actions"><Button variant="primary" onClick={() => void mutate({ type: "setAgentLanguagePolicy", policy: { avoid: agentAvoidDraft.split(/\r?\n/).map((item) => item.trim()).filter(Boolean), prohibited: agentProhibitedDraft.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) } })}><Check size={14} /> Save language policy</Button></div>
       </section>
       <section className="brain-overview">
         <div><SectionEyebrow>Model runtime</SectionEyebrow><strong>{model?.provider === "ollama" ? ollamaModelLabel(ollamaModels.find((item) => item.name === model.model || item.name.startsWith(`${model.model}:`))?.name ?? model.model) : runtimeModels.find((item) => item.model === model?.model && item.quality === model?.quality)?.name ?? model?.model ?? "Not selected"}</strong><small>{model?.provider ?? "Choose a provider"} · {model?.quality ?? "runtime"}</small></div>
@@ -5017,6 +5062,8 @@ function PresenceView({
   const [editingBrief, setEditingBrief] = useState(false);
   const [ghostDraft, setGhostDraft] = useState<GhostProfile>(presence.ghostProfile ?? { subject: "Me / my organization", priorities: "", preferences: "", voice: "", boundaries: "" });
   const [publicSelfDraft, setPublicSelfDraft] = useState<PublicSelf>(presence.publicSelf ?? { displayName: presence.name, posture: presence.mode === "ghost" ? "representational" : "contextual", approvedTechnicalFacts: [] });
+  const [presenceAvoidDraft, setPresenceAvoidDraft] = useState((presence.languagePolicy?.avoid ?? []).join("\n"));
+  const [presenceProhibitedDraft, setPresenceProhibitedDraft] = useState((presence.languagePolicy?.prohibited ?? []).join("\n"));
   const [mediaPolicyDraft, setMediaPolicyDraft] = useState(presence.mediaPerceptionPolicy);
   const [autoApprovalPrompt, setAutoApprovalPrompt] = useState<{ capabilities: string[]; labels: string[]; executionIds: string[] } | null>(null);
   const [confirmingAutoApproval, setConfirmingAutoApproval] = useState(false);
@@ -5304,6 +5351,21 @@ function PresenceView({
           <p><b>Typical response:</b> answer naturally as this Presence without volunteering AI, platform, provider, model, or tool details. Direct questions still follow the Identity posture above.</p>
         </div>}
         <div className="inline-form-actions"><Button variant="primary" onClick={savePublicSelf}><Check size={14} /> Save Public Self</Button></div>
+      </section>
+      <section className="settings-card language-policy-card presence-language-policy-card">
+        <div className="section-heading compact">
+          <div><SectionEyebrow>Presence taste · language</SectionEyebrow><h2>Language & phrasing here</h2></div>
+          <ShieldCheck size={17} />
+        </div>
+        <p className="muted">This Presence inherits the Agent&apos;s hard boundaries and can add local ones. Inherited rules are read-only here; this editor cannot weaken them.</p>
+        <div className="language-inherited-rules">
+          <span><strong>Inherited Never use</strong>{state.agent?.languagePolicy?.prohibited?.length ? state.agent.languagePolicy.prohibited.join(" · ") : "None set"}</span>
+        </div>
+        <div className="language-policy-editor">
+          <label>Prefer to avoid <small>Advisory and Presence-scoped.</small><textarea aria-label="Presence language preferences to avoid" rows={3} value={presenceAvoidDraft} onChange={(event) => setPresenceAvoidDraft(event.target.value)} /></label>
+          <label>Never use here <small>Additional literal boundaries for this channel and public self.</small><textarea aria-label="Presence prohibited language" rows={3} value={presenceProhibitedDraft} onChange={(event) => setPresenceProhibitedDraft(event.target.value)} /></label>
+        </div>
+        <div className="inline-form-actions"><Button variant="primary" onClick={() => void mutate({ type: "setPresenceLanguagePolicy", policy: { avoid: presenceAvoidDraft.split(/\r?\n/).map((item) => item.trim()).filter(Boolean), prohibited: presenceProhibitedDraft.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) } })}><Check size={14} /> Save Presence language</Button></div>
       </section>
       <section className="settings-card presence-rhythm-card" id="rhythm-settings">
         <div className="section-heading compact">

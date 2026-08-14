@@ -4,7 +4,7 @@ import { z } from "zod";
 import { readState, saveProviderSecret, writeState } from "@/lib/db";
 import { generateAgentReply, generateAgentSocialDecision, generateAgentSocialEdit, generateAgentSocialJudgment, generatePresenceChatReply } from "@/lib/ai";
 import type { AgentSocialDecision } from "@/lib/ai";
-import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntroduction, beginOriginalPostRehearsal, cleanSandboxDraft, completeNativeExecution, completeOriginalPostRehearsal, confirmAutoMode, declineSandboxIntroduction, deliverSandboxExecution, expireSandboxIntents, failNativeExecution, finishPulse, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, identityLeakageReason, isExplicitXPostRequest, isLaunchCandidate, isLowInformationCue, markCalendarSlotEvaluated, markInboundJudged, markNativeConnectionNeedsAttention, publicSelfGuidance, recordPreferenceEvidence, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, resetPlaygroundSession, stateForContext, startPlaygroundSession, syncPlaygroundTime } from "@/lib/runtime";
+import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntroduction, beginOriginalPostRehearsal, blockExecutionForLanguage, cleanSandboxDraft, completeNativeExecution, completeOriginalPostRehearsal, confirmAutoMode, declineSandboxIntroduction, deliverSandboxExecution, expireSandboxIntents, failNativeExecution, finishPulse, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, identityLeakageReason, isExplicitXPostRequest, isLaunchCandidate, isLowInformationCue, languageValidationForExecution, markCalendarSlotEvaluated, markInboundJudged, markNativeConnectionNeedsAttention, publicSelfGuidance, recordPreferenceEvidence, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, resetPlaygroundSession, stateForContext, startPlaygroundSession, syncPlaygroundTime } from "@/lib/runtime";
 import { publishXPost, readNativeXCredentials } from "@/lib/x";
 import { reconcileNativeX } from "@/lib/native-x";
 import type { Asset, MirrorObject, OpenPresenceState, Operation, RuntimeOperation, SandboxAssetInput } from "@/lib/types";
@@ -14,6 +14,7 @@ import { inspectSandboxObject } from "@/lib/perception-runtime";
 import { networkSearchInstruction, searchSandboxNetwork } from "@/lib/network";
 import type { NetworkSearchResult } from "@/lib/network";
 import { buildSocialEvidenceContext } from "@/lib/social-context";
+import { effectiveLanguagePolicy, languagePolicyGuidance, validateLanguage } from "@/lib/language-policy";
 
 export const dynamic = "force-dynamic";
 
@@ -37,6 +38,11 @@ async function deliverNativeExecutions(source: OpenPresenceState, executionIds: 
     const credentials = connection ? readNativeXCredentials(connection.id) : undefined;
     const payload = intent?.publicationId ? next.publications.find((item) => item.id === intent.publicationId)?.payload : undefined;
     const postText = payload && typeof payload === "object" && "text" in payload && typeof payload.text === "string" ? payload.text : undefined;
+    const languageResult = languageValidationForExecution(next, execution);
+    if (!languageResult.valid) {
+      next = blockExecutionForLanguage(next, execution.id);
+      continue;
+    }
     if (credentials && postText) {
       try {
         const replyTo = execution.target?.type === "x.post" ? execution.target.id : undefined;
@@ -177,13 +183,13 @@ function markSandboxObjectJudged(source: OpenPresenceState, sessionId: string, e
   return next;
 }
 
-function recordAssignmentDecision(source: OpenPresenceState, assignmentId: string, outcome: "candidate_rejected" | "evaluation_failed" | "delivery_failed", message: string) {
+function recordAssignmentDecision(source: OpenPresenceState, assignmentId: string, outcome: "candidate_rejected" | "evaluation_failed" | "delivery_failed" | "language_policy_failed", message: string) {
   const next = JSON.parse(JSON.stringify(source)) as OpenPresenceState;
   const assignment = next.assignments.find((item) => item.id === assignmentId);
   if (!assignment) return next;
   const timestamp = new Date().toISOString();
   if (outcome === "candidate_rejected") assignment.rejectedCandidates += 1;
-  if (outcome === "evaluation_failed" || outcome === "delivery_failed") { assignment.systemFailures += 1; assignment.status = "blocked"; }
+  if (outcome === "evaluation_failed" || outcome === "delivery_failed" || outcome === "language_policy_failed") { assignment.systemFailures += 1; assignment.status = "blocked"; }
   else assignment.status = "active";
   assignment.lastOutcome = { class: outcome, message, at: timestamp };
   assignment.updatedAt = timestamp;
@@ -301,6 +307,7 @@ Do not mention simulation, prompts, connectors, internal systems, or this Assign
       ? `Evaluate the current simulated ${presence.channel} world. There is no new unjudged inbound object. Current observed world: ${world || "[empty]"}. Use the Agent's meaning files, current activity, relationship context, Mission, Taste, Pulse, Public Self, and available affordances to decide whether an original contribution is worth making now. A check-in alone is not a reason to publish; silence is healthy when nothing is worth leaving behind. If Calendar attention is present, connect one specific observed detail to the standing instruction rather than restating the instruction; if no concrete connection is worth making, choose no_op. Because there is no inbound object, choose only post or no_op here; reply, quote, repost, like, reaction, and message require a real target. Do not add generic hashtags or broad AI slogans. ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, or internal systems.${punctuationGuidance}${attention}${evidenceGuidance}`
       : `Fresh simulated ${presence.channel} Presence, no public footing yet. Choose post for the first move unless an explicit identity, safety, or provider limitation makes it impossible. Do not choose no_op merely because there is no inbound post. Mission: ${source.agent?.description ?? "be useful to this audience"}. Public Self: ${presence.name}, ${presence.publicSelf.posture}. Write one original field note under 250 characters using one distinctive Mission, Taste, Soul, or Presence detail below. Show a concrete mechanism, example, failure mode, or tradeoff. No hashtags, generic AI advice, greeting, product announcement, self-introduction, or question asking for help. Return the post text as the JSON text field. ${publicSelfGuidance(presence)}${attention}${punctuationGuidance}${evidenceGuidance}`;
   prompt += structuredEvidenceGuidance;
+  prompt += "\n\nLanguage and phrasing policy:\n" + languagePolicyGuidance(effectiveLanguagePolicy(cognitionSource.agent, presence));
   let decision;
   let actionSource = networkResult ? recordSandboxNetworkSearch(source, { sessionId, presenceId: presence.id, result: networkResult }) : source;
   // Media and links are perception prerequisites, not optional model preferences.
@@ -400,7 +407,7 @@ Do not mention simulation, prompts, connectors, internal systems, or this Assign
   // The planner owns the social act. A second model pass may only refine its
   // wording. It must return an explicit, evidence-backed needs_replan before
   // the planner is asked to choose a different act.
-  if (!isAiMockEnabled() && process.env.OPENPRESENCE_SOCIAL_EDITOR !== "0" && textActions.has(decision.action) && draft) {
+  if (!isAssignment && !isAiMockEnabled() && process.env.OPENPRESENCE_SOCIAL_EDITOR !== "0" && textActions.has(decision.action) && draft) {
     try {
       const lengthGuidance = modelTextLimit === undefined ? "" : ` Keep the final text at or below ${modelTextLimit} characters, leaving channel headroom. Do not truncate a sentence; choose no_op if the grounded idea cannot fit.`;
       const attentionGuidance = attentionInstruction
@@ -512,6 +519,27 @@ Do not mention simulation, prompts, connectors, internal systems, or this Assign
       draft = "";
     }
   }
+  if (draft && textActions.has(decision.action)) {
+    const languagePolicy = effectiveLanguagePolicy(cognitionSource.agent, presence);
+    let languageResult = validateLanguage(draft, languagePolicy);
+    for (let attempt = 0; !languageResult.valid && attempt < 2 && !isAiMockEnabled(); attempt += 1) {
+      try {
+        const plannedAction: string = decision.action;
+        const revision = await generateAgentSocialEdit(cognitionSource, "The candidate violates a hard lexical language rule. Rewrite only the expression for the same social act. " + languagePolicyGuidance(languagePolicy) + "\nCandidate: " + draft, plannedAction);
+        const revisedDraft: string = revision?.status === "ok" && revision.action === plannedAction ? cleanSandboxDraft(revision.text) : "";
+        if (revisedDraft) {
+          decision = { ...decision, text: revisedDraft };
+          draft = revisedDraft;
+          languageResult = validateLanguage(draft, languagePolicy);
+        }
+      } catch {
+        break;
+      }
+    }
+    if (!languageResult.valid) {
+      actionSource = recordRuntimeEvent(actionSource, presence.id, "Language policy blocked delivery", "The selected social act remains chosen, but its expression still contains a prohibited literal after two rewrite attempts.", "warning", { sessionId, sourceObjectId: inbound?.id });
+    }
+  }
   if (decision.action === "no_op") {
     if (isAssignment) return recordAssignmentDecision(actionSource, assignment!.id, "candidate_rejected", "The candidate did not meet the Presence's Taste. The Assignment remains active and will continue with another candidate.");
     const planRecorded = recordRuntimeEvent(actionSource, presence.id, "Social plan formed", JSON.stringify({ action: decision.action, rationale: decision.rationale }), "neutral", { sessionId, sourceObjectId: inbound?.id });
@@ -545,28 +573,22 @@ Do not mention simulation, prompts, connectors, internal systems, or this Assign
 
 async function runSandboxAssignment(source: OpenPresenceState, assignmentId: string, sessionId: string) {
   let next = JSON.parse(JSON.stringify(source)) as OpenPresenceState;
-  const initialAssignment = next.assignments.find((item) => item.id === assignmentId);
-  const remaining = initialAssignment ? Math.max(1, initialAssignment.progress.required - initialAssignment.progress.verified) : 1;
-  const maxCandidateAttempts = Math.min(40, Math.max(8, remaining * 4));
-  for (let attempt = 0; attempt < maxCandidateAttempts; attempt += 1) {
-    const assignment = next.assignments.find((item) => item.id === assignmentId);
-    if (!assignment || assignment.status === "completed" || assignment.status === "blocked" || assignment.status === "cancelled") return next;
-    assignment.status = "working";
-    assignment.updatedAt = new Date().toISOString();
-    try {
-      next = await runSandboxAgentCycle(next, sessionId, undefined, undefined, undefined, { id: assignmentId });
-    } catch (error) {
-      const message = error instanceof Error ? error.message : "The Agent runtime could not work this Assignment.";
-      return recordAssignmentDecision(next, assignmentId, "evaluation_failed", `${message} This is a model/runtime failure, not social silence.`);
-    }
-    const updated = next.assignments.find((item) => item.id === assignmentId);
-    if (!updated || updated.status === "completed" || updated.status === "blocked") return next;
-    const latestExecution = next.executions.find((item) => item.assignmentId === assignmentId && item.sessionId === sessionId);
-    if (latestExecution && latestExecution.status !== "succeeded") return recordAssignmentDecision(next, assignmentId, "delivery_failed", latestExecution.failure?.message ?? "The candidate was formed, but Sandbox delivery did not complete. No publication was counted.");
+  const assignment = next.assignments.find((item) => item.id === assignmentId);
+  if (!assignment || assignment.status === "completed" || assignment.status === "blocked" || assignment.status === "cancelled") return next;
+  assignment.status = "working";
+  assignment.updatedAt = new Date().toISOString();
+  try {
+    next = await runSandboxAgentCycle(next, sessionId, undefined, undefined, undefined, { id: assignmentId });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "The Agent runtime could not work this Assignment.";
+    return recordAssignmentDecision(next, assignmentId, "evaluation_failed", `${message} This is a model/runtime failure, not social silence.`);
   }
-  const finalAssignment = next.assignments.find((item) => item.id === assignmentId);
-  if (finalAssignment && finalAssignment.status === "working") finalAssignment.status = "active";
-  if (finalAssignment) { finalAssignment.updatedAt = new Date().toISOString(); finalAssignment.lastOutcome = { class: "candidate_rejected", message: "The Assignment remains active after several quality rejections. Continue working or adjust the instruction.", at: new Date().toISOString() }; }
+  const updated = next.assignments.find((item) => item.id === assignmentId);
+  if (!updated || updated.status === "completed" || updated.status === "blocked") return next;
+  const latestExecution = next.executions.find((item) => item.assignmentId === assignmentId && item.sessionId === sessionId);
+  if (latestExecution && latestExecution.status !== "succeeded") return recordAssignmentDecision(next, assignmentId, latestExecution.failure?.code === "LANGUAGE_POLICY_VIOLATION" ? "language_policy_failed" : "delivery_failed", latestExecution.failure?.message ?? "The candidate was formed, but Sandbox delivery did not complete. No publication was counted.");
+  if (updated.status === "working") updated.status = "active";
+  updated.updatedAt = new Date().toISOString();
   return next;
 }
 
@@ -651,6 +673,7 @@ const capabilities = z.object({ inbound: z.boolean(), reconcile: z.boolean(), af
 const channelDefinition = z.object({ id: channelId, name: z.string().trim().min(1).max(120), description: z.string().max(500).optional(), icon: z.string().max(40).optional(), domain: z.string().trim().max(300).optional(), entities: z.array(z.object({ id: z.string().min(1), label: z.string().min(1) })).max(100), affordances: z.array(z.object({ id: z.string().min(1), label: z.string().min(1), description: z.string().min(1) })).max(100), supportedAssetKinds: z.array(z.enum(["image", "video", "gif", "audio", "document", "chart", "link"])).max(7).optional(), formats: z.array(z.object({ id: z.string().min(1), label: z.string().min(1), description: z.string().min(1), channel: channelId })).max(100), relationships: z.array(z.object({ from: z.string(), to: z.array(z.string()), relation: z.enum(["contains", "replies-to", "mentions", "direct"]) })).max(100), metrics: z.array(z.object({ id: z.string(), label: z.string() })).max(100), playbook: z.string().max(10_000).optional(), privacyDefaults: z.object({ visibility: z.enum(["public", "private-community", "private-thread", "direct-message", "unknown"]), shareability: z.enum(["presence-only", "agent-wide", "public"]) }), builtIn: z.boolean().optional(), createdAt: z.string().datetime(), updatedAt: z.string().datetime() });
 const presenceInput = z.object({ channel: channelId, name: z.string().trim().min(1).max(120).optional(), handle: z.string().trim().min(1).max(80), mode: z.enum(["agent", "ghost"]), accent: z.string().regex(/^#[0-9a-f]{6}$/i), channelDefinition: channelDefinition.optional(), connectionMode: z.enum(["sandbox", "native", "bridge"]).optional() });
 const presenceChatAsset = z.object({ name: z.string().trim().min(1).max(160), kind: z.enum(["image", "video", "gif", "audio", "document", "chart", "link"]), mimeType: z.string().trim().max(120).optional(), dataUrl: z.string().max(2_500_000).optional(), sourceUrl: z.string().url().max(2000).optional() });
+const languagePolicy = z.object({ avoid: z.array(z.string().trim().min(1).max(160)).max(100), prohibited: z.array(z.string().trim().min(1).max(160)).max(100) });
 const operation: z.ZodType<RuntimeOperation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("reset") }),
   z.object({ type: z.literal("createAgent"), input: agentInput }),
@@ -684,6 +707,9 @@ const operation: z.ZodType<RuntimeOperation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("runPulse"), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("syncNativeX"), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("setModel"), model: z.string().trim().min(1).max(80), provider: z.enum(["openai", "anthropic", "gemini", "openrouter", "ollama", "custom"]).optional(), quality: z.enum(["low", "medium", "high", "local"]).optional(), vision: z.boolean().optional() }),
+  z.object({ type: z.literal("setAgentLanguagePolicy"), policy: languagePolicy }),
+  z.object({ type: z.literal("setPresenceLanguagePolicy"), policy: languagePolicy }),
+  z.object({ type: z.literal("overrideLanguagePolicy"), id: z.string().min(1) }),
   z.object({ type: z.literal("createAssignment"), instruction: z.string().trim().min(1).max(4000), presenceId: z.string().min(1).optional(), sessionId: z.string().min(1).optional(), environment: z.enum(["sandbox", "live"]).optional(), schedule: z.object({ day: z.string().min(1).max(20), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), executionWindow: z.string().min(1).max(40) }).optional() }),
   z.object({ type: z.literal("startAssignment"), id: z.string().min(1), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("workAssignment"), id: z.string().min(1), sessionId: z.string().min(1) }),
@@ -775,10 +801,15 @@ export async function POST(request: Request) {
       if (assignment.environment !== "sandbox" || session.presenceId !== assignment.presenceId) throw new Error("Only a matching Playground Sandbox session can work this Assignment in V1.");
       const presence = current.presences.find((item) => item.id === assignment.presenceId);
       if (!presence) throw new Error("That Assignment's Presence is no longer available.");
-      let next = parsed.type === "startAssignment" ? applyOperation(current, parsed) : current;
-      next = await runSandboxAssignment(next, assignment.id, session.id);
-      writeState(next);
-      return NextResponse.json(next);
+      if (parsed.type === "startAssignment") {
+        const next = applyOperation(current, parsed);
+        writeState(next);
+        return NextResponse.json(next);
+      }
+      const next = current;
+      const worked = await runSandboxAssignment(next, assignment.id, session.id);
+      writeState(worked);
+      return NextResponse.json(worked);
     }
     if (parsed.type === "runSlot") {
       const next = await evaluateCalendarSlot(current, parsed.id, parsed.scheduled);
@@ -925,6 +956,11 @@ export async function POST(request: Request) {
       return NextResponse.json(next);
     }
     let next = applyOperation(current, parsed);
+    if (parsed.type === "overrideLanguagePolicy") {
+      const overridden = next.executions.find((item) => item.id === parsed.id);
+      if (overridden?.connector === "native" && overridden.status === "queued") next = await deliverNativeExecutions(next, new Set([overridden.id]));
+      if (overridden?.connector === "simulated" && overridden.status === "queued") next = deliverSandboxExecution(next, overridden.id);
+    }
     if (parsed.type === "setPresence" && current.presence && next.presence && parsed.patch.mode && parsed.patch.mode !== current.presence.mode && parsed.patch.mediaPerceptionPolicy === undefined) {
       next = applyOperation(next, { type: "setPresence", patch: { mediaPerceptionPolicy: parsed.patch.mode === "ghost" ? "review-uncertain" : "use-judgment" } });
     }
@@ -952,9 +988,10 @@ export async function POST(request: Request) {
       const lastMessage = conversation?.messages.at(-1);
       if (lastMessage?.role === "agent") lastMessage.content = reply;
       if (conversation) conversation.updatedAt = new Date().toISOString();
-      if (isExplicitXPostRequest(parsed.content) && next.presence?.channel === "x") {
+      const exactOperatorText = parsed.content.match(/^publish exactly\s*:\s*([\s\S]+)$/i)?.[1]?.trim();
+      if ((isExplicitXPostRequest(parsed.content) || exactOperatorText) && next.presence?.channel === "x") {
         const existingExecutionIds = new Set(next.executions.map((item) => item.id));
-        next = formChatPostIntent(next, reply);
+        next = formChatPostIntent(next, exactOperatorText ?? reply, undefined, exactOperatorText ? "operator" : "agent");
         const chatExecutionIds = new Set(next.executions.filter((item) => !existingExecutionIds.has(item.id)).map((item) => item.id));
         next = await deliverNativeExecutions(next, chatExecutionIds);
       }

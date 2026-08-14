@@ -2149,6 +2149,18 @@ These sentences should survive implementation changes.
 
 ---
 
+# Language and phrasing
+
+Taste guides expression. Authority defines hard constraints.
+
+The Agent owns how it speaks; the operator defines explicit boundaries the final expression must obey. Agent and Presence language policies are visible, structured, and additive: a Presence can add local rules but cannot weaken the Agent's inherited rules. Avoid is advisory. Never use is a literal lexical constraint, not a semantic category or a hidden style preference.
+
+The model owns the sentence. Deterministic code owns whether an explicit lexical constraint was satisfied. A lexical prohibition is a deterministic execution constraint, not social intelligence. The expression layer may request a bounded rewrite that preserves the chosen act, target, thread, facts, assets, and format; it must not mechanically edit public language when the Agent can re-express it. If the final candidate still violates the rule, Execution is blocked while Social Intent remains the chosen act. Violation is not NO_OP; failure is not judgment.
+
+The product must keep NO_OP, language violation, evaluation failure, delivery failure, and candidate rejection distinct. A blocked Assignment remains incomplete, does not advance progress, and produces no delivery or Mirror artifact. Manual exact-text operator actions require a visible, auditable per-action choice to go back or publish anyway; an autonomous Agent output cannot override its own boundary.
+
+Language validation sits at Expression and final delivery across Sandbox, Playground, Pulse, Schedule, Assignments, native X, Bridge, manual relay, messages, and retries. It validates Agent-generated text, not quoted third-party source text, and never turns a Presence boundary into an observation filter.
+
 # 55. The final idea
 
 OpenPresence starts from a simple belief:
