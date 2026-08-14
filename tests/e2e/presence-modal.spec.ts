@@ -5,10 +5,18 @@ test.beforeEach(async ({ request }) => {
   expect(reset.ok()).toBeTruthy();
 });
 
+async function openAddPresence(page: import("@playwright/test").Page) {
+  const host = test.info().project.name === "mobile"
+    ? page.locator(".mobile-presence-switcher")
+    : page.locator(".sidebar");
+  await host.getByRole("button", { name: /Switch Presence, currently/ }).click();
+  await page.getByRole("menu", { name: "Your Presences" }).getByRole("menuitem", { name: "Add a Presence", exact: true }).click();
+}
+
 test("Add Presence modal covers the viewport and centers the channel identity flow", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await page.getByRole("button", { name: "Add a Presence", exact: true }).click();
+  await openAddPresence(page);
 
   const backdrop = page.locator(".add-presence-modal-backdrop");
   const dialog = page.getByRole("dialog", { name: "Add a Presence" });

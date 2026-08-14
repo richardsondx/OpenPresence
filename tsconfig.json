@@ -1,7 +1,11 @@
 {
   "compilerOptions": {
     "target": "ES2017",
-    "lib": ["dom", "dom.iterable", "esnext"],
+    "lib": [
+      "dom",
+      "dom.iterable",
+      "esnext"
+    ],
     "allowJs": false,
     "skipLibCheck": true,
     "strict": true,
@@ -13,9 +17,28 @@
     "isolatedModules": true,
     "jsx": "preserve",
     "incremental": true,
-    "plugins": [{ "name": "next" }],
-    "paths": { "@/*": ["./*"] }
+    "plugins": [
+      {
+        "name": "next"
+      }
+    ],
+    "paths": {
+      "@/*": [
+        "./*"
+      ]
+    }
   },
-  "include": ["next-env.d.ts", "**/*.ts", "**/*.tsx", ".next/types/**/*.ts"],
-  "exclude": ["node_modules"]
+  "include": [
+    "**/*.ts",
+    "**/*.tsx",
+    ".next/types/**/*.ts",
+    "/Users/richardson/Code/OpenPresence/tmp/openpresence-boardy48-gptlow/.next/types/**/*.ts",
+    "/Users/richardson/Code/OpenPresence/tmp/openpresence-final-gptlow/.next/types/**/*.ts",
+    "/tmp/openpresence-boardy48.0sH7CL/next/types/**/*.ts",
+    "next-env.d.ts",
+    "tmp/openpresence-final-gptlow/next/types/**/*.ts"
+  ],
+  "exclude": [
+    "node_modules"
+  ]
 }

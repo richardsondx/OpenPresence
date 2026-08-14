@@ -1,5 +1,346 @@
 # Active QA Work
 
+## COMPLETE — Make Scenario Runs channel-native and operator-first
+
+- **Started:** 2026-08-14
+- **Scope:** Reframe completed Scenario Runs around the social behavior being rehearsed: channel-native Replay first, concise Review second, and technical evidence in Details. Reuse the existing Playground thread renderer, preserve Sandbox provenance and append-only evidence, and keep operator review explicit and non-mutating.
+- **QA learning:** Evidence-backed social features must be browser-verified at the level of the user’s trust question. A passing structural evaluation is not enough; the regression flow must assert that the actual Sandbox world objects and Presence outcome are visible before technical details.
+- **Executable protection:** `tests/e2e/scenario-rehearsal.spec.ts` asserts Replay, Details, Review, isolated Run provenance, unchanged Memory/Growth, and fresh rerun isolation.
+- **Verification:** TypeScript passed; Scenario unit tests passed 4/4; Scenario Chromium E2E passed 1/1; targeted ESLint reported 0 errors; `git diff --check` passed; connected Chrome visual QA inspected Replay, Review, and Details at desktop size. Repository-wide ESLint remains blocked by generated `tmp/**/.next` artifacts unrelated to this change. No live connector activity occurred.
+- **Status:** Complete.
+
+## IN_PROGRESS — Implement Scenario Rehearsal Runs for Playground
+
+- **Started:** 2026-08-14
+- **Scope:** Execute the corrected Scenario Rehearsal Runs plan: natural-language Scenario authoring frozen into versioned fixed replays, Presence-scoped isolated Runs backed by existing Playground sessions, structured import/export, narrow structural checks, independent model-review boundary, provenance, resume/rerun semantics, and philosophy integration.
+- **Product boundary:** Keep `User → Agent → Presence`, Sandbox/Live isolation, Social Mirror provenance, worldSpec/evaluationSpec separation, and explicit learning promotion. No live connector activity is authorized.
+- **Verification:** `pnpm typecheck` passed; full Vitest passed 174/174; feature-scoped ESLint passed with no errors; Scenario Chromium E2E passed 1/1; connected Chrome verified natural-language authoring, world/evaluation preview separation, isolated Sandbox Run, append-only evidence, conservative `Needs review` handling, and fresh rerun behavior with no console errors; CLI Scenario list returned versioned Runs and provenance. The broader legacy Chromium suite was started for regression context and exposed unrelated baseline failures in Calendar Week selector strictness and an Activity navigation timeout; no Scenario test failed. No live connector activity occurred.
+- **Status:** Complete.
+
+## COMPLETE — Language & Phrasing V1
+
+- **Started:** 2026-08-14
+- **Scope:** Implement the attached structured LanguagePolicy plan, add `docs/LANGUAGE.md`, update the canonical OpenPresence philosophy, and verify Agent/Presence language configuration plus deterministic outbound validation. This is feature-scoped and local/Sandbox-only; no live connector activity is authorized.
+- **Coordination:** The referenced multi-Agent browser task was asked to pause because its active worktree changes overlap this feature's UI/runtime surfaces. Existing uncommitted changes remain preserved.
+- **Verification:** docs/LANGUAGE.md is an exact copy of the attached reference. Pure matcher/merge/runtime coverage passes 6/6; full Vitest passes 169/169; TypeScript passes; production build passes; changed-source ESLint reports zero errors; focused Chromium configuration flow passes 1/1 on an isolated local test port. The referenced browser-audit task is idle and confirmed it will not edit this workspace until explicitly resumed. No live connector activity occurred.
+- **Status:** Complete.
+
+## COMPLETE — Production mock isolation
+
+- **Started:** 2026-08-14
+- **Scope:** Prevent deterministic AI/X fixture output from reaching production while preserving isolated test-harness coverage.
+- **Root cause:** `OPENPRESENCE_AI_MOCK=1` and `OPENPRESENCE_X_API_MOCK=1` were checked directly. The Playwright harness enabled them explicitly, but there was no separate runtime gate preventing an accidental production configuration from activating them.
+- **Fix:** Mock behavior now requires `OPENPRESENCE_TEST_MODE=1` outside production. Production mode ignores the mock flags, uses provider and connector paths, and fails with an actionable error when configuration is missing instead of emitting generic output. The browser harness runs in non-production test mode.
+- **Verification:** AI, X, and Sandbox suites passed 65/65; production-mode AI mock regression passed; production build passed; focused Chromium test passed 1/1 with the isolated test harness.
+
+## COMPLETE — Correct Playground virtual time initialization and reset
+
+- **Started:** 2026-08-14
+- **Scope:** Trace why Playground cards and the Virtual time panel show a stale fixed time, then ensure a new/reloaded Playground session and Reset use the current local time while preserving intentional virtual-time advancement within a session.
+- **Product boundary:** Virtual time is Sandbox world state, not public channel truth. It must be persisted per Presence/session and must not affect Agent identity, Presence meaning, or live delivery.
+- **Root cause:** New and reset sessions already used `now()`, but reopening an existing active session returned its persisted `virtualNow` unchanged. The formatter was correct; the persisted Sandbox clock was stale.
+- **Fix:** Added persisted `virtualTimeMode` (`realtime` or `manual`), synchronized stale realtime sessions when Playground opens, preserved manually advanced virtual time, and explicitly reanchored Reset to the current clock. Legacy sessions default to realtime during normalization.
+- **Verification:** `tests/sandbox.test.ts` 27/27 passed; focused Chromium browser checks for current-on-open and current-on-Reset passed 2/2; TypeScript passed. The broader neighboring Playground rehearsal test still has an unrelated pre-existing media-inspection failure before it reaches the clock assertions.
+
+## COMPLETE — Trace cross-Agent Presence style contamination
+
+- **Started:** 2026-08-14
+- **Scope:** Use runtime provenance and focused browser QA to determine why Genny, Dan Klone, and Alex Klonemozi can show similar OpenPresence/agent-loop posts, and why historical `QA-*` markers appear in Sandbox feeds. Verify Agent Brain, Presence Brief, Assignment instructions, AI decision context, Sandbox Mirror lineage, and Feed projection.
+- **Product boundary:** Preserve `User → Agent → Presence`; public output must be grounded in the selected Presence and Assignment while internal QA instructions remain private. Local/Sandbox only; no live connector activity.
+- **Verification:** Runtime provenance traced the reported posts from the selected Agent workspace through Presence, Assignment, AI decision, Sandbox execution, Mirror delivery, and Feed projection. The screenshot batches had distinct Agent/Presence/session/Assignment lineage, but the historical 10-post payloads were byte-for-byte identical because an older deterministic mock returned one shared candidate list. The `QA-NOW`/`QA-TEN` publications were intentionally created by earlier diagnostic Assignments and persisted as historical Sandbox Mirror data; current `cleanSandboxDraft` prevents new marker leakage, but does not rewrite history. A current-code API trace then exposed a second related defect: the mock classifier scanned the full private runtime prompt, allowing execution-envelope prose to steer a Genny-shaped workspace into the operator fixture family. The classifier now extracts only the explicit Assignment instruction before matching Presence style, with word-bounded precedence. Current local Sandbox trace completed Genny, Dan Klone, and Alex Klonemozi at 2/2 each, with distinct topic-grounded outputs, unique text, correct Agent/Presence/session/Assignment lineage, and zero QA markers. Focused AI tests pass 2/2; no live connector activity occurred.
+- **Status:** Complete.
+
+## COMPLETE — Three-agent concurrent Playground posting experiment
+
+- **Started:** 2026-08-14
+- **Scope:** Use three isolated Chrome tabs and three configured Agent/Presence pairs to assign and publish 10 Sandbox Playground posts each for Boardly-style, Dan Koe-style, and Alex Hormozi-style output. Verify immediate sequential delivery, feed counts, style grounding, context isolation, and recoverability.
+- **Product boundary:** This is a local Sandbox/mock experiment only. It must not publish to live X or impersonate the referenced people; the test evaluates configured style emulation and product workflow, not identity deception.
+- **Verification:** Three independent Chrome workers ran the UI against Social Mirror Sandbox worlds. Genny, Dan Klone, and Alex Klonemozi each completed a fresh 10-post Assignment with 10/10 verified publications, distinct outputs, correct topic/style grounding after the fixture-precedence fix, reload persistence, and no live-X activity. The run exposed and fixed context-insensitive mock candidates, operator/builder classifier precedence, and normalized SQLite projection loss when concurrent Agent workspaces wrote. The concurrent-tab Chromium regression passes 1/1; focused AI/runtime/Sandbox/X/concurrent-context coverage passes 129/129; typecheck, production build, changed-file ESLint, and `git diff --check` pass. Remaining UX debt: Start rehearsal completes the internal sequential loop without streaming individual post progress, the expanded `10 / 10 delivered` label is not restored after reload, and seeded history can make a fresh Sandbox look non-empty. Style emulation is differentiated and grounded, not indistinguishable impersonation; the profile explicitly avoids copying a real person's distinctive wording. Full Vitest remains unable to exit in the pre-existing Playground CLI child-process suite.
+- **Status:** Complete.
+
+## COMPLETE — Default new Agents to OpenAI GPT 5.6 Luna medium
+
+- **Started:** 2026-08-14
+- **Scope:** Ensure new Agents and untouched legacy Anthropic seeds use OpenAI `gpt-5.6-luna` at medium reasoning, while preserving explicitly configured provider/model choices.
+- **Product boundary:** The model runtime is Agent-owned configuration; Presence switching must not change it, and provider implementation details remain outside social cognition.
+- **Verification:** New-agent and narrow legacy-migration runtime coverage passes; full Vitest passes 160/160; focused Chromium and Pixel 5 Brain persistence E2E passes 2/2; typecheck, production E2E build, focused ESLint, and `git diff --check` pass. Existing Anthropic selections with configured access remain unchanged.
+- **Status:** Complete.
+
+## IN_PROGRESS — Refine Bridge Channel editor layout
+
+- **Started:** 2026-08-14
+- **Scope:** Remove confusing media summary copy and make Channel actions/media controls compact, aligned, and easier to scan.
+- **Verification:** Chrome visual QA confirmed compact three-column actions, aligned checkbox/text, compact media controls, and removal of the confusing media summary. Focused Channel editor E2E passed. TypeScript, 158 Vitest tests, changed-file ESLint, production build, and `git diff --check` passed. The existing Bridge lifecycle E2E remains blocked later by its unrelated Schedule evaluation timeout.
+- **Status:** Complete.
+
+## IN_PROGRESS — Edit Bridge Channel configuration
+
+- **Started:** 2026-08-14
+- **Scope:** Let users edit an existing Bridge Presence's Channel name, destination, declared actions, and channel media support from Settings while keeping Bridge delivery limitations explicit.
+- **Verification:** TypeScript, 158 Vitest tests, changed-file ESLint, production build, and Chrome QA passed. Chrome QA exercised the editor fields and media warning without mutating shared local data.
+- **Status:** Complete.
+
+## IN_PROGRESS — Make Bridge setup usable by external browser agents
+
+- **Started:** 2026-08-14
+- **Scope:** Make Bridge onboarding truthful and guided, add adapter heartbeat/check-in, expose a generated browser-agent contract without secrets, replace raw custom-channel capability entry, and document/test the generic Bridge lifecycle. Keep delivery local/mock-only; do not connect or mutate Skool.
+- **Verification:** TypeScript, 157 Vitest tests, focused ESLint, production build, and Chrome QA passed. Chrome QA confirmed waiting-for-adapter state, instruction-copy feedback, prompt placeholder redaction, claim rule, and explicit unsupported-media messaging. No live Skool actions performed.
+- **Status:** Complete.
+
+## COMPLETE — Support independent Agent work across browser tabs
+
+- **Started:** 2026-08-14
+- **Scope:** Let a user work on two different Agents simultaneously in separate browser tabs or windows without one tab changing the other tab's selected Agent, Presence, conversation, or workspace context. No split workspace layout is in scope.
+- **Product boundary:** Preserve `User → Agent → Presence`; Agent-wide meaning remains shared within an Agent, while each browser surface keeps an independent selected Agent context. QA and development remain local/Sandbox-only; no live connector activity is required.
+- **Verification:** Separate Chrome tabs held Atlas and Jenny simultaneously with independent `agentId`/`presenceId` URLs; each tab sent Agent-scoped Teach work, reloaded, restored its own Agent and transcript, and switching Atlas↔Jenny in one tab left the other on Jenny. Chrome diagnostics showed no warnings/errors. The focused Playwright Chromium regression passes 1/1; the stale-snapshot unit regression passes; focused runtime/AI/Sandbox/X coverage passes 126/126; typecheck, production build, changed-file ESLint, and `git diff --check` pass. Full Vitest remains unable to exit in the pre-existing Playground CLI child-process suite; the other 12 focused test files pass when run independently. No live connector activity occurred.
+- **Status:** Complete.
+
+## IN_PROGRESS — Browser-verify custom Skool Bridge setup
+
+- **Started:** 2026-08-14
+- **Scope:** Use the real interface in an isolated development runtime to create a new Agent and Skool Presence, configure Bridge capabilities for posts, likes, comments/replies, and GIF/image-capable publication, and inspect whether the workflow is understandable and bottleneck-free.
+- **Product boundary:** Keep the Agent mind separate from the Presence, the custom Skool Channel separate from the Bridge connector, and all live delivery out of scope for this QA run.
+- **Verification:** Main-database Chrome flow created `Skool Community Agent` with a custom `Skool Community` Channel and `@skool_community` Presence; the route persisted as Bridge; a Bridge named `Skool` was created; supervised Post, Comment, and Like capabilities persisted after reopening Settings; the one-time Bridge key appeared only at creation; no Skool credentials or external actions were used; Chrome diagnostics were clean. The current Bridge protocol does not carry inbound `assetRefs`, and claimed executions expose publication asset IDs without uploadable asset data, so image/GIF delivery remains an implementation gap. Official Skool policy also prohibits bots, scraping, and automated posting/commenting, so no live Skool adapter was connected.
+- **Status:** Complete with media/integration gap recorded.
+
+## COMPLETE — Revalidate 10-post Assignment lineage and marker hygiene
+
+- **Started:** 2026-08-14
+- **Scope:** Trace a fresh Assignment through AI decision, Sandbox execution, Social Mirror delivery, and Feed projection; verify distinct output, truthful progress, real observed timestamps, and no internal QA-marker leakage.
+- **Product boundary:** Assignment instructions are operator context, not public copy. A Sandbox post counts only after a succeeded execution creates a Mirror object; Feed is the visible acceptance surface and must not imply live X publication.
+- **Verification:** Connected Chrome on an isolated local Sandbox completed `10 / 10 delivered`; runtime state contained 10 succeeded Assignment executions, 10 Mirror posts, 10 unique normalized texts, and zero `QA-TEN-RUN-2026-08-14` markers. Feed rendered exactly 10 items with `observedAt` timestamps and explicit simulated-world-time titles. A provider-backed attempt truthfully stopped at `0 / 10` with actionable “Sandbox evaluation unavailable” events when Anthropic was not connected. Vitest passes 155/155; Assignment/marker E2E passes 8/8 Chromium and 2/2 Pixel 5; typecheck, production build, and `git diff --check` pass. No live X write occurred.
+- **Status:** Complete.
+
+## IN_PROGRESS — Enforce Presence-scoped Playground worlds
+
+- **Started:** 2026-08-14
+- **Scope:** Ensure switching Presence changes Playground's channel, Sandbox world, Social Mirror, simulated actors, relationships, rehearsal history, calibration evidence, and related world-derived state without changing the underlying Agent mind.
+- **Product boundary:** Preserve `User → Agent → Presence`; Brain, Soul, Mission, Taste, Memory, Skills, Tools, and model remain Agent-level, while Playground embodiment is Presence-scoped.
+- **Verification:** Runtime isolation coverage confirms distinct Presence/session/environment/channel roots, no Mirror or actor records cross into a new Presence, and Agent-level meaning files remain unchanged. The responsive E2E regression passes on Chromium and Pixel 5; full Vitest passes 154/154; typecheck, production build, and `git diff --check` pass. Isolated browser inspection confirms Playground is labeled “Presence rehearsal” and Playground is in Presence navigation. The shared `localhost:3001` dev server was left untouched after concurrent Next processes corrupted its `.next` chunks.
+- **Status:** Complete.
+
+## COMPLETE — Fix duplicate Assignment binding in the state route
+
+- **Started:** 2026-08-14
+- **Scope:** Resolve the production compile failure in `runSandboxAssignment`, where the loop binding and post-loop cleanup both declared `assignment`.
+- **Verification:** TypeScript compilation and the production Next build pass; focused runtime/Sandbox tests pass 86/86; `git diff --check` passes. The cleanup binding is now explicitly named `finalAssignment`.
+- **Status:** Complete.
+
+## COMPLETE — Remove individual Playground feed items
+
+- **Started:** 2026-08-14
+- **Scope:** Give each Sandbox Playground post, reply, and social event a small accessible removal control without clearing the rest of the rehearsal.
+- **Product boundary:** This is local Sandbox curation only; it cannot remove live X content. The mutation is scoped to the current Playground session and removes the selected Mirror object plus its derived perception/event mirror record.
+- **Verification:** Full Vitest passes 152/152; the new removal flow passes in Chromium and Pixel 5; typecheck, production Next build, focused ESLint, and `git diff --check` pass. Existing Next `<img>` optimization warning remains.
+- **Status:** Complete.
+
+## COMPLETE — Keep Attention Rhythm in Presence Settings
+
+- **Started:** 2026-08-14
+- **Scope:** Remove the duplicated Rhythm summary from Activity while preserving the full attention rhythm controls in Presence Settings.
+- **Product boundary:** Activity shows observed context, Presence decisions, and delivery state. Rhythm is Presence configuration and belongs in Settings.
+- **Verification:** Fresh Chrome on isolated `localhost:3231` confirmed Activity no longer renders “When Jenny pays attention” while Settings still renders the rhythm controls and quiet-hours state; Chrome reported no console errors. Focused Chromium + Pixel 5 E2E passed 4/4; full Vitest passed 151/151; typecheck, focused ESLint, and `git diff --check` passed.
+- **Status:** Complete.
+
+## COMPLETE — Make Schedule Assignments first-class calendar objects
+
+- **Started:** 2026-08-14
+- **Scope:** Put scheduled Assignments in the Week calendar as a distinct visual object, open a review surface on click, and make cancellation available from that surface.
+- **Product boundary:** Standing intents grant permission to notice and decide; Assignments delegate an outcome without turning the schedule into a promise to publish. Cancelled Assignments must leave the active viewpoint.
+- **Acceptance:** The Week calendar is the primary Assignment surface; clicking a scheduled Assignment opens details with progress, timing, run/retry, and cancel actions; List view uses the same detail surface; updated copy explains the difference between Standing intents and Assignments.
+- **Verification:** Calendar Week and Assignment cancellation/exact-time E2E pass 3/3 in Chromium and 3/3 on the mobile viewport; typecheck passes; focused ESLint reports 0 errors with only the existing `<img>` warning; production build passes with the same warning; `git diff --check` passes. The Week view no longer duplicates the Assignment list, and cancelled Assignments leave the active viewpoint.
+- **Status:** Complete.
+
+## COMPLETE — Verify 10-post Feed delivery and 10-reply context rehearsal
+
+- **Started:** 2026-08-14
+- **Scope:** QA the Playground “Give an Assignment” and Schedule Assignment flows, verify cancelled Assignments leave the active viewpoint, and rehearse a Boardy-style 10-post / 10-reply Sandbox session.
+- **Product boundary:** A requested quantity is a verified outcome, not a count of attempted drafts. Feed shows every successful public Sandbox publication; reply cognition uses the newest inbound object rather than stale thread text. No live X activity is part of this QA.
+- **Verification:** Fixed quantity-aware Assignment attempts and expanded deterministic candidates; fixed cancelled Assignment filtering; fixed local reply fixtures to match only the newest inbound object. Chrome verified exactly 10 Feed originals, exactly 10 Feed replies, and 10 unique reply texts including the provided introductions example. Full unit suite passes 149/149; focused Chromium + mobile Assignment/Schedule suite passes 14/14; typecheck and production build pass with the existing Next `<img>` warning; clean Chrome load has no current console errors.
+- **Status:** Complete.
+
+## COMPLETE — Diagnose Chat responding about the Agent instead of as a Presence
+
+- **Started:** 2026-08-14
+- **Scope:** Reproduce the reported Presence Chat context failure in connected Chrome and trace the selected post → runtime → rendered reply path.
+- **Product boundary:** Presence Chat is a private rehearsal of the selected Presence responding to a simulated social-world post. It must not collapse into Teach, generic Agent self-description, or expose internal runtime context.
+- **Acceptance:** A user can add a post, select Reply, and receive a context-sensitive Presence response to that post; standalone posts remain non-reply context; errors are visible and no internal telemetry remains after debugging.
+- **Verification:** Connected Chrome reproduced the defect, then verified a standalone founder/quietness post received a public-self response with no `Agent runtime` wording; explicit Reply mode preserved the selected post and produced an edge-case-specific reply; Chrome console showed no errors. Runtime telemetry was content-free, temporary, and removed after localization. Added AI and E2E regression coverage. Full Vitest passes 150/150; typecheck passes; changed-file ESLint passes; focused Chromium Chat E2E passes 2/2. The existing Pixel 5 Chat viewport assertion remains red before message submission (`composerBottom` 777.6px vs 727px viewport) and is outside this response-layer change.
+- **Status:** Complete.
+
+## IN_PROGRESS — Bring CLI parity to Playground, Schedule, and Watching
+
+- **Started:** 2026-08-14
+- **Scope:** Extend the agent CLI with the latest Playground rehearsal/Assignment controls plus Presence-scoped Schedule and Watching workflows so experiments can run without parsing the browser UI.
+- **Product boundary:** Keep the CLI machine-readable and Sandbox-scoped. Schedule remains permission to consider; Watching records attention instructions without inventing observations; Assignments advance only from verified Sandbox outcomes.
+- **Acceptance:** `playground` supports original rehearsal feedback and Assignment lifecycle operations; `schedule` supports list/add/edit/run/cancel with Consider versus Assign semantics; `watching` supports list/add/remove with truthful source status; contract tests and real local CLI smoke pass.
+- **Verification:** `tests/playground-cli.test.ts` passes 11/11; full Vitest passes 147/147; typecheck, focused CLI/test ESLint, syntax, and `git diff --check` pass; production build passes with only the existing Next `<img>` warning. Real local smoke on isolated `localhost:3217` covered Playground start → inject → advance → timeline → reset, Schedule Consider add/list/edit/run, scheduled Sandbox Assignment creation and 2/2 verified completion, original rehearsal → preference feedback, automatic/manual Watch add/list/remove, and the `LIVE_SCOPE_BLOCKED` guard for non-Sandbox Schedule evaluation. No live connector delivery occurred.
+- **Status:** Complete.
+
+## COMPLETE — Make Genny's Boardy-style rehearsal truthful and useful
+
+- **Started:** 2026-08-14
+- **Scope:** Diagnose repeated Sandbox posts, stuck Assignments, missing Assignment visibility in Schedule, and the gap between the requested multimodal/conversational experiment and the current Playground/Feed experience.
+- **Product boundary:** Prove a Presence can build a recognizable, selective, multimodal social presence without copying Boardy, inventing network access, or treating a schedule as an obligation to publish. Keep Agent cognition, Social Intent, Execution, Delivery, and Outcome distinct.
+- **Acceptance:** Repeated fixtures are eliminated or clearly marked as deterministic replay; every Assignment has an actionable lifecycle with truthful failure/retry/cancel state; scheduled Assignments are visible in the same week calendar as future execution candidates; Playground and Feed show original posts, replies, and supported assets with provenance; Chat tests a context-sensitive social decision rather than generic assistant output.
+- **Verification:** Reproduced the duplicate-post and stalled-Assignment flows in isolated Chrome and state responses; runtime evidence localized the defects to deterministic candidate exhaustion, non-idempotent Sandbox delivery, and Schedule projection. Added duplicate candidate rejection, exactly-once delivery, scheduled Assignment calendar cards with 00:00–23:00 coverage, actionable Run/Retry controls, deterministic multimodal Sandbox fixtures, Feed asset rendering, and a specific consent-aware Presence Chat fixture. `npm test` passes 144/144; typecheck passes; focused Chromium feature E2E passes 5/5; focused Chromium + mobile regression E2E passes 8/8; production build passes with one existing Next `<img>` optimization warning. Chrome on isolated `localhost:3120` verified 5/5 distinct posts, image/chart/GIF/link/video in Feed, a 23:35 Assignment on the Week calendar, execution from the calendar into Playground, and a context-sensitive introduction reply. No live X write was performed. The full Chromium suite reports 48/57; the nine remaining failures are outside this narrow feature scope (legacy Activity/Bridge/X-connection selectors and existing Schedule List-vs-Week assumptions).
+
+## COMPLETE — Genny Boardy-style Sandbox rehearsal
+
+- **Started:** 2026-08-14
+- **Scope:** Configure Genny inside Jenny through the app, exercise Teach/Chat/Playground, schedule weekly attention, and produce a 15+ item simulated post/reply rehearsal without real-X publication.
+- **Safety boundary:** Use the local Sandbox Presence and simulated connector only; do not publish, message, or change the real X account.
+- **Delivery:** Commit all intended worktree changes and push after the focused QA audit.
+- **Verification:** Boardy’s public profile was inspected read-only in Chrome; Genny was selected as Jenny’s X Sandbox Presence; Teach recorded agent-wide anti-impersonation/usefulness guidance; Genny’s Presence Brief and Public Self were configured through Settings; Chat produced a private feed reply; Playground completed three 5/5 Assignments; the Sandbox Mirror contains 16 Genny original posts and a contextual reply chain with two inbound replies; Schedule shows seven weekdays plus three exact-time Assignments at 23:35, 23:38, and 23:41 local time. No live X post, reply, message, or configuration was sent.
+
+## COMPLETE — Prevent quoted Ghost mentions from mutating Presence state
+
+- **Started:** 2026-08-13
+- **Scope:** Keep Teach focused on the operator's actual request when social handles or quoted world text contain `ghost`; make the reported post-formatting preference produce a truthful reviewable proposal with explicit interim behavior.
+- **Product boundary:** Teach may shape durable meaning only through reviewable proposals. A social-world mention is context, not a command, and must not silently change `User → Agent → Presence` identity.
+- **Acceptance:** The exact `@jenny_ghost write a post about SpaceX` example leaves the Presence Agent-owned; explicit “Put this Presence into Ghost mode” still works; the one-sentence-per-paragraph post preference records a `TASTE` proposal and states that replies remain normally formatted.
+- **Verification:** 140 unit tests, focused Teach Chromium/mobile E2E (4/4), exact screenshot wording in connected Chrome on isolated `localhost:3108`, production build, typecheck, changed-file lint, `git diff --check`, and zero Chrome console warnings/errors. No external connector or production state was mutated.
+
+## COMPLETE — Diagnose failed Assignment posting
+
+- **Started:** 2026-08-13
+- **Scope:** Trace why an explicit Sandbox Assignment remains at `0 / 4 delivered` after starting rehearsal, localize the failing runtime layer, and restore verified publication progress.
+- **Product boundary:** Assignment work remains Sandbox-only during QA; only a publication observed in the Social Mirror advances progress. Model failure, delivery failure, and candidate rejection must remain distinct and truthful.
+- **Acceptance:** Starting the shown Assignment produces a truthful success or failure state, and a successful run advances the Assignment from `0 / 4 delivered` with the corresponding verified Sandbox publication visible.
+- **Verification:** Runtime telemetry localized the failure to Ghost candidate validation before execution. The fix now distinguishes public subject matter from self-referential provider/model disclosure; the same local Sandbox Assignment reached `4 / 4 verified`, `completed`, four succeeded simulated executions, and zero system failures. Runtime and identity-boundary tests passed; temporary detailed telemetry was removed. Chrome was attempted, but the existing localhost tab was already claimed by another browser session, so the final execution proof came from the local state route and Sandbox Mirror.
+
+## COMPLETE — Clarify Watch lifecycle language
+
+- **Started:** 2026-08-14
+- **Scope:** Remove the contradiction between an active Watch and the implementation-shaped `Performance baseline · Not started` label.
+- **Acceptance:** The Watch card tells the operator whether the Watch is active, what it is waiting for, and whether any action is required; it does not expose an unexplained performance metric.
+- **Flow under test:** Chrome Watching surface → persisted Watch observation state → lifecycle copy.
+- **Verification:** Fresh Chrome on isolated `localhost:3106` verified both automatic and manual states with no console errors; focused Watching E2E passed 4/4 across Chromium and Pixel 5 after rebuilding `.next-e2e`; runtime tests, typecheck, focused lint, and `git diff --check` passed.
+
+## COMPLETE — Debug Watching in Chrome
+
+- **Started:** 2026-08-13
+- **Scope:** Reproduce the user-reported Watching failure in the real Chrome session and distinguish feature failure from a stale local browser build.
+- **Acceptance:** Chrome loads the current Watching navigation, creates and persists a creator/topic/opportunity Watch, reloads it, removes it, and preserves an explicit no-observations state.
+- **Verification:** Fresh Chrome run on `localhost:3103` completed load → create → remove with 200 responses and no console errors; focused Watching E2E passed 4/4 across Chromium and Pixel 5; 59 runtime tests, typecheck, changed-file ESLint, isolated production build, and `git diff --check` passed. The original `localhost:3001` tab was stale and did not contain Watching; regression rule added for active-origin/client-bundle verification.
+
+## COMPLETE — Clarify Assignment ownership in the review card
+
+- **Started:** 2026-08-13
+- **Scope:** Make the Assignment review card distinguish the operator-owned outcome from the Agent-owned approach; remove the ambiguous `Jenny decides` label while preserving the list of decisions Jenny makes.
+- **Product boundary:** Assignments own the expected outcome; the Agent owns how to accomplish it. This is a user-facing authority explanation and does not change runtime behavior.
+- **Acceptance:** After reviewing an Assignment, the card says `Agent decides how`, keeps the topics/thesis/evidence/format/wording/timing list, and does not imply that the Assignment is optional or that Jenny owns the requested deliverable.
+- **Verification:** 136 unit tests, focused Assignment lifecycle E2E 6/6 across Chromium and Pixel 5, typecheck, changed-file lint, production build, isolated E2E build, and `git diff --check`.
+
+## COMPLETE — Add Presence-level Watching
+
+- **Started:** 2026-08-13
+- **Scope:** Add a first-class Watching surface for Presence-scoped attention, with natural-language creator/topic/opportunity Watches, review-before-start confirmation, truthful automatic/manual source status, persistence, and removal.
+- **Product boundary:** Watching is the Presence's eyes, not a publishing queue or creator-remixing instruction. Watches preserve `User → Agent → Presence`, do not rewrite identity, do not invent observations, and keep observed-world evidence separate from Agent action.
+- **Acceptance:** An operator can open Watching, add a creator or free-form social-world description, inspect the inferred meaning and boundary, start the Watch, reload it, remove it, and see an explicit no-observations state until a source supplies evidence.
+- **Verification:** 58 runtime tests, 4/4 focused Watching E2E cases across Chromium and Pixel 5, isolated production build via `.next-e2e`, typecheck, `git diff --check`, and exploratory browser review at 1440px and 390px with no console errors or horizontal overflow. Repository-wide lint remains noisy/red from pre-existing generated artifacts under `tmp/`; source typecheck and feature-focused gates passed.
+
+## COMPLETE — Implement Assignment control layer
+
+- **Started:** 2026-08-13
+- **Scope:** Add the first-class Assign authority alongside existing Consider behavior, with prompt-driven compilation, verified Sandbox progress, distinct failure states, and focused Playground/Schedule/Operating Status/Activity/Feed UX.
+- **Product boundary:** Preserve `User → Agent → Presence`, Taste, silence for ambient consideration, the separation of cognition from execution/delivery/outcome, and the Sandbox-only boundary during QA. Assignment progress counts only verified Social Mirror publications.
+- **Acceptance:** An operator can create or rehearse an Assignment, review what OpenPresence understood, start it, see truthful progress, and distinguish candidate rejection, model failure, delivery failure, incomplete work, and completion. Existing Consider flows remain behaviorally unchanged.
+- **Verification:** 56 runtime tests, 23 Sandbox tests, and 12 AI tests passed; desktop and 390px mobile Sandbox browser QA passed with no console warnings or horizontal overflow; Assignment rehearsal reached 2/2 verified publications in the Sandbox Mirror; Schedule, Activity, Feed, and provenance surfaces were inspected; typecheck, changed-file lint, production build, and `git diff --check` passed.
+
+## COMPLETE — Make Feed the canonical Presence public-history surface
+
+- **Started:** 2026-08-13
+- **Scope:** Replace the Presence-level Calendar navigation item with Feed; keep Calendar as a view over the same verified public-history projection.
+- **Product boundary:** Feed shows what the Presence actually put into the world; Activity remains operational history; Schedule remains future consideration permission. No drafts, no-ops, failed executions, private messages, or internal events enter Feed.
+- **Acceptance:** Feed opens newest-first with lightweight date headings, All/Originals/Replies/Quotes/Reposts filters, inspectable publications, and Sandbox/live provenance. Calendar remains reachable inside Feed and continues to visualize the same records.
+- **Verification:** 4/4 focused Feed/Calendar Chromium tests, 4/4 focused mobile tests, compact desktop layout regression, 132 unit tests, typecheck, changed-file lint, production build, and `git diff --check` passed. Full Chromium E2E was started and exposed an unrelated pre-existing Brain provider-selection failure before later legacy cases; no Feed-focused test failed.
+
+## COMPLETE — Keep Teach person-shaped for low-information operator cues
+
+- **Started:** 2026-08-13
+- **Scope:** Stop Teach from treating punctuation or symbol-only operator turns as invitations to perform generic assistant onboarding, and make the operator-facing prompt explicitly person-shaped.
+- **Product boundary:** Teach is the operator-facing conversation that shapes the private Agent; Chat is the selected Presence's public-self rehearsal. Neither surface should collapse the Agent into a generic support assistant.
+- **Acceptance:** A punctuation-only Teach turn persists as operator context without an Agent reply or model call; substantive Teach turns retain durable-change handling; historical transcripts remain intact.
+- **Verification:** 129 unit tests, focused Chromium Teach/Presence Chat E2E (4/4), typecheck, changed-file ESLint, isolated production build, and \`git diff --check\` passed.
+
+## COMPLETE — Remove the ambiguous channel label from the Playground Presence chip
+
+- **Started:** 2026-08-13
+- **Scope:** Remove the trailing `X` channel label from the top-right Presence identity chip in Playground because it visually resembles a close control.
+- **Product boundary:** Keep the Presence identity clear and preserve channel context in the surrounding `Simulated X` and Sandbox labels; this is a presentation-only change.
+- **Acceptance:** The chip shows the channel icon and Presence name without a trailing close-like label; the actual channel remains legible elsewhere in Playground; desktop and mobile remain usable.
+- **Verification:** Isolated Chromium and mobile E2E checks pass: the chip renders only the Presence name while `Simulated X` remains visible. Production build, typecheck, changed-file ESLint, 89 feature-relevant unit tests, and `git diff --check` pass. The broader existing Playground scenario still stops later at its unrelated `Media needs inspection` assertion after media attachment; the chip assertions pass before that point.
+
+## COMPLETE — Make low-information social cues context-sensitive
+
+- **Started:** 2026-08-13
+- **Scope:** Teach the Agent to interpret fragments, punctuation, emoji, brief acknowledgments, and casual greetings from thread and relationship context rather than treating them as automatic questions or reply obligations.
+- **Product boundary:** Preserve silence as a successful social act; permit the smallest natural signal or acknowledgment when a cue genuinely opens an exchange; never expand a one-character cue into assistant-style onboarding or invent a topic.
+- **Acceptance:** Fresh Playground cases distinguish noise (`.` / `?` / `👀` / `ok` / `Thanks`) from a casual opening (`What's good?`) without phrase-specific runtime branches.
+- **Verification:** 127 unit tests, Brain/system-prompt regression, isolated Chrome Playground experiment, typecheck, changed-file lint, isolated production build, and `git diff --check` passed. The real-model experiment chose `no_op` for `.` and a short Sandbox reply for `What's good?`; exact wording remains intentionally unconstrained.
+
+## COMPLETE — Keep Playground Control Room inside the viewport
+
+- **Started:** 2026-08-13
+- **Scope:** Prevent long Control Room decision details, especially the `Now` container, from expanding the Playground beyond the visible viewport.
+- **Product boundary:** Preserve the Control Room as an operator-readable explanation of Agent judgment; contain overflow through layout and wrapping rather than hiding the decision or exposing implementation mechanics.
+- **Acceptance:** Desktop Playground has no horizontal overflow; long `Now` details wrap within the rail; the rail and rehearsal history remain visible; the responsive layout remains usable at mobile widths.
+- **Verification:** Before the fix, the 264px rail's sections rendered at about 413px and pushed document width to 1373px at a 1280px viewport. After the fix, desktop and 390px mobile browser checks report document width equal to the viewport, Control Room sections contained within the rail, and no horizontal overflow. Focused Original Post Rehearsal E2E passed on Chromium and Pixel 5 with viewport-fit assertions, 87 feature-relevant unit tests, typecheck, changed-file ESLint, production build, and `git diff --check` passing.
+
+## COMPLETE — Make Original Post Rehearsal input inspectable
+
+- **Started:** 2026-08-13
+- **Scope:** Make the exact operator-submitted inspiration easy to find and open from every Original Post Rehearsal attempt, including silence/no-op outcomes.
+- **Product boundary:** Preserve the submitted text as operator context, keep it out of the simulated social world, and do not imply that the input commanded publication or served as a reward.
+- **Acceptance:** After a rehearsal completes, the history card visibly offers a `View what you submitted` action; opening it shows the exact submitted text (or clearly states that no inspiration was supplied) and explains how the context was used. The control works on desktop and mobile and remains available when Genny chooses silence.
+- **Verification:** Focused Chromium + Pixel 5 E2E confirms the exact submitted text opens in the expanded detail panel, the context-only boundary remains visible, and the rehearsal history stays viewport-contained; 87 feature-relevant unit tests, typecheck, changed-file ESLint, production build, and `git diff --check` pass. Direct browser checks also confirmed the disclosure at desktop and mobile widths with no console or request failures.
+
+## COMPLETE — Make Original Post Rehearsal produce a usable original-post outcome
+
+- **Started:** 2026-08-13
+- **Scope:** Diagnose and fix the narrow Original Post Rehearsal flow when an explicit consideration ends in “no sufficiently worthwhile original expression,” including AI decision parsing, Sandbox intent formation, and the operator-visible outcome.
+- **Product boundary:** Preserve Agent judgment and the right to remain silent; an explicit rehearsal must still yield a truthful, inspectable result and must not publish to a live connector or turn preference evidence into a reward.
+- **Verification:** 126 unit tests, typecheck, changed-file ESLint, production build, `git diff --check`, and focused Original Post Rehearsal E2E passed on Chromium and Pixel 5. The browser flow verifies a Sandbox publication, private inspiration non-leakage, persisted `fits` preference evidence, Sandbox-only execution lineage, responsive interaction, and no console errors or failed requests. Deliberate no-op state remains covered by runtime tests; real-model quality evaluation was not run because no model call was required for this regression.
+
+## COMPLETE — Preserve commas while editing Presence Brief territories
+
+- **Started:** 2026-08-13
+- **Scope:** Keep comma-separated Presence Brief textarea input stable while typing, then normalize territory values only at save time.
+- **Acceptance:** Commas remain visible in Primary territory, Adjacent territory, and Keep out drafts; saved values are trimmed arrays; cancel restores the saved Brief; desktop and mobile editing remain usable.
+- **Verification:** 123 unit tests, typecheck, isolated production build, changed-file ESLint, `git diff --check`, and focused Settings E2E on Chromium + Pixel 5 passed. The browser flow verifies trailing commas remain visible before save and comma-separated values persist after reopening. Repository-wide lint remains blocked by unrelated generated bundled files under `tmp/openpresence-social-v2.78dZil/next`; changed files lint cleanly.
+
+## COMPLETE — Make Schedule timing progressive and intention-centered
+
+- **Started:** 2026-08-13
+- **Scope:** Keep the internal consideration/execution window while removing the implementation-shaped field from the default Schedule form.
+- **Acceptance:** The default form shows Standing instruction, When, Objective, and Save; Timing options is collapsed by default and explains Flexible, Exact, and Custom relevance; existing runtime data remains compatible; desktop and mobile layouts remain usable.
+- **Verification:** 123 unit tests, typecheck, production build, lint, `git diff --check`, and focused Schedule E2E on Chromium + Pixel 5 passed. The browser flow verifies the raw field is absent by default, Timing options starts collapsed, Flexible is explained as the recommendation, and Custom values persist as consideration copy.
+
+## COMPLETE — Render submitted turns before Chat and Teach responses
+
+- **Started:** 2026-08-13
+- **Scope:** Make Presence Chat and Teach render the submitted operator message immediately, show an explicit in-flight thinking state while the model runs, then reconcile to the authoritative Agent response without duplicate turns.
+- **Product boundary:** The loading state communicates that cognition is in progress without exposing hidden chain-of-thought, provider details, or execution mechanics. Teach remains Agent-wide durable-shaping conversation; Presence Chat remains session-only public-self rehearsal.
+- **Acceptance:** Both surfaces show `You → Thinking → Agent`; delayed responses do not leave a blank transcript; one submission persists as one user turn and one response; duplicate submits are ignored; desktop and mobile remain usable.
+- **Verification:** 123 unit tests, production build, typecheck, lint, delayed-response Chromium + mobile E2E coverage for Chat and Teach, transcript cardinality assertions, and responsive chat viewport assertions passed.
+
+## COMPLETE — Explain Activity decision provenance
+
+- **Started:** 2026-08-13
+- **Scope:** Clarify the selected Presence's Activity decision rows so an operator can see what was observed, what social judgment was made, which action was selected, and whether delivery is pending, reviewed, or complete.
+- **Product boundary:** Preserve the separation between world observation, Agent judgment, Social Intent, Execution, Delivery, and Outcome. This is an evidence presentation fix, not a new cognition or execution behavior.
+- **Acceptance:** Repeated settings/system events no longer read as if they were meaningful social decisions; a decision row names its trigger/evidence, chosen action or silence, and current delivery state; the explanation remains truthful when evidence is missing.
+- **Verification:** 123 unit tests, focused Activity Chromium + mobile E2E regression passed, fresh Sandbox browser review confirmed distinct provenance lines on desktop and 390px mobile with no horizontal overflow, browser logs were clean, typecheck, lint, production build, and `git diff --check` passed.
+
+## COMPLETE — Separate Teach, Presence Chat, and Playground
+
+- **Started:** 2026-08-13
+- **Scope:** Make Teach the operator-facing Agent-shaping surface, make Chat a direct conversation with the selected Presence's public self, and keep Playground as isolated simulated-world rehearsal. Presence Chat must use the social cognition path with local delivery and session-only memory by default.
+- **Product boundary:** Preserve `User → Agent → Presence`; Chat does not mutate durable Agent Memory, Growth, Presence identity, or live connector state unless the operator explicitly creates a later teaching proposal. Playground remains simulated and isolated.
+- **Acceptance:** Sidebar labels and destinations communicate the three distinct interaction modes; Chat loads the selected Presence context and maintains test-conversation continuity; attachments can be sent with truthful perception state; Teach is clearly framed around proposals/change sets; Playground remains a simulated rehearsal surface.
+- **Verification:** 122 unit tests, AI prompt coverage for selected Presence/session history, normalized SQLite projection, focused Presence Chat/Teach E2E on Chromium and Pixel 5, responsive exploratory browser review with attachment and `What Presence sees` disclosure, console/network inspection, typecheck, lint, production build, and `git diff --check`. The focused acceptance suite passed 8/8, including the corrected mobile safe-area interaction. The broader legacy E2E suite remained partially red in pre-existing Playground/Calendar/Bridge lifecycle cases outside this change; no focused Teach or Presence Chat case failed after the final fixes.
+
 ## COMPLETE — Confirm Auto transitions before approving pending replies
 
 - **Started:** 2026-08-13
@@ -373,3 +714,151 @@
 - **Product boundary:** The observed post remains world data; it is shown as context for the Agent's judgment, never as an instruction. Approval remains the operator's decision about delivery, not a rewrite of the Agent's judgment.
 - **Acceptance:** A context-bearing Activity event says why it is clickable, the current action identifies its source post when available, “View post” opens the full observed post, and internal terms such as `x.post`, `execution envelope`, and raw status names are not required to understand the screen.
 - **Verification:** 83 unit tests, typecheck, lint, production build after rotating a stale generated `.next` directory, `git diff --check`, and focused Chromium coverage for Add Presence viewport centering plus Activity review/manual lifecycles passed.
+
+## IN PROGRESS — Establish robust social capability evidence
+
+- **Started:** 2026-08-13
+- **Scope:** Continue the frozen-methodology evaluation loop without benchmark-specific social rules. Strengthen the model-driven planner only from general development failures; record provider/model/reasoning/media/tool metadata; keep all six sandbox affordances Auto; separate act and wording evaluation; validate hidden, fresh, and longitudinal generalization.
+- **Latest evidence:** GPT 5.6 Luna Low scored 96.875% act / 96.667% wording across three repeated 48-case development replays; 99.074% / 92.857% on repeated restraint; 98.333% / 100% on a sealed aggregate-only 60-case holdout after the latest change; and 100% / 100% on each of three post-guidance fresh worlds. GLM 5.2 scored 97.917% act / 70% wording on the same 48-case fixture. Structural checks passed for all recorded runs.
+- **Current blockers to parity claim:** no frozen 130-case provenance-backed source set with complete thread-level partitions; human packet is generated but pending review; macro capability report is defined but incomplete; no independent second semantic judge; repeated frozen comparison is not yet complete.
+- **Latest development iteration:** A general clarification-breadth/neutral-expression guidance change was tested on three GPT 5.6 Luna Low sessions: 97.917% act / 90.476% wording across 24 packets. One-session 48-case Boardy and 18-case restraint regressions remained structurally valid at 97.917% / 95.833% and 97.222% / 100%. The change is retained provisionally as general model-facing guidance; it did not justify any benchmark-specific patch.
+- **Partition progress:** A transparent candidate manifest now records 33 development cases, 60 validation cases, 0 frozen cases, and 62 excluded Boardy source cases requiring complete thread/relationship provenance. The fail-closed validator reports `candidate-not-frozen` and will not promote incomplete captures.
+- **Provenance progress:** A public-status enrichment pass successfully added timestamps, authors, reply-parent chains, quoted-post context, and public media/link metadata to all 68 captured Boardy cases; 25 reply captures expose a retrieved parent chain, representing 14 unique retrieved thread roots across the 48 visible-feed cases. Private outcomes and complete relationship history remain explicitly unknown, so the enriched artifact is still development-only.
+- **Review packet:** A 68-case provenance review packet is ready with explicit open evidence gaps and blank thread-unit/frozen-eligibility decisions. It is pending source review and is not treated as benchmark evidence yet.
+- **Thread-unit analysis:** The 48 visible reply captures collapse to 37 retrieved roots; adding the 9 non-overlapping curated thread units gives a potential 46-unit reply pool before manual deduplication, leaving at least 4 additional distinct reply/reaction units needed for the 50-unit target. The 20 original/quote captures provide 20 distinct public roots, but still require provenance review.
+- **Verification:** 14 targeted AI/perception tests, seal verifier, semantic/structural audit scripts, repeated-run stability summaries, and `git diff --check` pass. The release verdict remains `PROMISING_BUT_NOT_YET_ESTABLISHED`.
+# 2026-08-13 — Provenance-backed parent-chain replay fixture
+
+The source enrichment work produced a development-only replay at
+`scenarios/boardy-thread-replay-development.json`. It uses one fresh
+Playground session per captured source object, loads public parent-chain
+history with `observeOnly`, and evaluates only the final captured object.
+The inventory records 68 targets, 59 historical observations, 37 distinct
+reply roots, and 20 original/quote roots. It is explicitly not frozen: source
+review, relationship/private evidence, and four missing parent objects remain
+open.
+
+The observation-only ingestion seam is a mechanical replay capability, not a
+social rule. It prevents setup history from becoming accidental new prompts;
+the Social Planner still owns the target act and the editor cannot override it.
+
+# 2026-08-13 — Source-pool review packet for the 130-case freeze
+
+The deduplicated source pool now contains 50 Boardy reply/reaction thread
+units and 20 Boardy original/quote units. A separate review packet at
+`qa-learnings/social-capability-source-pool-review-packet-v1.json` records one
+explicit decision slot per candidate for available-thread completeness,
+category, stable thread unit, evidence status, confidence, and frozen-set
+eligibility. It contains no expected action or expected wording fields.
+
+The packet is intentionally `pending-source-review`: all 70 provenance and
+thread-unit decisions remain open, and 61 category decisions still need manual
+normalization. The dataset audit now reports the packet separately from the
+candidate pool, so reaching the numeric source count cannot be mistaken for a
+frozen parity set.
+
+`scripts/validate-social-source-pool-review.mjs` now fails closed on blank
+decisions, duplicate thread units, incomplete evidence, invalid categories, or
+any expected-answer field. Its current result is `not-ready` with 70 pending
+cases and zero promoted cases, which is the expected state before source
+review.
+
+## 2026-08-13 — Independent-strata unit coverage audit
+
+The fresh and restraint fixtures initially contained 55 candidate cases but
+only 36 independent thread units. A separate development fixture,
+`scenarios/independent-strata-development-24.json`, now adds 24 single-turn
+cases with new actors and thread units. The coverage audit at
+`qa-learnings/social-capability-strata-coverage-latest.json` now records 79
+candidate cases and 60 independent units, meeting the technical/media,
+network, sensitive, and restraint unit targets at the candidate level. The
+fixture still requires model runs, semantic review, and final partition
+assignment; it is not frozen evidence.
+
+The selected 60-unit supplemental review packet is
+`qa-learnings/social-capability-independent-review-packet-v1.json`. Its
+validator is currently `not-ready` with 60 pending decisions and zero promoted
+cases. The audit therefore distinguishes coverage availability from frozen
+evidence.
+
+The fail-closed promotion path is now represented by
+`scripts/build-social-frozen-manifest.mjs`. Because both review packets remain
+pending, `qa-learnings/social-capability-frozen-manifest.json` has zero frozen
+cases and `scripts/validate-social-freeze.mjs` correctly reports `not-ready`.
+
+The social experiment runner now refuses `OPENPRESENCE_AI_MOCK=1` and rejects
+any Qwen message model before accepting a run. This is an experiment-integrity
+guard, not social behavior or a benchmark rule.
+
+## Next executable experiment
+
+With a permitted local listener and the app's GPT connection available, the
+first new development run is:
+
+```text
+node scripts/run-social-experiment.mjs scenarios/independent-strata-development-24.json --runs 3 --require-provider openai --require-model gpt-5.6-luna --require-reasoning low --output qa-learnings/independent-strata-gpt-luna-low-r3-2026-08-13.json
+node scripts/evaluate-social-run.mjs qa-learnings/independent-strata-gpt-luna-low-r3-2026-08-13.json > qa-learnings/independent-strata-gpt-luna-low-r3-2026-08-13-semantic.json
+```
+
+The evaluator must use GPT 5.6 Luna Medium independently, remain blind to
+scenario metadata and provider identity, and record act selection separately
+from wording. The current environment cannot run this command because
+`next start` is denied listener access with `EPERM`.
+
+## 2026-08-13 — In-process runner and provider preflight
+
+To remove the listener dependency without touching the UI, a narrow
+`scripts/run-social-experiment-in-process.mjs` runner now invokes the compiled
+state route directly. It records the actual message provider/model/reasoning,
+the `asset.inspect` provider/model, all six Auto modes, Sandbox-only lineage,
+and the full projected Playground packets. It rejects mock mode and Qwen, and
+both experiment runners now fail closed when the runtime emits
+`Sandbox evaluation unavailable`, so provider outages cannot be scored as
+silence.
+
+The first attempt against `data/skill-edit-qa.db` found an inconsistent QA
+snapshot: its state claimed an OpenAI credential was configured, but its
+encrypted `provider_credentials` table had no matching row. A verified prior
+GPT QA database contained a decryptable credential; re-saving it through the
+route proved that credential lookup works. The subsequent real 24-case GPT
+5.6 Luna Low attempt was then blocked before model judgment because this
+shell cannot reach `api.openai.com` (`fetch failed` with no HTTP status). The
+packets were not scored and the invalid diagnostic outputs were moved out of
+`qa-learnings/`.
+
+No UI, typecheck, infrastructure, or Qwen rerun was performed. The next
+valid run remains the 24-case independent-strata development replay once the
+app/server execution environment has outbound provider connectivity; it must
+complete with model decisions and usable media provenance before semantic
+evaluation.
+
+## 2026-08-13 — Human-review workbooks
+
+Added `scripts/render-social-review-packet.mjs`, a read-only renderer for the
+fail-closed provenance packets. It generated:
+
+- `qa-learnings/social-capability-source-review-workbook-v1.md` — 70 Boardy
+  source candidates;
+- `qa-learnings/social-capability-independent-review-workbook-v1.md` — 60
+  independent thread units.
+
+The workbooks expose source links, available context, provenance-only Boardy
+observations, known/unknown evidence, and blank decisions for thread
+completeness, category, confidence, and frozen eligibility. They contain no
+expected action or expected wording fields. Both existing validators still
+report `not-ready` with zero promoted cases, so the workbooks improve review
+accessibility without changing the evidence status.
+
+Added `scripts/import-social-review-workbook.mjs` to import a completed
+workbook into a new packet. It rejects missing or ambiguous decisions, requires
+exclusion reasons, and only permits `--approve-for-freeze` after every case is
+reviewed and the required category counts are met. An untouched workbook was
+tested and rejected fail-closed; no review decisions were promoted.
+## IN_PROGRESS — Validate Assignment-to-Feed quantity parity
+
+- **Started:** 2026-08-14
+- **Scope:** Verify Playground Assignments for exactly 1 and exactly 10 Sandbox publications, plus a scheduled-for-now Assignment, against Feed delivery counts.
+- **Product boundary:** Use the local simulated X/Sandbox only; Feed counts verified public history, and Assignment progress advances only from verified Sandbox delivery.
+- **Current finding:** Quantity parsing treated a date in a QA marker as the requested count; fixed and covered by a runtime regression test. A stale persisted Feed view also required a refresh before the latest completed Sandbox publications were projected.
+- **Verification:** Connected Chrome verified Feed marker counts of 1, 10, and 1 for the Playground single Assignment, Playground ten-post Assignment, and exact-time scheduled Assignment. Persisted state shows all three Assignments completed with 1/1, 10/10, and 1/1 verified publications; the scheduled case retained Thursday 19:03 exact timing. Full Vitest passes 153/153; focused Playground/Schedule E2E passes 12/12 across Chromium and mobile; typecheck, production build, and `git diff --check` pass. Final Chrome console has no warnings or errors.
+- **Status:** Complete.

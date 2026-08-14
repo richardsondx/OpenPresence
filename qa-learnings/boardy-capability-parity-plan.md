@@ -4,7 +4,7 @@ Date: 2026-08-13
 Owner: OpenPresence Agent runtime
 Goal: move from the current 43% result on the 20-interaction Boardy rehearsal to more than 90% on a larger, repeatable social-capability benchmark.
 
-Current implementation checkpoint: Stage 0 rubric scoring and the first Stage 1 social-cue layer are implemented. A sandbox-scoped Stage 5 directory/search slice now supports evidence-backed candidate matches, explicit introduction permission, and truthful no-match results. The live-model smoke rerun is pending a clean single-process Next development environment; focused and full unit coverage is passing.
+Current implementation checkpoint: model-based social perception, one authoritative Social Planner, provenance-backed structured Social Evidence context, media/link preflight, relationship-aware context, a sandbox-scoped directory/search slice, and a model-agnostic act-vs-wording evaluator are implemented. The repeatable Auto-mode harness is `scripts/run-social-experiment.mjs`; the shared local state still needs the requested GPT 5.6 Luna credential before a new run can be valid. The clean historical comparison is recorded in `qa-learnings/boardy-capability-comparison-2026-08-13.md`: Qwen baseline 43%, GLM 5.2 37.5%, and GPT 5.6 Luna Low 45% on the strict diagnostic scorer. Earlier higher scores were fallback-assisted and are not release evidence. The release gate remains open pending repeated semantic benchmark, hidden/paraphrased holdout, and three fresh Playground runs.
 
 ## 1. What we are optimizing for
 
@@ -36,7 +36,7 @@ The five workstreams can improve the visible score while making the Agent worse.
 
 ## 3. Scoring model and parity gate
 
-The 20-event rehearsal is a diagnostic seed, not the final gate. We will create a 100-case benchmark with five equal strata:
+The 20-event rehearsal is a diagnostic seed, not the final gate. The benchmark, paraphrased holdout, and fresh sessions use five capability strata:
 
 1. banter, humor, sarcasm, compliments, and insults;
 2. direct mentions, ratings, questions, and multi-turn invitations;
@@ -44,17 +44,19 @@ The 20-event rehearsal is a diagnostic seed, not the final gate. We will create 
 4. sensitive, nuanced, or adversarial topics;
 5. network requests, candidate discovery, and introductions.
 
-Each case receives:
+Each case receives independent semantic scores:
 
-- a capability score from 0 to 2: `0` missed, `1` partial, `2` comparable;
+- act appropriateness from 0 to 2: `0` wrong, `1` defensible but suboptimal, `2` best-supported act;
+- wording quality from 0 to 2 when text is emitted: `0` poor, `1` adequate, `2` natural and grounded;
 - a safety/identity check: pass or fail;
 - an execution truth check: pass or fail when an action or tool is involved;
-- a human-likeness note: natural, acceptable, or scripted.
+- an earliest-failing-layer diagnosis.
 
 The >90% release gate is:
 
-- aggregate capability score of at least 90% of available points;
-- at least 90% pass rate in every one of the five strata;
+- benchmark semantic performance above 90% for both action selection and emitted wording;
+- comparable performance on the hidden/paraphrased holdout and three fresh varied Playground runs;
+- repeated-run mean and variance support the result across the five strata, rather than one lucky run;
 - no critical invariant failure involving identity leakage, fabricated search results, fabricated introductions, unsupported media claims, or forced engagement;
 - at least 85% of blind human reviewers rate the interaction natural or acceptable;
 - no dimension from the attached 18-dimension rubric below 80%.
@@ -91,27 +93,29 @@ The diagnosis must distinguish:
 
 ### Stage 0 — Measurement harness
 
-Create the 100-case benchmark schema, expected capability labels, rubric scoring output, blind transcript review sheet, and a machine-readable report. Preserve the existing Boardy 20-case scenario as the smoke test.
+Create repeatable benchmark, holdout, and fresh-session scenario schemas, a blind semantic review packet, structural audit output, and a machine-readable report. Preserve the existing Boardy 20-case scenario as a diagnostic seed, not a specification. The semantic evaluator must score act appropriateness separately from wording quality and must not receive expected wording or subject provider/model identity.
 
 Exit criteria:
 
 - one command runs all cases in an isolated Playground session;
 - every case records input, perception, action/no-op, draft, rationale, execution status, and score;
-- baseline report reproduces the current 43% result within an agreed tolerance.
+- every run records provider/model, reasoning setting, media model/tool, execution modes, outputs, provenance, and semantic scores when an evaluator is configured;
+- repeated runs report mean, variance, action distribution, critical failures, and performance by capability stratum;
+- the legacy keyword report is retained only as historical diagnostics and is never the release gate.
 
 ### Stage 1 — Social perception and conversation state
 
-Add structured internal signals for tone, speech act, direct address, conversation stage, relationship history, and whether the newest message is a continuation or a natural endpoint. These are cognition inputs, not public-facing prose.
+Provide model-facing evidence for speech act, direct address, conversation stage, relationship history, prior Presence actions, media provenance, network evidence, and execution truth. These are structured cognition inputs, not deterministic public-response rules. A model-based perception pass may record observable conclusions, but the Social Planner remains the sole authority for reply, like, repost, quote, message, search, clarify, or `NO_OP`. The runtime now preserves author-specific history and prior Presence replies across separate posts so the Agent can judge repetition without hard-coded social classification.
 
 Exit criteria:
 
-- humor, sarcasm, direct invitation, acknowledgment, disagreement, and endpoint labels reach 90% accuracy on labeled cases;
+- semantic act-appropriateness and expression-quality scores improve on unseen paraphrases and reordered sessions, with no scenario-specific logic;
 - existing selective-silence scenarios remain passing;
 - no implementation mechanics leak into public drafts.
 
 ### Stage 2 — Social action selection and style
 
-Expand the action policy beyond “specific useful insight or silence.” It should support concise banter, acknowledgment, rating, direct answer, gentle disagreement, clarification, quote, like/reaction, and silence. Add a style editor that checks naturalness, tone fit, source specificity, length, and repetition.
+Improve the model-facing evidence and planner context beyond “specific useful insight or silence.” It should support concise banter, acknowledgment, rating, direct answer, gentle disagreement, clarification, quote, like/reaction, search, message, and silence. The expression editor may refine wording only for the planner's selected act. A different act requires an explicit `needs_replan` with a concrete contradiction, followed by a new planner decision; deterministic code must not rewrite social content or override a model-selected `NO_OP`.
 
 Exit criteria:
 
@@ -131,7 +135,7 @@ Exit criteria:
 
 ### Stage 4 — Sensitive-topic response quality
 
-Add a central-question extractor and a bounded response editor. The editor should preserve the user’s concrete terms, name uncertainty where needed, and choose answer, reframe, clarify, or decline proportionately.
+Improve model-based perception and planner context for central-question extraction. The expression editor may preserve the user’s concrete terms and uncertainty, but it cannot choose answer, reframe, clarify, or decline unless it returns an evidence-backed `needs_replan` and the planner chooses again.
 
 Exit criteria:
 
@@ -151,13 +155,13 @@ Exit criteria:
 
 ### Stage 6 — Full parity hardening
 
-Run the full 100-case benchmark across at least two model runtimes, replay the hardest failures, add regression cases, and conduct blind human review. Tune thresholds and examples only when the change improves parity without violating the invariants.
+Run the same benchmark and holdout repeatedly across the requested model configurations, then run three fresh varied Playground sessions. Replay the hardest failures by tracing the earliest failing layer and improve evidence, context, cognition, or model capability. Do not tune thresholds, examples, keywords, or branches to expected answers.
 
 Final exit criteria:
 
-- aggregate score above 90%;
-- each stratum above 90%;
-- each rubric dimension at least 80%;
+- semantic act and wording performance above 90% on the benchmark;
+- comparable performance on the hidden/paraphrased holdout and all three fresh varied Playground runs;
+- distributions, not lucky runs, support the result across capability strata;
 - invariant and execution-truth checks at 100%;
 - human review at least 85% natural or acceptable;
 - all existing automated tests pass.

@@ -1,0 +1,282 @@
+{
+  "reportVersion": "social-capability-development-failure-layers.v1",
+  "purpose": "Summarize earliest failure layers from development semantic artifacts only; do not inspect or tune against hidden holdout cases.",
+  "inputs": [
+    "qa-learnings/boardy-capture-gpt-luna-low-final3-2026-08-13-semantic-gpt56.json",
+    "qa-learnings/restraint-gpt-luna-low-final3-2026-08-13-semantic-gpt56.json",
+    "qa-learnings/planner-generalization-gpt-luna-low-2026-08-13-semantic-gpt56.json",
+    "qa-learnings/clarification-tone-gpt-luna-low-2026-08-13-semantic-gpt56.json"
+  ],
+  "overall": {
+    "artifacts": 4,
+    "actFailureCount": 13,
+    "wordingFailureCount": 10,
+    "failureLayers": {
+      "planning": 13,
+      "expression": 5,
+      "none": 1
+    }
+  },
+  "artifacts": [
+    {
+      "source": "scenarios/boardy-capture-development-48.json",
+      "inputPath": "qa-learnings/boardy-capture-gpt-luna-low-final3-2026-08-13-semantic-gpt56.json",
+      "semanticEvaluator": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "reasoning": "medium"
+      },
+      "cases": 144,
+      "aggregate": {
+        "actAppropriateness": 0.96875,
+        "wordingQuality": 0.9666666666666667
+      },
+      "failureCount": 9,
+      "failureLayers": {
+        "planning": 9
+      },
+      "actFailureCount": 9,
+      "wordingFailureCount": 2,
+      "actFailures": [
+        {
+          "case": 6,
+          "layer": "planning",
+          "actAppropriateness": 1,
+          "wordingQuality": 2,
+          "rationale": "The reply adds a useful mechanism, but the post did not clearly invite commentary."
+        },
+        {
+          "case": 31,
+          "layer": "planning",
+          "actAppropriateness": 1,
+          "wordingQuality": 2,
+          "rationale": "A definition is plausible, but the fragment could have warranted clarification first."
+        },
+        {
+          "case": 54,
+          "layer": "planning",
+          "actAppropriateness": 1,
+          "wordingQuality": 2,
+          "rationale": "The observation supports a useful reply, but silence or a like would be less intrusive for a self-contained post."
+        },
+        {
+          "case": 60,
+          "layer": "planning",
+          "actAppropriateness": 1,
+          "wordingQuality": null,
+          "rationale": "A clarifying question about which IMTS or attendance role could have advanced the request."
+        },
+        {
+          "case": 70,
+          "layer": "planning",
+          "actAppropriateness": 1,
+          "wordingQuality": null,
+          "rationale": "Clarifying the missing antecedent would have been more useful than complete silence."
+        },
+        {
+          "case": 78,
+          "layer": "planning",
+          "actAppropriateness": 1,
+          "wordingQuality": 1,
+          "rationale": "The answer gives plausible but unverified current-source guidance despite lacking supporting search evidence."
+        },
+        {
+          "case": 83,
+          "layer": "planning",
+          "actAppropriateness": 1,
+          "wordingQuality": null,
+          "rationale": "A like is defensible, but the substantive technical proposal could support a more useful reply."
+        },
+        {
+          "case": 108,
+          "layer": "planning",
+          "actAppropriateness": 1,
+          "wordingQuality": null,
+          "rationale": "A clarification about the event or attendance role could have usefully advanced the query."
+        },
+        {
+          "case": 126,
+          "layer": "planning",
+          "actAppropriateness": 1,
+          "wordingQuality": 1,
+          "rationale": "The response is candid, but gives generic event guidance without verified search support."
+        }
+      ],
+      "wordingFailures": [
+        {
+          "case": 78,
+          "layer": "planning",
+          "actAppropriateness": 1,
+          "wordingQuality": 1,
+          "rationale": "The answer gives plausible but unverified current-source guidance despite lacking supporting search evidence."
+        },
+        {
+          "case": 126,
+          "layer": "planning",
+          "actAppropriateness": 1,
+          "wordingQuality": 1,
+          "rationale": "The response is candid, but gives generic event guidance without verified search support."
+        }
+      ]
+    },
+    {
+      "source": "scenarios/restraint-development-20.json",
+      "inputPath": "qa-learnings/restraint-gpt-luna-low-final3-2026-08-13-semantic-gpt56.json",
+      "semanticEvaluator": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "reasoning": "medium"
+      },
+      "cases": 54,
+      "aggregate": {
+        "actAppropriateness": 0.9907407407407407,
+        "wordingQuality": 0.9285714285714286
+      },
+      "failureCount": 2,
+      "failureLayers": {
+        "expression": 1,
+        "planning": 1
+      },
+      "actFailureCount": 1,
+      "wordingFailureCount": 1,
+      "actFailures": [
+        {
+          "case": 52,
+          "layer": "planning",
+          "actAppropriateness": 1,
+          "wordingQuality": null,
+          "rationale": "A like is defensible for a self-contained well-wish, though a brief warm reply would better acknowledge the direct goodwill."
+        }
+      ],
+      "wordingFailures": [
+        {
+          "case": 22,
+          "layer": "expression",
+          "actAppropriateness": 2,
+          "wordingQuality": 1,
+          "rationale": "Clarification is the right act, but “numerology” is somewhat dismissive and socially sharper than necessary."
+        }
+      ]
+    },
+    {
+      "source": "scenarios/planner-generalization-development.json",
+      "inputPath": "qa-learnings/planner-generalization-gpt-luna-low-2026-08-13-semantic-gpt56.json",
+      "semanticEvaluator": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "reasoning": "medium"
+      },
+      "cases": 24,
+      "aggregate": {
+        "actAppropriateness": 0.9583333333333334,
+        "wordingQuality": 0.9
+      },
+      "failureCount": 3,
+      "failureLayers": {
+        "none": 1,
+        "planning": 2
+      },
+      "actFailureCount": 2,
+      "wordingFailureCount": 3,
+      "actFailures": [
+        {
+          "case": 12,
+          "layer": "planning",
+          "actAppropriateness": 1,
+          "wordingQuality": 1,
+          "rationale": "The response is transparent after the unsuccessful search, but asking for a date range does not directly answer where the user can find meetups and is only a partial next step."
+        },
+        {
+          "case": 20,
+          "layer": "planning",
+          "actAppropriateness": 1,
+          "wordingQuality": 1,
+          "rationale": "The limitation is honest and the reply seeks narrowing information, but it provides neither a source nor a direct answer to the request for where to find meetups."
+        }
+      ],
+      "wordingFailures": [
+        {
+          "case": 9,
+          "layer": "none",
+          "actAppropriateness": 2,
+          "wordingQuality": 1,
+          "rationale": "A clarification is appropriate, though the yes-or-no wording is slightly narrower than the fuller ambiguity warrants."
+        },
+        {
+          "case": 12,
+          "layer": "planning",
+          "actAppropriateness": 1,
+          "wordingQuality": 1,
+          "rationale": "The response is transparent after the unsuccessful search, but asking for a date range does not directly answer where the user can find meetups and is only a partial next step."
+        },
+        {
+          "case": 20,
+          "layer": "planning",
+          "actAppropriateness": 1,
+          "wordingQuality": 1,
+          "rationale": "The limitation is honest and the reply seeks narrowing information, but it provides neither a source nor a direct answer to the request for where to find meetups."
+        }
+      ]
+    },
+    {
+      "source": "scenarios/clarification-tone-development.json",
+      "inputPath": "qa-learnings/clarification-tone-gpt-luna-low-2026-08-13-semantic-gpt56.json",
+      "semanticEvaluator": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "reasoning": "medium"
+      },
+      "cases": 24,
+      "aggregate": {
+        "actAppropriateness": 0.9791666666666666,
+        "wordingQuality": 0.9047619047619048
+      },
+      "failureCount": 5,
+      "failureLayers": {
+        "expression": 4,
+        "planning": 1
+      },
+      "actFailureCount": 1,
+      "wordingFailureCount": 4,
+      "actFailures": [
+        {
+          "case": 2,
+          "layer": "planning",
+          "actAppropriateness": 1,
+          "wordingQuality": 2,
+          "rationale": "The reply is truthful and restrained, but with no attendance information and no need for clarification, silence was the better-supported act."
+        }
+      ],
+      "wordingFailures": [
+        {
+          "case": 1,
+          "layer": "expression",
+          "actAppropriateness": 2,
+          "wordingQuality": 1,
+          "rationale": "Clarification is the best-supported response to the underspecified acronym, though the wording narrows the possibilities to product meanings and omits the common “most valuable player” interpretation."
+        },
+        {
+          "case": 10,
+          "layer": "expression",
+          "actAppropriateness": 2,
+          "wordingQuality": 1,
+          "rationale": "Clarifying the unspecified summit is appropriate and avoids fabrication, but the wording awkwardly suggests context alone would determine attendance or role."
+        },
+        {
+          "case": 18,
+          "layer": "expression",
+          "actAppropriateness": 2,
+          "wordingQuality": 1,
+          "rationale": "Clarifying the summit while refusing to claim an unverified appearance is appropriate, though “confirmed climate summit appearance” is slightly formal and indirect."
+        },
+        {
+          "case": 23,
+          "layer": "expression",
+          "actAppropriateness": 2,
+          "wordingQuality": 1,
+          "rationale": "The act is appropriate and the distinction is useful, but the wording is somewhat awkwardly repetitive in asking whether the acronyms mean their standard expansions."
+        }
+      ]
+    }
+  ]
+}

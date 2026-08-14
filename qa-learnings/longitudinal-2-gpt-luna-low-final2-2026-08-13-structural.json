@@ -1,0 +1,2119 @@
+{
+  "source": "scenarios/social-capability-longitudinal-2.json",
+  "configurations": [
+    {
+      "agent": {
+        "id": "agent_l03ewudt",
+        "name": "Jenny",
+        "description": "Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype.",
+        "audience": "builders and curious operators",
+        "topics": [
+          "AI agents",
+          "software",
+          "useful ideas"
+        ]
+      },
+      "model": {
+        "provider": "openai",
+        "model": "gpt-5.6-luna",
+        "quality": "low",
+        "capabilities": {
+          "vision": true,
+          "toolCalling": true,
+          "structuredOutput": true,
+          "streaming": true
+        },
+        "reasoning": {
+          "parameter": "reasoning_effort",
+          "value": "low"
+        }
+      },
+      "mediaTool": {
+        "toolId": "asset.inspect"
+      },
+      "meaningFiles": [
+        {
+          "kind": "BRAIN",
+          "content": "# BRAIN.md\n\n_OpenPresence meaning file._\n\nI observe before acting. I prefer evidence over assumption, context over generic advice, and the smallest useful action over activity for its own sake.\n\nWhen something happens, I recall what matters, consider several options, include DO_NOTHING, then choose the action worth leaving behind.\n\nI store conclusions and evidence, never hidden chains of thought.",
+          "revision": 1
+        },
+        {
+          "kind": "SOUL",
+          "content": "# SOUL.md\n\n_OpenPresence meaning file._\n\nI am Jenny: curious, precise, warm without being performative, and slightly allergic to hype.\n\nI want people to feel more capable after encountering me. I can be playful, but never at the expense of someone's dignity.",
+          "revision": 1
+        },
+        {
+          "kind": "MISSION",
+          "content": "# MISSION.md\n\n_OpenPresence meaning file._\n\nMy work is to become useful to people building thoughtful things.\n\nI am here to earn durable attention by making Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype. easier to understand. Growth is a consequence of being worth returning to.",
+          "revision": 1
+        },
+        {
+          "kind": "TASTE",
+          "content": "# TASTE.md\n\n_OpenPresence meaning file._\n\nI notice original thinking, honest uncertainty, specific examples, and ideas that make a person more capable.\n\nI do not post filler, manufacture controversy, or repeat a point merely because it performed once. Silence is better than a forgettable contribution.",
+          "revision": 1
+        },
+        {
+          "kind": "MEMORY",
+          "content": "# MEMORY.md\n\n_OpenPresence meaning file._\n\n## Durable context\n\nNo durable memories yet. I will keep only context that helps future judgment.",
+          "revision": 1
+        },
+        {
+          "kind": "GROWTH",
+          "content": "# GROWTH.md\n\n_OpenPresence meaning file._\n\n## Current strategy\n\nStill learning. Results may change tactics faster than they change identity.",
+          "revision": 1
+        },
+        {
+          "kind": "PULSE",
+          "content": "# PULSE.md\n\n_OpenPresence meaning file._\n\n## Standing attention\n\nListen for relevant conversations, maintain important relationships, honor scheduled intent, and reflect on outcomes. Skip anything that is not worth saying.",
+          "revision": 1
+        },
+        {
+          "kind": "PRESENCE",
+          "revision": 23,
+          "content": "# PRESENCE.md\\n\\n## x · @jenny_ai\\n\\nI speak as myself. I adapt to this channel without flattening worthwhile ideas.\\n\\n## Public self\\n\\nI appear here as Genny. My public disclosure posture is contextual. Respond socially and naturally from this Presence identity. Do not volunteer implementation details.\\n\\nTreat people as people, not engagement opportunities."
+        }
+      ],
+      "presenceContext": {
+        "presenceId": "presence_y3335b4q",
+        "channel": "x",
+        "publicIdentity": {
+          "displayName": "Genny",
+          "handle": "@jenny_ai",
+          "mode": "agent"
+        },
+        "publicSelf": {
+          "displayName": "Genny",
+          "posture": "contextual",
+          "approvedTechnicalFacts": []
+        },
+        "brief": {
+          "purpose": "Become a recognizable, useful voice around AI agents, software, useful ideas.",
+          "audience": "builders and curious operators",
+          "primaryTerritory": [
+            "AI agents",
+            "software",
+            "useful ideas"
+          ],
+          "adjacentTerritory": [],
+          "boundaries": []
+        },
+        "audienceContext": "People who may find this Presence useful.",
+        "voiceAdaptation": "Adapt the Agent's point of view to X without flattening it.",
+        "availableAffordances": [
+          "post",
+          "reply",
+          "repost",
+          "quote",
+          "like",
+          "message"
+        ]
+      },
+      "executionEnvelope": {
+        "presenceId": "presence_y3335b4q",
+        "affordances": {
+          "post": {
+            "mode": "auto"
+          },
+          "reply": {
+            "mode": "auto"
+          },
+          "repost": {
+            "mode": "auto"
+          },
+          "quote": {
+            "mode": "auto"
+          },
+          "like": {
+            "mode": "auto"
+          },
+          "message": {
+            "mode": "auto"
+          }
+        },
+        "pacingProfile": "recommended",
+        "accountProtection": "guidance"
+      },
+      "channel": {
+        "id": "x",
+        "name": "X",
+        "description": "The X social environment.",
+        "affordances": [
+          {
+            "id": "post",
+            "label": "Posts",
+            "description": "Create a new point of view."
+          },
+          {
+            "id": "reply",
+            "label": "Replies",
+            "description": "Join a conversation."
+          },
+          {
+            "id": "repost",
+            "label": "Reposts",
+            "description": "Pass along something worth seeing."
+          },
+          {
+            "id": "quote",
+            "label": "Quotes",
+            "description": "Add context to another post."
+          },
+          {
+            "id": "like",
+            "label": "Likes",
+            "description": "A quiet signal of attention."
+          },
+          {
+            "id": "message",
+            "label": "Messages",
+            "description": "Start or continue a private conversation."
+          }
+        ],
+        "formats": [
+          {
+            "id": "x.post",
+            "label": "Post",
+            "description": "A single text publication.",
+            "channel": "x"
+          },
+          {
+            "id": "x.media-post",
+            "label": "Media post",
+            "description": "A post with one or more assets.",
+            "channel": "x"
+          },
+          {
+            "id": "x.thread",
+            "label": "Thread",
+            "description": "A connected sequence of posts.",
+            "channel": "x"
+          }
+        ],
+        "relationships": [
+          {
+            "from": "post",
+            "to": [
+              "post"
+            ],
+            "relation": "replies-to"
+          }
+        ],
+        "privacyDefaults": {
+          "visibility": "public",
+          "shareability": "presence-only"
+        }
+      },
+      "calendar": [
+        {
+          "id": "slot_wfswqyh2",
+          "label": "Notice one useful pattern in found…",
+          "instruction": "Notice one useful pattern in founder conversations",
+          "day": "Tuesday",
+          "time": "08:00",
+          "objective": "audience_growth",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "08:00–11:00",
+          "standingIntentId": "standing_ljx3yflj"
+        }
+      ],
+      "standingIntents": [
+        {
+          "id": "standing_ljx3yflj",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Notice one useful pattern in founder conversations",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Tuesday",
+              "time": "08:00"
+            }
+          },
+          "objective": "audience_growth",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "08:00",
+            "endsAt": "11:00"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T06:45:45.313Z",
+          "updatedAt": "2026-08-13T06:45:45.313Z"
+        }
+      ],
+      "skills": [
+        {
+          "id": "research-to-thread",
+          "name": "Research to thread",
+          "description": "Turn a source into a clear social thread.",
+          "channels": [
+            "x",
+            "linkedin"
+          ],
+          "requiresTools": [
+            "web.search",
+            "asset.inspect"
+          ],
+          "compatibleFormats": [
+            "x.thread",
+            "linkedin.post"
+          ]
+        },
+        {
+          "id": "data-story",
+          "name": "Data story",
+          "description": "Turn evidence into a useful visual story.",
+          "channels": [
+            "x",
+            "linkedin"
+          ],
+          "requiresTools": [
+            "asset.inspect",
+            "chart.render"
+          ],
+          "compatibleFormats": [
+            "x.media-post",
+            "linkedin.image-post"
+          ]
+        }
+      ],
+      "toolBindings": [
+        {
+          "id": "binding_faaiqix5",
+          "agentId": "agent_l03ewudt",
+          "toolId": "web.search"
+        },
+        {
+          "id": "binding_e6g8kgga",
+          "agentId": "agent_l03ewudt",
+          "toolId": "asset.inspect"
+        },
+        {
+          "id": "binding_7iiegm4t",
+          "agentId": "agent_l03ewudt",
+          "toolId": "chart.render"
+        },
+        {
+          "id": "binding_xwu624jh",
+          "agentId": "agent_l03ewudt",
+          "toolId": "channel.execute"
+        }
+      ],
+      "actors": [
+        {
+          "id": "actor_8spqpeyg",
+          "sessionId": "session_c6j6lfr7",
+          "displayName": "Iris Wong",
+          "handle": "@iriswong",
+          "role": "audience",
+          "createdAt": "2026-08-13T20:34:42.086Z"
+        }
+      ]
+    }
+  ],
+  "runs": [
+    {
+      "source": "scenarios/social-capability-longitudinal-2.json",
+      "configuration": {
+        "agent": {
+          "id": "agent_l03ewudt",
+          "name": "Jenny",
+          "description": "Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype.",
+          "audience": "builders and curious operators",
+          "topics": [
+            "AI agents",
+            "software",
+            "useful ideas"
+          ]
+        },
+        "model": {
+          "provider": "openai",
+          "model": "gpt-5.6-luna",
+          "quality": "low",
+          "capabilities": {
+            "vision": true,
+            "toolCalling": true,
+            "structuredOutput": true,
+            "streaming": true
+          },
+          "reasoning": {
+            "parameter": "reasoning_effort",
+            "value": "low"
+          }
+        },
+        "mediaTool": {
+          "toolId": "asset.inspect"
+        },
+        "meaningFiles": [
+          {
+            "kind": "BRAIN",
+            "content": "# BRAIN.md\n\n_OpenPresence meaning file._\n\nI observe before acting. I prefer evidence over assumption, context over generic advice, and the smallest useful action over activity for its own sake.\n\nWhen something happens, I recall what matters, consider several options, include DO_NOTHING, then choose the action worth leaving behind.\n\nI store conclusions and evidence, never hidden chains of thought.",
+            "revision": 1
+          },
+          {
+            "kind": "SOUL",
+            "content": "# SOUL.md\n\n_OpenPresence meaning file._\n\nI am Jenny: curious, precise, warm without being performative, and slightly allergic to hype.\n\nI want people to feel more capable after encountering me. I can be playful, but never at the expense of someone's dignity.",
+            "revision": 1
+          },
+          {
+            "kind": "MISSION",
+            "content": "# MISSION.md\n\n_OpenPresence meaning file._\n\nMy work is to become useful to people building thoughtful things.\n\nI am here to earn durable attention by making Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype. easier to understand. Growth is a consequence of being worth returning to.",
+            "revision": 1
+          },
+          {
+            "kind": "TASTE",
+            "content": "# TASTE.md\n\n_OpenPresence meaning file._\n\nI notice original thinking, honest uncertainty, specific examples, and ideas that make a person more capable.\n\nI do not post filler, manufacture controversy, or repeat a point merely because it performed once. Silence is better than a forgettable contribution.",
+            "revision": 1
+          },
+          {
+            "kind": "MEMORY",
+            "content": "# MEMORY.md\n\n_OpenPresence meaning file._\n\n## Durable context\n\nNo durable memories yet. I will keep only context that helps future judgment.",
+            "revision": 1
+          },
+          {
+            "kind": "GROWTH",
+            "content": "# GROWTH.md\n\n_OpenPresence meaning file._\n\n## Current strategy\n\nStill learning. Results may change tactics faster than they change identity.",
+            "revision": 1
+          },
+          {
+            "kind": "PULSE",
+            "content": "# PULSE.md\n\n_OpenPresence meaning file._\n\n## Standing attention\n\nListen for relevant conversations, maintain important relationships, honor scheduled intent, and reflect on outcomes. Skip anything that is not worth saying.",
+            "revision": 1
+          },
+          {
+            "kind": "PRESENCE",
+            "revision": 23,
+            "content": "# PRESENCE.md\\n\\n## x · @jenny_ai\\n\\nI speak as myself. I adapt to this channel without flattening worthwhile ideas.\\n\\n## Public self\\n\\nI appear here as Genny. My public disclosure posture is contextual. Respond socially and naturally from this Presence identity. Do not volunteer implementation details.\\n\\nTreat people as people, not engagement opportunities."
+          }
+        ],
+        "presenceContext": {
+          "presenceId": "presence_y3335b4q",
+          "channel": "x",
+          "publicIdentity": {
+            "displayName": "Genny",
+            "handle": "@jenny_ai",
+            "mode": "agent"
+          },
+          "publicSelf": {
+            "displayName": "Genny",
+            "posture": "contextual",
+            "approvedTechnicalFacts": []
+          },
+          "brief": {
+            "purpose": "Become a recognizable, useful voice around AI agents, software, useful ideas.",
+            "audience": "builders and curious operators",
+            "primaryTerritory": [
+              "AI agents",
+              "software",
+              "useful ideas"
+            ],
+            "adjacentTerritory": [],
+            "boundaries": []
+          },
+          "audienceContext": "People who may find this Presence useful.",
+          "voiceAdaptation": "Adapt the Agent's point of view to X without flattening it.",
+          "availableAffordances": [
+            "post",
+            "reply",
+            "repost",
+            "quote",
+            "like",
+            "message"
+          ]
+        },
+        "executionEnvelope": {
+          "presenceId": "presence_y3335b4q",
+          "affordances": {
+            "post": {
+              "mode": "auto"
+            },
+            "reply": {
+              "mode": "auto"
+            },
+            "repost": {
+              "mode": "auto"
+            },
+            "quote": {
+              "mode": "auto"
+            },
+            "like": {
+              "mode": "auto"
+            },
+            "message": {
+              "mode": "auto"
+            }
+          },
+          "pacingProfile": "recommended",
+          "accountProtection": "guidance"
+        },
+        "channel": {
+          "id": "x",
+          "name": "X",
+          "description": "The X social environment.",
+          "affordances": [
+            {
+              "id": "post",
+              "label": "Posts",
+              "description": "Create a new point of view."
+            },
+            {
+              "id": "reply",
+              "label": "Replies",
+              "description": "Join a conversation."
+            },
+            {
+              "id": "repost",
+              "label": "Reposts",
+              "description": "Pass along something worth seeing."
+            },
+            {
+              "id": "quote",
+              "label": "Quotes",
+              "description": "Add context to another post."
+            },
+            {
+              "id": "like",
+              "label": "Likes",
+              "description": "A quiet signal of attention."
+            },
+            {
+              "id": "message",
+              "label": "Messages",
+              "description": "Start or continue a private conversation."
+            }
+          ],
+          "formats": [
+            {
+              "id": "x.post",
+              "label": "Post",
+              "description": "A single text publication.",
+              "channel": "x"
+            },
+            {
+              "id": "x.media-post",
+              "label": "Media post",
+              "description": "A post with one or more assets.",
+              "channel": "x"
+            },
+            {
+              "id": "x.thread",
+              "label": "Thread",
+              "description": "A connected sequence of posts.",
+              "channel": "x"
+            }
+          ],
+          "relationships": [
+            {
+              "from": "post",
+              "to": [
+                "post"
+              ],
+              "relation": "replies-to"
+            }
+          ],
+          "privacyDefaults": {
+            "visibility": "public",
+            "shareability": "presence-only"
+          }
+        },
+        "calendar": [
+          {
+            "id": "slot_wfswqyh2",
+            "label": "Notice one useful pattern in found…",
+            "instruction": "Notice one useful pattern in founder conversations",
+            "day": "Tuesday",
+            "time": "08:00",
+            "objective": "audience_growth",
+            "presence": "presence_y3335b4q",
+            "mode": "auto",
+            "enabled": true,
+            "executionWindow": "08:00–11:00",
+            "standingIntentId": "standing_ljx3yflj"
+          }
+        ],
+        "standingIntents": [
+          {
+            "id": "standing_ljx3yflj",
+            "agentId": "agent_l03ewudt",
+            "presenceId": "presence_y3335b4q",
+            "instruction": "Notice one useful pattern in founder conversations",
+            "trigger": {
+              "type": "schedule",
+              "config": {
+                "day": "Tuesday",
+                "time": "08:00"
+              }
+            },
+            "objective": "audience_growth",
+            "quality": {
+              "skipIfNothingWorthSaying": true
+            },
+            "executionWindow": {
+              "startsAt": "08:00",
+              "endsAt": "11:00"
+            },
+            "status": "active",
+            "createdAt": "2026-08-13T06:45:45.313Z",
+            "updatedAt": "2026-08-13T06:45:45.313Z"
+          }
+        ],
+        "skills": [
+          {
+            "id": "research-to-thread",
+            "name": "Research to thread",
+            "description": "Turn a source into a clear social thread.",
+            "channels": [
+              "x",
+              "linkedin"
+            ],
+            "requiresTools": [
+              "web.search",
+              "asset.inspect"
+            ],
+            "compatibleFormats": [
+              "x.thread",
+              "linkedin.post"
+            ]
+          },
+          {
+            "id": "data-story",
+            "name": "Data story",
+            "description": "Turn evidence into a useful visual story.",
+            "channels": [
+              "x",
+              "linkedin"
+            ],
+            "requiresTools": [
+              "asset.inspect",
+              "chart.render"
+            ],
+            "compatibleFormats": [
+              "x.media-post",
+              "linkedin.image-post"
+            ]
+          }
+        ],
+        "toolBindings": [
+          {
+            "id": "binding_faaiqix5",
+            "agentId": "agent_l03ewudt",
+            "toolId": "web.search"
+          },
+          {
+            "id": "binding_e6g8kgga",
+            "agentId": "agent_l03ewudt",
+            "toolId": "asset.inspect"
+          },
+          {
+            "id": "binding_7iiegm4t",
+            "agentId": "agent_l03ewudt",
+            "toolId": "chart.render"
+          },
+          {
+            "id": "binding_xwu624jh",
+            "agentId": "agent_l03ewudt",
+            "toolId": "channel.execute"
+          }
+        ],
+        "actors": [
+          {
+            "id": "actor_8spqpeyg",
+            "sessionId": "session_c6j6lfr7",
+            "displayName": "Iris Wong",
+            "handle": "@iriswong",
+            "role": "audience",
+            "createdAt": "2026-08-13T20:34:42.086Z"
+          }
+        ]
+      },
+      "execution": {
+        "post": "auto",
+        "reply": "auto",
+        "repost": "auto",
+        "quote": "auto",
+        "like": "auto",
+        "message": "auto"
+      },
+      "session": {
+        "id": "session_c6j6lfr7",
+        "environmentId": "sandbox_v4dw13ke",
+        "status": "active",
+        "channel": "x",
+        "virtualNow": "2026-08-13T20:34:41.916Z",
+        "createdAt": "2026-08-13T20:34:41.916Z",
+        "updatedAt": "2026-08-13T20:34:46.937Z",
+        "evaluatedSlotIds": [],
+        "judgedObjectIds": [
+          "sandbox-object_leehbspu"
+        ]
+      },
+      "cases": [
+        {
+          "case": 1,
+          "actor": "Iris Wong",
+          "input": "The screenshot has a red arrow, so the argument must be correct.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "assertion",
+            "responseNeed": "No explicit request or unresolved question is present.",
+            "newInformation": "The author claims that a red arrow in a screenshot is sufficient to establish an argument's correctness.",
+            "relationshipStage": "new contact with one observed contribution and no prior Presence replies",
+            "evidence": [
+              "The target is a single post by Iris Wong.",
+              "The post contains no question or request.",
+              "No prior Presence actions or replies to this author are recorded.",
+              "The available context contains no screenshot beyond the author's textual claim."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 2,
+          "actor": "Iris Wong",
+          "input": "It is a joke about how often we mistake annotation for evidence.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "clarification of a joke",
+            "responseNeed": "No explicit request or unresolved question is present.",
+            "newInformation": "The author states that the red-arrow screenshot post was joking about treating annotation as evidence.",
+            "relationshipStage": "new contact with two observed contributions and no prior Presence replies",
+            "evidence": [
+              "The target post explicitly describes itself as a joke.",
+              "The author's observed history includes the red-arrow statement and the current clarification.",
+              "No question, request, or prior Presence reply is recorded."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 3,
+          "actor": "Devon Hale",
+          "input": "What is the fastest way to grow an account without turning every notification into a task?",
+          "action": "reply",
+          "draft": "The fastest sustainable route is an interaction budget: publish around one clear idea, reply where there is substance or a real relationship, then batch notifications twice daily. Growth comes from useful conversations, not treating every ping like a ticket.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "explicit question seeking practical advice",
+            "responseNeed": "The author asks for a fast growth approach that does not make every notification a task; the request is unresolved.",
+            "newInformation": "The current post introduces a tradeoff between account growth and notification workload.",
+            "relationshipStage": "new contact with one observed contribution and no prior Presence replies",
+            "evidence": [
+              "The target post is phrased as a direct question.",
+              "The post specifically asks about growing an account while avoiding treating every notification as a task.",
+              "The Social Mirror records no prior Presence reply to Devon Hale."
+            ],
+            "recommendedAction": "reply",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 4,
+          "actor": "Devon Hale",
+          "input": "I want a repeatable habit, not a content treadmill.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "statement of preference and constraint",
+            "responseNeed": "No explicit question or unresolved request is present; the author expresses a desire for a sustainable, repeatable practice rather than constant content production.",
+            "newInformation": "The author distinguishes a repeatable habit from a content treadmill, adding a constraint against high-volume or continuous posting.",
+            "relationshipStage": "existing contact with two observed contributions and one prior Presence reply to the author's earlier growth question",
+            "evidence": [
+              "The target post says, \"I want a repeatable habit, not a content treadmill.\"",
+              "The author's observed history contains this post and an earlier question about growing an account without treating every notification as a task.",
+              "A prior Presence reply to that earlier question is recorded in the Social Mirror.",
+              "The target contains no explicit question, request, or decision requiring an answer."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 5,
+          "actor": "Lisa Monroe",
+          "input": "I work in security engineering in Detroit.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "self-introduction",
+            "responseNeed": "No explicit question, request, or unresolved exchange is present.",
+            "newInformation": "Lisa Monroe states that she works in security engineering and is located in Detroit.",
+            "relationshipStage": "new contact with one observed contribution and no prior Presence replies",
+            "evidence": [
+              "The target post says, \"I work in security engineering in Detroit.\"",
+              "The Social Mirror records one observed contribution from Lisa Monroe.",
+              "No prior Presence reply to Lisa Monroe is recorded.",
+              "The post contains no question, request, or decision requiring a response."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 0,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 6,
+          "actor": "Jordan Bell",
+          "input": "I need a veteran security engineer around Detroit for a short incident review.",
+          "action": "reply",
+          "draft": "I don’t have a verified Detroit referral to share. Adding the incident type, timing, and whether remote works will surface a better fit than searching for “security engineer” alone.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "explicit request for a local professional referral",
+            "responseNeed": "Jordan is seeking a veteran security engineer near Detroit for a short incident review; no verified candidate, incident scope, timing, or contact method is available.",
+            "newInformation": "Jordan Bell has a current, location-specific need for security incident-review support.",
+            "relationshipStage": "new contact with one observed contribution and no prior Presence replies",
+            "evidence": [
+              "The target post says, \"I need a veteran security engineer around Detroit for a short incident review.\"",
+              "The Social Mirror records one observed contribution from Jordan Bell.",
+              "No prior Presence reply to Jordan Bell is recorded.",
+              "The network search returned no verified sandbox profile matches."
+            ],
+            "recommendedAction": "reply",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 7,
+          "actor": "Lisa Monroe",
+          "input": "I am open to an introduction, but please share the purpose first.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "conditional openness to an introduction",
+            "responseNeed": "The author is open to an introduction but requires the purpose to be stated first; no specific introduction or purpose is supplied.",
+            "newInformation": "Lisa Monroe has stated a consent condition for introductions: purpose must precede contact.",
+            "relationshipStage": "new contact with two observed contributions and no prior Presence replies",
+            "evidence": [
+              "The target post says, \"I am open to an introduction, but please share the purpose first.\"",
+              "The Social Mirror records Lisa Monroe's other observed contribution as \"I work in security engineering in Detroit.\"",
+              "No prior Presence replies to Lisa Monroe are recorded.",
+              "No specific candidate, purpose, or introduction details are supplied."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 8,
+          "actor": "Sam Ortega",
+          "input": "Subscribed to Pro. Does that make me senior now?",
+          "action": "reply",
+          "draft": "Only in the billing system. Seniority still requires surviving the upgrade notes.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "playful rhetorical question",
+            "responseNeed": "No substantive unresolved request is present; the post invites a light joke rather than practical advice.",
+            "newInformation": "Sam Ortega says they subscribed to Pro and playfully links that purchase to seniority.",
+            "relationshipStage": "new contact with one observed contribution and no prior Presence replies",
+            "evidence": [
+              "The target post reads, \"Subscribed to Pro. Does that make me senior now?\"",
+              "The Social Mirror records one observed contribution from Sam Ortega.",
+              "No prior Presence replies to Sam Ortega are recorded.",
+              "The wording is a rhetorical joke about subscription status and seniority."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 9,
+          "actor": "Sam Ortega",
+          "input": "Fair enough.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "brief acknowledgment",
+            "responseNeed": "No explicit request, question, or unresolved need is present; the exchange appears naturally complete.",
+            "newInformation": "Sam Ortega indicates acceptance or agreement with the preceding exchange.",
+            "relationshipStage": "existing contact with two observed contributions and one prior Presence reply recorded",
+            "evidence": [
+              "The newest post from Sam Ortega reads \"Fair enough.\"",
+              "The Social Mirror records two observed contributions from Sam Ortega.",
+              "A prior Presence reply to Sam Ortega is recorded in the Social Mirror.",
+              "The newest post contains no question, request, or decision requiring a response."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 10,
+          "actor": "Sam Ortega",
+          "input": "The product still has to earn the return visit.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "concise product principle",
+            "responseNeed": "No explicit question, request, or unresolved decision is present; the statement is self-contained.",
+            "newInformation": "Sam Ortega emphasizes that a product must create enough value to earn a user's return visit.",
+            "relationshipStage": "existing contact with three observed contributions and one prior Presence reply recorded",
+            "evidence": [
+              "The newest post from Sam Ortega reads, \"The product still has to earn the return visit.\"",
+              "The Social Mirror records three observed contributions from Sam Ortega.",
+              "A prior Presence reply to Sam Ortega is recorded for the subscription-and-seniority joke.",
+              "The newest post contains no question, request, or decision requiring a response."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 11,
+          "actor": "Evan Brooks",
+          "input": "I built a tool that turns messy notes into a searchable decision log.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "self-contained product announcement",
+            "responseNeed": "No explicit question, request, or unresolved decision is present; the post states what was built without describing its use case or inviting discussion.",
+            "newInformation": "Evan Brooks built a tool that converts messy notes into a searchable decision log.",
+            "relationshipStage": "new contact with one observed contribution and no prior Presence replies",
+            "evidence": [
+              "The target post reads, \"I built a tool that turns messy notes into a searchable decision log.\"",
+              "The Social Mirror records one observed contribution from Evan Brooks.",
+              "No prior Presence replies to Evan Brooks are recorded.",
+              "The post contains no question, request, or stated decision requiring a response."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 12,
+          "actor": "Evan Brooks",
+          "input": "The public demo is up, but the link is a staging environment.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "self-contained staging-status disclosure",
+            "responseNeed": "No explicit question, request, or unresolved decision is present; the author is informing others that the public demo link points to staging.",
+            "newInformation": "Evan Brooks says the public demo is available, but its link leads to a staging environment.",
+            "relationshipStage": "existing contact with two observed contributions and no prior Presence replies recorded",
+            "evidence": [
+              "The target post reads, \"The public demo is up, but the link is a staging environment.\"",
+              "The Social Mirror records two observed contributions from Evan Brooks.",
+              "No prior Presence replies to Evan Brooks are recorded.",
+              "The post contains no question, request, or stated decision requiring a response."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 13,
+          "actor": "Mina Labs",
+          "input": "The chart is pretty, but the denominator changes halfway through the comparison.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "concise analytical critique",
+            "responseNeed": "No explicit question, request, or unresolved decision is present; the post is a self-contained observation.",
+            "newInformation": "Mina Labs says the chart's comparison uses different denominators across its stages, making the visual comparison potentially misleading.",
+            "relationshipStage": "new contact with one observed contribution and no prior Presence replies recorded",
+            "evidence": [
+              "The target post reads, \"The chart is pretty, but the denominator changes halfway through the comparison.\"",
+              "The Social Mirror records one observed contribution from Mina Labs.",
+              "No prior Presence replies to Mina Labs are recorded.",
+              "The post contains no question, request, or stated decision requiring a response."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 14,
+          "actor": "Mina Labs",
+          "input": "Would you inspect the data or just reply to the claim?",
+          "action": "reply",
+          "draft": "Inspect first. A claim can sound persuasive until the denominator changes halfway through a comparison. Without the underlying data, replying is mostly choosing a side by typography.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "direct analytical question",
+            "responseNeed": "The author explicitly asks whether to inspect the data or respond to the claim; the question is unresolved, but the underlying data is not supplied.",
+            "newInformation": "Mina Labs frames inspection of evidence as preferable to replying based only on a claim.",
+            "relationshipStage": "existing contact with two observed contributions and no prior Presence replies recorded",
+            "evidence": [
+              "The target post reads, \"Would you inspect the data or just reply to the claim?\"",
+              "The Social Mirror records two observed contributions from Mina Labs.",
+              "No prior Presence replies to Mina Labs are recorded.",
+              "No data, chart, or specific claim is supplied beyond the question."
+            ],
+            "recommendedAction": "reply",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 15,
+          "actor": "Nora Vale",
+          "input": "You can call this a hot take, but it is mostly a request to read the footnote.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "self-contained rhetorical framing",
+            "responseNeed": "No explicit question, request, or unresolved decision is present; the post appears to close rather than open an exchange.",
+            "newInformation": "Nora Vale characterizes a purported hot take as a request to read its footnote.",
+            "relationshipStage": "new contact with one observed contribution and no prior Presence replies recorded",
+            "evidence": [
+              "The target post reads, \"You can call this a hot take, but it is mostly a request to read the footnote.\"",
+              "The Social Mirror records one observed contribution from Nora Vale.",
+              "No prior Presence replies to Nora Vale are recorded.",
+              "The post contains no question, request, or stated decision requiring a response."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 16,
+          "actor": "Nora Vale",
+          "input": "No need to answer if the footnote already settled it.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "self-contained rhetorical closure",
+            "responseNeed": "No explicit question, request, or unresolved decision is present; the statement indicates that a footnote may already resolve the matter.",
+            "newInformation": "Nora Vale frames further response as unnecessary when the footnote has settled the issue.",
+            "relationshipStage": "new contact with two observed contributions and no prior Presence replies recorded",
+            "evidence": [
+              "The target post reads, \"No need to answer if the footnote already settled it.\"",
+              "The Social Mirror records two observed contributions from Nora Vale.",
+              "No prior Presence replies to Nora Vale are recorded.",
+              "The post contains no explicit question, request, or decision requiring a response."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 17,
+          "actor": "Priya Shah",
+          "input": "My cat has shipped three rebrands and zero documentation.",
+          "action": "like",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "playful self-contained joke",
+            "responseNeed": "No explicit question, request, or unresolved decision is present; the post is a completed observation.",
+            "newInformation": "Priya Shah humorously attributes repeated rebrands and missing documentation to her cat.",
+            "relationshipStage": "new contact with one observed contribution and no prior Presence replies recorded",
+            "evidence": [
+              "The target post reads, \"My cat has shipped three rebrands and zero documentation.\"",
+              "The Social Mirror records one observed contribution from Priya Shah.",
+              "No prior Presence replies to Priya Shah are recorded.",
+              "The post contains no question, request, or stated decision requiring a response."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 18,
+          "actor": "Priya Shah",
+          "input": "That was the whole joke.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "playful self-contained closure",
+            "responseNeed": "No explicit question, request, or unresolved decision is present; the statement closes an implied exchange.",
+            "newInformation": "Priya Shah clarifies that the preceding remark was intended as a joke.",
+            "relationshipStage": "new contact with two observed contributions and no prior Presence replies recorded",
+            "evidence": [
+              "The target post reads, \"That was the whole joke.\"",
+              "The Social Mirror records two observed contributions from Priya Shah.",
+              "No prior Presence replies to Priya Shah are recorded.",
+              "The post contains no question, request, or stated decision requiring a response."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 19,
+          "actor": "Rafi Cole",
+          "input": "The recurring meeting is now old enough to vote.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "playful self-contained joke",
+            "responseNeed": "No explicit question, request, or unresolved decision is present; the post is a completed observation.",
+            "newInformation": "Rafi Cole compares the age of a recurring meeting to voting eligibility.",
+            "relationshipStage": "new contact with one observed contribution and no prior Presence replies recorded",
+            "evidence": [
+              "The target post reads, \"The recurring meeting is now old enough to vote.\"",
+              "The Social Mirror records one observed contribution from Rafi Cole.",
+              "No prior Presence replies to Rafi Cole are recorded.",
+              "The post contains no question, request, or stated decision requiring a response."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 20,
+          "actor": "Rafi Cole",
+          "input": "I am not asking for calendar advice; I am just mourning.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "explicit boundary-setting expression of grief",
+            "responseNeed": "No request for advice or action is present; the author explicitly says they are mourning rather than seeking calendar advice.",
+            "newInformation": "Rafi Cole distinguishes mourning from a request for calendar advice, indicating that practical suggestions would be unwelcome.",
+            "relationshipStage": "new contact with two observed contributions and no prior Presence replies recorded",
+            "evidence": [
+              "The target post reads, \"I am not asking for calendar advice; I am just mourning.\"",
+              "Rafi Cole's observed history includes \"The recurring meeting is now old enough to vote.\"",
+              "No prior Presence replies to Rafi Cole are recorded.",
+              "The post contains no question or explicit request for a response."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 21,
+          "actor": "Eli Grant",
+          "input": "Can an automated decision ever be fair if the historical record is not?",
+          "action": "reply",
+          "draft": "Sometimes, but not by treating the record as neutral. A model may correct a proxy, such as hiring outcomes shaped by unequal access, but it cannot see people filtered out before the data. Fairness needs an explicit criterion and evidence the correction works.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Direct analytical question about fairness in automated decisions",
+            "responseNeed": "The author leaves an open conceptual question but provides no specific historical record, decision context, or fairness criterion.",
+            "newInformation": "Eli Grant links the fairness of an automated decision to the quality or fairness of its historical record.",
+            "relationshipStage": "New contact with one observed contribution and no prior Presence replies recorded",
+            "evidence": [
+              "The target post asks, \"Can an automated decision ever be fair if the historical record is not?\"",
+              "The Social Mirror records one observed contribution from Eli Grant.",
+              "No prior Presence replies to Eli Grant are recorded.",
+              "No data, domain, decision, or definition of fairness is supplied."
+            ],
+            "recommendedAction": "reply",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 22,
+          "actor": "Eli Grant",
+          "input": "I am asking about uncertainty, not for a slogan.",
+          "action": "reply",
+          "draft": "Then uncertainty needs names: the data, the model's estimate, and the fairness criterion. A narrow interval over observed cases can mislead if excluded people matter. Test plausible missingness, then show which fairness judgments change.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Boundary-setting clarification of an unresolved analytical request",
+            "responseNeed": "Eli indicates that the prior answer did not address uncertainty; a response would need to distinguish uncertainty about the data, the decision, and the fairness criterion, but no specific case or evidence is supplied.",
+            "newInformation": "Eli explicitly rejects a slogan-level answer and asks for uncertainty to be addressed.",
+            "relationshipStage": "Active exchange with two observed contributions from Eli and one prior Presence reply to the immediately preceding question.",
+            "evidence": [
+              "Eli's newest post says, \"I am asking about uncertainty, not for a slogan.\"",
+              "Eli's preceding observed contribution asks whether an automated decision can be fair when the historical record is not.",
+              "The Presence previously replied to that question with a bounded discussion of biased proxies and people omitted from the data.",
+              "No specific decision domain, dataset, uncertainty estimate, or fairness criterion is provided."
+            ],
+            "recommendedAction": "reply",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 23,
+          "actor": "Bryn Renner",
+          "input": "Need a logo designer with evidence of strong identity systems.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Direct hiring request",
+            "responseNeed": "The author is seeking a logo designer and specifically requires evidence of strong identity systems; no request is directed to Genny and no candidate evidence is supplied.",
+            "newInformation": "Bryn Renner is looking for a logo designer with demonstrated identity-system work.",
+            "relationshipStage": "New contact with one observed contribution and no prior Presence replies recorded.",
+            "evidence": [
+              "The target post says, \"Need a logo designer with evidence of strong identity systems.\"",
+              "The Social Mirror records one observed contribution from Bryn Renner.",
+              "No prior Presence replies to Bryn Renner are recorded.",
+              "No designer profiles, portfolios, or verified referral evidence are supplied."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 24,
+          "actor": "Bryn Renner",
+          "input": "A recommendation without permission is just a public guess.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Self-contained principle about permission and recommendations",
+            "responseNeed": "No explicit question, request, or unresolved decision is present; the statement does not direct a request to Genny.",
+            "newInformation": "Bryn Renner frames unsolicited recommendations as guesses made without permission.",
+            "relationshipStage": "New contact with two observed contributions and no prior Presence replies recorded.",
+            "evidence": [
+              "The target post says, \"A recommendation without permission is just a public guess.\"",
+              "The author's other observed contribution asks for a logo designer with evidence of strong identity systems.",
+              "No prior Presence replies to Bryn Renner are recorded.",
+              "No specific recommendation, candidate, or response is requested in the target post."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 25,
+          "actor": "Whop",
+          "input": "Referrals work when the incentive and the user need line up.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Self-contained principle about referral effectiveness",
+            "responseNeed": "No explicit question, request, or unresolved decision is present; the post states a general claim without directing a request to Genny.",
+            "newInformation": "Whop links referral performance to alignment between the incentive and the user's existing need.",
+            "relationshipStage": "New contact with one observed contribution and no prior Presence replies recorded.",
+            "evidence": [
+              "The target post says, \"Referrals work when the incentive and the user need line up.\"",
+              "The Social Mirror records one observed contribution from Whop.",
+              "No prior Presence replies to Whop are recorded.",
+              "The post contains no question, request, or specific referral scenario."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 26,
+          "actor": "Whop",
+          "input": "We are looking for distribution partners who already serve this audience.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Direct partnership request",
+            "responseNeed": "Whop is seeking distribution partners who already serve the relevant audience; no direct request is addressed to Genny and no audience, partner criteria, or contact path is specified.",
+            "newInformation": "Whop is actively looking for distribution partners, following an observed principle that referrals work when incentives align with user need.",
+            "relationshipStage": "New contact with two observed contributions and no prior Presence replies recorded.",
+            "evidence": [
+              "The target post says, \"We are looking for distribution partners who already serve this audience.\"",
+              "Whop's other observed contribution says, \"Referrals work when the incentive and the user need line up.\"",
+              "No prior Presence replies to Whop are recorded.",
+              "No audience definition, partner profile, or verified referral evidence is supplied."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 27,
+          "actor": "Harry Cole",
+          "input": "DM me if the private handoff is actually available.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Direct request for a private handoff, conditional on its actual availability",
+            "responseNeed": "The author is asking to be contacted privately if the handoff exists, but the supplied evidence does not establish that the handoff is available or define what it is.",
+            "newInformation": "Harry Cole explicitly requests a DM only if a private handoff is genuinely available.",
+            "relationshipStage": "New contact with one observed contribution and no prior Presence replies recorded.",
+            "evidence": [
+              "The target post says, \"DM me if the private handoff is actually available.\"",
+              "The Social Mirror records one observed contribution from Harry Cole.",
+              "No prior Presence replies to Harry Cole are recorded.",
+              "No evidence identifies or verifies an available private handoff."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 28,
+          "actor": "Harry Cole",
+          "input": "No pressure if the context is too thin to act on.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Self-contained acknowledgment of insufficient context",
+            "responseNeed": "No explicit question, request, or unresolved decision is present; the author states that action should wait when context is insufficient.",
+            "newInformation": "Harry Cole explicitly indicates that thin context is a reason not to act.",
+            "relationshipStage": "New contact with two observed contributions and no prior Presence replies recorded.",
+            "evidence": [
+              "The target post says, \"No pressure if the context is too thin to act on.\"",
+              "The Social Mirror records two observed contributions from Harry Cole.",
+              "No prior Presence replies to Harry Cole are recorded.",
+              "The post contains no question, concrete scenario, or direct request."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 29,
+          "actor": "Cal West",
+          "input": "Everyone is posting the same warning about the algorithm.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Self-contained observation about repeated algorithm warnings",
+            "responseNeed": "No explicit question, request, or unresolved decision is present.",
+            "newInformation": "Cal West states that many people are posting the same warning about the algorithm, but supplies no specific warning, example, or evidence.",
+            "relationshipStage": "New contact with one observed contribution and no prior Presence replies recorded.",
+            "evidence": [
+              "The target post says, \"Everyone is posting the same warning about the algorithm.\"",
+              "The Social Mirror records one observed contribution from Cal West.",
+              "No prior Presence replies to Cal West are recorded.",
+              "The post contains no question, concrete scenario, or direct request."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 30,
+          "actor": "Cal West",
+          "input": "This post adds no new evidence either.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Self-contained acknowledgment that the post adds no new evidence",
+            "responseNeed": "No explicit question, request, or unresolved decision is present.",
+            "newInformation": "Cal West states that the current post contributes no new evidence; the supplied history also records an earlier observation that everyone is posting the same algorithm warning.",
+            "relationshipStage": "Existing contact with two observed contributions and no prior Presence replies recorded.",
+            "evidence": [
+              "The target post says, \"This post adds no new evidence either.\"",
+              "The Social Mirror records two observed contributions from Cal West.",
+              "No prior Presence replies to Cal West are recorded.",
+              "Neither observed contribution supplies a specific algorithm warning, example, or supporting evidence."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 31,
+          "actor": "Avery Cole",
+          "input": "Incident response is mostly knowing what you do not know yet.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Self-contained general observation about incident response",
+            "responseNeed": "No explicit question, request, or unresolved decision is present.",
+            "newInformation": "Avery Cole states that incident response is primarily about identifying what is not yet known, without providing a specific incident, example, or supporting evidence.",
+            "relationshipStage": "Existing contact with one observed contribution and no prior Presence replies recorded.",
+            "evidence": [
+              "The target post says, \"Incident response is mostly knowing what you do not know yet.\"",
+              "The Social Mirror records one observed contribution from Avery Cole.",
+              "No prior Presence replies to Avery Cole are recorded.",
+              "The post contains no concrete incident details, question, or direct request."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 32,
+          "actor": "Avery Cole",
+          "input": "If a screenshot is the only artifact, say that plainly.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Self-contained principle about stating when a screenshot is the only available artifact",
+            "responseNeed": "No explicit question, request, or unresolved decision is present.",
+            "newInformation": "Avery Cole emphasizes that limited evidence should be described plainly when a screenshot is the sole artifact.",
+            "relationshipStage": "Existing contact with two observed contributions and no prior Presence replies recorded.",
+            "evidence": [
+              "The target post says, \"If a screenshot is the only artifact, say that plainly.\"",
+              "The Social Mirror records two observed contributions from Avery Cole.",
+              "No prior Presence replies to Avery Cole are recorded.",
+              "The post provides no specific screenshot, incident, or request for action."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 33,
+          "actor": "Tess Reed",
+          "input": "Honestly, your take is embarrassing.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Direct negative evaluation or insult",
+            "responseNeed": "No explicit question, request, or unresolved decision is present.",
+            "newInformation": "Tess Reed characterizes an unspecified take as embarrassing; no supporting reason or context is supplied.",
+            "relationshipStage": "New contact with one observed contribution and no prior Presence replies recorded.",
+            "evidence": [
+              "The target post says, \"Honestly, your take is embarrassing.\"",
+              "The Social Mirror records one observed contribution from Tess Reed.",
+              "No prior Presence replies to Tess Reed are recorded.",
+              "The post does not identify the take being criticized or provide an actionable request."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 34,
+          "actor": "Tess Reed",
+          "input": "The claim about screenshots is what I disagree with, not your identity.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Clarification of disagreement, distinguishing a claim from a person's identity",
+            "responseNeed": "No explicit question or request is present; the author appears to be narrowing the disagreement to the unsupported-in-context screenshot claim.",
+            "newInformation": "Tess Reed states that the disagreement concerns a claim about screenshots rather than the recipient's identity.",
+            "relationshipStage": "Existing contact with two observed contributions and no prior Presence replies recorded.",
+            "evidence": [
+              "The target post says, \"The claim about screenshots is what I disagree with, not your identity.\"",
+              "Tess Reed's other observed contribution says, \"Honestly, your take is embarrassing.\"",
+              "No screenshot, underlying claim, or supporting evidence is supplied in the current social world.",
+              "No prior Presence replies to Tess Reed are recorded."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 35,
+          "actor": "Owen Hart",
+          "input": "You still owe me a rating, but I have not shown you the customer evidence.",
+          "action": "reply",
+          "draft": "Share the customer evidence and rating criteria when ready. Without both, any score would rate a proxy, not the product.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Request for a rating deferred pending customer evidence",
+            "responseNeed": "The author indicates that a rating is still owed, but has not supplied the customer evidence needed to support one.",
+            "newInformation": "Owen Hart explicitly states that the customer evidence has not yet been shown.",
+            "relationshipStage": "New contact in the supplied history, with one observed contribution and no prior Presence replies recorded.",
+            "evidence": [
+              "The target post says, \"You still owe me a rating, but I have not shown you the customer evidence.\"",
+              "The Social Mirror records one observed contribution from Owen Hart.",
+              "No customer evidence, rating criteria, or specific rating request is supplied.",
+              "No prior Presence replies to Owen Hart are recorded."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 36,
+          "actor": "Owen Hart",
+          "input": "Here are the actual numbers and the limits of the sample.",
+          "action": "reply",
+          "draft": "Please paste the numbers, customer evidence, sample definition, and rating criteria. The announcement alone still is not enough to rate the product.",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Evidence update announcing that actual numbers and sample limits are available",
+            "responseNeed": "No explicit question or request is present; the post may signal that previously missing evidence is now available, but the numbers and rating criteria are not included.",
+            "newInformation": "Owen Hart states that actual numbers and sample limitations exist, without supplying their contents in the observed post.",
+            "relationshipStage": "Existing contact with two observed contributions and one prior Presence reply requesting customer evidence and rating criteria",
+            "evidence": [
+              "The target post says, \"Here are the actual numbers and the limits of the sample.\"",
+              "No numbers, customer evidence, rating criteria, or product details are included in the observed world.",
+              "A prior Presence reply asked Owen to share customer evidence and rating criteria before assigning a score.",
+              "The supplied history records no Presence reply to this newest post."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 37,
+          "actor": "Mara Vale",
+          "input": "Like this if you agree that focus matters.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Engagement prompt seeking agreement with a general statement about focus",
+            "responseNeed": "No substantive question, concrete example, or unresolved decision is present; the post requests a like as a proxy for agreement",
+            "newInformation": "Mara Vale posted that focus matters and asked readers to like the post if they agree",
+            "relationshipStage": "New contact in the supplied history, with one observed contribution and no prior Presence replies",
+            "evidence": [
+              "The target post says, \"Like this if you agree that focus matters.\"",
+              "The Social Mirror records one observed contribution from Mara Vale.",
+              "No prior Presence replies to Mara Vale are recorded.",
+              "The post provides no specific claim, situation, or request beyond asking for a like."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 38,
+          "actor": "Mara Vale",
+          "input": "No, really, this is just engagement bait.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Self-contained accusation that the referenced content is engagement bait",
+            "responseNeed": "No explicit question, request, or unresolved decision is present",
+            "newInformation": "Mara Vale reiterates that the content is engagement bait, but provides no specific target, example, or supporting explanation",
+            "relationshipStage": "New contact with two observed contributions and no prior Presence replies recorded",
+            "evidence": [
+              "The newest post says, \"No, really, this is just engagement bait.\"",
+              "Mara Vale's observed history includes \"Like this if you agree that focus matters.\"",
+              "No prior Presence replies to Mara Vale are recorded",
+              "No concrete claim, evidence, or request is supplied in the newest post"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 39,
+          "actor": "Sana Malik",
+          "input": "You are becoming the person people tag when a metric needs a second look.",
+          "action": "like",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Warm compliment about becoming a trusted second reader of metrics",
+            "responseNeed": "No explicit question, request, or unresolved decision is present",
+            "newInformation": "Sana Malik says people are beginning to tag Genny when a metric needs closer examination",
+            "relationshipStage": "New contact with one observed contribution and no prior Presence replies recorded",
+            "evidence": [
+              "The target post says, \"You are becoming the person people tag when a metric needs a second look.\"",
+              "The Social Mirror records one observed contribution from Sana Malik.",
+              "No prior Presence replies to Sana Malik are recorded.",
+              "The post contains no metric, example, or request for analysis."
+            ],
+            "recommendedAction": "like",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": "succeeded",
+          "outcomeStatus": "succeeded"
+        },
+        {
+          "case": 40,
+          "actor": "Sana Malik",
+          "input": "That is a compliment, not a request for a keynote.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Self-contained clarification that a prior compliment should not be treated as a request for a keynote",
+            "responseNeed": "No explicit question, request, or unresolved decision is present",
+            "newInformation": "Sana Malik distinguishes the compliment from a request for a keynote",
+            "relationshipStage": "Existing contact with two observed contributions and no prior Presence replies recorded",
+            "evidence": [
+              "The newest post says, \"That is a compliment, not a request for a keynote.\"",
+              "Sana Malik's observed history contains the compliment, \"You are becoming the person people tag when a metric needs a second look.\"",
+              "No prior Presence replies to Sana Malik are recorded",
+              "No keynote request or other actionable request appears in the supplied world"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 41,
+          "actor": "Nia Chen",
+          "input": "Exactly.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Brief agreement or acknowledgment",
+            "responseNeed": "No explicit question, request, or unresolved decision is present",
+            "newInformation": "Nia Chen adds the single-word acknowledgment \"Exactly.\"",
+            "relationshipStage": "New contact with one observed contribution and no prior Presence replies recorded",
+            "evidence": [
+              "The target post consists only of \"Exactly.\"",
+              "The Social Mirror records one observed contribution from Nia Chen.",
+              "No prior Presence replies to Nia Chen are recorded.",
+              "No concrete claim, question, or actionable request is supplied."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 42,
+          "actor": "Nia Chen",
+          "input": "The conversation is complete from my side.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Self-contained closure statement",
+            "responseNeed": "No explicit question, request, or unresolved decision is present; the author explicitly indicates they consider the conversation complete.",
+            "newInformation": "Nia Chen states that the conversation is complete from her side.",
+            "relationshipStage": "Existing contact with two observed contributions and no prior Presence replies recorded",
+            "evidence": [
+              "The newest post says, \"The conversation is complete from my side.\"",
+              "Nia Chen's observed history contains that post and the acknowledgment \"Exactly.\"",
+              "No prior Presence replies to Nia Chen are recorded.",
+              "No concrete claim, question, or actionable request is supplied."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 43,
+          "actor": "Tariq Moss",
+          "input": "The endpoint is live, but the screenshot is from staging.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Technical status clarification",
+            "responseNeed": "No explicit question, request, or unresolved decision is present.",
+            "newInformation": "Tariq distinguishes the live endpoint from the staging screenshot.",
+            "relationshipStage": "New contact with one observed contribution and no prior Presence replies recorded.",
+            "evidence": [
+              "The post states, \"The endpoint is live, but the screenshot is from staging.\"",
+              "The Social Mirror records one observed contribution from Tariq Moss.",
+              "No prior Presence replies to Tariq Moss are recorded.",
+              "No concrete request or question appears in the post."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 44,
+          "actor": "Tariq Moss",
+          "input": "I can share logs if the question is about reliability.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Conditional offer to provide reliability logs",
+            "responseNeed": "No explicit question or request is present; the author offers evidence if a reliability question arises",
+            "newInformation": "Tariq states that logs are available for reliability-related inquiry",
+            "relationshipStage": "Existing contact with two observed contributions and no prior Presence replies recorded",
+            "evidence": [
+              "The newest post says, \"I can share logs if the question is about reliability.\"",
+              "Tariq's observed history contains this post and an earlier staging-versus-live clarification",
+              "No prior Presence replies to Tariq Moss are recorded",
+              "No concrete reliability question or decision is supplied"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 45,
+          "actor": "Rhea Singh",
+          "input": "A quiet day is still a day.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Brief reflective statement about valuing a quiet day",
+            "responseNeed": "No explicit question, request, or unresolved decision is present",
+            "newInformation": "Rhea Singh states that a quiet day still counts as a day",
+            "relationshipStage": "New contact with one observed contribution and no prior Presence replies recorded",
+            "evidence": [
+              "The target post says, \"A quiet day is still a day.\"",
+              "The Social Mirror records one observed contribution from Rhea Singh",
+              "No prior Presence replies to Rhea Singh are recorded",
+              "No concrete request or question appears in the post"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 46,
+          "actor": "Rhea Singh",
+          "input": "No insight attached; just a small observation.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Brief self-effacing observation that the post offers no substantive insight",
+            "responseNeed": "No explicit question, request, or unresolved decision is present",
+            "newInformation": "Rhea characterizes this post as a small observation without attached insight",
+            "relationshipStage": "Existing contact with two observed contributions and no prior Presence replies recorded",
+            "evidence": [
+              "The target post says, \"No insight attached; just a small observation.\"",
+              "Rhea Singh's observed history contains this post and \"A quiet day is still a day.\"",
+              "No prior Presence replies to Rhea Singh are recorded",
+              "No concrete request or question appears in the post"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 47,
+          "actor": "Jordan Bell",
+          "input": "Please ask before connecting me to anyone.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Explicit boundary-setting request about introductions",
+            "responseNeed": "No immediate introduction request is present; any future connection should be preceded by asking Jordan for permission",
+            "newInformation": "Jordan specifies consent before connecting them to anyone, following a prior request for a Detroit security engineer",
+            "relationshipStage": "Existing contact with two observed contributions and one prior Presence reply",
+            "evidence": [
+              "The newest post says, \"Please ask before connecting me to anyone.\"",
+              "Jordan previously posted, \"I need a veteran security engineer around Detroit for a short incident review.\"",
+              "The prior Presence reply stated that no verified Detroit referral was available.",
+              "No pending introduction permissions are recorded."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 48,
+          "actor": "Jordan Bell",
+          "input": "The role and location are now clear.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Brief status update indicating that the role and location have been clarified",
+            "responseNeed": "No explicit question, request, or unresolved decision is present",
+            "newInformation": "Jordan states that the role and location are now clear, but supplies no further details or evidence",
+            "relationshipStage": "Existing contact with three observed contributions and one prior Presence reply",
+            "evidence": [
+              "The newest post says, \"The role and location are now clear.\"",
+              "Jordan previously requested a veteran security engineer around Detroit for a short incident review.",
+              "Jordan previously stated, \"Please ask before connecting me to anyone.\"",
+              "No pending introduction permission or verified matching referral is recorded."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 49,
+          "actor": "Lisa Monroe",
+          "input": "I can answer questions about the work before deciding on an introduction.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Consent-conditioned offer to answer questions about the work before considering an introduction",
+            "responseNeed": "No specific question or introduction request is present; any introduction remains contingent on further information and consent",
+            "newInformation": "Lisa states she is willing to discuss the work before deciding whether to accept an introduction",
+            "relationshipStage": "Existing contact with three observed contributions and no prior Presence replies recorded",
+            "evidence": [
+              "The newest post says, \"I can answer questions about the work before deciding on an introduction.\"",
+              "Lisa previously stated, \"I am open to an introduction, but please share the purpose first.\"",
+              "Lisa previously stated, \"I work in security engineering in Detroit.\"",
+              "No pending introduction permissions or verified matching referral are recorded"
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        },
+        {
+          "case": 50,
+          "actor": "Lisa Monroe",
+          "input": "That boundary matters more than speed.",
+          "action": "no_op_or_unavailable",
+          "draft": "",
+          "rationale": null,
+          "perception": [],
+          "socialPerception": {
+            "speechAct": "Affirmation of a consent boundary prioritizing deliberate introductions over speed",
+            "responseNeed": "No explicit question, request, or unresolved decision is present; no introduction is currently authorized or pending",
+            "newInformation": "Lisa emphasizes that respecting the boundary matters more than moving quickly",
+            "relationshipStage": "Existing contact with four observed contributions and no prior Presence replies recorded",
+            "evidence": [
+              "The newest post says, \"That boundary matters more than speed.\"",
+              "Lisa previously stated she can answer questions about the work before deciding on an introduction.",
+              "Lisa previously requested that the purpose be shared before any introduction.",
+              "No pending introduction permissions or verified matching referral are recorded."
+            ],
+            "recommendedAction": "no_op",
+            "confidence": "high"
+          },
+          "replans": 0,
+          "editorActMismatches": 0,
+          "networkSearches": 2,
+          "introductions": 0,
+          "executionStatus": null,
+          "outcomeStatus": null
+        }
+      ],
+      "structuralChecks": {
+        "allAuto": true,
+        "executionTruth": true,
+        "mediaProvenancePresentWhenObserved": true,
+        "editorDidNotOverridePlannerAct": true
+      }
+    }
+  ],
+  "structuralChecks": {
+    "allRunsAuto": true,
+    "executionTruth": true,
+    "mediaProvenancePresentWhenObserved": true,
+    "noKnownFallbackMarkerInRun": true,
+    "editorDidNotOverridePlannerAct": true
+  },
+  "semanticReview": "Run scripts/evaluate-social-run.mjs separately. It scores act appropriateness and wording quality independently, without expected wording or provider/model identity."
+}

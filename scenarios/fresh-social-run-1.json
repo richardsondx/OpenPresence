@@ -1,0 +1,11 @@
+{
+  "name": "Fresh varied run 1, evidence and relationship",
+  "source": "fresh holdout session",
+  "steps": [
+    { "command": "start", "options": { "source": "fresh" } },
+    { "command": "inject", "options": { "actor": "Maya Chen", "handle": "@mayachen", "action": "post", "content": "Our activation rate doubled after we stopped counting invited users as activated.", "assets": [{ "name": "activation-chart", "kind": "chart", "dataUrl": "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" }] } },
+    { "command": "inject", "options": { "actor": "Maya Chen", "handle": "@mayachen", "action": "reply", "target": "$latest-inbound", "content": "Is that a real improvement or just a denominator trick?" } },
+    { "command": "inject", "options": { "actor": "Noah Kim", "handle": "@noahkim", "action": "post", "content": "The best dashboards are honest enough to make the good news smaller." } },
+    { "command": "timeline" }
+  ]
+}

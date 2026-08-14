@@ -14,7 +14,7 @@ async function createAgent(page: import("@playwright/test").Page) {
   await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
 }
 
-async function inspectCompactPage(page: import("@playwright/test").Page, view: "Chat" | "Activity" | "Calendar" | "Schedule" | "Brain" | "Presence settings") {
+async function inspectCompactPage(page: import("@playwright/test").Page, view: "Chat" | "Activity" | "Feed" | "Schedule" | "Brain" | "Presence settings") {
   if (view === "Presence settings") {
     await page.locator(".sidebar").getByRole("button", { name: "Settings", exact: true }).click();
   } else {
@@ -36,7 +36,7 @@ async function inspectCompactPage(page: import("@playwright/test").Page, view: "
 
 test("small desktop keeps each page task above the fold", async ({ page }) => {
   await createAgent(page);
-  for (const view of ["Chat", "Activity", "Calendar", "Schedule", "Brain", "Presence settings"] as const) await inspectCompactPage(page, view);
+  for (const view of ["Chat", "Activity", "Feed", "Schedule", "Brain", "Presence settings"] as const) await inspectCompactPage(page, view);
 
   await page.getByRole("button", { name: "Schedule", exact: true }).click();
   await page.getByRole("button", { name: "Add intent" }).click();
@@ -50,8 +50,7 @@ test("small desktop keeps each page task above the fold", async ({ page }) => {
   expect(settingsScroll.documentScrolls).toBe(true);
   expect(settingsScroll.workspaceOverflow).toBe("visible");
 
-  await page.getByRole("button", { name: "Chat", exact: true }).click();
-  await expect(page.getByRole("button", { name: "New conversation", exact: true })).toHaveCount(0);
+  await page.getByRole("button", { name: "Teach", exact: true }).click();
   const contextSidebar = page.getByRole("complementary", { name: "Context & Changes sidebar" });
   await expect(contextSidebar).toBeVisible();
   await page.getByRole("button", { name: "Hide context sidebar" }).click();

@@ -77,9 +77,8 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
     const posts = postsResult.value;
     const mentions = mentionsResult.status === "fulfilled" ? mentionsResult.value : [];
     const observedAt = new Date().toISOString();
-    for (const post of [...posts, ...mentions]) {
-      next = recordNativeMirror(next, { connectionId: connection.id, presenceId, post });
-    }
+    for (const post of posts) next = recordNativeMirror(next, { connectionId: connection.id, presenceId, own: true, post });
+    for (const post of mentions) next = recordNativeMirror(next, { connectionId: connection.id, presenceId, post });
     next = recordPublicFooting(next, presenceId, {
       postsPublished: posts.length,
       recentPostIds: posts.map((post) => post.id),

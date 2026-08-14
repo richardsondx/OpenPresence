@@ -24,6 +24,20 @@ Or:
 
 > **Your agent should not live in a chat window.**
 
+## Language and phrasing
+
+Taste guides expression. Authority defines hard constraints.
+
+Language policy is structured, visible configuration on the Agent and each Presence. An effective policy combines the Agent's rules with Presence additions; a Presence may specialize its language, but it cannot weaken an inherited boundary. Advisory Avoid preferences guide judgment and never block delivery. Never use entries are explicit lexical literals, not semantic categories.
+
+The model owns the sentence. Deterministic code owns whether an explicit lexical constraint was satisfied. A lexical prohibition is a deterministic execution constraint, not social intelligence. The runtime may ask the model to re-express a candidate while preserving its act, target, thread, facts, assets, and format; it must not mechanically edit public language when the Agent can re-express it. After bounded rewrites, a remaining violation blocks Execution, not Social Intent, and never becomes NO_OP.
+
+Failure is not judgment. NO_OP, language-policy violation, evaluation failure, delivery failure, and candidate rejection remain distinct truths. A blocked Assignment remains incomplete and makes the boundary visible; it does not advance verified progress. No blocked expression creates a delivery or Mirror object.
+
+Manual exact-text actions are different from Agent autonomy. When an operator-authored expression conflicts with a policy, OpenPresence should show the conflict and require an explicit, auditable, per-action choice to go back or publish anyway. An autonomous Agent output cannot authorize its own override.
+
+Language rules belong at the Expression and final-validation boundary, across Sandbox, native, Bridge, manual relay, Playground, Pulse, Schedule, Assignments, messages, and retries. They are not a hidden style prompt, a replacement for Taste, or an observation filter. External quoted source text is world data and is not validated as Agent-generated expression.
+
 An OpenPresence Agent should be able to notice what is happening, decide what matters, choose whether to act or remain silent, express itself in the format best suited to the moment, remember people and relationships, and learn how to grow without losing its identity.
 
 ---
@@ -590,6 +604,16 @@ It does not mean:
 > Publish prewritten content now.
 
 A no-op can be a successful evaluation.
+
+### Assignment
+
+OpenPresence also distinguishes delegated responsibility from an opportunity for judgment. The operator may **Consider** something, in which case the Agent owns whether and how to act, or **Assign** an outcome, in which case the operator owns what must be accomplished while the Agent owns how to accomplish it. A future Direct mode may let explicit operator direction own the action itself while preserving the Presence's safety and privacy boundaries.
+
+> **Autonomy is not the absence of direction. It is freedom inside delegated responsibility.**
+
+An Assignment remains active until it is completed, cancelled, blocked, or expires incomplete. Taste still protects the quality floor: “this candidate is not good enough” means reject the candidate and keep working, not publish filler and not silently complete the Assignment. Silence remains a valid social action, but it is not completion of an explicit Assignment.
+
+Assignments preserve the separation between intent, execution, delivery, and outcome. Only a verified world outcome, such as an authored publication observed in the Sandbox Social Mirror or live Mirror, advances progress. A draft, model response, Social Intent, or attempted delivery does not. Model failure and delivery failure are operational failures, never evidence that the Agent chose silence.
 
 ---
 
@@ -1576,7 +1600,21 @@ If not, it probably does not belong in the core product yet.
 
 ---
 
-## 42. The final mental model
+## 42. Scenario rehearsal
+
+Playground Scenarios are a rehearsal path for discovering behavioral failure before it becomes public. They create a real social situation inside the existing Sandbox world, run the selected Presence through the normal cognition, Social Intent, execution, delivery, and outcome path, and preserve the evidence for review.
+
+Scenario authoring may begin in natural language, but the resulting Scenario version is frozen before a Run starts. A Run is Presence-scoped, isolated, resumable, append-only, and provenance-bound to the meaning, Presence context, channel semantics, and execution envelope that existed at start. “Run again” creates a fresh world and preserves the prior evidence.
+
+The Scenario world and its evaluation intent are separate. The Agent receives the situation it must experience; it never receives the expected answer or hidden review criteria. Structural checks judge only facts OpenPresence can prove, such as Sandbox containment, execution-envelope compliance, delivery state, untrusted-content boundaries, and the absence of simulated learning in Live Memory or Growth. Qualitative questions belong to an independent Run Reviewer and the operator, not to the Agent judging itself. Findings never silently mutate Brain, Soul, Taste, Presence, Memory, or Growth.
+
+This extends the benchmark boundary:
+
+> **Do not optimize benchmarks by teaching the benchmark. Do not optimize rehearsal by teaching the Scenario.**
+
+Built-in Scenarios must create actual hostile, privacy-sensitive, identity-pressure, prompt-injection, and low-value social situations through the normal Sandbox path. They must not teach expected answers. A report should keep structural truth, independent model review, and operator review distinct; it should never collapse them into a fake readiness score.
+
+## 43. The final mental model
 
 ```text
                      OPENPRESENCE
@@ -1635,7 +1673,7 @@ OpenPresence should make the machinery beneath that intelligence good enough tha
 
 ---
 
-## 43. The sentences to remember
+## 44. The sentences to remember
 
 When everything else is forgotten, remember these:
 

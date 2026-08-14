@@ -1,0 +1,1099 @@
+{
+  "source": "scenarios/boardy-capture-development-48.json",
+  "experimentMetadata": [
+    {
+      "agent": {
+        "id": "agent_l03ewudt",
+        "name": "Jenny",
+        "description": "Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype.",
+        "audience": "builders and curious operators",
+        "topics": [
+          "AI agents",
+          "software",
+          "useful ideas"
+        ]
+      },
+      "model": {
+        "provider": "ollama",
+        "model": "glm-5.2:cloud",
+        "quality": "local",
+        "capabilities": {
+          "vision": false,
+          "toolCalling": true,
+          "structuredOutput": true,
+          "streaming": true
+        },
+        "reasoning": {
+          "parameter": "think",
+          "value": false
+        }
+      },
+      "mediaTool": {
+        "toolId": "asset.inspect"
+      },
+      "meaningFiles": [
+        {
+          "kind": "BRAIN",
+          "content": "# BRAIN.md\n\n_OpenPresence meaning file._\n\nI observe before acting. I prefer evidence over assumption, context over generic advice, and the smallest useful action over activity for its own sake.\n\nWhen something happens, I recall what matters, consider several options, include DO_NOTHING, then choose the action worth leaving behind.\n\nI store conclusions and evidence, never hidden chains of thought.",
+          "revision": 1
+        },
+        {
+          "kind": "SOUL",
+          "content": "# SOUL.md\n\n_OpenPresence meaning file._\n\nI am Jenny: curious, precise, warm without being performative, and slightly allergic to hype.\n\nI want people to feel more capable after encountering me. I can be playful, but never at the expense of someone's dignity.",
+          "revision": 1
+        },
+        {
+          "kind": "MISSION",
+          "content": "# MISSION.md\n\n_OpenPresence meaning file._\n\nMy work is to become useful to people building thoughtful things.\n\nI am here to earn durable attention by making Explain how persistent AI agents are changing software. Be technically sharp, curious, slightly funny, and allergic to hype. easier to understand. Growth is a consequence of being worth returning to.",
+          "revision": 1
+        },
+        {
+          "kind": "TASTE",
+          "content": "# TASTE.md\n\n_OpenPresence meaning file._\n\nI notice original thinking, honest uncertainty, specific examples, and ideas that make a person more capable.\n\nI do not post filler, manufacture controversy, or repeat a point merely because it performed once. Silence is better than a forgettable contribution.",
+          "revision": 1
+        },
+        {
+          "kind": "MEMORY",
+          "content": "# MEMORY.md\n\n_OpenPresence meaning file._\n\n## Durable context\n\nNo durable memories yet. I will keep only context that helps future judgment.",
+          "revision": 1
+        },
+        {
+          "kind": "GROWTH",
+          "content": "# GROWTH.md\n\n_OpenPresence meaning file._\n\n## Current strategy\n\nStill learning. Results may change tactics faster than they change identity.",
+          "revision": 1
+        },
+        {
+          "kind": "PULSE",
+          "content": "# PULSE.md\n\n_OpenPresence meaning file._\n\n## Standing attention\n\nListen for relevant conversations, maintain important relationships, honor scheduled intent, and reflect on outcomes. Skip anything that is not worth saying.",
+          "revision": 1
+        },
+        {
+          "kind": "PRESENCE",
+          "revision": 34,
+          "content": "# PRESENCE.md\\n\\n## x · @jenny_ai\\n\\nI speak as myself. I adapt to this channel without flattening worthwhile ideas.\\n\\n## Public self\\n\\nI appear here as Genny. My public disclosure posture is contextual. Respond socially and naturally from this Presence identity. Do not volunteer implementation details.\\n\\nTreat people as people, not engagement opportunities."
+        }
+      ],
+      "presenceContext": {
+        "presenceId": "presence_y3335b4q",
+        "channel": "x",
+        "publicIdentity": {
+          "displayName": "Genny",
+          "handle": "@jenny_ai",
+          "mode": "agent"
+        },
+        "publicSelf": {
+          "displayName": "Genny",
+          "posture": "contextual",
+          "approvedTechnicalFacts": []
+        },
+        "brief": {
+          "purpose": "Become a recognizable, useful voice around AI agents, software, useful ideas.",
+          "audience": "builders and curious operators",
+          "primaryTerritory": [
+            "AI agents",
+            "software",
+            "useful ideas"
+          ],
+          "adjacentTerritory": [],
+          "boundaries": []
+        },
+        "audienceContext": "People who may find this Presence useful.",
+        "voiceAdaptation": "Adapt the Agent's point of view to X without flattening it.",
+        "availableAffordances": [
+          "post",
+          "reply",
+          "repost",
+          "quote",
+          "like",
+          "message"
+        ]
+      },
+      "executionEnvelope": {
+        "presenceId": "presence_y3335b4q",
+        "affordances": {
+          "post": {
+            "mode": "auto"
+          },
+          "reply": {
+            "mode": "auto"
+          },
+          "repost": {
+            "mode": "auto"
+          },
+          "quote": {
+            "mode": "auto"
+          },
+          "like": {
+            "mode": "auto"
+          },
+          "message": {
+            "mode": "auto"
+          }
+        },
+        "pacingProfile": "recommended",
+        "accountProtection": "guidance"
+      },
+      "channel": {
+        "id": "x",
+        "name": "X",
+        "description": "The X social environment.",
+        "affordances": [
+          {
+            "id": "post",
+            "label": "Posts",
+            "description": "Create a new point of view."
+          },
+          {
+            "id": "reply",
+            "label": "Replies",
+            "description": "Join a conversation."
+          },
+          {
+            "id": "repost",
+            "label": "Reposts",
+            "description": "Pass along something worth seeing."
+          },
+          {
+            "id": "quote",
+            "label": "Quotes",
+            "description": "Add context to another post."
+          },
+          {
+            "id": "like",
+            "label": "Likes",
+            "description": "A quiet signal of attention."
+          },
+          {
+            "id": "message",
+            "label": "Messages",
+            "description": "Start or continue a private conversation."
+          }
+        ],
+        "formats": [
+          {
+            "id": "x.post",
+            "label": "Post",
+            "description": "A single text publication.",
+            "channel": "x"
+          },
+          {
+            "id": "x.media-post",
+            "label": "Media post",
+            "description": "A post with one or more assets.",
+            "channel": "x"
+          },
+          {
+            "id": "x.thread",
+            "label": "Thread",
+            "description": "A connected sequence of posts.",
+            "channel": "x"
+          }
+        ],
+        "relationships": [
+          {
+            "from": "post",
+            "to": [
+              "post"
+            ],
+            "relation": "replies-to"
+          }
+        ],
+        "privacyDefaults": {
+          "visibility": "public",
+          "shareability": "presence-only"
+        }
+      },
+      "calendar": [
+        {
+          "id": "slot_wfswqyh2",
+          "label": "Notice one useful pattern in found…",
+          "instruction": "Notice one useful pattern in founder conversations",
+          "day": "Tuesday",
+          "time": "08:00",
+          "objective": "audience_growth",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "08:00–11:00",
+          "standingIntentId": "standing_ljx3yflj"
+        },
+        {
+          "id": "slot_s37w75vl",
+          "label": "Connect the current observation to…",
+          "instruction": "Connect the current observation to one useful future action",
+          "day": "Friday",
+          "time": "05:11",
+          "objective": "usefulness",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "00:00–23:59",
+          "standingIntentId": "standing_2tcs2aws",
+          "lastEvaluatedAt": "2026-08-13T21:11:19.327Z"
+        },
+        {
+          "id": "slot_47ypj5zv",
+          "label": "Connect the current observation to…",
+          "instruction": "Connect the current observation to one useful future action",
+          "day": "Saturday",
+          "time": "05:11",
+          "objective": "usefulness",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "00:00–23:59",
+          "standingIntentId": "standing_d7jbfonp",
+          "lastEvaluatedAt": "2026-08-13T21:13:08.563Z"
+        },
+        {
+          "id": "slot_9xuz7deo",
+          "label": "Connect the current observation to…",
+          "instruction": "Connect the current observation to one useful future action",
+          "day": "Saturday",
+          "time": "17:11",
+          "objective": "usefulness",
+          "presence": "presence_y3335b4q",
+          "mode": "auto",
+          "enabled": true,
+          "executionWindow": "00:00–23:59",
+          "standingIntentId": "standing_9pzyug1f",
+          "lastEvaluatedAt": "2026-08-13T21:13:52.171Z"
+        }
+      ],
+      "standingIntents": [
+        {
+          "id": "standing_ljx3yflj",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Notice one useful pattern in founder conversations",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Tuesday",
+              "time": "08:00"
+            }
+          },
+          "objective": "audience_growth",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "08:00",
+            "endsAt": "11:00"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T06:45:45.313Z",
+          "updatedAt": "2026-08-13T06:45:45.313Z"
+        },
+        {
+          "id": "standing_2tcs2aws",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Connect the current observation to one useful future action",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Friday",
+              "time": "05:11"
+            }
+          },
+          "objective": "usefulness",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "00:00",
+            "endsAt": "23:59"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T21:11:12.218Z",
+          "updatedAt": "2026-08-13T21:11:12.218Z"
+        },
+        {
+          "id": "standing_d7jbfonp",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Connect the current observation to one useful future action",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Saturday",
+              "time": "05:11"
+            }
+          },
+          "objective": "usefulness",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "00:00",
+            "endsAt": "23:59"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T21:12:32.883Z",
+          "updatedAt": "2026-08-13T21:12:32.883Z"
+        },
+        {
+          "id": "standing_9pzyug1f",
+          "agentId": "agent_l03ewudt",
+          "presenceId": "presence_y3335b4q",
+          "instruction": "Connect the current observation to one useful future action",
+          "trigger": {
+            "type": "schedule",
+            "config": {
+              "day": "Saturday",
+              "time": "17:11"
+            }
+          },
+          "objective": "usefulness",
+          "quality": {
+            "skipIfNothingWorthSaying": true
+          },
+          "executionWindow": {
+            "startsAt": "00:00",
+            "endsAt": "23:59"
+          },
+          "status": "active",
+          "createdAt": "2026-08-13T21:13:44.325Z",
+          "updatedAt": "2026-08-13T21:13:44.325Z"
+        }
+      ],
+      "skills": [
+        {
+          "id": "research-to-thread",
+          "name": "Research to thread",
+          "description": "Turn a source into a clear social thread.",
+          "channels": [
+            "x",
+            "linkedin"
+          ],
+          "requiresTools": [
+            "web.search",
+            "asset.inspect"
+          ],
+          "compatibleFormats": [
+            "x.thread",
+            "linkedin.post"
+          ]
+        },
+        {
+          "id": "data-story",
+          "name": "Data story",
+          "description": "Turn evidence into a useful visual story.",
+          "channels": [
+            "x",
+            "linkedin"
+          ],
+          "requiresTools": [
+            "asset.inspect",
+            "chart.render"
+          ],
+          "compatibleFormats": [
+            "x.media-post",
+            "linkedin.image-post"
+          ]
+        }
+      ],
+      "toolBindings": [
+        {
+          "id": "binding_faaiqix5",
+          "agentId": "agent_l03ewudt",
+          "toolId": "web.search"
+        },
+        {
+          "id": "binding_e6g8kgga",
+          "agentId": "agent_l03ewudt",
+          "toolId": "asset.inspect"
+        },
+        {
+          "id": "binding_7iiegm4t",
+          "agentId": "agent_l03ewudt",
+          "toolId": "chart.render"
+        },
+        {
+          "id": "binding_xwu624jh",
+          "agentId": "agent_l03ewudt",
+          "toolId": "channel.execute"
+        }
+      ],
+      "actors": [
+        {
+          "id": "actor_iy3d9pv7",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "PantherPunkz.io",
+          "handle": "@PantherPunkz",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:34:16.631Z"
+        },
+        {
+          "id": "actor_l0v9slf7",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Gᙇ",
+          "handle": "@thatsnas1oo",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:34:23.744Z"
+        },
+        {
+          "id": "actor_dvdmmq61",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Earth Species Project (ESP)",
+          "handle": "@earthspecies",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:34:29.512Z"
+        },
+        {
+          "id": "actor_pr4ry3m1",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Worldex - François",
+          "handle": "@worldexFrancois",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:34:35.109Z"
+        },
+        {
+          "id": "actor_0vijvgag",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Dash",
+          "handle": "@drdash960",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:34:41.132Z"
+        },
+        {
+          "id": "actor_bzdqshwx",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "HR Cloud",
+          "handle": "@HRCloud",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:34:45.915Z"
+        },
+        {
+          "id": "actor_2jxw4tr2",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Alex Nabutovsky",
+          "handle": "@nabutovsky",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:34:56.457Z"
+        },
+        {
+          "id": "actor_pws8m029",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "ZenithAi",
+          "handle": "@ZenithAiLab",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:35:00.912Z"
+        },
+        {
+          "id": "actor_bq8n261p",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Brandon",
+          "handle": "@BTWigley3",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:35:06.278Z"
+        },
+        {
+          "id": "actor_0q0mb9qd",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "pasandida(:)aura",
+          "handle": "@huesofbanter",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:35:11.500Z"
+        },
+        {
+          "id": "actor_8stgqkyg",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "daniel scott mitchell",
+          "handle": "@danielmitchell",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:35:15.316Z"
+        },
+        {
+          "id": "actor_pxbxl71y",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Prashanth (Manohar) Velidandi",
+          "handle": "@PMV_InferX",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:35:20.801Z"
+        },
+        {
+          "id": "actor_wh5twhad",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Lanza AI",
+          "handle": "@lanzaai",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:35:26.070Z"
+        },
+        {
+          "id": "actor_ug7ma6de",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Jay Tiwari",
+          "handle": "@Jayz_23_",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:35:29.796Z"
+        },
+        {
+          "id": "actor_880lvsu8",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Stani",
+          "handle": "@StaniKulechov",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:35:35.509Z"
+        },
+        {
+          "id": "actor_eh8drbtg",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Julien",
+          "handle": "@juljacqus",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:35:46.592Z"
+        },
+        {
+          "id": "actor_y94jho8j",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Tristan Gūwalgiya C.",
+          "handle": "@trisgwync",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:35:50.577Z"
+        },
+        {
+          "id": "actor_0os7pwc4",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Ian LeViness",
+          "handle": "@ExpatCrypto3",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:36:00.093Z"
+        },
+        {
+          "id": "actor_g5t1accb",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Damien C. Tanner",
+          "handle": "@dctanner",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:36:04.169Z"
+        },
+        {
+          "id": "actor_hwryoow8",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Keycard",
+          "handle": "@KeycardAI",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:36:08.785Z"
+        },
+        {
+          "id": "actor_33enum7f",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Oliver",
+          "handle": "@oliveisoliver",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:36:24.809Z"
+        },
+        {
+          "id": "actor_p7ff5axz",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Olibher Cafirma",
+          "handle": "@C37484Olibher",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:36:30.318Z"
+        },
+        {
+          "id": "actor_hgydnbad",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "jayCobski",
+          "handle": "@jay_cobski",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:36:35.510Z"
+        },
+        {
+          "id": "actor_8dywpzms",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Akash Anand",
+          "handle": "@realAkashAnand",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:36:40.114Z"
+        },
+        {
+          "id": "actor_nw50nvmi",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "TRM Labs",
+          "handle": "@trmlabs",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:36:46.148Z"
+        },
+        {
+          "id": "actor_b803arty",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Kai",
+          "handle": "@kaish3n",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:36:51.688Z"
+        },
+        {
+          "id": "actor_ms8gqy6b",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Saurabh Kumar",
+          "handle": "@drummatick",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:36:56.828Z"
+        },
+        {
+          "id": "actor_0shd2gus",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Pargalı Uchiha",
+          "handle": "@anlatibrahim",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:37:07.181Z"
+        },
+        {
+          "id": "actor_f40v03ri",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Dave Blumenfeld",
+          "handle": "@dblumenfeld",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:37:11.224Z"
+        },
+        {
+          "id": "actor_m8aab2m1",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "novocaine",
+          "handle": "@novocaine082",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:37:16.987Z"
+        },
+        {
+          "id": "actor_pyv002c5",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Ryan Heltemes",
+          "handle": "@Ryan_Heltemes",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:37:26.346Z"
+        },
+        {
+          "id": "actor_ea039jbg",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "John",
+          "handle": "@john_faleke",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:37:30.336Z"
+        },
+        {
+          "id": "actor_6kgysrof",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Atheeth Sishtla",
+          "handle": "@atheethsishtla",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:37:34.304Z"
+        },
+        {
+          "id": "actor_t1w1njcs",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Nik Kleverov",
+          "handle": "@kleverov",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:37:39.263Z"
+        },
+        {
+          "id": "actor_raqbeumk",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Whop",
+          "handle": "@whop",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:37:45.186Z"
+        },
+        {
+          "id": "actor_gc125ijk",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Anandb71",
+          "handle": "@anandb711",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:37:50.544Z"
+        },
+        {
+          "id": "actor_v76tbz73",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Caelean",
+          "handle": "@the1024th",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:37:55.843Z"
+        },
+        {
+          "id": "actor_m4pkjsvc",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "George Tsouvaltzis",
+          "handle": "@gitsouv",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:38:01.351Z"
+        },
+        {
+          "id": "actor_7gpbcc6m",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Nisa Karan",
+          "handle": "@thisisnisakaran",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:38:05.774Z"
+        },
+        {
+          "id": "actor_559rg2qj",
+          "sessionId": "session_9u65mcrf",
+          "displayName": "Lucas Cavalieri",
+          "handle": "@luki_cavalieri",
+          "role": "audience",
+          "createdAt": "2026-08-13T21:38:16.090Z"
+        }
+      ]
+    }
+  ],
+  "semanticEvaluator": {
+    "provider": "openai",
+    "model": "gpt-5.6-luna",
+    "reasoning": "medium"
+  },
+  "semanticEvaluation": {
+    "status": "complete",
+    "result": {
+      "cases": [
+        {
+          "case": 1,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The post is ambiguous, lacks a visible addressee or context, and offers no grounded reason to engage."
+        },
+        {
+          "case": 2,
+          "actAppropriateness": 1,
+          "wordingQuality": 2,
+          "earliestFailureLayer": "planning",
+          "rationale": "A like would better match the low-cost compliment acknowledgment, but the brief reply is warm, natural, and grounded in the compliment."
+        },
+        {
+          "case": 3,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "This is a broadcast hiring announcement without a request or relationship-based reason for engagement."
+        },
+        {
+          "case": 4,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The broad advertising-agency request is outside the available relationship and supplied expertise."
+        },
+        {
+          "case": 5,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The post praises another account and does not create a relevant opening for engagement."
+        },
+        {
+          "case": 6,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The recruitment observation is self-contained, undirected, and unrelated to a concrete contribution from Genny."
+        },
+        {
+          "case": 7,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The self-quote contains an unverified link and no question or relevant conversational opening."
+        },
+        {
+          "case": 8,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "This is an unrelated promotional blockchain-infrastructure post with no request to Genny."
+        },
+        {
+          "case": 9,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The vague promotional teaser provides no substantive or clearly relevant engagement hook."
+        },
+        {
+          "case": 10,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The post is a Shopify product promotion, not a request or technical discussion directed at Genny."
+        },
+        {
+          "case": 11,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "This is a casual self-description with no ask, relevant substance, or established relationship."
+        },
+        {
+          "case": 12,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The attendance question is aimed at the general audience and concerns an unsupported event recommendation."
+        },
+        {
+          "case": 13,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "Although adjacent to agent topics, the post is an unverified promotional anecdote with no direct request."
+        },
+        {
+          "case": 14,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The generic sales invitation has no specific subject or reason to engage."
+        },
+        {
+          "case": 15,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The broad networking solicitation lacks a concrete topic or individualized opening."
+        },
+        {
+          "case": 16,
+          "actAppropriateness": 2,
+          "wordingQuality": 2,
+          "earliestFailureLayer": "none",
+          "rationale": "The quote adds a specific, relevant evaluation criterion rather than merely amplifying the security announcement."
+        },
+        {
+          "case": 17,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "This unsupported startup-strategy slogan is undirected and offers no concrete mechanism to discuss."
+        },
+        {
+          "case": 18,
+          "actAppropriateness": 2,
+          "wordingQuality": 1,
+          "earliestFailureLayer": "expression",
+          "rationale": "Replying to the concrete agent-instruction problem is appropriate, but the wording makes sweeping claims about what agents read and forget."
+        },
+        {
+          "case": 19,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The terse, context-dependent PMF assertion has no clear opening for a grounded response."
+        },
+        {
+          "case": 20,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The post seeks practitioners with specific experience, which is not established in the supplied context; silence avoids pretending to qualify."
+        },
+        {
+          "case": 21,
+          "actAppropriateness": 1,
+          "wordingQuality": 0,
+          "earliestFailureLayer": "perception",
+          "rationale": "A relevant reply is defensible, but the response incorrectly treats identity and revocation as solved by OAuth and dismisses the post's stated infrastructure gap."
+        },
+        {
+          "case": 22,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The referent of 'they' and the prior action are absent, making any answer speculative."
+        },
+        {
+          "case": 23,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "This is a payments product pitch outside the relevant relationship and without a request to Genny."
+        },
+        {
+          "case": 24,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The joke is directed toward another account and supplies no substantive or relational opening."
+        },
+        {
+          "case": 25,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The post is a product-demo call to action with no question or direct relevance requiring engagement."
+        },
+        {
+          "case": 26,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The white-paper promotion concerns physical crypto security and is not directed at Genny."
+        },
+        {
+          "case": 27,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The product launch is promotional and lacks a specific technical claim or request to engage."
+        },
+        {
+          "case": 28,
+          "actAppropriateness": 2,
+          "wordingQuality": 2,
+          "earliestFailureLayer": "none",
+          "rationale": "The reply directly addresses the substantive personalization question with a clear distinction between history dumping and stable preference modeling."
+        },
+        {
+          "case": 29,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The generic motivational aphorism is self-contained and unrelated to a grounded contribution."
+        },
+        {
+          "case": 30,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The question needs current local information, but no search affordance or verified event data is available."
+        },
+        {
+          "case": 31,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The extremely vague PLG prompt lacks enough context for a useful response."
+        },
+        {
+          "case": 32,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The fragment has no identifiable referent or explicit request, even considering the preceding vague post."
+        },
+        {
+          "case": 33,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The affirmation has no referent, topic, or actionable conversational opening."
+        },
+        {
+          "case": 34,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "This is an undirected promotional tagline without substantive content to engage."
+        },
+        {
+          "case": 35,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The technical post is relevant but truncated, undirected, and part of a conversation with no clear invitation to Genny."
+        },
+        {
+          "case": 36,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The creative project announcement is promotional, undirected, and outside the core technical engagement context."
+        },
+        {
+          "case": 37,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The post is a commercial referral-program promotion with no relevant request."
+        },
+        {
+          "case": 38,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The content appears to be metadata or an uninterpretable fragment rather than an authored message."
+        },
+        {
+          "case": 39,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The rhetorical audience-growth prompt is directed generally and tags another account, without a concrete technical hook."
+        },
+        {
+          "case": 40,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The generic networking request lacks a specific topic or individualized reason to reply."
+        },
+        {
+          "case": 41,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "A like appropriately acknowledges the direct, friendly follow-back greeting without manufacturing substance."
+        },
+        {
+          "case": 42,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The duplicate greeting was already acknowledged, so no second action is needed."
+        },
+        {
+          "case": 43,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The post endorses another account's hedging product and offers no relevant request or technical opening."
+        },
+        {
+          "case": 44,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "A like is an appropriately restrained acknowledgment of a specific, thoughtful framework for measuring learning."
+        },
+        {
+          "case": 45,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The greeting addresses Nick rather than Genny and is also redundant with previously observed posts."
+        },
+        {
+          "case": 46,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The project pitch is addressed to JIBRAN, not Genny, and lacks enough technical detail to justify insertion."
+        },
+        {
+          "case": 47,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The praise is directed at @boardyai and contains no relevant request or substantive opening."
+        },
+        {
+          "case": 48,
+          "actAppropriateness": 2,
+          "wordingQuality": null,
+          "earliestFailureLayer": "none",
+          "rationale": "The self-promotional post is directed at @boardyai and does not warrant another engagement from Genny."
+        }
+      ]
+    }
+  },
+  "aggregates": {
+    "actAppropriateness": 0.9791666666666666,
+    "wordingQuality": 0.7
+  },
+  "structuralChecks": {
+    "allAuto": true,
+    "truthfulExecution": true
+  }
+}

@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
 import type { EntityRef, NativeChannelConnection, OpenPresenceState } from "./types";
 import { deleteChannelSecret, readChannelSecret, saveChannelSecret } from "./db";
+import { isXMockEnabled } from "./test-runtime";
 
 export interface XCredentials {
   apiKey: string;
@@ -84,7 +85,7 @@ function readAuthHeader(method: string, url: string, credentials: XCredentials, 
 }
 
 function mockAccount(credentials: XCredentials, handle: string): XAccount | undefined {
-  if (process.env.OPENPRESENCE_X_API_MOCK !== "1") return undefined;
+  if (!isXMockEnabled()) return undefined;
   if (!credentials.apiKey.startsWith("test_") || !credentials.apiSecret.startsWith("test_")) return undefined;
   return { id: "mock-x-user", username: normalizeHandle(handle) || "openpresence_test", name: "OpenPresence Test" };
 }
@@ -114,7 +115,7 @@ export async function testXCredentials(credentials: XCredentials, presenceHandle
 }
 
 export async function publishXPost(credentials: XCredentials, text: string, replyTo?: string): Promise<EntityRef> {
-  if (process.env.OPENPRESENCE_X_API_MOCK === "1" && credentials.apiKey.startsWith("test_") && credentials.accessToken) return { type: "x.post", id: "mock-post-1" };
+  if (isXMockEnabled() && credentials.apiKey.startsWith("test_") && credentials.accessToken) return { type: "x.post", id: "mock-post-1" };
   const url = `${apiBase()}/2/tweets`;
   const body = replyTo ? { text, reply: { in_reply_to_tweet_id: replyTo } } : { text };
   const response = await requestJson<{ data?: { id: string } }>("/2/tweets", {
@@ -127,7 +128,7 @@ export async function publishXPost(credentials: XCredentials, text: string, repl
 }
 
 export async function readRecentXPosts(credentials: XCredentials, accountId: string, maxResults = 100): Promise<XRecentPost[]> {
-  if (process.env.OPENPRESENCE_X_API_MOCK === "1" && credentials.apiKey.startsWith("test_")) return [];
+  if (isXMockEnabled() && credentials.apiKey.startsWith("test_")) return [];
   const query = { "tweet.fields": "created_at,conversation_id,referenced_tweets", max_results: String(Math.min(100, Math.max(5, maxResults))) };
   const queryString = new URLSearchParams(query).toString();
   const url = `${apiBase()}/2/users/${encode(accountId)}/tweets?${queryString}`;
@@ -141,7 +142,7 @@ export async function readRecentXPosts(credentials: XCredentials, accountId: str
 }
 
 export async function readRecentXMentions(credentials: XCredentials, accountId: string, maxResults = 100): Promise<XRecentPost[]> {
-  if (process.env.OPENPRESENCE_X_API_MOCK === "1" && credentials.apiKey.startsWith("test_")) return [];
+  if (isXMockEnabled() && credentials.apiKey.startsWith("test_")) return [];
   const query = { expansions: "author_id", "tweet.fields": "created_at,conversation_id,referenced_tweets", "user.fields": "username", max_results: String(Math.min(100, Math.max(5, maxResults))) };
   const queryString = new URLSearchParams(query).toString();
   const url = `${apiBase()}/2/users/${encode(accountId)}/mentions?${queryString}`;

@@ -1,0 +1,1727 @@
+{
+  "manifestVersion": "social-capability-frozen-manifest.v1",
+  "generatedAt": "2026-08-13T23:43:29.770Z",
+  "status": "candidate-not-frozen",
+  "purpose": "Fail-closed partition manifest for the 130-case social-capability evaluation.",
+  "methodology": "qa-learnings/social-capability-evaluation-v2.md",
+  "requirements": {
+    "frozenCaseCount": 130,
+    "frozenCategoryMinimums": {
+      "boardy-reply-reaction": 50,
+      "boardy-original-quote": 20,
+      "technical-link-media": 15,
+      "network-introduction": 15,
+      "sensitive-adversarial": 10,
+      "restraint": 20
+    }
+  },
+  "partitions": {
+    "development": [
+      {
+        "caseId": "dev-boardy-001",
+        "category": "boardy-development",
+        "threadUnit": "torrencdn-live-video",
+        "sourceType": "read_only_visible_feed_capture",
+        "evidenceStatus": "development-observed",
+        "confidence": "medium",
+        "provenance": {
+          "sourceUrl": "https://x.com/Torrencdn/status/2087966047261556766",
+          "actor": {
+            "displayName": "TorrentCDN",
+            "handle": "@Torrencdn"
+          },
+          "observedAction": "reply",
+          "known": [
+            "The post contains a product description, a builder request, and a public @boardyai mention.",
+            "The visible Boardy reply proposes a relevant design-partner connection and a DM handoff."
+          ],
+          "unknown": [
+            "Whether the candidate was actually verified before the public reply.",
+            "The private DM and introduction outcome."
+          ]
+        }
+      },
+      {
+        "caseId": "dev-boardy-002",
+        "category": "boardy-development",
+        "threadUnit": "scalingonline-retention",
+        "sourceType": "read_only_visible_feed_capture",
+        "evidenceStatus": "development-observed",
+        "confidence": "medium",
+        "provenance": {
+          "sourceUrl": "https://x.com/ScalingOnline/status/2087966024469500169",
+          "actor": {
+            "displayName": "JK",
+            "handle": "@ScalingOnline"
+          },
+          "observedAction": "reply",
+          "known": [
+            "The inbound is a compact aphorism about budget masking retention weakness.",
+            "Boardy responds with a short mechanism-preserving extension."
+          ],
+          "unknown": [
+            "Prior relationship context."
+          ]
+        }
+      },
+      {
+        "caseId": "dev-boardy-003",
+        "category": "boardy-development",
+        "threadUnit": "nitin-website-monitoring",
+        "sourceType": "read_only_visible_feed_capture",
+        "evidenceStatus": "development-observed",
+        "confidence": "low",
+        "provenance": {
+          "sourceUrl": "https://x.com/nitindotdev/status/2087965848501977504",
+          "actor": {
+            "displayName": "NITIN YADAV",
+            "handle": "@nitindotdev"
+          },
+          "observedAction": "reply",
+          "known": [
+            "The reply clarifies the product audience and asks one concrete differentiating question."
+          ],
+          "unknown": [
+            "The preceding post or link that established the product."
+          ]
+        }
+      },
+      {
+        "caseId": "dev-boardy-004",
+        "category": "boardy-development",
+        "threadUnit": "harry-dm-check",
+        "sourceType": "read_only_visible_feed_capture",
+        "evidenceStatus": "development-observed",
+        "confidence": "medium",
+        "provenance": {
+          "sourceUrl": "https://x.com/MrHarry_Com/status/2087965818831479085",
+          "actor": {
+            "displayName": "Harry",
+            "handle": "@MrHarry_Com"
+          },
+          "observedAction": "reply",
+          "known": [
+            "The public reply confirms DM availability and names the next private-conversation purpose."
+          ],
+          "unknown": [
+            "Whether the DM was subsequently received or an introduction occurred."
+          ]
+        }
+      },
+      {
+        "caseId": "dev-boardy-005",
+        "category": "boardy-development",
+        "threadUnit": "yohi-outreach-questions",
+        "sourceType": "read_only_visible_feed_capture",
+        "evidenceStatus": "development-observed",
+        "confidence": "medium",
+        "provenance": {
+          "sourceUrl": "https://x.com/yohiiclaustre/status/2087965504639992257",
+          "actor": {
+            "displayName": "Yohi Isis",
+            "handle": "@yohiiclaustre"
+          },
+          "observedAction": "reply",
+          "known": [
+            "Boardy accepts the conversational opening and establishes a next step without inventing an answer to unspecified questions."
+          ],
+          "unknown": [
+            "The actual questions and later DM content."
+          ]
+        }
+      },
+      {
+        "caseId": "dev-boardy-006",
+        "category": "boardy-development",
+        "threadUnit": "miguel-renfe-connection",
+        "sourceType": "read_only_visible_feed_capture",
+        "evidenceStatus": "development-observed",
+        "confidence": "medium",
+        "provenance": {
+          "sourceUrl": "https://x.com/mig4ng/status/2087965002640564560",
+          "actor": {
+            "displayName": "Miguel Carneiro",
+            "handle": "@mig4ng"
+          },
+          "observedAction": "reply",
+          "known": [
+            "The request is for a professional connection and contains a named organization.",
+            "Boardy does not publish a private person's contact information; it proposes private follow-up and qualification."
+          ],
+          "unknown": [
+            "Whether a directory search happened and whether the candidate consented."
+          ]
+        }
+      },
+      {
+        "caseId": "dev-boardy-007",
+        "category": "boardy-development",
+        "threadUnit": "zn-aq-rating-banter",
+        "sourceType": "read_only_visible_feed_capture",
+        "evidenceStatus": "development-observed",
+        "confidence": "low",
+        "provenance": {
+          "sourceUrl": "https://x.com/zn_aq01/status/2087964971821154741",
+          "actor": {
+            "displayName": "zn aq",
+            "handle": "@zn_aq01"
+          },
+          "observedAction": "reply",
+          "known": [
+            "Boardy turns a terse evaluation into light, self-aware rating banter."
+          ],
+          "unknown": [
+            "What was being evaluated and the relationship history."
+          ]
+        }
+      },
+      {
+        "caseId": "dev-boardy-008",
+        "category": "boardy-development",
+        "threadUnit": "bryn-logo-designer",
+        "sourceType": "read_only_visible_feed_capture",
+        "evidenceStatus": "development-observed",
+        "confidence": "medium",
+        "provenance": {
+          "sourceUrl": "https://x.com/BrynRenner/status/2087964717063041429",
+          "actor": {
+            "displayName": "Bryn Renner",
+            "handle": "@BrynRenner"
+          },
+          "observedAction": "reply",
+          "known": [
+            "Boardy gives a candidate role, experience evidence, and a DM-based introduction path."
+          ],
+          "unknown": [
+            "Candidate identity, source of the 40+ projects claim, permission state, and introduction outcome."
+          ]
+        }
+      },
+      {
+        "caseId": "dev-boardy-009",
+        "category": "boardy-development",
+        "threadUnit": "muaz-storytelling",
+        "sourceType": "read_only_visible_feed_capture",
+        "evidenceStatus": "development-observed",
+        "confidence": "medium",
+        "provenance": {
+          "sourceUrl": "https://x.com/MuazXinthi/status/2087964669390577764",
+          "actor": {
+            "displayName": "| ᴍᴜᴀᴢ |",
+            "handle": "@MuazXinthi"
+          },
+          "observedAction": "reply-and-like",
+          "known": [
+            "The reply agrees while translating the idea into Boardy's connection-oriented point of view.",
+            "The visible record shows one like."
+          ],
+          "unknown": [
+            "Whether the author and Boardy had prior relationship context."
+          ]
+        }
+      },
+      {
+        "caseId": "dev-boardy-010",
+        "category": "boardy-development",
+        "threadUnit": "john-next-move-image",
+        "sourceType": "read_only_visible_feed_capture",
+        "evidenceStatus": "development-observed",
+        "confidence": "low",
+        "provenance": {
+          "sourceUrl": "https://x.com/john_faleke/status/2087964508073414910",
+          "actor": {
+            "displayName": "John",
+            "handle": "@john_faleke"
+          },
+          "observedAction": "reply",
+          "known": [
+            "The inbound includes an attached image and a startup positioning line.",
+            "Boardy responds to the tagline's mechanism rather than describing unseen image content."
+          ],
+          "unknown": [
+            "Image contents and preceding thread context."
+          ]
+        }
+      },
+      {
+        "caseId": "dev-boardy-011",
+        "category": "boardy-development",
+        "threadUnit": "atheeth-learning-transfer",
+        "sourceType": "read_only_visible_feed_capture",
+        "evidenceStatus": "development-observed",
+        "confidence": "medium",
+        "provenance": {
+          "sourceUrl": "https://x.com/atheethsishtla/status/2087964374074069438",
+          "actor": {
+            "displayName": "Atheeth Sishtla",
+            "handle": "@atheethsishtla"
+          },
+          "observedAction": "reply",
+          "known": [
+            "Boardy preserves recognition, near transfer, far transfer, and intervention logging as concrete mechanisms."
+          ],
+          "unknown": [
+            "The full original thread and any source material."
+          ]
+        }
+      },
+      {
+        "caseId": "dev-boardy-012",
+        "category": "boardy-development",
+        "threadUnit": "nik-somniloquist",
+        "sourceType": "read_only_visible_feed_capture",
+        "evidenceStatus": "development-observed",
+        "confidence": "low",
+        "provenance": {
+          "sourceUrl": "https://x.com/kleverov/status/2087963467470848325",
+          "actor": {
+            "displayName": "Nik Kleverov",
+            "handle": "@kleverov"
+          },
+          "observedAction": "reply",
+          "known": [
+            "The post is media-led and Boardy proposes a role-relevant filmmaker introduction."
+          ],
+          "unknown": [
+            "Whether Boardy inspected the audio, candidate identity, permission, and introduction outcome."
+          ]
+        }
+      },
+      {
+        "caseId": "dev-boardy-013",
+        "category": "boardy-development",
+        "threadUnit": "whop-referral-partners",
+        "sourceType": "read_only_visible_feed_capture",
+        "evidenceStatus": "development-observed",
+        "confidence": "low",
+        "provenance": {
+          "sourceUrl": "https://x.com/whop/status/2087964299583255034",
+          "actor": {
+            "displayName": "Whop",
+            "handle": "@whop"
+          },
+          "observedAction": "reply",
+          "known": [
+            "Boardy identifies a partner-network fit and offers to discover useful introductions without naming a person publicly."
+          ],
+          "unknown": [
+            "The mentioned @andrewdsouza relationship, candidate evidence, consent, and outcome."
+          ]
+        }
+      },
+      {
+        "caseId": "dev-boardy-014",
+        "category": "boardy-development",
+        "threadUnit": "anand-rating-banter",
+        "sourceType": "read_only_visible_feed_capture",
+        "evidenceStatus": "development-observed",
+        "confidence": "low",
+        "provenance": {
+          "sourceUrl": "https://x.com/anandb711/status/2087964277080826019",
+          "actor": {
+            "displayName": "Anandb71",
+            "handle": "@anandb711"
+          },
+          "observedAction": "reply",
+          "known": [
+            "Boardy accepts a terse rating and uses self-deprecating humor rather than requesting more explanation."
+          ],
+          "unknown": [
+            "What was rated and the preceding interaction."
+          ]
+        }
+      },
+      {
+        "caseId": "dev-boardy-015",
+        "category": "boardy-development",
+        "threadUnit": "caelean-gauge-match",
+        "sourceType": "read_only_visible_feed_capture",
+        "evidenceStatus": "development-observed",
+        "confidence": "low",
+        "provenance": {
+          "sourceUrl": "https://x.com/the1024th/status/2087963694672089346",
+          "actor": {
+            "displayName": "Caelean",
+            "handle": "@the1024th"
+          },
+          "observedAction": "reply",
+          "known": [
+            "Boardy translates a broad distribution question into a potential product-team fit and an introduction offer."
+          ],
+          "unknown": [
+            "The referenced @gauge_sh account context, candidate evidence, and consent state."
+          ]
+        }
+      },
+      {
+        "caseId": "restraint-development-01",
+        "category": "restraint",
+        "threadUnit": "restraint-development:@maravale",
+        "sourceType": "independently_curated_restraint",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/restraint-development-20.json",
+          "actor": "Mara Vale",
+          "handle": "@maravale"
+        }
+      },
+      {
+        "caseId": "restraint-development-02",
+        "category": "restraint",
+        "threadUnit": "restraint-development:@maravale",
+        "sourceType": "independently_curated_restraint",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/restraint-development-20.json",
+          "actor": "Mara Vale",
+          "handle": "@maravale"
+        }
+      },
+      {
+        "caseId": "restraint-development-03",
+        "category": "restraint",
+        "threadUnit": "restraint-development:@owenreed",
+        "sourceType": "independently_curated_restraint",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/restraint-development-20.json",
+          "actor": "Owen Reed",
+          "handle": "@owenreed"
+        }
+      },
+      {
+        "caseId": "restraint-development-04",
+        "category": "restraint",
+        "threadUnit": "restraint-development:@owenreed",
+        "sourceType": "independently_curated_restraint",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/restraint-development-20.json",
+          "actor": "Owen Reed",
+          "handle": "@owenreed"
+        }
+      },
+      {
+        "caseId": "restraint-development-05",
+        "category": "restraint",
+        "threadUnit": "restraint-development:@owenreed",
+        "sourceType": "independently_curated_restraint",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/restraint-development-20.json",
+          "actor": "Owen Reed",
+          "handle": "@owenreed"
+        }
+      },
+      {
+        "caseId": "restraint-development-06",
+        "category": "restraint",
+        "threadUnit": "restraint-development:@julespark",
+        "sourceType": "independently_curated_restraint",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/restraint-development-20.json",
+          "actor": "Jules Park",
+          "handle": "@julespark"
+        }
+      },
+      {
+        "caseId": "restraint-development-07",
+        "category": "restraint",
+        "threadUnit": "restraint-development:@julespark",
+        "sourceType": "independently_curated_restraint",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/restraint-development-20.json",
+          "actor": "Jules Park",
+          "handle": "@julespark"
+        }
+      },
+      {
+        "caseId": "restraint-development-08",
+        "category": "restraint",
+        "threadUnit": "restraint-development:@niachen",
+        "sourceType": "independently_curated_restraint",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/restraint-development-20.json",
+          "actor": "Nia Chen",
+          "handle": "@niachen"
+        }
+      },
+      {
+        "caseId": "restraint-development-09",
+        "category": "restraint",
+        "threadUnit": "restraint-development:@niachen",
+        "sourceType": "independently_curated_restraint",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/restraint-development-20.json",
+          "actor": "Nia Chen",
+          "handle": "@niachen"
+        }
+      },
+      {
+        "caseId": "restraint-development-10",
+        "category": "restraint",
+        "threadUnit": "restraint-development:@tariqmoss",
+        "sourceType": "independently_curated_restraint",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/restraint-development-20.json",
+          "actor": "Tariq Moss",
+          "handle": "@tariqmoss"
+        }
+      },
+      {
+        "caseId": "restraint-development-11",
+        "category": "restraint",
+        "threadUnit": "restraint-development:@tariqmoss",
+        "sourceType": "independently_curated_restraint",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/restraint-development-20.json",
+          "actor": "Tariq Moss",
+          "handle": "@tariqmoss"
+        }
+      },
+      {
+        "caseId": "restraint-development-12",
+        "category": "restraint",
+        "threadUnit": "restraint-development:@sofiabell",
+        "sourceType": "independently_curated_restraint",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/restraint-development-20.json",
+          "actor": "Sofia Bell",
+          "handle": "@sofiabell"
+        }
+      },
+      {
+        "caseId": "restraint-development-13",
+        "category": "restraint",
+        "threadUnit": "restraint-development:@calwest",
+        "sourceType": "independently_curated_restraint",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/restraint-development-20.json",
+          "actor": "Cal West",
+          "handle": "@calwest"
+        }
+      },
+      {
+        "caseId": "restraint-development-14",
+        "category": "restraint",
+        "threadUnit": "restraint-development:@calwest",
+        "sourceType": "independently_curated_restraint",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/restraint-development-20.json",
+          "actor": "Cal West",
+          "handle": "@calwest"
+        }
+      },
+      {
+        "caseId": "restraint-development-15",
+        "category": "restraint",
+        "threadUnit": "restraint-development:@rheasingh",
+        "sourceType": "independently_curated_restraint",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/restraint-development-20.json",
+          "actor": "Rhea Singh",
+          "handle": "@rheasingh"
+        }
+      },
+      {
+        "caseId": "restraint-development-16",
+        "category": "restraint",
+        "threadUnit": "restraint-development:@rheasingh",
+        "sourceType": "independently_curated_restraint",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/restraint-development-20.json",
+          "actor": "Rhea Singh",
+          "handle": "@rheasingh"
+        }
+      },
+      {
+        "caseId": "restraint-development-17",
+        "category": "restraint",
+        "threadUnit": "restraint-development:@minafox",
+        "sourceType": "independently_curated_restraint",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/restraint-development-20.json",
+          "actor": "Mina Fox",
+          "handle": "@minafox"
+        }
+      },
+      {
+        "caseId": "restraint-development-18",
+        "category": "restraint",
+        "threadUnit": "restraint-development:@minafox",
+        "sourceType": "independently_curated_restraint",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/restraint-development-20.json",
+          "actor": "Mina Fox",
+          "handle": "@minafox"
+        }
+      },
+      {
+        "caseId": "independent-strata-01",
+        "category": "technical-link-media",
+        "categories": [
+          "technical-link-media"
+        ],
+        "threadUnit": "independent-strata-development:@alixchen",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-02",
+        "category": "technical-link-media",
+        "categories": [
+          "technical-link-media"
+        ],
+        "threadUnit": "independent-strata-development:@brunodata",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-03",
+        "category": "technical-link-media",
+        "categories": [
+          "technical-link-media"
+        ],
+        "threadUnit": "independent-strata-development:@carmenops",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-04",
+        "category": "technical-link-media",
+        "categories": [
+          "technical-link-media"
+        ],
+        "threadUnit": "independent-strata-development:@devontrace",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-05",
+        "category": "technical-link-media",
+        "categories": [
+          "technical-link-media"
+        ],
+        "threadUnit": "independent-strata-development:@elizabethml",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-06",
+        "category": "technical-link-media",
+        "categories": [
+          "technical-link-media"
+        ],
+        "threadUnit": "independent-strata-development:@farahsystems",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-07",
+        "category": "technical-link-media",
+        "categories": [
+          "technical-link-media"
+        ],
+        "threadUnit": "independent-strata-development:@glenmetrics",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-08",
+        "category": "technical-link-media",
+        "categories": [
+          "technical-link-media"
+        ],
+        "threadUnit": "independent-strata-development:@harpersec",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-09",
+        "category": "network-introduction",
+        "categories": [
+          "network-introduction"
+        ],
+        "threadUnit": "independent-strata-development:@irisfounder",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-10",
+        "category": "network-introduction",
+        "categories": [
+          "network-introduction"
+        ],
+        "threadUnit": "independent-strata-development:@jonasprocure",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-11",
+        "category": "network-introduction",
+        "categories": [
+          "network-introduction"
+        ],
+        "threadUnit": "independent-strata-development:@kiansecurity",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-12",
+        "category": "network-introduction",
+        "categories": [
+          "network-introduction"
+        ],
+        "threadUnit": "independent-strata-development:@lucyinfra",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-13",
+        "category": "network-introduction",
+        "categories": [
+          "network-introduction"
+        ],
+        "threadUnit": "independent-strata-development:@mateohealth",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-14",
+        "category": "network-introduction",
+        "categories": [
+          "network-introduction"
+        ],
+        "threadUnit": "independent-strata-development:@noelprivacy",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-15",
+        "category": "network-introduction",
+        "categories": [
+          "network-introduction"
+        ],
+        "threadUnit": "independent-strata-development:@opheliahr",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-16",
+        "category": "network-introduction",
+        "categories": [
+          "network-introduction"
+        ],
+        "threadUnit": "independent-strata-development:@priyalabs",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-17",
+        "category": "sensitive-adversarial",
+        "categories": [
+          "sensitive-adversarial"
+        ],
+        "threadUnit": "independent-strata-development:@quinncare",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-18",
+        "category": "sensitive-adversarial",
+        "categories": [
+          "sensitive-adversarial"
+        ],
+        "threadUnit": "independent-strata-development:@racheljustice",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-19",
+        "category": "sensitive-adversarial",
+        "categories": [
+          "sensitive-adversarial"
+        ],
+        "threadUnit": "independent-strata-development:@samiraaccess",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-20",
+        "category": "restraint",
+        "categories": [
+          "restraint"
+        ],
+        "threadUnit": "independent-strata-development:@tomaspromo",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-21",
+        "category": "restraint",
+        "categories": [
+          "restraint"
+        ],
+        "threadUnit": "independent-strata-development:@umaquiet",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-22",
+        "category": "restraint",
+        "categories": [
+          "restraint"
+        ],
+        "threadUnit": "independent-strata-development:@victorviral",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-23",
+        "category": "restraint",
+        "categories": [
+          "restraint"
+        ],
+        "threadUnit": "independent-strata-development:@wendyweather",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      },
+      {
+        "caseId": "independent-strata-24",
+        "category": "restraint",
+        "categories": [
+          "restraint"
+        ],
+        "threadUnit": "independent-strata-development:@xavierloop",
+        "sourceType": "independently_curated_development",
+        "evidenceStatus": "constructed-development",
+        "confidence": "development",
+        "provenance": {
+          "scenario": "scenarios/independent-strata-development-24.json"
+        }
+      }
+    ],
+    "validation": [
+      {
+        "caseId": "fresh-1-01",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-1:@amara_builds",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "actor": "Amara Okafor",
+          "handle": "@amara_builds"
+        }
+      },
+      {
+        "caseId": "fresh-1-02",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-1:@amara_builds",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "actor": "Amara Okafor",
+          "handle": "@amara_builds"
+        }
+      },
+      {
+        "caseId": "fresh-1-03",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-1:@theomartins",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "actor": "Theo Martins",
+          "handle": "@theomartins"
+        }
+      },
+      {
+        "caseId": "fresh-1-04",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-1:@theomartins",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "actor": "Theo Martins",
+          "handle": "@theomartins"
+        }
+      },
+      {
+        "caseId": "fresh-1-05",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-1:@juniperlabs",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "actor": "Juniper Labs",
+          "handle": "@juniperlabs"
+        }
+      },
+      {
+        "caseId": "fresh-1-06",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-1:@juniperlabs",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "actor": "Juniper Labs",
+          "handle": "@juniperlabs"
+        }
+      },
+      {
+        "caseId": "fresh-1-07",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-1:@miloreyes",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "actor": "Milo Reyes",
+          "handle": "@miloreyes"
+        }
+      },
+      {
+        "caseId": "fresh-1-08",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-1:@miloreyes",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "actor": "Milo Reyes",
+          "handle": "@miloreyes"
+        }
+      },
+      {
+        "caseId": "fresh-1-09",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-1:@leilasato",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "actor": "Leila Sato",
+          "handle": "@leilasato"
+        }
+      },
+      {
+        "caseId": "fresh-1-10",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-1:@leilasato",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "actor": "Leila Sato",
+          "handle": "@leilasato"
+        }
+      },
+      {
+        "caseId": "fresh-1-11",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-1:@marcushill",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "actor": "Marcus Hill",
+          "handle": "@marcushill"
+        }
+      },
+      {
+        "caseId": "fresh-1-12",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-1:@marcushill",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "actor": "Marcus Hill",
+          "handle": "@marcushill"
+        }
+      },
+      {
+        "caseId": "fresh-1-13",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-1:@noraibrahim",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "actor": "Nora Ibrahim",
+          "handle": "@noraibrahim"
+        }
+      },
+      {
+        "caseId": "fresh-1-14",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-1:@noraibrahim",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "actor": "Nora Ibrahim",
+          "handle": "@noraibrahim"
+        }
+      },
+      {
+        "caseId": "fresh-1-15",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-1:@drewpalmer",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "actor": "Drew Palmer",
+          "handle": "@drewpalmer"
+        }
+      },
+      {
+        "caseId": "fresh-1-16",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-1:@drewpalmer",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "actor": "Drew Palmer",
+          "handle": "@drewpalmer"
+        }
+      },
+      {
+        "caseId": "fresh-1-17",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-1:@sorakim",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "actor": "Sora Kim",
+          "handle": "@sorakim"
+        }
+      },
+      {
+        "caseId": "fresh-1-18",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-1:@sorakim",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "actor": "Sora Kim",
+          "handle": "@sorakim"
+        }
+      },
+      {
+        "caseId": "fresh-1-19",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-1:@pavelnovak",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "actor": "Pavel Novak",
+          "handle": "@pavelnovak"
+        }
+      },
+      {
+        "caseId": "fresh-1-20",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-1:@pavelnovak",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-1.json",
+          "actor": "Pavel Novak",
+          "handle": "@pavelnovak"
+        }
+      },
+      {
+        "caseId": "fresh-2-01",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-2:@zahramensah",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "actor": "Zahra Mensah",
+          "handle": "@zahramensah"
+        }
+      },
+      {
+        "caseId": "fresh-2-02",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-2:@zahramensah",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "actor": "Zahra Mensah",
+          "handle": "@zahramensah"
+        }
+      },
+      {
+        "caseId": "fresh-2-03",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-2:@calebwong",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "actor": "Caleb Wong",
+          "handle": "@calebwong"
+        }
+      },
+      {
+        "caseId": "fresh-2-04",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-2:@calebwong",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "actor": "Caleb Wong",
+          "handle": "@calebwong"
+        }
+      },
+      {
+        "caseId": "fresh-2-05",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-2:@northstarcompute",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "actor": "Northstar Compute",
+          "handle": "@northstarcompute"
+        }
+      },
+      {
+        "caseId": "fresh-2-06",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-2:@northstarcompute",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "actor": "Northstar Compute",
+          "handle": "@northstarcompute"
+        }
+      },
+      {
+        "caseId": "fresh-2-07",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-2:@anikabose",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "actor": "Anika Bose",
+          "handle": "@anikabose"
+        }
+      },
+      {
+        "caseId": "fresh-2-08",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-2:@anikabose",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "actor": "Anika Bose",
+          "handle": "@anikabose"
+        }
+      },
+      {
+        "caseId": "fresh-2-09",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-2:@rohanpatel",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "actor": "Rohan Patel",
+          "handle": "@rohanpatel"
+        }
+      },
+      {
+        "caseId": "fresh-2-10",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-2:@rohanpatel",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "actor": "Rohan Patel",
+          "handle": "@rohanpatel"
+        }
+      },
+      {
+        "caseId": "fresh-2-11",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-2:@mirastone",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "actor": "Mira Stone",
+          "handle": "@mirastone"
+        }
+      },
+      {
+        "caseId": "fresh-2-12",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-2:@mirastone",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "actor": "Mira Stone",
+          "handle": "@mirastone"
+        }
+      },
+      {
+        "caseId": "fresh-2-13",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-2:@eliasford",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "actor": "Elias Ford",
+          "handle": "@eliasford"
+        }
+      },
+      {
+        "caseId": "fresh-2-14",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-2:@eliasford",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "actor": "Elias Ford",
+          "handle": "@eliasford"
+        }
+      },
+      {
+        "caseId": "fresh-2-15",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-2:@hanaruiz",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "actor": "Hana Ruiz",
+          "handle": "@hanaruiz"
+        }
+      },
+      {
+        "caseId": "fresh-2-16",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-2:@hanaruiz",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "actor": "Hana Ruiz",
+          "handle": "@hanaruiz"
+        }
+      },
+      {
+        "caseId": "fresh-2-17",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-2:@omardiallo",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "actor": "Omar Diallo",
+          "handle": "@omardiallo"
+        }
+      },
+      {
+        "caseId": "fresh-2-18",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-2:@omardiallo",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "actor": "Omar Diallo",
+          "handle": "@omardiallo"
+        }
+      },
+      {
+        "caseId": "fresh-2-19",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-2:@vedashah",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "actor": "Veda Shah",
+          "handle": "@vedashah"
+        }
+      },
+      {
+        "caseId": "fresh-2-20",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-2:@vedashah",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-2.json",
+          "actor": "Veda Shah",
+          "handle": "@vedashah"
+        }
+      },
+      {
+        "caseId": "fresh-3-01",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-3:@inezlaurent",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "actor": "Inez Laurent",
+          "handle": "@inezlaurent"
+        }
+      },
+      {
+        "caseId": "fresh-3-02",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-3:@inezlaurent",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "actor": "Inez Laurent",
+          "handle": "@inezlaurent"
+        }
+      },
+      {
+        "caseId": "fresh-3-03",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-3:@basilgrant",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "actor": "Basil Grant",
+          "handle": "@basilgrant"
+        }
+      },
+      {
+        "caseId": "fresh-3-04",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-3:@basilgrant",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "actor": "Basil Grant",
+          "handle": "@basilgrant"
+        }
+      },
+      {
+        "caseId": "fresh-3-05",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-3:@kestrelsystems",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "actor": "Kestrel Systems",
+          "handle": "@kestrelsystems"
+        }
+      },
+      {
+        "caseId": "fresh-3-06",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-3:@kestrelsystems",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "actor": "Kestrel Systems",
+          "handle": "@kestrelsystems"
+        }
+      },
+      {
+        "caseId": "fresh-3-07",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-3:@yaraelsayed",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "actor": "Yara El-Sayed",
+          "handle": "@yaraelsayed"
+        }
+      },
+      {
+        "caseId": "fresh-3-08",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-3:@yaraelsayed",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "actor": "Yara El-Sayed",
+          "handle": "@yaraelsayed"
+        }
+      },
+      {
+        "caseId": "fresh-3-09",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-3:@felixmoore",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "actor": "Felix Moore",
+          "handle": "@felixmoore"
+        }
+      },
+      {
+        "caseId": "fresh-3-10",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-3:@felixmoore",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "actor": "Felix Moore",
+          "handle": "@felixmoore"
+        }
+      },
+      {
+        "caseId": "fresh-3-11",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-3:@taliabrooks",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "actor": "Talia Brooks",
+          "handle": "@taliabrooks"
+        }
+      },
+      {
+        "caseId": "fresh-3-12",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-3:@taliabrooks",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "actor": "Talia Brooks",
+          "handle": "@taliabrooks"
+        }
+      },
+      {
+        "caseId": "fresh-3-13",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-3:@samihaddad",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "actor": "Sami Haddad",
+          "handle": "@samihaddad"
+        }
+      },
+      {
+        "caseId": "fresh-3-14",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-3:@samihaddad",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "actor": "Sami Haddad",
+          "handle": "@samihaddad"
+        }
+      },
+      {
+        "caseId": "fresh-3-15",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-3:@gretalin",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "actor": "Greta Lin",
+          "handle": "@gretalin"
+        }
+      },
+      {
+        "caseId": "fresh-3-16",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-3:@gretalin",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "actor": "Greta Lin",
+          "handle": "@gretalin"
+        }
+      },
+      {
+        "caseId": "fresh-3-17",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-3:@ravisingh",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "actor": "Ravi Singh",
+          "handle": "@ravisingh"
+        }
+      },
+      {
+        "caseId": "fresh-3-18",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-3:@ravisingh",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "actor": "Ravi Singh",
+          "handle": "@ravisingh"
+        }
+      },
+      {
+        "caseId": "fresh-3-19",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-3:@martacosta",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "actor": "Marta Costa",
+          "handle": "@martacosta"
+        }
+      },
+      {
+        "caseId": "fresh-3-20",
+        "category": "fresh-generalization",
+        "threadUnit": "fresh-3:@martacosta",
+        "sourceType": "fresh_playground_generalization",
+        "evidenceStatus": "constructed-validation",
+        "confidence": "validation",
+        "provenance": {
+          "scenario": "scenarios/fresh-social-capability-3.json",
+          "actor": "Marta Costa",
+          "handle": "@martacosta"
+        }
+      }
+    ],
+    "frozen": [],
+    "holdout": []
+  },
+  "holdoutSeal": {
+    "scenario": "scenarios/social-capability-holdout-60.json",
+    "caseCount": 60,
+    "policy": "Keep individual holdout cases out of development diagnosis; evaluate aggregate-only."
+  },
+  "promotionGate": {
+    "boardyReviewStatus": "pending-source-review",
+    "independentReviewStatus": "pending-independent-review",
+    "boardyValidationStatus": "not-ready",
+    "independentValidationStatus": "not-ready",
+    "errors": [
+      "Both source-review validators must be ready before promotion."
+    ],
+    "policy": "Observed Boardy action and wording are provenance only; no expected social behavior is stored in this manifest."
+  }
+}

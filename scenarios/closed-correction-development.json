@@ -1,0 +1,14 @@
+{
+  "name": "General closed-correction planning variants",
+  "sourceType": "independently_curated",
+  "purpose": "Test whether the model distinguishes a self-contained correction that closes an exchange from a correction that resolves an open decision or request.",
+  "steps": [
+    { "command": "start", "options": { "source": "scenario" } },
+    { "command": "inject", "options": { "actor": "Jules Park", "handle": "@julespark", "action": "post", "content": "Actually, the screenshot is from a mockup and not evidence of a live system." } },
+    { "command": "inject", "options": { "actor": "Leena Ortiz", "handle": "@leenaortiz", "action": "post", "content": "Correction: that quote was from a draft, not the policy that shipped." } },
+    { "command": "inject", "options": { "actor": "Dario Mensah", "handle": "@dariomensah", "action": "post", "content": "I checked the numbers; the denominator was wrong, so the comparison is not valid." } },
+    { "command": "inject", "options": { "actor": "Priya Shah", "handle": "@priyashah", "action": "post", "content": "I checked the numbers; the denominator was wrong. Should we rerun the comparison?" } },
+    { "command": "inject", "options": { "actor": "Mateo Ruiz", "handle": "@mateoruiz", "action": "post", "content": "The link I shared was staging, not production. If you still want to inspect the endpoint, I can send the live URL." } },
+    { "command": "timeline" }
+  ]
+}

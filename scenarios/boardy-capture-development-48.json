@@ -1,0 +1,449 @@
+{
+  "name": "Boardy visible-feed capture, development only",
+  "sourceType": "development-derived",
+  "manifest": "qa-learnings/boardy-source-capture-2026-08-13.json",
+  "warning": "Observed Boardy replies are provenance context, not expected wording. Visible posts may be truncated or lack parent history.",
+  "steps": [
+    {
+      "command": "start",
+      "options": {
+        "source": "scenario"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "PantherPunkz.io",
+        "handle": "@PantherPunkz",
+        "action": "post",
+        "content": "PantherPunkz.io\n@PantherPunkz\n·\n38s\nHah! What’s wrong with it? I’m trying to NYC this year.\n1"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Gᙇ",
+        "handle": "@thatsnas1oo",
+        "action": "post",
+        "content": "Gᙇ\n@thatsnas1oo\n·\n1m\nbro how are your responses so .. smooth and on point?\n1\n4"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Earth Species Project (ESP)",
+        "handle": "@earthspecies",
+        "action": "post",
+        "content": "Earth Species Project (ESP)\n@earthspecies\n·\n1m\nWe’re hiring two Bioacoustics Annotators!\n\nHelp build and curate the datasets used to train and evaluate our models for animal communication research.\n\n Apply by August 17: \nhttps://\nearthspecies.org/2026/07/29/wer\ne-hiring-bioacoustics-annotators/\n…\n\n#Bioacoustics #AnimalCommunication #Hiring\n1\n1\n11"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Worldex - François",
+        "handle": "@worldexFrancois",
+        "action": "post",
+        "content": "Worldex - François\n@worldexFrancois\n·\n2m\nDo you guys know any solid ads agencies that could help us scale for Q4?\n\nIf you know any great ones, I’d really appreciate it if you could tag them below. \n\nWe’re currently doing over $5M/month\n1\n1\n7"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Dash",
+        "handle": "@drdash960",
+        "action": "post",
+        "content": "Dash\n@drdash960\n·\n2m\nWhoever created \n@boardyai\n is a genius\n1\n1\n7"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "HR Cloud",
+        "handle": "@HRCloud",
+        "action": "post",
+        "content": "HR Cloud\n@HRCloud\n·\n3m\nThe candidate who ghosts you after the offer call usually decided three days earlier, when their question sat in a recruiter's inbox instead of getting answered.\n\nNobody tracks that number. There's no dashboard for \"lost the offer to silence.\" It just shows up later as a declined\nShow more\n1\n5"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Gᙇ",
+        "handle": "@thatsnas1oo",
+        "action": "post",
+        "content": "Gᙇ\n@thatsnas1oo\n·\n3m\n100%\nQuote\nGᙇ\n@thatsnas1oo\n·\n43m\nReplying to @thatsnas1oo\nhttps://\nnasirr.innergintel.org <<<\n1\n3"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Alex Nabutovsky",
+        "handle": "@nabutovsky",
+        "action": "post",
+        "content": "Alex Nabutovsky\n@nabutovsky\n·\n3m\nPeering is not a managed API. You keep your node, your setup, your control — you just stop losing blocks to bad peers.\n3 allowlisted sentry IPs, multi-DC, full mempool included. $750/mo, provisioned by a human, \n7 days to prove it or get refunded.\nHyperliquid Peering for Node Operators | Quicknode\nFrom quicknode.com\n1\n1\n9"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "ZenithAi",
+        "handle": "@ZenithAiLab",
+        "action": "post",
+        "content": "ZenithAi\n@ZenithAiLab\n·\n4m\nA great opportunity for founders still shaping their earliest ideas\n1\n3"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Brandon",
+        "handle": "@BTWigley3",
+        "action": "post",
+        "content": "Brandon\n@BTWigley3\n·\n9m\n14 days until Shopify auto-upgrades non-Plus checkout pages.\n\nThe 5 minute check: test tracking at BOTH ends of one order. Baseline now, upgrade, retest.\n\nUnsure what's wired to the old pages? CheckoutProof maps it, AI naming fixes for scripts it's never even seen. Free scan.\n1\n3"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "pasandida(:)aura",
+        "handle": "@huesofbanter",
+        "action": "post",
+        "content": "pasandida(:)aura\n@huesofbanter\n·\n9m\ni m myself the marketing team at boardy and my own venturee\n1\n5"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "daniel scott mitchell",
+        "handle": "@danielmitchell",
+        "action": "post",
+        "content": "daniel scott mitchell\n@danielmitchell\n·\n10m\nwho will be at IMTS?\n3\n2\n60"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Prashanth (Manohar) Velidandi",
+        "handle": "@PMV_InferX",
+        "action": "post",
+        "content": "Prashanth (Manohar) Velidandi\n@PMV_InferX\n·\n10m\nOne of users ran 6+ hours of continuous agentic work on DeepSeek V4 Flash through \n@InferXai\n , non-stop, unprompted.\n\nThis is the kind of proof that actually matters. Not a benchmark slide. someone’s agent grinding for hours without falling over.\n\nTry it out:\nShow more\n1\n2\n20"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Lanza AI",
+        "handle": "@lanzaai",
+        "action": "post",
+        "content": "Lanza AI\n@lanzaai\n·\n10m\nHappy to have a call or discuss how we can help in DMs\n1\n2"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Jay Tiwari",
+        "handle": "@Jayz_23_",
+        "action": "post",
+        "content": "Jay Tiwari\n@Jayz_23_\n·\n11m\nLooking to connect with people in tech\nEngineers, product folks, founders, AI people — anyone building cool things.\nDrop a reply or DM if you’re open to chatting about tech, careers, or projects. Let’s connect\n#Tech #Networking\n1\n15"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Stani",
+        "handle": "@StaniKulechov",
+        "action": "post",
+        "content": "Stani\n@StaniKulechov\n·\n12m\nWe selected the three AI-assisted smart contract review tools and ran them across the entire Aave smart contract surface.\n\nThe result: no critical or high-severity findings.\n\nAI tooling is a core part of how Aave secures its smart contracts, and our analysis demonstrates the\nShow more\nQuote\nAave\n@aave\n·\n1h\nSince 2020, Aave has launched four protocol generations, and its security program grew with each one.\n\nAI-assisted scanning is the newest addition beyond human review.\n\nWe've published the initial results for V3 and V4, along with how we plan to use AI tooling going forward.\n7\n4\n26\n2.1K"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Julien",
+        "handle": "@juljacqus",
+        "action": "post",
+        "content": "Julien\n@juljacqus\n·\n13m\nThe next wave of startups will only launch with marketing teams\n1\n4"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Tristan Gūwalgiya C.",
+        "handle": "@trisgwync",
+        "action": "post",
+        "content": "Tristan Gūwalgiya C.\n@trisgwync\n·\n13m\nI asked 10+ engineering managers this week what their no.1 headache is since vibe-coding. 6-7 of them said it's their engineers didn't code with the rules they have in their claude.md. I looked into the file and it's 1000+ lines...\n Article\nCLAUDE.md too long? Too Many Skill Files? 4 Fixes for Agent Memory Bloat \nWhy does my agent ignore CLAUDE.md? How many skill files is too many? Is my CLAUDE.md too long? Too Many Skill Files?\nYou don't have a memory problem. You have 200 markdown files.\nIt starts as good...\n2\n1\n3\n53"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Ian LeViness   ",
+        "handle": "@ExpatCrypto3",
+        "action": "post",
+        "content": "Ian LeViness   \n@ExpatCrypto3\n·\n13m\nJumps in awareness don’t equal PMF either\n1\n1"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Damien C. Tanner",
+        "handle": "@dctanner",
+        "action": "post",
+        "content": "Damien C. Tanner\n@dctanner\n·\n14m\nWe’re seeing companies like Stripe, Ramp, and \n@Cloudflare\n building their own  internal agent platforms for everyone to use - from finance to marketing.\n\nIf you’ve built this or are planning do. I’d like to chat with you. Have any existing platforms met your requirements? DMs\nShow more\n1\n38"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Keycard",
+        "handle": "@KeycardAI",
+        "action": "post",
+        "content": "Keycard\n@KeycardAI\n·\n18m\nWhat makes securing agents a novel challenge is that they reason and act on our behalf.\n\nWe need new agent identity and access infrastructure that allows agents to safely work on our behalf, audits every grant, and allows us to immediately revoke an agent's access when necessary\nQuote\nInsecure Agents Podcast\n@insecureagents\n·\n25m\n\"We're moving to a world where computers are reasoning on our behalf, deciding for us on our behalf, and they're actually acting on our behalf. And the purpose of a human now is to provide intent or some goal for these agents to achieve. That fundamentally changes the way we\n0:01 / 1:30\n1\n1\n211"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Oliver",
+        "handle": "@oliveisoliver",
+        "action": "post",
+        "content": "Oliver\n@oliveisoliver\n·\n18m\nWhat will they be doing instead?\n1\n10"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Olibher Cafirma",
+        "handle": "@C37484Olibher",
+        "action": "post",
+        "content": "Olibher Cafirma\n@C37484Olibher\n·\n19m\nYour payment processor shouldn't own the relationship with your customer's card. Network tokens make payment credentials portable.\n\nPaymentKit (\nhttps://\npaymentkit.com) stores them independently, so you can route across processors without asking customers to enter their card\nShow more\npaymentkit.com\nMulti-Processor Billing Platform | PaymentKit\nPaymentKit is a multi-processor billing platform for SaaS and e-commerce. Automate subscriptions, route payments, and unify metrics, independent of any processor.\n1\n1\n22"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "jayCobski",
+        "handle": "@jay_cobski",
+        "action": "post",
+        "content": "jayCobski\n@jay_cobski\n·\n19m\nNothing beats talking about county festivals in America and Poland - peak business smalltalk \n@boardyai\n1\n9"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Akash Anand",
+        "handle": "@realAkashAnand",
+        "action": "post",
+        "content": "Akash Anand\n@realAkashAnand\n·\n19m\nhttps://\nclueso.io/agents \n\nSchedule a call with us to see it work live !\nQuote\nAkash Anand\n@realAkashAnand\n·\n17h\nIntroducing: product videos that update themselves.\n\nClueso can now automatically update all your product videos every time you ship a change to your product.\n\nWhenever your engineering team pushes a release to GitHub:\n\n- Clueso scans the PR to understand what changed.\n- It\n0:01 / 0:55\n1\n5\n103"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "TRM Labs",
+        "handle": "@trmlabs",
+        "action": "post",
+        "content": "TRM Labs\n@trmlabs\n·\n19m\nWrench attacks — violence used to steal crypto assets — are on the rise. \n@metpoliceuk\n recorded 17 cases in London in 2024, averaging GBP 660,000 lost each, with kidnapping making up 59% of offenses. Global cases roughly doubled in 2025, to about 70.\n\nOur new white paper,\nShow more\n1\n2\n197"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Kai",
+        "handle": "@kaish3n",
+        "action": "post",
+        "content": "Kai\n@kaish3n\n·\n20m\nI just built \"XLens\" using X's open-sourced algorithm.\n\nIt's 500,000+ lines of Rust, Scala and JAX across 26 production services. That's a lot to read!\n\nXLens make all the information in the algo easier to digest and gives you better direction on how you can use it to grow your\nShow more\n0:42\n2\n3\n7\n1.5K"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Saurabh Kumar",
+        "handle": "@drummatick",
+        "action": "post",
+        "content": "Saurabh Kumar\n@drummatick\n·\n20m\nI want Claude to be able to read an article the way I do, and absorb information like I do, so that when I interact with it, it knows my pain points\n\nA truly personalized agent\n\nIs anyone building something like that?\n\nI’m not looking for the smartest agent, but an agent that’s\nShow more\n1\n94"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Pargalı Uchiha ",
+        "handle": "@anlatibrahim",
+        "action": "post",
+        "content": "Pargalı Uchiha \n@anlatibrahim\n·\n20m\nand you shouldn't really care what others think that much, just focus.\n1\n12"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Dave Blumenfeld",
+        "handle": "@dblumenfeld",
+        "action": "post",
+        "content": "Dave Blumenfeld\n@dblumenfeld\n·\n21m\nWhere's the best place to learn about interesting AI and deep tech events in SF? Looking for: talks, hackathons and any type of networking events that are not cringe (which I know is a lot to ask).\n1\n20"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "novocaine",
+        "handle": "@novocaine082",
+        "action": "post",
+        "content": "novocaine\n@novocaine082\n·\n21m\nproduct led growth?\n1\n7"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "novocaine",
+        "handle": "@novocaine082",
+        "action": "post",
+        "content": "novocaine\n@novocaine082\n·\n21m\nstill dont get it\n1\n8"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Ryan Heltemes",
+        "handle": "@Ryan_Heltemes",
+        "action": "post",
+        "content": "Ryan Heltemes\n@Ryan_Heltemes\n·\n22m\nYou got it!\n1\n5"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "John",
+        "handle": "@john_faleke",
+        "action": "post",
+        "content": "John\n@john_faleke\n·\n41m\nExactly,\nEvery startup has a next move. Diados find it.\n1\n2\n7"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Atheeth Sishtla",
+        "handle": "@atheethsishtla",
+        "action": "post",
+        "content": "Atheeth Sishtla\n@atheethsishtla\n·\n42m\nExactly and that diagnosis can change the intervention. If recognition improves but transfer doesn’t, LemonSugar should stop repeating familiar patterns and switch to explanation, comparison, and novel-context problems. That turns the memory layer into an adaptive learning\nShow more\n1\n10"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Nik Kleverov",
+        "handle": "@kleverov",
+        "action": "post",
+        "content": "Nik Kleverov\n@kleverov\n·\n45m\nThis is what AI is made for! Working with the estate of the world's most famous sleeptalker, Dion McGregor, we launched The Somniloquist project: bringing his outlandish dreams to life. Just listen to the audio to get a sense of what I mean.\n\nMy friend and collaborator on this\nShow more\n0:01 / 2:04\n1\n1\n56"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Whop",
+        "handle": "@whop",
+        "action": "post",
+        "content": "Whop\n@whop\n·\n42m\nWhop Partners have earned over $10M to date.\n\nToday, anyone can refer a business to Whop and earn up to 30% of our cut.\n4\n14\n51\n8.4K"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Anandb71",
+        "handle": "@anandb711",
+        "action": "post",
+        "content": "Anandb71\n@anandb711\n·\n42m\n8 ig\n1\n1\n13"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Caelean",
+        "handle": "@the1024th",
+        "action": "post",
+        "content": "Caelean\n@the1024th\n·\n45m\nBuilders are everywhere. Are you reaching them?\n\n\n@gauge_sh\n 8.18.26\n0:10\n2\n3\n9\n179"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "George Tsouvaltzis",
+        "handle": "@gitsouv",
+        "action": "post",
+        "content": "George Tsouvaltzis\n@gitsouv\n·\n44m\nfellow dev on the timeline. Let's connect?\n1\n1"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Nisa Karan",
+        "handle": "@thisisnisakaran",
+        "action": "post",
+        "content": "Nisa Karan\n@thisisnisakaran\n·\n44m\nHi! Just followed back, looking forward to your posts and following your journey!\n1\n12"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Nisa Karan",
+        "handle": "@thisisnisakaran",
+        "action": "post",
+        "content": "Nisa Karan\n@thisisnisakaran\n·\n44m\nHi! Just followed back, looking forward to your posts and following your journey!\n1\n9"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Lucas Cavalieri",
+        "handle": "@luki_cavalieri",
+        "action": "post",
+        "content": "Lucas Cavalieri\n@luki_cavalieri\n·\n47m\nNow it is... hedge with \n@castle_tech_\n \nQuote\nBasil\n@LinkofSunshine\n·\n5h\nI low key have always been surprised custom insurance has never been that popular \n\nBack in the day, air lines used to spend vast amounts on oil futures for this! Being able to hedge against random expenditures is so cool x.com/nhull28/status…\n1\n6\n194"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Atheeth Sishtla",
+        "handle": "@atheethsishtla",
+        "action": "post",
+        "content": "Atheeth Sishtla\n@atheethsishtla\n·\n44m\nYes—that suggests three separate measures: recognition with familiar cues, near transfer with new wording or values, and far transfer in a new context with no cues. Reporting them separately would stop a “memory” score from overstating actual learning. This is becoming a useful\nShow more\n1\n3"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Nisa Karan",
+        "handle": "@thisisnisakaran",
+        "action": "post",
+        "content": "Nisa Karan\n@thisisnisakaran\n·\n44m\nHi Nick! Just followed back, looking forward to your posts and following your journey!\n1\n12"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "George Tsouvaltzis",
+        "handle": "@gitsouv",
+        "action": "post",
+        "content": "George Tsouvaltzis\n@gitsouv\n·\n44m\nyou asked for builders, so here I am JIBRAN  building an iOS app that lets you travel through time and see yourself there\n2\n1\n3"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Nisa Karan",
+        "handle": "@thisisnisakaran",
+        "action": "post",
+        "content": "Nisa Karan\n@thisisnisakaran\n·\n45m\n@boardyai\n definitely the GOAT.\n1\n1\n11"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Nisa Karan",
+        "handle": "@thisisnisakaran",
+        "action": "post",
+        "content": "Nisa Karan\n@thisisnisakaran\n·\n45m\n@boardyai\n Taking over. Good thing I am on your Boardy Pro Advisory Board Boardy, I think were making a dent here, organically.\n1\n14"
+      }
+    },
+    {
+      "command": "timeline"
+    }
+  ]
+}

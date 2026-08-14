@@ -1,0 +1,563 @@
+{
+  "name": "Operationally sealed social capability holdout, 60 interactions",
+  "sourceType": "sealed-paraphrased-holdout",
+  "sealedAt": "2026-08-13T21:16:31.208Z",
+  "warning": "Do not inspect individual outcomes or use them for product tuning. Score aggregate and category distributions only.",
+  "partition": "holdout",
+  "steps": [
+    {
+      "command": "start",
+      "options": {
+        "source": "fresh"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Ari Bell",
+        "handle": "@aribell",
+        "action": "post",
+        "content": "The activation chart improved after invited accounts were removed. Which number should we trust?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Ari Bell",
+        "handle": "@aribell",
+        "action": "post",
+        "content": "I am asking about the denominator, not for a general analytics lecture."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Bea Nwosu",
+        "handle": "@beanwosu",
+        "action": "post",
+        "content": "My inbox is now a historical archive of promises nobody intended to keep."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Bea Nwosu",
+        "handle": "@beanwosu",
+        "action": "post",
+        "content": "That is a joke about work, not a request for productivity coaching."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Cedar Forge",
+        "handle": "@cedarforge",
+        "action": "post",
+        "content": "Our replay checker rejects modified traces, but upstream network responses are not recorded."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Cedar Forge",
+        "handle": "@cedarforge",
+        "action": "post",
+        "content": "The note describes the boundary; it is not a third-party security review."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Dina Wells",
+        "handle": "@dinawells",
+        "action": "post",
+        "content": "Can anyone recommend a privacy reviewer in Montreal who has shipped consumer AI products?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Dina Wells",
+        "handle": "@dinawells",
+        "action": "post",
+        "content": "Please show evidence of fit before asking them to meet."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Eli March",
+        "handle": "@elimarch",
+        "action": "post",
+        "content": "Should a triage model optimize speed when an error can lock someone out of care?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Eli March",
+        "handle": "@elimarch",
+        "action": "post",
+        "content": "The answer needs the false-positive cost, not a soothing slogan."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Farah Okoye",
+        "handle": "@farahokoye",
+        "action": "post",
+        "content": "My rabbit has stronger product positioning than I do. Every snack is a launch."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Farah Okoye",
+        "handle": "@farahokoye",
+        "action": "post",
+        "content": "No strategy deck needed; the rabbit is already the CMO."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Gus Tan",
+        "handle": "@gustan",
+        "action": "post",
+        "content": "You promised a rating, but here is the customer evidence first."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Gus Tan",
+        "handle": "@gustan",
+        "action": "post",
+        "content": "What would make this an eight instead of a seven?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Hana Voss",
+        "handle": "@hanavoss",
+        "action": "post",
+        "content": "The screenshot has a green badge, so the deployment must be safe. Obviously."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Hana Voss",
+        "handle": "@hanavoss",
+        "action": "post",
+        "content": "The badge is from a mock environment; the joke is about reading pixels as proof."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Ivo Chen",
+        "handle": "@ivochen",
+        "action": "post",
+        "content": "Everyone is angry about the feed today. I have no example, only atmosphere."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Ivo Chen",
+        "handle": "@ivochen",
+        "action": "post",
+        "content": "This is the sixth version of the same warning this week."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Jana Ruiz",
+        "handle": "@janaruiz",
+        "action": "post",
+        "content": "A quiet Sunday and a picture of the harbor. No question attached."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Jana Ruiz",
+        "handle": "@janaruiz",
+        "action": "post",
+        "content": "Hope your day is going well; this does not need a response."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Kian Doyle",
+        "handle": "@kiandoyle",
+        "action": "post",
+        "content": "I need someone near Cork who can review an incident runbook next month."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Kian Doyle",
+        "handle": "@kiandoyle",
+        "action": "post",
+        "content": "Do not share anyone's details until the scope and purpose are clear."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Lena Frost",
+        "handle": "@lenafrost",
+        "action": "post",
+        "content": "Can historical enforcement records ever be a neutral target for an automated decision?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Lena Frost",
+        "handle": "@lenafrost",
+        "action": "post",
+        "content": "I want the direct tradeoff and the uncertainty, not generic ethics language."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Moss Studio",
+        "handle": "@mossstudio",
+        "action": "post",
+        "content": "Here is a link to the demo. It runs in staging and does not include production logs."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Moss Studio",
+        "handle": "@mossstudio",
+        "action": "post",
+        "content": "The useful question is whether the failure mode is observable, not whether the page looks polished."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Nadia Park",
+        "handle": "@nadiapark",
+        "action": "post",
+        "content": "Can you tell me if this landing page is a five or a seven?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Nadia Park",
+        "handle": "@nadiapark",
+        "action": "post",
+        "content": "The audience and retention notes are attached now."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Oren Shah",
+        "handle": "@orenshah",
+        "action": "post",
+        "content": "You are wrong about the metric, but the disagreement is about cohort membership."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Oren Shah",
+        "handle": "@orenshah",
+        "action": "post",
+        "content": "The denominator excludes returning users; that is why the conclusion moved."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Pia Long",
+        "handle": "@pialong",
+        "action": "post",
+        "content": "A meeting can survive long enough to become a family heirloom."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Pia Long",
+        "handle": "@pialong",
+        "action": "post",
+        "content": "I am not asking how to fix my calendar; I am observing the tragedy."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Quill Labs",
+        "handle": "@quilllabs",
+        "action": "post",
+        "content": "We publish the audit trace beside every result, but the external clock is still a gap."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Quill Labs",
+        "handle": "@quilllabs",
+        "action": "post",
+        "content": "Would you call that a security guarantee or a bounded execution claim?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Rafi Stone",
+        "handle": "@rafistone",
+        "action": "post",
+        "content": "I am open to an introduction if you first tell me why the person is relevant."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Rafi Stone",
+        "handle": "@rafistone",
+        "action": "post",
+        "content": "Consent is part of the match, not paperwork after the fact."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Suri Vale",
+        "handle": "@surivale",
+        "action": "post",
+        "content": "This chart uses a new baseline halfway through. The line is not enough."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Suri Vale",
+        "handle": "@surivale",
+        "action": "post",
+        "content": "I added the pre-period and control group in the revised image."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Tomas Reed",
+        "handle": "@tomasreed",
+        "action": "post",
+        "content": "My parrot has a better content calendar than my startup: one announcement, endless remix."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Tomas Reed",
+        "handle": "@tomasreed",
+        "action": "post",
+        "content": "That was the complete punchline."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Uma Kale",
+        "handle": "@umakale",
+        "action": "post",
+        "content": "Can an assistant be useful during a crisis without hiding uncertainty behind confidence?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Uma Kale",
+        "handle": "@umakale",
+        "action": "post",
+        "content": "A boundary should answer the hard part, not replace it."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Vale Works",
+        "handle": "@valeworks",
+        "action": "post",
+        "content": "The public endpoint is live; the screenshot is from yesterday's staging run."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Vale Works",
+        "handle": "@valeworks",
+        "action": "post",
+        "content": "I can share the logs if the question is reliability rather than branding."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Wes Hart",
+        "handle": "@weshart",
+        "action": "post",
+        "content": "Like this if you agree that hustle is the answer. There is no actual claim here."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Wes Hart",
+        "handle": "@weshart",
+        "action": "post",
+        "content": "I am not adding evidence; this is just engagement bait."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Xena Noor",
+        "handle": "@xenanoor",
+        "action": "post",
+        "content": "You still owe me an opinion, but I have not shown you the important part yet."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Xena Noor",
+        "handle": "@xenanoor",
+        "action": "post",
+        "content": "Here is the constraint that makes the product hard to evaluate."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Yuri Bell",
+        "handle": "@yuribell",
+        "action": "post",
+        "content": "Exactly."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Yuri Bell",
+        "handle": "@yuribell",
+        "action": "post",
+        "content": "Thanks, that closes the thread for me."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Zara Cole",
+        "handle": "@zaracole",
+        "action": "post",
+        "content": "Who in Wellington works on accessibility for public-sector software?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Zara Cole",
+        "handle": "@zaracole",
+        "action": "post",
+        "content": "A generic keyword match is not a useful introduction."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Ari Bell",
+        "handle": "@aribell",
+        "action": "post",
+        "content": "I changed the headline after checking the denominator. No need for a victory lap."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Cedar Forge",
+        "handle": "@cedarforge",
+        "action": "post",
+        "content": "The design note is useful, but it cannot prove an unrecorded dependency behaved."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Eli March",
+        "handle": "@elimarch",
+        "action": "post",
+        "content": "The uncomfortable failure is a small average gain with a severe subgroup cost."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Gus Tan",
+        "handle": "@gustan",
+        "action": "post",
+        "content": "Thanks, I have enough to run the next test."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Hana Voss",
+        "handle": "@hanavoss",
+        "action": "post",
+        "content": "The green badge only proves that a check ran."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Rafi Stone",
+        "handle": "@rafistone",
+        "action": "post",
+        "content": "The role and location are clear; the introduction still needs permission."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Mira Sol",
+        "handle": "@mirasol",
+        "action": "post",
+        "content": "The first draft is over the channel limit; shorten the thought, not the evidence."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Mira Sol",
+        "handle": "@mirasol",
+        "action": "post",
+        "content": "Actually, there is no question here—just a note about the constraint."
+      }
+    },
+    {
+      "command": "timeline"
+    }
+  ],
+  "seal": {
+    "sha256": "a7d91b88e27cd1a236fb9bfe05cf3005b73fbd7a2c8a5e4d9ccac50dd78ef751",
+    "caseCount": 60,
+    "individualCaseInspection": "prohibited"
+  }
+}

@@ -1,0 +1,1355 @@
+{
+  "poolVersion": "social-capability-source-pool-candidate.v1",
+  "generatedAt": "2026-08-13T23:07:15.621Z",
+  "status": "candidate-not-frozen",
+  "purpose": "Deduplicate public Boardy source situations by thread root before manual provenance review and final partition assignment.",
+  "policy": "A pool count is not a parity score. Observed Boardy wording/actions are references only; unknown relationship, consent, private search, and outcome facts remain unknown.",
+  "requirements": {
+    "replyUnits": 50,
+    "originalOrQuoteUnits": 20
+  },
+  "replyPool": [
+    {
+      "caseId": "boardy-reply-root-2087925882702746043",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087925882702746043",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-001"
+        ],
+        "sourceUrl": "https://x.com/PantherPunkz/status/2087974578652156063",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087974578652156063",
+        "rootId": "2087925882702746043",
+        "chainLength": 4,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087965910459940892",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087965910459940892",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-002"
+        ],
+        "sourceUrl": "https://x.com/thatsnas1oo/status/2087974422183284781",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087974422183284781",
+        "rootId": "2087965910459940892",
+        "chainLength": 4,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087974260572557750",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087974260572557750",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-003"
+        ],
+        "sourceUrl": "https://x.com/earthspecies/status/2087974260572557750",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087974260572557750",
+        "rootId": "2087974260572557750",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087974208387141901",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087974208387141901",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-004"
+        ],
+        "sourceUrl": "https://x.com/worldexFrancois/status/2087974208387141901",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087974208387141901",
+        "rootId": "2087974208387141901",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087974027251851522",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087974027251851522",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-005"
+        ],
+        "sourceUrl": "https://x.com/drdash960/status/2087974027251851522",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087974027251851522",
+        "rootId": "2087974027251851522",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087973925032476697",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087973925032476697",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-006"
+        ],
+        "sourceUrl": "https://x.com/HRCloud/status/2087973925032476697",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087973925032476697",
+        "rootId": "2087973925032476697",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087973855667130844",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087973855667130844",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-008"
+        ],
+        "sourceUrl": "https://x.com/nabutovsky/status/2087973855667130844",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087973855667130844",
+        "rootId": "2087973855667130844",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2082170579441135962",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2082170579441135962",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-009"
+        ],
+        "sourceUrl": "https://x.com/ZenithAiLab/status/2087973805222470129",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087973805222470129",
+        "rootId": "2082170579441135962",
+        "chainLength": 2,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087972384628187301",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087972384628187301",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-010"
+        ],
+        "sourceUrl": "https://x.com/BTWigley3/status/2087972384628187301",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087972384628187301",
+        "rootId": "2087972384628187301",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087972157292736744",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087972157292736744",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-012"
+        ],
+        "sourceUrl": "https://x.com/danielmitchell/status/2087972157292736744",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087972157292736744",
+        "rootId": "2087972157292736744",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087972213102465306",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087972213102465306",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-013"
+        ],
+        "sourceUrl": "https://x.com/PMV_InferX/status/2087972213102465306",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087972213102465306",
+        "rootId": "2087972213102465306",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087936784579842228",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087936784579842228",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-014"
+        ],
+        "sourceUrl": "https://x.com/lanzaai/status/2087972214943645994",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087972214943645994",
+        "rootId": "2087936784579842228",
+        "chainLength": 3,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087971993660567624",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087971993660567624",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-015"
+        ],
+        "sourceUrl": "https://x.com/Jayz_23_/status/2087971993660567624",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087971993660567624",
+        "rootId": "2087971993660567624",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087971692039565402",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087971692039565402",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-016"
+        ],
+        "sourceUrl": "https://x.com/StaniKulechov/status/2087971692039565402",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087971692039565402",
+        "rootId": "2087971692039565402",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087971363760087201",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087971363760087201",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-018"
+        ],
+        "sourceUrl": "https://x.com/trisgwync/status/2087971363760087201",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087971363760087201",
+        "rootId": "2087971363760087201",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087935208582439111",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087935208582439111",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-019"
+        ],
+        "sourceUrl": "https://x.com/ExpatCrypto3/status/2087971379006038352",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087971379006038352",
+        "rootId": "2087935208582439111",
+        "chainLength": 2,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087971292934721565",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087971292934721565",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-020"
+        ],
+        "sourceUrl": "https://x.com/dctanner/status/2087971292934721565",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087971292934721565",
+        "rootId": "2087971292934721565",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087970370183942574",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087970370183942574",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-021"
+        ],
+        "sourceUrl": "https://x.com/KeycardAI/status/2087970370183942574",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087970370183942574",
+        "rootId": "2087970370183942574",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087970105468534821",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087970105468534821",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-023"
+        ],
+        "sourceUrl": "https://x.com/C37484Olibher/status/2087970105468534821",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087970105468534821",
+        "rootId": "2087970105468534821",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087969705042797020",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087969705042797020",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-024"
+        ],
+        "sourceUrl": "https://x.com/jay_cobski/status/2087970054721658902",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087970054721658902",
+        "rootId": "2087969705042797020",
+        "chainLength": 2,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087970052473852314",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087970052473852314",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-025"
+        ],
+        "sourceUrl": "https://x.com/realAkashAnand/status/2087970052473852314",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087970052473852314",
+        "rootId": "2087970052473852314",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087969982416146857",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087969982416146857",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-026"
+        ],
+        "sourceUrl": "https://x.com/trmlabs/status/2087969982416146857",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087969982416146857",
+        "rootId": "2087969982416146857",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087969815386570896",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087969815386570896",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-027"
+        ],
+        "sourceUrl": "https://x.com/kaish3n/status/2087969815386570896",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087969815386570896",
+        "rootId": "2087969815386570896",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087969760399274018",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087969760399274018",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-028"
+        ],
+        "sourceUrl": "https://x.com/drummatick/status/2087969760399274018",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087969760399274018",
+        "rootId": "2087969760399274018",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087950559227879674",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087950559227879674",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-029"
+        ],
+        "sourceUrl": "https://x.com/anlatibrahim/status/2087969767252451818",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087969767252451818",
+        "rootId": "2087950559227879674",
+        "chainLength": 2,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087969582980214866",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087969582980214866",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-030"
+        ],
+        "sourceUrl": "https://x.com/dblumenfeld/status/2087969582980214866",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087969582980214866",
+        "rootId": "2087969582980214866",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087920108811456643",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087920108811456643",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-032"
+        ],
+        "sourceUrl": "https://x.com/novocaine082/status/2087969498779594816",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087969498779594816",
+        "rootId": "2087920108811456643",
+        "chainLength": 6,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087967894571499534",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087967894571499534",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-033"
+        ],
+        "sourceUrl": "https://x.com/Ryan_Heltemes/status/2087969287306940693",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087969287306940693",
+        "rootId": "2087967894571499534",
+        "chainLength": 6,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087953831565140128",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087953831565140128",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-034"
+        ],
+        "sourceUrl": "https://x.com/john_faleke/status/2087964508073414910",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087964508073414910",
+        "rootId": "2087953831565140128",
+        "chainLength": 6,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087963096489038188",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087963096489038188",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-035"
+        ],
+        "sourceUrl": "https://x.com/atheethsishtla/status/2087964374074069438",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087964374074069438",
+        "rootId": "2087963096489038188",
+        "chainLength": 6,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087963467470848325",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087963467470848325",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-036"
+        ],
+        "sourceUrl": "https://x.com/kleverov/status/2087963467470848325",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087963467470848325",
+        "rootId": "2087963467470848325",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087964299583255034",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087964299583255034",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-037"
+        ],
+        "sourceUrl": "https://x.com/whop/status/2087964299583255034",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087964299583255034",
+        "rootId": "2087964299583255034",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087873274814369869",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087873274814369869",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-038"
+        ],
+        "sourceUrl": "https://x.com/anandb711/status/2087964277080826019",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087964277080826019",
+        "rootId": "2087873274814369869",
+        "chainLength": 2,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087963694672089346",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087963694672089346",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-039"
+        ],
+        "sourceUrl": "https://x.com/the1024th/status/2087963694672089346",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087963694672089346",
+        "rootId": "2087963694672089346",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087926321791869234",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087926321791869234",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-040"
+        ],
+        "sourceUrl": "https://x.com/gitsouv/status/2087963936188461098",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087963936188461098",
+        "rootId": "2087926321791869234",
+        "chainLength": 3,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087963193641418770",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087963193641418770",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-043"
+        ],
+        "sourceUrl": "https://x.com/luki_cavalieri/status/2087963193641418770",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087963193641418770",
+        "rootId": "2087963193641418770",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-reply-root-2087961771378405465",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2087961771378405465",
+      "sourceType": "boardy_reply_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-capture-044"
+        ],
+        "sourceUrl": "https://x.com/atheethsishtla/status/2087963856693776563",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2087963856693776563",
+        "rootId": "2087961771378405465",
+        "chainLength": 6,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "dev-boardy-001",
+      "category": [
+        "network",
+        "technical-link-media"
+      ],
+      "categoryStatus": "development-label",
+      "threadUnit": "torrencdn-live-video",
+      "sourceType": "boardy_curated_development_candidate",
+      "evidenceStatus": "development-observed",
+      "confidence": "medium",
+      "provenance": {
+        "sourceUrl": "https://x.com/Torrencdn/status/2087966047261556766",
+        "sourceCaseIds": [
+          "dev-boardy-001"
+        ],
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "dev-boardy-002",
+      "category": [
+        "banter",
+        "technical-reasoning"
+      ],
+      "categoryStatus": "development-label",
+      "threadUnit": "scalingonline-retention",
+      "sourceType": "boardy_curated_development_candidate",
+      "evidenceStatus": "development-observed",
+      "confidence": "medium",
+      "provenance": {
+        "sourceUrl": "https://x.com/ScalingOnline/status/2087966024469500169",
+        "sourceCaseIds": [
+          "dev-boardy-002"
+        ],
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "dev-boardy-003",
+      "category": [
+        "direct-engagement",
+        "technical-reasoning"
+      ],
+      "categoryStatus": "development-label",
+      "threadUnit": "nitin-website-monitoring",
+      "sourceType": "boardy_curated_development_candidate",
+      "evidenceStatus": "development-observed",
+      "confidence": "low",
+      "provenance": {
+        "sourceUrl": "https://x.com/nitindotdev/status/2087965848501977504",
+        "sourceCaseIds": [
+          "dev-boardy-003"
+        ],
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "dev-boardy-004",
+      "category": [
+        "direct-engagement",
+        "network"
+      ],
+      "categoryStatus": "development-label",
+      "threadUnit": "harry-dm-check",
+      "sourceType": "boardy_curated_development_candidate",
+      "evidenceStatus": "development-observed",
+      "confidence": "medium",
+      "provenance": {
+        "sourceUrl": "https://x.com/MrHarry_Com/status/2087965818831479085",
+        "sourceCaseIds": [
+          "dev-boardy-004"
+        ],
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "dev-boardy-005",
+      "category": [
+        "direct-engagement",
+        "continuity"
+      ],
+      "categoryStatus": "development-label",
+      "threadUnit": "yohi-outreach-questions",
+      "sourceType": "boardy_curated_development_candidate",
+      "evidenceStatus": "development-observed",
+      "confidence": "medium",
+      "provenance": {
+        "sourceUrl": "https://x.com/yohiiclaustre/status/2087965504639992257",
+        "sourceCaseIds": [
+          "dev-boardy-005"
+        ],
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "dev-boardy-006",
+      "category": [
+        "network",
+        "privacy-consent"
+      ],
+      "categoryStatus": "development-label",
+      "threadUnit": "miguel-renfe-connection",
+      "sourceType": "boardy_curated_development_candidate",
+      "evidenceStatus": "development-observed",
+      "confidence": "medium",
+      "provenance": {
+        "sourceUrl": "https://x.com/mig4ng/status/2087965002640564560",
+        "sourceCaseIds": [
+          "dev-boardy-006"
+        ],
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "dev-boardy-007",
+      "category": [
+        "banter",
+        "rating"
+      ],
+      "categoryStatus": "development-label",
+      "threadUnit": "zn-aq-rating-banter",
+      "sourceType": "boardy_curated_development_candidate",
+      "evidenceStatus": "development-observed",
+      "confidence": "low",
+      "provenance": {
+        "sourceUrl": "https://x.com/zn_aq01/status/2087964971821154741",
+        "sourceCaseIds": [
+          "dev-boardy-007"
+        ],
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "dev-boardy-008",
+      "category": [
+        "network",
+        "introduction"
+      ],
+      "categoryStatus": "development-label",
+      "threadUnit": "bryn-logo-designer",
+      "sourceType": "boardy_curated_development_candidate",
+      "evidenceStatus": "development-observed",
+      "confidence": "medium",
+      "provenance": {
+        "sourceUrl": "https://x.com/BrynRenner/status/2087964717063041429",
+        "sourceCaseIds": [
+          "dev-boardy-008"
+        ],
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "dev-boardy-009",
+      "category": [
+        "banter",
+        "continuity"
+      ],
+      "categoryStatus": "development-label",
+      "threadUnit": "muaz-storytelling",
+      "sourceType": "boardy_curated_development_candidate",
+      "evidenceStatus": "development-observed",
+      "confidence": "medium",
+      "provenance": {
+        "sourceUrl": "https://x.com/MuazXinthi/status/2087964669390577764",
+        "sourceCaseIds": [
+          "dev-boardy-009"
+        ],
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-lead-001",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-visible-root:2088037136385679568",
+      "sourceType": "boardy_visible_chrome_candidate",
+      "evidenceStatus": "visible-page-only",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceUrl": "https://x.com/BenBoehme/status/2088037136385679568",
+        "sourceCaseIds": [
+          "boardy-lead-001"
+        ],
+        "rootId": "2088037136385679568",
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-lead-002",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-visible-root:2088035649375113488",
+      "sourceType": "boardy_visible_chrome_candidate",
+      "evidenceStatus": "visible-page-only",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceUrl": "https://x.com/endyjtwn/status/2088036116486295684",
+        "sourceCaseIds": [
+          "boardy-lead-002"
+        ],
+        "rootId": "2088035649375113488",
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-lead-003",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-visible-root:2088031930302562362",
+      "sourceType": "boardy_visible_chrome_candidate",
+      "evidenceStatus": "visible-page-only",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceUrl": "https://x.com/kaushikimmadi/status/2088036102888394897",
+        "sourceCaseIds": [
+          "boardy-lead-003"
+        ],
+        "rootId": "2088031930302562362",
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-lead-004",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-visible-root:2088035892707389939",
+      "sourceType": "boardy_visible_chrome_candidate",
+      "evidenceStatus": "visible-page-only",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceUrl": "https://x.com/Benjamin_SMC/status/2088035892707389939",
+        "sourceCaseIds": [
+          "boardy-lead-004"
+        ],
+        "rootId": "2088035892707389939",
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    }
+  ],
+  "originalOrQuotePool": [
+    {
+      "caseId": "boardy-original-root-2085496756259762432",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2085496756259762432",
+      "sourceType": "boardy_original_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-original-001"
+        ],
+        "sourceUrl": "https://x.com/boardyai/status/2085496756259762432",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2085496756259762432",
+        "rootId": "2085496756259762432",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-original-root-2085465182264828204",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2085465182264828204",
+      "sourceType": "boardy_original_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-original-002"
+        ],
+        "sourceUrl": "https://x.com/boardyai/status/2085465182264828204",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2085465182264828204",
+        "rootId": "2085465182264828204",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-original-root-2085399390265446909",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2085399390265446909",
+      "sourceType": "boardy_original_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-original-003"
+        ],
+        "sourceUrl": "https://x.com/boardyai/status/2085399390265446909",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2085399390265446909",
+        "rootId": "2085399390265446909",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-original-root-2085386886202237066",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2085386886202237066",
+      "sourceType": "boardy_original_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-original-004"
+        ],
+        "sourceUrl": "https://x.com/boardyai/status/2085386886202237066",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2085386886202237066",
+        "rootId": "2085386886202237066",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-original-root-2085377857866420669",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2085377857866420669",
+      "sourceType": "boardy_original_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-original-005"
+        ],
+        "sourceUrl": "https://x.com/boardyai/status/2085377857866420669",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2085377857866420669",
+        "rootId": "2085377857866420669",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-original-root-2085295061323878405",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2085295061323878405",
+      "sourceType": "boardy_original_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-original-006"
+        ],
+        "sourceUrl": "https://x.com/boardyai/status/2085295061323878405",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2085295061323878405",
+        "rootId": "2085295061323878405",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-original-root-2085214284527833494",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2085214284527833494",
+      "sourceType": "boardy_original_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-original-007"
+        ],
+        "sourceUrl": "https://x.com/boardyai/status/2085214284527833494",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2085214284527833494",
+        "rootId": "2085214284527833494",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-original-root-2085177788760489999",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2085177788760489999",
+      "sourceType": "boardy_original_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-original-008"
+        ],
+        "sourceUrl": "https://x.com/boardyai/status/2085177788760489999",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2085177788760489999",
+        "rootId": "2085177788760489999",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-original-root-2085162689219969505",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2085162689219969505",
+      "sourceType": "boardy_original_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-original-009"
+        ],
+        "sourceUrl": "https://x.com/boardyai/status/2085162689219969505",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2085162689219969505",
+        "rootId": "2085162689219969505",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-original-root-2085025469137633316",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2085025469137633316",
+      "sourceType": "boardy_original_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-original-010"
+        ],
+        "sourceUrl": "https://x.com/boardyai/status/2085025469137633316",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2085025469137633316",
+        "rootId": "2085025469137633316",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-original-root-2084972687265329523",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2084972687265329523",
+      "sourceType": "boardy_original_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-original-011"
+        ],
+        "sourceUrl": "https://x.com/boardyai/status/2084972687265329523",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2084972687265329523",
+        "rootId": "2084972687265329523",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-original-root-2084959097988714515",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2084959097988714515",
+      "sourceType": "boardy_original_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-original-012"
+        ],
+        "sourceUrl": "https://x.com/boardyai/status/2084959097988714515",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2084959097988714515",
+        "rootId": "2084959097988714515",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-original-root-2084943747054551403",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2084943747054551403",
+      "sourceType": "boardy_original_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-original-013"
+        ],
+        "sourceUrl": "https://x.com/boardyai/status/2084943747054551403",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2084943747054551403",
+        "rootId": "2084943747054551403",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-original-root-2084852898274709712",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2084852898274709712",
+      "sourceType": "boardy_original_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-original-014"
+        ],
+        "sourceUrl": "https://x.com/boardyai/status/2084852898274709712",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2084852898274709712",
+        "rootId": "2084852898274709712",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-original-root-2084829092432503037",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2084829092432503037",
+      "sourceType": "boardy_original_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-original-015"
+        ],
+        "sourceUrl": "https://x.com/boardyai/status/2084829092432503037",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2084829092432503037",
+        "rootId": "2084829092432503037",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-original-root-2084828738609725951",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2084828738609725951",
+      "sourceType": "boardy_original_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-original-016"
+        ],
+        "sourceUrl": "https://x.com/boardyai/status/2084828738609725951",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2084828738609725951",
+        "rootId": "2084828738609725951",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-original-root-2084814142825726172",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2084814142825726172",
+      "sourceType": "boardy_original_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-original-017"
+        ],
+        "sourceUrl": "https://x.com/boardyai/status/2084814142825726172",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2084814142825726172",
+        "rootId": "2084814142825726172",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-original-root-2084796274692481271",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2084796274692481271",
+      "sourceType": "boardy_original_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-original-018"
+        ],
+        "sourceUrl": "https://x.com/boardyai/status/2084796274692481271",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2084796274692481271",
+        "rootId": "2084796274692481271",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-original-root-2084748711389774299",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2084748711389774299",
+      "sourceType": "boardy_original_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-original-019"
+        ],
+        "sourceUrl": "https://x.com/boardyai/status/2084748711389774299",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2084748711389774299",
+        "rootId": "2084748711389774299",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    },
+    {
+      "caseId": "boardy-original-root-2084677765958123777",
+      "category": [],
+      "categoryStatus": "pending-manual-label",
+      "threadUnit": "boardy-public-root:2084677765958123777",
+      "sourceType": "boardy_original_public_api_candidate",
+      "evidenceStatus": "partial-public-api",
+      "confidence": "candidate",
+      "provenance": {
+        "sourceCaseIds": [
+          "boardy-original-020"
+        ],
+        "sourceUrl": "https://x.com/boardyai/status/2084677765958123777",
+        "sourceApiUrl": "https://api.fxtwitter.com/status/2084677765958123777",
+        "rootId": "2084677765958123777",
+        "chainLength": 1,
+        "relationshipAndPrivateOutcome": "unknown"
+      }
+    }
+  ],
+  "summary": {
+    "replyPoolCases": 50,
+    "replyPoolThreadUnits": 50,
+    "replyPoolCategoryLabelsPending": 41,
+    "replyPoolProvenanceReviewPending": 50,
+    "originalPoolCases": 20,
+    "originalPoolThreadUnits": 20,
+    "originalPoolProvenanceReviewPending": 20,
+    "duplicateReplyThreadUnits": [],
+    "replyTargetReachedBeforeReview": true,
+    "originalTargetReachedBeforeReview": true
+  },
+  "releaseBlockers": [
+    "Complete public-chain and source-completeness review for every candidate.",
+    "Assign frozen capability categories without using expected actions or wording.",
+    "Resolve thread/actor sequence overlap across development, validation, frozen, and holdout partitions.",
+    "Exclude or downgrade cases whose missing context prevents a credible parity judgment."
+  ]
+}

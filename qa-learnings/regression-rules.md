@@ -1,5 +1,315 @@
 # Regression rules
 
+## Rule: New Agents must start on the requested OpenAI runtime
+
+**Defect class:** Default model/provider selection / legacy seed migration
+
+**General principle:** A new Agent should begin with the product’s declared default runtime, and an old untouched seed should not silently keep selecting a different provider after the default changes. Explicitly configured model choices remain user-owned.
+
+**Incident:** New Agents opened Brain with Anthropic selected, and Chat reported that Anthropic was selected but not connected even though OpenAI GPT 5.6 Luna was the intended default.
+
+**Project enforcement:** `createAgent` seeds OpenAI `gpt-5.6-luna` with medium reasoning and an OpenAI connection. `normalizeState` migrates only the exact unconfigured legacy Anthropic seed (`claude`/high) and preserves configured Anthropic selections.
+
+**Executable protection:** `tests/runtime.test.ts` asserts the new default and both sides of the narrow legacy migration; `tests/e2e/openpresence.spec.ts` verifies the default Brain selection after Agent creation.
+
+**Apply when:** Changing model/provider defaults, onboarding, Brain runtime selection, provider access, or persisted Agent workspace normalization.
+
+**Added:** 2026-08-14
+
+## Rule: Sandbox Assignment drafts must not publish internal QA markers
+
+**Defect class:** Internal test-context leakage / public-copy hygiene
+
+**General principle:** Assignment instructions belong to the operator and runtime. A Presence may use them to decide what to do, but must not expose internal QA identifiers in a public Sandbox expression.
+
+**Incident:** A diagnostic Assignment explicitly containing `QA-TEN-RUN-2026-08-14` produced historical Sandbox posts carrying that marker, making test output look like repetitive public content and obscuring whether the model or harness was speaking.
+
+**Project enforcement:** Every text candidate passes through `cleanSandboxDraft` before editing, length checks, duplicate checks, and delivery. Internal `QA-*` markers are removed; a marker-only candidate becomes `no_op` instead of an empty publication.
+
+**Executable protection:** `tests/runtime.test.ts` covers marker removal and preserves ordinary QA subject matter; `tests/e2e/playground-rehearsal.spec.ts` verifies the Assignment-to-Feed path never renders the diagnostic marker.
+
+**Apply when:** Changing Assignment prompts, AI candidate editing, Sandbox delivery, Feed projection, or QA instructions that contain internal identifiers.
+
+**Added:** 2026-08-14
+
+## Rule: Sandbox style fixtures classify only public Assignment intent
+
+**Defect class:** Presence-style contamination from private runtime context
+
+**General principle:** A Sandbox fixture must be selected from the Agent/Presence profile and the operator's explicit Assignment, not from private execution-envelope or prompt-scaffolding text. Internal runtime language is not public style evidence.
+
+**Incident:** A Genny-shaped workspace received Alex-style offer/sales candidates because the mock classifier scanned the complete private Assignment prompt. Runtime words such as `execution` could win over the selected Presence's builder territory.
+
+**Project enforcement:** `assignmentMockCandidates` extracts the explicit Assignment instruction before profile matching and uses word-bounded, Presence-aware precedence. The full prompt remains available to cognition, but cannot steer the local style fixture.
+
+**Executable protection:** `tests/ai.test.ts` covers the three configured fixture families and a Genny-shaped profile with private execution prose; the latter must remain builder-specific and must not select an offer candidate.
+
+**Apply when:** Changing Assignment prompt construction, mock AI fixtures, Presence style selection, or private execution context passed to social cognition.
+
+**Added:** 2026-08-14
+
+## Rule: Playground removal must be item-scoped and Sandbox-only
+
+**Defect class:** Playground feed curation / destructive action scope
+
+**General principle:** A rehearsal feed needs a low-friction way to remove one noisy social object without resetting the whole experiment or implying that live channel content was deleted.
+
+**Project enforcement:** Each Sandbox post, reply, and social event exposes an accessible `Remove … from Playground` control. The server accepts only a matching Sandbox session/object pair, removes the selected Mirror object and derived perception records, and leaves the rest of the rehearsal intact.
+
+**Executable protection:** `tests/sandbox.test.ts` verifies one-object removal preserves the remaining object; `tests/e2e/openpresence.spec.ts` verifies removing a reply and then a post in Chromium and Pixel 5, including persistence after reload.
+
+**Apply when:** Changing Playground cards, Social Mirror state, rehearsal reset/curation, or any UI that can remove simulated social-world context.
+
+**Added:** 2026-08-14
+
+## Rule: Presence Chat must answer as the selected public self
+
+**Defect class:** Chat identity boundary / social-context fallback
+
+**General principle:** A simulated feed post is social-world evidence. Chat responses must stay in the selected Presence's public voice and may not fall through to private Agent/Teach language or expose runtime mechanics.
+
+**Incident:** In local/mock Chat, a normal post was stored correctly but the response fell through to the generic Agent reply fixture: `I understood ... This response came through the Agent runtime.` Prior rehearsal history could also make a later post receive an unrelated memory response.
+
+**Project enforcement:** `generatePresenceChatReply` uses context-sensitive public-self fixtures for local rehearsal inputs and matches the current post before history-derived cues. Provider-backed Chat continues to receive the explicit social prompt, selected Presence, session history, and optional reply target.
+
+**Executable protection:** `tests/ai.test.ts` rejects runtime wording and proves a current edge-case post is not overridden by prior memory context; `tests/e2e/openpresence.spec.ts` verifies a normal post and an explicit Reply in Chromium, including selected-thread context.
+
+**Apply when:** Changing Presence Chat, social rehearsal prompts, mock/runtime fallbacks, or any route that translates simulated world posts into Presence replies.
+
+**Added:** 2026-08-14
+
+## Rule: Teach must require an explicit Presence-mode command
+
+**Defect class:** Conversational command parsing / quoted social context
+
+**General principle:** A word inside a social handle, quotation, example, or world-data description is not an operator command. State-changing conversational actions require an explicit imperative that names the target and requested transition.
+
+**Incident:** Teach matched the substring `ghost` anywhere in the operator's message. Asking how to handle `@jenny_ghost write a post about SpaceX` therefore changed the Presence to Ghost and surfaced `Presence changed to Ghost`, even though the user asked for nuanced mention handling.
+
+**Project enforcement:** `isExplicitGhostModeRequest` accepts explicit Presence-to-Ghost imperatives and rejects quoted handles or incidental mentions. The `sendMessage` operation uses that recognizer instead of a substring check.
+
+**Executable protection:** `tests/runtime.test.ts` asserts the exact reported mention leaves the Presence Agent-owned and that the explicit mode phrase still changes it; `tests/e2e/openpresence.spec.ts` exercises the same Teach flow and checks the state route.
+
+**Apply when:** Changing Teach command parsing, natural-language state mutations, Presence mode/identity controls, or handling of quoted social-world text.
+
+**Added:** 2026-08-13
+
+## Rule: Durable writing preferences must have real proposal provenance
+
+**Defect class:** Teach preference acknowledgement / phantom proposal
+
+**General principle:** If the Agent says a protected preference is a reviewable proposal, the proposal and its ChangeSet must exist in durable state. The acknowledgement must repeat the exact scope and distinguish immediate conversational behavior from authoritative meaning.
+
+**Incident:** The one-sentence-per-line post-formatting preference was described as a proposal, but no proposal was actually created, leaving the operator unable to find or review what the Agent claimed to have added.
+
+**Project enforcement:** Teach recognizes the post-only formatting request, appends the exact guidance to a pending `TASTE` proposal, creates its ChangeSet, and says that posts use blank-line-separated sentence paragraphs while replies remain normally formatted until approval.
+
+**Executable protection:** `tests/runtime.test.ts` asserts the proposal body, exact interim behavior, and ChangeSet; `tests/e2e/openpresence.spec.ts` verifies the Teach response and persisted proposal.
+
+**Apply when:** Changing Teach durable preferences, protected meaning proposals, writing-style instructions, or acknowledgement copy.
+
+**Added:** 2026-08-13
+
+## Rule: Assignment review must expose the delegated authority boundary
+
+**Defect class:** Assignment review copy / operator-versus-Agent ownership
+
+**General principle:** When an operator assigns an outcome, the review surface must distinguish the required deliverable from the Agent's freedom over the approach. A generic `Agent decides` label can make required work look optional or make the Agent appear to own the outcome.
+
+**Incident:** The Assignment review card labeled the approach column `Jenny decides`, even though the operator had already assigned the expected deliverable. The supporting list was accurate but the authority boundary was ambiguous at the moment the operator approved the work.
+
+**Project enforcement:** The review card labels the approach column `Agent decides how` and keeps the explicit list of topics, thesis, evidence, format, wording, and timing strategy. Deliverable and verified completion remain separate columns.
+
+**Executable protection:** `tests/e2e/playground-rehearsal.spec.ts` reviews an Assignment and asserts the `Agent decides how` label, the approach list, and the absence of `Jenny decides` on Chromium and Pixel 5.
+
+**Apply when:** Changing Assignment creation/review copy, delegated responsibility, Consider versus Assign controls, or any surface that explains Agent autonomy inside an operator instruction.
+
+**Added:** 2026-08-13
+
+## Rule: Teach must not turn symbol-only operator context into assistant onboarding
+
+**Defect class:** Teach conversation identity / low-information operator input
+
+**General principle:** Teach is a person-shaped conversation with the Agent's private mind. A punctuation or symbol-only operator turn may be meaningful context, but it is not a request for a help menu, topic invention, or generic onboarding response.
+
+**Incident:** The operator sent \`.\` and \`?\`; Teach answered with “Share a question, idea, or half-formed thought” and “What’s on your mind?” The transcript looked like a generic assistant instead of an Agent being shaped by its operator.
+
+**Project enforcement:** \`isLowInformationCue\` records the operator turn without adding a canned Agent reply, the state route skips the model call for that cue, and the operator prompt explicitly prohibits generic AI-assistant onboarding.
+
+**Executable protection:** \`tests/runtime.test.ts\` asserts symbol-only Teach turns contain only the operator message; \`tests/e2e/openpresence.spec.ts\` verifies a fresh \`?\` turn has no onboarding response; \`tests/ai.test.ts\` asserts the Teach prompt is person-shaped.
+
+**Apply when:** Changing Teach, operator conversation routing, Brain prompt construction, low-information handling, or Chat/Teach surface boundaries.
+
+**Added:** 2026-08-13
+
+## Rule: Delegated Assignments need visible cancellation
+
+**Defect class:** Assignment lifecycle / action completeness
+
+**General principle:** Any delegated workflow that can remain drafted or active must expose a clear cancellation action, preserve its history, and prevent cancelled work from restarting.
+
+**Project-specific risk:** Assignments had a `cancelled` status in the data model but the calendar did not provide a clear review-and-cancel interaction, leaving operators unable to stop or dismiss a scheduled draft without hunting through a separate list.
+
+**Project enforcement:** Scheduled Assignments are distinct cards in the Week calendar. Opening a card reveals timing, verified progress, Sandbox run/retry, and `Cancel Assignment` for non-terminal work; `cancelAssignment` marks the record cancelled and records a decision event; completed and cancelled Assignments cannot be restarted or cancelled again.
+
+**Executable protection:** `tests/runtime.test.ts` covers draft and active cancellation plus restart prevention. `tests/e2e/playground-rehearsal.spec.ts` covers opening the Assignment detail surface, confirming cancellation, exact-time calendar placement, and cancelled-history state on Chromium and Pixel 5.
+
+**Apply when:** Adding or changing delegated workflows, Assignment statuses, Schedule rows, background work, or terminal lifecycle actions.
+
+**Added:** 2026-08-13
+
+## Rule: UI forms must enforce runtime contracts before submission
+
+**Defect class:** Form validation / API contract mismatch
+
+**General principle:** Client forms should constrain values to the same limits as the write API and provide an actionable validation path before submission.
+
+**Project-specific risk:** The Manage Agent skill form allowed prompts longer than the API's 500-character limit, producing only a generic save failure.
+
+**Learned from:** OpenPresence Playground experiment on 2026-08-13.
+
+**Why QA missed it:** The form had required fields but no visible length constraint, and existing coverage did not exercise a near-boundary skill prompt.
+
+**Project enforcement:** `app/page.tsx` applies `maxLength={100}` to skill names and `maxLength={500}` to skill prompts; `tests/e2e/openpresence.spec.ts` asserts both attributes and completes a successful skill creation.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts` — `Skill creation keeps the instruction within the API contract`.
+
+**Apply when:** Adding or editing any form backed by a stricter Zod/API length, enum, format, or cardinality constraint.
+
+**Added:** 2026-08-13
+
+## Rule: Provider switching must choose an available runtime model
+
+**Defect class:** Runtime selection / environment capability mismatch
+
+**General principle:** A provider selector must choose from currently available capabilities, not a hard-coded default that may not exist in the target environment.
+
+**Project-specific risk:** Switching an Agent to Ollama selected `llama3.2` even though the local runtime only exposed `qwen3-vl:8b`, `qwen2.5:7b-instruct`, and other installed models; Playground then failed before cognition.
+
+**Learned from:** Alex Klonemozi Playground experiment on 2026-08-13.
+
+**Why QA missed it:** Provider UI coverage checked the selected provider label but not that the selected model was installed and executable.
+
+**Project enforcement:** `app/page.tsx` selects the first discovered Ollama model when changing providers; Brain's model grid remains the source of truth for explicit model selection.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts` — recommended follow-up: mock `/api/ollama/models` with an installed-model fixture and assert provider switching selects that model; currently missing in the existing suite.
+
+**Apply when:** Changing provider access, model discovery, Agent runtime selection, or AI-backed Playground/Chat flows.
+
+**Added:** 2026-08-13
+
+## Rule: Low-information social cues must be judged in context
+
+**Defect class:** Social cognition / minimal or ambiguous inbound content
+
+**General principle:** A short fragment, punctuation mark, emoji, brief acknowledgment, or casual greeting is neither an automatic question nor an automatic reply obligation. Use thread and relationship evidence to decide whether it opens a real exchange. If it does, choose the smallest natural response; otherwise preserve `no_op`. Never turn low-information content into assistant onboarding, invented context, or a canned public line.
+
+**Incident:** A human may answer a minimal cue with `??`, `Yes?`, `👀`, a tiny acknowledgment, or silence depending on the room. Treating every cue as a request produces performative activity; treating every cue as meaningless can miss a genuine conversational opening.
+
+**Project enforcement:** `promptFor` includes the model-facing rule for current and future Agents, and `fileContent("BRAIN")` includes the durable default Brain rule. No phrase-specific branch selects a public action.
+
+**Executable protection:** `tests/ai.test.ts` asserts that social cognition receives the low-information-cue guidance and that newly created Agents carry the Brain rule. The isolated Chrome Playground experiment is the current behavioral evidence; recommended follow-up is a small real-model eval fixture covering fresh and established relationships without asserting exact wording.
+
+**Apply when:** Changing Brain defaults, social cognition prompts, low-content social handling, clarification guidance, or Playground decision evaluation.
+
+**Added:** 2026-08-13
+
+## Rule: Social evaluation failures must not masquerade as intentional silence
+
+**Defect class:** Original Post Rehearsal / structured AI decision handling
+
+**General principle:** A no-op is a valid Agent judgment only when cognition returned a valid social decision. A malformed or unavailable model response must be surfaced as an evaluation failure, while deterministic test mode must provide structured social fixtures so the publication lifecycle is actually exercised.
+
+**Incident:** Original Post Rehearsal received the generic chat mock sentence instead of structured social-decision JSON. The parser correctly refused to publish, but the workflow recorded the result as `NO_OP` and told the operator the Presence chose silence, making an evaluation failure look like a deliberate identity judgment.
+
+**Project enforcement:** `generateAgentSocialDecision` returns a structured Sandbox-only fixture under `OPENPRESENCE_AI_MOCK=1`; `runSandboxAgentCycle` records `Sandbox evaluation unavailable` for the invalid structured-response rationale; the rehearsal completion copy names deliberate silence as “Silence” and explains that no post was formed.
+
+**Executable protection:** `tests/ai.test.ts` verifies structured mock decisions, `tests/sandbox.test.ts` preserves valid no-op calibration and its plain-language outcome, and `tests/e2e/openpresence.spec.ts` verifies Original Post Rehearsal publishes a Sandbox post, preserves private inspiration, records `fits` evidence, and passes on Chromium and Pixel 5.
+
+**Apply when:** Changing Original Post Rehearsal, social decision parsing, AI mock/replay behavior, Sandbox publication lifecycle, or no-op/error copy.
+
+**Added:** 2026-08-13
+
+## Rule: List-like Presence Brief fields must not rewrite text while typing
+
+**Defect class:** Controlled textarea input loss / comma-separated Brief editing
+
+**General principle:** Preserve the operator’s raw draft text during editing. Parse and normalize list-like values at an explicit commit boundary so punctuation, separators, and partial entries remain editable.
+
+**Incident:** Primary territory, Adjacent territory, and Keep out split the textarea value and filtered empty items on every keystroke. Typing a comma created an empty trailing item, which was immediately removed and made the comma disappear.
+
+**Project enforcement:** `PresenceView` stores raw territory strings separately from the persisted `PresenceBrief` arrays; `territoryValues` is applied only by Save brief. Cancel and reopening the editor rehydrate from persisted Presence state.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts` fills trailing commas in Adjacent territory and Keep out, asserts the comma remains before completion, saves internal comma-separated values, reopens the editor, and verifies persistence on Chromium and mobile.
+
+**Apply when:** Changing Presence Brief, territory, boundaries, comma-separated settings inputs, or controlled list-like textareas.
+
+**Added:** 2026-08-13
+
+## Rule: Schedule timing should explain relevance, not execution mechanics
+
+**Defect class:** Standing Intent timing abstraction / progressive disclosure
+
+**General principle:** A scheduled intention grants the Agent a future moment to reconsider the world; it is not a guaranteed delivery slot. The default form should make that boundary legible without requiring operators to understand the persisted execution-window representation.
+
+**Incident:** Schedule exposed every intent with the same raw `Execution window` field, making a meaningful attention choice look like an arbitrary delivery setting and making all updates appear equivalent.
+
+**Project enforcement:** `ScheduleView` keeps the internal window for runtime compatibility, but defaults to a collapsed `Timing options` control with Flexible, Exact time, and Custom relevance choices. List and Week surfaces describe consideration rather than an execution window.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts` asserts the raw field is absent by default, the timing panel is collapsed, the recommended explanation appears when expanded, and custom start/end values persist as consideration copy on Chromium and mobile.
+
+**Apply when:** Changing Schedule, standing intents, future attention, timing controls, calendar geometry, or execution-envelope copy.
+
+**Added:** 2026-08-13
+
+## Rule: Conversational surfaces must render the submitted turn before model completion
+
+**Defect class:** Chat/Teach loading-state omission / duplicate transcript
+
+**General principle:** A conversational submission is a visible user turn immediately. While the Agent is judging or composing, the surface must show a truthful in-flight state, then reconcile that temporary state with exactly one authoritative response.
+
+**Incident:** Chat and Teach waited for the model request to finish before rendering anything, then displayed the user message and Agent response together. A delayed submission could also be invoked twice before React committed the loading flag.
+
+**Project enforcement:** Teach and Presence Chat keep an optimistic local user turn, render a shared accessible `Thinking` status, reconcile against the returned persisted state, and guard the submission with a ref-level in-flight lock. The status communicates cognition without exposing hidden reasoning or infrastructure.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts` delays both API operations and asserts the immediate user turn, visible thinking state, eventual single response, and exact persisted role sequence on Chromium and mobile.
+
+**Apply when:** Changing Chat, Teach, Presence Chat, message submission, model loading states, transcript hydration, or response reconciliation.
+
+**Added:** 2026-08-13
+
+## Rule: Activity decisions must expose provenance and exclude configuration churn
+
+**Defect class:** Activity decision ambiguity / system-event leakage
+
+**General principle:** An operational feed called “What [Presence] decided” must distinguish observed evidence, Agent judgment, selected Social Intent, and delivery state. Configuration acknowledgements and other infrastructure updates are not decisions and must not masquerade as them.
+
+**Incident:** Repeated `Presence settings updated` rows all used the same generic copy, so the Activity feed looked like a sequence of identical decisions and did not explain how any decision was reached.
+
+**Project enforcement:** `isActivityDecisionEvent` excludes generic settings churn from the decision feed. Eligible rows render a compact `Observed`, `Judgment`, and `Delivery` path, with truthful fallbacks when no linked intent, execution, or outcome exists. The empty state names the absence of decisions and directs configuration changes to Settings.
+
+**Executable protection:** `tests/runtime.test.ts` covers the event boundary; `tests/e2e/openpresence.spec.ts` asserts configuration changes do not appear as Presence decisions and the empty state explains the feed.
+
+**Apply when:** Changing Activity event projections, system-event titles, Social Intent/execution lineage, decision summaries, or Presence Settings mutations.
+
+**Added:** 2026-08-13
+
+## Rule: Public Self must explain the zero-disclosure state
+
+**Defect class:** Presence settings / disclosure-state ambiguity
+
+**General principle:** A permissions checklist must explain its default behavior when no option is selected; otherwise operators cannot predict what the Agent will say.
+
+**Incident:** Approved disclosure details were shown as four unchecked controls without explaining the typical response when none were approved.
+
+**Project enforcement:** `PresenceView` renders `.public-facts-default` while `approvedTechnicalFacts` is empty, explaining that the Presence answers naturally, does not volunteer technical details, and still follows the selected Identity posture for direct questions.
+
+**Executable protection:** `tests/e2e/openpresence.spec.ts` asserts the default-state explanation in the Presence Public Self settings flow.
+
+**Apply when:** Changing Public Self, disclosure facts, Identity posture, Ghost boundaries, or Presence settings copy.
+
+**Added:** 2026-08-13
+
 ## Rule: Enabling Auto must explicitly approve the pending review queue
 
 **Defect class:** Execution-policy transition / implicit approval
@@ -47,6 +357,20 @@
 **Apply when:** Changing Playground, MirrorObject lineage, Activity, Presence routing, channel selection, event context, or review execution projections.
 
 **Added:** 2026-08-13
+
+## Rule: Playground worlds must be Presence-scoped
+
+**Defect class:** Cross-Presence rehearsal leakage
+
+**General principle:** Selecting a Presence changes the entire simulated social room. Agent-level meaning remains shared, but channel, Sandbox environment, actors, Social Mirror objects, rehearsal history, assignments, and calibration evidence must remain isolated to the selected Presence/session.
+
+**Project enforcement:** Playground selects only an active session whose `presenceId` matches the selected Presence, automatically opens that Presence's session when switching in-place, and never falls back to another Presence's first session. The navigation and “Presence rehearsal” scope marker make the current embodiment explicit.
+
+**Executable protection:** `tests/sandbox.test.ts` verifies distinct Presence/session/environment/channel roots and shared Agent mind; `tests/e2e/playground-rehearsal.spec.ts` verifies an X-only marker is absent from a LinkedIn world and returns when switching back on Chromium and Pixel 5.
+
+**Apply when:** Changing Playground state projection, Presence switching, Sandbox sessions/environments, Social Mirror history, actor simulation, rehearsal calibration, or Agent-vs-Presence boundaries.
+
+**Added:** 2026-08-14
 
 ## Rule: Chat must contain intentional conversation turns only
 
@@ -278,13 +602,13 @@
 
 **General principle:** AI agents should be able to drive Playground without parsing UI copy or receiving unrelated application state. Every CLI command must return structured JSON by default, identify the selected sandbox session, preserve the observation → decision → execution → outcome chain, and never enable live delivery.
 
-**Project enforcement:** `openpresence playground` targets `/api/state` only with Playground operations, projects state into Presence/world/decisions/review/timeline records, supports deterministic virtual time and JSON scenarios, and requires `--human` for non-machine output. Documentation uses `pnpm --silent` so package-manager banners cannot corrupt JSON streams.
+**Project enforcement:** `openpresence playground`, `openpresence schedule`, and `openpresence watching` target `/api/state` only with sandbox-safe operations, project Presence/session-scoped records, and require `--human` for non-machine output. Playground supports deterministic virtual time, Assignments, original-post calibration, and JSON scenarios; Schedule preserves Consider versus Assign semantics and blocks non-Sandbox evaluation; Watching preserves automatic/manual source status without inventing observations. Documentation uses `pnpm --silent` so package-manager banners cannot corrupt JSON streams.
 
-**Executable protection:** `tests/playground-cli.test.ts` verifies projection redaction, operation translation, and structured server errors. Local smoke verification covers `start`, `inspect`, `inject`, `advance`, `timeline`, and scenario replay against the production-shaped app.
+**Executable protection:** `tests/playground-cli.test.ts` verifies projection redaction, operation translation for Playground/Schedule/Watching, and structured server errors. Local smoke verification covers `start`, `inspect`, `inject`, `advance`, `timeline`, Assignments, rehearsal feedback, Schedule mutation/evaluation, Watch lifecycle, and live-scope blocking against the production-shaped app.
 
 **Apply when:** Changing the Playground CLI, scenario format, agent-facing state projections, sandbox commands, or command output formatting.
 
-**Added:** 2026-08-13
+**Added:** 2026-08-13; expanded 2026-08-14
 
 ## Rule: Presence marks must stay legible and channel-scoped
 
@@ -1058,3 +1382,118 @@
 **Apply when:** Changing Calendar, Schedule, Standing Intent, publication history, Social Mirror projections, outcome metrics, or Presence navigation.
 
 **Added:** 2026-08-13
+## Rule: Browser QA must verify the active local build and origin
+
+**Defect class:** Stale browser bundle / multiple local development servers
+
+**General principle:** A user-facing browser feature is not verified by API success or a headless run alone. The test must exercise the same browser surface the user is using, confirm the active origin and current client bundle, and prove the user journey from navigation to persisted result.
+
+**Incident:** Chrome was pointed at an older local app tab on `localhost:3001`, which still rendered the pre-Watching navigation while the current implementation was available on another local server. The current API accepted the Watch mutation, but the stale browser could not expose the feature.
+
+**Project enforcement:** Watching QA starts one known local server, opens a fresh Chrome tab, confirms the `Watching` navigation item, and completes create → reload → remove. When multiple local servers exist, record the exact origin under test and do not treat a different port as equivalent evidence.
+
+**Executable protection:** `tests/e2e/watching.spec.ts` covers the complete creator persistence/removal journey and topic/opportunity boundary on Chromium and Pixel 5; Chrome acceptance was independently rerun on `localhost:3103` with no console errors and 200 responses through load, create, and delete.
+
+**Apply when:** Adding or changing user-facing navigation, local dev-server routing, browser bundles, cache-sensitive UI, or any feature reported as missing or broken in a real browser.
+
+**Added:** 2026-08-13
+
+## Rule: Watch activation and observation readiness must use separate language
+
+**Defect class:** Watch lifecycle copy / implementation-state leakage
+
+**General principle:** A configured capability and the data it has produced are different states. User-facing status must say whether the capability is active, what evidence is currently available, what it is waiting for, and whether the operator needs to act; never expose an internal “not started” metric as if it were a pending user action.
+
+**Incident:** A green `Watching` pill appeared beside `Performance baseline · Not started`, making an already-started Watch look both active and inactive. “Performance baseline” also implied a metric workflow that the operator could not start or understand.
+
+**Project enforcement:** `WatchingView` renders `Active watch` plus `Waiting for first observation` for automatic creator Watches, and `Manual source` plus `Waiting for source material` for topic/opportunity Watches. The page explains that starting saves the attention instruction and observations appear only when a source supplies evidence; the internal baseline field is not exposed.
+
+**Executable protection:** `tests/e2e/watching.spec.ts` asserts both lifecycle messages and asserts that `Performance baseline`/`Not started` are absent on Chromium and Pixel 5.
+
+**Apply when:** Changing Watching, observation status, source readiness, baselines, metrics, connected-source language, or any UI that combines activation state with collected evidence.
+
+**Added:** 2026-08-14
+
+## Rule: Ghost identity protection must allow public subject matter
+
+**Defect class:** Ghost identity boundary / false-positive content rejection
+
+**General principle:** Identity disclosure protection must block private runtime details without treating ordinary public subject matter as implementation leakage.
+
+**Incident:** An Assignment about building the best AI model repeatedly generated valid posts, but the Ghost filter treated the generic word `model` as forbidden, rewrote every candidate to `no_op`, and left the Assignment at 0/4 with no execution.
+
+**Project enforcement:** `identityLeakageReason` blocks specific provider, exact-model, and runtime-detail phrases, while allowing ordinary discussion of an AI model as the public topic. Assignment candidates must still reach `formSandboxIntent` and verified Sandbox delivery.
+
+**Executable protection:** `tests/runtime.test.ts` covers both permitted public subject matter and blocked private runtime disclosure; the Assignment rehearsal E2E coverage verifies the delegated flow remains usable.
+
+**Apply when:** Changing Ghost boundaries, Assignment candidate QA, public subject-matter posts, or model/provider disclosure rules.
+
+**Added:** 2026-08-13
+
+## Assignment schedule metadata must survive the review handoff
+
+**Incident:** The Schedule Assignment form accepted a day, time, and exact/flexible timing choice, but the `createAssignment` operation discarded those fields. The resulting row falsely collapsed a near-term Assignment to `Once`, leaving the operator unable to verify when it was intended to run.
+
+**Product boundary:** Assignment timing is an operator-provided execution window, not a command to publish regardless of context. The Agent still owns how it fulfills the outcome, and Sandbox verification remains the only source of progress.
+
+**Executable protection:** `Assignment.schedule` is carried through the typed operation, runtime compiler, state route, and Schedule row; the runtime test asserts that exact timing remains attached to the created Assignment.
+
+## Rule: Assignment candidates must be distinct and delivery must be idempotent
+
+**Defect class:** Repeated publication / duplicate execution
+
+**General principle:** An outcome Assignment is not complete when the system has emitted the same draft repeatedly. Candidate quality must reject already-verified text, and retrying a succeeded execution must not create another public object or count progress twice.
+
+**Project enforcement:** Sandbox Assignment cycles compare normalized drafts against that Assignment's verified Mirror publications; `deliverSandboxExecution` returns the existing state for a succeeded execution and refuses statuses that are not ready for delivery.
+
+**Executable protection:** `tests/ai.test.ts` covers structured decision parsing; `tests/sandbox.test.ts` covers exactly-once delivery and asset lineage; `tests/e2e/playground-rehearsal.spec.ts` asserts five distinct delivered posts.
+
+**Apply when:** Changing Assignment generation, retries, execution claiming, delivery, progress counters, or deterministic AI fixtures.
+
+## Rule: Scheduled Assignments belong on the Week calendar with Standing Intents
+
+**Defect class:** Schedule visibility / operator discoverability
+
+**General principle:** A scheduled Assignment is a delegated outcome with a time window. It should be visible in the same weekly planning surface as Standing Intents, while remaining visually distinct because a schedule grants attention and does not guarantee publication.
+
+**Project enforcement:** The Week calendar projects scheduled Assignments, includes the full 00:00–23:00 local-time range, labels them as Assignments, and provides a direct Run/Retry in Playground action. The list remains the detail and cancellation surface.
+
+**Executable protection:** `tests/e2e/playground-rehearsal.spec.ts` asserts a 23:35 Assignment appears as a calendar card and retains its status/timing.
+
+**Apply when:** Changing Schedule, Assignment timing, calendar projection, late-night schedules, or operator actions for draft/blocked work.
+
+## Rule: Sandbox media must survive decision → publication → Mirror → Feed
+
+**Defect class:** Multimodal rehearsal false positive
+
+**General principle:** An asset claim is only useful when the simulated publication stores its asset provenance and the Feed renders the resulting image, chart, GIF, video, or link instead of dropping it at an intermediate layer.
+
+**Project enforcement:** Social decisions carry supported asset metadata; local mock rehearsals use deterministic Sandbox fixtures; publication asset IDs become Mirror asset references; Feed renders local and source URLs without changing the live connector boundary.
+
+**Executable protection:** `tests/sandbox.test.ts` verifies asset lineage; `tests/e2e/playground-rehearsal.spec.ts` verifies the requested five-media set in Feed.
+
+**Apply when:** Changing social decision schemas, asset uploads, Sandbox fixtures, publication storage, Social Mirror projection, or Feed rendering.
+
+## Rule: Assignment quantity must equal Feed quantity, and replies must use current inbound context
+
+**Defect class:** Partial Assignment completion / stale social context
+
+**General principle:** An Assignment that asks for N original publications must either deliver N distinct verified publications or remain visibly incomplete; a reply decision must be grounded in the newest inbound object, not whichever matching phrase appeared earlier in the thread.
+
+**Project enforcement:** Sandbox Assignment work derives a bounded attempt budget from remaining quantity and rejects only verified duplicate drafts. Deterministic reply rehearsal extracts the newest inbound object before selecting a context fixture. Feed is the acceptance surface for successful original publications and includes each verified Sandbox publication exactly once.
+
+**Executable protection:** `tests/e2e/playground-rehearsal.spec.ts` asserts 10/10 delivered and exactly 10 Feed items; `tests/ai.test.ts` asserts distinct context-specific reply decisions; Chrome QA verifies 10 unique replies in the rendered rehearsal.
+
+**Apply when:** Changing Assignment quantity parsing, candidate retry budgets, deterministic AI fixtures, Social Mirror context assembly, or Feed projections.
+
+## Rule: Assignment quantities must ignore incidental numbers
+
+**Defect class:** Quantity parsing / destructive overproduction
+
+**General principle:** Natural-language quantity extraction must prioritize explicit quantity phrases or numbers attached to the requested deliverable, and must not interpret dates, years, URLs, or QA markers as the requested count.
+
+**Project enforcement:** `assignmentQuantity` prioritizes modifiers such as `exactly 1`, then recognizes numbers followed by a bounded deliverable phrase such as `10 original X posts`; review must show the same quantity before rehearsal starts.
+
+**Executable protection:** `tests/runtime.test.ts` asserts that `QA-ONE-2026-08-14 ... exactly 1 ...` and `QA-TEN-2026-08-14 ... exactly 10 ...` compile to 1 and 10 respectively.
+
+**Apply when:** Changing Assignment instruction parsing, review-card quantities, schedule Assignment compilation, or QA-marker/test instructions.
