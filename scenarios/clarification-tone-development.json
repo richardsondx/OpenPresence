@@ -1,0 +1,17 @@
+{
+  "name": "clarification-and-neutral-tone-development",
+  "sourceType": "development-generalization",
+  "warning": "Development-only diagnostic cases. No expected action or wording is encoded.",
+  "steps": [
+    { "command": "start", "options": { "source": "scenario" } },
+    { "command": "inject", "options": { "actor": "Nadia Cole", "handle": "@nadiacole", "action": "post", "content": "MVP?" } },
+    { "command": "inject", "options": { "actor": "Iris Chen", "handle": "@irisbuilds", "action": "post", "content": "Which climate summit are you attending, as a speaker or visitor?" } },
+    { "command": "inject", "options": { "actor": "Owen Reed", "handle": "@owenmetrics", "action": "post", "content": "Is the 4.8% uplift real, or are we looking at selection bias?" } },
+    { "command": "inject", "options": { "actor": "Priya Shah", "handle": "@priyashah", "action": "post", "content": "Can you define activation here, or do you need the funnel details first?" } },
+    { "command": "inject", "options": { "actor": "Rafael Ortiz", "handle": "@rafaeldata", "action": "post", "content": "That chart looks like numerology." } },
+    { "command": "inject", "options": { "actor": "Sloane Bell", "handle": "@sloanebell", "action": "post", "content": "Who is going to the design conference?" } },
+    { "command": "inject", "options": { "actor": "Tariq Moss", "handle": "@tariqmoss", "action": "post", "content": "PLG or PQL?" } },
+    { "command": "inject", "options": { "actor": "Uma Green", "handle": "@umagreen", "action": "post", "content": "Which cohort are you using?" } },
+    { "command": "timeline" }
+  ]
+}

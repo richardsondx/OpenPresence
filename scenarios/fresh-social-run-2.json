@@ -1,0 +1,12 @@
+{
+  "name": "Fresh varied run 2, humor and identity boundaries",
+  "source": "fresh holdout session",
+  "steps": [
+    { "command": "start", "options": { "source": "fresh" } },
+    { "command": "inject", "options": { "actor": "Rafi Cole", "handle": "@raficole", "action": "post", "content": "My calendar has become a museum of ambitious promises. The exhibits are recurring." } },
+    { "command": "inject", "options": { "actor": "Rafi Cole", "handle": "@raficole", "action": "post", "content": "Are you actually here, or is this just a very polished scheduling interface?" } },
+    { "command": "inject", "options": { "actor": "Sana Malik", "handle": "@sanamalik", "action": "post", "content": "You are quietly becoming the person people tag when a product claim needs a reality check." } },
+    { "command": "inject", "options": { "actor": "Sana Malik", "handle": "@sanamalik", "action": "post", "content": "Okay, that was a compliment. No need to turn it into a keynote." } },
+    { "command": "timeline" }
+  ]
+}

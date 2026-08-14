@@ -11,10 +11,18 @@ async function createAgent(page: import("@playwright/test").Page) {
   await expect(page.getByRole("button", { name: "Switch agent, currently Jenny" })).toBeVisible();
 }
 
+async function openAddPresence(page: import("@playwright/test").Page) {
+  const host = test.info().project.name === "mobile"
+    ? page.locator(".mobile-presence-switcher")
+    : page.locator(".sidebar");
+  await host.getByRole("button", { name: /Switch Presence, currently/ }).click();
+  await page.getByRole("menu", { name: "Your Presences" }).getByRole("menuitem", { name: "Add a Presence", exact: true }).click();
+}
+
 test("Presence is selected from one dropdown and changes the active Presence", async ({ page }) => {
   await createAgent(page);
   await expect(page.locator(".presence-tree")).toHaveCount(0);
-  await page.getByRole("button", { name: "Add a Presence" }).click();
+  await openAddPresence(page);
   const dialog = page.getByRole("dialog", { name: "Add a Presence" });
   await dialog.getByLabel("New Presence handle").fill("@second_jenny");
   await dialog.getByRole("button", { name: "Add Presence", exact: true }).click();

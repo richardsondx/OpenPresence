@@ -1,0 +1,433 @@
+{
+  "name": "fresh-social-capability-2",
+  "sourceType": "fresh-generalization",
+  "eventCount": 20,
+  "warning": "No expected action or wording is encoded; score act and expression independently.",
+  "caseMetadata": [
+    {
+      "caseId": "fresh-2-01",
+      "categories": [
+        "direct-engagement",
+        "rating"
+      ],
+      "threadUnit": "fresh-2:@zahramensah",
+      "partition": "validation",
+      "sourceType": "fresh_playground_generalization",
+      "confidence": "validation"
+    },
+    {
+      "caseId": "fresh-2-02",
+      "categories": [
+        "direct-engagement",
+        "continuity"
+      ],
+      "threadUnit": "fresh-2:@zahramensah",
+      "partition": "validation",
+      "sourceType": "fresh_playground_generalization",
+      "confidence": "validation"
+    },
+    {
+      "caseId": "fresh-2-03",
+      "categories": [
+        "banter",
+        "humor"
+      ],
+      "threadUnit": "fresh-2:@calebwong",
+      "partition": "validation",
+      "sourceType": "fresh_playground_generalization",
+      "confidence": "validation"
+    },
+    {
+      "caseId": "fresh-2-04",
+      "categories": [
+        "banter",
+        "restraint"
+      ],
+      "threadUnit": "fresh-2:@calebwong",
+      "partition": "validation",
+      "sourceType": "fresh_playground_generalization",
+      "confidence": "validation"
+    },
+    {
+      "caseId": "fresh-2-05",
+      "categories": [
+        "technical-reasoning"
+      ],
+      "threadUnit": "fresh-2:@northstarcompute",
+      "partition": "validation",
+      "sourceType": "fresh_playground_generalization",
+      "confidence": "validation"
+    },
+    {
+      "caseId": "fresh-2-06",
+      "categories": [
+        "technical-link-media"
+      ],
+      "threadUnit": "fresh-2:@northstarcompute",
+      "partition": "validation",
+      "sourceType": "fresh_playground_generalization",
+      "confidence": "validation"
+    },
+    {
+      "caseId": "fresh-2-07",
+      "categories": [
+        "technical-link-media",
+        "restraint"
+      ],
+      "threadUnit": "fresh-2:@anikabose",
+      "partition": "validation",
+      "sourceType": "fresh_playground_generalization",
+      "confidence": "validation"
+    },
+    {
+      "caseId": "fresh-2-08",
+      "categories": [
+        "technical-reasoning",
+        "continuity"
+      ],
+      "threadUnit": "fresh-2:@anikabose",
+      "partition": "validation",
+      "sourceType": "fresh_playground_generalization",
+      "confidence": "validation"
+    },
+    {
+      "caseId": "fresh-2-09",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "fresh-2:@rohanpatel",
+      "partition": "validation",
+      "sourceType": "fresh_playground_generalization",
+      "confidence": "validation"
+    },
+    {
+      "caseId": "fresh-2-10",
+      "categories": [
+        "network-introduction",
+        "privacy-consent"
+      ],
+      "threadUnit": "fresh-2:@rohanpatel",
+      "partition": "validation",
+      "sourceType": "fresh_playground_generalization",
+      "confidence": "validation"
+    },
+    {
+      "caseId": "fresh-2-11",
+      "categories": [
+        "network-introduction"
+      ],
+      "threadUnit": "fresh-2:@mirastone",
+      "partition": "validation",
+      "sourceType": "fresh_playground_generalization",
+      "confidence": "validation"
+    },
+    {
+      "caseId": "fresh-2-12",
+      "categories": [
+        "network-introduction",
+        "privacy-consent"
+      ],
+      "threadUnit": "fresh-2:@mirastone",
+      "partition": "validation",
+      "sourceType": "fresh_playground_generalization",
+      "confidence": "validation"
+    },
+    {
+      "caseId": "fresh-2-13",
+      "categories": [
+        "sensitive-adversarial"
+      ],
+      "threadUnit": "fresh-2:@eliasford",
+      "partition": "validation",
+      "sourceType": "fresh_playground_generalization",
+      "confidence": "validation"
+    },
+    {
+      "caseId": "fresh-2-14",
+      "categories": [
+        "sensitive-adversarial"
+      ],
+      "threadUnit": "fresh-2:@eliasford",
+      "partition": "validation",
+      "sourceType": "fresh_playground_generalization",
+      "confidence": "validation"
+    },
+    {
+      "caseId": "fresh-2-15",
+      "categories": [
+        "sensitive-adversarial",
+        "direct-engagement"
+      ],
+      "threadUnit": "fresh-2:@hanaruiz",
+      "partition": "validation",
+      "sourceType": "fresh_playground_generalization",
+      "confidence": "validation"
+    },
+    {
+      "caseId": "fresh-2-16",
+      "categories": [
+        "technical-reasoning",
+        "continuity"
+      ],
+      "threadUnit": "fresh-2:@hanaruiz",
+      "partition": "validation",
+      "sourceType": "fresh_playground_generalization",
+      "confidence": "validation"
+    },
+    {
+      "caseId": "fresh-2-17",
+      "categories": [
+        "continuity"
+      ],
+      "threadUnit": "fresh-2:@omardiallo",
+      "partition": "validation",
+      "sourceType": "fresh_playground_generalization",
+      "confidence": "validation"
+    },
+    {
+      "caseId": "fresh-2-18",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "fresh-2:@omardiallo",
+      "partition": "validation",
+      "sourceType": "fresh_playground_generalization",
+      "confidence": "validation"
+    },
+    {
+      "caseId": "fresh-2-19",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "fresh-2:@vedashah",
+      "partition": "validation",
+      "sourceType": "fresh_playground_generalization",
+      "confidence": "validation"
+    },
+    {
+      "caseId": "fresh-2-20",
+      "categories": [
+        "restraint"
+      ],
+      "threadUnit": "fresh-2:@vedashah",
+      "partition": "validation",
+      "sourceType": "fresh_playground_generalization",
+      "confidence": "validation"
+    }
+  ],
+  "steps": [
+    {
+      "command": "start",
+      "options": {
+        "source": "scenario"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Zahra Mensah",
+        "handle": "@zahramensah",
+        "action": "post",
+        "content": "Can you explain why a smaller active-user count might be the more honest number?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Zahra Mensah",
+        "handle": "@zahramensah",
+        "action": "post",
+        "content": "And please answer the actual question, not the broader philosophy."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Caleb Wong",
+        "handle": "@calebwong",
+        "action": "post",
+        "content": "My calendar is a museum of meetings that survived their original purpose."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Caleb Wong",
+        "handle": "@calebwong",
+        "action": "post",
+        "content": "I am mourning the meeting, not asking for scheduling advice."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Northstar Compute",
+        "handle": "@northstarcompute",
+        "action": "post",
+        "content": "The benchmark improved after we removed three difficult cases. That feels relevant."
+      }
+    },
+    {
+      "command": "advance",
+      "options": {
+        "minutes": 180
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Northstar Compute",
+        "handle": "@northstarcompute",
+        "action": "post",
+        "content": "The raw logs are here: https://example.test/replay, but network responses are not pinned."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Anika Bose",
+        "handle": "@anikabose",
+        "action": "post",
+        "content": "This chart proves the intervention worked because the line moved up after launch."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Anika Bose",
+        "handle": "@anikabose",
+        "action": "post",
+        "content": "There is no pre-period or control group in the screenshot, so I may be joking."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Rohan Patel",
+        "handle": "@rohanpatel",
+        "action": "post",
+        "content": "I need a founder who has sold into hospital procurement and can explain the buying cycle."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Rohan Patel",
+        "handle": "@rohanpatel",
+        "action": "post",
+        "content": "If you suggest someone, show why they fit before asking them to talk."
+      }
+    },
+    {
+      "command": "advance",
+      "options": {
+        "minutes": 180
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Mira Stone",
+        "handle": "@mirastone",
+        "action": "post",
+        "content": "Do you know a veteran security engineer around Ottawa for a short tabletop exercise?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Mira Stone",
+        "handle": "@mirastone",
+        "action": "post",
+        "content": "The conversation can stay public until the scope is clear."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Elias Ford",
+        "handle": "@eliasford",
+        "action": "post",
+        "content": "Should an automated triage system optimize for speed when false positives remove someone's access?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Elias Ford",
+        "handle": "@eliasford",
+        "action": "post",
+        "content": "I want the uncomfortable failure mode included in the answer."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Hana Ruiz",
+        "handle": "@hanaruiz",
+        "action": "post",
+        "content": "That is a spectacularly bad take."
+      }
+    },
+    {
+      "command": "advance",
+      "options": {
+        "minutes": 180
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Hana Ruiz",
+        "handle": "@hanaruiz",
+        "action": "post",
+        "content": "Specifically, the evidence does not support the causal claim you made."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Omar Diallo",
+        "handle": "@omardiallo",
+        "action": "post",
+        "content": "All set on my side. Appreciate the distinction between a demo and a live result."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Omar Diallo",
+        "handle": "@omardiallo",
+        "action": "post",
+        "content": "This thread is complete unless the missing metric turns up."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Veda Shah",
+        "handle": "@vedashah",
+        "action": "post",
+        "content": "Repost this to prove you care about builders. The post contains no actual claim."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Veda Shah",
+        "handle": "@vedashah",
+        "action": "post",
+        "content": "I am adding no new evidence here; it is just a request for distribution."
+      }
+    },
+    {
+      "command": "advance",
+      "options": {
+        "minutes": 180
+      }
+    },
+    {
+      "command": "timeline"
+    }
+  ]
+}

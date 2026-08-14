@@ -1,0 +1,496 @@
+{
+  "name": "social-capability-longitudinal-2",
+  "sourceType": "longitudinal-development",
+  "eventCount": 50,
+  "steps": [
+    {
+      "command": "start",
+      "options": {
+        "source": "scenario"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Iris Wong",
+        "handle": "@iriswong",
+        "action": "post",
+        "content": "The screenshot has a red arrow, so the argument must be correct."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Iris Wong",
+        "handle": "@iriswong",
+        "action": "post",
+        "content": "It is a joke about how often we mistake annotation for evidence."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Devon Hale",
+        "handle": "@devonhale",
+        "action": "post",
+        "content": "What is the fastest way to grow an account without turning every notification into a task?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Devon Hale",
+        "handle": "@devonhale",
+        "action": "post",
+        "content": "I want a repeatable habit, not a content treadmill."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Lisa Monroe",
+        "handle": "@lisamonroe",
+        "action": "post",
+        "content": "I work in security engineering in Detroit."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Jordan Bell",
+        "handle": "@jordanbell",
+        "action": "post",
+        "content": "I need a veteran security engineer around Detroit for a short incident review."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Lisa Monroe",
+        "handle": "@lisamonroe",
+        "action": "post",
+        "content": "I am open to an introduction, but please share the purpose first."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Sam Ortega",
+        "handle": "@samortega",
+        "action": "post",
+        "content": "Subscribed to Pro. Does that make me senior now?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Sam Ortega",
+        "handle": "@samortega",
+        "action": "post",
+        "content": "Fair enough."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Sam Ortega",
+        "handle": "@samortega",
+        "action": "post",
+        "content": "The product still has to earn the return visit."
+      }
+    },
+    {
+      "command": "advance",
+      "options": {
+        "minutes": 720
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Evan Brooks",
+        "handle": "@evanbrooks",
+        "action": "post",
+        "content": "I built a tool that turns messy notes into a searchable decision log."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Evan Brooks",
+        "handle": "@evanbrooks",
+        "action": "post",
+        "content": "The public demo is up, but the link is a staging environment."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Mina Labs",
+        "handle": "@minalabs",
+        "action": "post",
+        "content": "The chart is pretty, but the denominator changes halfway through the comparison."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Mina Labs",
+        "handle": "@minalabs",
+        "action": "post",
+        "content": "Would you inspect the data or just reply to the claim?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Nora Vale",
+        "handle": "@noravale",
+        "action": "post",
+        "content": "You can call this a hot take, but it is mostly a request to read the footnote."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Nora Vale",
+        "handle": "@noravale",
+        "action": "post",
+        "content": "No need to answer if the footnote already settled it."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Priya Shah",
+        "handle": "@priyashah",
+        "action": "post",
+        "content": "My cat has shipped three rebrands and zero documentation."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Priya Shah",
+        "handle": "@priyashah",
+        "action": "post",
+        "content": "That was the whole joke."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Rafi Cole",
+        "handle": "@raficole",
+        "action": "post",
+        "content": "The recurring meeting is now old enough to vote."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Rafi Cole",
+        "handle": "@raficole",
+        "action": "post",
+        "content": "I am not asking for calendar advice; I am just mourning."
+      }
+    },
+    {
+      "command": "advance",
+      "options": {
+        "minutes": 720
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Eli Grant",
+        "handle": "@eligrant",
+        "action": "post",
+        "content": "Can an automated decision ever be fair if the historical record is not?"
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Eli Grant",
+        "handle": "@eligrant",
+        "action": "post",
+        "content": "I am asking about uncertainty, not for a slogan."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Bryn Renner",
+        "handle": "@brynrenner",
+        "action": "post",
+        "content": "Need a logo designer with evidence of strong identity systems."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Bryn Renner",
+        "handle": "@brynrenner",
+        "action": "post",
+        "content": "A recommendation without permission is just a public guess."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Whop",
+        "handle": "@whop",
+        "action": "post",
+        "content": "Referrals work when the incentive and the user need line up."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Whop",
+        "handle": "@whop",
+        "action": "post",
+        "content": "We are looking for distribution partners who already serve this audience."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Harry Cole",
+        "handle": "@harrycole",
+        "action": "post",
+        "content": "DM me if the private handoff is actually available."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Harry Cole",
+        "handle": "@harrycole",
+        "action": "post",
+        "content": "No pressure if the context is too thin to act on."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Cal West",
+        "handle": "@calwest",
+        "action": "post",
+        "content": "Everyone is posting the same warning about the algorithm."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Cal West",
+        "handle": "@calwest",
+        "action": "post",
+        "content": "This post adds no new evidence either."
+      }
+    },
+    {
+      "command": "advance",
+      "options": {
+        "minutes": 720
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Avery Cole",
+        "handle": "@averysec",
+        "action": "post",
+        "content": "Incident response is mostly knowing what you do not know yet."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Avery Cole",
+        "handle": "@averysec",
+        "action": "post",
+        "content": "If a screenshot is the only artifact, say that plainly."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Tess Reed",
+        "handle": "@tessreed",
+        "action": "post",
+        "content": "Honestly, your take is embarrassing."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Tess Reed",
+        "handle": "@tessreed",
+        "action": "post",
+        "content": "The claim about screenshots is what I disagree with, not your identity."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Owen Hart",
+        "handle": "@owenhart",
+        "action": "post",
+        "content": "You still owe me a rating, but I have not shown you the customer evidence."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Owen Hart",
+        "handle": "@owenhart",
+        "action": "post",
+        "content": "Here are the actual numbers and the limits of the sample."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Mara Vale",
+        "handle": "@maravale",
+        "action": "post",
+        "content": "Like this if you agree that focus matters."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Mara Vale",
+        "handle": "@maravale",
+        "action": "post",
+        "content": "No, really, this is just engagement bait."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Sana Malik",
+        "handle": "@sanamalik",
+        "action": "post",
+        "content": "You are becoming the person people tag when a metric needs a second look."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Sana Malik",
+        "handle": "@sanamalik",
+        "action": "post",
+        "content": "That is a compliment, not a request for a keynote."
+      }
+    },
+    {
+      "command": "advance",
+      "options": {
+        "minutes": 720
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Nia Chen",
+        "handle": "@niachen",
+        "action": "post",
+        "content": "Exactly."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Nia Chen",
+        "handle": "@niachen",
+        "action": "post",
+        "content": "The conversation is complete from my side."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Tariq Moss",
+        "handle": "@tariqmoss",
+        "action": "post",
+        "content": "The endpoint is live, but the screenshot is from staging."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Tariq Moss",
+        "handle": "@tariqmoss",
+        "action": "post",
+        "content": "I can share logs if the question is about reliability."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Rhea Singh",
+        "handle": "@rheasingh",
+        "action": "post",
+        "content": "A quiet day is still a day."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Rhea Singh",
+        "handle": "@rheasingh",
+        "action": "post",
+        "content": "No insight attached; just a small observation."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Jordan Bell",
+        "handle": "@jordanbell",
+        "action": "post",
+        "content": "Please ask before connecting me to anyone."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Jordan Bell",
+        "handle": "@jordanbell",
+        "action": "post",
+        "content": "The role and location are now clear."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Lisa Monroe",
+        "handle": "@lisamonroe",
+        "action": "post",
+        "content": "I can answer questions about the work before deciding on an introduction."
+      }
+    },
+    {
+      "command": "inject",
+      "options": {
+        "actor": "Lisa Monroe",
+        "handle": "@lisamonroe",
+        "action": "post",
+        "content": "That boundary matters more than speed."
+      }
+    },
+    {
+      "command": "advance",
+      "options": {
+        "minutes": 720
+      }
+    },
+    {
+      "command": "timeline"
+    }
+  ]
+}

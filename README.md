@@ -99,7 +99,7 @@ X credentials belong to the specific Presence, not to the Agent’s model runtim
 
 The connection is tested against the account before activation. Posts, replies, and other channel actions remain subject to the Presence’s Execution Envelope. A connected credential does not authorize an action by itself.
 
-Community Bridges and Manual Relay remain separate fallback connectors. A revoked Bridge exposes safe credential metadata, never the secret itself, and can be removed from the interface.
+Community Bridges and Manual Relay remain separate fallback connectors. A revoked Bridge exposes safe credential metadata, never the secret itself, and can be removed from the interface. See the [Bridge adapter contract](docs/bridge-adapter.md) for the guided external browser-agent setup, lifecycle endpoints, and troubleshooting.
 
 ## Secrets and local data
 
@@ -162,7 +162,7 @@ The browser suite covers desktop and Pixel 5 layouts, onboarding, Chat, Activity
 
 ## Agent CLI
 
-Codex and other AI agents can drive the simulated Playground without reading the browser UI. The CLI is sandbox-only and returns compact JSON by default:
+Codex and other AI agents can drive the simulated Playground, Schedule, and Presence-scoped Watching surfaces without reading the browser UI. The CLI is sandbox-only and returns compact JSON by default:
 
 ~~~bash
 pnpm --silent openpresence playground start
@@ -171,6 +171,9 @@ pnpm --silent openpresence playground inject --actor Maya --action post --conten
 pnpm --silent openpresence playground inspect-media --object mirror_123
 pnpm --silent openpresence playground consider
 pnpm --silent openpresence playground timeline
+pnpm --silent openpresence playground rehearse --inspiration "A useful boundary"
+pnpm --silent openpresence schedule list
+pnpm --silent openpresence watching list
 ~~~
 
 Set `OPENPRESENCE_URL` when the local server is not on port 3000. Use `--human` for a concise terminal summary. Repeatable JSON scenarios live in [scenarios/reply-to-founder.json](scenarios/reply-to-founder.json):
@@ -186,6 +189,8 @@ Command meanings:
 - `inject` adds a simulated inbound post, reply, message, reaction, like, repost, or quote and immediately runs the Agent’s judgment. Use `--actor`, `--handle`, `--action`, `--content`, `--target`, `--parent`, and `--assets-json`.
 - `inspect-media` runs a deeper Social Mirror perception pass for a simulated object. It records the provider, model, uncertainty, and missing context without deciding whether to act.
 - `consider` runs one attention cycle over the current simulated world, including a possible original post or `NO_OP`.
+- `rehearse` runs the original-publication rehearsal; `feedback` records session calibration evidence with `--reaction`, optional `--reasons`, and `--note`.
+- `assignment create|start|work|cancel|inspect` drives the Sandbox Assignment lifecycle. Assignments count only verified simulated publications and never enable live delivery.
 - `advance` moves virtual time with `--minutes <n>` and evaluates due Calendar standing intents.
 - `schedule` adds a Calendar Standing Intent to the selected Presence so a later `advance` can evaluate it against the current simulated world. Use `--day`/`--time`, or `--minutes-from-now <n>` for a session-relative slot.
 - `timeline` emits a chronological audit of observations, perceptions, Social Intents, Executions, Outcomes, and events.
@@ -193,6 +198,8 @@ Command meanings:
 - `run <scenario.json>` executes a repeatable sequence of the commands above. Scenario values can refer to `$session`, `$latest-object`, `$latest-object-id`, and `$latest-inbound`.
 
 All commands accept `--session <id>` when more than one rehearsal is active. JSON is the default output for agent consumption; add `--human` for a concise terminal summary. `--assets-json` accepts inline asset objects or local fixture paths, for example `[{"kind":"image","path":"docs/screenshots/chat.png"}]`.
+
+The top-level `schedule` scope provides `list`, `add`, `edit`, `run`, and `cancel`. Use `--responsibility assign` (or `schedule assign`) to create a Sandbox Assignment with timing; the default is a Consider standing intention. The `run` command is blocked for non-Sandbox Presences. The top-level `watching` scope provides `list`, `add`, and `remove`, preserving the Watch's automatic/manual source status and explicit no-observation state.
 
 The projection keeps observation, Social Intent, Execution, Delivery, and Outcome visible as separate records while omitting unrelated application state. `NO_OP` remains a successful decision, and the CLI never enables live channel delivery.
 

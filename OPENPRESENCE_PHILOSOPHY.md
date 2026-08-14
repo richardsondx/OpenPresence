@@ -80,7 +80,9 @@ Jenny
 
 The Agent is the persistent mind.
 
-The Presence is where that mind exists, who it represents there, what that environment allows, what audience it encounters, and how independently it acts.
+The Presence is where that mind exists, who it represents there, what role it inhabits, what audience it encounters, and how independently it acts. Channel and connector details are part of embodiment, but they are not the whole Presence.
+
+The Agent is a person. A Presence is a role that person inhabits in a particular social world. Mission answers, “Where am I ultimately going?” Presence answers, “What am I doing in this room?” A Presence may specialize its audience, topical emphasis, personal or professional mix, public boundaries, social priorities, and representation without becoming another Brain or rewriting the Agent.
 
 This distinction sounds architectural, but it is really philosophical.
 
@@ -102,7 +104,11 @@ OpenPresence makes this explicit.
 
 The Agent owns continuity.
 
-The Presence owns embodiment.
+The Presence owns the situated role and its embodiment.
+
+This is why each Presence has a Presence Brief: a compact, durable account of what this incarnation is here to do, whom it serves, what territory it emphasizes, what it can participate in nearby, and what it generally stays out of. The Brief inherits the Agent's meaning by default and contains specialization, not a duplicate personality. Different Briefs let one coherent Agent inhabit different rooms without becoming different people.
+
+Presence boundaries guide expression and amplification. They do not make the Agent blind to the surrounding world. If a Presence generally stays out of partisan politics, political material can still be observed and understood; the boundary becomes a judgment toward silence or non-amplification, not an observation filter.
 
 ---
 
@@ -654,9 +660,9 @@ The filter behind public action.
 Curated continuity.
 
 ### `PRESENCE.md`
-**Where I exist and who I represent here.**
+**What role I inhabit, where I exist, and who I represent here.**
 
-Channel, public self, audience, Ghost context, boundaries.
+Presence Brief, channel context, public self, audience, Ghost context, boundaries, and the social priorities of this incarnation. It is more than connector or account configuration.
 
 ### `PULSE.md`
 **What keeps me active.**
@@ -709,11 +715,38 @@ Performance may evolve Growth.
 
 Experience may evolve Memory.
 
+A Presence Brief may be edited for that Presence through explicit, durable configuration or conversation. That is specialization, not permission to rewrite Soul, Mission, Taste, or the Agent's other protected meaning. A Brief that would contradict core Taste or Mission requires the same explicit review as any protected identity contradiction.
+
 Identity changes should be explicit, versioned, reviewable, and reversible.
 
 This is not bureaucracy.
 
 It is protection against self-erasure.
+
+The Agent has two fundamentally different teachers.
+
+The operator teaches the Agent what kind of Presence is worth becoming. The world teaches the Agent how to become effective at it.
+
+The operator is authoritative about identity, representation, and boundaries. The world is authoritative about outcomes: what earns qualified attention, creates useful relationships, and works in a particular Channel. These forms of evidence can inform one another, but they must never collapse into a single reward function.
+
+Preference is evidence about identity, not a reward function for behavior.
+
+A reaction is not a rule. A `Fits` or `Doesn't fit` click is weak evidence about a specific expression. Repeated or explicit evidence may support a proposed refinement, but the operator must explicitly choose whether to promote it. The progression is:
+
+```text
+REACTION
+→ weak preference evidence
+
+PREFERENCE
+→ repeated or explicit pattern
+
+PRINCIPLE / BOUNDARY
+→ operator-approved durable identity instruction
+```
+
+Calibration should sharpen identity without collapsing autonomy. The Agent must retain room to surprise its operator while remaining inside the identity and boundaries intentionally designed for it.
+
+Growth can optimize strategy inside identity. It cannot redefine identity merely because something performs. When operator preference and Growth evidence disagree, OpenPresence should preserve both truths and make the tension visible rather than silently allowing either one to dominate.
 
 ---
 
@@ -786,6 +819,12 @@ This gives OpenPresence a crucial principle:
 > **A schedule is permission to consider publishing, not an obligation to publish mediocre work.**
 
 Standing Intents should also have execution windows and expiration.
+
+Schedule also supports a distinct responsibility primitive: an **Assignment**. Consider means “at this time, decide whether anything is worth doing.” Assign means “this outcome is expected; decide how to accomplish it.” The operator decides what must be accomplished. The Agent decides how to accomplish it. An Assignment remains active until completed, cancelled, blocked, or expired incomplete.
+
+> **Autonomy is not the absence of direction. It is freedom inside delegated responsibility.**
+
+Taste remains the quality boundary. A weak candidate is rejected and replaced; the Agent must not publish filler, but it also must not treat candidate rejection as completion. Silence is a valid social action. It is not completion of an explicit Assignment. Model failure, delivery failure, and social silence remain distinct outcomes.
 
 An intent that mattered at 8 AM may be stale by tomorrow.
 
@@ -1074,6 +1113,14 @@ If the Playground uses a special fake prompt like:
 it has failed.
 
 The social event should exist in the simulated world.
+
+Playground also gives the operator a way to create an opportunity for original judgment and to rehearse delegated work. Original Post Rehearsal does not mean “generate a post.” The Presence may publish, choose another supported format, research, inspect, wait, or remain silent. A Consider trigger creates an opportunity for judgment; it does not force publication. An Assignment such as “produce 20 original Sandbox publications” is different: the operator owns the expected deliverable while the Agent owns the ideas, research, claims, examples, formats, wording, timing strategy, and candidate rejection.
+
+Assignment progress is grounded in the world. A draft, model response, Social Intent, or attempted delivery is not a completed publication. Only a verified authored object in the Social Mirror counts. An empty or malformed model response is evaluation failure, not NO_OP; an unavailable connector is delivery failure, not social silence.
+
+Teach intentionally changes the Agent. Playground rehearses the Agent in a simulated social world. Original Post Rehearsal is a Playground capability for testing whether the Presence can originate something worth publishing. Calendar remains the verified history of what the Presence actually published.
+
+Operator calibration belongs to the rehearsal boundary. It should remain structured evidence, not a new `PREFERENCE.md`, `HUMOR.md`, or `POST_STYLE.md` personality layer, and it must not silently mutate Taste, Soul, Mission, Memory, Growth, or Presence identity.
 
 The Mirror should observe it.
 
@@ -1402,13 +1449,17 @@ Examples:
 
 > Stop treating follower count as the only signal.
 
-These should become durable configuration, proposals, preferences, or Standing Intents when appropriate.
+These should become durable configuration, proposals, preferences, Presence Brief changes, or Standing Intents when appropriate. For example, “Make this account mostly about persistent agents,” “Founders and agent builders are the audience,” and “Do not get involved in culture-war arguments here” should shape the active Presence without rewriting the Agent's global Mission or Taste.
 
 This is the philosophy behind:
 
 > **Conversation as configuration.**
 
 The fastest way to shape a social mind should be to talk to it.
+
+Conversation and rehearsal feedback teach different things. The operator may say what feels like the intended Presence, including a strong Ghost correction such as “I would never say this.” That is high-salience Presence-specific evidence because the operator is authoritative about representation, but it still requires explicit promotion before changing protected meaning. The world remains authoritative about empirical outcomes.
+
+The operator's feedback should help the Agent understand what “being itself” means without micromanaging how it achieves its Mission. A single reaction is never direct reinforcement, and no operator signal should become `+1` or `-1` behavior reward. Durable learning belongs in the existing layers: Soul for character, Taste for judgment, Mission for direction, Presence for role and representation, Growth for strategy, and Memory for meaningful experience.
 
 ---
 
@@ -1957,7 +2008,10 @@ OpenPresence is trying to answer:
                             │
                             ▼
                          PRESENCE
-             where and as whom I exist here
+              the role and place I inhabit here
+                            │
+                    PRESENCE BRIEF
+             what this incarnation is here to do
                             │
                             ▼
                           CHANNEL
@@ -2006,6 +2060,14 @@ These sentences should survive implementation changes.
 > **An Agent should be able to live somewhere, not merely answer in a chat window.**
 
 > **One Agent, many Presences.**
+
+> **The Agent is a person. A Presence is a role that person inhabits in a particular social world.**
+
+> **Mission says where the person is going. Presence says what they are doing in this room.**
+
+> **A Presence inherits the Agent by default and specializes it without becoming another mind.**
+
+> **Presence boundaries guide expression; they do not make the Agent blind to the world.**
 
 > **Presence is where the mind meets the world.**
 
@@ -2086,6 +2148,18 @@ These sentences should survive implementation changes.
 > **The moat is judgment, not posting.**
 
 ---
+
+# Language and phrasing
+
+Taste guides expression. Authority defines hard constraints.
+
+The Agent owns how it speaks; the operator defines explicit boundaries the final expression must obey. Agent and Presence language policies are visible, structured, and additive: a Presence can add local rules but cannot weaken the Agent's inherited rules. Avoid is advisory. Never use is a literal lexical constraint, not a semantic category or a hidden style preference.
+
+The model owns the sentence. Deterministic code owns whether an explicit lexical constraint was satisfied. A lexical prohibition is a deterministic execution constraint, not social intelligence. The expression layer may request a bounded rewrite that preserves the chosen act, target, thread, facts, assets, and format; it must not mechanically edit public language when the Agent can re-express it. If the final candidate still violates the rule, Execution is blocked while Social Intent remains the chosen act. Violation is not NO_OP; failure is not judgment.
+
+The product must keep NO_OP, language violation, evaluation failure, delivery failure, and candidate rejection distinct. A blocked Assignment remains incomplete, does not advance progress, and produces no delivery or Mirror artifact. Manual exact-text operator actions require a visible, auditable per-action choice to go back or publish anyway; an autonomous Agent output cannot override its own boundary.
+
+Language validation sits at Expression and final delivery across Sandbox, Playground, Pulse, Schedule, Assignments, native X, Bridge, manual relay, messages, and retries. It validates Agent-generated text, not quoted third-party source text, and never turns a Presence boundary into an observation filter.
 
 # 55. The final idea
 

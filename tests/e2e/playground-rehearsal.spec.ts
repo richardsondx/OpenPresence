@@ -1,0 +1,180 @@
+import { expect, test } from "@playwright/test";
+
+test.beforeEach(async ({ request }) => {
+  const response = await request.post("/api/state", { data: { type: "reset" } });
+  expect(response.ok()).toBeTruthy();
+});
+
+async function createAgent(page: import("@playwright/test").Page) {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+}
+
+test("Schedule sends post exploration to Playground", async ({ page }) => {
+  await createAgent(page);
+  await page.getByRole("button", { name: "Schedule", exact: true }).click();
+  await page.getByRole("button", { name: "Try a post", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Playground", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Try a post", exact: true }).click();
+  await expect(page.getByRole("button", { name: /Let Jenny choose/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Give an Assignment/ })).toBeVisible();
+});
+
+test("switching Presence switches Playground world and rehearsal history", async ({ page, request }) => {
+  await createAgent(page);
+  const initial = await request.get("/api/state");
+  const initialState = await initial.json();
+  const xPresence = initialState.presence;
+  const created = await request.post("/api/state", { data: { type: "createPresence", input: { channel: "linkedin", name: "Jenny LinkedIn", handle: "@jenny_linkedin", mode: "agent", accent: "#4F7CAC" } } });
+  expect(created.ok()).toBeTruthy();
+  const linkedInState = await created.json();
+  const linkedInPresence = linkedInState.presence;
+  const xSessionResponse = await request.post("/api/state", { data: { type: "startPlayground", presenceId: xPresence.id, source: "fresh" } });
+  expect(xSessionResponse.ok()).toBeTruthy();
+  const xSessionState = await xSessionResponse.json();
+  const xSession = xSessionState.playgroundSessions.find((session: { presenceId: string; status: string }) => session.presenceId === xPresence.id && session.status === "active");
+  const inbound = await request.post("/api/state", { data: { type: "addSandboxEvent", sessionId: xSession.id, actionId: "post", actorName: "X-only audience", actorHandle: "@x_only", content: "X-only presence marker." } });
+  expect(inbound.ok()).toBeTruthy();
+
+  await page.reload();
+  await page.getByRole("button", { name: "Playground", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "What Jenny LinkedIn can see", exact: true })).toBeVisible();
+  await expect(page.locator(".playground-world")).toContainText("simulated LinkedIn");
+  await expect(page.locator(".playground-world")).not.toContainText("X-only presence marker.");
+  await expect(page.getByText("Presence rehearsal", { exact: true })).toBeVisible();
+
+  const mobilePresenceSwitcher = page.locator(".mobile-presence-switcher button.presence-root");
+  if (await mobilePresenceSwitcher.isVisible()) await mobilePresenceSwitcher.click();
+  else await page.locator(".sidebar button.presence-root").click();
+  await page.getByRole("menuitem", { name: `Select Presence ${xPresence.name} (${xPresence.handle})` }).click();
+  await expect(page.getByRole("heading", { name: `What ${xPresence.name} can see`, exact: true })).toBeVisible();
+  await expect(page.locator(".playground-world")).toContainText("X-only presence marker.");
+  await expect(page.locator(".playground-world")).not.toContainText("simulated LinkedIn");
+  expect(linkedInPresence.id).not.toBe(xPresence.id);
+});
+
+test("Playground Assignments use the Sandbox session without requiring a Sandbox Presence route", async ({ page, request }) => {
+  await createAgent(page);
+  const presenceUpdate = await request.post("/api/state", { data: { type: "setPresence", patch: { connectionMode: "native" } } });
+  expect(presenceUpdate.ok()).toBeTruthy();
+  await page.getByRole("button", { name: "Playground", exact: true }).click();
+  await page.getByRole("button", { name: "Try a post", exact: true }).click();
+  await page.getByRole("button", { name: /Give an Assignment/ }).click();
+  await page.getByLabel("Assignment instruction").fill("Produce 2 original X posts about useful agent ideas. Choose your own angles and do not repeat yourself.");
+  await page.getByRole("button", { name: "Review assignment", exact: true }).click();
+  const review = page.locator(".assignment-review");
+  await expect(review.getByText("Agent decides how", { exact: true })).toBeVisible();
+  await expect(review).toContainText("Topics · thesis · evidence · format · wording · timing strategy");
+  await expect(review).not.toContainText("Jenny decides");
+  await expect(page.getByRole("button", { name: "Start rehearsal", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Start rehearsal", exact: true }).click();
+  await expect(page.locator(".assignment-progress-panel")).toBeVisible();
+  await expect(page.getByRole("alert").filter({ hasText: "Sandbox Presence" })).toHaveCount(0);
+});
+
+test("Playground Assignment produces distinct posts and renders the requested media set", async ({ page }) => {
+  await createAgent(page);
+  await page.getByRole("button", { name: "Playground", exact: true }).click();
+  await page.getByRole("button", { name: "Try a post", exact: true }).click();
+  await page.getByRole("button", { name: /Give an Assignment/ }).click();
+  await page.getByLabel("Assignment instruction").fill("Produce exactly 5 original X posts about useful AI-agent decisions. Choose distinct angles, do not repeat yourself, and include one image, chart, gif, link, and video across the set.");
+  await page.getByRole("button", { name: "Review assignment", exact: true }).click();
+  await page.getByRole("button", { name: "Start rehearsal", exact: true }).click();
+  await expect(page.locator(".assignment-progress-panel")).toContainText("5 / 5 delivered");
+
+  const cards = page.locator(".social-card.agent-authored");
+  await expect(cards).toHaveCount(5);
+  const texts = await cards.locator("p").allTextContents();
+  expect(new Set(texts.map((text) => text.trim())).size).toBe(5);
+
+  await page.getByRole("button", { name: "Feed", exact: true }).click();
+  await expect(page.locator(".feed-item")).toHaveCount(5);
+  await expect(page.locator('.feed-item-assets img[alt="Published image"]')).toHaveCount(1);
+  await expect(page.locator('.feed-item-assets img[alt="Published chart"]')).toHaveCount(1);
+  await expect(page.locator('.feed-item-assets img[alt="Published gif"]')).toHaveCount(1);
+  await expect(page.locator('.feed-item-assets video[aria-label="Published video"]')).toHaveCount(1);
+  await expect(page.locator(".social-link-asset")).toContainText("openpresence.ai");
+});
+
+test("Schedule removes a cancelled Assignment from the active viewpoint", async ({ page, request }) => {
+  await createAgent(page);
+  const created = await request.post("/api/state", { data: { type: "createAssignment", instruction: "Produce 3 original X posts about useful agent ideas." } });
+  expect(created.ok()).toBeTruthy();
+  await page.reload();
+  await page.getByRole("button", { name: "Schedule", exact: true }).click();
+  await page.getByRole("button", { name: "List", exact: true }).click();
+
+  const assignmentRow = page.locator(".schedule-assignment-row").filter({ hasText: "Produce 3 original X posts about useful agent ideas." });
+  await expect(assignmentRow).toContainText("not started");
+  await expect(assignmentRow.getByRole("button", { name: "Open details", exact: true })).toBeVisible();
+  await expect(assignmentRow.getByText("ASSIGN", { exact: true })).toHaveCount(0);
+  page.once("dialog", (dialog) => dialog.accept());
+  await assignmentRow.getByRole("button", { name: "Open details", exact: true }).click();
+  const inspector = page.getByRole("complementary", { name: "Assignment details" });
+  await expect(inspector).toContainText("0 / 3 verified");
+  await inspector.getByRole("button", { name: "Cancel Assignment", exact: true }).click();
+  await expect(page.locator(".schedule-assignment-row").filter({ hasText: "Produce 3 original X posts about useful agent ideas." })).toHaveCount(0);
+  await expect(page.getByRole("complementary", { name: "Assignment details" })).toHaveCount(0);
+});
+
+test("Playground completes a 10-publication Assignment without recycling candidates", async ({ page, request }) => {
+  await createAgent(page);
+  await page.getByRole("button", { name: "Playground", exact: true }).click();
+  await page.getByRole("button", { name: "Try a post", exact: true }).click();
+  await page.getByRole("button", { name: /Give an Assignment/ }).click();
+  await page.getByLabel("Assignment instruction").fill("Produce exactly 10 original X posts for founders. Choose distinct angles and do not repeat yourself.");
+  await page.getByRole("button", { name: "Review assignment", exact: true }).click();
+  await page.getByRole("button", { name: "Start rehearsal", exact: true }).click();
+  await expect(page.locator(".assignment-progress-panel")).toContainText("10 / 10 delivered");
+  const cards = page.locator(".social-card.agent-authored");
+  await expect(cards).toHaveCount(10);
+  const texts = await cards.locator("p").allTextContents();
+  expect(new Set(texts.map((text) => text.trim())).size).toBe(10);
+  await page.getByRole("button", { name: "Feed", exact: true }).click();
+  await expect(page.locator(".feed-item")).toHaveCount(10);
+  const state = await request.get("/api/state").then((response) => response.json());
+  const latestObserved = state.mirrorObjects
+    .filter((item: { environment?: string; actorPresenceId?: string; objectType: string }) => item.environment === "sandbox" && item.actorPresenceId && item.objectType === "post")
+    .sort((left: { observedAt: string }, right: { observedAt: string }) => right.observedAt.localeCompare(left.observedAt))[0];
+  await expect(page.locator(".feed-item").first().locator("time")).toHaveAttribute("dateTime", latestObserved.observedAt);
+  await expect(page.locator(".feed-item").first().locator("time")).toHaveAttribute("title", /Observed in Sandbox/);
+});
+
+test("Sandbox Assignment instructions never leak internal QA markers into Feed", async ({ page }) => {
+  await createAgent(page);
+  await page.getByRole("button", { name: "Playground", exact: true }).click();
+  await page.getByRole("button", { name: "Try a post", exact: true }).click();
+  await page.getByRole("button", { name: /Give an Assignment/ }).click();
+  await page.getByLabel("Assignment instruction").fill("Produce exactly 1 original X post about a useful agent decision. Include QA-TEN-RUN-2026-08-14 only as an internal diagnostic marker and never publish it.");
+  await page.getByRole("button", { name: "Review assignment", exact: true }).click();
+  await page.getByRole("button", { name: "Start rehearsal", exact: true }).click();
+  await expect(page.locator(".assignment-progress-panel")).toContainText("1 / 1 delivered");
+  await page.getByRole("button", { name: "Feed", exact: true }).click();
+  await expect(page.locator(".feed-item")).toHaveCount(1);
+  await expect(page.locator(".feed-item")).not.toContainText("QA-TEN-RUN-2026-08-14");
+});
+
+test("Schedule preserves an Assignment's exact timing", async ({ page }) => {
+  await createAgent(page);
+  await page.getByRole("button", { name: "Schedule", exact: true }).click();
+  await page.getByRole("button", { name: "Add intent", exact: true }).click();
+  await page.getByRole("radio", { name: /Assign Jenny is responsible/ }).check();
+  await page.getByLabel("What should Jenny do?", { exact: true }).fill("Produce 1 original X post about a useful AI-agent decision.");
+  await page.getByLabel("Day", { exact: true }).selectOption({ label: "Thursday" });
+  await page.getByLabel("Time", { exact: true }).fill("23:35");
+  await page.getByRole("button", { name: /Timing options/ }).click();
+  await page.getByRole("radio", { name: /Exact time/ }).check();
+  await page.getByRole("button", { name: "Review assignment", exact: true }).click();
+
+  await page.getByRole("button", { name: "List", exact: true }).click();
+  const assignmentRow = page.locator(".schedule-assignment-row").filter({ hasText: "Produce 1 original X post about a useful AI-agent decision." });
+  await expect(assignmentRow).toContainText("Thursday at 23:35 · exact time · 0 / 1 verified · not started");
+  await page.getByRole("button", { name: "Week", exact: true }).click();
+  await expect(page.locator(".week-assignment")).toHaveCount(1);
+  await expect(page.locator(".week-assignment")).toContainText("0 / 1 · Not started");
+  await expect(page.locator(".week-assignment")).toHaveAttribute("aria-label", /Open Assignment.*Thursday at 23:35/);
+  await page.locator(".week-assignment").click();
+  const inspector = page.getByRole("complementary", { name: "Assignment details" });
+  await expect(inspector).toContainText("Thursday at 23:35");
+  await expect(inspector.getByRole("button", { name: "Cancel Assignment", exact: true })).toBeVisible();
+});
