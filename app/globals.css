@@ -355,7 +355,22 @@ fieldset { border: none; padding: 0; margin: 0 0 26px; }
   margin-bottom: 28px;
   border-bottom: 1px solid var(--line);
 }
+.brain-page {
+  display: flex;
+  flex-direction: column;
+}
 .brain-page > .page-heading + .settings-card { margin-top: 0; }
+.brain-page > .brain-page-section {
+  margin: 24px 0 0;
+  padding-top: 26px;
+  border-top: 1px solid var(--line);
+}
+.brain-page > .agent-identity-card { margin-bottom: 0; }
+.brain-page > .brain-overview { margin-bottom: 0; }
+.brain-page > .runtime-panel { margin-bottom: 0; }
+.brain-page > .brain-config-grid { margin-bottom: 0; }
+.brain-page > .tools-card { margin-bottom: 0; }
+.brain-page > .proposal-section { margin-bottom: 0; }
 @media (max-width: 680px) {
   .brain-page > .page-heading {
     padding-bottom: 22px;

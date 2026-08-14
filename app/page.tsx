@@ -4729,25 +4729,13 @@ function BrainView({
           <Button type="submit" variant="secondary" disabled={!agentNameDraft.trim() || agentNameDraft.trim() === agent.name}><Check size={14} /> Save name</Button>
         </form>
       </section>
-      <section className="settings-card language-policy-card">
-        <div className="section-heading compact">
-          <div><SectionEyebrow>Agent taste · language</SectionEyebrow><h2>Language & phrasing</h2></div>
-          <ShieldCheck size={17} />
-        </div>
-        <p className="muted">Taste guides expression. Advisory preferences help the Agent choose. Never use rules are explicit lexical boundaries enforced before delivery.</p>
-        <div className="language-policy-editor">
-          <label>Prefer to avoid <small>Advisory only. One literal word or phrase per line.</small><textarea aria-label="Agent language preferences to avoid" rows={4} value={agentAvoidDraft} onChange={(event) => setAgentAvoidDraft(event.target.value)} /></label>
-          <label>Never use <small>Hard constraint. Literal matching only; no semantic categories or inferred synonyms.</small><textarea aria-label="Agent prohibited language" rows={4} value={agentProhibitedDraft} onChange={(event) => setAgentProhibitedDraft(event.target.value)} /></label>
-        </div>
-        <div className="inline-form-actions"><Button variant="primary" onClick={() => void mutate({ type: "setAgentLanguagePolicy", policy: { avoid: agentAvoidDraft.split(/\r?\n/).map((item) => item.trim()).filter(Boolean), prohibited: agentProhibitedDraft.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) } })}><Check size={14} /> Save language policy</Button></div>
-      </section>
-      <section className="brain-overview">
+      <section className="brain-page-section brain-overview">
         <div><SectionEyebrow>Model runtime</SectionEyebrow><strong>{model?.provider === "ollama" ? ollamaModelLabel(ollamaModels.find((item) => item.name === model.model || item.name.startsWith(`${model.model}:`))?.name ?? model.model) : runtimeModels.find((item) => item.model === model?.model && item.quality === model?.quality)?.name ?? model?.model ?? "Not selected"}</strong><small>{model?.provider ?? "Choose a provider"} · {model?.quality ?? "runtime"}</small></div>
         <div><SectionEyebrow>Skills</SectionEyebrow><strong>{state.skills.length} installed</strong><small>{enabledSkills.length} enabled for {agent.name}</small></div>
         <div><SectionEyebrow>Tools</SectionEyebrow><strong>{boundTools.length} bound</strong><small>Agent-wide mechanical capabilities</small></div>
         <div><SectionEyebrow>Connections</SectionEyebrow><strong>{state.providerConnections.filter((item) => item.status !== "needs-configuration").length ? "Ready" : "Needs setup"}</strong><small>Set up provider access below.</small></div>
       </section>
-      <section className="runtime-panel settings-card">
+      <section className="brain-page-section runtime-panel settings-card">
         <div className="section-heading compact"><div><SectionEyebrow>Model Runtime</SectionEyebrow><h2>Choose by provider</h2></div><span className="quiet-label">Agent-wide</span></div>
         <p className="muted runtime-intro">Model choice lives here so Chat stays a single, uninterrupted conversation.</p>
         {(() => {
@@ -4837,7 +4825,7 @@ function BrainView({
           );
         })()}
       </section>
-      <section className="brain-config-grid">
+      <section className="brain-page-section brain-config-grid">
         <div className="settings-card brain-action-card">
           <div className="section-heading compact">
             <div><SectionEyebrow>Skills</SectionEyebrow><h2>Installed skills</h2></div>
@@ -4872,7 +4860,7 @@ function BrainView({
         </div>
         <div className="settings-card brain-action-card"><div className="section-heading compact"><div><SectionEyebrow>Connections</SectionEyebrow><h2>Provider access</h2></div><PlugZap size={17} /></div><p className="muted">Connect a provider here; Chat will use the Agent runtime you choose above.</p><div className="config-list">{providerAccessProviders.map((provider) => { const connection = state.providerConnections.find((item) => item.provider === provider); const name = providerLabel(provider); return <div className="config-list-row" key={provider}><div><strong>{name}</strong><small>{connection?.status === "local" ? connection.endpoint ?? "Local endpoint" : connection?.secretConfigured ? "Credential ready" : connection?.status === "available" ? "Connected" : "Needs setup"}</small></div><Button variant={connection && connection.status !== "needs-configuration" ? "ghost" : "secondary"} onClick={() => { setConnectionProvider(provider as "openai" | "openrouter" | "ollama"); setConnectionSecret(""); if (provider === "ollama") setConnectionEndpoint(connection?.endpoint ?? "http://localhost:11434"); }}>{connection && connection.status !== "needs-configuration" ? "Edit" : "Set up"}</Button></div>; })}</div>{connectionProvider && <form className="inline-config-form" onSubmit={saveConnection}><h3>Set up {providerLabel(connectionProvider)}</h3>{connectionProvider === "ollama" ? <label>Ollama endpoint<input aria-label="Ollama endpoint" value={connectionEndpoint} onChange={(event) => setConnectionEndpoint(event.target.value)} required /></label> : <label>API key<input aria-label="Provider API key" type="password" value={connectionSecret} onChange={(event) => setConnectionSecret(event.target.value)} placeholder={connectionProvider === "openrouter" ? "sk-or-…" : "sk-…"} autoComplete="off" /></label>}<div className="inline-form-actions"><Button type="button" variant="ghost" onClick={() => setConnectionProvider(null)}>Cancel</Button><Button type="submit" variant="primary"><Check size={14} /> Save connection</Button></div></form>}</div>
       </section>
-      <section className="settings-card tools-card" aria-label="Agent tools">
+      <section className="brain-page-section settings-card tools-card" aria-label="Agent tools">
         <div className="section-heading compact">
           <div>
             <SectionEyebrow>Agent capabilities</SectionEyebrow>
@@ -4898,7 +4886,19 @@ function BrainView({
           Presence settings still control whether channel actions are off, manual, review, or auto. A tool being bound does not authorize a publication by itself.
         </p>
       </section>
-      <div className="brain-layout">
+      <section className="brain-page-section settings-card language-policy-card">
+        <div className="section-heading compact">
+          <div><SectionEyebrow>Agent taste · language</SectionEyebrow><h2>Language & phrasing</h2></div>
+          <ShieldCheck size={17} />
+        </div>
+        <p className="muted">Taste guides expression. Advisory preferences help the Agent choose. Never use rules are explicit lexical boundaries enforced before delivery.</p>
+        <div className="language-policy-editor">
+          <label>Prefer to avoid <small>Advisory only. One literal word or phrase per line.</small><textarea aria-label="Agent language preferences to avoid" rows={4} value={agentAvoidDraft} onChange={(event) => setAgentAvoidDraft(event.target.value)} /></label>
+          <label>Never use <small>Hard constraint. Literal matching only; no semantic categories or inferred synonyms.</small><textarea aria-label="Agent prohibited language" rows={4} value={agentProhibitedDraft} onChange={(event) => setAgentProhibitedDraft(event.target.value)} /></label>
+        </div>
+        <div className="inline-form-actions"><Button variant="primary" onClick={() => void mutate({ type: "setAgentLanguagePolicy", policy: { avoid: agentAvoidDraft.split(/\r?\n/).map((item) => item.trim()).filter(Boolean), prohibited: agentProhibitedDraft.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) } })}><Check size={14} /> Save language policy</Button></div>
+      </section>
+      <div className="brain-page-section brain-layout">
         <aside className="file-list">
           <div className="file-list-label">Mind files</div>
           {fileOrder.map((kind) => {
@@ -4957,7 +4957,7 @@ function BrainView({
         </section>
       </div>
       {pending.length > 0 && (
-        <section className="proposal-section">
+        <section className="brain-page-section proposal-section">
           <div className="section-heading">
             <div>
               <SectionEyebrow>Operator review</SectionEyebrow>
