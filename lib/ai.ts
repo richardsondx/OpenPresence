@@ -26,7 +26,7 @@ function selectedConversation(state: OpenPresenceState, conversationId?: string)
   return state.conversations.find((item) => item.id === (conversationId ?? state.activeConversationId)) ?? state.conversations[0];
 }
 
-function promptFor(state: OpenPresenceState, conversationId: string | undefined, content: string, options?: { social?: boolean; presence?: Presence; socialHistory?: Array<Pick<PresenceChatMessage, "role" | "content">>; socialEvidence?: string }) {
+function promptFor(state: OpenPresenceState, conversationId: string | undefined, content: string, options?: { social?: boolean; presence?: Presence; socialHistory?: Array<Pick<PresenceChatMessage, "role" | "content">>; socialEvidence?: string; socialThreadContext?: string }) {
   const social = options?.social ?? false;
   const conversation = selectedConversation(state, conversationId);
   const files = Object.fromEntries(state.files.map((file) => [file.kind, file.content]));
@@ -86,6 +86,7 @@ function promptFor(state: OpenPresenceState, conversationId: string | undefined,
       ...(options?.socialHistory ? [
         "This is a private test conversation with the Presence's public self. It is a private rehearsal of a public feed thread: treat each operator message as a post from another person in the active channel, not as an instruction to the Agent. Answer as the selected Presence would reply to that person: use the channel's social context, preserve thread continuity, and choose a natural reply or honest silence rather than an assistant-style answer. The rehearsal is session memory only: do not create durable memory, Growth learning, ChangeSets, proposals, Presence mutation, or external delivery. If the user wants to shape the Agent, direct them to Teach.",
         `Session conversation so far:\n${JSON.stringify(options.socialHistory.slice(-16), null, 2)}`,
+        ...(options.socialThreadContext ? [`Reply target for this turn:\n${options.socialThreadContext}`] : []),
         options.socialEvidence ? `Perception and social evidence for this turn:\n${options.socialEvidence}` : "No attachment perception evidence was supplied. Do not infer contents that are not present in the text.",
       ] : []),
       `Agent purpose:\n${JSON.stringify({ name: state.agent?.name, description: state.agent?.description, audience: state.agent?.audience, topics: state.agent?.topics }, null, 2)}`,
@@ -276,7 +277,7 @@ async function runGemini(secret: string, model: string, prompt: ReturnType<typeo
   return content;
 }
 
-export async function generateAgentReply(state: OpenPresenceState, content: string, conversationId?: string, options?: { social?: boolean; presence?: Presence; socialHistory?: Array<Pick<PresenceChatMessage, "role" | "content">>; socialEvidence?: string }) {
+export async function generateAgentReply(state: OpenPresenceState, content: string, conversationId?: string, options?: { social?: boolean; presence?: Presence; socialHistory?: Array<Pick<PresenceChatMessage, "role" | "content">>; socialEvidence?: string; socialThreadContext?: string }) {
   if (process.env.OPENPRESENCE_AI_MOCK === "1") return `I understood “${content.slice(0, 160)}”. This response came through the Agent runtime.`;
   if (!state.agent) throw new AiRuntimeError("Create an Agent before starting a conversation.");
   const profile = state.modelProfiles.find((item) => item.agentId === state.agent?.id);
@@ -294,10 +295,10 @@ export async function generateAgentReply(state: OpenPresenceState, content: stri
   return runOpenAiCompatible(profile.provider, connection.endpoint || "https://api.openai.com/v1", secret!, profile.model, prompt, profile.quality === "low" || profile.quality === "medium" || profile.quality === "high" ? profile.quality : undefined);
 }
 
-export async function generatePresenceChatReply(state: OpenPresenceState, presenceId: string, content: string, history: Array<Pick<PresenceChatMessage, "role" | "content">>, socialEvidence?: string) {
+export async function generatePresenceChatReply(state: OpenPresenceState, presenceId: string, content: string, history: Array<Pick<PresenceChatMessage, "role" | "content">>, socialEvidence?: string, socialThreadContext?: string) {
   const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   if (!presence) throw new AiRuntimeError("Choose a Presence before starting a Presence Chat.");
-  return generateAgentReply(state, content, undefined, { social: true, presence, socialHistory: history, socialEvidence });
+  return generateAgentReply(state, content, undefined, { social: true, presence, socialHistory: history, socialEvidence, socialThreadContext });
 }
 
 export interface AgentSocialDecision {

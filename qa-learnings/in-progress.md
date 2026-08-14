@@ -1,5 +1,60 @@
 # Active QA Work
 
+## COMPLETE — Genny Boardy-style Sandbox rehearsal
+
+- **Started:** 2026-08-14
+- **Scope:** Configure Genny inside Jenny through the app, exercise Teach/Chat/Playground, schedule weekly attention, and produce a 15+ item simulated post/reply rehearsal without real-X publication.
+- **Safety boundary:** Use the local Sandbox Presence and simulated connector only; do not publish, message, or change the real X account.
+- **Delivery:** Commit all intended worktree changes and push after the focused QA audit.
+- **Verification:** Boardy’s public profile was inspected read-only in Chrome; Genny was selected as Jenny’s X Sandbox Presence; Teach recorded agent-wide anti-impersonation/usefulness guidance; Genny’s Presence Brief and Public Self were configured through Settings; Chat produced a private feed reply; Playground completed three 5/5 Assignments; the Sandbox Mirror contains 16 Genny original posts and a contextual reply chain with two inbound replies; Schedule shows seven weekdays plus three exact-time Assignments at 23:35, 23:38, and 23:41 local time. No live X post, reply, message, or configuration was sent.
+
+## COMPLETE — Prevent quoted Ghost mentions from mutating Presence state
+
+- **Started:** 2026-08-13
+- **Scope:** Keep Teach focused on the operator's actual request when social handles or quoted world text contain `ghost`; make the reported post-formatting preference produce a truthful reviewable proposal with explicit interim behavior.
+- **Product boundary:** Teach may shape durable meaning only through reviewable proposals. A social-world mention is context, not a command, and must not silently change `User → Agent → Presence` identity.
+- **Acceptance:** The exact `@jenny_ghost write a post about SpaceX` example leaves the Presence Agent-owned; explicit “Put this Presence into Ghost mode” still works; the one-sentence-per-paragraph post preference records a `TASTE` proposal and states that replies remain normally formatted.
+- **Verification:** 140 unit tests, focused Teach Chromium/mobile E2E (4/4), exact screenshot wording in connected Chrome on isolated `localhost:3108`, production build, typecheck, changed-file lint, `git diff --check`, and zero Chrome console warnings/errors. No external connector or production state was mutated.
+
+## COMPLETE — Diagnose failed Assignment posting
+
+- **Started:** 2026-08-13
+- **Scope:** Trace why an explicit Sandbox Assignment remains at `0 / 4 delivered` after starting rehearsal, localize the failing runtime layer, and restore verified publication progress.
+- **Product boundary:** Assignment work remains Sandbox-only during QA; only a publication observed in the Social Mirror advances progress. Model failure, delivery failure, and candidate rejection must remain distinct and truthful.
+- **Acceptance:** Starting the shown Assignment produces a truthful success or failure state, and a successful run advances the Assignment from `0 / 4 delivered` with the corresponding verified Sandbox publication visible.
+- **Verification:** Runtime telemetry localized the failure to Ghost candidate validation before execution. The fix now distinguishes public subject matter from self-referential provider/model disclosure; the same local Sandbox Assignment reached `4 / 4 verified`, `completed`, four succeeded simulated executions, and zero system failures. Runtime and identity-boundary tests passed; temporary detailed telemetry was removed. Chrome was attempted, but the existing localhost tab was already claimed by another browser session, so the final execution proof came from the local state route and Sandbox Mirror.
+
+## COMPLETE — Clarify Watch lifecycle language
+
+- **Started:** 2026-08-14
+- **Scope:** Remove the contradiction between an active Watch and the implementation-shaped `Performance baseline · Not started` label.
+- **Acceptance:** The Watch card tells the operator whether the Watch is active, what it is waiting for, and whether any action is required; it does not expose an unexplained performance metric.
+- **Flow under test:** Chrome Watching surface → persisted Watch observation state → lifecycle copy.
+- **Verification:** Fresh Chrome on isolated `localhost:3106` verified both automatic and manual states with no console errors; focused Watching E2E passed 4/4 across Chromium and Pixel 5 after rebuilding `.next-e2e`; runtime tests, typecheck, focused lint, and `git diff --check` passed.
+
+## COMPLETE — Debug Watching in Chrome
+
+- **Started:** 2026-08-13
+- **Scope:** Reproduce the user-reported Watching failure in the real Chrome session and distinguish feature failure from a stale local browser build.
+- **Acceptance:** Chrome loads the current Watching navigation, creates and persists a creator/topic/opportunity Watch, reloads it, removes it, and preserves an explicit no-observations state.
+- **Verification:** Fresh Chrome run on `localhost:3103` completed load → create → remove with 200 responses and no console errors; focused Watching E2E passed 4/4 across Chromium and Pixel 5; 59 runtime tests, typecheck, changed-file ESLint, isolated production build, and `git diff --check` passed. The original `localhost:3001` tab was stale and did not contain Watching; regression rule added for active-origin/client-bundle verification.
+
+## COMPLETE — Clarify Assignment ownership in the review card
+
+- **Started:** 2026-08-13
+- **Scope:** Make the Assignment review card distinguish the operator-owned outcome from the Agent-owned approach; remove the ambiguous `Jenny decides` label while preserving the list of decisions Jenny makes.
+- **Product boundary:** Assignments own the expected outcome; the Agent owns how to accomplish it. This is a user-facing authority explanation and does not change runtime behavior.
+- **Acceptance:** After reviewing an Assignment, the card says `Agent decides how`, keeps the topics/thesis/evidence/format/wording/timing list, and does not imply that the Assignment is optional or that Jenny owns the requested deliverable.
+- **Verification:** 136 unit tests, focused Assignment lifecycle E2E 6/6 across Chromium and Pixel 5, typecheck, changed-file lint, production build, isolated E2E build, and `git diff --check`.
+
+## COMPLETE — Add Presence-level Watching
+
+- **Started:** 2026-08-13
+- **Scope:** Add a first-class Watching surface for Presence-scoped attention, with natural-language creator/topic/opportunity Watches, review-before-start confirmation, truthful automatic/manual source status, persistence, and removal.
+- **Product boundary:** Watching is the Presence's eyes, not a publishing queue or creator-remixing instruction. Watches preserve `User → Agent → Presence`, do not rewrite identity, do not invent observations, and keep observed-world evidence separate from Agent action.
+- **Acceptance:** An operator can open Watching, add a creator or free-form social-world description, inspect the inferred meaning and boundary, start the Watch, reload it, remove it, and see an explicit no-observations state until a source supplies evidence.
+- **Verification:** 58 runtime tests, 4/4 focused Watching E2E cases across Chromium and Pixel 5, isolated production build via `.next-e2e`, typecheck, `git diff --check`, and exploratory browser review at 1440px and 390px with no console errors or horizontal overflow. Repository-wide lint remains noisy/red from pre-existing generated artifacts under `tmp/`; source typecheck and feature-focused gates passed.
+
 ## COMPLETE — Implement Assignment control layer
 
 - **Started:** 2026-08-13

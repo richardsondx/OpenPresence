@@ -17,6 +17,7 @@ import {
   Circle,
   CircleAlert,
   Clock3,
+  Eye,
   FileText,
   FlaskConical,
   Globe2,
@@ -34,6 +35,7 @@ import {
   Plus,
   PlugZap,
   Radio,
+  Reply,
   RotateCcw,
   Send,
   Settings2,
@@ -71,6 +73,7 @@ import type {
   SandboxActor,
   SandboxAssetInput,
   SocialAssetKind,
+  Watch,
   View,
 } from "@/lib/types";
 
@@ -93,13 +96,14 @@ const fileOrder: FileKind[] = [
 const navItems: { id: View; label: string; icon: typeof MessageCircle }[] = [
   { id: "live", label: "Activity", icon: Radio },
   { id: "chat", label: "Chat", icon: MessageSquare },
+  { id: "watching", label: "Watching", icon: Eye },
   { id: "feed", label: "Feed", icon: Newspaper },
   { id: "schedule", label: "Schedule", icon: Clock3 },
   { id: "presence", label: "Settings", icon: Settings2 },
   { id: "teach", label: "Teach", icon: MessageCircle },
   { id: "playground", label: "Playground", icon: FlaskConical },
 ];
-const presenceNavItems = navItems.filter(({ id }) => id === "live" || id === "chat" || id === "feed" || id === "schedule" || id === "presence");
+const presenceNavItems = navItems.filter(({ id }) => id === "live" || id === "chat" || id === "watching" || id === "feed" || id === "schedule" || id === "presence");
 const agentNavItems = navItems.filter(({ id }) => id === "teach" || id === "playground");
 const channelLabel = (channel: ChannelId, definitions?: ChannelDefinition[]) =>
   definitions?.find((item) => item.id === channel)?.name ??
@@ -1240,10 +1244,9 @@ function AgentWorkspaceShell({
           )}
         </button>
         <div className="sidebar-footer">
-          <div className="sidebar-runtime" aria-label="Local runtime SQLite">
+          <div className="sidebar-runtime" aria-label="Local runtime">
             <span className="status-dot" />
             <span>Local runtime</span>
-            <small>SQLite</small>
           </div>
           <div className="sidebar-footer-actions">
             <AgentSwitcher state={state} mutate={mutate} />
@@ -1295,6 +1298,7 @@ function AgentWorkspaceShell({
         <div className="workspace-content">
           {view === "teach" && <TeachView state={state} mutate={mutate} setView={setView} />}
           {view === "chat" && <PresenceChatView state={state} mutate={mutate} />}
+          {view === "watching" && <WatchingView state={state} mutate={mutate} />}
           {view === "playground" && (
             <PlaygroundView state={state} mutate={mutate} />
           )}
@@ -1539,6 +1543,7 @@ function LegacyAppShell({
           {view === "live" && (
             <LiveView state={state} mutate={mutate} />
           )}
+          {view === "watching" && <WatchingView state={state} mutate={mutate} />}
           {view === "feed" && (
             <PublicHistoryView state={state} setView={setView} />
           )}
@@ -1956,15 +1961,6 @@ function ContextSidebar({
     )
       ? "Pending review"
       : "Created";
-  const outputs = [
-    ...state.publications.map((publication) => ({
-      label: publication.format,
-      detail: "Publication draft",
-    })),
-    ...state.contentDrops
-      .slice(0, 3)
-      .map((drop) => ({ label: drop.origin, detail: "Content drop" })),
-  ].slice(0, 4);
   return (
     <aside
       id={id}
@@ -2031,27 +2027,6 @@ function ContextSidebar({
           </div>
         ) : (
           <p className="context-empty">No changes in this conversation yet.</p>
-        )}
-      </section>
-      <section className="context-section">
-        <SectionEyebrow>Outputs</SectionEyebrow>
-        {outputs.length ? (
-          <div className="context-item-list">
-            {outputs.map((output, index) => (
-              <div
-                className="context-item"
-                key={`${output.label}-${output.detail}-${index}`}
-              >
-                <Sparkles size={14} />
-                <span>
-                  <strong>{output.label}</strong>
-                  <small>{output.detail}</small>
-                </span>
-              </div>
-            ))}
-          </div>
-        ) : (
-          <p className="context-empty">No outputs yet.</p>
         )}
       </section>
       <section className="context-section context-advanced">
@@ -2373,7 +2348,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
         </>}
         {rehearsalMode === "assign" && <>
           <div><div className="eyebrow">Posting Assignment</div><h2>What do you expect {presence.name} to produce?</h2><p>OpenPresence will show the structured deliverable before work begins. Verified Sandbox publications determine progress.</p></div>
-          {!assignmentDraft ? <><label>Assignment instruction<textarea aria-label="Assignment instruction" value={assignmentInstruction} onChange={(event) => setAssignmentInstruction(event.target.value)} placeholder="Produce 3 original X posts about offers, pricing, sales, or execution. Choose your own angles and do not repeat yourself." rows={4} /></label><div className="original-rehearsal-actions"><small>The original instruction stays attached to the Assignment.</small><Button variant="primary" disabled={busy || !assignmentInstruction.trim()} onClick={() => void reviewAssignment()}><Check size={14} /> Review assignment</Button></div></> : <div className="assignment-review" aria-label="Assignment review"><div><span>Deliverable</span><strong>{assignmentDraft.progress.required} original {channelLabel(assignmentDraft.channelId, state.channelDefinitions)} publications</strong></div><div><span>Completion</span><strong>{assignmentDraft.progress.required} verified publications</strong></div><div><span>{presence.name} decides</span><strong>Topics · thesis · evidence · format · wording · timing strategy</strong></div><p>{assignmentDraft.instruction}</p><div className="original-rehearsal-actions"><Button variant="ghost" onClick={() => setAssignmentDraftId(null)}>Adjust</Button><Button variant="primary" disabled={busy} onClick={() => void run({ type: "startAssignment", id: assignmentDraft.id, sessionId: session.id })}><Play size={14} /> Start rehearsal</Button></div></div>}
+          {!assignmentDraft ? <><label>Assignment instruction<textarea aria-label="Assignment instruction" value={assignmentInstruction} onChange={(event) => setAssignmentInstruction(event.target.value)} placeholder="Produce 3 original X posts about offers, pricing, sales, or execution. Choose your own angles and do not repeat yourself." rows={4} /></label><div className="original-rehearsal-actions"><small>The original instruction stays attached to the Assignment.</small><Button variant="primary" disabled={busy || !assignmentInstruction.trim()} onClick={() => void reviewAssignment()}><Check size={14} /> Review assignment</Button></div></> : <div className="assignment-review" aria-label="Assignment review"><div><span>Deliverable</span><strong>{assignmentDraft.progress.required} original {channelLabel(assignmentDraft.channelId, state.channelDefinitions)} publications</strong></div><div><span>Completion</span><strong>{assignmentDraft.progress.required} verified publications</strong></div><div><span>Agent decides how</span><strong>Topics · thesis · evidence · format · wording · timing strategy</strong></div><p>{assignmentDraft.instruction}</p><div className="original-rehearsal-actions"><Button variant="ghost" onClick={() => setAssignmentDraftId(null)}>Adjust</Button><Button variant="primary" disabled={busy} onClick={() => void run({ type: "startAssignment", id: assignmentDraft.id, sessionId: session.id })}><Play size={14} /> Start rehearsal</Button></div></div>}
         </>}
       </section>}
       {(activeAssignment || assignmentDraft) && <section className="assignment-progress-panel" aria-label="Assignment progress"><div><div className="eyebrow">Posting Assignment</div><h2>{(activeAssignment ?? assignmentDraft)?.instruction}</h2></div><div className="assignment-progress-bar"><span style={{ width: `${Math.min(100, (((activeAssignment ?? assignmentDraft)?.progress.verified ?? 0) / Math.max(1, (activeAssignment ?? assignmentDraft)?.progress.required ?? 1)) * 100)}%` }} /></div><div className="assignment-progress-meta"><strong>{(activeAssignment ?? assignmentDraft)?.progress.verified} / {(activeAssignment ?? assignmentDraft)?.progress.required} delivered</strong><span>{(activeAssignment ?? assignmentDraft)?.status === "completed" ? "Completed" : (activeAssignment ?? assignmentDraft)?.status === "blocked" ? "Blocked" : `${(activeAssignment ?? assignmentDraft)?.rejectedCandidates} candidate rejections`}</span></div>{(activeAssignment ?? assignmentDraft)?.status === "blocked" && <p className="assignment-warning">{(activeAssignment ?? assignmentDraft)?.lastOutcome?.message}</p>}{(activeAssignment ?? assignmentDraft)?.status === "active" && <Button variant="secondary" disabled={busy} onClick={() => void run({ type: "workAssignment", id: (activeAssignment ?? assignmentDraft)!.id, sessionId: session.id })}><Play size={14} /> Continue working</Button>}</section>}
@@ -2444,6 +2419,74 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
       </div>
     </div>
   );
+}
+
+function watchPreview(query: string) {
+  const clean = query.trim().replace(/^keep an eye on\s+/i, "").replace(/[.!?]+$/, "").trim();
+  const creator = /^(?:https?:\/\/)?(?:www\.)?(?:x\.com|twitter\.com)\/[A-Za-z0-9_]+\/?$/i.test(clean) || /^@?[A-Za-z0-9_]{2,30}$/.test(clean);
+  const opportunity = /\b(opportunit|founder|introduction|network|may need|looking for|could help)\b/i.test(clean);
+  return { clean, kind: creator ? "creator" : opportunity ? "opportunity" : "topic" as "creator" | "topic" | "opportunity" };
+}
+
+function watchObservationCopy(watch: Watch) {
+  if (watch.observation.observedCount > 0) {
+    const count = watch.observation.observedCount;
+    return {
+      label: `${count} observation${count === 1 ? "" : "s"} recorded`,
+      detail: "Jenny has current material to consider from this Watch.",
+    };
+  }
+  if (watch.observation.source === "automatic") {
+    return {
+      label: "Waiting for first observation",
+      detail: "This Watch is active. No action is needed yet; Jenny will show signals here when the connected source supplies them.",
+    };
+  }
+  return {
+    label: "Waiting for source material",
+    detail: "This Watch is saved, but it needs connected or manually supplied material before Jenny can notice anything.",
+  };
+}
+
+function WatchingView({ state, mutate }: { state: OpenPresenceState; mutate: Mutate }) {
+  const presence = state.presence ?? state.presences[0];
+  const watches = state.watches.filter((item) => item.presenceId === presence?.id);
+  const [query, setQuery] = useState("");
+  const [purpose, setPurpose] = useState("");
+  const [reviewing, setReviewing] = useState(false);
+  const [busy, setBusy] = useState(false);
+  if (!presence) return null;
+  const preview = watchPreview(query);
+  const kindLabel = preview.kind === "creator" ? "Creator" : preview.kind === "opportunity" ? "Opportunity" : "Topic or conversation";
+  const startWatching = async () => {
+    if (!preview.clean) return;
+    setBusy(true);
+    try {
+      const next = await mutate({ type: "createWatch", query: preview.clean, purpose: purpose.trim() || undefined, presenceId: presence.id });
+      if (next) { setQuery(""); setPurpose(""); setReviewing(false); }
+    } finally { setBusy(false); }
+  };
+  return <div className="watching-page">
+    <div className="watching-header">
+      <div><SectionEyebrow>Presence attention</SectionEyebrow><h1>Watching</h1><p>What {presence.name} is set up to notice. Observations appear when a source supplies evidence.</p></div>
+      <Button variant="primary" onClick={() => setReviewing((value) => !value)}><Plus size={14} /> Add watch</Button>
+    </div>
+    {reviewing && <section className="watch-composer" aria-label="Add a watch">
+      <div><SectionEyebrow>New watch</SectionEyebrow><h2>What should {presence.name} notice?</h2><p>Describe a creator, topic, conversation, or opportunity. OpenPresence will keep the meaning understandable.</p></div>
+      <label>Keep an eye on
+        <textarea aria-label="What should this Presence watch?" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="@AlexHormozi or conversations involving AI agents and founder problems" rows={3} />
+      </label>
+      <label>Why should {presence.name} watch this? <span className="optional-label">Optional</span>
+        <input aria-label="Why should this Presence watch this?" value={purpose} onChange={(event) => setPurpose(event.target.value)} placeholder="Learn from strong offers without imitating the voice" />
+      </label>
+      {query.trim() && <div className="watch-review" aria-label="Watch review"><div><SectionEyebrow>Here&apos;s what {presence.name} will watch</SectionEyebrow><strong>{kindLabel}</strong><p>{preview.clean}</p></div><div><span>Use</span><strong>Notice relevant material</strong></div><div><span>Boundary</span><strong>Watching does not imitate identity or voice</strong></div><div><span>Source</span><strong>{preview.kind === "creator" && presence.channel === "x" ? "Automatic where available" : "Manual material or connected source"}</strong></div></div>}
+      <div className="watch-form-actions"><Button variant="ghost" onClick={() => { setReviewing(false); setQuery(""); setPurpose(""); }}>Cancel</Button><Button variant="primary" disabled={busy || !preview.clean} onClick={() => void startWatching()}>{busy ? "Starting…" : "Start watching"}</Button></div>
+    </section>}
+    {watches.length ? <>
+      <section className="watching-section"><div className="section-heading compact"><div><SectionEyebrow>Watching now</SectionEyebrow><h2>{watches.length} {watches.length === 1 ? "watch" : "watches"}</h2></div></div><div className="watch-list">{watches.map((watch) => { const observationCopy = watchObservationCopy(watch); return <article className="watch-card" key={watch.id}><div className="watch-card-main"><div className="watch-card-icon"><Eye size={17} /></div><div><div className="watch-card-heading"><strong>{watch.title}</strong><span className={`watch-status watch-status-${watch.observation.status}`}><span className="status-dot" /> {watch.observation.status === "manual" ? "Manual source" : "Active watch"}</span></div><small>{watch.kind === "creator" ? "Creator" : watch.kind === "opportunity" ? "Opportunity" : "Topic or conversation"} · {channelLabel(watch.channel, state.channelDefinitions)}</small><p>{watch.purpose || watch.query}</p><div className="watch-observation-state"><strong>{observationCopy.label}</strong><span>{observationCopy.detail}</span></div></div></div><Button variant="ghost" aria-label={`Remove ${watch.title}`} onClick={() => void mutate({ type: "deleteWatch", id: watch.id })}>Remove</Button></article>; })}</div></section>
+      <section className="watching-section noticed-section"><div><SectionEyebrow>Noticed recently</SectionEyebrow><h2>No observations yet</h2><p>Signals will appear here when a connected source supplies current social-world evidence. Adding a Watch does not invent activity or publish anything.</p></div></section>
+    </> : <section className="watching-empty"><div className="watch-empty-mark"><Eye size={23} /></div><SectionEyebrow>Watching</SectionEyebrow><h2>Give {presence.name} better eyes on the social world.</h2><p>Add creators, topics, conversations, or opportunities {presence.name} should notice. Observation helps the Agent decide what deserves attention; it does not turn every match into a post.</p><Button variant="primary" onClick={() => setReviewing(true)}><Plus size={14} /> Add material</Button></section>}
+  </div>;
 }
 
 function TeachView({
@@ -2915,13 +2958,21 @@ function PresenceChatView({
   const [link, setLink] = useState("");
   const [sending, setSending] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  const [composerMode, setComposerMode] = useState<"post" | "reply">("post");
+  const [replyToMessageId, setReplyToMessageId] = useState<string | null>(null);
   const sendingRef = useRef(false);
+  const historyEndRef = useRef<HTMLDivElement>(null);
   const presence = state.presence ?? state.presences[0]!;
   const session = state.presenceChatSessions.find((item) => item.presenceId === presence.id);
   const messages = session?.messages ?? [];
+  const replyTarget = messages.find((item) => item.id === replyToMessageId);
+  const canReply = messages.some((item) => item.role === "user");
   useEffect(() => {
     if (!session) void mutate({ type: "newPresenceChatSession", presenceId: presence.id });
   }, [mutate, presence.id, session]);
+  useEffect(() => {
+    historyEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
+  }, [session?.id, messages.length, pendingMessage, sending]);
   const addFile = (file: File) => {
     if (attachments.length >= 4 || file.size > 1_500_000) return;
     const kind = file.type === "image/gif" ? "gif" : file.type.startsWith("video/") ? "video" : file.type.startsWith("image/") ? "image" : "document";
@@ -2946,11 +2997,13 @@ function PresenceChatView({
     setPendingMessage(outgoing);
     setSending(true);
     try {
-      const next = await mutate({ type: "sendPresenceChatMessage", presenceId: presence.id, sessionId: session.id, content: outgoing, attachments });
+      const next = await mutate({ type: "sendPresenceChatMessage", presenceId: presence.id, sessionId: session.id, content: outgoing, attachments, replyToMessageId: composerMode === "reply" ? replyToMessageId ?? undefined : undefined });
       if (!next) setPendingMessage(null);
     } finally {
       setSending(false);
       setPendingMessage(null);
+      setComposerMode("post");
+      setReplyToMessageId(null);
       sendingRef.current = false;
     }
   };
@@ -2961,7 +3014,7 @@ function PresenceChatView({
           <SectionEyebrow>Chat · {channelLabel(presence.channel, state.channelDefinitions)}</SectionEyebrow>
           <h1>See {presence.name} in the feed.</h1>
           <p className="muted">
-            Write a post or reply that {presence.name} might encounter in {channelLabel(presence.channel, state.channelDefinitions)}. Nothing publishes or changes the Agent during this rehearsal.
+            Add a post to the scene, or choose Reply on a post to continue its thread. Nothing publishes or changes the Agent during this rehearsal.
           </p>
         </div>
       </div>
@@ -2977,17 +3030,19 @@ function PresenceChatView({
                 </div>
               </div>
             ) : (
-              messages.map((item) => (
-                <article key={item.id} className={`social-card presence-chat-card ${item.role === "presence" ? "agent-authored thread-reply-card" : ""}`}>
+              messages.map((item) => {
+                const target = item.replyToMessageId ? messages.find((message) => message.id === item.replyToMessageId) : undefined;
+                return <article key={item.id} className={`social-card presence-chat-card ${item.role === "presence" ? "agent-authored thread-reply-card" : ""}`}>
                   <div className="social-card-meta">
                     {item.role === "presence" ? <PresenceGlyph accent={presence.accent} /> : <span className="actor-avatar">{initials("You")}</span>}
                     <span>
                       <strong>{item.role === "presence" ? presence.name : "You"}</strong>
-                      <small>{item.role === "presence" ? `${presence.handle} · Reply` : "@you · Post"}</small>
+                      <small>{item.role === "presence" ? `${presence.handle} · Reply` : `@you · ${item.replyToMessageId ? "Reply" : "Post"}`}</small>
                     </span>
                     <time>{formatTime(item.timestamp)}</time>
                   </div>
-                  <small className="thread-context">{item.role === "presence" ? `↳ Replying in ${channelLabel(presence.channel, state.channelDefinitions)}` : `Posted to ${channelLabel(presence.channel, state.channelDefinitions)}`}</small>
+                  <small className="thread-context">{item.role === "presence" ? `↳ Replying to the post above` : target ? "↳ Replying to a post" : `Posted to ${channelLabel(presence.channel, state.channelDefinitions)}`}</small>
+                  {target && <div className="presence-chat-reply-context"><span>Replying to</span><p>{target.content}</p></div>}
                   <p>{item.content}</p>
                   {item.attachments?.map((attachment) => (
                     <div className="presence-chat-attachment" key={attachment.id}>
@@ -2999,23 +3054,33 @@ function PresenceChatView({
                       </details>
                     </div>
                   ))}
-                </article>
-              ))
+                  {item.role === "user" && <button type="button" className="presence-chat-reply-action" onClick={() => { setComposerMode("reply"); setReplyToMessageId(item.id); }} disabled={sending} aria-label="Reply to this post" title={`Reply to: ${item.content}`}><Reply size={13} /> Reply to this post</button>}
+                </article>;
+              })
             )}
             {pendingMessage && (
               <>
                 <article className="social-card presence-chat-card optimistic-message">
                   <div className="social-card-meta">
                     <span className="actor-avatar">{initials("You")}</span>
-                    <span><strong>You</strong><small>@you · Post</small></span>
+                    <span><strong>You</strong><small>@you · {composerMode === "reply" ? "Reply" : "Post"}</small></span>
                     <time>{formatTime(new Date().toISOString())}</time>
                   </div>
-                  <small className="thread-context">Posted to {channelLabel(presence.channel, state.channelDefinitions)}</small>
+                  <small className="thread-context">{composerMode === "reply" && replyTarget ? "↳ Replying to a post" : `Posted to ${channelLabel(presence.channel, state.channelDefinitions)}`}</small>
+                  {composerMode === "reply" && replyTarget && <div className="presence-chat-reply-context"><span>Replying to</span><p>{replyTarget.content}</p></div>}
                   <p>{pendingMessage}</p>
                 </article>
                 {sending && <ChatThinkingMessage name={presence.name} accent={presence.accent} feed />}
               </>
             )}
+            <div ref={historyEndRef} aria-hidden="true" className="chat-history-end" />
+          </div>
+          <div className="presence-chat-compose-tools">
+            <div className="presence-chat-mode" role="group" aria-label="Choose what to add to the rehearsal">
+              <button type="button" className={composerMode === "post" ? "active" : ""} aria-pressed={composerMode === "post"} onClick={() => { setComposerMode("post"); setReplyToMessageId(null); }}>Post</button>
+              <button type="button" className={composerMode === "reply" ? "active" : ""} aria-pressed={composerMode === "reply"} disabled={!canReply && composerMode !== "reply"} onClick={() => { if (canReply) setComposerMode("reply"); }}>Reply</button>
+            </div>
+            {composerMode === "reply" && replyTarget ? <div className="presence-chat-selected-reply"><div><span>Replying to</span><button type="button" aria-label="Clear reply target" onClick={() => { setComposerMode("post"); setReplyToMessageId(null); }}><X size={13} /></button></div><p>{replyTarget.content}</p></div> : composerMode === "reply" ? <div className="presence-chat-selected-reply empty"><span>Choose “Reply to this post” on a message above.</span></div> : null}
           </div>
           <div className="attachment-list">
             {attachments.map((attachment) => (
@@ -3041,7 +3106,7 @@ function PresenceChatView({
               />
             </label>
             <textarea
-              aria-label={`Post for ${presence.name} to encounter`}
+              aria-label={composerMode === "reply" ? `Reply for ${presence.name} to encounter` : `Post for ${presence.name} to encounter`}
               value={message}
               onChange={(event) => setMessage(event.target.value)}
               disabled={sending || !session}
@@ -3051,12 +3116,12 @@ function PresenceChatView({
                   void send();
                 }
               }}
-              placeholder={sending ? `${presence.name} is considering the post…` : `Write a post for ${presence.name} to encounter…`}
+              placeholder={sending ? `${presence.name} is considering the ${composerMode}…` : composerMode === "reply" ? `Write a reply for ${presence.name} to encounter…` : `Write a post for ${presence.name} to encounter…`}
               rows={3}
             />
             <button
               className="send-button"
-              aria-label="Send message"
+              aria-label={composerMode === "reply" ? "Send reply" : "Send post"}
               type="submit"
             >
               {sending ? <LoaderCircle size={17} className="spin" /> : <Send size={17} />}
@@ -3064,7 +3129,7 @@ function PresenceChatView({
           </form>
           <div className="presence-chat-link-row"><input aria-label="Link to inspect" placeholder="Paste a link to inspect" value={link} onChange={(event) => setLink(event.target.value)} /><button type="button" onClick={addLink} disabled={!link.trim() || attachments.length >= 4}>Add link</button></div>
           <div className="composer-hint">
-            Enter to post <span>·</span> Shift + Enter for a new line <span>·</span> Private rehearsal · nothing publishes or teaches the Agent
+            {composerMode === "reply" ? "Enter to reply" : "Enter to post"} <span>·</span> Shift + Enter for a new line <span>·</span> Choose Reply on a post above to continue its thread <span>·</span> Private rehearsal · nothing publishes or teaches the Agent
           </div>
         </section>
         <aside className="chat-aside context-panel presence-chat-aside">
@@ -3072,7 +3137,7 @@ function PresenceChatView({
           <h3>{presence.name} as encountered in public</h3>
           <p className="muted">{presence.brief.purpose}</p>
           <div className="presence-chat-boundary"><span className="status-dot" /> Private thread · not published</div>
-          <small>{presence.name} is responding from the selected channel context, Public Self, relationships, and perception when needed. Use Teach for durable changes.</small>
+          <small>{presence.name} is responding from the selected channel context, relationships, and perception when needed. Use Teach for durable changes.</small>
           <Button variant="secondary" onClick={() => void mutate({ type: "newPresenceChatSession", presenceId: presence.id })}><Plus size={14} /> New rehearsal</Button>
         </aside>
       </div>
@@ -3099,7 +3164,7 @@ function ChatThinkingMessage({ name, accent, feed = false }: { name: string; acc
     <article className="social-card presence-chat-card chat-thinking-message" role="status" aria-live="polite">
       <div className="social-card-meta">
         <PresenceGlyph accent={accent} />
-        <span><strong>{name}</strong><small>Public self · Replying</small></span>
+        <span><strong>{name}</strong><small>Replying</small></span>
         <time>Now</time>
       </div>
       <small className="thread-context">↳ Considering a reply in the feed</small>
@@ -4103,7 +4168,7 @@ function ScheduleView({
   const add = async (event: React.FormEvent) => {
     event.preventDefault();
     if (responsibility === "assign") {
-      const next = await mutate({ type: "createAssignment", instruction, presenceId, environment: selectedPresence?.connectionMode === "sandbox" ? "sandbox" : "live" });
+      const next = await mutate({ type: "createAssignment", instruction, presenceId, environment: selectedPresence?.connectionMode === "sandbox" ? "sandbox" : "live", schedule: { day, time, executionWindow } });
       if (next) { resetForm(); setShowForm(false); }
       return;
     }
@@ -4268,7 +4333,7 @@ function ScheduleView({
           </Button>
         </form>
       )}
-      {state.assignments.filter((item) => item.presenceId === presenceId).length > 0 && <section className="schedule-assignment-list" aria-label="Assignments"><div className="section-heading"><div><SectionEyebrow>Delegated responsibility</SectionEyebrow><h2>Assignments</h2></div></div>{state.assignments.filter((item) => item.presenceId === presenceId).map((assignment) => { const canCancel = assignment.status !== "completed" && assignment.status !== "cancelled"; return <article className="schedule-assignment-row" key={assignment.id}><div><strong>{assignment.instruction}</strong><small>{assignment.recurrence?.label ?? "Once"} · {assignment.progress.verified} / {assignment.progress.required} verified · {assignment.status.replaceAll("_", " ")}</small></div><div className="schedule-assignment-actions">{canCancel && <Button variant="danger" disabled={busy} onClick={() => void cancelAssignment(assignment)}>Cancel</Button>}</div></article>; })}</section>}
+      {state.assignments.filter((item) => item.presenceId === presenceId).length > 0 && <section className="schedule-assignment-list" aria-label="Assignments"><div className="section-heading"><div><SectionEyebrow>Delegated responsibility</SectionEyebrow><h2>Assignments</h2></div></div>{state.assignments.filter((item) => item.presenceId === presenceId).map((assignment) => { const canCancel = assignment.status !== "completed" && assignment.status !== "cancelled"; const timing = assignment.schedule ? `${assignment.schedule.day} at ${assignment.schedule.time} · ${assignment.schedule.executionWindow === `${assignment.schedule.time}–${assignment.schedule.time}` ? "exact time" : assignment.schedule.executionWindow}` : assignment.recurrence?.label ?? "Once"; return <article className="schedule-assignment-row" key={assignment.id}><div><strong>{assignment.instruction}</strong><small>{timing} · {assignment.progress.verified} / {assignment.progress.required} verified · {assignment.status.replaceAll("_", " ")}</small></div><div className="schedule-assignment-actions">{canCancel && <Button variant="danger" onClick={() => void cancelAssignment(assignment)}>Cancel</Button>}</div></article>; })}</section>}
       {viewMode === "week" ? (
         <WeekCalendar slots={visibleSlots} state={state} presenceName={presenceName} onEdit={beginEdit} onAdd={() => setShowForm(true)} />
       ) : (

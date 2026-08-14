@@ -1,5 +1,53 @@
 # Regression rules
 
+## Rule: Teach must require an explicit Presence-mode command
+
+**Defect class:** Conversational command parsing / quoted social context
+
+**General principle:** A word inside a social handle, quotation, example, or world-data description is not an operator command. State-changing conversational actions require an explicit imperative that names the target and requested transition.
+
+**Incident:** Teach matched the substring `ghost` anywhere in the operator's message. Asking how to handle `@jenny_ghost write a post about SpaceX` therefore changed the Presence to Ghost and surfaced `Presence changed to Ghost`, even though the user asked for nuanced mention handling.
+
+**Project enforcement:** `isExplicitGhostModeRequest` accepts explicit Presence-to-Ghost imperatives and rejects quoted handles or incidental mentions. The `sendMessage` operation uses that recognizer instead of a substring check.
+
+**Executable protection:** `tests/runtime.test.ts` asserts the exact reported mention leaves the Presence Agent-owned and that the explicit mode phrase still changes it; `tests/e2e/openpresence.spec.ts` exercises the same Teach flow and checks the state route.
+
+**Apply when:** Changing Teach command parsing, natural-language state mutations, Presence mode/identity controls, or handling of quoted social-world text.
+
+**Added:** 2026-08-13
+
+## Rule: Durable writing preferences must have real proposal provenance
+
+**Defect class:** Teach preference acknowledgement / phantom proposal
+
+**General principle:** If the Agent says a protected preference is a reviewable proposal, the proposal and its ChangeSet must exist in durable state. The acknowledgement must repeat the exact scope and distinguish immediate conversational behavior from authoritative meaning.
+
+**Incident:** The one-sentence-per-line post-formatting preference was described as a proposal, but no proposal was actually created, leaving the operator unable to find or review what the Agent claimed to have added.
+
+**Project enforcement:** Teach recognizes the post-only formatting request, appends the exact guidance to a pending `TASTE` proposal, creates its ChangeSet, and says that posts use blank-line-separated sentence paragraphs while replies remain normally formatted until approval.
+
+**Executable protection:** `tests/runtime.test.ts` asserts the proposal body, exact interim behavior, and ChangeSet; `tests/e2e/openpresence.spec.ts` verifies the Teach response and persisted proposal.
+
+**Apply when:** Changing Teach durable preferences, protected meaning proposals, writing-style instructions, or acknowledgement copy.
+
+**Added:** 2026-08-13
+
+## Rule: Assignment review must expose the delegated authority boundary
+
+**Defect class:** Assignment review copy / operator-versus-Agent ownership
+
+**General principle:** When an operator assigns an outcome, the review surface must distinguish the required deliverable from the Agent's freedom over the approach. A generic `Agent decides` label can make required work look optional or make the Agent appear to own the outcome.
+
+**Incident:** The Assignment review card labeled the approach column `Jenny decides`, even though the operator had already assigned the expected deliverable. The supporting list was accurate but the authority boundary was ambiguous at the moment the operator approved the work.
+
+**Project enforcement:** The review card labels the approach column `Agent decides how` and keeps the explicit list of topics, thesis, evidence, format, wording, and timing strategy. Deliverable and verified completion remain separate columns.
+
+**Executable protection:** `tests/e2e/playground-rehearsal.spec.ts` reviews an Assignment and asserts the `Agent decides how` label, the approach list, and the absence of `Jenny decides` on Chromium and Pixel 5.
+
+**Apply when:** Changing Assignment creation/review copy, delegated responsibility, Consider versus Assign controls, or any surface that explains Agent autonomy inside an operator instruction.
+
+**Added:** 2026-08-13
+
 ## Rule: Teach must not turn symbol-only operator context into assistant onboarding
 
 **Defect class:** Teach conversation identity / low-information operator input
@@ -1242,3 +1290,57 @@
 **Apply when:** Changing Calendar, Schedule, Standing Intent, publication history, Social Mirror projections, outcome metrics, or Presence navigation.
 
 **Added:** 2026-08-13
+## Rule: Browser QA must verify the active local build and origin
+
+**Defect class:** Stale browser bundle / multiple local development servers
+
+**General principle:** A user-facing browser feature is not verified by API success or a headless run alone. The test must exercise the same browser surface the user is using, confirm the active origin and current client bundle, and prove the user journey from navigation to persisted result.
+
+**Incident:** Chrome was pointed at an older local app tab on `localhost:3001`, which still rendered the pre-Watching navigation while the current implementation was available on another local server. The current API accepted the Watch mutation, but the stale browser could not expose the feature.
+
+**Project enforcement:** Watching QA starts one known local server, opens a fresh Chrome tab, confirms the `Watching` navigation item, and completes create → reload → remove. When multiple local servers exist, record the exact origin under test and do not treat a different port as equivalent evidence.
+
+**Executable protection:** `tests/e2e/watching.spec.ts` covers the complete creator persistence/removal journey and topic/opportunity boundary on Chromium and Pixel 5; Chrome acceptance was independently rerun on `localhost:3103` with no console errors and 200 responses through load, create, and delete.
+
+**Apply when:** Adding or changing user-facing navigation, local dev-server routing, browser bundles, cache-sensitive UI, or any feature reported as missing or broken in a real browser.
+
+**Added:** 2026-08-13
+
+## Rule: Watch activation and observation readiness must use separate language
+
+**Defect class:** Watch lifecycle copy / implementation-state leakage
+
+**General principle:** A configured capability and the data it has produced are different states. User-facing status must say whether the capability is active, what evidence is currently available, what it is waiting for, and whether the operator needs to act; never expose an internal “not started” metric as if it were a pending user action.
+
+**Incident:** A green `Watching` pill appeared beside `Performance baseline · Not started`, making an already-started Watch look both active and inactive. “Performance baseline” also implied a metric workflow that the operator could not start or understand.
+
+**Project enforcement:** `WatchingView` renders `Active watch` plus `Waiting for first observation` for automatic creator Watches, and `Manual source` plus `Waiting for source material` for topic/opportunity Watches. The page explains that starting saves the attention instruction and observations appear only when a source supplies evidence; the internal baseline field is not exposed.
+
+**Executable protection:** `tests/e2e/watching.spec.ts` asserts both lifecycle messages and asserts that `Performance baseline`/`Not started` are absent on Chromium and Pixel 5.
+
+**Apply when:** Changing Watching, observation status, source readiness, baselines, metrics, connected-source language, or any UI that combines activation state with collected evidence.
+
+**Added:** 2026-08-14
+
+## Rule: Ghost identity protection must allow public subject matter
+
+**Defect class:** Ghost identity boundary / false-positive content rejection
+
+**General principle:** Identity disclosure protection must block private runtime details without treating ordinary public subject matter as implementation leakage.
+
+**Incident:** An Assignment about building the best AI model repeatedly generated valid posts, but the Ghost filter treated the generic word `model` as forbidden, rewrote every candidate to `no_op`, and left the Assignment at 0/4 with no execution.
+
+**Project enforcement:** `identityLeakageReason` blocks specific provider, exact-model, and runtime-detail phrases, while allowing ordinary discussion of an AI model as the public topic. Assignment candidates must still reach `formSandboxIntent` and verified Sandbox delivery.
+
+**Executable protection:** `tests/runtime.test.ts` covers both permitted public subject matter and blocked private runtime disclosure; the Assignment rehearsal E2E coverage verifies the delegated flow remains usable.
+
+**Apply when:** Changing Ghost boundaries, Assignment candidate QA, public subject-matter posts, or model/provider disclosure rules.
+
+**Added:** 2026-08-13
+\n+## Assignment schedule metadata must survive the review handoff
+
+**Incident:** The Schedule Assignment form accepted a day, time, and exact/flexible timing choice, but the `createAssignment` operation discarded those fields. The resulting row falsely collapsed a near-term Assignment to `Once`, leaving the operator unable to verify when it was intended to run.
+
+**Product boundary:** Assignment timing is an operator-provided execution window, not a command to publish regardless of context. The Agent still owns how it fulfills the outcome, and Sandbox verification remains the only source of progress.
+
+**Executable protection:** `Assignment.schedule` is carried through the typed operation, runtime compiler, state route, and Schedule row; the runtime test asserts that exact timing remains attached to the created Assignment.

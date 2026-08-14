@@ -1,4 +1,4 @@
-import type { ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, Asset, Assignment, AssignmentQuantityMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, FileKind, FileProposal, GhostProfile, JsonValue, LiveEvent, OpenPresenceState, Operation, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, SandboxAssetInput, SocialAssetKind, SocialIntent, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt } from "./types";
+import type { ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, Asset, Assignment, AssignmentQuantityMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, FileKind, FileProposal, GhostProfile, JsonValue, LiveEvent, OpenPresenceState, Operation, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, SandboxAssetInput, SocialAssetKind, SocialIntent, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind } from "./types";
 import { CHANNEL_CAPABILITIES, CHANNEL_EXTENSIONS, simulationForChannel } from "./types";
 import { createAssetPerception, createUninterpretedPerception, hasUsablePerception, mediaRequiresReview, perceptionRequirement } from "./perception";
 
@@ -72,7 +72,7 @@ const fileContent = (kind: FileKind, input: CreateAgentInput, presence?: Presenc
 };
 
 export function initialState(): OpenPresenceState {
-  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], events: [], calendar: [], assignments: [], actions: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], toolBindings: [], changeSets: [], standingIntents: [], socialIntents: [], executions: [], outcomes: [], publications: [], preferenceEvidence: [], originalPostRehearsals: [], librarySources: [], assets: [], perceptions: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
+  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], events: [], calendar: [], assignments: [], watches: [], actions: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], toolBindings: [], changeSets: [], standingIntents: [], socialIntents: [], executions: [], outcomes: [], publications: [], preferenceEvidence: [], originalPostRehearsals: [], librarySources: [], assets: [], perceptions: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
 }
 
 function makeFiles(input: CreateAgentInput, presence: Presence): AgentFile[] { return (Object.keys(fileMeta) as FileKind[]).map((kind) => ({ kind, ...fileMeta[kind], content: fileContent(kind, input, presence), revision: 1, updatedAt: now() })); }
@@ -438,11 +438,17 @@ export function identityLeakageReason(state: OpenPresenceState, presence: Presen
   const approved = new Set(presence.publicSelf?.approvedTechnicalFacts ?? []);
   const agentName = state.agent?.name?.trim();
   if (agentName && agentName.toLowerCase() !== presence.name.toLowerCase() && new RegExp(`\\b${agentName.replace(/[.*+?^${}()|[\\]\\\\]/g, "\\\\$&")}\\b`, "i").test(text)) return `This Ghost draft names the private Agent identity (${agentName}).`;
+  const selfReference = "(?:I|we|my|our|this\\s+(?:account|presence|agent)|the\\s+(?:account|presence|agent))";
+  const selfReferenceWindow = `(?:${selfReference}[^.!?]{0,100})`;
+  const platformTerms = "(?:OpenPresence)";
+  const providerTerms = "(?:OpenAI|Anthropic|OpenRouter|Ollama|model provider|provider)";
+  const modelTerms = "(?:GPT[- ]?\\w+|Claude|(?:current|selected|exact|underlying)\\s+model\\b|model\\s+(?:provider|name|version|runtime)\\b)";
+  const toolTerms = "(?:system prompt|credentials?|API key|database|tool registry|worker topology|implementation details?|internal machinery|private machinery|how (?:this|the account) works)";
   const implementationTerms = [
-    !approved.has("built-with-openpresence") && "OpenPresence",
-    !approved.has("model-provider") && "(?:OpenAI|Anthropic|OpenRouter|Ollama|provider)",
-    !approved.has("exact-model") && "(?:GPT[- ]?\\w+|Claude|model)",
-    !approved.has("tools") && "(?:system prompt|credentials?|API key|database|tool registry|worker topology|implementation details?|internal machinery|private machinery|how (?:this|the account) works)",
+    !approved.has("built-with-openpresence") && `(?:${selfReferenceWindow}(?:am|are|is|was|were|built|made|powered|hosted|run|runs|operate|operates|connected|configured)[^.!?]{0,100}${platformTerms}|${platformTerms}[^.!?]{0,100}(?:powers|runs|hosts|operates)\\s+(?:this|the)\\s+(?:account|presence|agent))`,
+    !approved.has("model-provider") && `(?:${selfReferenceWindow}(?:am|are|is|use|uses|run|runs|rely|relies|powered|built|hosted|connected|configured|work|works|operate|operates)[^.!?]{0,100}${providerTerms}|${providerTerms}[^.!?]{0,100}(?:powers|runs|drives|operates)\\s+(?:this|the)\\s+(?:account|presence|agent))`,
+    !approved.has("exact-model") && `(?:${selfReferenceWindow}(?:use|uses|run|runs|rely|relies|select|selects|selected|configured|work|works|operate|operates)[^.!?]{0,100}${modelTerms}|${modelTerms}[^.!?]{0,100}(?:powers|runs|drives|operates)\\s+(?:this|the)\\s+(?:account|presence|agent))`,
+    !approved.has("tools") && `${selfReferenceWindow}[^.!?]{0,100}${toolTerms}`,
   ].filter(Boolean).join("|");
   return implementationTerms && new RegExp(implementationTerms, "i").test(text) ? "This Ghost draft includes implementation details that are not approved for public disclosure." : undefined;
 }
@@ -488,6 +494,19 @@ function makeSandboxEnvironment(presence: Presence): SandboxEnvironment {
 }
 
 function cloneState(source: OpenPresenceState) { return normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState); }
+
+export function compileWatch(agentId: string, presenceId: string, channel: ChannelId, query: string, purpose?: string): Watch {
+  const clean = query.trim().replace(/^keep an eye on\s+/i, "").replace(/[.!?]+$/, "").trim();
+  const creator = /^(?:https?:\/\/)?(?:www\.)?(?:x\.com|twitter\.com)\/[A-Za-z0-9_]+\/?$/i.test(clean) || /^@?[A-Za-z0-9_]{2,30}$/.test(clean);
+  const opportunity = /\b(opportunit|founder|introduction|network|may need|looking for|could help)\b/i.test(clean);
+  const kind: WatchKind = creator ? "creator" : opportunity ? "opportunity" : "topic";
+  const title = creator
+    ? clean.replace(/^https?:\/\/(?:www\.)?(?:x\.com|twitter\.com)\//i, "@").replace(/\/$/, "")
+    : kind === "opportunity" ? "Opportunity watch" : clean.length > 56 ? `${clean.slice(0, 56).trim()}…` : clean;
+  const source = creator && channel === "x" ? "automatic" as const : "manual" as const;
+  const timestamp = now();
+  return { id: id("watch"), agentId, presenceId, channel, kind, title, query: clean, purpose: purpose?.trim() || undefined, observation: { status: source === "automatic" ? "watching" : "manual", source, observedCount: 0, baseline: "not-started" }, createdAt: timestamp, updatedAt: timestamp };
+}
 
 function sandboxEnvironmentFor(state: OpenPresenceState, presence: Presence): SandboxEnvironment {
   const existing = state.sandboxEnvironments.find((item) => item.presenceId === presence.id && item.channelId === presence.channel);
@@ -828,7 +847,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   const base = initialState();
   const skills = (state.skills ?? []).map((skill) => ({ ...skill, name: skill.name ?? skill.id.replaceAll("-", " ") }));
   const providerConnections = (state.providerConnections ?? []).map((connection) => ({ ...connection, label: providerName(connection.provider) }));
-  const normalized = { ...base, ...state, agents, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], presence, presences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], calendar, assignments: state.assignments ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, toolBindings: state.toolBindings ?? [], changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], preferenceEvidence: state.preferenceEvidence ?? [], originalPostRehearsals: state.originalPostRehearsals ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], perceptions: state.perceptions ?? [], skills, agentSkills: state.agentSkills ?? [], contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: state.playgroundSessions ?? [], sandboxActors: state.sandboxActors ?? [], networkSearches: state.networkSearches ?? [], networkIntroductions: state.networkIntroductions ?? [] };
+  const normalized = { ...base, ...state, agents, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], presence, presences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], calendar, assignments: state.assignments ?? [], watches: state.watches ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, toolBindings: state.toolBindings ?? [], changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], preferenceEvidence: state.preferenceEvidence ?? [], originalPostRehearsals: state.originalPostRehearsals ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], perceptions: state.perceptions ?? [], skills, agentSkills: state.agentSkills ?? [], contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: state.playgroundSessions ?? [], sandboxActors: state.sandboxActors ?? [], networkSearches: state.networkSearches ?? [], networkIntroductions: state.networkIntroductions ?? [] };
   const pulseTimes = normalized.events.filter((item) => item.title === "Pulse completed").map((item) => item.time).sort().reverse();
   const priorPulseAt = pulseTimes[1];
   if (priorPulseAt) {
@@ -904,6 +923,25 @@ function inferPresenceBriefChange(content: string, current: PresenceBrief): { br
   return undefined;
 }
 
+function inferPostFormattingProposal(content: string, currentTaste: string): { proposed: string; reply: string } | undefined {
+  const asksForSeparatedPostSentences = /one sentence per (?:line|paragraph)|blank line between sentences/i.test(content);
+  const scopesPosts = /\bposts?\b/i.test(content) && !/\b(?:repl(?:y|ies)|responses?)\b/i.test(content) || /posts?\s*\(\s*not\s+repl/i.test(content);
+  if (!asksForSeparatedPostSentences || !scopesPosts) return undefined;
+  const guidance = "## Post formatting\n\nFor posts, write one sentence per paragraph with a blank line between sentences. Replies can use normal paragraph formatting.";
+  const proposed = currentTaste.includes(guidance) ? currentTaste : `${currentTaste.trim()}\n\n${guidance}`;
+  return {
+    proposed,
+    reply: "For posts, I’ll use one sentence per paragraph with a blank line between sentences. Replies can stay normally formatted. I also created a reviewable TASTE proposal; it is not authoritative until you approve it.",
+  };
+}
+
+export function isExplicitGhostModeRequest(content: string) {
+  const normalized = content.toLowerCase().replace(/[’]/g, "'");
+  return /\b(?:put|move|switch|change|set)\s+(?:this|the|my)?\s*presence\s+(?:into|in|to|as)\s+ghost(?:\s+mode)?\b/.test(normalized)
+    || /\bmake\s+(?:this|the|my)?\s*presence\s+(?:a\s+)?ghost(?:\s+presence)?\b/.test(normalized)
+    || /\b(?:turn|enable)\s+ghost\s+mode\s+on\b/.test(normalized);
+}
+
 function makeStandingIntent(state: OpenPresenceState, instruction: string, presence: Presence | null, day: string, time: string, objective: string, executionWindow: string): StandingIntent {
   const timestamp = now();
   return { id: id("standing"), agentId: state.agent?.id ?? "", presenceId: presence?.id, instruction: instruction.trim(), trigger: { type: "schedule", config: { day, time } }, objective, quality: { skipIfNothingWorthSaying: true }, executionWindow: { startsAt: executionWindow.split("–")[0], endsAt: executionWindow.split("–")[1] }, status: "active", createdAt: timestamp, updatedAt: timestamp };
@@ -917,7 +955,7 @@ function assignmentQuantity(instruction: string): { quantity: number; quantityMo
   return { quantity, quantityMode };
 }
 
-export function compileAssignmentInstruction(source: OpenPresenceState, instruction: string, presenceId?: string, environment: PresenceEnvironment = "sandbox", sessionId?: string): Assignment {
+export function compileAssignmentInstruction(source: OpenPresenceState, instruction: string, presenceId?: string, environment: PresenceEnvironment = "sandbox", sessionId?: string, schedule?: Assignment["schedule"]): Assignment {
   const clean = instruction.trim();
   if (!clean) throw new Error("An Assignment needs an expected outcome.");
   const presence = source.presences.find((item) => item.id === (presenceId ?? source.activePresenceId)) ?? source.presence;
@@ -932,7 +970,7 @@ export function compileAssignmentInstruction(source: OpenPresenceState, instruct
     /choose\s+your\s+own|find\s+your\s+own/i.test(clean) ? "The Agent chooses the topics, thesis, examples, format, and wording." : "",
   ].filter(Boolean);
   const timestamp = now();
-  return { id: id("assignment"), agentId: source.agent.id, presenceId: presence.id, sessionId, channelId: presence.channel, environment, instruction: clean, deliverable: { type, quantity, quantityMode }, recurrence, editorialContext: { topics, constraints }, executionPolicy: { usePresenceEnvelope: true }, status: "draft", progress: { required: quantity, verified: 0 }, rejectedCandidates: 0, systemFailures: 0, createdAt: timestamp, updatedAt: timestamp };
+  return { id: id("assignment"), agentId: source.agent.id, presenceId: presence.id, sessionId, channelId: presence.channel, environment, instruction: clean, deliverable: { type, quantity, quantityMode }, recurrence, schedule, editorialContext: { topics, constraints }, executionPolicy: { usePresenceEnvelope: true }, status: "draft", progress: { required: quantity, verified: 0 }, rejectedCandidates: 0, systemFailures: 0, createdAt: timestamp, updatedAt: timestamp };
 }
 
 export function assignmentIsSatisfied(assignment: Assignment) {
@@ -1150,7 +1188,7 @@ export function confirmAutoMode(source: OpenPresenceState, presenceId: string, c
 export function applyOperation(source: OpenPresenceState, operation: Operation | import("./types").ToolBindingOperation): OpenPresenceState {
   let state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   if (operation.type === "createAssignment") {
-    const assignment = compileAssignmentInstruction(state, operation.instruction, operation.presenceId, operation.environment ?? "sandbox", operation.sessionId);
+    const assignment = compileAssignmentInstruction(state, operation.instruction, operation.presenceId, operation.environment ?? "sandbox", operation.sessionId, operation.schedule);
     state.assignments.unshift(assignment);
     state.events.unshift(event("system", "Assignment drafted", `${assignment.progress.required} ${assignment.deliverable.type === "original_publication" ? "original publications" : assignment.deliverable.type} · ${assignment.recurrence?.label ?? "Once"}. Review the expected outcome before starting.`, "positive", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
     return state;
@@ -1162,6 +1200,23 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     assignment.sessionId = operation.sessionId;
     assignment.updatedAt = now();
     state.events.unshift(event("decision", "Assignment started", `${assignment.progress.required} verified ${assignment.deliverable.type === "original_publication" ? "publications" : assignment.deliverable.type} expected. The Agent owns how to fulfill the Assignment; verified Sandbox output owns progress.`, "positive", { presenceId: assignment.presenceId, sessionId: operation.sessionId }));
+    return state;
+  }
+  if (operation.type === "createWatch") {
+    const query = operation.query.trim();
+    const presence = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence;
+    if (!state.agent || !presence || !query) return state;
+    const watch = compileWatch(state.agent.id, presence.id, presence.channel, query, operation.purpose);
+    if (state.watches.some((item) => item.presenceId === watch.presenceId && item.query.toLowerCase() === watch.query.toLowerCase())) return state;
+    state.watches.unshift(watch);
+    state.events.unshift(event("system", "Watch added", `${watch.title} is now part of ${presence.name}'s attention. Observation is ${watch.observation.status === "manual" ? "waiting for a source" : "available automatically"}.`, "positive", { presenceId: presence.id }));
+    return state;
+  }
+  if (operation.type === "deleteWatch") {
+    const watch = state.watches.find((item) => item.id === operation.id);
+    if (!watch) return state;
+    state.watches = state.watches.filter((item) => item.id !== watch.id);
+    state.events.unshift(event("system", "Watch removed", `${watch.title} is no longer part of the Presence's attention.`, "quiet", { presenceId: watch.presenceId }));
     return state;
   }
   switch (operation.type) {
@@ -1230,7 +1285,8 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       const session = state.presenceChatSessions.find((item) => item.id === operation.sessionId && item.presenceId === operation.presenceId);
       if (!session || !state.presences.some((presence) => presence.id === operation.presenceId) || !operation.content.trim()) return state;
       const content = operation.content.trim();
-      session.messages.push({ id: id("presence-chat-message"), role: "user", content, timestamp: now(), attachments: operation.attachments?.map((attachment) => ({ id: id("presence-chat-asset"), ...attachment })) });
+      const replyToMessageId = operation.replyToMessageId && session.messages.some((message) => message.id === operation.replyToMessageId) ? operation.replyToMessageId : undefined;
+      session.messages.push({ id: id("presence-chat-message"), role: "user", content, timestamp: now(), attachments: operation.attachments?.map((attachment) => ({ id: id("presence-chat-asset"), ...attachment })), replyToMessageId });
       if (session.title === "New conversation") session.title = content.replace(/\s+/g, " ").slice(0, 42) + (content.length > 42 ? "…" : "");
       session.updatedAt = now();
       return state;
@@ -1246,9 +1302,10 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       const lower = content.toLowerCase(); let reply = "I heard you. I’ll keep that in the working context and use it when the next decision calls for it."; let change: string | undefined;
       const briefChange = state.presence ? inferPresenceBriefChange(content, state.presence.brief) : undefined;
       if (briefChange && state.presence) { state = applyOperation(state, { type: "setPresence", patch: { brief: briefChange.brief } }); reply = "I updated this Presence Brief. The Agent remains the same, while this social role now has a clearer emphasis here."; change = briefChange.summary; }
+      else if (inferPostFormattingProposal(content, state.files.find((file) => file.kind === "TASTE")?.content ?? "")) { const formatting = inferPostFormattingProposal(content, state.files.find((file) => file.kind === "TASTE")?.content ?? "")!; state.proposals.push(proposal(state, "TASTE", formatting.proposed, "You asked for a durable post-formatting preference. Protected identity files change through proposals.", conversation.id)); reply = formatting.reply; change = "Taste proposal created"; }
       else if (lower.includes("em dash") || lower.includes("em-dash")) { const current = state.files.find((file) => file.kind === "TASTE")?.content ?? ""; state.proposals.push(proposal(state, "TASTE", `${current}\n\n## Style note\n\nPrefer commas, periods, or a clean line break over em dashes.`, "You asked for a durable writing preference. Protected identity files change through proposals.", conversation.id)); reply = "I turned that into a Taste proposal so it can become a durable preference without silently rewriting who I am."; change = "Taste proposal created"; }
       else if (lower.includes("tuesday") || lower.includes("schedule") || lower.includes("every ")) { const instruction = content.replace(/^schedule\s+/i, "").replace(/[.!?]+$/, "").trim() || "Teach the audience one useful thing."; const slot = makeCalendarSlot(instruction, state.presence); const standing = makeStandingIntent(state, instruction, state.presence, slot.day, slot.time, slot.objective, slot.executionWindow); slot.standingIntentId = standing.id; state.standingIntents.push(standing); state.calendar.push(slot); recordChangeSet(state, "Create standing intent", [{ path: "standingIntents", action: "create", after: standing.instruction }], conversation.id); reply = `I created a standing intention: ${slot.label}. I’ll evaluate it in the moment and let it expire without publishing if there is nothing worthwhile.`; change = "Standing intention created"; }
-      else if (lower.includes("ghost")) { const presence = state.presence ? { ...state.presence, mode: "ghost" as const } : null; if (presence) { presence.context = compilePresenceContext(presence); state.presence = presence; state.presences = state.presences.map((item) => item.id === presence.id ? presence : item); } const file = state.files.find((item) => item.kind === "PRESENCE"); if (file && presence) file.content = fileContent("PRESENCE", { name: state.agent.name, description: state.agent.description, audience: state.agent.audience, mode: "ghost", handle: presence.handle, accent: state.agent.accent }); recordChangeSet(state, "Change Presence mode", [{ path: `presences.${state.presence?.id}.mode`, action: "update", after: "ghost" }], conversation.id); reply = "I updated this Presence to Ghost mode. I’ll extend the operator’s attention and judgment rather than pretending to be a different public speaker."; change = "Presence changed to Ghost"; }
+      else if (isExplicitGhostModeRequest(content)) { const presence = state.presence ? { ...state.presence, mode: "ghost" as const } : null; if (presence) { presence.context = compilePresenceContext(presence); state.presence = presence; state.presences = state.presences.map((item) => item.id === presence.id ? presence : item); } const file = state.files.find((item) => item.kind === "PRESENCE"); if (file && presence) file.content = fileContent("PRESENCE", { name: state.agent.name, description: state.agent.description, audience: state.agent.audience, mode: "ghost", handle: presence.handle, accent: state.agent.accent }); recordChangeSet(state, "Change Presence mode", [{ path: `presences.${state.presence?.id}.mode`, action: "update", after: "ghost" }], conversation.id); reply = "I updated this Presence to Ghost mode. I’ll extend the operator’s attention and judgment rather than pretending to be a different public speaker."; change = "Presence changed to Ghost"; }
       conversation.messages.push({ id: id("msg"), role: "agent", content: reply, timestamp: now(), change }); conversation.updatedAt = now(); state.events.unshift(event("decision", "A conversation with the operator", change ?? "Working context updated.", change ? "positive" : "neutral")); syncMessages(state); return state;
     }
     case "saveFile": { const file = state.files.find((item) => item.kind === operation.kind); if (!file || file.content === operation.content) return state; if (file.protected) { state.proposals.push(proposal(state, operation.kind, operation.content, "Protected meaning files are reviewed before they change.")); state.events.unshift(event("system", `${operation.kind}.md needs your review`, "A protected meaning change is waiting in Brain.", "warning")); } else { const before = file.content; file.content = operation.content; file.revision += 1; file.updatedAt = now(); recordChangeSet(state, `Update ${operation.kind}.md`, [{ path: `agentFiles.${operation.kind}`, action: "update", before, after: operation.content }]); state.events.unshift(event("learning", `${operation.kind}.md updated`, "The change was saved to the local agent state.", "positive")); } return state; }

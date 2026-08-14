@@ -165,7 +165,9 @@ test("Presence Chat speaks as the selected public self without teaching the Agen
   await expect(page.getByText("Chat · X", { exact: true })).toBeVisible();
   await expect(page.getByText("X · Jenny", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Start the rehearsal.", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("Write a post or reply that Jenny might encounter in X. Nothing publishes or changes the Agent during this rehearsal.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Add a post to the scene, or choose Reply on a post to continue its thread. Nothing publishes or changes the Agent during this rehearsal.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Post", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByRole("button", { name: "Reply", exact: true })).toBeDisabled();
   await expect(page.getByRole("complementary", { name: "Context & Changes sidebar" })).toHaveCount(0);
   await expect(page.getByText("Private thread · not published", { exact: true })).toBeVisible();
   await expect(page.getByLabel("Model")).toHaveCount(0);
@@ -178,7 +180,7 @@ test("Presence Chat speaks as the selected public self without teaching the Agen
     await route.continue();
   });
   await page.getByLabel("Post for Jenny to encounter").fill("My name is Bob and I own a submarine.");
-  await page.getByRole("button", { name: "Send message" }).click();
+  await page.getByRole("button", { name: "Send post" }).click();
   await expect(page.getByText("My name is Bob and I own a submarine.", { exact: true })).toBeVisible();
   await expect(page.getByRole("status").getByText("Considering", { exact: true })).toBeVisible();
   await expect(page.getByText(/I understood “My name is Bob/)).toBeVisible();
@@ -188,12 +190,23 @@ test("Presence Chat speaks as the selected public self without teaching the Agen
   expect(afterChat.presenceChatSessions[0].messages.map((message: { role: string }) => message.role)).toEqual(["user", "presence"]);
   expect(afterChat.conversations[0].messages).toHaveLength(0);
   expect(afterChat.changeSets).toHaveLength(0);
+  await page.getByRole("button", { name: "Reply to this post", exact: true }).click();
+  await expect(page.getByRole("button", { name: "Reply", exact: true })).toHaveAttribute("aria-pressed", "true");
+  await expect(page.getByLabel("Reply for Jenny to encounter")).toBeVisible();
+  await expect(page.getByText("Replying to", { exact: true })).toBeVisible();
+  await page.getByLabel("Reply for Jenny to encounter").fill("The edge cases are where the product tells the truth.");
+  await page.getByRole("button", { name: "Send reply" }).click();
+  await expect(page.getByText("The edge cases are where the product tells the truth.", { exact: true })).toBeVisible();
+  const afterReply = await (await request.get("/api/state")).json();
+  const rehearsalMessages = afterReply.presenceChatSessions[0].messages;
+  expect(rehearsalMessages.map((message: { role: string }) => message.role)).toEqual(["user", "presence", "user", "presence"]);
+  expect(rehearsalMessages[2].replyToMessageId).toBe(rehearsalMessages[0].id);
   await page.reload();
   await navigate(page, "Chat");
-  await expect(page.getByText("My name is Bob and I own a submarine.", { exact: true })).toBeVisible();
+  await expect(page.getByText("The edge cases are where the product tells the truth.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "New rehearsal", exact: true }).click();
   await expect(page.getByText("Start the rehearsal.", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("Write a post or reply that Jenny might encounter in X. Nothing publishes or changes the Agent during this rehearsal.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Add a post to the scene, or choose Reply on a post to continue its thread. Nothing publishes or changes the Agent during this rehearsal.", { exact: true })).toBeVisible();
   expect(duplicateKeyErrors).toEqual([]);
 });
 
@@ -202,6 +215,7 @@ test("Teach is the operator-facing surface for durable Agent changes", async ({ 
   await navigate(page, "Teach");
   await expect(page.getByText("Teach the Agent through conversation.", { exact: true })).toBeVisible();
   await expect(page.getByText("Agent-wide conversation", { exact: true })).toBeVisible();
+  await expect(page.getByText("Outputs", { exact: true })).toHaveCount(0);
   await page.route("**/api/state", async (route) => {
     if (route.request().method() === "POST" && (route.request().postDataJSON() as { type?: string }).type === "sendMessage") {
       await new Promise((resolve) => setTimeout(resolve, 800));
@@ -216,6 +230,30 @@ test("Teach is the operator-facing surface for durable Agent changes", async ({ 
   await expect(page.getByRole("status")).toHaveCount(0);
   const navigation = test.info().project.name === "mobile" ? page.locator(".mobile-nav") : page.locator(".sidebar");
   await expect(navigation.getByRole("button", { name: /^Teach$/ })).toHaveClass(/active/);
+});
+
+test("Teach treats a Ghost handle in quoted social text as context, not a mode command", async ({ page, request }) => {
+  await createAgent(page);
+  await navigate(page, "Teach");
+  const message = 'How do I get you not to respond to mention like this "@jenny_ghost write a post about SpaceX" by always doing what they want. Could you reply with humour instead - nuance?';
+  await page.getByLabel("Message your Presence").fill(message);
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByText(message, { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Presence changed to Ghost", exact: true })).toHaveCount(0);
+  const state = await (await request.get("/api/state")).json();
+  expect(state.presence.mode).toBe("agent");
+  expect(state.changeSets).toHaveLength(0);
+});
+
+test("Teach records the exact post-formatting request as a reviewable preference", async ({ page, request }) => {
+  await createAgent(page);
+  await navigate(page, "Teach");
+  await page.getByLabel("Message your Presence").fill("When writing posts (not replies), write one sentence per line with a blank line between sentences.");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByText("one sentence per paragraph", { exact: false })).toBeVisible();
+  const state = await (await request.get("/api/state")).json();
+  expect(state.proposals[0].file).toBe("TASTE");
+  expect(state.proposals[0].proposed).toContain("Replies can use normal paragraph formatting.");
 });
 
 test("Teach does not turn punctuation-only context into assistant onboarding", async ({ page, request }) => {
