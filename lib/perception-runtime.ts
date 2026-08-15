@@ -111,7 +111,7 @@ async function imageParts(asset: Asset) {
   }
 }
 
-export interface AssetResearchInspectionContext { story?: string; evidenceNeed?: string; visualBrief?: string; sourcePageUrl?: string; publisher?: string; }
+export interface AssetResearchInspectionContext { story?: string; evidenceNeed?: string; visualNeed?: string; visualBrief?: string; sourcePageUrl?: string; publisher?: string; assignmentMode?: "strict" | "exploratory"; }
 
 function promptFor(asset: Asset, object: MirrorObject | undefined, level: PerceptionLevel, research?: AssetResearchInspectionContext) {
   if (research) return [
@@ -119,6 +119,7 @@ function promptFor(asset: Asset, object: MirrorObject | undefined, level: Percep
     `Candidate media type: ${asset.type}. Source page: ${research.sourcePageUrl ?? "unknown"}. Publisher: ${research.publisher ?? "unknown"}.`,
     `Story: ${research.story ?? "unknown"}`,
     `Evidence need: ${research.evidenceNeed ?? "unknown"}`,
+    `Visual importance: ${research.visualNeed ?? "unknown"}`,
     `Visual brief: ${research.visualBrief ?? "unknown"}`,
     "Return JSON only with observation, interpretation, visibleText, uncertainty, visualForm (chart|screenshot|photo|illustration|logo|meme|diagram|clip|other), visualRole (evidence|subject|context|identity|atmosphere|none), claimsSupported, claimsNotSupported, legibility (clear|partial|poor), decorative (true|false), sourceCitationVisible (true|false), and missingContext.",
     "Describe only visible pixels. A generic photograph, report cover, hero image, logo, or decorative illustration is not a chart. Do not infer data, dates, metrics, or provenance that are not visible.",
@@ -317,6 +318,9 @@ export interface DiscoveredAssetComparison {
   selectedCandidateId?: string;
   evidenceSummary?: string;
   refinedSearchQuery?: string;
+  recommendedAction?: "select" | "reframe_to_evidence" | "search_again" | "reject";
+  newThesis?: string;
+  whyWorthPublishing?: string;
   error?: string;
 }
 
@@ -345,12 +349,14 @@ export async function compareDiscoveredAssets(
   const prompt = [
     "You are the visual evidence comparator for OpenPresence. Inspect every attached candidate image in this single request.",
     "Search metadata is only a lead. Judge the actual pixels. Return one judgment for every supplied candidate id, then rank only candidates that are acceptable for the visual brief.",
-    "Acceptable means the pixels are relevant, legible enough for a narrower defensible claim, non-decorative, and source identity can be preserved. A generic photo, logo, hero image, report cover, stale or wrong-metric chart, or unreadable image is not acceptable for an evidence role.",
+    `Assignment mode: ${context.assignmentMode ?? "exploratory"}. In exploratory mode the visual brief is soft: a strong source-backed visual may define the worthwhile story, even when it is adjacent to the initial broad request. In strict mode, the visual must support the supplied topic.`,
+    "Acceptable means the pixels are relevant, legible enough for a narrower defensible claim, non-decorative, and source identity can be preserved. Reject only poor, generic, decorative, materially unreadable, or genuinely wrong-metric visuals. Do not reject a strong alternative merely because it reframes a broad exploratory brief.",
     `Evidence need: ${context.evidenceNeed ?? "unknown"}`,
+    `Visual importance: ${context.visualNeed ?? "unknown"}`,
     `Visual brief: ${context.visualBrief ?? "unknown"}`,
     `Story context: ${context.story ?? "unknown"}`,
     JSON.stringify(viable.map((item) => ({ id: item.id, sourcePageUrl: item.sourcePageUrl, publisher: item.publisher }))),
-    "Return JSON only in this shape: {\"judgments\":[{\"id\":\"supplied id\",\"observation\":\"visible pixels only\",\"interpretation\":\"supported narrower meaning\",\"visibleText\":\"optional\",\"uncertainty\":\"low|medium|high|insufficient\",\"visualForm\":\"chart|screenshot|photo|illustration|logo|meme|diagram|clip|other\",\"visualRole\":\"evidence|subject|context|identity|atmosphere|none\",\"claimsSupported\":[\"...\"],\"claimsNotSupported\":[\"...\"],\"legibility\":\"clear|partial|poor\",\"decorative\":false,\"sourceCitationVisible\":true,\"missingContext\":[\"...\"]}],\"rankedAcceptableIds\":[\"id\"],\"selectedCandidateId\":\"id or null\",\"evidenceSummary\":\"short grounded summary\",\"refinedSearchQuery\":\"only when nothing qualifies\"}",
+    "Return JSON only in this shape: {\"judgments\":[{\"id\":\"supplied id\",\"observation\":\"visible pixels only\",\"interpretation\":\"supported narrower meaning\",\"possibleStory\":\"short evidence-led story\",\"visibleText\":\"optional\",\"uncertainty\":\"low|medium|high|insufficient\",\"visualForm\":\"chart|screenshot|photo|illustration|logo|meme|diagram|clip|other\",\"visualRole\":\"evidence|subject|context|identity|atmosphere|none\",\"claimsSupported\":[\"...\"],\"claimsNotSupported\":[\"...\"],\"legibility\":\"clear|partial|poor\",\"decorative\":false,\"sourceCitationVisible\":true,\"missingContext\":[\"...\"]}],\"rankedAcceptableIds\":[\"id\"],\"selectedCandidateId\":\"id or null\",\"recommendedAction\":\"select|reframe_to_evidence|search_again|reject\",\"newThesis\":\"only when reframe_to_evidence\",\"whyWorthPublishing\":\"only when reframe_to_evidence\",\"evidenceSummary\":\"short grounded summary\",\"refinedSearchQuery\":\"only when nothing qualifies\"}",
   ].join("\n\n");
   try {
     let raw: string | undefined;
@@ -395,7 +401,8 @@ export async function compareDiscoveredAssets(
     }
     const rankedAcceptableIds = Array.isArray(parsed.rankedAcceptableIds) ? parsed.rankedAcceptableIds.filter((id): id is string => typeof id === "string" && suppliedIds.has(id) && Boolean(judgments[id])).slice(0, viable.length) : [];
     const selectedCandidateId = typeof parsed.selectedCandidateId === "string" && rankedAcceptableIds.includes(parsed.selectedCandidateId) ? parsed.selectedCandidateId : rankedAcceptableIds[0];
-    return { attempted: true, providerId: profile.provider, modelId: profile.model, judgments, rankedAcceptableIds, selectedCandidateId, evidenceSummary: text(parsed.evidenceSummary), refinedSearchQuery: text(parsed.refinedSearchQuery) };
+    const recommendedAction = ["select", "reframe_to_evidence", "search_again", "reject"].includes(parsed.recommendedAction as string) ? parsed.recommendedAction as DiscoveredAssetComparison["recommendedAction"] : rankedAcceptableIds.length ? (context.assignmentMode === "exploratory" ? "reframe_to_evidence" : "select") : "search_again";
+    return { attempted: true, providerId: profile.provider, modelId: profile.model, judgments, rankedAcceptableIds, selectedCandidateId, recommendedAction, newThesis: text(parsed.newThesis), whyWorthPublishing: text(parsed.whyWorthPublishing), evidenceSummary: text(parsed.evidenceSummary), refinedSearchQuery: text(parsed.refinedSearchQuery) };
   } catch (error) {
     return { attempted: true, providerId: selected.profile.provider, modelId: selected.profile.model, judgments: {}, rankedAcceptableIds: [], error: error instanceof Error ? error.message : "The visual comparator failed." };
   }

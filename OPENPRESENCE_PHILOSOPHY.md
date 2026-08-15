@@ -842,6 +842,22 @@ An intent that mattered at 8 AM may be stale by tomorrow.
 
 Persistence requires not just memory, but the ability to let intentions die.
 
+## 17A. Responsibility is not a quota
+
+Permission is not responsibility. An Agent that is merely allowed to publish may rationally remain silent forever. A Presence can also be entrusted with an ongoing responsibility to maintain its public life without turning that responsibility into a script.
+
+The operator sets the level of responsibility. The Agent exercises judgment inside it. A Presence may therefore have a **publishing pace**: an expectation such as “aim for about five original posts per day.” The pace describes how much originating responsibility the Presence carries. It does not prescribe topics, words, formats, exact posting times, or a maximum.
+
+> **A publishing target is not a script.**
+
+Attention determines when a Presence looks. Publishing initiative describes its ongoing responsibility to originate. Schedule gives the operator time-bound considerations and delegated outcomes. These are related agenda inputs, not three competing schedulers.
+
+Silence remains a valid local action. Rejecting one weak candidate is good judgment, but it does not by itself discharge a standing publishing responsibility. The runtime should record the candidate-level no-op, preserve the responsibility for a later bounded cycle, and never force filler merely to satisfy a counter.
+
+Only reality completes the responsibility. Drafts, plans, model responses, and attempted deliveries do not count as public expression. Verified original publications in the Social Mirror do. Replies, quotes, reposts, likes, failed deliveries, and review-pending drafts remain distinct outcomes.
+
+Growth may inform a proposal about the right pace, but it may not silently redefine the operator's expectation. Autonomy is not the absence of expectations; it is freedom to decide how to pursue an outcome while remaining accountable for pursuing it.
+
 ---
 
 # 18. Intent should expire
