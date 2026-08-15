@@ -1,5 +1,35 @@
 # Regression rules
 
+## Rule: Visual necessity must not be confused with visual fit
+
+**Defect class:** Optional-media semantic failure / misleading Assignment terminal state
+
+**General principle:** A VisualBrief describes what a useful attachment would do; it does not decide whether the story requires one. `helpful`, `important`, and `required` visual needs must produce different fulfillment behavior, and zero discovery must never be described as candidate inspection.
+
+**Project enforcement:** Bounded research derives visual importance, permits one model-guided query reformulation, records distinct discovery/fetch/inspection/editorial outcomes, and lets helpful or important stories survive as text-only when the Agent judges that honest. Required visuals remain blocked without verified evidence. Playground exposes the outcome and zero-candidate explanation in the research trail.
+
+**Executable protection:** `tests/assignment-runtime.test.ts` covers optional fallback, required blocking, one reformulation, empty discovery, inspected rejection, and verified counting.
+
+**Apply when:** Changing Assignment visual requirements, asset discovery, perception/editorial review, research continuation, or Playground outcome copy.
+
+**Added:** 2026-08-15
+
+## Rule: Long-running Assignments need durable run truth and fast reads
+
+**Defect class:** Background Assignment lifecycle / stale progress UI / blocked retry reuse
+
+**General principle:** Provider and model work must not occupy the state mutation request. Operators need a durable run with stage, lease, heartbeat, attempt, and terminal status, while ordinary state reads remain responsive. A retry must create a new bounded run and preserve prior negative evidence instead of repeating the same failed candidates.
+
+**Incident:** Clicking an Assignment could leave the interface waiting on a slow asset/model call, show “Working…” after the bounded effort had already ended, or reuse an exhausted retry budget. The operator could not distinguish queued work, active research, and a terminal refusal.
+
+**Project enforcement:** `workAssignment` queues an `AssignmentRun` and returns immediately. The worker persists `queued`, `researching`, `writing`, and terminal states with lease/heartbeat metadata; visual research retains candidate decisions and known URLs across continuations; retry queues a fresh run; Playground polls active runs and renders a compact live card, a collapsible evidence trail, and terminal `Try again`/blocked or published states.
+
+**Executable protection:** `tests/assignment-runtime.test.ts` covers immediate queueing, provider failure, evidence-backed publication, candidate fallback, bounded exhaustion, fresh retry run IDs, and non-stranding clock sync. Browser QA verifies the main runtime remains readable while the worker runs and that terminal UI does not retain a working indicator.
+
+**Apply when:** Changing Assignment workers, asset/provider calls, Playground progress, retry semantics, workspace revision handling, or background polling.
+
+**Added:** 2026-08-15
+
 ## Rule: New Agents must start on the requested OpenAI runtime
 
 **Defect class:** Default model/provider selection / legacy seed migration

@@ -1,5 +1,24 @@
 # Active QA Work
 
+## COMPLETE — Visual necessity and truthful bounded research outcomes
+
+- **Started:** 2026-08-15
+- **Scope:** Separate optional/helpful/important/required visual needs from the visual brief, preserve the bounded evidence-first path, and make zero-result and rejection outcomes truthful in the Assignment UI.
+- **Coordination:** Preserved RuntimeScope, workspace revision/409 handling, Playground worldRevision, Assignment lineage/status checks, and durable bridge/asset ownership from the parallel concurrency work.
+- **Behavior:** Helpful visuals can fall back to a grounded text-only publication; important visuals may replan or publish text-only; required visuals remain blocked without verified media. Empty discovery receives exactly one model-guided query reformulation before the bounded effort ends. Research records `discovery_empty`, `fetch_failed`, `inspection_rejected`, or `editorial_rejected` and retains the trail across attempts.
+- **Executable protection:** Assignment tests cover helpful text-only fallback, required-visual blocking, one query reformulation, zero-candidate messaging, inspected rejection, and verified publication counting. The UI shows `No usable visual leads` for zero inspection and labels the research outcome in the collapsible trail.
+- **Verification:** Full Vitest passes 238/238; targeted AI/Assignment/perception tests pass 39/39; typecheck, production build, changed-source ESLint (0 errors, 8 existing warnings), and `git diff --check` pass. Browser QA on the main runtime confirmed the corrected zero-candidate card and `DISCOVERY EMPTY` trail. No live connector activity occurred.
+- **Status:** Complete for the bounded Sandbox Assignment path; provider-specific rendering and live connector delivery remain outside this scope.
+
+## COMPLETE — Evidence-led Assignment runs and truthful worker progress
+
+- **Started:** 2026-08-15
+- **Scope:** Execute the evidence-first Assignment feedback: reframe broad visual work around strong discovered evidence, create fresh bounded retry runs, keep state reads responsive during long work, and make terminal/progress UI truthful and compact.
+- **Coordination:** Preserve RuntimeScope, workspace revision/409 handling, Playground worldRevision, Assignment lineage/status checks, and durable bridge/asset ownership from the parallel concurrency work.
+- **Acceptance criteria:** A broad visual Assignment can publish around a strong alternative evidence candidate; Retry Assignment creates a fresh bounded run without repeating known negative evidence; `/api/state` remains responsive while work runs; queued/researching/selecting/writing/delivering are visible, while terminal blocked/published states never retain a working indicator.
+- **Verification:** Full Vitest passes 233/233; targeted Assignment/concurrency tests pass 82/82; typecheck, production build, changed-source ESLint, and `git diff --check` pass. The main runtime retry returned a queued run in 658ms, `/api/state` remained responsive during `visual_research`, and the worker reached a truthful terminal blocked state after 5 inspected candidates across 2 bounded searches. Browser QA confirmed compact terminal progress, the collapsible evidence trail, preserved candidate domains, and an actionable `Try again` control with no stale working indicator. No live connector activity occurred.
+- **Status:** Complete for the bounded Sandbox Assignment path; process-restart recovery and live connector delivery remain outside this scope.
+
 ## COMPLETE — Restore Presence handle editing
 
 - **Started:** 2026-08-15

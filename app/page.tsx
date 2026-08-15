@@ -583,6 +583,16 @@ export default function Home() {
     return () => window.clearTimeout(timer);
   }, [view, state?.onboarded, state?.activePresenceId, state?.playgroundSessions, state?.presence, pendingOperation]);
   useEffect(() => {
+    if (view !== "playground" || !state) return;
+    const activeAssignmentWork = state.assignments.some((assignment) => assignment.status === "working" || assignment.work?.phase === "researching" || assignment.work?.phase === "visual_research" || assignment.work?.phase === "publishing");
+    const activeRun = (state.assignmentRuns ?? []).some((run) => ["queued", "researching", "selecting", "writing", "delivering"].includes(run.status));
+    if (!activeAssignmentWork && !activeRun) return;
+    const timer = window.setInterval(() => {
+      void refreshState().catch((reason: unknown) => setError(clientErrorMessage(reason, "Unable to refresh Assignment progress.")));
+    }, 1_000);
+    return () => window.clearInterval(timer);
+  }, [view, state?.assignments, state?.assignmentRuns]);
+  useEffect(() => {
     if (pendingOperation === "wakePresence" || pendingOperation === "runPulse") return;
     const presence = state?.presence;
     const connection = presence && presence.connectionMode !== "bridge"
@@ -1410,7 +1420,7 @@ function AgentWorkspaceShell({
             <PlaygroundView state={state} mutate={mutate} />
           )}
           {view === "live" && (
-            <LiveView state={state} mutate={mutate} pendingOperation={pendingOperation} />
+            <LiveView state={state} mutate={mutate} pendingOperation={pendingOperation} setView={setView} />
           )}
           {view === "feed" && (
             <PublicHistoryView state={state} setView={setView} />
@@ -1655,7 +1665,7 @@ function LegacyAppShell({
             <TeachView state={state} mutate={mutate} setView={setView} />
           )}
           {view === "live" && (
-            <LiveView state={state} mutate={mutate} />
+            <LiveView state={state} mutate={mutate} setView={setView} />
           )}
           {view === "watching" && <WatchingView state={state} mutate={mutate} />}
           {view === "people" && <PeopleView state={state} mutate={mutate} />}
@@ -2813,12 +2823,13 @@ function ScenarioLibrary({ state, mutate, presence, creating, onCreatingChange }
 }
 
 function AssignmentResearchReview({ research, assets }: { research: OpenPresenceState["assetResearchSessions"][number]; assets: OpenPresenceState["assets"] }) {
-  if (!research.candidates.length) return null;
   const decisionFor = (candidateId: string) => research.decisionHistory.find((decision) => decision.candidateId === candidateId);
   const stage = (research as OpenPresenceState["assetResearchSessions"][number] & { stage?: string }).stage;
   const stageLabel = stage?.replaceAll("_", " ") || (research.status === "selected" ? "published" : research.status);
   const evidenceSummary = (research as OpenPresenceState["assetResearchSessions"][number] & { evidenceSummary?: string }).evidenceSummary;
-  return <details className="assignment-research-review" aria-label="Assignment research trail"><summary className="assignment-research-summary"><span><span className="eyebrow">Evidence trail</span><strong>{research.candidates.length} candidate{research.candidates.length === 1 ? "" : "s"} inspected</strong></span><span><small>{stageLabel}</small><small>{research.searchHistory.length} search{research.searchHistory.length === 1 ? "" : "es"}</small></span></summary><div className="assignment-research-body"><div className="assignment-candidate-list">{research.candidates.map((item, index) => {
+  const outcome = (research as OpenPresenceState["assetResearchSessions"][number] & { outcome?: string }).outcome ?? (research.candidates.length === 0 ? "discovery_empty" : undefined);
+  const outcomeLabel = outcome?.replaceAll("_", " ");
+  return <details className="assignment-research-review" aria-label="Assignment research trail"><summary className="assignment-research-summary"><span><span className="eyebrow">Evidence trail</span><strong>{research.candidates.length} candidate{research.candidates.length === 1 ? "" : "s"} inspected</strong></span><span><small>{stageLabel}</small>{outcomeLabel && <small>{outcomeLabel}</small>}<small>{research.searchHistory.length} search{research.searchHistory.length === 1 ? "" : "es"}</small></span></summary><div className="assignment-research-body">{research.candidates.length === 0 ? <p className="assignment-evidence-summary"><strong>No visual leads were inspected.</strong>{outcome === "discovery_empty" ? " The bounded search returned no usable media leads." : " The visual research ended before an inspectable candidate was available."}</p> : <div className="assignment-candidate-list">{research.candidates.map((item, index) => {
     const candidate = item.candidate;
     const asset = item.assetId ? assets.find((stored) => stored.id === item.assetId) : undefined;
     const decision = decisionFor(item.id);
@@ -2826,7 +2837,7 @@ function AssignmentResearchReview({ research, assets }: { research: OpenPresence
     const label = candidate.title ?? candidate.name ?? `Candidate ${index + 1}`;
     const sourceLabel = candidate.publisher ?? (() => { try { return candidate.sourcePageUrl ? new URL(candidate.sourcePageUrl).hostname.replace(/^www\./, "") : "Unknown source"; } catch { return "Unknown source"; } })();
     return <details className="assignment-candidate" key={item.id}><summary><span className={`assignment-candidate-mark ${item.perception ? "inspected" : "failed"}`} aria-hidden="true">{item.perception ? "✓" : "!"}</span><span className="assignment-candidate-copy"><strong>{label}</strong><small>{sourceLabel}</small></span><span className="assignment-candidate-status">{item.perception ? "Inspected" : "Fetch failed"}</span></summary><div className="assignment-candidate-detail">{asset?.storage && <img src={`/api/assets/${asset.id}`} alt={asset.description ?? label} /> }<div><p><strong>Why it was rejected</strong>{reason}</p>{item.perception && <p><strong>What the Agent saw</strong>{item.perception.observation}</p>}{candidate.sourcePageUrl && <a href={candidate.sourcePageUrl} target="_blank" rel="noreferrer">Open source page ↗</a>}</div></div></details>;
-  })}</div>{evidenceSummary && <p className="assignment-evidence-summary"><strong>Selected evidence</strong>{evidenceSummary}</p>}</div></details>;
+  })}</div>}{evidenceSummary && <p className="assignment-evidence-summary"><strong>Selected evidence</strong>{evidenceSummary}</p>}</div></details>;
 }
 
 function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: Mutate }) {
@@ -2861,8 +2872,10 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
   const latestAssignment = [...sessionAssignments]
     .filter((item) => item.status !== "cancelled")
     .sort((left, right) => new Date(right.updatedAt ?? right.createdAt).getTime() - new Date(left.updatedAt ?? left.createdAt).getTime())[0];
-  const displayedAssignment = assignmentDraft ?? latestAssignment;
-  const assignmentIsWorking = Boolean(displayedAssignment && (busy || displayedAssignment.status === "working" || displayedAssignment.work?.phase === "researching"));
+  let displayedAssignment = assignmentDraft ?? latestAssignment;
+  const assignmentRun = displayedAssignment ? [...(state.assignmentRuns ?? [])].filter((run) => run.assignmentId === displayedAssignment.id).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] : undefined;
+  const assignmentRunIsWorking = Boolean(assignmentRun && ["queued", "researching", "selecting", "writing", "delivering"].includes(assignmentRun.status));
+  const assignmentIsWorking = Boolean(displayedAssignment && (busy || assignmentRunIsWorking || displayedAssignment.status === "working" || ["researching", "visual_research", "publishing"].includes(displayedAssignment.work?.phase ?? "")));
   const assignmentVerified = displayedAssignment?.progress.verified ?? 0;
   const assignmentRequired = Math.max(1, displayedAssignment?.progress.required ?? 1);
   const assignmentProgress = Math.min(100, (assignmentVerified / assignmentRequired) * 100);
@@ -2870,8 +2883,11 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
     ? "Completed"
     : displayedAssignment?.status === "blocked"
       ? "Blocked"
-      : displayedAssignment?.work?.phase?.replaceAll("_", " ") ?? "Working";
-  const assignmentResearch = displayedAssignment ? state.assetResearchSessions.find((item) => item.assignmentId === displayedAssignment.id) : undefined;
+      : assignmentRun?.currentStage?.replaceAll("_", " ") ?? displayedAssignment?.work?.phase?.replaceAll("_", " ") ?? "Queued";
+  const assignmentResearch = displayedAssignment ? [...state.assetResearchSessions].filter((item) => item.assignmentId === displayedAssignment.id).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] : undefined;
+  if (displayedAssignment?.lastOutcome?.message?.includes("No inspected candidate") && assignmentResearch?.candidates.length === 0) {
+    displayedAssignment = { ...displayedAssignment, lastOutcome: { ...displayedAssignment.lastOutcome, message: "No usable visual leads were found. The bounded search ended without an inspectable candidate." } };
+  }
   const originalLabel = presence.channel === "x"
     ? "Consider an original post"
     : presence.channel === "substack"
@@ -2889,13 +2905,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
     try {
       let next = state;
       if (start) next = await mutate({ type: "startAssignment", id: assignmentId, sessionId }, next) ?? next;
-      while (true) {
-        const assignment = next.assignments.find((item) => item.id === assignmentId);
-        if (!assignment || !["active", "working"].includes(assignment.status)) break;
-        const worked = await mutate({ type: "workAssignment", id: assignmentId, sessionId }, next);
-        if (!worked) break;
-        next = worked;
-      }
+      await mutate({ type: "workAssignment", id: assignmentId, sessionId }, next);
     } finally {
       setBusy(false);
     }
@@ -2973,7 +2983,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
           {!assignmentDraft ? <><label>Assignment instruction<textarea aria-label="Assignment instruction" value={assignmentInstruction} onChange={(event) => setAssignmentInstruction(event.target.value)} placeholder="Produce 3 original X posts about offers, pricing, sales, or execution. Choose your own angles and do not repeat yourself." rows={4} /></label><div className="original-rehearsal-actions"><small>The original instruction stays attached to the Assignment.</small><Button variant="primary" disabled={busy || !assignmentInstruction.trim()} onClick={() => void reviewAssignment()}><Check size={14} /> Review assignment</Button></div></> : <div className="assignment-review" aria-label="Assignment review"><div><span>Deliverable</span><strong>{assignmentDraft.progress.required} original {channelLabel(assignmentDraft.channelId, state.channelDefinitions)} publications</strong></div><div><span>Completion</span><strong>{assignmentDraft.progress.required} verified publications</strong></div><div><span>Agent decides how</span><strong>Topics · thesis · evidence · format · wording · timing strategy</strong></div><p>{assignmentDraft.instruction}</p><div className="original-rehearsal-actions"><Button variant="ghost" onClick={() => setAssignmentDraftId(null)}>Adjust</Button><Button variant="primary" disabled={busy} onClick={() => void runAssignment(assignmentDraft.id, true)}><Play size={14} /> Start rehearsal</Button></div></div>}
         </>}
       </section>}
-      {displayedAssignment && <section className="assignment-progress-panel" aria-label="Assignment progress"><div className="assignment-progress-heading"><div><div className="eyebrow">Posting Assignment</div><h2>{displayedAssignment.instruction}</h2></div></div>{assignmentIsWorking && <aside className="assignment-live-card" role="status" aria-live="polite" aria-label={`Assignment ${assignmentPhase}. ${assignmentVerified} of ${assignmentRequired} published. ${displayedAssignment.rejectedCandidates} candidates rejected.`}><span className="assignment-progress-ring" style={{ background: `conic-gradient(#6f927d ${assignmentProgress}%, #e7eee8 0)` }}><span><strong>{assignmentVerified}/{assignmentRequired}</strong><small>published</small></span></span><span className="assignment-live-copy"><strong>{assignmentPhase}</strong><small>{displayedAssignment.rejectedCandidates} rejected · attempt {displayedAssignment.work?.attempts ?? 0}/{displayedAssignment.work?.maxAttempts ?? 4}</small></span></aside>}<div className="assignment-progress-bar"><span style={{ width: `${assignmentProgress}%` }} /></div><div className="assignment-progress-meta"><strong>{assignmentVerified} / {displayedAssignment.progress.required} published</strong><span>{assignmentPhase}{assignmentIsWorking ? " · live" : displayedAssignment.status === "blocked" ? "" : ` · ${displayedAssignment.rejectedCandidates} rejected`}</span></div>{assignmentResearch && <AssignmentResearchReview research={assignmentResearch} assets={state.assets} />}{displayedAssignment.status === "blocked" && <div className="assignment-outcome" role="status" aria-live="polite"><div className="assignment-outcome-heading"><span className="assignment-outcome-label">Blocked</span><strong>No publication was counted</strong></div><p className="assignment-warning">{displayedAssignment.lastOutcome?.message ?? "The Assignment could not produce a verified publication."}</p><small>Nothing was published because the available evidence did not meet the visual brief. Retry to begin a fresh bounded effort, or revise the Assignment if the evidence requirement is too strict.</small></div>}{["active", "blocked"].includes(displayedAssignment.status) && <Button variant="secondary" disabled={busy} onClick={() => void runAssignment(displayedAssignment.id, displayedAssignment.status === "blocked")}><Play size={14} /> {busy ? "Working…" : displayedAssignment.status === "blocked" ? "Retry Assignment" : "Continue working"}</Button>}</section>}
+      {displayedAssignment && <section className="assignment-progress-panel" aria-label="Assignment progress"><div className="assignment-progress-heading"><div><div className="eyebrow">Posting Assignment</div><h2>{displayedAssignment.instruction}</h2></div></div>{assignmentIsWorking && <aside className="assignment-live-card" role="status" aria-live="polite" aria-label={`Assignment ${assignmentPhase}. ${assignmentVerified} of ${assignmentRequired} published. ${displayedAssignment.rejectedCandidates} candidates rejected.`}><span className="assignment-progress-ring" style={{ background: `conic-gradient(#6f927d ${assignmentProgress}%, #e7eee8 0)` }}><span><strong>{assignmentVerified}/{assignmentRequired}</strong><small>published</small></span></span><span className="assignment-live-copy"><strong>{assignmentPhase}</strong><small>{displayedAssignment.rejectedCandidates} rejected · {assignmentResearch?.candidates.length ?? 0} inspected</small></span></aside>}<div className="assignment-progress-bar"><span style={{ width: `${assignmentProgress}%` }} /></div><div className="assignment-progress-meta"><strong>{assignmentVerified} / {displayedAssignment.progress.required} published</strong><span>{assignmentPhase}{assignmentIsWorking ? " · live" : displayedAssignment.status === "blocked" ? "" : ` · ${displayedAssignment.rejectedCandidates} rejected`}</span></div>{assignmentResearch && <AssignmentResearchReview research={assignmentResearch} assets={state.assets} />}{displayedAssignment.status === "blocked" && <div className="assignment-outcome" role="status" aria-live="polite"><div className="assignment-outcome-heading"><span className="assignment-outcome-label">Blocked</span><strong>No publication was counted</strong></div><p className="assignment-warning">{displayedAssignment.lastOutcome?.message ?? "The Assignment could not produce a verified publication."}</p><small>{(assignmentResearch as (typeof assignmentResearch & { outcome?: string }) | undefined)?.outcome === "discovery_empty" ? "No usable visual leads were found after one bounded reformulation. Nothing was published because this Assignment requires the visual; try again or revise that requirement." : (assignmentResearch as (typeof assignmentResearch & { outcome?: string }) | undefined)?.outcome === "inspection_rejected" ? "The downloaded candidates were inspected and rejected. Nothing was published because this Assignment requires a visual that meets the evidence standard." : "Nothing was published because the available evidence did not meet the visual requirement. Try again to begin a fresh bounded effort, or revise the Assignment if the evidence requirement is too strict."}</small></div>}{["active", "blocked"].includes(displayedAssignment.status) && <Button variant="secondary" disabled={busy || assignmentIsWorking} onClick={() => void runAssignment(displayedAssignment.id, displayedAssignment.status === "blocked")}><Play size={14} /> {displayedAssignment.status === "blocked" ? "Try again" : "Continue working"}</Button>}</section>}
       <div className="playground-grid">
           <aside className="playground-rail">
             <section className="playground-panel"><div className="eyebrow">Starting world</div><strong>{simulation.startingStateLabel}</strong><p>Nothing here is live. Simulated history stays in this session.</p><p className="playground-handle-hint">Agent handle: <strong>{presence.handle}</strong>. Use @mentions in Chat when addressing {presence.name}.</p><div className="session-status"><span className="status-dot" /> {presence.status === "paused" ? "Paused" : "Awake"}</div></section>
@@ -3859,10 +3869,12 @@ function LiveView({
   state,
   mutate,
   pendingOperation,
+  setView,
 }: {
   state: OpenPresenceState;
   mutate: Mutate;
   pendingOperation?: string | null;
+  setView: (view: View) => void;
 }) {
   const selected = state.presence;
   const presenceName = selected?.name ?? "this Presence";
@@ -3996,6 +4008,19 @@ function LiveView({
       ? `${actionName} is moving toward delivery.`
       : presenceCopy(activity.current.detail).replace("execution envelope", "delivery");
   const presenceScope = selected ? `${channelLabel(selected.channel, state.channelDefinitions)} · ${activityEnvironment === "sandbox" ? "Sandbox" : "Live"}` : "No Presence selected";
+  const initiative = activity.publishingInitiative;
+  const initiativePeriodLabel = initiative.period === "week" ? "this week" : "today";
+  const initiativeStatus = initiative.mode === "adaptive"
+    ? "Autonomous origination is active; Jenny chooses the pace."
+    : initiative.mode === "off"
+      ? "Only explicit requests and Assignments create original posts."
+      : initiative.status === "at_pace"
+        ? `At pace · ${initiative.verifiedOriginals} of ~${initiative.target} ${initiativePeriodLabel}`
+        : initiative.status === "blocked"
+          ? "Blocked by the current Posts setting."
+          : initiative.status === "awaiting_review"
+            ? `${initiative.verifiedOriginals} of ~${initiative.target} ${initiativePeriodLabel} · waiting for your review`
+            : `${initiative.verifiedOriginals} of ~${initiative.target} ${initiativePeriodLabel}`;
   return (
     <div className="page activity-page">
       <div className="page-heading activity-heading">
@@ -4049,7 +4074,7 @@ function LiveView({
       )}
       <div className="activity-main-grid">
         <div className="activity-left-column">
-          <MirrorPanel state={state} filter={selected?.id ?? "all"} channelId={selected?.channel} environment={activityEnvironment} sessionIds={activitySessionIds} />
+          <MirrorPanel state={state} filter={selected?.id ?? "all"} channelId={selected?.channel} environment={activityEnvironment} sessionIds={activitySessionIds} onContext={setSelectedContext} />
           <section className="event-stream activity-log">
             <div className="section-heading">
               <div>
@@ -4119,13 +4144,19 @@ function LiveView({
               <p>{presenceCopy(activity.nextAttention.detail)}</p>
               <small>{activity.nextIntent.label} · {presenceCopy(activity.nextIntent.detail)}</small>
             </div>
+            <div className="activity-status-block activity-publishing-block" aria-label="Publishing pace progress">
+              <SectionEyebrow>Publishing pace</SectionEyebrow>
+              <h3>{initiative.mode === "pace" ? `${initiative.verifiedOriginals} of ~${initiative.target}` : initiative.mode === "adaptive" ? "Let Jenny decide" : "Only when asked"}</h3>
+              <p>{initiativeStatus}</p>
+              {initiative.mode === "pace" && <small>{initiative.remaining ? `${initiative.remaining} remain · ${initiativePeriodLabel}` : `The target is not a maximum · ${initiativePeriodLabel}`}</small>}
+            </div>
           </section>
           <div id="decision-and-action">
             <ExecutionLedger state={state} mutate={mutate} presenceId={selected?.id} environment={activityEnvironment} sessionIds={activitySessionIds} onContext={setSelectedContext} />
           </div>
         </aside>
       </div>
-      {selectedContext && <ActivityContextInspector object={selectedContext} state={state} onClose={() => setSelectedContext(null)} />}
+      {selectedContext && <ActivityContextInspector object={selectedContext} state={state} mutate={mutate} onClose={() => setSelectedContext(null)} onOpenSettings={() => { setSelectedContext(null); setView("presence"); }} />}
     </div>
   );
 }
@@ -4135,12 +4166,14 @@ function MirrorPanel({
   channelId,
   environment,
   sessionIds,
+  onContext,
 }: {
   state: OpenPresenceState;
   filter?: string;
   channelId?: ChannelId;
   environment?: PresenceEnvironment;
   sessionIds?: Set<string>;
+  onContext?: (object: MirrorObject) => void;
 }) {
   const selectedPresence =
     filter === "all"
@@ -4239,7 +4272,7 @@ function MirrorPanel({
                   <time>{formatTime(item.occurredAt ?? item.observedAt)}</time>
                 </div>
                 <p className="mirror-post-content">{item.content?.text ?? "External activity received."}</p>
-                <div className="mirror-post-footer"><span>Observed</span><span>{item.objectType.replaceAll("-", " ")}</span></div>
+                <div className="mirror-post-footer"><span>Observed</span><span>{item.objectType.replaceAll("-", " ")}</span>{item.objectType === "post" && item.actorPresenceId !== selectedPresence?.id && onContext && <button type="button" className="mirror-reply-action" onClick={() => onContext(item)}>Ask {selectedPresence?.name ?? "this Presence"} to reply</button>}</div>
               </article>
             ))}
           </div>
@@ -4324,7 +4357,22 @@ function ActivityDecisionTrace({ trace }: { trace: { observed: string; judgment:
   );
 }
 
-function ActivityContextInspector({ object, state, onClose }: { object: MirrorObject; state: OpenPresenceState; onClose: () => void }) {
+function ActivityContextInspector({ object, state, mutate, onClose, onOpenSettings }: { object: MirrorObject; state: OpenPresenceState; mutate: Mutate; onClose: () => void; onOpenSettings: () => void }) {
+  const [direction, setDirection] = useState("");
+  const [requesting, setRequesting] = useState(false);
+  const presence = state.presences.find((item) => item.id === object.presenceId) ?? state.presence;
+  const presenceName = presence?.name ?? "this Presence";
+  const directive = state.operatorDirectives.find((item) => item.presenceId === object.presenceId && item.target.id === object.externalRef.id && (!object.sessionId || item.sessionId === object.sessionId) && item.status !== "failed");
+  const repliesOff = (presence?.execution.reply ?? "off") === "off";
+  const relatedJudgment = state.events.find((item) => item.sourceObjectId === object.id && (item.title.toLowerCase().includes("silence") || item.title.toLowerCase().includes("left alone") || item.title.toLowerCase().includes("reply observed")));
+  async function askToReply() {
+    setRequesting(true);
+    try {
+      await mutate({ type: "askPresenceToReply", presenceId: object.presenceId, objectId: object.id, sessionId: object.sessionId, optionalDirection: direction.trim() || undefined });
+    } finally {
+      setRequesting(false);
+    }
+  }
   return (
     <div className="activity-context-scrim" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
       <aside className="activity-context-dialog" role="dialog" aria-modal="true" aria-label="Decision context">
@@ -4342,6 +4390,14 @@ function ActivityContextInspector({ object, state, onClose }: { object: MirrorOb
           <p className="mirror-post-content">{object.content?.text ?? "External activity received."}</p>
           <div className="mirror-post-footer"><span>Observed</span><span>{object.objectType.replaceAll("-", " ")}</span></div>
         </article>
+        <section className="operator-reply-card" aria-label={`Ask ${presenceName} to reply`}>
+          <SectionEyebrow>Operator direction</SectionEyebrow>
+          <h3>{directive ? "Reply requested" : `Ask ${presenceName} to reply`}</h3>
+          <p>{directive ? `The social act is set. ${presenceName} owns the wording; the Presence reply setting owns how it is delivered.` : `You choose that this interaction should happen. ${presenceName} still decides what to say, within the Presence's privacy and channel boundaries.`}</p>
+          {relatedJudgment && <div className="operator-judgment"><strong>{presenceName} chose silence</strong><span>{relatedJudgment.detail.replaceAll("Jenny", presenceName)}</span></div>}
+          {!directive && !repliesOff && <label className="operator-direction-field">Optional direction for {presenceName}<textarea aria-label={`Optional direction for ${presenceName}`} value={direction} onChange={(event) => setDirection(event.target.value)} placeholder={`Anything you want ${presenceName} to consider?`} rows={3} /></label>}
+          {repliesOff ? <div className="operator-replies-off"><span>Replies are disabled for this Presence.</span><button type="button" onClick={onOpenSettings}>Enable replies →</button></div> : directive ? <div className="operator-requested-state">{presenceName} is preparing the expression through the existing reply envelope.</div> : <Button variant="primary" className="full-button" onClick={() => void askToReply()} disabled={requesting}>{requesting ? <><LoaderCircle size={14} className="spin" /> Asking {presenceName}…</> : <><Reply size={14} /> Ask {presenceName} to reply</>}</Button>}
+        </section>
       </aside>
     </div>
   );
@@ -5691,6 +5747,8 @@ function PresenceView({
   const [presenceAvoidDraft, setPresenceAvoidDraft] = useState((presence.languagePolicy?.avoid ?? []).join("\n"));
   const [presenceProhibitedDraft, setPresenceProhibitedDraft] = useState((presence.languagePolicy?.prohibited ?? []).join("\n"));
   const [mediaPolicyDraft, setMediaPolicyDraft] = useState(presence.mediaPerceptionPolicy);
+  const [publishingCountDraft, setPublishingCountDraft] = useState(String(presence.publishingInitiative?.target?.count ?? 5));
+  const [publishingPeriodDraft, setPublishingPeriodDraft] = useState<"day" | "week">(presence.publishingInitiative?.target?.period ?? "day");
   const [autoApprovalPrompt, setAutoApprovalPrompt] = useState<{ capabilities: string[]; labels: string[]; executionIds: string[] } | null>(null);
   const [confirmingAutoApproval, setConfirmingAutoApproval] = useState(false);
   const publicPostures: { id: PublicDisclosurePosture; label: string; detail: string }[] = presence.mode === "ghost"
@@ -5763,6 +5821,12 @@ function PresenceView({
     setConfirmingAutoApproval(false);
   };
   const autoApprovalLabel = autoApprovalPrompt?.labels.length === 1 ? autoApprovalPrompt.labels[0] : "these capabilities";
+  const publishingInitiative = presence.publishingInitiative;
+  const savePublishingPace = () => {
+    const count = Math.max(1, Math.min(10_000, Math.round(Number(publishingCountDraft) || 0)));
+    if (!count) return;
+    void mutate({ type: "setPresence", patch: { publishingInitiative: { ...(publishingInitiative ?? { mode: "pace", timezone: "UTC", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }), mode: "pace", target: { count, period: publishingPeriodDraft }, updatedAt: new Date().toISOString() } } });
+  };
   return (
     <div className="page presence-settings-page">
       <div className="page-heading">
@@ -6097,6 +6161,48 @@ function PresenceView({
             </div>
           ) : <p className="form-hint quiet-hours-off">Off · automatic observation follows the selected rhythm.</p>}
         </div>
+      </section>
+      <section className="settings-card publishing-initiative-card" id="publishing-pace-settings">
+        <div className="section-heading compact">
+          <div>
+            <SectionEyebrow>Publishing pace · Presence-scoped</SectionEyebrow>
+            <h2>How often should {presence.name} aim to publish original posts?</h2>
+          </div>
+          <Sparkles size={17} />
+        </div>
+        <p className="muted rhythm-intro">Give {presence.name} responsibility for originating here. {presence.name} still decides what is worth saying, what to research, and when within the period to publish.</p>
+        <div className="rhythm-options publishing-initiative-options" role="group" aria-label="Publishing pace">
+          <button type="button" className={publishingInitiative?.mode === "off" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { publishingInitiative: { ...(publishingInitiative ?? { timezone: "UTC", createdAt: new Date().toISOString() }), mode: "off", updatedAt: new Date().toISOString() } } })} aria-pressed={publishingInitiative?.mode === "off"}>
+            <strong>Only when I ask</strong>
+            <small>No autonomous original posting. Assignments and explicit requests still work.</small>
+          </button>
+          <button type="button" className={publishingInitiative?.mode === "adaptive" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { publishingInitiative: { ...(publishingInitiative ?? { timezone: "UTC", createdAt: new Date().toISOString() }), mode: "adaptive", updatedAt: new Date().toISOString() } } })} aria-pressed={publishingInitiative?.mode === "adaptive"}>
+            <strong>Let {presence.name} decide <em className="recommended-tag">Recommended</em></strong>
+            <small>{presence.name} determines the pace from its Mission, Growth evidence, and what is happening here.</small>
+          </button>
+          <button type="button" className={publishingInitiative?.mode === "pace" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { publishingInitiative: { ...(publishingInitiative ?? { timezone: "UTC", createdAt: new Date().toISOString() }), mode: "pace", target: { count: Math.max(1, Math.round(Number(publishingCountDraft) || 5)), period: publishingPeriodDraft }, updatedAt: new Date().toISOString() } } })} aria-pressed={publishingInitiative?.mode === "pace"}>
+            <strong>Set a pace</strong>
+            <small>Give {presence.name} an ongoing publishing target while preserving its judgment.</small>
+          </button>
+        </div>
+        {publishingInitiative?.mode === "pace" && (
+          <div className="publishing-pace-editor">
+            <div className="publishing-pace-sentence" aria-label="Publishing pace target">
+              <span>Aim for about</span>
+              <input aria-label="Publishing pace count" type="number" min={1} max={10000} value={publishingCountDraft} onChange={(event) => setPublishingCountDraft(event.target.value)} />
+              <span>original posts</span>
+              <select aria-label="Publishing pace period" value={publishingPeriodDraft} onChange={(event) => setPublishingPeriodDraft(event.target.value as "day" | "week")}>
+                <option value="day">per day</option>
+                <option value="week">per week</option>
+              </select>
+              <Button type="button" variant="secondary" onClick={savePublishingPace}>Save pace</Button>
+            </div>
+            <p className="form-hint">This is a pace, not a forced quota. Weak ideas can still be rejected, but {presence.name} keeps responsibility for finding better ones.</p>
+          </div>
+        )}
+        {publishingInitiative?.mode !== "off" && connectionMode !== "sandbox" && !nativeConnection?.status && !activeBridge && <p className="settings-warning">{presence.name} needs automatic attention to pursue this pace on its own. Connect the selected live route or use Sandbox to rehearse it.</p>}
+        {publishingInitiative?.mode !== "off" && presence.execution.post === "off" && <p className="settings-warning">Original posts are currently Off. {presence.name} can work on ideas, but cannot complete this publishing responsibility.</p>}
+        {publishingInitiative?.mode !== "off" && presence.execution.post === "review" && <p className="settings-warning">{presence.name} can work toward this pace, but publications will wait for your approval.</p>}
       </section>
       <section className="settings-card media-policy-card">
         <div className="section-heading compact">

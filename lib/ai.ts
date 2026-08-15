@@ -3,7 +3,7 @@ import { publicSelfGuidance } from "./runtime";
 import { effectiveLanguagePolicy, languagePolicyGuidance } from "./language-policy";
 import { isAiMockEnabled } from "./test-runtime";
 import { marketMockCandidate } from "./market-research";
-import type { AssetSemanticKind, Conversation, EvidenceNeed, ModelProvider, OpenPresenceState, Presence, PresenceChatMessage, SocialAssetKind, StoryCandidate, VisualBrief } from "./types";
+import type { AssetSemanticKind, Conversation, EvidenceNeed, ModelProvider, OpenPresenceState, Presence, PresenceChatMessage, SocialAssetKind, StoryCandidate, VisualBrief, VisualNeed } from "./types";
 
 const REQUEST_TIMEOUT_MS = 60_000;
 
@@ -366,6 +366,7 @@ export interface AgentSocialDecision {
   assets?: Array<{ kind: SocialAssetKind; name?: string; sourceUrl?: string; sourcePageUrl?: string; publisher?: string }>;
   storyCandidate?: StoryCandidate;
   evidenceNeed?: EvidenceNeed;
+  visualNeed?: VisualNeed;
   visualBrief?: VisualBrief;
 }
 
@@ -433,16 +434,27 @@ function parseVisualBrief(value: unknown): VisualBrief | undefined {
   return { role, ...(boundedStringArray(item.mustShow ?? item.must_show) ? { mustShow: boundedStringArray(item.mustShow ?? item.must_show) } : {}), ...(forms?.length ? { preferredForms: forms } : {}), ...(avoidForms?.length ? { avoidForms } : {}), ...(boundedString(item.rationale, 300) ? { rationale: boundedString(item.rationale, 300) } : {}) };
 }
 
+function parseVisualNeed(value: unknown): VisualNeed | undefined {
+  if (!value || typeof value !== "object") return undefined;
+  const item = value as Record<string, unknown>;
+  const importance = boundedString(item.importance ?? item.priority, 20) as VisualNeed["importance"] | undefined;
+  if (!importance || !["none", "helpful", "important", "required"].includes(importance)) return undefined;
+  const purpose = boundedString(item.purpose, 20) as VisualNeed["purpose"] | undefined;
+  return { importance, ...(purpose && ["evidence", "explanation", "illustration", "attention"].includes(purpose) ? { purpose } : {}), ...(boundedString(item.description, 300) ? { description: boundedString(item.description, 300) } : {}) };
+}
+
 function parseStoryCandidate(value: unknown): StoryCandidate | undefined {
   if (!value || typeof value !== "object") return undefined;
   const item = value as Record<string, unknown>;
   const evidenceNeed = parseEvidenceNeed(item.evidenceNeed ?? item.evidence_need);
+  const visualNeed = parseVisualNeed(item.visualNeed ?? item.visual_need);
   const visualBrief = parseVisualBrief(item.visualBrief ?? item.visual_brief);
   const candidate: StoryCandidate = {
     ...(boundedString(item.trigger, 300) ? { trigger: boundedString(item.trigger, 300) } : {}),
     ...(boundedString(item.whyNow ?? item.why_now, 300) ? { whyNow: boundedString(item.whyNow ?? item.why_now, 300) } : {}),
     ...(boundedString(item.claim, 500) ? { claim: boundedString(item.claim, 500) } : {}),
     ...(evidenceNeed ? { evidenceNeed } : {}),
+    ...(visualNeed ? { visualNeed } : {}),
     ...(visualBrief ? { visualBrief } : {}),
   };
   return Object.keys(candidate).length ? candidate : undefined;
@@ -518,6 +530,7 @@ export function parseAgentSocialDecision(raw: string, allowedActions: string[]):
   const format = typeof parsed.format === "string" && /^[-a-z0-9.]+$/i.test(parsed.format) ? parsed.format : undefined;
   const storyCandidate = parseStoryCandidate(parsed.storyCandidate ?? parsed.story_candidate);
   const evidenceNeed = parseEvidenceNeed(parsed.evidenceNeed ?? parsed.evidence_need) ?? storyCandidate?.evidenceNeed;
+  const visualNeed = parseVisualNeed(parsed.visualNeed ?? parsed.visual_need) ?? storyCandidate?.visualNeed;
   const visualBrief = parseVisualBrief(parsed.visualBrief ?? parsed.visual_brief) ?? storyCandidate?.visualBrief;
   const rawReferencedPeople = parsed.referencedPeople ?? parsed.referenced_people;
   const referencedPeople = Array.isArray(rawReferencedPeople)
@@ -531,7 +544,7 @@ export function parseAgentSocialDecision(raw: string, allowedActions: string[]):
     }).filter((item): item is NonNullable<typeof item> => Boolean(item)).slice(0, 4)
     : undefined;
   const networkReason = typeof parsed.networkReason === "string" ? parsed.networkReason.trim().slice(0, 500) : typeof parsed.network_reason === "string" ? parsed.network_reason.trim().slice(0, 500) : undefined;
-  return { action, text, rationale: rationale || undefined, ...(referencedPeople?.length ? { referencedPeople } : {}), ...(networkReason ? { networkReason } : {}), ...(format ? { format } : {}), assets: assets?.length ? assets : undefined, ...(storyCandidate ? { storyCandidate } : {}), ...(evidenceNeed ? { evidenceNeed } : {}), ...(visualBrief ? { visualBrief } : {}) };
+  return { action, text, rationale: rationale || undefined, ...(referencedPeople?.length ? { referencedPeople } : {}), ...(networkReason ? { networkReason } : {}), ...(format ? { format } : {}), assets: assets?.length ? assets : undefined, ...(storyCandidate ? { storyCandidate } : {}), ...(evidenceNeed ? { evidenceNeed } : {}), ...(visualNeed ? { visualNeed } : {}), ...(visualBrief ? { visualBrief } : {}) };
 }
 
 function cleanJudgmentField(value: unknown, fallback = "") {
@@ -794,14 +807,14 @@ export function parseAssetResearchPlannerDecision(raw: string, candidateIds: str
   }
 }
 
-export async function generateAssetResearchPlannerDecision(state: OpenPresenceState, input: { story?: StoryCandidate; evidenceNeed?: EvidenceNeed; visualBrief?: VisualBrief; candidates: Array<{ id: string; title?: string; sourcePageUrl?: string; publisher?: string; perception?: unknown; lineage?: unknown }>; recentVisualHistory?: string[]; attempt: number }) {
+export async function generateAssetResearchPlannerDecision(state: OpenPresenceState, input: { story?: StoryCandidate; evidenceNeed?: EvidenceNeed; visualNeed?: VisualNeed; visualBrief?: VisualBrief; candidates: Array<{ id: string; title?: string; sourcePageUrl?: string; publisher?: string; perception?: unknown; lineage?: unknown }>; recentVisualHistory?: string[]; currentQuery?: string; attempt: number }) {
   if (isAiMockEnabled()) {
     const preferred = input.visualBrief?.preferredForms ?? input.evidenceNeed?.preferredForms ?? [];
     const selected = input.candidates.find((candidate) => {
       const perception = candidate.perception && typeof candidate.perception === "object" ? candidate.perception as Record<string, unknown> : undefined;
       return perception?.visualForm && (preferred.length === 0 || preferred.includes(perception.visualForm as AssetSemanticKind)) && perception.decorative !== true && perception.legibility !== "poor";
     });
-    return selected ? { decision: "select" as const, candidateId: selected.id, rationale: "The inspected candidate has a compatible visual form and is not decorative." } : { decision: input.attempt < 3 ? "search_again" as const : "text_only" as const, query: input.evidenceNeed?.question, rationale: "No inspected candidate earned the requested visual role." };
+    return selected ? { decision: "select" as const, candidateId: selected.id, rationale: "The inspected candidate has a compatible visual form and is not decorative." } : input.attempt < 2 ? { decision: "search_again" as const, query: `${input.currentQuery ?? input.evidenceNeed?.question ?? "current source-backed evidence"} official report figure`, rationale: "No usable lead was found; reformulate the bounded search once." } : { decision: "text_only" as const, query: input.evidenceNeed?.question, rationale: "No acceptable visual lead was found within the bounded search budget." };
   }
   const candidateIds = input.candidates.map((candidate) => candidate.id);
   const raw = await generateAgentReply(state, [
@@ -809,10 +822,37 @@ export async function generateAssetResearchPlannerDecision(state: OpenPresenceSt
     "Choose exactly one bounded decision: select, search_again, render, text_only, or replan.",
     "Select only an inspected candidate whose actual pixels perform the visual brief and support a defensible part of the evidence need. Do not choose an OG image, logo, hero photo, generic stock photo, decorative illustration, stale/wrong-metric chart, or illegible media for an evidence role. The image does not need to prove every upstream causal claim: when it clearly supports a narrower subclaim, select it and let the expression editor narrow the post to that supported idea. Prefer a truthful narrower evidence-led post over text-only when the visual materially strengthens that narrower story.",
     "Use render only when the supplied structured evidence is sufficient to render a truthful chart; never invent data. Use search_again only with a concrete refined query. Use text_only when the story is still honest without media. Return JSON only.",
-    JSON.stringify({ story: input.story, evidenceNeed: input.evidenceNeed, visualBrief: input.visualBrief, candidates: input.candidates, recentVisualHistory: input.recentVisualHistory, attempt: input.attempt, candidateIds }),
+    JSON.stringify({ story: input.story, visualNeed: input.visualNeed, evidenceNeed: input.evidenceNeed, visualBrief: input.visualBrief, candidates: input.candidates, recentVisualHistory: input.recentVisualHistory, currentQuery: input.currentQuery, attempt: input.attempt, candidateIds }),
     '{"decision":"select|search_again|render|text_only|replan","candidateId":"one supplied id when selecting","query":"bounded refined query when search_again","rationale":"short editorial reason"}',
   ].join("\n\n"), undefined, { social: true });
   return parseAssetResearchPlannerDecision(raw, candidateIds);
+}
+
+export interface TextOnlyAssignmentPublication { status: "ready" | "replan"; text: string; rationale?: string; }
+
+export async function generateTextOnlyAssignmentPublication(state: OpenPresenceState, input: { assignment: string; visualNeed: VisualNeed; outcome: string; story?: StoryCandidate; evidenceSummary?: string }): Promise<TextOnlyAssignmentPublication> {
+  if (isAiMockEnabled()) {
+    return input.visualNeed.importance === "required"
+      ? { status: "replan", text: "", rationale: "The Assignment requires a visual and none was verified." }
+      : { status: "ready", text: "The evidence still stands on its own: a useful observation should survive the absence of a strong image. The visual was optional, so this note keeps the claim narrow and grounded.", rationale: "The story remains publishable without an attachment." };
+  }
+  const raw = await generateAgentReply(state, [
+    "Decide whether this Assignment story deserves a text-only Sandbox publication after bounded visual research.",
+    "The visual importance is model-derived: helpful permits text-only or a replan; important prefers one story replan but may publish text-only when the story independently deserves publication; required must replan and must never publish text-only.",
+    "Do not mention internal research mechanics in the publication. If ready, write the complete grounded publication and keep it honest without an image. If replan, leave text empty and explain the missing story work. Return JSON only.",
+    JSON.stringify(input),
+    '{"status":"ready|replan","text":"complete publication when ready","rationale":"short reason"}',
+  ].join("\n\n"), undefined, { social: true });
+  try {
+    const normalized = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    const start = normalized.indexOf("{");
+    const end = normalized.lastIndexOf("}");
+    const parsed = JSON.parse(start >= 0 && end > start ? normalized.slice(start, end + 1) : normalized) as Record<string, unknown>;
+    const status = parsed.status === "ready" || parsed.status === "replan" ? parsed.status : "replan";
+    return { status, text: typeof parsed.text === "string" ? parsed.text.trim() : "", rationale: typeof parsed.rationale === "string" ? parsed.rationale.trim() : undefined };
+  } catch {
+    return { status: "replan", text: "", rationale: "The text-only editorial decision was not structurally valid." };
+  }
 }
 
 export async function generateEvidenceLedDraft(state: OpenPresenceState, input: { draft: string; story?: StoryCandidate; evidenceNeed?: EvidenceNeed; visualBrief?: VisualBrief; perception: unknown; sourceEvidence?: unknown }) {
@@ -853,11 +893,11 @@ export interface EvidenceLedPublication {
 }
 
 /** One final Agent editorial call for the visual-evidence fast path. */
-export async function generateEvidenceLedPublication(state: OpenPresenceState, input: { assignment: string; evidenceSummary?: string; sourceEvidence?: unknown; perception?: unknown; topicHint?: string; draftHint?: string }) {
+export async function generateEvidenceLedPublication(state: OpenPresenceState, input: { assignment: string; evidenceSummary?: string; sourceEvidence?: unknown; perception?: unknown; topicHint?: string; reframedThesis?: string; reframeRationale?: string; draftHint?: string }) {
   if (isAiMockEnabled()) return { status: "ready" as const, text: input.draftHint?.trim() || "A grounded source deserves a clear claim, and the evidence should show exactly what the claim can carry.", uncertainty: "low" as const, rationale: "Sandbox fixture editorial pass accepted the selected evidence." };
   const raw = await generateAgentReply(state, [
     "Write the one final Sandbox publication around the selected visual evidence.",
-    "The evidence is authoritative for what the post may claim. Do not invent figures, dates, causality, source identity, or a broader thesis. If the evidence supports only a narrower point, make that narrower point the post. Preserve the source and publisher in a short final source line when supplied. Write in the active Presence voice, with natural paragraph spacing and the requested long-form format when the Assignment asks for it. Do not mention the Assignment, prompts, tools, model, or internal process.",
+    "The evidence is authoritative for what the post may claim. Do not invent figures, dates, causality, source identity, or a broader thesis. If a broad exploratory Assignment was reframed around stronger discovered evidence, use the supplied reframed thesis as the story center rather than forcing the original topic. If the evidence supports only a narrower point, make that narrower point the post. Preserve the source and publisher in a short final source line when supplied. Write in the active Presence voice, with natural paragraph spacing and the requested long-form format when the Assignment asks for it. Do not mention the Assignment, prompts, tools, model, or internal process.",
     "Return JSON only: {\"status\":\"ready|needs_review|text_only\",\"text\":\"publication text\",\"uncertainty\":\"low|medium|high\",\"rationale\":\"short reason\"}.",
     JSON.stringify(input),
   ].join("\n\n"), undefined, { social: true });
