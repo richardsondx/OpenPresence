@@ -5,6 +5,8 @@ import { effectiveLanguagePolicy, EMPTY_LANGUAGE_POLICY, normalizeLanguagePolicy
 import { createAssetPerception, createUninterpretedPerception, hasUsablePerception, mediaRequiresReview, perceptionRequirement } from "./perception";
 import { epistemicState } from "./asset-intelligence";
 import { isTestRuntime } from "./test-runtime";
+import { createRememberedPerson, evidenceRefFromMirror, factForCorrection, relationshipCurationEligible, relationshipForPerson } from "./network-memory";
+import type { RelationshipVisibility } from "./types";
 
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -76,7 +78,46 @@ const fileContent = (kind: FileKind, input: CreateAgentInput, presence?: Presenc
 };
 
 export function initialState(): OpenPresenceState {
-  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], events: [], calendar: [], assignments: [], watches: [], actions: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], assetProviderConnections: [], toolBindings: [], changeSets: [], standingIntents: [], socialIntents: [], executions: [], outcomes: [], publications: [], assetUsages: [], sourceEvidence: [], claimGrounding: [], preferenceEvidence: [], originalPostRehearsals: [], librarySources: [], assets: [], perceptions: [], assetResearchSessions: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], scenarios: [], scenarioVersions: [], scenarioRuns: [], scenarioRunProvenance: [], scenarioEvaluations: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
+  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], events: [], calendar: [], assignments: [], watches: [], actions: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], assetProviderConnections: [], toolBindings: [], changeSets: [], standingIntents: [], socialIntents: [], executions: [], outcomes: [], publications: [], assetUsages: [], sourceEvidence: [], claimGrounding: [], preferenceEvidence: [], originalPostRehearsals: [], librarySources: [], assets: [], perceptions: [], assetResearchSessions: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], people: [], personIdentities: [], relationships: [], relationshipFacts: [], relationshipOpenLoops: [], recommendationRecords: [], introductionRecords: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], scenarios: [], scenarioVersions: [], scenarioRuns: [], scenarioRunProvenance: [], scenarioEvaluations: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
+}
+
+/**
+ * Promote only an actual two-way interaction into Network Memory. Passive
+ * observations, directory entries, searches, and Watches remain world
+ * evidence until the operator explicitly chooses Remember or the Agent has
+ * actually continued the interaction.
+ */
+export function curateRelationshipFromMirror(source: OpenPresenceState, object: MirrorObject, presenceId = object.presenceId) {
+  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  if (!state.agent || !relationshipCurationEligible(state, object, presenceId)) return state;
+  const actor = object.author;
+  const externalActorId = actor?.externalRef?.id;
+  const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
+  if (!presence || !externalActorId || !actor?.externalRef?.type) return state;
+  const existingIdentity = state.personIdentities.find((identity) => identity.channel === object.channelId && identity.externalActorId === externalActorId);
+  const existingPerson = existingIdentity ? state.people.find((person) => person.id === existingIdentity.personId) : undefined;
+  const existingRelationship = existingPerson ? relationshipForPerson(state, existingPerson.id) : undefined;
+  const occurredAt = object.occurredAt ?? object.observedAt;
+  if (existingRelationship?.state === "forgotten" && existingRelationship.forgottenAt && new Date(occurredAt).getTime() <= new Date(existingRelationship.forgottenAt).getTime()) return state;
+  const remembered = createRememberedPerson({ agentId: state.agent.id, presenceId, channel: object.channelId, externalActorId, displayName: actor.displayName, handle: actor.handle, source: "current-context" }, state.people, state.personIdentities, state.relationships);
+  const timestamp = now();
+  remembered.person.memoryState = "active";
+  remembered.person.forgottenAt = undefined;
+  remembered.person.updatedAt = timestamp;
+  remembered.relationship.state = "active";
+  remembered.relationship.forgottenAt = undefined;
+  remembered.relationship.firstMeaningfulInteractionAt = remembered.relationship.firstMeaningfulInteractionAt ?? occurredAt;
+  remembered.relationship.lastMeaningfulInteractionAt = occurredAt;
+  remembered.relationship.updatedAt = timestamp;
+  state.people = [remembered.person, ...state.people.filter((item) => item.id !== remembered.person.id)];
+  state.personIdentities = [remembered.identity, ...state.personIdentities.filter((item) => item.id !== remembered.identity.id && !(item.channel === remembered.identity.channel && item.externalActorId === remembered.identity.externalActorId))];
+  state.relationships = [remembered.relationship, ...state.relationships.filter((item) => item.id !== remembered.relationship.id)];
+  const statement = actor.displayName + " said: " + (object.content?.text?.trim().slice(0, 360) ?? "[no text]");
+  const relationshipId = remembered.relationship.id;
+  const duplicate = state.relationshipFacts.some((fact) => fact.relationshipId === relationshipId && fact.statement === statement && fact.provenanceRefs.some((ref) => ref.id === object.id));
+  if (!duplicate) state.relationshipFacts.unshift({ id: id("relationship-fact"), relationshipId, statement, epistemicKind: "stated_by_person", confidence: "high", provenanceRefs: [evidenceRefFromMirror(object)], visibility: object.visibility === "public" ? "public" : `presence:${presenceId}`, validFrom: occurredAt, createdAt: timestamp });
+  state.events.unshift(event("memory", "Relationship curated", `${remembered.person.displayName} now has selective relationship continuity from a meaningful interaction.`, "positive", { presenceId, sourceObjectId: object.id }));
+  return state;
 }
 
 function makeFiles(input: CreateAgentInput, presence: Presence): AgentFile[] { return (Object.keys(fileMeta) as FileKind[]).map((kind) => ({ kind, ...fileMeta[kind], content: fileContent(kind, input, presence), revision: 1, updatedAt: now() })); }
@@ -160,7 +201,11 @@ export function recordNativeMirror(source: OpenPresenceState, input: { connectio
   if (!state.mirrorEvents.some((item) => item.externalRef.type === "x.post" && item.externalRef.id === input.post.id && item.event === "created")) {
     state.mirrorEvents.unshift({ id: id("mirror-event"), bridgeId: `native:${input.connectionId}`, presenceId: input.presenceId, sourceEventId, event: existing ? "updated" : "created", externalRef: { type: "x.post", id: input.post.id }, receivedAt });
   }
-  return state;
+  const mirrored = state.mirrorObjects.find((item) => item.externalRef.type === "x.post" && item.externalRef.id === input.post.id);
+  const curationTarget = mirrored?.actorPresenceId === input.presenceId && mirrored.parentExternalRef
+    ? state.mirrorObjects.find((item) => item.externalRef.type === mirrored.parentExternalRef?.type && item.externalRef.id === mirrored.parentExternalRef?.id)
+    : mirrored;
+  return curationTarget ? curateRelationshipFromMirror(state, curationTarget, input.presenceId) : state;
 }
 
 const publicHistoryKinds = new Set(["post", "reply", "comment", "quote", "repost", "thread"]);
@@ -1038,7 +1083,7 @@ export function resetPlaygroundSession(source: OpenPresenceState, sessionId: str
   return state;
 }
 
-export function formSandboxIntent(source: OpenPresenceState, input: { sessionId: string; affordance: string; format?: string; text: string; target?: EntityRef; perceptionTarget?: EntityRef; rehearsalAttemptId?: string; assignmentId?: string; invocationId?: string; assets?: SandboxAssetInput[]; expressionMode?: import("./types").ExpressionMode; groundingStatus?: import("./types").GroundingStatus; assetReuse?: { usageType: import("./types").AssetUsageType; reason: string } }) {
+export function formSandboxIntent(source: OpenPresenceState, input: { sessionId: string; affordance: string; format?: string; text: string; target?: EntityRef; perceptionTarget?: EntityRef; rehearsalAttemptId?: string; assignmentId?: string; invocationId?: string; assets?: SandboxAssetInput[]; expressionMode?: import("./types").ExpressionMode; groundingStatus?: import("./types").GroundingStatus; assetReuse?: { usageType: import("./types").AssetUsageType; reason: string }; networkMetadata?: { referencedPeople?: import("./types").SocialIntentPersonReference[]; networkReason?: string } }) {
   const state = cloneState(source);
   const session = sandboxSessionFor(state, input.sessionId);
   const presence = state.presences.find((item) => item.id === session.presenceId) ?? state.presence;
@@ -1065,7 +1110,7 @@ export function formSandboxIntent(source: OpenPresenceState, input: { sessionId:
   });
   const expression = epistemicState(input.expressionMode ?? "factual", input.groundingStatus);
   const publication: Publication = { id: id("publication"), format: input.format ?? `${session.channelId}.${input.affordance}`, payload: { text: input.text.trim() }, assetIds: publicationAssets.map((asset) => asset.id), links: publicationAssets.filter((asset) => asset.type === "link" && asset.provenance.sourceUrl).map((asset) => ({ url: asset.provenance.sourceUrl!, label: asset.description })), assetReuse: input.assetReuse, ...expression, createdAt: timestamp, environment: "sandbox", sessionId: session.id, rehearsalAttemptId: input.rehearsalAttemptId, assignmentId: input.assignmentId, invocationId: input.invocationId } as Publication & { invocationId?: string };
-  const intent: SocialIntent = { id: id("intent"), agentId: state.agent?.id ?? "", presenceId: presence.id, affordance: input.affordance, target: input.target, publicationId: publication.id, priority: 50, validity: { staleAfterMs: 60 * 60 * 1000 }, state: executionMode === "off" ? "withdrawn" : "active", formedAt: timestamp, updatedAt: timestamp, environment: "sandbox", sessionId: session.id, rehearsalAttemptId: input.rehearsalAttemptId, assignmentId: input.assignmentId, invocationId: input.invocationId } as SocialIntent & { invocationId?: string };
+  const intent: SocialIntent = { id: id("intent"), agentId: state.agent?.id ?? "", presenceId: presence.id, affordance: input.affordance, target: input.target, publicationId: publication.id, priority: 50, validity: { staleAfterMs: 60 * 60 * 1000 }, state: executionMode === "off" ? "withdrawn" : "active", formedAt: timestamp, updatedAt: timestamp, environment: "sandbox", sessionId: session.id, rehearsalAttemptId: input.rehearsalAttemptId, assignmentId: input.assignmentId, invocationId: input.invocationId, referencedPeople: input.networkMetadata?.referencedPeople, networkReason: input.networkMetadata?.networkReason } as SocialIntent & { invocationId?: string };
   if (executionMode === "off") {
     state.publications.unshift(publication);
     state.socialIntents.unshift(intent);
@@ -1088,7 +1133,7 @@ export function formSandboxIntent(source: OpenPresenceState, input: { sessionId:
 }
 
 export function deliverSandboxExecution(source: OpenPresenceState, executionId: string) {
-  const state = cloneState(source);
+  let state = cloneState(source);
   const execution = state.executions.find((item) => item.id === executionId);
   if (!execution || execution.environment !== "sandbox" || execution.connector !== "simulated" || !execution.sessionId || !execution.bridgeId?.startsWith("sandbox:")) throw new Error("Sandbox delivery rejected a non-simulated execution.");
   if (execution.status === "succeeded" && execution.externalRef) return state;
@@ -1118,6 +1163,27 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
   const object = { id: id("mirror"), bridgeId: `sandbox:${session.environmentId}`, presenceId: presence.id, channelId: session.channelId, externalRef, parentExternalRef: execution.target, objectType: execution.affordance, author: { externalRef: { type: `${session.channelId}.user`, id: `agent:${presence.id}` }, displayName: presence.name, handle: presence.handle }, content: { text: text || undefined }, assetRefs, occurredAt: session.virtualNow, observedAt: now(), visibility: "public" as const, shareability: "presence-only" as const, originExecutionId: execution.id, actorPresenceId: presence.id, sourceEventId: `sandbox-delivery:${execution.id}`, environment: "sandbox" as const, sessionId: session.id, assignmentId: execution.assignmentId };
   state.mirrorObjects.unshift(object);
   state.mirrorEvents.unshift({ id: id("mirror-event"), bridgeId: object.bridgeId, presenceId: presence.id, sourceEventId: object.sourceEventId!, event: "created", externalRef, object, receivedAt: now(), environment: "sandbox", sessionId: session.id });
+  const deliveredIntent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
+  const recipientActorId = execution.target?.id;
+  const recipientPersonId = recipientActorId ? state.personIdentities.find((identity) => identity.channel === presence.channel && identity.externalActorId === recipientActorId)?.personId : undefined;
+  for (const reference of deliveredIntent?.referencedPeople ?? []) {
+    if (reference.purpose !== "recommendation" || state.recommendationRecords.some((item) => item.sourceSocialIntentId === deliveredIntent?.id && item.candidateId === reference.candidateId)) continue;
+    state.recommendationRecords.unshift({
+      id: id("recommendation"),
+      agentId: state.agent?.id ?? "",
+      presenceId: presence.id,
+      recipientPersonId,
+      recipientActorId,
+      recommendedPersonId: reference.personId,
+      candidateId: reference.candidateId,
+      sourceSocialIntentId: deliveredIntent?.id ?? execution.socialIntentId,
+      rationale: deliveredIntent?.networkReason ?? "The Agent selected this candidate as relevant to the delivered social act.",
+      evidenceRefs: [{ kind: "social_intent", id: deliveredIntent?.id ?? execution.socialIntentId }, { kind: "mirror_object", id: object.id, sourcePresenceId: presence.id, observedAt: object.observedAt }],
+      visibility: `presence:${presence.id}`,
+      deliveredAt: now(),
+    });
+  }
+  const repliedToId = execution.target?.id;
   execution.status = "succeeded"; execution.attempts += 1; execution.externalRef = externalRef; execution.executedAt = now(); execution.updatedAt = now();
   state.outcomes.unshift({ id: id("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: presence.id, status: "succeeded", observedAt: now(), metrics: {}, evidence: [externalRef], environment: "sandbox", sessionId: session.id });
   if (publication) {
@@ -1138,6 +1204,10 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
       state.events.unshift({ ...event("execution", assignmentIsSatisfied(assignment) ? "Assignment complete" : "Assignment progress updated", `${assignment.progress.verified} / ${assignment.progress.required} verified publications.`, "positive", { presenceId: presence.id, executionId: execution.id }), sessionId: session.id });
     }
   }
+  if (repliedToId) {
+    const repliedTo = state.mirrorObjects.find((item) => item.externalRef.id === repliedToId && item.actorPresenceId !== presence.id);
+    if (repliedTo) state = curateRelationshipFromMirror(state, repliedTo, presence.id);
+  }
   state.events.unshift({ ...event("execution", "Sandbox delivery complete", `The ${channelName(session.channelId)} object is visible in this simulated world only.`, "positive", { presenceId: presence.id, executionId: execution.id }), sessionId: session.id });
   return state;
 }
@@ -1147,11 +1217,8 @@ export function recordSandboxNetworkSearch(source: OpenPresenceState, input: { s
   const timestamp = now();
   const searchId = id("network-search");
   state.networkSearches.unshift({ id: searchId, sessionId: input.sessionId, presenceId: input.presenceId, query: input.result.query, status: input.result.status, candidates: input.result.candidates, limitation: input.result.limitation, createdAt: timestamp });
-  for (const candidate of input.result.candidates.filter((item) => item.permission !== "not-available")) {
-    state.networkIntroductions.unshift({ id: id("network-intro"), searchId, sessionId: input.sessionId, presenceId: input.presenceId, candidateActorId: candidate.actorId, status: candidate.permission === "allowed" ? "proposed" : "awaiting-consent", createdAt: timestamp, updatedAt: timestamp });
-  }
   const detail = input.result.status === "matches"
-    ? `The Agent found ${input.result.candidates.length} verified sandbox candidate${input.result.candidates.length === 1 ? "" : "s"}; introduction permission was preserved in the audit record.`
+    ? `The Agent found ${input.result.candidates.length} verified sandbox candidate${input.result.candidates.length === 1 ? "" : "s"}. Search retrieved evidence only; no relationship or introduction was created.`
     : input.result.limitation ?? "No verified network match was found.";
   state.events.unshift({ ...event("decision", "Network search completed", detail, input.result.status === "matches" ? "positive" : "warning", { presenceId: input.presenceId }), sessionId: input.sessionId });
   return state;
@@ -1237,7 +1304,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   const providerConnections = (state.providerConnections ?? []).map((connection) => ({ ...connection, label: providerName(connection.provider) }));
   const normalizedPresences = presences.map((item) => ({ ...item, languagePolicy: normalizeLanguagePolicy((item as Presence & { languagePolicy?: LanguagePolicy }).languagePolicy) }));
   const hydratedPresence = normalizedPresences.find((item) => item.id === activePresenceId) ?? normalizedPresences[0] ?? null;
-  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], workspaceRevision: state.workspaceRevision, presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], calendar, assignments: (state.assignments ?? []).map((assignment) => ({ ...assignment, revision: assignment.revision ?? 0, work: assignment.work ?? { phase: assignment.status === "blocked" ? "blocked" as const : assignment.status === "completed" ? "completed" as const : "candidate_review" as const, attempts: assignment.rejectedCandidates ?? 0, maxAttempts: Math.min(12, Math.max(4, assignment.progress.required * 4)), storiesResearched: 0 }, attemptHistory: assignment.attemptHistory ?? [], storyResearch: assignment.storyResearch ?? [] })), watches: state.watches ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, assetProviderConnections: state.assetProviderConnections ?? [], toolBindings: (state.toolBindings ?? []).map((binding) => ({ ...binding, enabled: binding.enabled !== false })), changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], assetUsages: state.assetUsages ?? [], sourceEvidence: state.sourceEvidence ?? [], claimGrounding: state.claimGrounding ?? [], preferenceEvidence: state.preferenceEvidence ?? [], originalPostRehearsals: state.originalPostRehearsals ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], perceptions: state.perceptions ?? [], assetResearchSessions: state.assetResearchSessions ?? [], skills, agentSkills, contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: (state.playgroundSessions ?? []).map((session) => ({ ...session, virtualTimeMode: session.virtualTimeMode ?? "realtime", worldRevision: session.worldRevision ?? 1 })), sandboxActors: state.sandboxActors ?? [], networkSearches: state.networkSearches ?? [], networkIntroductions: state.networkIntroductions ?? [], scenarios: state.scenarios ?? [], scenarioVersions: state.scenarioVersions ?? [], scenarioRuns: state.scenarioRuns ?? [], scenarioRunProvenance: state.scenarioRunProvenance ?? [], scenarioEvaluations: state.scenarioEvaluations ?? [] };
+  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], workspaceRevision: state.workspaceRevision, presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], calendar, assignments: (state.assignments ?? []).map((assignment) => ({ ...assignment, revision: assignment.revision ?? 0, work: assignment.work ?? { phase: assignment.status === "blocked" ? "blocked" as const : assignment.status === "completed" ? "completed" as const : "candidate_review" as const, attempts: assignment.rejectedCandidates ?? 0, maxAttempts: Math.min(12, Math.max(4, assignment.progress.required * 4)), storiesResearched: 0 }, attemptHistory: assignment.attemptHistory ?? [], storyResearch: assignment.storyResearch ?? [] })), watches: state.watches ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, assetProviderConnections: state.assetProviderConnections ?? [], toolBindings: (state.toolBindings ?? []).map((binding) => ({ ...binding, enabled: binding.enabled !== false })), changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], assetUsages: state.assetUsages ?? [], sourceEvidence: state.sourceEvidence ?? [], claimGrounding: state.claimGrounding ?? [], preferenceEvidence: state.preferenceEvidence ?? [], originalPostRehearsals: state.originalPostRehearsals ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], perceptions: state.perceptions ?? [], assetResearchSessions: state.assetResearchSessions ?? [], skills, agentSkills, contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], people: state.people ?? [], personIdentities: state.personIdentities ?? [], relationships: state.relationships ?? [], relationshipFacts: state.relationshipFacts ?? [], relationshipOpenLoops: state.relationshipOpenLoops ?? [], recommendationRecords: state.recommendationRecords ?? [], introductionRecords: state.introductionRecords ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: (state.playgroundSessions ?? []).map((session) => ({ ...session, virtualTimeMode: session.virtualTimeMode ?? "realtime", worldRevision: session.worldRevision ?? 1 })), sandboxActors: state.sandboxActors ?? [], networkSearches: state.networkSearches ?? [], networkIntroductions: state.networkIntroductions ?? [], scenarios: state.scenarios ?? [], scenarioVersions: state.scenarioVersions ?? [], scenarioRuns: state.scenarioRuns ?? [], scenarioRunProvenance: state.scenarioRunProvenance ?? [], scenarioEvaluations: state.scenarioEvaluations ?? [] };
   if (normalized.agent && normalized.scenarios.length === 0) {
     const builtins = builtinScenarioDefinitions(normalized.agent.id, normalized.presence?.channel ?? "x");
     normalized.scenarios = builtins.map((item) => item.scenario);
@@ -1839,6 +1906,99 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     if (!watch) return state;
     state.watches = state.watches.filter((item) => item.id !== watch.id);
     state.events.unshift(event("system", "Watch removed", `${watch.title} is no longer part of the Presence's attention.`, "quiet", { presenceId: watch.presenceId }));
+    return state;
+  }
+  if (operation.type === "rememberPerson") {
+    const presence = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence;
+    if (!state.agent || !presence || !operation.externalActorId.trim() || !operation.displayName.trim()) return state;
+    const remembered = createRememberedPerson({ agentId: state.agent.id, presenceId: presence.id, channel: operation.channel ?? presence.channel, externalActorId: operation.externalActorId.trim(), displayName: operation.displayName, handle: operation.handle, profileUrl: operation.profileUrl, personId: operation.personId, source: operation.source ?? "operator" }, state.people, state.personIdentities, state.relationships);
+    state.people = [remembered.person, ...state.people.filter((item) => item.id !== remembered.person.id)];
+    state.personIdentities = [remembered.identity, ...state.personIdentities.filter((item) => item.id !== remembered.identity.id && !(item.channel === remembered.identity.channel && item.externalActorId === remembered.identity.externalActorId))];
+    state.relationships = [remembered.relationship, ...state.relationships.filter((item) => item.id !== remembered.relationship.id)];
+    state.events.unshift(event("memory", "Person remembered", `${remembered.person.displayName} is now part of this Agent's selective People memory. Remembering does not invent prior interaction history.`, "positive", { presenceId: presence.id }));
+    return state;
+  }
+  if (operation.type === "forgetRelationship") {
+    const relationship = state.relationships.find((item) => item.id === operation.relationshipId);
+    if (!relationship) return state;
+    const timestamp = now();
+    relationship.state = "forgotten";
+    relationship.forgottenAt = timestamp;
+    relationship.updatedAt = timestamp;
+    const person = state.people.find((item) => item.id === relationship.personId);
+    if (person) { person.memoryState = "forgotten"; person.forgottenAt = timestamp; person.updatedAt = timestamp; }
+    state.events.unshift(event("memory", "Relationship forgotten", "Curated relationship memory is suppressed. Social Mirror history remains available as historical channel evidence.", "quiet", { presenceId: state.presence?.id }));
+    return state;
+  }
+  if (operation.type === "restoreRelationship") {
+    const relationship = state.relationships.find((item) => item.id === operation.relationshipId);
+    if (!relationship) return state;
+    relationship.state = "active";
+    relationship.forgottenAt = undefined;
+    relationship.updatedAt = now();
+    const person = state.people.find((item) => item.id === relationship.personId);
+    if (person) { person.memoryState = "active"; person.forgottenAt = undefined; person.updatedAt = now(); }
+    state.events.unshift(event("memory", "Relationship restored", "The operator explicitly restored curated relationship memory; historical facts remain provenance-backed.", "positive", { presenceId: state.presence?.id }));
+    return state;
+  }
+  if (operation.type === "correctRelationshipFact") {
+    const relationship = state.relationships.find((item) => item.id === operation.relationshipId);
+    const presence = state.presence;
+    if (!relationship || !state.agent || !presence || !operation.statement.trim()) return state;
+    const nextFact = factForCorrection(relationship.id, operation.statement, operation.visibility ?? `presence:${presence.id}` as RelationshipVisibility, presence.id);
+    if (operation.factId) {
+      const previous = state.relationshipFacts.find((fact) => fact.id === operation.factId);
+      if (previous) nextFact.supersedesFactId = previous.id;
+    }
+    state.relationshipFacts.unshift(nextFact);
+    relationship.updatedAt = now();
+    state.events.unshift(event("memory", "Relationship memory corrected", "The correction supersedes the curated interpretation without rewriting the original social evidence.", "positive", { presenceId: presence.id }));
+    return state;
+  }
+  if (operation.type === "createIntroductionRecord") {
+    const presence = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence;
+    if (!state.agent || !presence || (!operation.candidatePersonId && !operation.candidateActorId)) return state;
+    const timestamp = now();
+    const record = {
+      id: id("introduction"),
+      agentId: state.agent.id,
+      presenceId: presence.id,
+      requesterPersonId: operation.requesterPersonId,
+      requesterActorId: operation.requesterActorId,
+      candidatePersonId: operation.candidatePersonId,
+      candidateActorId: operation.candidateActorId,
+      requesterConsent: "asked" as const,
+      candidateConsent: "unknown" as const,
+      sourceIntentIds: [...(operation.sourceIntentIds ?? [])],
+      executionIds: [],
+      state: "offered" as const,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    state.introductionRecords.unshift(record);
+    state.events.unshift(event("decision", "Introduction offer recorded", "The candidate remains separate from the requester until both parties consent. No message was sent by recording this offer.", "neutral", { presenceId: presence.id }));
+    return state;
+  }
+  if (operation.type === "respondIntroductionConsent") {
+    const record = state.introductionRecords.find((item) => item.id === operation.id);
+    if (!record || record.state === "closed" || record.state === "introduced") return state;
+    const timestamp = now();
+    const consent = operation.consent ? "consented" : "declined";
+    if (operation.party === "requester") record.requesterConsent = consent;
+    else record.candidateConsent = consent;
+    if (!operation.consent) {
+      record.state = "closed";
+      record.outcome = `${operation.party} declined introduction`;
+    } else if (record.requesterConsent === "consented" && record.candidateConsent === "consented") {
+      record.state = "introduced";
+      record.outcome = "Both parties consented; a separate Message execution may now proceed.";
+    } else if (operation.party === "requester") {
+      record.state = "candidate_contact_pending";
+    } else {
+      record.state = "candidate_accepted";
+    }
+    record.updatedAt = timestamp;
+    state.events.unshift(event("decision", "Introduction consent updated", record.state === "introduced" ? "Both parties consented. Any contact still requires a separate Message execution." : record.state === "closed" ? "The introduction was closed without contact." : "One consent is recorded; the other party remains unresolved.", record.state === "closed" ? "quiet" : "positive", { presenceId: record.presenceId }));
     return state;
   }
   if (operation.type === "setAgentLanguagePolicy") {

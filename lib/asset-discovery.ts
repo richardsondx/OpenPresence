@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { fetchPublicAsset, isPublicHttpUrl } from "./asset-store";
+import { fetchPublicAsset, fetchPublicAssetPreview, isPublicHttpUrl } from "./asset-store";
 import { inferAssetSemanticKind } from "./visual-fit";
 import type { Asset, AssetCandidate, AssetDiscoveryProvider, AssetSemanticKind, SourceEvidence } from "./types";
 
@@ -117,4 +117,12 @@ export async function materializeCandidate(candidate: AssetCandidate, input: { a
   const asset: Asset = { id: `asset_${crypto.randomUUID()}`, agentId: input.agentId, presenceId: input.presenceId, sessionId: input.sessionId, type: stored.mimeType === "image/gif" ? "gif" : stored.mimeType.startsWith("video/") ? "video" : "image", mediaKind: stored.mimeType === "image/gif" ? "gif" : stored.mimeType.startsWith("video/") ? "video" : "image", semanticKind: input.semanticKind, storage: stored, status: "ready", nature: "observed", rights: { status: "unknown" }, provenance: { origin: input.origin ?? "discovered", sourceUrl: candidate.mediaUrl, sourcePageUrl: candidate.sourcePageUrl, canonicalSourcePage: candidate.sourcePageUrl, publisher: candidate.assetPublisher ?? candidate.publisher, author: candidate.author, publishedAt: candidate.publishedAt, retrievedAt, acquisitionProvider: candidate.provider, importedAt: retrievedAt, sourceIdentityStatus: candidate.sourcePageUrl ? "unknown" : "unknown" }, description: candidate.title ?? candidate.name, visibility: "public", shareability: "presence-only", environment: input.environment ?? "sandbox", createdAt: retrievedAt, updatedAt: retrievedAt };
   if (sourceEvidence) sourceEvidence.assetIds.push(asset.id);
   return { asset, sourceEvidence };
+}
+
+export async function previewCandidate(candidate: AssetCandidate, input: { agentId: string; presenceId?: string; sessionId?: string; environment?: "sandbox" | "live"; origin?: Asset["provenance"]["origin"]; semanticKind?: AssetSemanticKind }): Promise<{ asset: Asset }> {
+  if (!candidate.mediaUrl) throw new Error("The candidate has no media URL to fetch.");
+  const stored = await fetchPublicAssetPreview(candidate.mediaUrl);
+  const retrievedAt = new Date().toISOString();
+  const asset: Asset = { id: `asset_${crypto.randomUUID()}`, agentId: input.agentId, presenceId: input.presenceId, sessionId: input.sessionId, type: stored.mimeType === "image/gif" ? "gif" : stored.mimeType.startsWith("video/") ? "video" : "image", mediaKind: stored.mimeType === "image/gif" ? "gif" : stored.mimeType.startsWith("video/") ? "video" : "image", semanticKind: input.semanticKind, storage: stored, status: "ready", nature: "observed", rights: { status: "unknown" }, provenance: { origin: input.origin ?? "discovered", sourceUrl: candidate.mediaUrl, sourcePageUrl: candidate.sourcePageUrl, canonicalSourcePage: candidate.sourcePageUrl, publisher: candidate.assetPublisher ?? candidate.publisher, author: candidate.author, publishedAt: candidate.publishedAt, retrievedAt, acquisitionProvider: candidate.provider, importedAt: retrievedAt, sourceIdentityStatus: "unknown" }, description: candidate.title ?? candidate.name, visibility: "public", shareability: "presence-only", environment: input.environment ?? "sandbox", createdAt: retrievedAt, updatedAt: retrievedAt };
+  return { asset };
 }

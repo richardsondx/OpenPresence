@@ -307,3 +307,96 @@ export async function inspectSandboxObject(state: OpenPresenceState, object: Mir
 export async function inspectDiscoveredAsset(state: OpenPresenceState, asset: Asset, context: AssetResearchInspectionContext): Promise<PerceptionRun> {
   return inspectWithProvider(state, asset, undefined, "resolve", context);
 }
+
+export interface DiscoveredAssetComparison {
+  attempted: boolean;
+  providerId?: string;
+  modelId?: string;
+  judgments: Record<string, PerceptionResult>;
+  rankedAcceptableIds: string[];
+  selectedCandidateId?: string;
+  evidenceSummary?: string;
+  refinedSearchQuery?: string;
+  error?: string;
+}
+
+/**
+ * Compare a bounded set of already-downloaded candidates in one vision call.
+ * Search metadata remains outside this function; the model sees the actual
+ * pixels plus the candidate/source labels and returns a judgment for each.
+ */
+export async function compareDiscoveredAssets(
+  state: OpenPresenceState,
+  items: Array<{ id: string; asset: Asset; sourcePageUrl?: string; publisher?: string }>,
+  context: AssetResearchInspectionContext,
+): Promise<DiscoveredAssetComparison> {
+  const selected = providerSupportsVision(state);
+  if (!selected || isAiMockEnabled()) {
+    return {
+      attempted: false,
+      judgments: {},
+      rankedAcceptableIds: [],
+      error: "A configured vision runtime is required for batch visual comparison.",
+    };
+  }
+  const media = await Promise.all(items.map(async (item) => ({ ...item, media: await imageParts(item.asset) })));
+  const viable = media.filter((item): item is typeof item & { media: { mimeType: string; data: string } } => Boolean(item.media));
+  if (!viable.length) return { attempted: true, judgments: {}, rankedAcceptableIds: [], error: "No candidate preview could be normalized for visual comparison." };
+  const prompt = [
+    "You are the visual evidence comparator for OpenPresence. Inspect every attached candidate image in this single request.",
+    "Search metadata is only a lead. Judge the actual pixels. Return one judgment for every supplied candidate id, then rank only candidates that are acceptable for the visual brief.",
+    "Acceptable means the pixels are relevant, legible enough for a narrower defensible claim, non-decorative, and source identity can be preserved. A generic photo, logo, hero image, report cover, stale or wrong-metric chart, or unreadable image is not acceptable for an evidence role.",
+    `Evidence need: ${context.evidenceNeed ?? "unknown"}`,
+    `Visual brief: ${context.visualBrief ?? "unknown"}`,
+    `Story context: ${context.story ?? "unknown"}`,
+    JSON.stringify(viable.map((item) => ({ id: item.id, sourcePageUrl: item.sourcePageUrl, publisher: item.publisher }))),
+    "Return JSON only in this shape: {\"judgments\":[{\"id\":\"supplied id\",\"observation\":\"visible pixels only\",\"interpretation\":\"supported narrower meaning\",\"visibleText\":\"optional\",\"uncertainty\":\"low|medium|high|insufficient\",\"visualForm\":\"chart|screenshot|photo|illustration|logo|meme|diagram|clip|other\",\"visualRole\":\"evidence|subject|context|identity|atmosphere|none\",\"claimsSupported\":[\"...\"],\"claimsNotSupported\":[\"...\"],\"legibility\":\"clear|partial|poor\",\"decorative\":false,\"sourceCitationVisible\":true,\"missingContext\":[\"...\"]}],\"rankedAcceptableIds\":[\"id\"],\"selectedCandidateId\":\"id or null\",\"evidenceSummary\":\"short grounded summary\",\"refinedSearchQuery\":\"only when nothing qualifies\"}",
+  ].join("\n\n");
+  try {
+    let raw: string | undefined;
+    const { profile, connection } = selected;
+    const secret = profile.provider === "ollama" || profile.provider === "custom" && !connection.secretConfigured ? undefined : connection.id ? readProviderSecret(connection.id) : undefined;
+    const contentParts = viable.flatMap((item) => [{ type: "text", text: `Candidate ${item.id}` }, { type: "image_url", image_url: { url: `data:${item.media.mimeType};base64,${item.media.data}` } }]);
+    if (profile.provider === "anthropic") {
+      const body = await requestJson("https://api.anthropic.com/v1/messages", { method: "POST", headers: { "content-type": "application/json", "x-api-key": secret!, "anthropic-version": "2023-06-01" }, body: JSON.stringify({ model: providerModel(profile.provider, profile.model), max_tokens: 2200, system: "You are a careful visual evidence comparator. Do not write a publication.", messages: [{ role: "user", content: [{ type: "text", text: prompt }, ...viable.flatMap((item) => [{ type: "text", text: `Candidate ${item.id}` }, { type: "image", source: { type: "base64", media_type: item.media.mimeType, data: item.media.data } }]) ] }] }) }, "Anthropic");
+      raw = contentText((body.content ?? []) as unknown[]);
+    } else if (profile.provider === "gemini") {
+      const body = await requestJson(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(profile.model)}:generateContent?key=${encodeURIComponent(secret!)}`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ systemInstruction: { parts: [{ text: "You are a careful visual evidence comparator. Do not write a publication." }] }, contents: [{ role: "user", parts: [{ text: prompt }, ...viable.flatMap((item) => [{ text: `Candidate ${item.id}` }, { inline_data: { mime_type: item.media.mimeType, data: item.media.data } }]) ] }] }) }, "Gemini");
+      const candidate = Array.isArray(body.candidates) ? body.candidates[0] : undefined;
+      const parts = candidate && typeof candidate === "object" && (candidate as Record<string, unknown>).content && typeof (candidate as Record<string, unknown>).content === "object" ? ((candidate as Record<string, unknown>).content as Record<string, unknown>).parts : undefined;
+      raw = contentText(parts);
+    } else if (profile.provider === "ollama") {
+      const endpoint = connection.endpoint || "http://localhost:11434";
+      const body = await requestJson(`${endpoint.replace(/\/+$/, "")}/api/chat`, { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ model: profile.model, stream: false, think: false, format: "json", messages: [{ role: "system", content: "You are a careful visual evidence comparator. Do not write a publication." }, { role: "user", content: prompt, images: viable.map((item) => item.media.data) }], options: { num_ctx: 8192, num_predict: 2200, temperature: 0 } }) }, "Ollama");
+      if (body.message && typeof body.message === "object") raw = text((body.message as Record<string, unknown>).content) ?? text((body.message as Record<string, unknown>).thinking);
+    } else {
+      const endpoint = connection.endpoint || (profile.provider === "openrouter" ? "https://openrouter.ai/api/v1" : "https://api.openai.com/v1");
+      const messages = [{ role: "system", content: "You are a careful visual evidence comparator. Do not write a publication." }, { role: "user", content: [{ type: "text", text: prompt }, ...contentParts] }];
+      const isGpt56 = profile.provider === "openai" && profile.model.startsWith("gpt-5.6");
+      const requestBody: Record<string, unknown> = { model: providerModel(profile.provider, profile.model), messages };
+      if (!isGpt56) { requestBody.temperature = 0; requestBody.response_format = { type: "json_object" }; }
+      const body = await requestJson(`${endpoint.replace(/\/+$/, "")}/chat/completions`, { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${secret!}` }, body: JSON.stringify(requestBody) }, profile.provider === "openrouter" ? "OpenRouter" : "OpenAI");
+      const choice = Array.isArray(body.choices) ? body.choices[0] : undefined;
+      raw = choice && typeof choice === "object" && (choice as Record<string, unknown>).message && typeof (choice as Record<string, unknown>).message === "object" ? contentText(((choice as Record<string, unknown>).message as Record<string, unknown>).content) : undefined;
+    }
+    if (!raw) throw new Error("The visual comparator returned no structured result.");
+    const normalized = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "");
+    const start = normalized.indexOf("{");
+    const end = normalized.lastIndexOf("}");
+    const parsed = JSON.parse(start >= 0 && end > start ? normalized.slice(start, end + 1) : normalized) as Record<string, unknown>;
+    const suppliedIds = new Set(viable.map((item) => item.id));
+    const judgments: Record<string, PerceptionResult> = {};
+    for (const item of Array.isArray(parsed.judgments) ? parsed.judgments : []) {
+      if (!item || typeof item !== "object") continue;
+      const record = item as Record<string, unknown>;
+      const id = text(record.id);
+      if (!id || !suppliedIds.has(id) || !text(record.observation)) continue;
+      try { judgments[id] = parseResult(JSON.stringify(record)); } catch { /* one malformed judgment does not invalidate the batch */ }
+    }
+    const rankedAcceptableIds = Array.isArray(parsed.rankedAcceptableIds) ? parsed.rankedAcceptableIds.filter((id): id is string => typeof id === "string" && suppliedIds.has(id) && Boolean(judgments[id])).slice(0, viable.length) : [];
+    const selectedCandidateId = typeof parsed.selectedCandidateId === "string" && rankedAcceptableIds.includes(parsed.selectedCandidateId) ? parsed.selectedCandidateId : rankedAcceptableIds[0];
+    return { attempted: true, providerId: profile.provider, modelId: profile.model, judgments, rankedAcceptableIds, selectedCandidateId, evidenceSummary: text(parsed.evidenceSummary), refinedSearchQuery: text(parsed.refinedSearchQuery) };
+  } catch (error) {
+    return { attempted: true, providerId: selected.profile.provider, modelId: selected.profile.model, judgments: {}, rankedAcceptableIds: [], error: error instanceof Error ? error.message : "The visual comparator failed." };
+  }
+}

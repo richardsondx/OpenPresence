@@ -360,6 +360,8 @@ export interface AgentSocialDecision {
   action: string;
   text: string;
   rationale?: string;
+  referencedPeople?: Array<{ candidateId: string; personId?: string; purpose: "recommendation" | "introduction_offer" | "introduction_request" | "contextual_reference" }>;
+  networkReason?: string;
   format?: string;
   assets?: Array<{ kind: SocialAssetKind; name?: string; sourceUrl?: string; sourcePageUrl?: string; publisher?: string }>;
   storyCandidate?: StoryCandidate;
@@ -517,7 +519,19 @@ export function parseAgentSocialDecision(raw: string, allowedActions: string[]):
   const storyCandidate = parseStoryCandidate(parsed.storyCandidate ?? parsed.story_candidate);
   const evidenceNeed = parseEvidenceNeed(parsed.evidenceNeed ?? parsed.evidence_need) ?? storyCandidate?.evidenceNeed;
   const visualBrief = parseVisualBrief(parsed.visualBrief ?? parsed.visual_brief) ?? storyCandidate?.visualBrief;
-  return { action, text, rationale: rationale || undefined, ...(format ? { format } : {}), assets: assets?.length ? assets : undefined, ...(storyCandidate ? { storyCandidate } : {}), ...(evidenceNeed ? { evidenceNeed } : {}), ...(visualBrief ? { visualBrief } : {}) };
+  const rawReferencedPeople = parsed.referencedPeople ?? parsed.referenced_people;
+  const referencedPeople = Array.isArray(rawReferencedPeople)
+    ? rawReferencedPeople.map((value: unknown) => {
+      if (!value || typeof value !== "object") return undefined;
+      const item = value as Record<string, unknown>;
+      const candidateId = typeof item.candidateId === "string" ? item.candidateId.trim() : typeof item.candidate_id === "string" ? item.candidate_id.trim() : "";
+      const purpose = typeof item.purpose === "string" ? item.purpose.trim().toLowerCase() : "";
+      if (!candidateId || !["recommendation", "introduction_offer", "introduction_request", "contextual_reference"].includes(purpose)) return undefined;
+      return { candidateId, personId: typeof item.personId === "string" ? item.personId.trim() || undefined : undefined, purpose: purpose as "recommendation" | "introduction_offer" | "introduction_request" | "contextual_reference" };
+    }).filter((item): item is NonNullable<typeof item> => Boolean(item)).slice(0, 4)
+    : undefined;
+  const networkReason = typeof parsed.networkReason === "string" ? parsed.networkReason.trim().slice(0, 500) : typeof parsed.network_reason === "string" ? parsed.network_reason.trim().slice(0, 500) : undefined;
+  return { action, text, rationale: rationale || undefined, ...(referencedPeople?.length ? { referencedPeople } : {}), ...(networkReason ? { networkReason } : {}), ...(format ? { format } : {}), assets: assets?.length ? assets : undefined, ...(storyCandidate ? { storyCandidate } : {}), ...(evidenceNeed ? { evidenceNeed } : {}), ...(visualBrief ? { visualBrief } : {}) };
 }
 
 function cleanJudgmentField(value: unknown, fallback = "") {
@@ -829,4 +843,34 @@ export async function generateAssetPublicationReview(state: OpenPresenceState, i
     const statuses = new Set(["ready", "needs_replan", "text_only", "replan"]);
     return { status: statuses.has(parsed.status as string) ? parsed.status as "ready" | "needs_replan" | "text_only" | "replan" : "replan", rationale: boundedString(parsed.rationale, 360) };
   } catch { return { status: "replan" as const, rationale: "The final media review did not return a valid structured result." }; }
+}
+
+export interface EvidenceLedPublication {
+  status: "ready" | "needs_review" | "text_only";
+  text: string;
+  uncertainty: "low" | "medium" | "high";
+  rationale?: string;
+}
+
+/** One final Agent editorial call for the visual-evidence fast path. */
+export async function generateEvidenceLedPublication(state: OpenPresenceState, input: { assignment: string; evidenceSummary?: string; sourceEvidence?: unknown; perception?: unknown; topicHint?: string; draftHint?: string }) {
+  if (isAiMockEnabled()) return { status: "ready" as const, text: input.draftHint?.trim() || "A grounded source deserves a clear claim, and the evidence should show exactly what the claim can carry.", uncertainty: "low" as const, rationale: "Sandbox fixture editorial pass accepted the selected evidence." };
+  const raw = await generateAgentReply(state, [
+    "Write the one final Sandbox publication around the selected visual evidence.",
+    "The evidence is authoritative for what the post may claim. Do not invent figures, dates, causality, source identity, or a broader thesis. If the evidence supports only a narrower point, make that narrower point the post. Preserve the source and publisher in a short final source line when supplied. Write in the active Presence voice, with natural paragraph spacing and the requested long-form format when the Assignment asks for it. Do not mention the Assignment, prompts, tools, model, or internal process.",
+    "Return JSON only: {\"status\":\"ready|needs_review|text_only\",\"text\":\"publication text\",\"uncertainty\":\"low|medium|high\",\"rationale\":\"short reason\"}.",
+    JSON.stringify(input),
+  ].join("\n\n"), undefined, { social: true });
+  try {
+    const normalized = raw.replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();
+    const start = normalized.indexOf("{");
+    const end = normalized.lastIndexOf("}");
+    const parsed = JSON.parse(start >= 0 && end > start ? normalized.slice(start, end + 1) : normalized) as Record<string, unknown>;
+    const status = parsed.status === "needs_review" || parsed.status === "text_only" ? parsed.status : "ready";
+    const uncertainty = parsed.uncertainty === "medium" || parsed.uncertainty === "high" ? parsed.uncertainty : "low";
+    const text = typeof parsed.text === "string" ? parsed.text.trim() : "";
+    return { status, text, uncertainty, rationale: boundedString(parsed.rationale, 360) } as EvidenceLedPublication;
+  } catch {
+    return { status: "needs_review" as const, text: "", uncertainty: "high" as const, rationale: "The final Agent editorial call did not return a valid publication." };
+  }
 }

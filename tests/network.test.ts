@@ -1,9 +1,8 @@
 import { describe, expect, it } from "vitest";
-import { networkSearchInstruction, searchSandboxNetwork } from "../lib/network";
+import { networkSearchInstruction, searchNetwork, searchSandboxNetwork } from "../lib/network";
+import { relationshipProjection } from "../lib/network-memory";
 import type { SandboxActor } from "../lib/types";
-import { addSandboxEvent, applyOperation, approveSandboxIntroduction, createAgent, recordSandboxNetworkSearch, startPlaygroundSession } from "../lib/runtime";
-import { writeState } from "../lib/db";
-import { POST as statePost } from "../app/api/state/route";
+import { addSandboxEvent, applyOperation, createAgent, deliverSandboxExecution, formSandboxIntent, recordSandboxNetworkSearch, startPlaygroundSession } from "../lib/runtime";
 
 const actors: SandboxActor[] = [
   {
@@ -67,7 +66,7 @@ describe("sandbox network search", () => {
     expect(state.sandboxActors[0]?.profile).toEqual(actors[0]?.profile);
   });
 
-  it("turns a verified candidate into a consent-aware, auditable introduction", () => {
+  it("keeps search retrieval separate from memory and introductions", () => {
     let state = createAgent({ name: "Jenny", description: "Connect thoughtful builders.", mode: "agent", handle: "@jenny_ai", accent: "#D68754" });
     state = applyOperation(state, { type: "setPresence", patch: { execution: { message: "auto" } } });
     state = startPlaygroundSession(state);
@@ -75,29 +74,63 @@ describe("sandbox network search", () => {
     state = addSandboxEvent(state, { sessionId: session.id, actionId: "post", actorName: "Avery Cole", actorHandle: "@averysec", profile: actors[0]!.profile, content: "I work in security engineering in Detroit." });
     const result = searchSandboxNetwork(state.sandboxActors, session.id, "Former military veterans near Detroit who do security");
     state = recordSandboxNetworkSearch(state, { sessionId: session.id, presenceId: session.presenceId, result });
-    const introduction = state.networkIntroductions[0]!;
-    expect(introduction.status).toBe("awaiting-consent");
-
-    state = approveSandboxIntroduction(state, introduction.id);
-    expect(state.networkIntroductions[0]?.status).toBe("succeeded");
-    expect(state.networkIntroductions[0]?.executionId).toBeDefined();
-    expect(state.outcomes[0]?.status).toBe("succeeded");
-    expect(state.mirrorObjects[0]?.externalRef.type).toBe("x.message");
-    expect(state.mirrorObjects[0]?.parentExternalRef).toEqual({ type: "sandbox.actor", id: state.sandboxActors[0]?.id });
+    expect(state.networkSearches[0]?.status).toBe("matches");
+    expect(state.networkIntroductions).toHaveLength(0);
+    expect(state.people).toHaveLength(0);
+    expect(state.relationships).toHaveLength(0);
   });
 
-  it("exposes approval through the state API without bypassing the execution envelope", async () => {
+  it("returns provider-neutral candidates without creating durable records", () => {
     let state = createAgent({ name: "Jenny", description: "Connect thoughtful builders.", mode: "agent", handle: "@jenny_ai", accent: "#D68754" });
-    state = applyOperation(state, { type: "setPresence", patch: { execution: { message: "auto" } } });
     state = startPlaygroundSession(state);
     const session = state.playgroundSessions[0]!;
     state = addSandboxEvent(state, { sessionId: session.id, actionId: "post", actorName: "Avery Cole", profile: actors[0]!.profile, content: "Security engineering in Detroit." });
-    state = recordSandboxNetworkSearch(state, { sessionId: session.id, presenceId: session.presenceId, result: searchSandboxNetwork(state.sandboxActors, session.id, "Detroit security engineer") });
-    writeState(state);
-    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "approveSandboxIntroduction", id: state.networkIntroductions[0]!.id }), headers: { "content-type": "application/json" } }));
-    const next = await response.json();
-    expect(response.status).toBe(200);
-    expect(next.networkIntroductions[0].status).toBe("succeeded");
-    expect(next.executions[0].connector).toBe("simulated");
+    const result = searchNetwork(state, state.presence!, { query: "Detroit security engineer", scope: "presence", sessionId: session.id });
+    expect(result.candidates[0]).toMatchObject({ displayName: "Avery Cole", relationshipStatus: "observed", candidateSource: "sandbox-directory" });
+    expect(result.candidates[0]?.personId).toBeUndefined();
+    expect(state.people).toHaveLength(0);
+  });
+
+  it("requires both parties to consent before an introduction is complete", () => {
+    let state = createAgent({ name: "Jenny", description: "Connect thoughtful builders.", mode: "agent", handle: "@jenny_ai", accent: "#D68754" });
+    const presenceId = state.presence!.id;
+    state = applyOperation(state, { type: "createIntroductionRecord", presenceId, requesterActorId: "requester", candidateActorId: "candidate" });
+    const record = state.introductionRecords[0]!;
+    expect(record.state).toBe("offered");
+    state = applyOperation(state, { type: "respondIntroductionConsent", id: record.id, party: "requester", consent: true });
+    expect(state.introductionRecords[0]?.state).toBe("candidate_contact_pending");
+    expect(state.introductionRecords[0]?.candidateConsent).toBe("unknown");
+    state = applyOperation(state, { type: "respondIntroductionConsent", id: record.id, party: "candidate", consent: true });
+    expect(state.introductionRecords[0]?.state).toBe("introduced");
+  });
+
+  it("curates only meaningful replied-to evidence, preserves provenance, and honors forget", () => {
+    let state = createAgent({ name: "Jenny", description: "Connect thoughtful builders.", mode: "agent", handle: "@jenny_ai", accent: "#D68754" });
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { reply: "auto" } } });
+    state = startPlaygroundSession(state);
+    const session = state.playgroundSessions[0]!;
+    state = addSandboxEvent(state, { sessionId: session.id, actionId: "post", actorName: "Avery Cole", actorHandle: "@averysec", profile: actors[0]!.profile, content: "I work in security engineering in Detroit and help teams recover from incidents." });
+    const inbound = state.mirrorObjects[0]!;
+    state = formSandboxIntent(state, { sessionId: session.id, affordance: "reply", target: inbound.externalRef, text: "That incident-response experience sounds useful for the teams building calmer operational systems." });
+    const execution = state.executions[0]!;
+    state = deliverSandboxExecution(state, execution.id);
+    expect(state.people[0]?.displayName).toBe("Avery Cole");
+    expect(state.relationships[0]?.lastMeaningfulInteractionAt).toBeDefined();
+    expect(state.relationshipFacts[0]).toMatchObject({ epistemicKind: "stated_by_person", provenanceRefs: [{ kind: "mirror_object", id: inbound.id }] });
+    const relationshipId = state.relationships[0]!.id;
+    state = applyOperation(state, { type: "forgetRelationship", relationshipId });
+    expect(state.people[0]?.memoryState).toBe("forgotten");
+    const forgotten = state.relationshipFacts.length;
+    state = deliverSandboxExecution(state, execution.id);
+    expect(state.relationshipFacts).toHaveLength(forgotten);
+  });
+
+  it("keeps Presence-only corrections out of recipient-shareable context", () => {
+    let state = createAgent({ name: "Jenny", description: "Connect thoughtful builders.", mode: "agent", handle: "@jenny_ai", accent: "#D68754" });
+    state = applyOperation(state, { type: "rememberPerson", presenceId: state.presence!.id, externalActorId: "maya-1", displayName: "Maya Chen" });
+    const relationshipId = state.relationships[0]!.id;
+    state = applyOperation(state, { type: "correctRelationshipFact", relationshipId, statement: "Maya prefers product research conversations." });
+    expect(relationshipProjection(state, state.people[0]!.id, state.presence!.id)?.facts).toHaveLength(1);
+    expect(relationshipProjection(state, state.people[0]!.id, state.presence!.id, true)?.facts).toHaveLength(0);
   });
 });
