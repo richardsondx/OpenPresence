@@ -45,11 +45,11 @@ import {
   Users,
   X,
 } from "lucide-react";
-import { AGENT_TOOL_DEFINITIONS, CHANNEL_CAPABILITIES, simulationForChannel } from "@/lib/types";
+import { AGENT_CAPABILITY_DEFINITIONS, CHANNEL_CAPABILITIES, isAgentCapabilityEnabled, simulationForChannel } from "@/lib/types";
 import { bridgeAdapterPrompt, bridgeAdapterStatus, bridgeAdapterStatusLabel, bridgeApiExamples, bridgeEnvironmentExample } from "@/lib/bridge-contract";
 import { latestPerception } from "@/lib/perception";
 import { validateScenarioFidelity } from "@/lib/scenarios";
-import { deriveActivitySummary, derivePublicHistory, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities } from "@/lib/runtime";
+import { deriveActivitySummary, derivePublicHistory, emptyGhostRepresentation, formatGhostRepresentation, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities } from "@/lib/runtime";
 import type {
   CalendarSlot,
   Assignment,
@@ -62,6 +62,7 @@ import type {
   ExecutionMode,
   FileKind,
   GhostProfile,
+  GhostRepresentation,
   OpenPresenceState,
   PublicHistoryItem,
   PublicDisclosurePosture,
@@ -319,7 +320,7 @@ function SectionEyebrow({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
-type Mutate = (operation: unknown) => Promise<OpenPresenceState | null>;
+type Mutate = (operation: unknown, requestContext?: OpenPresenceState) => Promise<OpenPresenceState | null>;
 type BridgeManage = (
   operation: unknown,
 ) => Promise<{ state: OpenPresenceState; key?: string } | null>;
@@ -496,22 +497,29 @@ export default function Home() {
   useEffect(() => {
     if (state?.onboarded) window.scrollTo({ top: 0, left: 0 });
   }, [state?.onboarded]);
-  async function mutate(operation: unknown) {
+  async function mutate(operation: unknown, requestContext?: OpenPresenceState) {
     setError(null);
     const operationType = typeof operation === "object" && operation !== null && "type" in operation && typeof operation.type === "string" ? operation.type : null;
-    const tracksAttention = operationType === "wakePresence" || operationType === "runPulse";
+    const tracksAttention = ["wakePresence", "runPulse", "startAssignment", "workAssignment"].includes(operationType ?? "");
     if (tracksAttention) setPendingOperation(operationType);
+    const context = requestContext ?? state;
     try {
       const response = await fetch("/api/state", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(state?.activeAgentId ? { "x-openpresence-agent-id": state.activeAgentId } : {}),
-          ...(state?.activePresenceId ? { "x-openpresence-presence-id": state.activePresenceId } : {}),
+          ...(context?.activeAgentId ? { "x-openpresence-agent-id": context.activeAgentId } : {}),
+          ...(context?.activePresenceId ? { "x-openpresence-presence-id": context.activePresenceId } : {}),
+          ...(context?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(context.workspaceRevision) } : {}),
         },
         body: JSON.stringify(operation),
       });
-      const payload = await readJsonResponse<OpenPresenceState & { error?: string }>(response);
+      const payload = await readJsonResponse<OpenPresenceState & { error?: string; conflict?: boolean; state?: OpenPresenceState }>(response);
+      if (!response.ok && response.status === 409 && payload.state) {
+        setState(payload.state);
+        syncBrowserWorkspaceContext(payload.state);
+        throw new Error("This tab was refreshed because the Agent workspace changed elsewhere. Please retry the action.");
+      }
       if (!response.ok)
         throw new Error(payload.error ?? "That change could not be saved.");
       setState(payload);
@@ -538,6 +546,7 @@ export default function Home() {
     setView(nextView);
     const presence = state?.presence;
     if (nextView !== "playground" || !state?.onboarded || !presence || playgroundStartInFlight.current === presence.id) return;
+    if (pendingOperation === "startAssignment" || pendingOperation === "workAssignment") return;
     const activeSession = state.playgroundSessions.find((item) => item.presenceId === presence.id && item.status === "active");
     if (activeSession) {
       if (activeSession.virtualTimeMode !== "manual" && Math.abs(Date.now() - new Date(activeSession.virtualNow).getTime()) >= 60_000 && playgroundClockSyncInFlight.current !== activeSession.id) {
@@ -554,6 +563,7 @@ export default function Home() {
   useEffect(() => {
     const presence = state?.presence;
     if (view !== "playground" || !state?.onboarded || !presence || playgroundStartInFlight.current === presence.id) return;
+    if (pendingOperation === "startAssignment" || pendingOperation === "workAssignment") return;
     const activeSession = state.playgroundSessions.find((item) => item.presenceId === presence.id && item.status === "active");
     if (activeSession) {
       if (activeSession.virtualTimeMode !== "manual" && Math.abs(Date.now() - new Date(activeSession.virtualNow).getTime()) >= 60_000 && playgroundClockSyncInFlight.current !== activeSession.id) {
@@ -570,7 +580,7 @@ export default function Home() {
       });
     }, 0);
     return () => window.clearTimeout(timer);
-  }, [view, state?.onboarded, state?.activePresenceId, state?.playgroundSessions, state?.presence]);
+  }, [view, state?.onboarded, state?.activePresenceId, state?.playgroundSessions, state?.presence, pendingOperation]);
   useEffect(() => {
     if (pendingOperation === "wakePresence" || pendingOperation === "runPulse") return;
     const presence = state?.presence;
@@ -589,7 +599,7 @@ export default function Home() {
       if (nativeSyncInFlight.current === presence.id) return;
       nativeSyncInFlight.current = presence.id;
       try {
-        const response = await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ type: "syncNativeX", presenceId: presence.id }) });
+        const response = await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json", ...(state?.activeAgentId ? { "x-openpresence-agent-id": state.activeAgentId } : {}), ...(state?.activePresenceId ? { "x-openpresence-presence-id": state.activePresenceId } : {}), ...(state?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(state.workspaceRevision) } : {}) }, body: JSON.stringify({ type: "syncNativeX", presenceId: presence.id }) });
         const payload = await readJsonResponse<OpenPresenceState & { error?: string }>(response);
         if (!response.ok) throw new Error(payload.error ?? "The X observer could not run.");
         setState(payload);
@@ -649,10 +659,17 @@ export default function Home() {
           "Content-Type": "application/json",
           ...(state?.activeAgentId ? { "x-openpresence-agent-id": state.activeAgentId } : {}),
           ...(state?.activePresenceId ? { "x-openpresence-presence-id": state.activePresenceId } : {}),
+          ...(state?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(state.workspaceRevision) } : {}),
         },
         body: JSON.stringify(operation),
       });
       const payload = await readJsonResponse<{ state?: OpenPresenceState; key?: string; error?: string }>(response);
+      if (!response.ok)
+        if (response.status === 409 && payload.state) {
+          setState(payload.state);
+          syncBrowserWorkspaceContext(payload.state);
+          throw new Error("This tab was refreshed because the Agent workspace changed elsewhere. Please retry the Bridge action.");
+        }
       if (!response.ok)
         throw new Error(
           payload.error ?? "That Bridge change could not be saved.",
@@ -675,10 +692,16 @@ export default function Home() {
           "Content-Type": "application/json",
           ...(state?.activeAgentId ? { "x-openpresence-agent-id": state.activeAgentId } : {}),
           ...(state?.activePresenceId ? { "x-openpresence-presence-id": state.activePresenceId } : {}),
+          ...(state?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(state.workspaceRevision) } : {}),
         },
         body: JSON.stringify(operation),
       });
       const payload = await readJsonResponse<{ state?: OpenPresenceState; result?: { account: { id: string; username: string; name: string }; access: "read" | "read-write" }; error?: string }>(response);
+      if (!response.ok && response.status === 409 && payload.state) {
+        setState(payload.state);
+        syncBrowserWorkspaceContext(payload.state);
+        throw new Error("This tab was refreshed because the Agent workspace changed elsewhere. Please retry the X action.");
+      }
       if (!response.ok) throw new Error(payload.error ?? "The X connection could not be completed.");
       if (payload.state) {
         setState(payload.state);
@@ -1404,6 +1427,7 @@ function AgentWorkspaceShell({
               mutate={mutate}
               selectedFile={selectedFile}
               setSelectedFile={setSelectedFile}
+              setView={setView}
             />
           )}
           {view === "presence" && (
@@ -1649,6 +1673,7 @@ function LegacyAppShell({
               mutate={mutate}
               selectedFile={selectedFile}
               setSelectedFile={setSelectedFile}
+              setView={setView}
             />
           )}
           {view === "presence" && (
@@ -2141,8 +2166,8 @@ function ContextSidebar({
             <strong>{state.skills.length}</strong>
           </div>
           <div>
-          <span>Tools bound</span>
-          <strong>{state.toolBindings.length}</strong>
+          <span>Capabilities enabled</span>
+          <strong>{AGENT_CAPABILITY_DEFINITIONS.filter((definition) => definition.scope === "agent" && isAgentCapabilityEnabled(state.toolBindings, state.agent?.id, definition.id)).length}</strong>
           </div>
         </div>
       </section>
@@ -2254,12 +2279,12 @@ function SocialObjectCard({
           {itemAssets.map((asset) =>
             asset?.type === "image" || asset?.type === "gif" ? (
               <span className="social-card-asset" key={asset.id}>
-                <img src={asset.dataUrl ?? asset.provenance.sourceUrl ?? ""} alt={asset.description ?? "Attached simulated media"} />
+                <img src={asset.storage ? `/api/assets/${asset.id}` : asset.dataUrl ?? asset.provenance.sourceUrl ?? ""} alt={asset.description ?? "Attached simulated media"} />
                 {asset.provenance.sourcePageUrl && <a href={asset.provenance.sourcePageUrl} target="_blank" rel="noreferrer">Source: {asset.provenance.publisher ?? asset.description ?? "Open source"}</a>}
               </span>
             ) : asset?.type === "chart" ? (
               <span className="social-card-asset" key={asset.id}>
-                <img src={asset.dataUrl ?? asset.provenance.sourceUrl ?? ""} alt={asset.description ?? "Attached chart"} />
+                <img src={asset.storage ? `/api/assets/${asset.id}` : asset.dataUrl ?? asset.provenance.sourceUrl ?? ""} alt={asset.description ?? "Attached chart"} />
                 {asset.provenance.sourcePageUrl && <a href={asset.provenance.sourcePageUrl} target="_blank" rel="noreferrer">Source: {asset.provenance.publisher ?? asset.description ?? "Open source"}</a>}
               </span>
             ) : (
@@ -2788,6 +2813,20 @@ function ScenarioLibrary({ state, mutate, presence, creating, onCreatingChange }
   );
 }
 
+function AssignmentResearchReview({ research, assets }: { research: OpenPresenceState["assetResearchSessions"][number]; assets: OpenPresenceState["assets"] }) {
+  if (!research.candidates.length) return null;
+  const decisionFor = (candidateId: string) => research.decisionHistory.find((decision) => decision.candidateId === candidateId);
+  return <section className="assignment-research-review" aria-label="Assignment research trail"><div className="assignment-research-heading"><div><div className="eyebrow">Research trail</div><strong>{research.candidates.length} candidate{research.candidates.length === 1 ? "" : "s"} inspected</strong></div><small>{research.searchHistory.length} bounded search{research.searchHistory.length === 1 ? "" : "es"}</small></div><div className="assignment-candidate-list">{research.candidates.map((item, index) => {
+    const candidate = item.candidate;
+    const asset = item.assetId ? assets.find((stored) => stored.id === item.assetId) : undefined;
+    const decision = decisionFor(item.id);
+    const reason = item.rejectionReasons?.join(" ") ?? decision?.rationale ?? "Inspected, but not selected for the final publication.";
+    const label = candidate.title ?? candidate.name ?? `Candidate ${index + 1}`;
+    const sourceLabel = candidate.publisher ?? (() => { try { return candidate.sourcePageUrl ? new URL(candidate.sourcePageUrl).hostname.replace(/^www\./, "") : "Unknown source"; } catch { return "Unknown source"; } })();
+    return <details className="assignment-candidate" key={item.id}><summary><span className={`assignment-candidate-mark ${item.perception ? "inspected" : "failed"}`} aria-hidden="true">{item.perception ? "✓" : "!"}</span><span className="assignment-candidate-copy"><strong>{label}</strong><small>{sourceLabel}</small></span><span className="assignment-candidate-status">{item.perception ? "Inspected" : "Fetch failed"}</span></summary><div className="assignment-candidate-detail">{asset?.storage && <img src={`/api/assets/${asset.id}`} alt={asset.description ?? label} /> }<div><p><strong>Why it was rejected</strong>{reason}</p>{item.perception && <p><strong>What the Agent saw</strong>{item.perception.observation}</p>}{candidate.sourcePageUrl && <a href={candidate.sourcePageUrl} target="_blank" rel="noreferrer">Open source page ↗</a>}</div></div></details>;
+  })}</div></section>;
+}
+
 function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: Mutate }) {
   const presence = state.presence ?? state.presences[0];
   const session = state.playgroundSessions.find((item) => item.presenceId === presence?.id && item.status === "active");
@@ -2817,7 +2856,20 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
   const rehearsalAttempts = sessionId ? state.originalPostRehearsals.filter((item) => item.sessionId === sessionId).slice(0, 5) : [];
   const sessionAssignments = state.assignments.filter((item) => (sessionId && item.sessionId === sessionId) || (item.status === "draft" && item.presenceId === presence?.id));
   const assignmentDraft = assignmentDraftId ? sessionAssignments.find((item) => item.id === assignmentDraftId) : undefined;
-  const activeAssignment = sessionAssignments.find((item) => ["active", "working", "blocked"].includes(item.status));
+  const latestAssignment = [...sessionAssignments]
+    .filter((item) => item.status !== "cancelled")
+    .sort((left, right) => new Date(right.updatedAt ?? right.createdAt).getTime() - new Date(left.updatedAt ?? left.createdAt).getTime())[0];
+  const displayedAssignment = assignmentDraft ?? latestAssignment;
+  const assignmentIsWorking = Boolean(displayedAssignment && (busy || displayedAssignment.status === "working" || displayedAssignment.work?.phase === "researching"));
+  const assignmentVerified = displayedAssignment?.progress.verified ?? 0;
+  const assignmentRequired = Math.max(1, displayedAssignment?.progress.required ?? 1);
+  const assignmentProgress = Math.min(100, (assignmentVerified / assignmentRequired) * 100);
+  const assignmentPhase = displayedAssignment?.status === "completed"
+    ? "Completed"
+    : displayedAssignment?.status === "blocked"
+      ? "Blocked"
+      : displayedAssignment?.work?.phase?.replaceAll("_", " ") ?? "Working";
+  const assignmentResearch = displayedAssignment ? state.assetResearchSessions.find((item) => item.assignmentId === displayedAssignment.id) : undefined;
   const originalLabel = presence.channel === "x"
     ? "Consider an original post"
     : presence.channel === "substack"
@@ -2834,11 +2886,11 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
     setBusy(true);
     try {
       let next = state;
-      if (start) next = await mutate({ type: "startAssignment", id: assignmentId, sessionId }) ?? next;
+      if (start) next = await mutate({ type: "startAssignment", id: assignmentId, sessionId }, next) ?? next;
       while (true) {
         const assignment = next.assignments.find((item) => item.id === assignmentId);
         if (!assignment || !["active", "working"].includes(assignment.status)) break;
-        const worked = await mutate({ type: "workAssignment", id: assignmentId, sessionId });
+        const worked = await mutate({ type: "workAssignment", id: assignmentId, sessionId }, next);
         if (!worked) break;
         next = worked;
       }
@@ -2919,7 +2971,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
           {!assignmentDraft ? <><label>Assignment instruction<textarea aria-label="Assignment instruction" value={assignmentInstruction} onChange={(event) => setAssignmentInstruction(event.target.value)} placeholder="Produce 3 original X posts about offers, pricing, sales, or execution. Choose your own angles and do not repeat yourself." rows={4} /></label><div className="original-rehearsal-actions"><small>The original instruction stays attached to the Assignment.</small><Button variant="primary" disabled={busy || !assignmentInstruction.trim()} onClick={() => void reviewAssignment()}><Check size={14} /> Review assignment</Button></div></> : <div className="assignment-review" aria-label="Assignment review"><div><span>Deliverable</span><strong>{assignmentDraft.progress.required} original {channelLabel(assignmentDraft.channelId, state.channelDefinitions)} publications</strong></div><div><span>Completion</span><strong>{assignmentDraft.progress.required} verified publications</strong></div><div><span>Agent decides how</span><strong>Topics · thesis · evidence · format · wording · timing strategy</strong></div><p>{assignmentDraft.instruction}</p><div className="original-rehearsal-actions"><Button variant="ghost" onClick={() => setAssignmentDraftId(null)}>Adjust</Button><Button variant="primary" disabled={busy} onClick={() => void runAssignment(assignmentDraft.id, true)}><Play size={14} /> Start rehearsal</Button></div></div>}
         </>}
       </section>}
-      {(activeAssignment || assignmentDraft) && <section className="assignment-progress-panel" aria-label="Assignment progress"><div><div className="eyebrow">Posting Assignment</div><h2>{(activeAssignment ?? assignmentDraft)?.instruction}</h2></div><div className="assignment-progress-bar"><span style={{ width: `${Math.min(100, (((activeAssignment ?? assignmentDraft)?.progress.verified ?? 0) / Math.max(1, (activeAssignment ?? assignmentDraft)?.progress.required ?? 1)) * 100)}%` }} /></div><div className="assignment-progress-meta"><strong>{(activeAssignment ?? assignmentDraft)?.progress.verified} / {(activeAssignment ?? assignmentDraft)?.progress.required} delivered</strong><span>{(activeAssignment ?? assignmentDraft)?.status === "completed" ? "Completed" : (activeAssignment ?? assignmentDraft)?.status === "blocked" ? "Blocked" : `${(activeAssignment ?? assignmentDraft)?.rejectedCandidates} candidate rejections`}</span></div>{(activeAssignment ?? assignmentDraft)?.status === "blocked" && <p className="assignment-warning">{(activeAssignment ?? assignmentDraft)?.lastOutcome?.message}</p>}{["active", "blocked"].includes((activeAssignment ?? assignmentDraft)?.status ?? "") && <Button variant="secondary" disabled={busy} onClick={() => void runAssignment((activeAssignment ?? assignmentDraft)!.id, (activeAssignment ?? assignmentDraft)?.status === "blocked")}><Play size={14} /> {(activeAssignment ?? assignmentDraft)?.status === "blocked" ? "Retry Assignment" : "Continue working"}</Button>}</section>}
+      {displayedAssignment && <section className="assignment-progress-panel" aria-label="Assignment progress"><div className="assignment-progress-heading"><div><div className="eyebrow">Posting Assignment</div><h2>{displayedAssignment.instruction}</h2></div></div>{assignmentIsWorking && <aside className="assignment-live-card" role="status" aria-live="polite" aria-label={`Assignment ${assignmentPhase}. ${assignmentVerified} of ${assignmentRequired} published. ${displayedAssignment.rejectedCandidates} candidates rejected.`}><span className="assignment-progress-ring" style={{ background: `conic-gradient(#6f927d ${assignmentProgress}%, #e7eee8 0)` }}><span><strong>{assignmentVerified}/{assignmentRequired}</strong><small>published</small></span></span><span className="assignment-live-copy"><strong>{assignmentPhase}</strong><small>{displayedAssignment.rejectedCandidates} rejected · attempt {displayedAssignment.work?.attempts ?? 0}/{displayedAssignment.work?.maxAttempts ?? 4}</small></span></aside>}<div className="assignment-progress-bar"><span style={{ width: `${assignmentProgress}%` }} /></div><div className="assignment-progress-meta"><strong>{assignmentVerified} / {displayedAssignment.progress.required} published</strong><span>{assignmentPhase}{assignmentIsWorking ? " · live" : displayedAssignment.status === "blocked" ? "" : ` · ${displayedAssignment.rejectedCandidates} rejected`}</span></div>{assignmentResearch && <AssignmentResearchReview research={assignmentResearch} assets={state.assets} />}{displayedAssignment.status === "blocked" && <div className="assignment-outcome" role="status" aria-live="polite"><div className="assignment-outcome-heading"><span className="assignment-outcome-label">Blocked</span><strong>No publication was counted</strong></div><p className="assignment-warning">{displayedAssignment.lastOutcome?.message ?? "The Assignment could not produce a verified publication."}</p><small>Nothing was published because the available evidence did not meet the visual brief. Retry to begin a fresh bounded effort, or revise the Assignment if the evidence requirement is too strict.</small></div>}{["active", "blocked"].includes(displayedAssignment.status) && <Button variant="secondary" disabled={busy} onClick={() => void runAssignment(displayedAssignment.id, displayedAssignment.status === "blocked")}><Play size={14} /> {busy ? "Working…" : displayedAssignment.status === "blocked" ? "Retry Assignment" : "Continue working"}</Button>}</section>}
       <div className="playground-grid">
           <aside className="playground-rail">
             <section className="playground-panel"><div className="eyebrow">Starting world</div><strong>{simulation.startingStateLabel}</strong><p>Nothing here is live. Simulated history stays in this session.</p><p className="playground-handle-hint">Agent handle: <strong>{presence.handle}</strong>. Use @mentions in Chat when addressing {presence.name}.</p><div className="session-status"><span className="status-dot" /> {presence.status === "paused" ? "Paused" : "Awake"}</div></section>
@@ -4534,13 +4586,15 @@ function PublicHistoryView({
           <Button variant="secondary" onClick={() => setView("schedule")}><Clock3 size={15} /> Schedule</Button>
         </div>
       </div>
-      <div className="public-history-view-toggle" role="group" aria-label="Public history view">
-        <button type="button" className={surface === "timeline" ? "active" : ""} aria-pressed={surface === "timeline"} onClick={() => { setSurface("timeline"); setSelected(null); }}>Timeline</button>
-        <button type="button" className={surface === "calendar" ? "active" : ""} aria-pressed={surface === "calendar"} onClick={() => { setSurface("calendar"); setSelected(null); }}>Calendar</button>
-      </div>
-      <div className={`mirror-health mirror-health-${mirrorHealth.tone}`} aria-label={`Social Mirror status: ${mirrorHealth.label}`}>
-        <span className="mirror-health-dot" aria-hidden="true" />
-        <span><strong>{mirrorHealth.label}</strong><small>{mirrorHealth.detail}</small></span>
+      <div className="public-history-view-controls">
+        <div className="public-history-view-toggle" role="group" aria-label="Public history view">
+          <button type="button" className={surface === "timeline" ? "active" : ""} aria-pressed={surface === "timeline"} onClick={() => { setSurface("timeline"); setSelected(null); }}>Timeline</button>
+          <button type="button" className={surface === "calendar" ? "active" : ""} aria-pressed={surface === "calendar"} onClick={() => { setSurface("calendar"); setSelected(null); }}>Calendar</button>
+        </div>
+        <div className={`mirror-health mirror-health-${mirrorHealth.tone}`} aria-label={`Social Mirror status: ${mirrorHealth.label}`}>
+          <span className="mirror-health-dot" aria-hidden="true" />
+          <span><strong>{mirrorHealth.label}</strong><small>{mirrorHealth.detail}</small></span>
+        </div>
       </div>
       <div className="metric-row public-history-metrics" aria-label="Public history summary">
         <div className="metric"><span>Publications</span><strong>{counts.publications}</strong><small>Verified posts and threads</small></div>
@@ -4622,7 +4676,7 @@ function FeedItem({ item, state, presenceName, onSelect }: { item: PublicHistory
     <span className="feed-item-header"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span className="feed-item-identity"><strong>{presence?.name ?? presenceName}</strong><small>{presence?.handle ?? ""} · {kindLabel}</small></span><time dateTime={displayAt} title={historyTimeTitle(item)}>{formatTime(displayAt)}</time></span>
     {item.kind === "reply" || item.kind === "comment" ? <span className="feed-item-context">Replying in a public conversation</span> : null}
     <span className="feed-item-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "Public expression without returned text.")}</span>
-    {assets.length > 0 && <span className="feed-item-assets">{assets.map((asset) => { const source = asset?.dataUrl ?? asset?.provenance.sourceUrl; return source && (asset.type === "image" || asset.type === "gif" || asset.type === "chart") ? <span className="feed-item-asset" key={asset.id}><img src={source} alt={asset.description ?? `Published ${asset.type}`} />{asset.provenance.sourcePageUrl && <span className="feed-item-source">Source: {asset.provenance.publisher ?? asset.description ?? "Open source"}</span>}</span> : source && asset.type === "video" ? <video key={asset.id} controls src={source} aria-label="Published video" /> : <span className="social-link-asset" key={asset?.id}>{asset?.type === "link" ? asset.provenance.sourceUrl : `${asset?.type ?? "Asset"} published`}</span>; })}</span>}
+    {assets.length > 0 && <span className="feed-item-assets">{assets.map((asset) => { const source = asset?.storage ? `/api/assets/${asset.id}` : asset?.dataUrl ?? asset?.provenance.sourceUrl; return source && (asset.type === "image" || asset.type === "gif" || asset.type === "chart") ? <span className="feed-item-asset" key={asset.id}><img src={source} alt={asset.description ?? `Published ${asset.type}`} />{asset.provenance.sourcePageUrl && <span className="feed-item-source">Source: {asset.provenance.publisher ?? asset.description ?? "Open source"}</span>}</span> : source && asset.type === "video" ? <video key={asset.id} controls src={source} aria-label="Published video" /> : <span className="social-link-asset" key={asset?.id}>{asset?.type === "link" ? asset.provenance.sourceUrl : `${asset?.type ?? "Asset"} published`}</span>; })}</span>}
     <span className="feed-item-footer"><span>View details <ChevronRight size={13} /></span></span>
   </button>;
 }
@@ -4677,7 +4731,7 @@ function PublicHistoryInspector({ item, state, index, total, onNavigate, onClose
   const kindLabel = item.kind === "post" ? "Post" : item.kind[0].toUpperCase() + item.kind.slice(1);
   const position = Math.max(0, index) + 1;
   const displayAt = historyDisplayAt(item);
-  return <aside className="history-inspector" aria-label={`${kindLabel} details`}><div className="history-inspector-header"><div><SectionEyebrow>{kindLabel} details</SectionEyebrow><h2>{kindLabel}</h2><small title={historyTimeTitle(item)}>{formatTime(displayAt)}{item.environment === "sandbox" ? " · Sandbox observed" : ""}</small></div><button type="button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button></div><div className="history-inspector-navigation" aria-label="Browse public posts"><span aria-live="polite"><strong>Post {position}</strong> of {total}</span><div><button type="button" aria-label="Previous post" disabled={index <= 0} onClick={() => onNavigate(-1)}><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /></button><button type="button" aria-label="Next post" disabled={index < 0 || index >= total - 1} onClick={() => onNavigate(1)}><ChevronRight size={14} /></button></div></div><div className="history-inspector-identity"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span><strong>{presence?.name ?? "Presence"}</strong><small>{presence?.handle ?? ""}</small></span></div>{parent?.content?.text && <div className="history-parent-context"><SectionEyebrow>Replying to</SectionEyebrow><p>{parent.content.text}</p><small>{parent.author?.displayName ?? "Public conversation"}</small></div>}<p className="history-inspector-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "No text was returned by the channel.")}</p>{itemAssets.length > 0 && <section className="history-provenance"><SectionEyebrow>Attached sources</SectionEyebrow>{itemAssets.map((asset) => <div key={asset.id}><a className="history-external-link" href={asset.provenance.sourcePageUrl ?? asset.provenance.sourceUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {asset.provenance.publisher ?? asset.description ?? "Open source"}</a></div>)}</section>}<div className="history-proof"><Check size={14} /><span>Observed in Social Mirror · {item.externalRef.type} · {item.externalRef.id}</span></div><section className="history-provenance"><SectionEyebrow>Provenance</SectionEyebrow><p>{item.executionId ? "Published by OpenPresence and verified in the Social Mirror." : "Observed on the connected channel and attributed to this Presence."}</p>{assignment && <p>Assignment output · {assignment.progress.verified} / {assignment.progress.required} verified publications</p>}{mirrorObject?.environment === "sandbox" && <small>Simulated social reality · this expression has no live destination. Sandbox world time: {formatTime(item.occurredAt)}.</small>}</section><section className="history-outcome"><SectionEyebrow>Outcome</SectionEyebrow>{metrics.length ? <div className="history-outcome-grid">{metrics.map(([key, value]) => <div key={key}><strong>{value}</strong><small>{key.replaceAll("_", " ")}</small></div>)}</div> : <p>No channel outcome evidence is attached to this expression yet.</p>}</section><div className="history-inspector-actions">{item.externalUrl ? <a className="history-external-link" href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> Open on X</a> : item.environment === "sandbox" && item.channel === "x" ? <p className="history-sandbox-note">Sandbox rehearsal only. This expression has no live X URL.</p> : null}<Button variant="secondary" onClick={onActivity}><Activity size={14} /> View in Activity</Button></div></aside>;
+  return <aside className="history-inspector" aria-label={`${kindLabel} details`}><div className="history-inspector-header"><div><SectionEyebrow>{kindLabel} details</SectionEyebrow><h2>{kindLabel}</h2><small title={historyTimeTitle(item)}>{formatTime(displayAt)}{item.environment === "sandbox" ? " · Sandbox observed" : ""}</small></div><button type="button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button></div><div className="history-inspector-navigation" aria-label="Browse public posts"><span aria-live="polite"><strong>Post {position}</strong> of {total}</span><div><button type="button" aria-label="Previous post" disabled={index <= 0} onClick={() => onNavigate(-1)}><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /></button><button type="button" aria-label="Next post" disabled={index < 0 || index >= total - 1} onClick={() => onNavigate(1)}><ChevronRight size={14} /></button></div></div><div className="history-inspector-identity"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span><strong>{presence?.name ?? "Presence"}</strong><small>{presence?.handle ?? ""}</small></span></div>{parent?.content?.text && <div className="history-parent-context"><SectionEyebrow>Replying to</SectionEyebrow><p>{parent.content.text}</p><small>{parent.author?.displayName ?? "Public conversation"}</small></div>}<p className="history-inspector-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "No text was returned by the channel.")}</p>{itemAssets.length > 0 && <section className="history-provenance"><SectionEyebrow>Attached sources</SectionEyebrow>{itemAssets.map((asset) => <div key={asset.id}><a className="history-external-link" href={asset.provenance.sourcePageUrl ?? asset.provenance.sourceUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {asset.provenance.publisher ?? asset.description ?? "Open source"}</a><small>Origin: {asset.provenance.origin}. Source identity: {asset.provenance.sourceIdentityStatus ?? "unknown"}. Rights: {asset.rights?.status ?? "unknown"}.</small></div>)}</section>}<div className="history-proof"><Check size={14} /><span>Observed in Social Mirror · {item.externalRef.type} · {item.externalRef.id}</span></div><section className="history-provenance"><SectionEyebrow>Provenance</SectionEyebrow><p>{item.executionId ? "Published by OpenPresence and verified in the Social Mirror." : "Observed on the connected channel and attributed to this Presence."}</p>{assignment && <p>Assignment output · {assignment.progress.verified} / {assignment.progress.required} verified publications</p>}{mirrorObject?.environment === "sandbox" && <small>Simulated social reality · this expression has no live destination. Sandbox world time: {formatTime(item.occurredAt)}.</small>}</section><section className="history-outcome"><SectionEyebrow>Outcome</SectionEyebrow>{metrics.length ? <div className="history-outcome-grid">{metrics.map(([key, value]) => <div key={key}><strong>{value}</strong><small>{key.replaceAll("_", " ")}</small></div>)}</div> : <p>No channel outcome evidence is attached to this expression yet.</p>}</section><div className="history-inspector-actions">{item.externalUrl ? <a className="history-external-link" href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> Open on X</a> : item.environment === "sandbox" && item.channel === "x" ? <p className="history-sandbox-note">Sandbox rehearsal only. This expression has no live X URL.</p> : null}<Button variant="secondary" onClick={onActivity}><Activity size={14} /> View in Activity</Button></div></aside>;
 }
 
 function ScheduleView({
@@ -4936,16 +4990,16 @@ function ScheduleView({
           <p className="assignment-inspector-instruction">{selectedAssignment.instruction}</p>
           <div className="assignment-inspector-meta">
             <div><span>Window</span><strong>{selectedAssignment.schedule ? `${selectedAssignment.schedule.day} at ${selectedAssignment.schedule.time}` : "Unscheduled"}</strong><small>{selectedAssignment.schedule?.executionWindow ?? "Ready to start when you choose."}</small></div>
-            <div><span>Progress</span><strong>{selectedAssignment.progress.verified} / {selectedAssignment.progress.required} verified</strong><small>{selectedAssignment.status === "draft" ? "Not started" : selectedAssignment.status.replaceAll("_", " ")}</small></div>
+            <div><span>Progress</span><strong>{selectedAssignment.progress.verified} / {selectedAssignment.progress.required} published</strong><small>{selectedAssignment.status === "draft" ? "Not started" : `${selectedAssignment.status.replaceAll("_", " ")} · ${selectedAssignment.rejectedCandidates} rejected`}</small></div>
           </div>
-          <p className="assignment-inspector-note">The outcome is delegated; {presenceName} still chooses the approach and may remain quiet when the social context does not warrant a post.</p>
+          <p className="assignment-inspector-note">The outcome is delegated; {presenceName} still chooses the approach and may reject weak candidates. A rejection keeps the Assignment working. Only a verified deliverable, a bounded blocked result, or operator cancellation ends it.</p>
           <div className="assignment-inspector-actions">
             {selectedAssignment.status !== "completed" && <Button variant="secondary" onClick={() => void runAssignmentInPlayground(selectedAssignment)}>{selectedAssignment.status === "blocked" ? "Retry in Playground" : "Run in Playground"}</Button>}
             {selectedAssignment.status !== "completed" && <Button variant="danger" onClick={() => void cancelAssignment(selectedAssignment)}>Cancel Assignment</Button>}
           </div>
         </aside>
       )}
-      {visibleAssignments.length > 0 && viewMode === "list" && <section className="schedule-assignment-list" aria-label="Assignments"><div className="section-heading"><div><SectionEyebrow>Delegated responsibility</SectionEyebrow><h2>Assignments</h2><p className="muted">Assignments delegate an outcome to work toward. Open one to review its window and progress, run a Sandbox rehearsal, or cancel it. A completed Assignment is verified work, not a promise to publish.</p></div></div>{visibleAssignments.map((assignment) => { const timing = assignment.schedule ? `${assignment.schedule.day} at ${assignment.schedule.time} · ${assignment.schedule.executionWindow === `${assignment.schedule.time}–${assignment.schedule.time}` ? "exact time" : assignment.schedule.executionWindow}` : "Unscheduled · ready to start"; const status = assignment.status === "draft" ? "not started" : assignment.status.replaceAll("_", " "); return <article className="schedule-assignment-row" key={assignment.id}><div><strong>{assignment.instruction}</strong><small>{timing} · {assignment.progress.verified} / {assignment.progress.required} verified · {status}</small></div><div className="schedule-assignment-actions"><Button variant="secondary" onClick={() => openAssignment(assignment)}>Open details</Button></div></article>; })}</section>}
+      {visibleAssignments.length > 0 && viewMode === "list" && <section className="schedule-assignment-list" aria-label="Assignments"><div className="section-heading"><div><SectionEyebrow>Delegated responsibility</SectionEyebrow><h2>Assignments</h2><p className="muted">Assignments delegate an outcome to work toward. Open one to review its window and progress, run a Sandbox rehearsal, or cancel it. A rejected candidate is part of the work history, not a completed Assignment.</p></div></div>{visibleAssignments.map((assignment) => { const timing = assignment.schedule ? `${assignment.schedule.day} at ${assignment.schedule.time} · ${assignment.schedule.executionWindow === `${assignment.schedule.time}–${assignment.schedule.time}` ? "exact time" : assignment.schedule.executionWindow}` : "Unscheduled · ready to start"; const status = assignment.status === "draft" ? "not started" : assignment.status.replaceAll("_", " "); return <article className="schedule-assignment-row" key={assignment.id}><div><strong>{assignment.instruction}</strong><small>{timing} · {assignment.progress.verified} / {assignment.progress.required} published · {status} · {assignment.rejectedCandidates} rejected</small></div><div className="schedule-assignment-actions"><Button variant="secondary" onClick={() => openAssignment(assignment)}>Open details</Button></div></article>; })}</section>}
       {viewMode === "week" ? (
         <WeekCalendar slots={visibleSlots} assignments={visibleAssignments} state={state} presenceName={presenceName} onEdit={beginEdit} onAssignment={openAssignment} onAdd={() => setShowForm(true)} />
       ) : (
@@ -5079,11 +5133,13 @@ function BrainView({
   mutate,
   selectedFile,
   setSelectedFile,
+  setView,
 }: {
   state: OpenPresenceState;
   mutate: Mutate;
   selectedFile: FileKind;
   setSelectedFile: (file: FileKind) => void;
+  setView: (view: View) => void;
 }) {
   const file =
     state.files.find((item) => item.kind === selectedFile) ?? state.files[0];
@@ -5101,17 +5157,36 @@ function BrainView({
   const [connectionProvider, setConnectionProvider] = useState<"openai" | "openrouter" | "ollama" | null>(null);
   const [connectionEndpoint, setConnectionEndpoint] = useState("http://localhost:11434");
   const [connectionSecret, setConnectionSecret] = useState("");
+  const [assetConnectionOpen, setAssetConnectionOpen] = useState(false);
+  const [assetConnectionSecret, setAssetConnectionSecret] = useState("");
   const [ollamaModels, setOllamaModels] = useState<OllamaModelOption[]>([]);
   const [ollamaModelsError, setOllamaModelsError] = useState<string | null>(null);
   const ollamaConnection = state.providerConnections.find((item) => item.provider === "ollama" && item.status !== "needs-configuration");
+  const tavilyConnection = state.assetProviderConnections.find((item) => item.provider === "tavily");
   const ollamaConnectionId = ollamaConnection?.id;
   const ollamaEndpoint = ollamaConnection?.endpoint;
   const modelProvider = model?.provider;
   const enabledSkills = state.skills.filter((skill) => state.agentSkills.some((binding) => binding.skillId === skill.id && binding.enabled));
-  const boundTools = state.toolBindings.map((binding) => ({
-    binding,
-    definition: AGENT_TOOL_DEFINITIONS.find((tool) => tool.id === binding.toolId),
-  }));
+  const agentCapabilities = AGENT_CAPABILITY_DEFINITIONS.filter((definition) => definition.scope === "agent");
+  const enabledCapabilities = agentCapabilities.filter((definition) => isAgentCapabilityEnabled(state.toolBindings, agent.id, definition.id));
+  const inspectBinding = state.toolBindings.find((binding) => binding.agentId === agent.id && binding.toolId === "asset.inspect");
+  const inspectProvider = inspectBinding?.provider ?? model?.provider;
+  const inspectConnection = state.providerConnections.find((connection) => connection.id === inspectBinding?.connectionId)
+    ?? state.providerConnections.find((connection) => connection.provider === inspectProvider);
+  const visionReady = Boolean(inspectConnection && (inspectConnection.status === "local" || inspectConnection.secretConfigured || inspectConnection.status === "available"));
+  const tavilyReady = Boolean(tavilyConnection?.secretConfigured && tavilyConnection.status === "available");
+  const missingSkillCapabilities = (skill: OpenPresenceState["skills"][number]) => skill.requiresTools
+    .filter((toolId) => !state.toolBindings.some((binding) => binding.agentId === agent.id && binding.toolId === toolId && binding.enabled !== false))
+    .map((toolId) => AGENT_CAPABILITY_DEFINITIONS.find((definition) => definition.toolIds.includes(toolId))?.name ?? toolId);
+  const capabilityReadiness = (id: string) => {
+    if (id === "research") return { label: "Sandbox source retrieval", status: "Ready" };
+    if (id === "asset-intelligence") return tavilyReady && visionReady
+      ? { label: "Tavily discovery · configured perception", status: "Ready" }
+      : tavilyReady || visionReady
+        ? { label: tavilyReady ? "Tavily discovery · perception needs setup" : "Discovery needs Tavily · perception configured", status: "Partially ready" }
+        : { label: "Discovery and perception providers", status: "Needs provider" };
+    return { label: "Local chart rendering", status: "Ready" };
+  };
   useEffect(() => {
     if (modelProvider !== "ollama" || !ollamaConnectionId) return;
     let cancelled = false;
@@ -5136,6 +5211,7 @@ function BrainView({
   const beginSkillEdit = (skill: OpenPresenceState["skills"][number]) => { setEditingSkillId(skill.id); setSkillName(skill.name ?? skill.id); setSkillDescription(skill.description); setShowSkillForm(true); };
   const saveSkill = async (event: React.FormEvent) => { event.preventDefault(); const next = await mutate(editingSkillId ? { type: "editSkill", id: editingSkillId, name: skillName, description: skillDescription } : { type: "createSkill", name: skillName, description: skillDescription }); if (next) resetSkillForm(); };
   const saveConnection = async (event: React.FormEvent) => { event.preventDefault(); const next = await mutate({ type: "configureProvider", provider: connectionProvider!, label: providerLabel(connectionProvider!), endpoint: connectionProvider === "ollama" ? connectionEndpoint : undefined, hasSecret: Boolean(connectionSecret), secret: connectionSecret || undefined }); if (next) { setConnectionProvider(null); setConnectionSecret(""); } };
+  const saveAssetConnection = async (event: React.FormEvent) => { event.preventDefault(); if (!assetConnectionSecret.trim()) return; const next = await mutate({ type: "configureAssetProvider", provider: "tavily", label: "Tavily", hasSecret: true, secret: assetConnectionSecret.trim() }); if (next) { setAssetConnectionOpen(false); setAssetConnectionSecret(""); } };
   if (!file)
     return (
       <div className="page">
@@ -5179,7 +5255,7 @@ function BrainView({
       <section className="brain-page-section brain-overview">
         <div><SectionEyebrow>Model runtime</SectionEyebrow><strong>{model?.provider === "ollama" ? ollamaModelLabel(ollamaModels.find((item) => item.name === model.model || item.name.startsWith(`${model.model}:`))?.name ?? model.model) : runtimeModels.find((item) => item.model === model?.model && item.quality === model?.quality)?.name ?? model?.model ?? "Not selected"}</strong><small>{model?.provider ?? "Choose a provider"} · {model?.quality ?? "runtime"}</small></div>
         <div><SectionEyebrow>Skills</SectionEyebrow><strong>{state.skills.length} installed</strong><small>{enabledSkills.length} enabled for {agent.name}</small></div>
-        <div><SectionEyebrow>Tools</SectionEyebrow><strong>{boundTools.length} bound</strong><small>Agent-wide mechanical capabilities</small></div>
+        <div><SectionEyebrow>Capabilities</SectionEyebrow><strong>{enabledCapabilities.length} enabled</strong><small>Agent-wide choices</small></div>
         <div><SectionEyebrow>Connections</SectionEyebrow><strong>{state.providerConnections.filter((item) => item.status !== "needs-configuration").length ? "Ready" : "Needs setup"}</strong><small>Set up provider access below.</small></div>
       </section>
       <section className="brain-page-section runtime-panel settings-card">
@@ -5273,7 +5349,7 @@ function BrainView({
         })()}
       </section>
       <section className="brain-page-section brain-config-grid">
-        <div className="settings-card brain-action-card">
+        <div className="settings-card brain-action-card" id="provider-access">
           <div className="section-heading compact">
             <div><SectionEyebrow>Skills</SectionEyebrow><h2>Installed skills</h2></div>
             <Button variant="secondary" onClick={() => showSkillForm ? resetSkillForm() : setShowSkillForm(true)}>
@@ -5296,41 +5372,86 @@ function BrainView({
           <div className="config-list">
             {state.skills.map((skill) => (
               <div className="config-list-row" key={skill.id}>
-                <div><strong>{skill.name ?? skill.id}</strong><small>{skill.description}</small></div>
+                <div><strong>{skill.name ?? skill.id}</strong><small>{skill.description}</small>{missingSkillCapabilities(skill).length > 0 && <small className="skill-dependency-warning">Unavailable until {missingSkillCapabilities(skill).join(" and ")} is enabled.</small>}</div>
                 <div className="config-row-actions">
-                  <span className="status-tag">{state.agentSkills.some((binding) => binding.skillId === skill.id && binding.enabled) ? "Enabled" : "Installed"}</span>
+                  <span className="status-tag">{missingSkillCapabilities(skill).length > 0 ? "Unavailable" : state.agentSkills.some((binding) => binding.skillId === skill.id && binding.enabled) ? "Enabled" : "Installed"}</span>
                   <Button variant="ghost" onClick={() => beginSkillEdit(skill)}>Edit</Button>
                 </div>
               </div>
             ))}
           </div>
         </div>
-        <div className="settings-card brain-action-card"><div className="section-heading compact"><div><SectionEyebrow>Connections</SectionEyebrow><h2>Provider access</h2></div><PlugZap size={17} /></div><p className="muted">Connect a provider here; Chat will use the Agent runtime you choose above.</p><div className="config-list">{providerAccessProviders.map((provider) => { const connection = state.providerConnections.find((item) => item.provider === provider); const name = providerLabel(provider); return <div className="config-list-row" key={provider}><div><strong>{name}</strong><small>{connection?.status === "local" ? connection.endpoint ?? "Local endpoint" : connection?.secretConfigured ? "Credential ready" : connection?.status === "available" ? "Connected" : "Needs setup"}</small></div><Button variant={connection && connection.status !== "needs-configuration" ? "ghost" : "secondary"} onClick={() => { setConnectionProvider(provider as "openai" | "openrouter" | "ollama"); setConnectionSecret(""); if (provider === "ollama") setConnectionEndpoint(connection?.endpoint ?? "http://localhost:11434"); }}>{connection && connection.status !== "needs-configuration" ? "Edit" : "Set up"}</Button></div>; })}</div>{connectionProvider && <form className="inline-config-form" onSubmit={saveConnection}><h3>Set up {providerLabel(connectionProvider)}</h3>{connectionProvider === "ollama" ? <label>Ollama endpoint<input aria-label="Ollama endpoint" value={connectionEndpoint} onChange={(event) => setConnectionEndpoint(event.target.value)} required /></label> : <label>API key<input aria-label="Provider API key" type="password" value={connectionSecret} onChange={(event) => setConnectionSecret(event.target.value)} placeholder={connectionProvider === "openrouter" ? "sk-or-…" : "sk-…"} autoComplete="off" /></label>}<div className="inline-form-actions"><Button type="button" variant="ghost" onClick={() => setConnectionProvider(null)}>Cancel</Button><Button type="submit" variant="primary"><Check size={14} /> Save connection</Button></div></form>}</div>
+        <div className="settings-card brain-action-card">
+          <div className="section-heading compact"><div><SectionEyebrow>Connections</SectionEyebrow><h2>Provider access</h2></div><PlugZap size={17} /></div>
+          <p className="muted">Connect a provider here; Chat and asset discovery use the credentials you configure for this Agent.</p>
+          <div className="config-list">
+            {providerAccessProviders.map((provider) => {
+              const connection = state.providerConnections.find((item) => item.provider === provider);
+              const name = providerLabel(provider);
+              return <div className="config-list-row" key={provider}><div><strong>{name}</strong><small>{connection?.status === "local" ? connection.endpoint ?? "Local endpoint" : connection?.secretConfigured ? "Credential ready" : connection?.status === "available" ? "Connected" : "Needs setup"}</small></div><Button variant={connection && connection.status !== "needs-configuration" ? "ghost" : "secondary"} onClick={() => { setConnectionProvider(provider as "openai" | "openrouter" | "ollama"); setConnectionSecret(""); if (provider === "ollama") setConnectionEndpoint(connection?.endpoint ?? "http://localhost:11434"); }}>{connection && connection.status !== "needs-configuration" ? "Edit" : "Set up"}</Button></div>;
+            })}
+          </div>
+          {connectionProvider && <form className="inline-config-form" onSubmit={saveConnection}><h3>Set up {providerLabel(connectionProvider)}</h3>{connectionProvider === "ollama" ? <label>Ollama endpoint<input aria-label="Ollama endpoint" value={connectionEndpoint} onChange={(event) => setConnectionEndpoint(event.target.value)} required /></label> : <label>API key<input aria-label="Provider API key" type="password" value={connectionSecret} onChange={(event) => setConnectionSecret(event.target.value)} placeholder={connectionProvider === "openrouter" ? "sk-or-…" : "sk-…"} autoComplete="off" /></label>}<div className="inline-form-actions"><Button type="button" variant="ghost" onClick={() => setConnectionProvider(null)}>Cancel</Button><Button type="submit" variant="primary"><Check size={14} /> Save connection</Button></div></form>}
+          <div className="config-list-row"><div><strong>Tavily asset discovery</strong><small>{tavilyConnection?.secretConfigured ? "Connected · key stored securely" : "Not connected · required for source-backed asset search"}</small></div><Button variant={tavilyConnection?.secretConfigured ? "ghost" : "secondary"} onClick={() => { setAssetConnectionOpen(true); setAssetConnectionSecret(""); }}>{tavilyConnection?.secretConfigured ? "Update key" : "Connect"}</Button></div>
+          {assetConnectionOpen && <form className="inline-config-form" onSubmit={saveAssetConnection}><h3>Connect Tavily asset discovery</h3><p className="form-hint">Paste your Tavily API key here. It is encrypted in local provider storage and is never returned to the browser or included in Agent state.</p><label>Tavily API key<input aria-label="Tavily API key" type="password" value={assetConnectionSecret} onChange={(event) => setAssetConnectionSecret(event.target.value)} placeholder="tvly-…" autoComplete="off" required /></label><div className="inline-form-actions"><Button type="button" variant="ghost" onClick={() => { setAssetConnectionOpen(false); setAssetConnectionSecret(""); }}>Cancel</Button><Button type="submit" variant="primary"><Check size={14} /> Save Tavily key</Button></div></form>}
+        </div>
       </section>
-      <section className="brain-page-section settings-card tools-card" aria-label="Agent tools">
+      <section className="brain-page-section settings-card tools-card" aria-label="Agent capabilities">
         <div className="section-heading compact">
           <div>
             <SectionEyebrow>Agent capabilities</SectionEyebrow>
-            <h2>Tools bound to {agent.name}</h2>
+            <h2>What {agent.name} can use</h2>
           </div>
-          <span className="quiet-label">{boundTools.length} bound</span>
+          <span className="quiet-label">{enabledCapabilities.length} enabled</span>
         </div>
         <p className="muted tools-intro">
-          These are Agent-level tool bindings, not channel permissions. A binding makes a capability eligible for a supported invocation; it does not run a tool or define Jenny&apos;s identity by itself.
+          Capabilities are available when useful. Enabling one does not force the Agent to use it. Providers supply a capability, while each Presence still controls authority to act in the world.
         </p>
-        <div className="tool-list">
-          {boundTools.length ? boundTools.map(({ binding, definition }) => (
-            <div className="tool-row" key={binding.id}>
-              <div>
-                <strong>{definition?.name ?? binding.toolId}</strong>
-                <small>{definition?.description ?? "A runtime capability bound to this Agent."}</small>
+        <div className="capability-list">
+          {agentCapabilities.map((capability) => {
+            const enabled = isAgentCapabilityEnabled(state.toolBindings, agent.id, capability.id);
+            const readiness = capabilityReadiness(capability.id);
+            return <div className={`capability-row ${enabled ? "enabled" : "disabled"}`} key={capability.id}>
+              <div className="capability-copy">
+                <strong>{capability.name}</strong>
+                <small>{capability.description}</small>
+                <span className="capability-provider">{readiness.label}</span>
               </div>
-              <span className="status-tag">{definition?.scope === "presence" ? "Presence connector" : "Agent-wide"} · Bound</span>
+              <div className="capability-actions">
+                <span className={`capability-status capability-status-${readiness.status.toLowerCase().replaceAll(" ", "-")}`}>
+                  {enabled ? `On · ${readiness.status}` : "Off · Registered"}
+                </span>
+                <label className="capability-toggle">
+                  <input
+                    type="checkbox"
+                    role="switch"
+                    aria-label={`Enable ${capability.name}`}
+                    checked={enabled}
+                    onChange={(event) => void mutate({ type: "setCapability", capabilityId: capability.id, enabled: event.target.checked })}
+                  />
+                  <span aria-hidden="true" />
+                </label>
+                <button type="button" className="capability-manage" onClick={() => {
+                  if (capability.id === "asset-intelligence") document.getElementById("provider-access")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                  else if (capability.id === "research") document.getElementById("provider-access")?.scrollIntoView({ behavior: "smooth", block: "center" });
+                }}>Manage <ChevronRight size={13} /></button>
+              </div>
+            </div>;
+          })}
+          <div className="capability-row capability-row-presence">
+            <div className="capability-copy">
+              <strong>Channel action</strong>
+              <small>Publish approved Social Intents through this Agent&apos;s Presences.</small>
+              <span className="capability-provider">Managed separately by each Presence&apos;s Execution Envelope</span>
             </div>
-          )) : <p className="context-empty">No tools are bound to this Agent yet.</p>}
+            <div className="capability-actions">
+              <span className="capability-status capability-status-managed">Managed by Presence</span>
+              <button type="button" className="capability-manage" onClick={() => setView("presence")}>Presence settings <ChevronRight size={13} /></button>
+            </div>
+          </div>
         </div>
         <p className="tool-boundary">
-          Presence settings still control whether channel actions are off, manual, review, or auto. A tool being bound does not authorize a publication by itself.
+          Registered tools remain internal implementation contracts. Disabling a capability withholds its callable tools from new Agent-initiated use; it does not erase Memory, Watching observations, existing assets, or source history.
         </p>
       </section>
       <section className="brain-page-section settings-card language-policy-card">
@@ -5501,6 +5622,7 @@ function PresenceView({
   const [channelAffordancesDraft, setChannelAffordancesDraft] = useState(() => channelDefinition?.affordances ?? capabilities);
   const [channelAssetsDraft, setChannelAssetsDraft] = useState<SocialAssetKind[]>(() => channelDefinition?.supportedAssetKinds ?? []);
   const [presenceNameDraft, setPresenceNameDraft] = useState(presence.name);
+  const [presenceHandleDraft, setPresenceHandleDraft] = useState(presence.handle);
   const [briefDraft, setBriefDraft] = useState<PresenceBrief>(presence.brief);
   const [briefTerritoryText, setBriefTerritoryText] = useState(() => ({
     primaryTerritory: presence.brief.primaryTerritory.join(", "),
@@ -5508,7 +5630,10 @@ function PresenceView({
     boundaries: presence.brief.boundaries.join(", "),
   }));
   const [editingBrief, setEditingBrief] = useState(false);
-  const [ghostDraft, setGhostDraft] = useState<GhostProfile>(presence.ghostProfile ?? { subject: "Me / my organization", priorities: "", preferences: "", voice: "", boundaries: "" });
+  const [ghostDraft, setGhostDraft] = useState<GhostProfile>(() => {
+    const profile = presence.ghostProfile ?? { subject: "Me / my organization", priorities: "", preferences: "", voice: "", boundaries: "" };
+    return { ...profile, representation: profile.representation ?? emptyGhostRepresentation() };
+  });
   const [publicSelfDraft, setPublicSelfDraft] = useState<PublicSelf>(presence.publicSelf ?? { displayName: presence.name, posture: presence.mode === "ghost" ? "representational" : "contextual", approvedTechnicalFacts: [] });
   const [presenceAvoidDraft, setPresenceAvoidDraft] = useState((presence.languagePolicy?.avoid ?? []).join("\n"));
   const [presenceProhibitedDraft, setPresenceProhibitedDraft] = useState((presence.languagePolicy?.prohibited ?? []).join("\n"));
@@ -5518,7 +5643,21 @@ function PresenceView({
   const publicPostures: { id: PublicDisclosurePosture; label: string; detail: string }[] = presence.mode === "ghost"
     ? [{ id: "representational", label: "Representational", detail: "Speak as the person or organization this Presence extends." }, { id: "open-about-assistance", label: "Open about assistance", detail: "Acknowledge AI assistance when it is relevant." }]
     : [{ id: "contextual", label: "Contextual", detail: "Answer socially and acknowledge AI only when it matters." }, { id: "ai-forward", label: "AI-forward", detail: "Be direct that this is an AI presence when relevant." }, { id: "private", label: "Private", detail: "Keep technical identity private in public conversation." }];
-  const savePublicSelf = () => void mutate({ type: "setPresence", patch: { publicSelf: { ...publicSelfDraft, displayName: presenceNameDraft.trim() || presence.name }, mediaPerceptionPolicy: mediaPolicyDraft } });
+  const ghostRepresentation: GhostRepresentation = ghostDraft.representation ?? emptyGhostRepresentation();
+  const ghostRepresentationReady = ghostRepresentation.kind === "individual"
+    ? Boolean(ghostRepresentation.individual.firstName.trim() && ghostRepresentation.individual.lastName.trim())
+    : Boolean(ghostRepresentation.organization.name.trim() && /^https?:\/\//i.test(ghostRepresentation.organization.website.trim()));
+  const ghostSubject = formatGhostRepresentation(ghostRepresentation) || ghostDraft.subject.trim();
+  const ghostProfileReady = ghostRepresentationReady && Boolean(ghostDraft.priorities.trim() && ghostDraft.preferences.trim() && ghostDraft.voice.trim() && ghostDraft.boundaries.trim());
+  const saveGhostProfile = () => void mutate({ type: "setPresence", patch: { ghostProfile: { ...ghostDraft, subject: ghostSubject, representation: ghostRepresentation, priorities: ghostDraft.priorities.trim(), preferences: ghostDraft.preferences.trim(), voice: ghostDraft.voice.trim(), boundaries: ghostDraft.boundaries.trim() } } });
+  const savePublicSelf = () => void mutate({
+    type: "setPresence",
+    patch: {
+      publicSelf: { ...publicSelfDraft, displayName: presenceNameDraft.trim() || presence.name },
+      mediaPerceptionPolicy: mediaPolicyDraft,
+      ...(presence.mode === "ghost" ? { ghostProfile: { ...ghostDraft, subject: ghostSubject, representation: ghostRepresentation } } : {}),
+    },
+  });
   const openChannelEditor = () => {
     setChannelNameDraft(channelDefinition?.name ?? channelLabel(presence.channel, state.channelDefinitions));
     setChannelDomainDraft(channelDefinition?.domain ?? "");
@@ -5716,6 +5855,24 @@ function PresenceView({
           >
             <Check size={14} /> Save name
           </Button>
+          <label>
+            Presence handle
+            <input
+              aria-label="Presence handle"
+              value={presenceHandleDraft}
+              onChange={(event) => setPresenceHandleDraft(event.target.value)}
+              maxLength={80}
+              placeholder="@genny"
+            />
+          </label>
+          <Button
+            type="button"
+            variant="secondary"
+            disabled={!presenceHandleDraft.trim() || presenceHandleDraft.trim() === presence.handle}
+            onClick={() => void mutate({ type: "setPresence", patch: { handle: presenceHandleDraft.trim() } })}
+          >
+            <Check size={14} /> Save handle
+          </Button>
         </div>
         <div className="identity-options">
           <button
@@ -5737,6 +5894,65 @@ function PresenceView({
             <small>Ghost · extends my identity</small>
           </button>
         </div>
+      </section>
+      <section className="settings-card public-self-card">
+        <div className="section-heading compact">
+          <div>
+            <SectionEyebrow>Public self · Presence-scoped</SectionEyebrow>
+            <h2>How this Presence describes itself</h2>
+          </div>
+          <ShieldCheck size={17} />
+        </div>
+        <p className="muted">The Agent is the private mind. This Public Self is who people meet here. Implementation details stay out of social judgment unless you approve a specific fact.</p>
+        {presence.mode === "ghost" && <div className="public-self-represented">
+          <div className="public-self-representation-toggle">
+            <span className="public-self-label">Represents</span>
+            <div className="public-self-representation-options" role="group" aria-label="Representation type">
+              <button type="button" className={ghostRepresentation.kind === "individual" ? "selected" : ""} aria-pressed={ghostRepresentation.kind === "individual"} onClick={() => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, kind: "individual" } })}>
+                <strong>Individual</strong><small>Use a person&apos;s name.</small>
+              </button>
+              <button type="button" className={ghostRepresentation.kind === "organization" ? "selected" : ""} aria-pressed={ghostRepresentation.kind === "organization"} onClick={() => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, kind: "organization" } })}>
+                <strong>Organization</strong><small>Use an organization name and website.</small>
+              </button>
+            </div>
+          </div>
+          {ghostRepresentation.kind === "individual" ? (
+            <div className="public-self-representation-fields individual-fields">
+              <label>First name<input aria-label="First name" value={ghostRepresentation.individual.firstName} onChange={(event) => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, individual: { ...ghostRepresentation.individual, firstName: event.target.value } } })} placeholder="First name" /></label>
+              <label>Middle name <small>(optional)</small><input aria-label="Middle name" value={ghostRepresentation.individual.middleName} onChange={(event) => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, individual: { ...ghostRepresentation.individual, middleName: event.target.value } } })} placeholder="Middle name" /></label>
+              <label>Last name<input aria-label="Last name" value={ghostRepresentation.individual.lastName} onChange={(event) => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, individual: { ...ghostRepresentation.individual, lastName: event.target.value } } })} placeholder="Last name" /></label>
+            </div>
+          ) : (
+            <div className="public-self-representation-fields organization-fields">
+              <label>Organization<input aria-label="Organization name" value={ghostRepresentation.organization.name} onChange={(event) => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, organization: { ...ghostRepresentation.organization, name: event.target.value } } })} placeholder="Organization name" /></label>
+              <label>Website<input aria-label="Organization website" type="url" value={ghostRepresentation.organization.website} onChange={(event) => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, organization: { ...ghostRepresentation.organization, website: event.target.value } } })} placeholder="https://example.com" /></label>
+            </div>
+          )}
+          {!ghostRepresentationReady && <p className="form-hint" role="status">{ghostRepresentation.kind === "individual" ? "Enter a first and last name before saving." : "Enter an organization name and a valid http(s) website before saving."}</p>}
+          <p className="form-hint">This is the public identity this Presence extends. The Agent can use these exact fields when someone asks who it represents.</p>
+        </div>}
+        <div className="public-self-postures">
+          <span className="public-self-label">Identity posture</span>
+          {publicPostures.map((option) => (
+            <button key={option.id} className={publicSelfDraft.posture === option.id ? "selected" : ""} onClick={() => setPublicSelfDraft({ ...publicSelfDraft, posture: option.id })}>
+              <strong>{option.label}</strong><small>{option.detail}</small>
+            </button>
+          ))}
+        </div>
+        <div className="public-facts">
+          <div><strong>Approved disclosure details</strong><p className="form-hint">Choose which details this Presence may share when relevant. These permissions never include credentials, private instructions, or hidden prompts.</p></div>
+          <div className="public-fact-grid">
+            {PUBLIC_TECHNICAL_FACTS.map((fact) => {
+              const checked = publicSelfDraft.approvedTechnicalFacts.includes(fact.id);
+              return <label key={fact.id}><input type="checkbox" checked={checked} onChange={() => setPublicSelfDraft({ ...publicSelfDraft, approvedTechnicalFacts: checked ? publicSelfDraft.approvedTechnicalFacts.filter((item) => item !== fact.id) : [...publicSelfDraft.approvedTechnicalFacts, fact.id] })} /><span><strong>{fact.label}</strong><small>{fact.detail}</small></span></label>;
+            })}
+          </div>
+        </div>
+        {publicSelfDraft.approvedTechnicalFacts.length === 0 && <div className="public-facts-default" role="note">
+          <strong>Default when none are selected</strong>
+          <p><b>Typical response:</b> answer naturally as this Presence without volunteering AI, platform, provider, model, or tool details. Direct questions still follow the Identity posture above.</p>
+        </div>}
+        <div className="inline-form-actions"><Button variant="primary" disabled={presence.mode === "ghost" && !ghostRepresentationReady} onClick={savePublicSelf}><Check size={14} /> Save Public Self</Button></div>
       </section>
       <section className="settings-card presence-brief-card">
         <div className="section-heading compact">
@@ -5767,38 +5983,6 @@ function PresenceView({
             <div className="inline-form-actions"><Button type="button" variant="ghost" onClick={() => { setBriefDraft(presence.brief); setBriefTerritoryText({ primaryTerritory: presence.brief.primaryTerritory.join(", "), adjacentTerritory: presence.brief.adjacentTerritory.join(", "), boundaries: presence.brief.boundaries.join(", ") }); setEditingBrief(false); }}>Cancel</Button><Button type="button" variant="primary" disabled={!briefDraft.purpose.trim() || !briefDraft.audience.trim()} onClick={() => { void mutate({ type: "setPresence", patch: { brief: { purpose: briefDraft.purpose.trim(), audience: briefDraft.audience.trim(), primaryTerritory: territoryValues(briefTerritoryText.primaryTerritory), adjacentTerritory: territoryValues(briefTerritoryText.adjacentTerritory), boundaries: territoryValues(briefTerritoryText.boundaries) } } }); setEditingBrief(false); }}><Check size={14} /> Save brief</Button></div>
           </div>
         )}
-      </section>
-      <section className="settings-card public-self-card">
-        <div className="section-heading compact">
-          <div>
-            <SectionEyebrow>Public self · Presence-scoped</SectionEyebrow>
-            <h2>How this Presence describes itself</h2>
-          </div>
-          <ShieldCheck size={17} />
-        </div>
-        <p className="muted">The Agent is the private mind. This Public Self is who people meet here. Implementation details stay out of social judgment unless you approve a specific fact.</p>
-        <div className="public-self-postures">
-          <span className="public-self-label">Identity posture</span>
-          {publicPostures.map((option) => (
-            <button key={option.id} className={publicSelfDraft.posture === option.id ? "selected" : ""} onClick={() => setPublicSelfDraft({ ...publicSelfDraft, posture: option.id })}>
-              <strong>{option.label}</strong><small>{option.detail}</small>
-            </button>
-          ))}
-        </div>
-        <div className="public-facts">
-          <div><strong>Approved disclosure details</strong><p className="form-hint">Choose which details this Presence may share when relevant. These permissions never include credentials, private instructions, or hidden prompts.</p></div>
-          <div className="public-fact-grid">
-            {PUBLIC_TECHNICAL_FACTS.map((fact) => {
-              const checked = publicSelfDraft.approvedTechnicalFacts.includes(fact.id);
-              return <label key={fact.id}><input type="checkbox" checked={checked} onChange={() => setPublicSelfDraft({ ...publicSelfDraft, approvedTechnicalFacts: checked ? publicSelfDraft.approvedTechnicalFacts.filter((item) => item !== fact.id) : [...publicSelfDraft.approvedTechnicalFacts, fact.id] })} /><span><strong>{fact.label}</strong><small>{fact.detail}</small></span></label>;
-            })}
-          </div>
-        </div>
-        {publicSelfDraft.approvedTechnicalFacts.length === 0 && <div className="public-facts-default" role="note">
-          <strong>Default when none are selected</strong>
-          <p><b>Typical response:</b> answer naturally as this Presence without volunteering AI, platform, provider, model, or tool details. Direct questions still follow the Identity posture above.</p>
-        </div>}
-        <div className="inline-form-actions"><Button variant="primary" onClick={savePublicSelf}><Check size={14} /> Save Public Self</Button></div>
       </section>
       <section className="settings-card language-policy-card presence-language-policy-card">
         <div className="section-heading compact">
@@ -5888,17 +6072,17 @@ function PresenceView({
             <Ghost size={17} />
           </div>
           <p className="muted">This is the context {agentName} uses to extend you here. It does not change {agentName}&apos;s Brain, Soul, Mission, Taste, Memory, or Growth.</p>
+          <p className="form-hint">The represented identity is set in Public Self above. This section adds the context the Ghost uses to extend it.</p>
           <div className="ghost-profile-form">
-            <label>Who or what is represented?<input aria-label="Ghost subject" value={ghostDraft.subject} onChange={(event) => setGhostDraft({ ...ghostDraft, subject: event.target.value })} placeholder="Me / my organization" /></label>
             <label>Priorities here<textarea aria-label="Ghost priorities" value={ghostDraft.priorities} onChange={(event) => setGhostDraft({ ...ghostDraft, priorities: event.target.value })} placeholder="What should this Presence help accomplish?" rows={3} /></label>
             <label>Preferences and points of view<textarea aria-label="Ghost preferences" value={ghostDraft.preferences} onChange={(event) => setGhostDraft({ ...ghostDraft, preferences: event.target.value })} placeholder="What do you care about, prefer, or believe?" rows={3} /></label>
             <label>Voice and tone<textarea aria-label="Ghost voice" value={ghostDraft.voice} onChange={(event) => setGhostDraft({ ...ghostDraft, voice: event.target.value })} placeholder="How should it sound when extending you?" rows={3} /></label>
             <label>Boundaries and things to avoid<textarea aria-label="Ghost boundaries" value={ghostDraft.boundaries} onChange={(event) => setGhostDraft({ ...ghostDraft, boundaries: event.target.value })} placeholder="What should it never assume, disclose, or do?" rows={3} /></label>
           </div>
           <div className="ghost-understanding" role="status">
-            <div className="section-heading compact"><div><SectionEyebrow>Review before acting</SectionEyebrow><h3>What {agentName} currently understands</h3></div><span className={`status-tag ${ghostDraft.priorities.trim() && ghostDraft.preferences.trim() && ghostDraft.voice.trim() && ghostDraft.boundaries.trim() ? "status-ready" : "status-incomplete"}`}>{ghostDraft.priorities.trim() && ghostDraft.preferences.trim() && ghostDraft.voice.trim() && ghostDraft.boundaries.trim() ? "Profile defined" : "Needs your input"}</span></div>
+            <div className="section-heading compact"><div><SectionEyebrow>Review before acting</SectionEyebrow><h3>What {agentName} currently understands</h3></div><span className={`status-tag ${ghostProfileReady ? "status-ready" : "status-incomplete"}`}>{ghostProfileReady ? "Profile defined" : "Needs your input"}</span></div>
             <dl>
-              <div><dt>Represents</dt><dd>{ghostDraft.subject.trim() || "Not defined yet"}</dd></div>
+              <div><dt>Represents</dt><dd>{ghostSubject || "Not defined yet"}</dd></div>
               <div><dt>Priorities</dt><dd>{ghostDraft.priorities.trim() || "Not defined yet"}</dd></div>
               <div><dt>Preferences</dt><dd>{ghostDraft.preferences.trim() || "Not defined yet"}</dd></div>
               <div><dt>Voice</dt><dd>{ghostDraft.voice.trim() || "Not defined yet"}</dd></div>
@@ -5906,7 +6090,7 @@ function PresenceView({
             </dl>
             <p className="form-hint">Empty fields are unknown. {agentName} must not infer them from their own identity or private context.</p>
           </div>
-          <div className="inline-form-actions"><Button variant="primary" disabled={!ghostDraft.subject.trim()} onClick={() => void mutate({ type: "setPresence", patch: { ghostProfile: { ...ghostDraft, subject: ghostDraft.subject.trim(), priorities: ghostDraft.priorities.trim(), preferences: ghostDraft.preferences.trim(), voice: ghostDraft.voice.trim(), boundaries: ghostDraft.boundaries.trim() } } })}><Check size={14} /> Save Ghost profile</Button></div>
+          <div className="inline-form-actions"><Button variant="primary" disabled={!ghostProfileReady} onClick={saveGhostProfile}><Check size={14} /> Save Ghost profile</Button></div>
         </section>
       )}
       <section className="settings-card presence-execution-card">

@@ -1,9 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { generateAgentReply, generateAgentSocialDecision, generatePresenceChatReply, parseAgentSocialDecision, parseAgentSocialEdit, parseAgentSocialJudgment } from "../lib/ai";
+import { generateAgentReply, generateAgentSocialDecision, generateAssetResearchPlannerDecision, generatePresenceChatReply, parseAgentSocialDecision, parseAgentSocialEdit, parseAgentSocialJudgment, parseAssetResearchPlannerDecision } from "../lib/ai";
 import { saveProviderSecret } from "../lib/db";
 import { applyOperation, createAgent } from "../lib/runtime";
 
 describe("Agent social decision parsing", () => {
+  it("keeps visual research decisions bounded to supplied candidates and outcomes", () => {
+    expect(parseAssetResearchPlannerDecision('{"decision":"select","candidateId":"good","rationale":"The inspected pixels match."}', ["good", "bad"])).toEqual({ decision: "select", candidateId: "good", rationale: "The inspected pixels match." });
+    expect(parseAssetResearchPlannerDecision('{"decision":"select","candidateId":"not-supplied"}', ["good"])).toMatchObject({ decision: "select" });
+    expect(parseAssetResearchPlannerDecision("not json", ["good"])).toMatchObject({ decision: "replan" });
+  });
+
+  it("uses actual perception rather than search metadata in the local research planner", async () => {
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
+    const state = createAgent({ name: "Ada", description: "Explain reliable AI agents.", mode: "agent", handle: "@ada", accent: "#D68754" });
+    const result = await generateAssetResearchPlannerDecision(state, { visualBrief: { role: "evidence", preferredForms: ["chart"] }, candidates: [{ id: "photo", title: "Chart result", perception: { visualForm: "photo", decorative: true } }, { id: "chart", title: "Report figure", perception: { visualForm: "chart", decorative: false, legibility: "clear" } }], attempt: 1 });
+    expect(result).toMatchObject({ decision: "select", candidateId: "chart" });
+  });
   it("accepts structured affordance decisions", () => {
     expect(parseAgentSocialDecision('{"action":"quote","text":"The denominator is the story.","rationale":"Adds a distinct point."}', ["post", "quote", "no_op"])).toEqual({ action: "quote", text: "The denominator is the story.", rationale: "Adds a distinct point." });
   });
@@ -108,6 +120,24 @@ describe("Agent social decision parsing", () => {
         { kind: "image", name: "diagram" },
         { kind: "chart", sourceUrl: "https://example.com/chart" },
       ],
+    });
+  });
+
+  it("keeps evidence need and visual role as general planning metadata", () => {
+    expect(parseAgentSocialDecision(JSON.stringify({
+      action: "post",
+      text: "Productivity accelerated while unit labor costs softened.",
+      storyCandidate: {
+        trigger: "A new productivity release",
+        whyNow: "The latest release changes the growth interpretation.",
+        claim: "Output improved faster than labor costs.",
+        evidenceNeed: { question: "Show the latest productivity and labor-cost change", mustShow: ["productivity", "labor costs"], preferredForms: ["chart"], freshness: "current" },
+        visualBrief: { role: "evidence", mustShow: ["productivity", "labor costs"], preferredForms: ["chart"], avoidForms: ["logo"] },
+      },
+    }), ["post", "no_op"])).toMatchObject({
+      storyCandidate: { trigger: "A new productivity release", evidenceNeed: { freshness: "current", preferredForms: ["chart"] }, visualBrief: { role: "evidence", avoidForms: ["logo"] } },
+      evidenceNeed: { question: "Show the latest productivity and labor-cost change" },
+      visualBrief: { role: "evidence" },
     });
   });
 

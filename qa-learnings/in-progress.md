@@ -1,5 +1,98 @@
 # Active QA Work
 
+## COMPLETE — Restore Presence handle editing
+
+- **Started:** 2026-08-15
+- **Scope:** Restore a Presence-scoped handle field in Presence Settings, allow it through the scoped state update contract, and keep handle changes independent from Agent identity.
+- **Human feedback:** The existing Presence showed `@skool_community`, but Settings exposed no way to edit it.
+- **Generalizable rule:** Every public Presence identity field that is already durable in the model must remain discoverable and editable at the Presence scope; changing it must not rewrite Agent identity or meaning files.
+- **Executable protection:** `tests/runtime.test.ts` verifies handle/context persistence and Agent rename isolation; `tests/e2e/openpresence.spec.ts` verifies desktop/mobile edit, reload persistence, and sidebar rendering.
+- **Verification:** TypeScript passed; targeted runtime test passed 1/1; Presence/Agent identity E2E passed 2/2 across Chromium desktop and Pixel 5; changed-source ESLint passed with existing warnings only; connected Chrome verification confirmed `@genny` in Settings and sidebar after reload, with no browser errors.
+- **Status:** Complete.
+
+## 2026-08-15 — Long-running Assignment visibility and revision ownership
+
+When Assignment work performs provider and model calls synchronously, the UI
+must persist a pre-work checkpoint and render a compact live status rather than
+leaving the operator to infer progress from a disabled button. Background
+Playground clock synchronization must not advance the same workspace revision
+while an Assignment is in `researching`; doing so can make the final worker
+write stale and strand the Assignment indefinitely. Verified the mobile panel
+with a visual progress ring and phase summary, then resumed the stranded
+Sandbox Assignment and observed a terminal blocked outcome instead of a false
+active state.
+
+## COMPLETE — Layer Agent capabilities above internal tool bindings
+
+- **Started:** 2026-08-15
+- **Scope:** Replace the user-facing flat “Tools bound” surface with coherent Agent capability families, separate enablement from provider readiness, and keep Channel action authority on each Presence.
+- **Product boundary:** `User → Agent → Presence` remains explicit. Disabling a capability withholds new Agent-initiated tool use without erasing Memory, Watching observations, existing assets, or source history; Presence Execution Envelopes remain the only social-world write authority.
+- **Executable protection:** `tests/runtime.test.ts` covers family toggling and the non-toggleable channel-action boundary; `tests/e2e/openpresence.spec.ts` covers persistence, disabled-state copy, and the absence of an Agent-level Channel action switch.
+- **Verification:** Full Vitest passes 222/222; typecheck and production build pass; changed-source ESLint reports zero errors; desktop and mobile Chromium coverage pass for the capability flow. Disabled Research persists across reload, dependent Skills become unavailable, Asset intelligence stops new media inspection, and Channel action remains Presence-managed.
+- **Status:** Complete.
+
+## COMPLETE — Assignment Fulfillment Loop
+
+- **Started:** 2026-08-15
+- **Scope:** Keep explicit Assignments working through candidate rejection, provide bounded temporary context and source/story research, and make blocked versus completed outcomes truthful in runtime and Playground.
+- **Generalizable rule:** A candidate-level social rejection is not an Assignment-level completion. Operator-owned objectives require bounded persistent pursuit; Taste remains free to veto each candidate.
+- **Project enforcement:** `app/api/state/route.ts` runs the bounded `runSandboxAssignment` controller, `Assignment.work` and `attemptHistory` persist phase/budget/reasons, `researchAssignmentStories` supplies current source leads when available, and Playground renders phase, budget, rejection count, and blocked state.
+- **Executable protection:** `tests/assignment-runtime.test.ts` covers rejected candidates followed by later success and transparent bounded exhaustion, alongside provider failure and source-backed visual publication coverage.
+- **Verification:** Focused Assignment tests pass 4/4; TypeScript passes. Full regression and browser verification are in progress.
+- **Status:** Complete for the bounded Sandbox Assignment path; live connector delivery remains outside this QA run.
+
+## COMPLETE — Visual Evidence Loop
+
+- **Started:** 2026-08-15
+- **Scope:** Replace search-metadata asset selection with an inspectable, source-linked, bounded visual editorial loop for Sandbox publication.
+- **Generalizable rule:** Search results are possibilities, not evidence. A source page, publisher name, filename, or OG image does not establish what the downloaded pixels show.
+- **Project enforcement:** `lib/asset-discovery.ts` emits source-page/figure candidates and marks thumbnails/hero leads; `lib/perception-runtime.ts` inspects actual downloaded media; `lib/ai.ts` owns bounded `select` / `search_again` / `render` / `text_only` / `replan` decisions and the final joint text+media review; `AssetResearchSession` preserves attempts, perceptions, lineage, and selection decisions.
+- **Executable protection:** Visual-fit tests reject uninspected evidence leads and decorative images; assignment tests stub only the perception boundary to prove inspected chart media can be selected and published. Follow-up coverage must include hidden cross-domain candidates, stale/wrong-metric charts, PDFs, and secondary visualizations with preserved lineage.
+- **Verification:** Full Vitest passes 214/214; TypeScript passes; production build passes in an isolated Next output directory; changed-source ESLint reports zero errors; focused Chromium provider-settings flow passes 1/1; `git diff --check` passes. No live connector activity occurred.
+- **Status:** Complete for the bounded Sandbox research/publication path. Live X delivery and provider-specific chart rendering remain explicitly outside this QA run.
+
+## COMPLETE — Provider-neutral evidence-led visual planning
+
+- **Started:** 2026-08-15
+- **Scope:** Execute the attached feedback without turning the Kobeissi diagnostic into a generic chart-posting rule.
+- **Generalizable changes:** Added `StoryCandidate`, `EvidenceNeed`, and `VisualBrief` metadata to social decisions; added contextual visual-fit checks; inferred semantic asset kinds without treating any kind as universally good or bad; added the provider-neutral `Evidence-led visual storytelling` Skill; and included enabled social Skills in model context.
+- **Explicit non-generalizations:** No Kobeissi name, preferred publisher, market topic, `BREAKING` opener, or chart-only rule was added to runtime. Source search is driven by the evidence need and visual brief. A logo can fit an identity brief, a photo can fit a scene brief, and text-only remains valid.
+- **Anti-overfit protection:** Cross-domain tests cover market-style evidence, product-style screenshots, event photography, branding/logo identity, and text-only counterfactuals. The same candidate is evaluated differently under different visual roles.
+- **Verification:** Full Vitest passes 204/204; TypeScript passes; focused visual-fit, AI-planning, asset, and assignment tests pass. No live connector activity occurred.
+- **Status:** Complete.
+
+## COMPLETE — Kobeissi asset-discovery rerun
+
+- **Started:** 2026-08-15
+- **Scope:** Re-run the KobeissiKlone Sandbox assignment through the interface after Tavily setup and compare the new source-backed asset path with the previous 10-publication pass.
+- **Initial blocker:** The OpenAI key was not lost from encrypted storage. The main runtime had a newly-created OpenAI connection without a matching credential row after connection/state drift; older encrypted rows remained under prior connection IDs. No sub-agent worktree or alternate runtime was found to have modified the main database. Re-saving the key created `connection_pt79tcwg`, which now reports `available` and `secretConfigured: true` in the UI and state metadata.
+- **Runtime fixes:** Exact-quantity assignments now get one bounded recovery pass when the model returns `no_op`; long-form X assignments retain `x.long-post` instead of being forced through the 280-character path; Tavily source search now enriches result pages with public preview images and falls back across official source families/topics while avoiding duplicate hashes. Evaluation failures still transition to `blocked` with an explicit model/runtime message.
+- **Evidence:** The corrected main-runtime assignment `assignment_pjmwqdft` completed 10 / 10 sequential Sandbox publications. Feed now shows 20 total publications: 10 prior baseline posts plus 10 new posts. All 10 new posts are 1,059–1,473 characters, 4–5 paragraphs, and have one attached asset. All 10 assets have distinct SHA-256 identities, local stored bytes, source evidence, distinct source pages, and asset-usage records tied to the assignment. The asset endpoint served all 10 with HTTP 200 and non-empty image bytes. Source pages include IMF, U.S. Treasury, World Bank, FRED, and BLS domains. No live X activity occurred.
+- **Comparison:** The prior baseline was 10 posts with 10 attached assets but did not have assignment-linked usage evidence in the current state. This rerun adds 10 new long-form publications, 10 distinct source-backed downloaded assets, 10 source-evidence records, and 10 assignment-linked usage records. Publisher/source identity and rights remain recorded as `unknown` for independent verification; the system does not claim legal clearance.
+- **Executable protection:** `tests/assignment-runtime.test.ts` asserts missing-model assignments block instead of looping and source-backed assignments materialize/use a Tavily asset; `tests/e2e/asset-provider.spec.ts` covers interface-managed Tavily credentials. No live connector activity occurred.
+- **Status:** Complete.
+
+## COMPLETE — Interface-managed asset discovery credentials
+
+- **Started:** 2026-08-14
+- **Scope:** Make Tavily configuration an operator-owned OpenPresence setting instead of an undocumented server-environment prerequisite.
+- **Product boundary:** External service credentials belong in the existing Manage Agent → Provider access flow. They are encrypted in provider credential storage, represented in state only by non-secret connection metadata, and never sent back to the browser or exposed to the Agent.
+- **Fix:** Added a dedicated `AssetProviderConnection` boundary for discovery services, a Manage Agent Tavily key form with connected/update status, encrypted save/delete handling, and discovery-route lookup through the configured connection. Tavily no longer defaults to `TAVILY_API_KEY` for product requests; an unconfigured request points the operator to the interface.
+- **Executable protection:** `tests/e2e/asset-provider.spec.ts` configures a test key through the UI, asserts the connected state, and verifies the raw key is absent from `/api/state`. Existing asset-intelligence tests continue to cover the provider adapter independently.
+- **Verification:** Full Vitest passes 195/195; the isolated Chromium provider-settings flow passes 1/1; TypeScript passes; production build passes; changed-source ESLint reports 0 errors (5 existing warnings in `app/page.tsx`).
+- **Status:** Complete.
+
+## COMPLETE — First coherent Asset Intelligence Runtime slice
+
+- **Started:** 2026-08-14
+- **Scope:** Execute the attached provider-neutral asset workflow: durable local asset identity and memory, source/provenance separation, expression intent, and truthful Sandbox publication state. Live external posting remains out of scope for autonomous QA.
+- **General principle:** A source URL is provenance, not proof; intentional fiction/satire is not a failed factual verification; and a publication is not complete until the stored asset, usage record, and observed delivery agree.
+- **Project enforcement:** `lib/types.ts` owns the structured ledger and publication intent; `lib/runtime.ts` must create stable asset metadata and usage records; Feed must render stored asset evidence rather than silently hotlinking remote URLs. Provider discovery is candidate generation only.
+- **Executable protection:** `tests/asset-intelligence.test.ts` covers immutable bytes, exact/visual identity metadata, provider normalization/Tavily adapter behavior, redirect security, fetched media persistence, usage history, and satire-vs-unsupported grounding. `tests/sandbox.test.ts` covers exact-duplicate blocking and explicit repurposing. Feed/inspector Chromium coverage remains green. Native connector media remains contract-tested without live mutation.
+- **Verification:** Full Vitest passes 194/194; focused Chromium Feed/inspector coverage passes 4/4; typecheck and production build pass; the development runtime returns HTTP 200. Tavily discovery is intentionally configuration-gated and now points operators to Manage Agent → Provider access when it has not been connected.
+- **Remaining phase:** Wire discovery/materialization into the model planner and add X media upload/reconciliation contract tests before any live connector approval. No external posting was performed.
+- **Status:** Complete for this coherent slice.
+
 ## COMPLETE — Validate KobeissiKlone multimodal posting workflow
 
 - **Started:** 2026-08-14
