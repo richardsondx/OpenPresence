@@ -63,7 +63,7 @@ export function isPublicHttpUrl(value: string) {
   } catch { return false; }
 }
 
-export async function fetchPublicAsset(url: string) {
+async function downloadPublicAsset(url: string) {
   if (!isPublicHttpUrl(url)) throw new Error("Only public HTTP(S) asset URLs may be fetched.");
   const controller = new AbortController();
   const timer = setTimeout(() => controller.abort(), 15_000);
@@ -85,6 +85,29 @@ export async function fetchPublicAsset(url: string) {
     if (contentLength > MAX_BYTES) throw new Error("Asset source exceeds the local media size limit.");
     const bytes = Buffer.from(await response.arrayBuffer());
     const mimeType = response.headers.get("content-type")?.split(";")[0]?.trim() || "application/octet-stream";
-    return putAssetBytes(bytes, { mimeType });
+    return { bytes, mimeType };
   } finally { clearTimeout(timer); }
+}
+
+export async function fetchPublicAsset(url: string) {
+  const downloaded = await downloadPublicAsset(url);
+  return putAssetBytes(downloaded.bytes, { mimeType: downloaded.mimeType });
+}
+
+/**
+ * Download only an inspection-sized representation. The original bytes are
+ * deliberately not persisted until a candidate has passed visual judgment.
+ */
+export async function fetchPublicAssetPreview(url: string) {
+  const downloaded = await downloadPublicAsset(url);
+  if (!downloaded.mimeType.startsWith("image/")) return putAssetBytes(downloaded.bytes, { mimeType: downloaded.mimeType });
+  try {
+    const preview = await sharp(downloaded.bytes)
+      .resize(1400, 1400, { fit: "inside", withoutEnlargement: true })
+      .jpeg({ quality: 82, progressive: true })
+      .toBuffer();
+    return putAssetBytes(preview, { mimeType: "image/jpeg" });
+  } catch {
+    return putAssetBytes(downloaded.bytes, { mimeType: downloaded.mimeType });
+  }
 }

@@ -1709,7 +1709,17 @@ OpenPresence should make the machinery beneath that intelligence good enough tha
 
 ---
 
-## 44. The sentences to remember
+## 44. People, memory, and the right to forget
+
+OpenPresence distinguishes the person an Agent observes from the person it chooses to remember. A Social Mirror can contain an Actor, a Watch can keep that Actor in attention, and a directory can return a candidate without creating a Person or Relationship. Durable Network Memory is selective, Presence-scoped, provenance-backed, and owned by the Agent.
+
+People memory should preserve a small, inspectable relationship history rather than build a hidden profile. Facts carry epistemic kind, visibility, chronology, and evidence. Operator corrections supersede interpretations without rewriting source Mirror history. Forget suppresses curated retrieval and creates a boundary after which only genuinely new interaction can establish new memory. Search retrieves candidates; it never implies contact, recommendation, or introduction.
+
+Recommendations belong to an existing delivered social act as inspectable metadata. They do not create a new execution permission. Introductions are consent state machines: both requester and candidate consent are required before an introduction is considered complete, and any message still passes through the existing Presence execution boundary.
+
+This is the social version of the platform's larger rule: cognition receives the smallest truthful context needed for judgment, after privacy filtering, while the operator can inspect where that context came from.
+
+## 45. The sentences to remember
 
 When everything else is forgotten, remember these:
 

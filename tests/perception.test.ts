@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { inspectSandboxObject } from "../lib/perception-runtime";
+import { compareDiscoveredAssets, inspectSandboxObject } from "../lib/perception-runtime";
+import type { Asset } from "../lib/types";
 import { saveProviderSecret } from "../lib/db";
 import { addSandboxEvent, applyOperation, createAgent, startPlaygroundSession } from "../lib/runtime";
 
@@ -80,6 +81,35 @@ describe("sandbox link perception", () => {
       const messages = body?.messages as Array<{ role: string; content: Array<{ type: string; image_url?: { url: string } }> }>;
       expect(messages[1]?.content[1]?.image_url?.url).toMatch(/^data:image\/png;base64,/);
       expect(inspected.perceptions[0]).toMatchObject({ providerId: "openai", modelId: "gpt-5.6-luna", level: "inspect" });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("compares a bounded preview batch in one multi-image request", async () => {
+    const calls: Array<Record<string, unknown>> = [];
+    vi.stubGlobal("fetch", vi.fn(async (_input: string | URL, init?: RequestInit) => {
+      calls.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ judgments: [
+        { id: "one", observation: "A line chart is visible.", interpretation: "It supports a trend claim.", uncertainty: "low", visualForm: "chart", visualRole: "evidence", legibility: "clear", decorative: false },
+        { id: "two", observation: "A generic office photo is visible.", interpretation: "It does not support a data claim.", uncertainty: "low", visualForm: "photo", visualRole: "context", legibility: "clear", decorative: true },
+      ], rankedAcceptableIds: ["one"], selectedCandidateId: "one", evidenceSummary: "The chart supports the trend claim." }) } }] }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    try {
+      let state = createAgent({ name: "Vision Agent", description: "Make evidence-led observations.", mode: "agent", handle: "@vision_agent", accent: "#D68754" });
+      state = applyOperation(state, { type: "configureProvider", provider: "openai", label: "OpenAI", hasSecret: true });
+      const connection = state.providerConnections.find((item) => item.provider === "openai");
+      saveProviderSecret(connection!.id, "test-openai-key");
+      state = applyOperation(state, { type: "setModel", provider: "openai", model: "gpt-5.6-luna", quality: "low", vision: true });
+      state = applyOperation(state, { type: "setToolBinding", toolId: "asset.inspect", provider: "openai", model: "gpt-5.6-luna", connectionId: connection!.id });
+      const pixel = "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=";
+      const makeAsset = (id: string): Asset => ({ id, agentId: state.agent!.id, type: "image", mediaKind: "image", status: "ready", dataUrl: pixel, provenance: { origin: "discovered", importedAt: new Date().toISOString() }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+      const result = await compareDiscoveredAssets(state, [{ id: "one", asset: makeAsset("asset-one"), sourcePageUrl: "https://example.com/one", publisher: "Example" }, { id: "two", asset: makeAsset("asset-two"), sourcePageUrl: "https://example.com/two", publisher: "Example" }], { evidenceNeed: "Show a trend", visualBrief: "evidence chart" });
+      expect(calls).toHaveLength(1);
+      const messages = calls[0]?.messages as Array<{ role: string; content: Array<{ type: string }> }>;
+      expect(messages[1]?.content.filter((part) => part.type === "image_url")).toHaveLength(2);
+      expect(result).toMatchObject({ selectedCandidateId: "one", rankedAcceptableIds: ["one"], evidenceSummary: "The chart supports the trend claim." });
+      expect(result.judgments.two.visualForm).toBe("photo");
     } finally {
       vi.unstubAllGlobals();
     }

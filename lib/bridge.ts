@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { applyOperation, blockExecutionForLanguage, languageValidationForExecution } from "./runtime";
+import { applyOperation, blockExecutionForLanguage, curateRelationshipFromMirror, languageValidationForExecution } from "./runtime";
 import { authenticateBridgeKey, deleteBridgeCredential, issueBridgeKey, readBridgeCredentialMetadata, readStateForBridge, revokeBridgeKey, writeState } from "./db";
 import type { Bridge, Execution, LiveEvent, MirrorObject, OpenPresenceState, Outcome } from "./types";
 import { bridgeAdapterStatus } from "./bridge-contract";
@@ -100,16 +100,26 @@ export function ingestEvents(bridge: Bridge, payload: z.infer<typeof eventsInput
   for (const item of payload.events) {
     if (state.mirrorEvents.some((event) => event.bridgeId === bridge.id && event.sourceEventId === item.sourceEventId)) continue;
     const object = upsertObject(state, current, item.object, item.sourceEventId, item.event === "deleted");
+    const curationTarget = object.actorPresenceId === bridge.presenceId && object.parentExternalRef
+      ? state.mirrorObjects.find((item) => item.externalRef.type === object.parentExternalRef?.type && item.externalRef.id === object.parentExternalRef?.id)
+      : object;
+    Object.assign(state, curateRelationshipFromMirror(state, curationTarget ?? object, bridge.presenceId));
     state.mirrorEvents.unshift({ id: localId("mirr_evt"), bridgeId: bridge.id, presenceId: bridge.presenceId, sourceEventId: item.sourceEventId, event: item.event, externalRef: item.object.externalRef, object, receivedAt: timestamp() });
   }
-  touchBridge(state, current); state.events.unshift(bridgeEvent(state, "Mirror updated", `${payload.events.length} external event${payload.events.length === 1 ? "" : "s"} received.`)); writeState(state); return state;
+  touchBridge(state, state.bridges.find((item) => item.id === bridge.id) ?? current); state.events.unshift(bridgeEvent(state, "Mirror updated", `${payload.events.length} external event${payload.events.length === 1 ? "" : "s"} received.`)); writeState(state); return state;
 }
 
 export function reconcileBridge(bridge: Bridge, payload: z.infer<typeof reconcileInput>) {
   const state = readStateForBridge(bridge.id); const current = state.bridges.find((item) => item.id === bridge.id); if (!current) throw new Error("Bridge not found");
-  for (const input of payload.objects) upsertObject(state, current, input, `reconcile:${payload.cursor ?? "latest"}:${input.externalRef.type}:${input.externalRef.id}`);
+  for (const input of payload.objects) {
+    const object = upsertObject(state, current, input, `reconcile:${payload.cursor ?? "latest"}:${input.externalRef.type}:${input.externalRef.id}`);
+    const curationTarget = object.actorPresenceId === bridge.presenceId && object.parentExternalRef
+      ? state.mirrorObjects.find((item) => item.externalRef.type === object.parentExternalRef?.type && item.externalRef.id === object.parentExternalRef?.id)
+      : object;
+    Object.assign(state, curateRelationshipFromMirror(state, curationTarget ?? object, bridge.presenceId));
+  }
   const sync = state.bridgeSync.find((item) => item.bridgeId === bridge.id); if (sync) sync.cursor = payload.cursor;
-  touchBridge(state, current, true); state.events.unshift(bridgeEvent(state, "Mirror reconciled", `${payload.objects.length} external object${payload.objects.length === 1 ? "" : "s"} reconciled.`)); writeState(state); return state;
+  touchBridge(state, state.bridges.find((item) => item.id === bridge.id) ?? current, true); state.events.unshift(bridgeEvent(state, "Mirror reconciled", `${payload.objects.length} external object${payload.objects.length === 1 ? "" : "s"} reconciled.`)); writeState(state); return state;
 }
 
 function expireIfNeeded(state: OpenPresenceState, execution: Execution) {

@@ -105,13 +105,14 @@ const navItems: { id: View; label: string; icon: typeof MessageCircle }[] = [
   { id: "live", label: "Activity", icon: Radio },
   { id: "chat", label: "Chat", icon: MessageSquare },
   { id: "watching", label: "Watching", icon: Eye },
+  { id: "people", label: "People", icon: Users },
   { id: "feed", label: "Feed", icon: Newspaper },
   { id: "schedule", label: "Schedule", icon: Clock3 },
   { id: "presence", label: "Settings", icon: Settings2 },
   { id: "teach", label: "Teach", icon: MessageCircle },
   { id: "playground", label: "Playground", icon: FlaskConical },
 ];
-const presenceNavItems = navItems.filter(({ id }) => id === "live" || id === "chat" || id === "watching" || id === "feed" || id === "schedule" || id === "presence" || id === "playground");
+const presenceNavItems = navItems.filter(({ id }) => id === "live" || id === "chat" || id === "watching" || id === "people" || id === "feed" || id === "schedule" || id === "presence" || id === "playground");
 const agentNavItems = navItems.filter(({ id }) => id === "teach");
 const channelLabel = (channel: ChannelId, definitions?: ChannelDefinition[]) =>
   definitions?.find((item) => item.id === channel)?.name ??
@@ -1008,11 +1009,7 @@ function AgentSwitcher({
               <PresenceGlyph accent={item.accent} />
               <span>
                 <strong>{item.name}</strong>
-                <small>
-                  {item.id === agent.id
-                    ? "Current · Persistent mind"
-                    : "Persistent mind"}
-                </small>
+                {item.id === agent.id && <small>Current</small>}
               </span>
             </button>
           ))}
@@ -1408,6 +1405,7 @@ function AgentWorkspaceShell({
           {view === "teach" && <TeachView state={state} mutate={mutate} setView={setView} />}
           {view === "chat" && <PresenceChatView state={state} mutate={mutate} />}
           {view === "watching" && <WatchingView state={state} mutate={mutate} />}
+          {view === "people" && <PeopleView state={state} mutate={mutate} />}
           {view === "playground" && (
             <PlaygroundView state={state} mutate={mutate} />
           )}
@@ -1660,6 +1658,7 @@ function LegacyAppShell({
             <LiveView state={state} mutate={mutate} />
           )}
           {view === "watching" && <WatchingView state={state} mutate={mutate} />}
+          {view === "people" && <PeopleView state={state} mutate={mutate} />}
           {view === "feed" && (
             <PublicHistoryView state={state} setView={setView} />
           )}
@@ -2816,7 +2815,10 @@ function ScenarioLibrary({ state, mutate, presence, creating, onCreatingChange }
 function AssignmentResearchReview({ research, assets }: { research: OpenPresenceState["assetResearchSessions"][number]; assets: OpenPresenceState["assets"] }) {
   if (!research.candidates.length) return null;
   const decisionFor = (candidateId: string) => research.decisionHistory.find((decision) => decision.candidateId === candidateId);
-  return <section className="assignment-research-review" aria-label="Assignment research trail"><div className="assignment-research-heading"><div><div className="eyebrow">Research trail</div><strong>{research.candidates.length} candidate{research.candidates.length === 1 ? "" : "s"} inspected</strong></div><small>{research.searchHistory.length} bounded search{research.searchHistory.length === 1 ? "" : "es"}</small></div><div className="assignment-candidate-list">{research.candidates.map((item, index) => {
+  const stage = (research as OpenPresenceState["assetResearchSessions"][number] & { stage?: string }).stage;
+  const stageLabel = stage?.replaceAll("_", " ") || (research.status === "selected" ? "published" : research.status);
+  const evidenceSummary = (research as OpenPresenceState["assetResearchSessions"][number] & { evidenceSummary?: string }).evidenceSummary;
+  return <details className="assignment-research-review" aria-label="Assignment research trail"><summary className="assignment-research-summary"><span><span className="eyebrow">Evidence trail</span><strong>{research.candidates.length} candidate{research.candidates.length === 1 ? "" : "s"} inspected</strong></span><span><small>{stageLabel}</small><small>{research.searchHistory.length} search{research.searchHistory.length === 1 ? "" : "es"}</small></span></summary><div className="assignment-research-body"><div className="assignment-candidate-list">{research.candidates.map((item, index) => {
     const candidate = item.candidate;
     const asset = item.assetId ? assets.find((stored) => stored.id === item.assetId) : undefined;
     const decision = decisionFor(item.id);
@@ -2824,7 +2826,7 @@ function AssignmentResearchReview({ research, assets }: { research: OpenPresence
     const label = candidate.title ?? candidate.name ?? `Candidate ${index + 1}`;
     const sourceLabel = candidate.publisher ?? (() => { try { return candidate.sourcePageUrl ? new URL(candidate.sourcePageUrl).hostname.replace(/^www\./, "") : "Unknown source"; } catch { return "Unknown source"; } })();
     return <details className="assignment-candidate" key={item.id}><summary><span className={`assignment-candidate-mark ${item.perception ? "inspected" : "failed"}`} aria-hidden="true">{item.perception ? "✓" : "!"}</span><span className="assignment-candidate-copy"><strong>{label}</strong><small>{sourceLabel}</small></span><span className="assignment-candidate-status">{item.perception ? "Inspected" : "Fetch failed"}</span></summary><div className="assignment-candidate-detail">{asset?.storage && <img src={`/api/assets/${asset.id}`} alt={asset.description ?? label} /> }<div><p><strong>Why it was rejected</strong>{reason}</p>{item.perception && <p><strong>What the Agent saw</strong>{item.perception.observation}</p>}{candidate.sourcePageUrl && <a href={candidate.sourcePageUrl} target="_blank" rel="noreferrer">Open source page ↗</a>}</div></div></details>;
-  })}</div></section>;
+  })}</div>{evidenceSummary && <p className="assignment-evidence-summary"><strong>Selected evidence</strong>{evidenceSummary}</p>}</div></details>;
 }
 
 function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: Mutate }) {
@@ -3040,6 +3042,57 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
       </>}
     </div>
   );
+}
+
+function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutate }) {
+  const presence = state.presence ?? state.presences[0];
+  const [query, setQuery] = useState("");
+  const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [remembering, setRemembering] = useState(false);
+  const [rememberName, setRememberName] = useState("");
+  const [rememberHandle, setRememberHandle] = useState("");
+  const [rememberExternalId, setRememberExternalId] = useState("");
+  const [correction, setCorrection] = useState("");
+  if (!presence) return null;
+  const visibleIdentityIds = new Set(state.personIdentities.filter((identity) => identity.sourcePresenceId === presence.id).map((identity) => identity.personId));
+  const people = state.people
+    .filter((person) => person.memoryState === "active" && visibleIdentityIds.has(person.id))
+    .filter((person) => !query.trim() || `${person.displayName} ${state.personIdentities.find((identity) => identity.personId === person.id)?.handle ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()));
+  const selected = state.people.find((person) => person.id === selectedId) ?? people[0];
+  const selectedIdentity = selected ? state.personIdentities.find((identity) => identity.personId === selected.id && identity.sourcePresenceId === presence.id) : undefined;
+  const relationship = selected ? state.relationships.find((item) => item.personId === selected.id) : undefined;
+  const facts = relationship ? state.relationshipFacts.filter((fact) => fact.relationshipId === relationship.id && !fact.validTo && !state.relationshipFacts.some((newer) => newer.supersedesFactId === fact.id)) : [];
+  const loops = relationship ? state.relationshipOpenLoops.filter((loop) => loop.relationshipId === relationship.id && loop.status === "open") : [];
+  const recentHistory = selectedIdentity ? state.mirrorObjects.filter((item) => item.presenceId === presence.id && item.author?.externalRef?.id === selectedIdentity.externalActorId).sort((left, right) => (right.occurredAt ?? right.observedAt).localeCompare(left.occurredAt ?? left.observedAt)).slice(0, 8) : [];
+  const remember = async () => {
+    if (!rememberName.trim() || !rememberExternalId.trim()) return;
+    const next = await mutate({ type: "rememberPerson", presenceId: presence.id, channel: presence.channel, externalActorId: rememberExternalId.trim(), displayName: rememberName.trim(), handle: rememberHandle.trim() || undefined, source: "operator" });
+    if (next) { setRememberName(""); setRememberHandle(""); setRememberExternalId(""); setRemembering(false); }
+  };
+  const correct = async () => {
+    if (!relationship || !correction.trim()) return;
+    const next = await mutate({ type: "correctRelationshipFact", relationshipId: relationship.id, factId: facts[0]?.id, statement: correction.trim(), visibility: `presence:${presence.id}` });
+    if (next) setCorrection("");
+  };
+  return <div className="people-page">
+    <div className="people-header">
+      <div><SectionEyebrow>Presence relationships</SectionEyebrow><h1>People</h1><p>Who {presence.name} remembers here. Seeing someone in the world does not automatically create a relationship.</p></div>
+      <Button variant="primary" onClick={() => setRemembering((value) => !value)}><Plus size={14} /> Remember a person</Button>
+    </div>
+    {remembering && <section className="people-composer" aria-label="Remember a person">
+      <div><SectionEyebrow>Explicit memory</SectionEyebrow><h2>Who should {presence.name} remember?</h2><p>This creates identity context without inventing prior interaction history.</p></div>
+      <div className="people-form-grid"><label>Name<input aria-label="Person name" value={rememberName} onChange={(event) => setRememberName(event.target.value)} placeholder="Maya Chen" /></label><label>Handle <span className="optional-label">Optional</span><input aria-label="Person handle" value={rememberHandle} onChange={(event) => setRememberHandle(event.target.value)} placeholder="@maya" /></label><label>Channel actor ID<input aria-label="Channel actor ID" value={rememberExternalId} onChange={(event) => setRememberExternalId(event.target.value)} placeholder="maya" /></label></div>
+      <div className="people-form-actions"><Button variant="ghost" onClick={() => setRemembering(false)}>Cancel</Button><Button variant="primary" disabled={!rememberName.trim() || !rememberExternalId.trim()} onClick={() => void remember()}>Remember</Button></div>
+    </section>}
+    <div className="people-toolbar"><label className="people-search"><span>Search people</span><input aria-label="Search people" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by name or handle" /></label><span className="people-count">{people.length} remembered</span></div>
+    {!people.length ? <section className="people-empty"><div className="watch-empty-mark"><Users size={23} /></div><SectionEyebrow>People</SectionEyebrow><h2>No one remembered yet.</h2><p>People will appear as meaningful relationships develop here. A Watch or a feed appearance alone is not a relationship.</p></section> : <div className="people-layout"><section className="people-list" aria-label="Remembered people">{people.map((person) => { const identity = state.personIdentities.find((item) => item.personId === person.id && item.sourcePresenceId === presence.id); const rel = state.relationships.find((item) => item.personId === person.id); return <button type="button" className={`people-row ${selected?.id === person.id ? "active" : ""}`} key={person.id} onClick={() => setSelectedId(person.id)}><span className="people-avatar">{initials(person.displayName)}</span><span className="people-row-copy"><strong>{person.displayName}</strong><small>{identity?.handle ?? identity?.externalActorId} · {rel?.lastMeaningfulInteractionAt ? `Last interacted ${formatTime(rel.lastMeaningfulInteractionAt)}` : "Remembered explicitly"}</small><span>{factsForPerson(state, person.id)[0] ?? "Selective relationship context is available here."}</span></span><ChevronRight size={16} /></button>; })}</section>{selected && <section className="person-inspector" aria-label={`${selected.displayName} relationship`}><div className="person-inspector-heading"><div><SectionEyebrow>Person</SectionEyebrow><h2>{selected.displayName}</h2><p>{selectedIdentity?.handle ?? selectedIdentity?.externalActorId} · {channelLabel(presence.channel, state.channelDefinitions)}</p></div><span className="people-status">{relationship?.lastMeaningfulInteractionAt ? "Remembered relationship" : "Remembered identity"}</span></div><div className="person-inspector-section"><SectionEyebrow>How {presence.name} knows them</SectionEyebrow><p>{relationship?.lastMeaningfulInteractionAt ? "You've interacted meaningfully here. The details below remain linked to actual evidence." : "The operator explicitly asked the Agent to remember this person. No prior interaction is being implied."}</p></div><div className="person-inspector-section"><SectionEyebrow>What {presence.name} remembers</SectionEyebrow>{facts.length ? <ul>{facts.map((fact) => <li key={fact.id}><span>{fact.statement}</span><small>{fact.epistemicKind.replaceAll("_", " ")} · {fact.provenanceRefs.map((ref) => ref.kind).join(", ")}</small></li>)}</ul> : <p>No curated facts yet.</p>}</div><div className="person-inspector-section"><SectionEyebrow>Open threads</SectionEyebrow>{loops.length ? <ul>{loops.map((loop) => <li key={loop.id}>{loop.description}</li>)}</ul> : <p>No open loops.</p>}</div><div className="person-inspector-section"><SectionEyebrow>Recent interactions</SectionEyebrow>{recentHistory.length ? <div className="person-history">{recentHistory.map((item) => <article key={item.id}><small>{formatTime(item.occurredAt ?? item.observedAt)}</small><p>{item.content?.text ?? "[no text]"}</p></article>)}</div> : <p>No Mirror-backed interactions yet.</p>}</div><div className="person-inspector-actions"><Button variant="ghost" onClick={() => void mutate({ type: "forgetRelationship", relationshipId: relationship?.id })} disabled={!relationship}>Forget relationship</Button><Button variant="ghost" onClick={() => void mutate({ type: "createWatch", presenceId: presence.id, query: selectedIdentity?.handle ?? selected.displayName, purpose: "Keep this person in attention without treating Watching as relationship memory." })}>Watch</Button></div>{relationship && <div className="person-correction"><label>Correct memory<textarea aria-label="Correct relationship memory" value={correction} onChange={(event) => setCorrection(event.target.value)} placeholder="What should the Agent remember instead?" rows={3} /></label><Button variant="secondary" disabled={!correction.trim()} onClick={() => void correct()}><Pencil size={14} /> Save correction</Button></div>}</section>}</div>}
+  </div>;
+}
+
+function factsForPerson(state: OpenPresenceState, personId: string) {
+  const relationship = state.relationships.find((item) => item.personId === personId);
+  if (!relationship) return [];
+  return state.relationshipFacts.filter((fact) => fact.relationshipId === relationship.id && !fact.validTo && !state.relationshipFacts.some((newer) => newer.supersedesFactId === fact.id)).slice(0, 1).map((fact) => fact.statement);
 }
 
 function watchPreview(query: string) {
