@@ -217,6 +217,31 @@ describe("Sandbox and Playground boundaries", () => {
     expect(state.publications[0]?.assetIds).toHaveLength(2);
   });
 
+  it("does not silently republish an exact asset as a new original", () => {
+    let state = startPlaygroundSession(createAgent(input));
+    const session = state.playgroundSessions[0]!;
+    const asset = { name: "same visual", kind: "gif" as const, mimeType: "image/gif", dataUrl: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" };
+    state = formSandboxIntent(state, { sessionId: session.id, affordance: "post", text: "First publication.", assets: [asset] });
+    state = deliverSandboxExecution(state, state.executions[0]!.id);
+    state = formSandboxIntent(state, { sessionId: session.id, affordance: "post", text: "Second publication.", assets: [asset] });
+    expect(state.executions[0]?.status).toBe("blocked");
+    expect(state.executions[0]?.failure?.code).toBe("DUPLICATE_ASSET_CANDIDATE");
+    expect(state.assetUsages).toHaveLength(1);
+  });
+
+  it("allows reuse when the planner records why it is intentional", () => {
+    let state = startPlaygroundSession(createAgent(input));
+    const session = state.playgroundSessions[0]!;
+    const asset = { name: "same visual", kind: "gif" as const, mimeType: "image/gif", dataUrl: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" };
+    state = formSandboxIntent(state, { sessionId: session.id, affordance: "post", text: "First publication.", assets: [asset] });
+    state = deliverSandboxExecution(state, state.executions[0]!.id);
+    state = formSandboxIntent(state, { sessionId: session.id, affordance: "post", text: "A follow-up with updated context.", assets: [asset], assetReuse: { usageType: "repurpose", reason: "follow_up" } });
+    expect(state.executions[0]?.status).toBe("queued");
+    state = deliverSandboxExecution(state, state.executions[0]!.id);
+    expect(state.assetUsages[0]?.usageType).toBe("repurpose");
+    expect(state.assetUsages[0]?.reuseReason).toBe("follow_up");
+  });
+
   it("keeps review-mode replies pending instead of silently delivering them", () => {
     let state = startPlaygroundSession(createAgent(input));
     const session = state.playgroundSessions[0]!;

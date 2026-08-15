@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { readState, writeState } from "@/lib/db";
+import { readState, WorkspaceConflictError, writeState } from "@/lib/db";
 import { disconnectNativeX, saveNativeXCredentials, testXCredentials, upsertNativeXConnection } from "@/lib/x";
 import { reconcileNativeX } from "@/lib/native-x";
 import { stateForContext } from "@/lib/runtime";
@@ -29,10 +29,13 @@ const input = z.discriminatedUnion("action", [
 export async function POST(request: Request) {
   try {
     const parsed = input.parse(await request.json());
-    const state = stateForContext(readState(), {
+    const context = {
       agentId: request.headers.get("x-openpresence-agent-id"),
       presenceId: request.headers.get("x-openpresence-presence-id"),
-    });
+    };
+    const state = stateForContext(readState(), context);
+    const revision = request.headers.get("x-openpresence-workspace-revision");
+    if (revision && /^\d+$/.test(revision)) state.workspaceRevision = Number(revision);
     const presence = state.presences.find((item) => item.id === parsed.presenceId);
     if (!presence || presence.channel !== "x") throw new Error("An X credential can only be attached to an X Presence.");
     if (parsed.action === "disconnect") {
@@ -52,6 +55,7 @@ export async function POST(request: Request) {
     return NextResponse.json({ state: next, result });
   } catch (error) {
     console.warn("X connection change rejected", error instanceof Error ? error.message : error);
-    return NextResponse.json({ error: error instanceof Error ? error.message : "X connection could not be completed." }, { status: 400 });
+    if (error instanceof WorkspaceConflictError) return NextResponse.json({ error: error.message, conflict: true, state: stateForContext(readState(), { agentId: request.headers.get("x-openpresence-agent-id"), presenceId: request.headers.get("x-openpresence-presence-id") }) }, { status: error.status });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "X connection could not be completed." }, { status: error instanceof WorkspaceConflictError ? error.status : 400 });
   }
 }

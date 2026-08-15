@@ -37,6 +37,23 @@ describe("sandbox link perception", () => {
     }
   });
 
+  it("does not inspect new media when Asset intelligence is disabled", async () => {
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      let state = applyOperation(createAgent({ name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent", handle: "@jenny_ai", accent: "#D68754" }), { type: "setCapability", capabilityId: "asset-intelligence", enabled: false });
+      state = startPlaygroundSession(state);
+      const session = state.playgroundSessions[0]!;
+      state = addSandboxEvent(state, { sessionId: session.id, actionId: "post", actorName: "Maya", content: "A media-bearing post.", assets: [{ name: "image", kind: "image", dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" }] });
+      const perceptionCountBeforeInspection = state.perceptions.length;
+      const inspected = await inspectSandboxObject(state, state.mirrorObjects[0]!, "inspect");
+      expect(fetchMock).not.toHaveBeenCalled();
+      expect(inspected.perceptions).toHaveLength(perceptionCountBeforeInspection);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("uses a GPT-5.6-compatible normalized media request with provenance", async () => {
     const calls: Array<{ url: string; body: Record<string, unknown> }> = [];
     vi.stubGlobal("fetch", vi.fn(async (input: string | URL, init?: RequestInit) => {

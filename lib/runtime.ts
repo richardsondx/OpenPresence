@@ -1,8 +1,9 @@
-import type { ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, Asset, Assignment, AssignmentQuantityMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, FileKind, FileProposal, GhostProfile, JsonValue, LiveEvent, MirrorObject, OpenPresenceState, Operation, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, SandboxAssetInput, SocialAssetKind, SocialIntent, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, LanguagePolicy, Scenario, ScenarioStimulus, ScenarioStimulusRequirements, ScenarioVersion, ScenarioRun, ScenarioRunProvenance, ScenarioRunEvaluation, StructuralFinding } from "./types";
-import { CHANNEL_CAPABILITIES, CHANNEL_EXTENSIONS, simulationForChannel } from "./types";
+import type { ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, Asset, Assignment, AssignmentQuantityMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, FileKind, FileProposal, GhostProfile, GhostRepresentation, JsonValue, LiveEvent, MirrorObject, OpenPresenceState, Operation, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, RuntimeScope, SandboxAssetInput, SocialAssetKind, SocialIntent, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, LanguagePolicy, Scenario, ScenarioStimulus, ScenarioStimulusRequirements, ScenarioVersion, ScenarioRun, ScenarioRunProvenance, ScenarioRunEvaluation, StructuralFinding } from "./types";
+import { AGENT_CAPABILITY_DEFINITIONS, CHANNEL_CAPABILITIES, CHANNEL_EXTENSIONS, simulationForChannel } from "./types";
 import { buildScenarioFromPrompt, builtinScenarioDefinitions, repairScenarioStimuli, scenarioFromImport, stableHash, validateScenarioFidelity } from "./scenarios";
 import { effectiveLanguagePolicy, EMPTY_LANGUAGE_POLICY, normalizeLanguagePolicy, validateLanguage } from "./language-policy";
 import { createAssetPerception, createUninterpretedPerception, hasUsablePerception, mediaRequiresReview, perceptionRequirement } from "./perception";
+import { epistemicState } from "./asset-intelligence";
 import { isTestRuntime } from "./test-runtime";
 
 const now = () => new Date().toISOString();
@@ -75,7 +76,7 @@ const fileContent = (kind: FileKind, input: CreateAgentInput, presence?: Presenc
 };
 
 export function initialState(): OpenPresenceState {
-  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], events: [], calendar: [], assignments: [], watches: [], actions: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], toolBindings: [], changeSets: [], standingIntents: [], socialIntents: [], executions: [], outcomes: [], publications: [], preferenceEvidence: [], originalPostRehearsals: [], librarySources: [], assets: [], perceptions: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], scenarios: [], scenarioVersions: [], scenarioRuns: [], scenarioRunProvenance: [], scenarioEvaluations: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
+  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], events: [], calendar: [], assignments: [], watches: [], actions: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], assetProviderConnections: [], toolBindings: [], changeSets: [], standingIntents: [], socialIntents: [], executions: [], outcomes: [], publications: [], assetUsages: [], sourceEvidence: [], claimGrounding: [], preferenceEvidence: [], originalPostRehearsals: [], librarySources: [], assets: [], perceptions: [], assetResearchSessions: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], scenarios: [], scenarioVersions: [], scenarioRuns: [], scenarioRunProvenance: [], scenarioEvaluations: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
 }
 
 function makeFiles(input: CreateAgentInput, presence: Presence): AgentFile[] { return (Object.keys(fileMeta) as FileKind[]).map((kind) => ({ kind, ...fileMeta[kind], content: fileContent(kind, input, presence), revision: 1, updatedAt: now() })); }
@@ -424,13 +425,51 @@ const attentionIntervalLabel = (presence: Presence | undefined) => {
 export const quietHoursLabel = (quietHours: PresenceQuietHours | undefined) =>
   quietHours?.enabled ? `${quietHours.start}–${quietHours.end}` : "Off";
 
-const defaultGhostProfile = (): GhostProfile => ({ subject: "Me / my organization", priorities: "", preferences: "", voice: "", boundaries: "" });
+export const emptyGhostRepresentation = (): GhostRepresentation => ({ kind: "individual", individual: { firstName: "", middleName: "", lastName: "" }, organization: { name: "", website: "" } });
+
+export function formatGhostRepresentation(representation?: GhostRepresentation, legacySubject?: string) {
+  if (representation?.kind === "organization") return representation.organization.name.trim();
+  if (representation?.kind === "individual") return [representation.individual.firstName, representation.individual.middleName, representation.individual.lastName].map((item) => item.trim()).filter(Boolean).join(" ");
+  return legacySubject?.trim() ?? "";
+}
+
+function normalizeGhostRepresentation(value?: Partial<GhostRepresentation>): GhostRepresentation {
+  return {
+    kind: value?.kind === "organization" ? "organization" : "individual",
+    individual: {
+      firstName: value?.individual?.firstName?.trim() ?? "",
+      middleName: value?.individual?.middleName?.trim() ?? "",
+      lastName: value?.individual?.lastName?.trim() ?? "",
+    },
+    organization: {
+      name: value?.organization?.name?.trim() ?? "",
+      website: value?.organization?.website?.trim() ?? "",
+    },
+  };
+}
+
+export function normalizeGhostProfile(value?: Partial<GhostProfile>) {
+  if (!value) return undefined;
+  const representation = normalizeGhostRepresentation(value.representation);
+  const formatted = formatGhostRepresentation(representation);
+  return {
+    subject: value.representation ? formatted || value.subject?.trim() || "Me / my organization" : value.subject?.trim() || "Me / my organization",
+    representation,
+    priorities: value.priorities?.trim() ?? "",
+    preferences: value.preferences?.trim() ?? "",
+    voice: value.voice?.trim() ?? "",
+    boundaries: value.boundaries?.trim() ?? "",
+  } satisfies GhostProfile;
+}
+
+const defaultGhostProfile = (): GhostProfile => ({ subject: "Me / my organization", representation: emptyGhostRepresentation(), priorities: "", preferences: "", voice: "", boundaries: "" });
 export const defaultPublicSelf = (displayName: string, mode: "agent" | "ghost"): PublicSelf => ({ displayName, posture: mode === "ghost" ? "representational" : "contextual", approvedTechnicalFacts: [] });
 export const PUBLIC_TECHNICAL_FACT_LABELS: Record<PublicTechnicalFact, string> = { "ai-presence": "This is an AI presence", "open-source": "Open source", "built-with-openpresence": "Built with OpenPresence", "model-provider": "Current model provider", "exact-model": "Exact model", tools: "Tools used" };
 
 export function publicSelfGuidance(presence: Presence): string {
   const posture = presence.publicSelf?.posture ?? defaultPublicSelf(presence.name, presence.mode).posture;
   const facts = (presence.publicSelf?.approvedTechnicalFacts ?? []).map((fact) => PUBLIC_TECHNICAL_FACT_LABELS[fact]).join(", ") || "none";
+  const representedIdentity = presence.mode === "ghost" ? formatGhostRepresentation(presence.ghostProfile?.representation, presence.ghostProfile?.subject) || "not defined yet" : "";
   const postureGuidance: Record<PublicDisclosurePosture, string> = {
     contextual: "Answer from this Presence's interests, point of view, and purpose. Acknowledge AI only when relevant.",
     "ai-forward": "It is acceptable to be direct that this is an AI presence when relevant, while keeping implementation details private.",
@@ -438,7 +477,7 @@ export function publicSelfGuidance(presence: Presence): string {
     representational: "Speak as the represented person or organization. Do not collapse this public self into the private Agent behind it.",
     "open-about-assistance": "Speak as the represented person or organization, and acknowledge AI assistance when relevant without exposing private machinery.",
   };
-  return `PUBLIC SELF BOUNDARY\nThis Presence appears publicly as ${presence.name}. ${postureGuidance[posture]}\nApproved technical facts that may be disclosed when relevant: ${facts}. Never invent or volunteer unapproved implementation details.`;
+  return `PUBLIC SELF BOUNDARY\nThis Presence appears publicly as ${presence.name}. ${postureGuidance[posture]}${presence.mode === "ghost" ? `\nRepresented identity: ${representedIdentity}.` : ""}\nApproved technical facts that may be disclosed when relevant: ${facts}. Never invent or volunteer unapproved implementation details.`;
 }
 
 export function identityLeakageReason(state: OpenPresenceState, presence: Presence, text: string): string | undefined {
@@ -486,14 +525,21 @@ export function isLowInformationCue(content: string) {
 const DEFAULT_MODEL = { provider: "openai" as const, model: "gpt-5.6-luna", quality: "medium" as const };
 
 function defaultModel(agentId: string): AgentModelProfile { return { id: id("model"), agentId, ...DEFAULT_MODEL, capabilities: { vision: true, toolCalling: true, structuredOutput: true, streaming: true }, updatedAt: now() }; }
-function defaultBindings(agentId: string): AgentToolBinding[] { return ["web.search", "asset.inspect", "chart.render", "channel.execute"].map((toolId) => ({ id: id("binding"), agentId, toolId })); }
+function defaultBindings(agentId: string): AgentToolBinding[] { return ["web.search", "asset.inspect", "chart.render", "channel.execute"].map((toolId) => ({ id: id("binding"), agentId, toolId, enabled: true })); }
+function defaultSkills(): import("./types").Skill[] {
+  return [
+    { id: "research-to-thread", name: "Research to thread", description: "Turn a source into a clear social thread.", channels: ["x", "linkedin"], requiresTools: ["web.search", "asset.inspect"], compatibleFormats: ["x.thread", "linkedin.post"] },
+    { id: "data-story", name: "Data story", description: "Turn evidence into a useful visual story.", channels: ["x", "linkedin"], requiresTools: ["asset.inspect", "chart.render"], compatibleFormats: ["x.media-post", "linkedin.image-post"] },
+    { id: "evidence-led-visual-storytelling", name: "Evidence-led visual storytelling", description: "Start from a concrete observation or idea, identify what evidence would materially support it, choose the visual role that fits this Presence, and keep the expression, source, perception, and uncertainty aligned. Use no asset when none performs the intended role.", channels: ["x", "linkedin", "substack"], requiresTools: ["web.search", "asset.inspect"], compatibleFormats: ["x.media-post", "x.long-post", "linkedin.image-post", "substack.article"] },
+  ];
+}
 
 export function createAgent(input: CreateAgentInput): OpenPresenceState {
   const agent = { id: id("agent"), name: input.name.trim(), description: input.description.trim(), audience: input.audience?.trim() || "builders and curious operators", topics: ["AI agents", "software", "useful ideas"], accent: input.accent, glyph: "◉", languagePolicy: { ...EMPTY_LANGUAGE_POLICY } };
   const definitions = builtinChannelDefinitions();
   const presence = makePresence({ channel: "x", handle: input.handle.trim() || `@${agent.name.toLowerCase().replace(/[^a-z0-9]/g, "")}`, mode: input.mode, accent: input.accent, connectionMode: "sandbox" }, agent.name, definitions[0], defaultPresenceBrief(agent));
   const conversation = makeConversation();
-  const skills = [{ id: "research-to-thread", name: "Research to thread", description: "Turn a source into a clear social thread.", channels: ["x", "linkedin"] as import("./types").ChannelId[], requiresTools: ["web.search", "asset.inspect"], compatibleFormats: ["x.thread", "linkedin.post"] }, { id: "data-story", name: "Data story", description: "Turn evidence into a useful visual story.", channels: ["x", "linkedin"] as import("./types").ChannelId[], requiresTools: ["asset.inspect", "chart.render"], compatibleFormats: ["x.media-post", "linkedin.image-post"] }];
+  const skills = defaultSkills();
   const environment = makeSandboxEnvironment(presence);
   const builtins = builtinScenarioDefinitions(agent.id, presence.channel);
   return { ...initialState(), onboarded: true, agent, agents: [agent], activeAgentId: agent.id, presence, presences: [presence], activePresenceId: presence.id, files: makeFiles(input, presence), modelProfiles: [defaultModel(agent.id)], providerConnections: [{ id: id("connection"), provider: "openai", label: "OpenAI", status: "needs-configuration", createdAt: now() }], toolBindings: defaultBindings(agent.id), conversations: [conversation], activeConversationId: conversation.id, channelDefinitions: definitions, sandboxEnvironments: [environment], skills, agentSkills: skills.map((skill) => ({ id: id("agent-skill"), agentId: agent.id, skillId: skill.id, enabled: true })), scenarios: builtins.map((item) => item.scenario), scenarioVersions: builtins.map((item) => item.version), events: [event("system", `${agent.name} is live`, `Your ${input.mode === "ghost" ? "Ghost " : "agent-owned "}Presence is ready on X.`, "positive")] };
@@ -798,7 +844,7 @@ export function startPlaygroundSession(source: OpenPresenceState, presenceId?: s
   if (!presence) throw new Error("Choose a Presence before starting Playground.");
   const environment = sandboxEnvironmentFor(state, presence);
   const timestamp = now();
-  const session: PlaygroundSession = { id: id("session"), environmentId: environment.id, presenceId: presence.id, channelId: presence.channel, source: sourceType, status: "active", virtualNow: timestamp, virtualTimeMode: "realtime", createdAt: timestamp, updatedAt: timestamp, evaluatedSlotIds: [], judgedObjectIds: [] };
+  const session: PlaygroundSession = { id: id("session"), environmentId: environment.id, presenceId: presence.id, channelId: presence.channel, source: sourceType, status: "active", virtualNow: timestamp, virtualTimeMode: "realtime", worldRevision: 1, createdAt: timestamp, updatedAt: timestamp, evaluatedSlotIds: [], judgedObjectIds: [] };
   state.playgroundSessions.unshift(session);
   state.sandboxEnvironments = state.sandboxEnvironments.map((item) => item.id === environment.id ? { ...item, status: "active", updatedAt: timestamp } : item);
   state.events.unshift(event("system", "Playground session started", `${channelName(presence.channel)} is simulated. ${presence.name} is using the real Agent runtime in an isolated world.`, "positive", { presenceId: presence.id }));
@@ -859,7 +905,8 @@ function sandboxAssetFromInput(state: OpenPresenceState, presence: Presence, ses
   const timestamp = now();
   const sourceUrl = input.sourceUrl?.trim() || undefined;
   const dataUrl = input.dataUrl?.trim() || undefined;
-  return { id: id("asset"), agentId: state.agent?.id ?? "", presenceId: presence.id, sessionId: session.id, type: input.kind, dataUrl, checksum: `${input.name}:${input.mimeType ?? ""}:${dataUrl?.length ?? sourceUrl ?? ""}`, status: "ready", provenance: { origin: "sandbox", sourceUrl, sourcePageUrl: input.sourcePageUrl?.trim() || undefined, publisher: input.publisher?.trim() || undefined, importedAt: timestamp }, mimeType: input.mimeType, sizeBytes: dataUrl ? Math.ceil((dataUrl.length * 3) / 4) : undefined, description: input.name, visibility, shareability, environment: "sandbox", createdAt: timestamp, updatedAt: timestamp };
+  const mimeType = input.mimeType ?? dataUrl?.match(/^data:([^;]+);/)?.[1];
+  return { id: id("asset"), agentId: state.agent?.id ?? "", presenceId: presence.id, sessionId: session.id, type: input.kind, mediaKind: input.kind === "chart" ? "image" : input.kind === "link" ? "other" : input.kind, semanticKind: input.kind === "chart" ? "chart" : undefined, dataUrl, checksum: `${input.name}:${input.mimeType ?? ""}:${dataUrl?.length ?? sourceUrl ?? ""}`, status: "ready", nature: sourceUrl ? "observed" : dataUrl ? "generated" : "unknown", rights: { status: "unknown" }, provenance: { origin: "sandbox", sourceUrl, sourcePageUrl: input.sourcePageUrl?.trim() || undefined, publisher: input.publisher?.trim() || undefined, retrievedAt: sourceUrl ? timestamp : undefined, acquisitionProvider: sourceUrl ? "sandbox-input" : undefined, importedAt: timestamp, sourceIdentityStatus: sourceUrl ? "unknown" : "verified" }, mimeType, sizeBytes: dataUrl ? Math.ceil((dataUrl.length * 3) / 4) : undefined, description: input.name, visibility, shareability, environment: "sandbox", createdAt: timestamp, updatedAt: timestamp };
 }
 
 export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: string; kind?: string; actionId?: string; actorId?: string; actorName?: string; actorHandle?: string; profile?: import("./types").SandboxActorProfile; content?: string; assets?: SandboxAssetInput[]; targetExternalRef?: EntityRef; parentExternalRef?: EntityRef; source?: MirrorObject["source"]; trust?: MirrorObject["trust"]; scenarioStimulusId?: string }) {
@@ -985,13 +1032,13 @@ export function resetPlaygroundSession(source: OpenPresenceState, sessionId: str
   state.assignments = state.assignments.filter((item) => item.sessionId !== sessionId);
   state.actions = state.actions.filter((item) => item.sessionId !== sessionId);
   state.events = state.events.filter((item) => item.sessionId !== sessionId);
-  state.playgroundSessions = state.playgroundSessions.map((item) => item.id === sessionId ? { ...item, status: "active", virtualNow: timestamp, virtualTimeMode: "realtime" as const, updatedAt: timestamp, evaluatedSlotIds: [], judgedObjectIds: [] } : item);
+  state.playgroundSessions = state.playgroundSessions.map((item) => item.id === sessionId ? { ...item, status: "active", virtualNow: timestamp, virtualTimeMode: "realtime" as const, worldRevision: (item.worldRevision ?? 1) + 1, updatedAt: timestamp, evaluatedSlotIds: [], judgedObjectIds: [] } : item);
   state.sandboxEnvironments = state.sandboxEnvironments.map((item) => item.id === environmentId ? { ...item, status: "active", updatedAt: timestamp } : item);
   state.events.unshift({ ...event("system", "Fresh Sandbox account ready", "The simulated account has been refreshed for a new rehearsal.", "positive", { presenceId: session.presenceId }), sessionId });
   return state;
 }
 
-export function formSandboxIntent(source: OpenPresenceState, input: { sessionId: string; affordance: string; format?: string; text: string; target?: EntityRef; perceptionTarget?: EntityRef; rehearsalAttemptId?: string; assignmentId?: string; assets?: SandboxAssetInput[] }) {
+export function formSandboxIntent(source: OpenPresenceState, input: { sessionId: string; affordance: string; format?: string; text: string; target?: EntityRef; perceptionTarget?: EntityRef; rehearsalAttemptId?: string; assignmentId?: string; invocationId?: string; assets?: SandboxAssetInput[]; expressionMode?: import("./types").ExpressionMode; groundingStatus?: import("./types").GroundingStatus; assetReuse?: { usageType: import("./types").AssetUsageType; reason: string } }) {
   const state = cloneState(source);
   const session = sandboxSessionFor(state, input.sessionId);
   const presence = state.presences.find((item) => item.id === session.presenceId) ?? state.presence;
@@ -1007,10 +1054,18 @@ export function formSandboxIntent(source: OpenPresenceState, input: { sessionId:
   const mediaReviewRequired = mediaRequiresReview(state.perceptions, targetObject, presence, requirement.requiredLevel === "none" ? "glance" : requirement.requiredLevel);
   const executionMode = presence.execution[input.affordance] ?? "off";
   const timestamp = now();
-  const publicationAssets = (input.assets ?? []).map((assetInput) => sandboxAssetFromInput(state, presence, session, assetInput, "public", "presence-only"));
-  state.assets.unshift(...publicationAssets);
-  const publication: Publication = { id: id("publication"), format: input.format ?? `${session.channelId}.${input.affordance}`, payload: { text: input.text.trim() }, assetIds: publicationAssets.map((asset) => asset.id), links: publicationAssets.filter((asset) => asset.type === "link" && asset.provenance.sourceUrl).map((asset) => ({ url: asset.provenance.sourceUrl!, label: asset.description })), createdAt: timestamp, environment: "sandbox", sessionId: session.id, rehearsalAttemptId: input.rehearsalAttemptId, assignmentId: input.assignmentId };
-  const intent: SocialIntent = { id: id("intent"), agentId: state.agent?.id ?? "", presenceId: presence.id, affordance: input.affordance, target: input.target, publicationId: publication.id, priority: 50, validity: { staleAfterMs: 60 * 60 * 1000 }, state: executionMode === "off" ? "withdrawn" : "active", formedAt: timestamp, updatedAt: timestamp, environment: "sandbox", sessionId: session.id, rehearsalAttemptId: input.rehearsalAttemptId, assignmentId: input.assignmentId };
+  const publicationAssets = (input.assets ?? []).map((assetInput) => assetInput.existingAssetId
+    ? state.assets.find((asset) => asset.id === assetInput.existingAssetId) ?? sandboxAssetFromInput(state, presence, session, assetInput, "public", "presence-only")
+    : sandboxAssetFromInput(state, presence, session, assetInput, "public", "presence-only"));
+  const newPublicationAssets = publicationAssets.filter((asset) => !source.assets.some((existing) => existing.id === asset.id));
+  state.assets.unshift(...newPublicationAssets);
+  const duplicateAssets = publicationAssets.filter((asset) => {
+    const identity = asset.storage?.exactHash ?? asset.checksum;
+    return identity && state.assetUsages.some((usage) => usage.assetId !== asset.id && usage.presenceId === presence.id && usage.environment === "sandbox" && (!input.assignmentId || usage.assignmentId === input.assignmentId) && state.assets.some((prior) => prior.id === usage.assetId && (prior.storage?.exactHash ?? prior.checksum) === identity));
+  });
+  const expression = epistemicState(input.expressionMode ?? "factual", input.groundingStatus);
+  const publication: Publication = { id: id("publication"), format: input.format ?? `${session.channelId}.${input.affordance}`, payload: { text: input.text.trim() }, assetIds: publicationAssets.map((asset) => asset.id), links: publicationAssets.filter((asset) => asset.type === "link" && asset.provenance.sourceUrl).map((asset) => ({ url: asset.provenance.sourceUrl!, label: asset.description })), assetReuse: input.assetReuse, ...expression, createdAt: timestamp, environment: "sandbox", sessionId: session.id, rehearsalAttemptId: input.rehearsalAttemptId, assignmentId: input.assignmentId, invocationId: input.invocationId } as Publication & { invocationId?: string };
+  const intent: SocialIntent = { id: id("intent"), agentId: state.agent?.id ?? "", presenceId: presence.id, affordance: input.affordance, target: input.target, publicationId: publication.id, priority: 50, validity: { staleAfterMs: 60 * 60 * 1000 }, state: executionMode === "off" ? "withdrawn" : "active", formedAt: timestamp, updatedAt: timestamp, environment: "sandbox", sessionId: session.id, rehearsalAttemptId: input.rehearsalAttemptId, assignmentId: input.assignmentId, invocationId: input.invocationId } as SocialIntent & { invocationId?: string };
   if (executionMode === "off") {
     state.publications.unshift(publication);
     state.socialIntents.unshift(intent);
@@ -1021,11 +1076,13 @@ export function formSandboxIntent(source: OpenPresenceState, input: { sessionId:
   const leakageReason = identityLeakageReason(state, presence, input.text);
   const languageResult = validateLanguage(input.text, effectiveLanguagePolicy(state.agent, presence));
   const languageReason = languageResult.valid ? undefined : "The final expression violates an explicit Never use language rule.";
-  const reviewReason = languageReason ?? leakageReason ?? (mediaReviewRequired ? "Attached media remains uncertain and this Presence requires review before acting." : undefined);
-  const status = languageReason ? "blocked" as const : reviewReason ? "awaiting-review" as const : executionMode === "auto" ? "queued" as const : executionMode === "review" ? "awaiting-review" as const : "awaiting-manual" as const;
-  const execution: Execution = { id: id("execution"), socialIntentId: intent.id, presenceId: presence.id, affordance: input.affordance, mode: executionMode, status, attempts: 0, bridgeId: `sandbox:${session.environmentId}`, connector: "simulated", idempotencyKey: `sandbox:${session.id}:${intent.id}`, target: input.target, publication, reviewReason, createdAt: timestamp, updatedAt: timestamp, assignmentId: input.assignmentId, environment: "sandbox", sessionId: session.id, rehearsalAttemptId: input.rehearsalAttemptId };
+  const duplicateReason = duplicateAssets.length && !input.assetReuse ? "This exact asset was already used in this Sandbox Presence and needs an explicit reuse reason." : undefined;
+  const reviewReason = languageReason ?? duplicateReason ?? leakageReason ?? (mediaReviewRequired ? "Attached media remains uncertain and this Presence requires review before acting." : undefined);
+  const status = languageReason || duplicateReason ? "blocked" as const : reviewReason ? "awaiting-review" as const : executionMode === "auto" ? "queued" as const : executionMode === "review" ? "awaiting-review" as const : "awaiting-manual" as const;
+  const execution: Execution = { id: id("execution"), socialIntentId: intent.id, presenceId: presence.id, affordance: input.affordance, mode: executionMode, status, attempts: 0, bridgeId: `sandbox:${session.environmentId}`, connector: "simulated", idempotencyKey: `sandbox:${session.id}:${intent.id}`, target: input.target, publication, reviewReason, createdAt: timestamp, updatedAt: timestamp, assignmentId: input.assignmentId, environment: "sandbox", sessionId: session.id, rehearsalAttemptId: input.rehearsalAttemptId, invocationId: input.invocationId } as Execution & { invocationId?: string };
   state.publications.unshift(publication); state.socialIntents.unshift(intent); state.executions.unshift(execution);
   if (languageReason) execution.failure = { code: "LANGUAGE_POLICY_VIOLATION", message: "Delivery blocked by Never use: " + languageResult.violations.map((item) => item.literal).join(", ") + ".", retryable: false };
+  if (duplicateReason) execution.failure = { code: "DUPLICATE_ASSET_CANDIDATE", message: duplicateReason, retryable: false };
   state.events.unshift({ ...event("decision", leakageReason ? "Identity disclosure needs review" : mediaReviewRequired ? "Media action needs review" : "Social Intent formed", reviewReason ?? `${presence.name} chose ${input.affordance} for the simulated ${channelName(session.channelId)} world.`, leakageReason || mediaReviewRequired ? "warning" : "positive", { presenceId: presence.id, intentId: intent.id, executionId: execution.id, sourceObjectId: targetObject?.id }), sessionId: session.id });
   return state;
 }
@@ -1063,13 +1120,21 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
   state.mirrorEvents.unshift({ id: id("mirror-event"), bridgeId: object.bridgeId, presenceId: presence.id, sourceEventId: object.sourceEventId!, event: "created", externalRef, object, receivedAt: now(), environment: "sandbox", sessionId: session.id });
   execution.status = "succeeded"; execution.attempts += 1; execution.externalRef = externalRef; execution.executedAt = now(); execution.updatedAt = now();
   state.outcomes.unshift({ id: id("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: presence.id, status: "succeeded", observedAt: now(), metrics: {}, evidence: [externalRef], environment: "sandbox", sessionId: session.id });
+  if (publication) {
+    const usageType = execution.affordance === "reply" ? "quote" : publication.assetReuse?.usageType ?? "new";
+    for (const assetId of publication.assetIds) {
+      state.assetUsages.unshift({ id: id("asset-usage"), assetId, agentId: state.agent?.id ?? "", presenceId: presence.id, publicationId: publication.id, socialIntentId: execution.socialIntentId, assignmentId: execution.assignmentId, channelId: session.channelId, environment: "sandbox", usageType, reuseReason: publication.assetReuse?.reason, publishedAt: now() });
+    }
+  }
   if (execution.assignmentId) {
     const assignment = state.assignments.find((item) => item.id === execution.assignmentId);
     if (assignment) {
       assignment.progress.verified += 1;
       assignment.status = assignmentIsSatisfied(assignment) ? "completed" : "active";
+      assignment.work = { ...(assignment.work ?? { phase: "publishing", attempts: 0, maxAttempts: 4, storiesResearched: 0 }), phase: assignmentIsSatisfied(assignment) ? "completed" : "candidate_review" };
       assignment.updatedAt = now();
-      assignment.lastOutcome = { class: "incomplete", message: assignmentIsSatisfied(assignment) ? "Verified publication satisfied the requested deliverable." : "Verified publication recorded; more work remains.", at: now() };
+      assignment.lastOutcome = { class: assignmentIsSatisfied(assignment) ? "assignment_completed" : "incomplete", message: assignmentIsSatisfied(assignment) ? "Verified publication satisfied the requested deliverable." : "Verified publication recorded; more work remains.", at: now() };
+      assignment.attemptHistory = [...(assignment.attemptHistory ?? []), { id: id("assignment-attempt"), attempt: assignment.work.attempts, phase: assignment.work.phase, outcome: assignment.lastOutcome.class, message: assignment.lastOutcome.message, at: assignment.lastOutcome.at }].slice(-24);
       state.events.unshift({ ...event("execution", assignmentIsSatisfied(assignment) ? "Assignment complete" : "Assignment progress updated", `${assignment.progress.verified} / ${assignment.progress.required} verified publications.`, "positive", { presenceId: presence.id, executionId: execution.id }), sessionId: session.id });
     }
   }
@@ -1165,11 +1230,14 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   const activeConversationId = state.activeConversationId ?? conversations[0]?.id ?? null;
   const calendar = (state.calendar ?? []).map((slot) => ({ ...slot, instruction: slot.instruction || slot.label || "Evaluate a useful idea for the audience", executionWindow: slot.executionWindow || "08:00–11:00" }));
   const base = initialState();
-  const skills = (state.skills ?? []).map((skill) => ({ ...skill, name: skill.name ?? skill.id.replaceAll("-", " ") }));
+  const existingSkills = (state.skills ?? []).map((skill) => ({ ...skill, name: skill.name ?? skill.id.replaceAll("-", " ") }));
+  const skills = [...defaultSkills().filter((skill) => !existingSkills.some((item) => item.id === skill.id)), ...existingSkills];
+  const existingSkillIds = new Set((state.agentSkills ?? []).map((binding) => binding.skillId));
+  const agentSkills = [...(state.agentSkills ?? []), ...defaultSkills().filter((skill) => !existingSkillIds.has(skill.id)).map((skill) => ({ id: id("agent-skill"), agentId: activeAgentId ?? "", skillId: skill.id, enabled: true }))];
   const providerConnections = (state.providerConnections ?? []).map((connection) => ({ ...connection, label: providerName(connection.provider) }));
   const normalizedPresences = presences.map((item) => ({ ...item, languagePolicy: normalizeLanguagePolicy((item as Presence & { languagePolicy?: LanguagePolicy }).languagePolicy) }));
   const hydratedPresence = normalizedPresences.find((item) => item.id === activePresenceId) ?? normalizedPresences[0] ?? null;
-  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], calendar, assignments: state.assignments ?? [], watches: state.watches ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, toolBindings: state.toolBindings ?? [], changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], preferenceEvidence: state.preferenceEvidence ?? [], originalPostRehearsals: state.originalPostRehearsals ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], perceptions: state.perceptions ?? [], skills, agentSkills: state.agentSkills ?? [], contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: (state.playgroundSessions ?? []).map((session) => ({ ...session, virtualTimeMode: session.virtualTimeMode ?? "realtime" })), sandboxActors: state.sandboxActors ?? [], networkSearches: state.networkSearches ?? [], networkIntroductions: state.networkIntroductions ?? [], scenarios: state.scenarios ?? [], scenarioVersions: state.scenarioVersions ?? [], scenarioRuns: state.scenarioRuns ?? [], scenarioRunProvenance: state.scenarioRunProvenance ?? [], scenarioEvaluations: state.scenarioEvaluations ?? [] };
+  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], workspaceRevision: state.workspaceRevision, presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], calendar, assignments: (state.assignments ?? []).map((assignment) => ({ ...assignment, revision: assignment.revision ?? 0, work: assignment.work ?? { phase: assignment.status === "blocked" ? "blocked" as const : assignment.status === "completed" ? "completed" as const : "candidate_review" as const, attempts: assignment.rejectedCandidates ?? 0, maxAttempts: Math.min(12, Math.max(4, assignment.progress.required * 4)), storiesResearched: 0 }, attemptHistory: assignment.attemptHistory ?? [], storyResearch: assignment.storyResearch ?? [] })), watches: state.watches ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, assetProviderConnections: state.assetProviderConnections ?? [], toolBindings: (state.toolBindings ?? []).map((binding) => ({ ...binding, enabled: binding.enabled !== false })), changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], assetUsages: state.assetUsages ?? [], sourceEvidence: state.sourceEvidence ?? [], claimGrounding: state.claimGrounding ?? [], preferenceEvidence: state.preferenceEvidence ?? [], originalPostRehearsals: state.originalPostRehearsals ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], perceptions: state.perceptions ?? [], assetResearchSessions: state.assetResearchSessions ?? [], skills, agentSkills, contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: (state.playgroundSessions ?? []).map((session) => ({ ...session, virtualTimeMode: session.virtualTimeMode ?? "realtime", worldRevision: session.worldRevision ?? 1 })), sandboxActors: state.sandboxActors ?? [], networkSearches: state.networkSearches ?? [], networkIntroductions: state.networkIntroductions ?? [], scenarios: state.scenarios ?? [], scenarioVersions: state.scenarioVersions ?? [], scenarioRuns: state.scenarioRuns ?? [], scenarioRunProvenance: state.scenarioRunProvenance ?? [], scenarioEvaluations: state.scenarioEvaluations ?? [] };
   if (normalized.agent && normalized.scenarios.length === 0) {
     const builtins = builtinScenarioDefinitions(normalized.agent.id, normalized.presence?.channel ?? "x");
     normalized.scenarios = builtins.map((item) => item.scenario);
@@ -1204,7 +1272,7 @@ function hydratePresence(raw: Presence, fallbackBrief = defaultPresenceBrief()):
   const brief = normalizePresenceBrief(raw.brief ?? raw.context?.brief, fallbackBrief);
   const context = raw.context ?? { presenceId: idValue, channel: raw.channel ?? "x", publicIdentity: { displayName: name, handle: raw.handle, mode }, publicSelf, brief, availableAffordances: capabilities.map((item) => item.id) };
   const executionEnvelope = raw.executionEnvelope ?? makeEnvelope(idValue, capabilities, execution);
-  const ghostProfile = raw.ghostProfile ?? (raw.mode === "ghost" ? defaultGhostProfile() : undefined);
+  const ghostProfile = normalizeGhostProfile(raw.ghostProfile ?? (raw.mode === "ghost" ? defaultGhostProfile() : undefined));
   const connectionMode: PresenceConnectionMode = raw.connectionMode ?? (raw.environment === "sandbox" ? "sandbox" : raw.channel === "x" ? "native" : "bridge");
   const pacing = raw.pacing ?? "recommended";
   const attentionIntervalMinutes = Math.max(5, Math.min(120, raw.attentionIntervalMinutes ?? (pacing === "gentle" ? 15 : 5)));
@@ -1221,7 +1289,7 @@ function snapshotWorkspace(state: OpenPresenceState): import("./types").AgentWor
 }
 
 function restoreWorkspace(state: OpenPresenceState, workspace: import("./types").AgentWorkspaceSnapshot, agentWorkspaces: import("./types").AgentWorkspaceSnapshot[]): OpenPresenceState {
-  return normalizeState({ ...state, ...workspace, agents: state.agents, activeAgentId: workspace.agent?.id ?? null, agentWorkspaces });
+  return normalizeState({ ...state, ...workspace, workspaceRevision: workspace.workspaceRevision, agents: state.agents, activeAgentId: workspace.agent?.id ?? null, agentWorkspaces });
 }
 
 /**
@@ -1244,13 +1312,39 @@ export function stateForContext(source: OpenPresenceState, context: { agentId?: 
   return state;
 }
 
+/** Build an immutable scope for one bounded runtime operation. */
+export function createRuntimeScope(source: OpenPresenceState, input: { sessionId?: string; presenceId?: string; assignmentId?: string; conversationId?: string; invocationId?: string }): RuntimeScope {
+  if (!source.agent?.id) throw new Error("A RuntimeScope requires an Agent.");
+  const session = input.sessionId ? source.playgroundSessions.find((item) => item.id === input.sessionId) : undefined;
+  const presenceId = input.presenceId ?? session?.presenceId ?? source.presence?.id;
+  const presence = presenceId ? source.presences.find((item) => item.id === presenceId) : source.presence;
+  if (!presence) throw new Error("A RuntimeScope requires a Presence.");
+  if (session && session.presenceId !== presence.id) throw new Error("The Playground session does not belong to the requested Presence.");
+  const assignment = input.assignmentId ? source.assignments.find((item) => item.id === input.assignmentId) : undefined;
+  if (input.assignmentId && !assignment) throw new Error("The Assignment is no longer available.");
+  if (assignment && (assignment.presenceId !== presence.id || assignment.sessionId && assignment.sessionId !== session?.id)) throw new Error("The Assignment does not belong to the requested Presence and Playground session.");
+  return { userId: "local", agentId: source.agent.id, presenceId: presence.id, environment: session ? "sandbox" : presence.environment ?? "live", playgroundSessionId: session?.id, worldRevision: session?.worldRevision ?? 1, assignmentId: assignment?.id, assignmentRevision: assignment?.revision ?? 0, conversationId: input.conversationId, invocationId: input.invocationId ?? id("invocation") };
+}
+
+/** Validate durable parent/child lineage before a scoped operation commits. */
+export function assertRuntimeScope(source: OpenPresenceState, scope: RuntimeScope) {
+  if (source.agent?.id !== scope.agentId) throw new Error("The RuntimeScope Agent is not the materialized Agent.");
+  const presence = scope.presenceId ? source.presences.find((item) => item.id === scope.presenceId) : undefined;
+  if (!presence || presence.id !== source.presence?.id) throw new Error("The RuntimeScope Presence is not part of the materialized Agent.");
+  const session = scope.playgroundSessionId ? source.playgroundSessions.find((item) => item.id === scope.playgroundSessionId) : undefined;
+  if (scope.playgroundSessionId && (!session || session.presenceId !== presence.id || (scope.worldRevision !== undefined && (session.worldRevision ?? 1) !== scope.worldRevision))) throw new Error("That RuntimeScope belongs to a stale or different Playground world.");
+  const assignment = scope.assignmentId ? source.assignments.find((item) => item.id === scope.assignmentId) : undefined;
+  if (scope.assignmentId && (!assignment || assignment.presenceId !== presence.id || (session && assignment.sessionId !== session.id) || (scope.assignmentRevision !== undefined && (assignment.revision ?? 0) !== scope.assignmentRevision) || assignment.status === "cancelled")) throw new Error("That RuntimeScope belongs to a stale or cancelled Assignment.");
+  return true;
+}
+
 function recordChangeSet(state: OpenPresenceState, summary: string, operations: ChangeSetOperation[], conversationId?: string): string | undefined {
   if (!state.agent) return undefined;
   const changeSet: ChangeSet = { id: id("changeset"), agentId: state.agent.id, conversationId, summary, operations, createdAt: now() };
   state.changeSets.unshift(changeSet);
   return changeSet.id;
 }
-function proposal(state: OpenPresenceState, kind: FileKind, proposed: string, reason: string, conversationId?: string): FileProposal { const current = state.files.find((file) => file.kind === kind)?.content ?? ""; const changeSetId = recordChangeSet(state, `Propose ${kind}.md change`, [{ path: `agentFiles.${kind}`, action: "update", before: current, after: proposed }], conversationId); return { id: id("proposal"), file: kind, title: `Update ${kind}.md`, reason, current, proposed, status: "pending", createdAt: now(), changeSetId }; }
+function proposal(state: OpenPresenceState, kind: FileKind, proposed: string, reason: string, conversationId?: string, target?: FileProposal["target"]): FileProposal { const current = state.files.find((file) => file.kind === kind)?.content ?? ""; const changeSetId = recordChangeSet(state, `Propose ${kind}.md change`, [{ path: `agentFiles.${kind}`, action: "update", before: current, after: proposed }], conversationId); return { id: id("proposal"), file: kind, title: `Update ${kind}.md`, reason, current, proposed, status: "pending", createdAt: now(), changeSetId, target }; }
 function activeConversation(state: OpenPresenceState, conversationId?: string) { return state.conversations.find((conversation) => conversation.id === (conversationId ?? state.activeConversationId)) ?? state.conversations[0]; }
 function syncMessages(state: OpenPresenceState) { state.messages = activeConversation(state)?.messages ?? []; }
 function makePresenceChatSession(presenceId: string): import("./types").PresenceChatSession { const timestamp = now(); return { id: id("presence-chat"), presenceId, title: "New conversation", createdAt: timestamp, updatedAt: timestamp, messages: [] }; }
@@ -1258,7 +1352,8 @@ function makePresenceChatSession(presenceId: string): import("./types").Presence
 function inferPresenceBriefChange(content: string, current: PresenceBrief): { brief: PresenceBrief; summary: string } | undefined {
   const clean = (value: string) => value.trim().replace(/[.!?]+$/, "").trim();
   const splitTerritory = (value: string) => value.split(/,|\s+and\s+/i).map(clean).filter(Boolean);
-  const territory = content.match(/\b(?:mostly|mainly)\s+about\s+(.+?)(?:[.!?]|$)/i)?.[1];
+  const territory = content.match(/\b(?:mostly|mainly)\s+about\s+(.+?)(?:[.!?]|$)/i)?.[1]
+    ?? content.match(/\b(?:focus|focused|center|centre)\s+(?:mostly\s+)?on\s+(.+?)(?:[.!?]|$)/i)?.[1];
   if (territory) {
     const primaryTerritory = splitTerritory(territory);
     if (primaryTerritory.length) return { brief: { ...current, primaryTerritory }, summary: "Presence Brief territory updated" };
@@ -1272,6 +1367,130 @@ function inferPresenceBriefChange(content: string, current: PresenceBrief): { br
   return undefined;
 }
 
+function cleanTeachContext(value: string) {
+  return value
+    .trim()
+    .replace(/^['“”"]|['“”"]$/g, "")
+    .replace(/^(?:as\s+)?(?:operator[- ]provided\s+)?context\s*:\s*/i, "")
+    .replace(/[.!?]+$/, "")
+    .trim();
+}
+
+/**
+ * Teach is a configuration surface, so durable context needs a typed path.
+ * Explicit memory language submits immediately for review; a plain durable
+ * identity/context claim asks once before creating the proposal.
+ */
+export function inferExplicitDurableContext(content: string) {
+  const match = content.match(/^(?:please\s+)?(?:remember|memorize|save|store|keep\s+in\s+mind|note)\s+(?:that\s+|this\s*(?:as\s+[^:]+)?\s*[:,-]?\s*)?([\s\S]+)$/i);
+  const context = match?.[1] ? cleanTeachContext(match[1]) : "";
+  return context.length >= 4 ? context : undefined;
+}
+
+export function inferDurableContextClaim(content: string) {
+  const normalized = content.trim();
+  if (!normalized || /[?]$/.test(normalized)) return undefined;
+  if (!/\b(?:built|created|developed|founded|owns?|owned|made)\b/i.test(normalized)) return undefined;
+  const context = cleanTeachContext(normalized);
+  return context.length >= 12 ? context : undefined;
+}
+
+export function isTeachProposalConfirmation(content: string) {
+  const normalized = content.toLowerCase().replace(/[’]/g, "'").trim();
+  return /\bsubmit\b[\s\S]*\bproposal\b/.test(normalized)
+    || /^(?:yes|yep|yeah|sure|please|do it|confirm|approved?)(?:[\s,!.].*)?$/.test(normalized);
+}
+
+function priorTeachProposalContext(conversation: import("./types").Conversation) {
+  const previousAgentIndex = [...conversation.messages].map((message) => message.role).lastIndexOf("agent");
+  const previousAgentMessage = previousAgentIndex >= 0 ? conversation.messages[previousAgentIndex] : undefined;
+  if (!previousAgentMessage) return undefined;
+  if (!/\b(?:proposal|durable|remember|context)\b/i.test(previousAgentMessage.content)) return undefined;
+  const boldCandidates = [...previousAgentMessage.content.matchAll(/\*\*([^*]+)\*\*/g)]
+    .map((match) => cleanTeachContext(match[1] ?? ""))
+    .filter((value) => value.length >= 12 && !/^(?:durable context|operator-provided context|context)$/i.test(value));
+  if (boldCandidates.length) return boldCandidates.sort((left, right) => right.length - left.length)[0];
+  const marked = previousAgentMessage.content.match(/(?:durable context|proposal to submit is)\s*:\s*([\s\S]+?)(?:\.|$)/i)?.[1];
+  if (marked) return cleanTeachContext(marked);
+  const precedingOperator = conversation.messages.slice(0, previousAgentIndex).reverse().find((message) => message.role === "operator");
+  return precedingOperator ? inferExplicitDurableContext(precedingOperator.content) ?? inferDurableContextClaim(precedingOperator.content) : undefined;
+}
+
+function submitMemoryProposal(state: OpenPresenceState, context: string, conversationId: string) {
+  const file = state.files.find((item) => item.kind === "MEMORY");
+  if (!file) return undefined;
+  const entry = `- ${context}`;
+  const proposed = file.content.includes(entry)
+    ? file.content
+    : `${file.content.trim()}\n\n## Operator-provided context\n\n${entry}`;
+  const existing = state.proposals.find((item) => item.status === "pending" && item.file === "MEMORY" && item.proposed === proposed);
+  if (existing) return existing;
+  const item = proposal(state, "MEMORY", proposed, "You confirmed adding this durable operator-provided context. It will remain a reviewable Mind File change until you apply it.", conversationId);
+  state.proposals.push(item);
+  return item;
+}
+
+const socialWarmthTasteGuidance = [
+  "## Curiosity and encouragement",
+  "",
+  "Be curious, helpful, and inquisitive in community conversations. Ask a genuine question when it can deepen engagement or help someone think further, but do not ask questions merely to keep a conversation going. When someone shares something genuinely strong, interesting, or meaningful, acknowledge it in a way that makes them feel seen and encouraged. Use praise and warmth selectively and honestly, based on the contribution and the conversation, never as a default engagement tactic.",
+].join("\n");
+
+function isTastePreferenceLanguage(content: string) {
+  return /\b(?:curious|curiosity|inquisitive|helpful|encourag(?:e|ement)|praise|warmth|feel good|engage(?:ment)?|ask(?:ing)? questions?)\b/i.test(content)
+    && (/\b(?:agent|you|we|repl(?:y|ies)|conversation|people|someone|share|sharing)\b/i.test(content)
+      || /\b(?:more|less|sometimes|selectively|not always)\b/i.test(content));
+}
+
+function isTasteProposalCommand(content: string) {
+  return /^(?:please\s+)?(?:propose|submit|create|make)\s+(?:the\s+)?(?:rule|proposal|taste(?:\s+proposal)?|change)\b/i.test(content.trim());
+}
+
+function priorTastePreferenceInstruction(conversation: import("./types").Conversation) {
+  const previousOperator = [...conversation.messages]
+    .reverse()
+    .find((message) => message.role === "operator" && isTastePreferenceLanguage(message.content));
+  return previousOperator?.content;
+}
+
+function submitTasteProposal(state: OpenPresenceState, conversationId: string) {
+  const file = state.files.find((item) => item.kind === "TASTE");
+  if (!file) return undefined;
+  const proposed = file.content.includes(socialWarmthTasteGuidance)
+    ? file.content
+    : file.content.trim() + "\n\n" + socialWarmthTasteGuidance;
+  const existing = state.proposals.find((item) => item.status === "pending" && item.file === "TASTE" && item.proposed === proposed);
+  if (existing) return existing;
+  const item = proposal(state, "TASTE", proposed, "You asked for a durable preference about curiosity, useful questions, and selective encouragement. The protected TASTE.md file stays unchanged until you review and apply it in Manage Agent → Brain.", conversationId);
+  state.proposals.push(item);
+  return item;
+}
+
+function inferExecutionSettingChange(content: string, presence: Presence) {
+  const mode = content.match(/\b(off|manual|review|auto)\b/i)?.[1]?.toLowerCase() as import("./types").ExecutionMode | undefined;
+  if (!mode) return undefined;
+  const target = content.match(/\b(posts?|replies?|comments?|messages?|reactions?|likes?|reposts?|quotes?)\b/i)?.[1]?.toLowerCase();
+  if (!target) return undefined;
+  const aliases: Record<string, string[]> = {
+    post: ["post", "posts"], reply: ["reply", "replies"], comment: ["comment", "comments"], message: ["message", "messages"],
+    like: ["like", "likes", "reaction", "reactions"], repost: ["repost", "reposts", "restack", "restacks"], quote: ["quote", "quotes"],
+  };
+  const capability = Object.entries(aliases).find(([, names]) => names.includes(target))?.[0];
+  if (!capability || !presence.capabilities.some((item) => item.id === capability) || presence.execution[capability] === mode) return undefined;
+  return { capability, mode };
+}
+
+function inferModelSettingChange(content: string, current: AgentModelProfile | undefined) {
+  const provider = content.match(/\b(?:use|switch\s+to|change\s+(?:the\s+)?(?:model|runtime|provider)\s+to)\s+(openai|anthropic|claude|gemini|ollama)\b/i)?.[1]?.toLowerCase();
+  if (!provider) return undefined;
+  const normalizedProvider = provider === "claude" ? "anthropic" : provider as import("./types").ModelProvider;
+  if (current?.provider === normalizedProvider) return undefined;
+  const defaults: Record<import("./types").ModelProvider, { model: string; quality: import("./types").ModelQuality }> = {
+    openai: { model: "gpt-5.6-luna", quality: "medium" }, anthropic: { model: "claude", quality: "high" }, gemini: { model: "gemini-2.5-flash", quality: "medium" }, openrouter: { model: "openai/gpt-4o-mini", quality: "medium" }, ollama: { model: "qwen2.5:7b", quality: "local" }, custom: { model: current?.model ?? "custom", quality: current?.quality ?? "medium" },
+  };
+  return { provider: normalizedProvider, ...defaults[normalizedProvider] };
+}
+
 function inferPostFormattingProposal(content: string, currentTaste: string): { proposed: string; reply: string } | undefined {
   const asksForSeparatedPostSentences = /one sentence per (?:line|paragraph)|blank line between sentences/i.test(content);
   const scopesPosts = /\bposts?\b/i.test(content) && !/\b(?:repl(?:y|ies)|responses?)\b/i.test(content) || /posts?\s*\(\s*not\s+repl/i.test(content);
@@ -1282,6 +1501,24 @@ function inferPostFormattingProposal(content: string, currentTaste: string): { p
     proposed,
     reply: "For posts, I’ll use one sentence per paragraph with a blank line between sentences. Replies can stay normally formatted. I also created a reviewable TASTE proposal; it is not authoritative until you approve it.",
   };
+}
+
+function cleanIdentityName(value: string) {
+  return value.trim()
+    .replace(/^['“”"]|['“”"]$/g, "")
+    .replace(/^I['’]?m\s+/i, "")
+    .replace(/\s+[—-]\s+@[^\s]+$/i, "")
+    .replace(/[.!?]+$/, "")
+    .trim();
+}
+
+export function inferPresenceIdentityChange(content: string, current: Presence): { name: string } | undefined {
+  const fullName = content.match(/\byour\s+full\s+name\s+is\s+["“”']([^"“”']+)["“”']/i)?.[1];
+  const quotedNames = [...content.matchAll(/\byou\s+are\s+(?!not\b)["“']([^"”']+)["”']/gi)].map((match) => match[1]);
+  const directName = quotedNames.at(-1) ?? content.match(/\b(?:call\s+yourself|rename\s+(?:this\s+)?Presence\s+to)\s+["“']([^"”']+)["”']/i)?.[1];
+  const nextName = cleanIdentityName(fullName ?? directName ?? "");
+  if (!nextName || nextName.toLowerCase() === current.name.trim().toLowerCase()) return undefined;
+  return { name: nextName };
 }
 
 /**
@@ -1342,7 +1579,7 @@ export function compileAssignmentInstruction(source: OpenPresenceState, instruct
     /choose\s+your\s+own|find\s+your\s+own/i.test(clean) ? "The Agent chooses the topics, thesis, examples, format, and wording." : "",
   ].filter(Boolean);
   const timestamp = now();
-  return { id: id("assignment"), agentId: source.agent.id, presenceId: presence.id, sessionId, channelId: presence.channel, environment, instruction: clean, deliverable: { type, quantity, quantityMode }, recurrence, schedule, editorialContext: { topics, constraints }, executionPolicy: { usePresenceEnvelope: true }, status: "draft", progress: { required: quantity, verified: 0 }, rejectedCandidates: 0, systemFailures: 0, createdAt: timestamp, updatedAt: timestamp };
+  return { id: id("assignment"), agentId: source.agent.id, presenceId: presence.id, sessionId, channelId: presence.channel, environment, instruction: clean, deliverable: { type, quantity, quantityMode }, recurrence, schedule, editorialContext: { topics, constraints }, executionPolicy: { usePresenceEnvelope: true }, status: "draft", progress: { required: quantity, verified: 0 }, rejectedCandidates: 0, systemFailures: 0, work: { phase: "candidate_review", attempts: 0, maxAttempts: Math.min(12, Math.max(4, quantity * 4)), storiesResearched: 0 }, attemptHistory: [], storyResearch: [], createdAt: timestamp, updatedAt: timestamp };
 }
 
 export function assignmentIsSatisfied(assignment: Assignment) {
@@ -1567,10 +1804,11 @@ export function confirmAutoMode(source: OpenPresenceState, presenceId: string, c
   return next;
 }
 
-export function applyOperation(source: OpenPresenceState, operation: Operation | import("./types").ToolBindingOperation): OpenPresenceState {
+export function applyOperation(source: OpenPresenceState, operation: Operation | import("./types").ToolBindingOperation | import("./types").CapabilityOperation): OpenPresenceState {
   let state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   if (operation.type === "createAssignment") {
     const assignment = compileAssignmentInstruction(state, operation.instruction, operation.presenceId, operation.environment ?? "sandbox", operation.sessionId, operation.schedule);
+    assignment.revision = 0;
     state.assignments.unshift(assignment);
     state.events.unshift(event("system", "Assignment drafted", `${assignment.progress.required} ${assignment.deliverable.type === "original_publication" ? "original publications" : assignment.deliverable.type} · ${assignment.recurrence?.label ?? "Once"}. Review the expected outcome before starting.`, "positive", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
     return state;
@@ -1578,8 +1816,10 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
   if (operation.type === "startAssignment") {
     const assignment = state.assignments.find((item) => item.id === operation.id);
     if (!assignment || assignment.status === "completed" || assignment.status === "cancelled") return state;
+    const retryingBlockedAssignment = assignment.status === "blocked";
     assignment.status = "active";
     assignment.sessionId = operation.sessionId;
+    assignment.work = { ...(assignment.work ?? { phase: "candidate_review", attempts: 0, maxAttempts: 4, storiesResearched: 0 }), phase: "candidate_review", attempts: retryingBlockedAssignment ? 0 : assignment.work?.attempts ?? 0, storiesResearched: retryingBlockedAssignment ? 0 : assignment.work?.storiesResearched ?? 0, blockedReason: undefined };
     assignment.updatedAt = now();
     state.events.unshift(event("decision", "Assignment started", `${assignment.progress.required} verified ${assignment.deliverable.type === "original_publication" ? "publications" : assignment.deliverable.type} expected. The Agent owns how to fulfill the Assignment; verified Sandbox output owns progress.`, "positive", { presenceId: assignment.presenceId, sessionId: operation.sessionId }));
     return state;
@@ -1648,8 +1888,11 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       const assignment = state.assignments.find((item) => item.id === operation.id);
       if (!assignment || assignment.status === "completed" || assignment.status === "cancelled") return state;
       assignment.status = "cancelled";
+      assignment.work = { ...(assignment.work ?? { phase: "candidate_review", attempts: 0, maxAttempts: 4, storiesResearched: 0 }), phase: "blocked", blockedReason: "The operator cancelled this Assignment." };
+      assignment.revision = (assignment.revision ?? 0) + 1;
       assignment.updatedAt = now();
-      state.events.unshift(event("decision", "Assignment cancelled", `${assignment.progress.verified} / ${assignment.progress.required} verified publications remain recorded, but this Assignment will not continue.`, "quiet", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
+      assignment.lastOutcome = { class: "assignment_cancelled", message: `${assignment.progress.verified} / ${assignment.progress.required} verified publications remain recorded, but this Assignment will not continue.`, at: assignment.updatedAt };
+      state.events.unshift(event("decision", "Assignment cancelled", assignment.lastOutcome.message, "quiet", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
       return state;
     }
     case "setToolBinding": {
@@ -1660,8 +1903,20 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
         if (operation.provider !== undefined) existing.provider = operation.provider;
         if (operation.model !== undefined) existing.model = operation.model.trim() || undefined;
         if (operation.connectionId !== undefined) existing.connectionId = operation.connectionId.trim() || undefined;
-      } else state.toolBindings.push({ id: id("binding"), agentId: state.agent.id, toolId, provider: operation.provider, model: operation.model?.trim() || undefined, connectionId: operation.connectionId?.trim() || undefined });
+      } else state.toolBindings.push({ id: id("binding"), agentId: state.agent.id, toolId, enabled: true, provider: operation.provider, model: operation.model?.trim() || undefined, connectionId: operation.connectionId?.trim() || undefined });
       state.events.unshift(event("system", "Tool binding updated", `${toolId} now has an explicit runtime binding for this Agent.`, "positive"));
+      return state;
+    }
+    case "setCapability": {
+      if (!state.agent) return state;
+      const definition = AGENT_CAPABILITY_DEFINITIONS.find((item) => item.id === operation.capabilityId);
+      if (!definition || definition.scope !== "agent") return state;
+      for (const toolId of definition.toolIds) {
+        const existing = state.toolBindings.find((item) => item.agentId === state.agent?.id && item.toolId === toolId);
+        if (existing) existing.enabled = operation.enabled;
+        else state.toolBindings.push({ id: id("binding"), agentId: state.agent.id, toolId, enabled: operation.enabled });
+      }
+      state.events.unshift(event("system", `${definition.name} ${operation.enabled ? "enabled" : "disabled"}`, operation.enabled ? `${definition.name} is available to the Agent when useful.` : `${definition.name} is no longer available for new Agent-initiated use. Existing assets and observations remain intact.`, operation.enabled ? "positive" : "quiet"));
       return state;
     }
     case "createAgent": return createAgent(operation.input);
@@ -1733,20 +1988,80 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       }
       const lower = content.toLowerCase(); let reply = "I heard you. I’ll keep that in the working context and use it when the next decision calls for it."; let change: string | undefined;
       const briefChange = state.presence ? inferPresenceBriefChange(content, state.presence.brief) : undefined;
-      if (briefChange && state.presence) { state = applyOperation(state, { type: "setPresence", patch: { brief: briefChange.brief } }); reply = "I updated this Presence Brief. The Agent remains the same, while this social role now has a clearer emphasis here."; change = briefChange.summary; }
+      const explicitContext = inferExplicitDurableContext(content);
+      const durableClaim = inferDurableContextClaim(content);
+      const confirmedContext = isTeachProposalConfirmation(content) ? priorTeachProposalContext(conversation) : undefined;
+      const currentModel = state.modelProfiles.find((item) => item.agentId === state.agent?.id);
+      const modelChange = inferModelSettingChange(content, currentModel);
+      const executionChange = state.presence ? inferExecutionSettingChange(content, state.presence) : undefined;
+      const tasteInstruction = isTastePreferenceLanguage(content)
+        ? content
+        : isTasteProposalCommand(content)
+          ? priorTastePreferenceInstruction(conversation)
+          : undefined;
+      if (confirmedContext) {
+        const submitted = submitMemoryProposal(state, confirmedContext, conversation.id);
+        if (submitted) {
+          reply = `I submitted this to MEMORY.md as a reviewable proposal: “${confirmedContext}”. Nothing durable changes until you apply it in Manage Agent.`;
+          change = "Memory proposal created";
+        }
+      }
+      else if (explicitContext) {
+        const submitted = submitMemoryProposal(state, explicitContext, conversation.id);
+        if (submitted) {
+          reply = `I submitted this to MEMORY.md as a reviewable proposal: “${explicitContext}”. Nothing durable changes until you apply it in Manage Agent.`;
+          change = "Memory proposal created";
+        }
+      }
+      else if (durableClaim) {
+        reply = `I can keep “${durableClaim}” as durable operator-provided context in MEMORY.md. Should I submit it as a reviewable proposal?`;
+        change = "Teach confirmation requested";
+      }
+      else if (modelChange) {
+        state = applyOperation(state, { type: "setModel", model: modelChange.model, provider: modelChange.provider, quality: modelChange.quality, vision: modelChange.provider !== "ollama" });
+        reply = `I switched ${state.agent?.name ?? "the Agent"}'s model runtime to ${modelChange.provider}${modelChange.provider === "anthropic" ? " (Claude)" : ""}. If that provider is not connected, Manage Agent will show the setup needed before the next turn.`;
+        change = "Model runtime updated";
+      }
+      else if (executionChange && state.presence) {
+        const label = state.presence.capabilities.find((item) => item.id === executionChange.capability)?.label ?? executionChange.capability;
+        state = applyOperation(state, { type: "setPresence", patch: { execution: { [executionChange.capability]: executionChange.mode } } });
+        reply = `I set ${label.toLowerCase()} to ${executionChange.mode}. This Presence setting is active now.`;
+        change = "Presence action setting updated";
+      }
+      else if (briefChange && state.presence) { state = applyOperation(state, { type: "setPresence", patch: { brief: briefChange.brief } }); reply = "I updated this Presence Brief. The Agent remains the same, while this social role now has a clearer emphasis here."; change = briefChange.summary; }
+      else if (state.presence && inferPresenceIdentityChange(content, state.presence)) {
+        const identity = inferPresenceIdentityChange(content, state.presence)!;
+        const proposedPresence = { ...state.presence, name: identity.name, publicSelf: { ...state.presence.publicSelf, displayName: identity.name } };
+        const proposedFile = fileContent("PRESENCE", { name: state.agent.name, description: state.agent.description, audience: state.agent.audience, mode: state.presence.mode, handle: state.presence.handle, accent: state.agent.accent }, proposedPresence);
+        state.proposals.push(proposal(state, "PRESENCE", proposedFile, "You gave an explicit Presence identity instruction. Protected identity changes are submitted for operator review before the live Presence changes.", conversation.id, { type: "presence_identity", presenceId: state.presence.id, name: identity.name }));
+        reply = `I submitted a Presence identity change for review: this Presence would appear as ${identity.name}. The live Presence remains ${state.presence.name} until you apply it in Manage Agent.`;
+        change = "Presence identity proposal created";
+      }
+      else if (tasteInstruction) {
+        const submitted = submitTasteProposal(state, conversation.id);
+        if (submitted) {
+          reply = isTasteProposalCommand(content)
+            ? "I submitted the rule as a reviewable TASTE.md proposal. It is waiting in Manage Agent → Brain; applying it there will make the preference durable."
+            : "I turned that into a reviewable TASTE.md proposal. I’ll use curiosity, genuine questions, and selective encouragement as judgment—not as a default engagement tactic. Review and apply it in Manage Agent → Brain.";
+          change = "Taste proposal created";
+        }
+      }
       else if (inferPostFormattingProposal(content, state.files.find((file) => file.kind === "TASTE")?.content ?? "")) { const formatting = inferPostFormattingProposal(content, state.files.find((file) => file.kind === "TASTE")?.content ?? "")!; state.proposals.push(proposal(state, "TASTE", formatting.proposed, "You asked for a durable post-formatting preference. Protected identity files change through proposals.", conversation.id)); reply = formatting.reply; change = "Taste proposal created"; }
+      else if (lower.includes("less promotional") || lower.includes("less salesy") || lower.includes("less sales-like")) { const current = state.files.find((file) => file.kind === "TASTE")?.content ?? ""; const guidance = "## Promotion\n\nPrefer useful, specific observations over promotional language. Do not turn a useful point into a sales pitch."; const proposed = current.includes(guidance) ? current : `${current.trim()}\n\n${guidance}`; state.proposals.push(proposal(state, "TASTE", proposed, "You asked for a durable tone preference. Protected meaning files change through proposals.", conversation.id)); reply = "I turned that into a reviewable TASTE proposal. Until you apply it, I’ll still use judgment and avoid making the Presence sound like a sales pitch."; change = "Taste proposal created"; }
       else if (lower.includes("em dash") || lower.includes("em-dash")) { const current = state.files.find((file) => file.kind === "TASTE")?.content ?? ""; state.proposals.push(proposal(state, "TASTE", `${current}\n\n## Style note\n\nPrefer commas, periods, or a clean line break over em dashes.`, "You asked for a durable writing preference. Protected identity files change through proposals.", conversation.id)); reply = "I turned that into a Taste proposal so it can become a durable preference without silently rewriting who I am."; change = "Taste proposal created"; }
       else if (lower.includes("tuesday") || lower.includes("schedule") || lower.includes("every ")) { const instruction = content.replace(/^schedule\s+/i, "").replace(/[.!?]+$/, "").trim() || "Teach the audience one useful thing."; const slot = makeCalendarSlot(instruction, state.presence); const standing = makeStandingIntent(state, instruction, state.presence, slot.day, slot.time, slot.objective, slot.executionWindow); slot.standingIntentId = standing.id; state.standingIntents.push(standing); state.calendar.push(slot); recordChangeSet(state, "Create standing intent", [{ path: "standingIntents", action: "create", after: standing.instruction }], conversation.id); reply = `I created a standing intention: ${slot.label}. I’ll evaluate it in the moment and let it expire without publishing if there is nothing worthwhile.`; change = "Standing intention created"; }
       else if (isExplicitGhostModeRequest(content)) { const presence = state.presence ? { ...state.presence, mode: "ghost" as const } : null; if (presence) { presence.context = compilePresenceContext(presence); state.presence = presence; state.presences = state.presences.map((item) => item.id === presence.id ? presence : item); } const file = state.files.find((item) => item.kind === "PRESENCE"); if (file && presence) file.content = fileContent("PRESENCE", { name: state.agent.name, description: state.agent.description, audience: state.agent.audience, mode: "ghost", handle: presence.handle, accent: state.agent.accent }); recordChangeSet(state, "Change Presence mode", [{ path: `presences.${state.presence?.id}.mode`, action: "update", after: "ghost" }], conversation.id); reply = "I updated this Presence to Ghost mode. I’ll extend the operator’s attention and judgment rather than pretending to be a different public speaker."; change = "Presence changed to Ghost"; }
       conversation.messages.push({ id: id("msg"), role: "agent", content: reply, timestamp: now(), change }); conversation.updatedAt = now(); state.events.unshift(event("decision", "A conversation with the operator", change ?? "Working context updated.", change ? "positive" : "neutral")); syncMessages(state); return state;
     }
     case "saveFile": { const file = state.files.find((item) => item.kind === operation.kind); if (!file || file.content === operation.content) return state; if (file.protected) { state.proposals.push(proposal(state, operation.kind, operation.content, "Protected meaning files are reviewed before they change.")); state.events.unshift(event("system", `${operation.kind}.md needs your review`, "A protected meaning change is waiting in Brain.", "warning")); } else { const before = file.content; file.content = operation.content; file.revision += 1; file.updatedAt = now(); recordChangeSet(state, `Update ${operation.kind}.md`, [{ path: `agentFiles.${operation.kind}`, action: "update", before, after: operation.content }]); state.events.unshift(event("learning", `${operation.kind}.md updated`, "The change was saved to the local agent state.", "positive")); } return state; }
-    case "resolveProposal": { const item = state.proposals.find((entry) => entry.id === operation.id); if (!item || item.status !== "pending") return state; item.status = operation.decision === "approve" ? "approved" : "rejected"; if (operation.decision === "approve") { const file = state.files.find((entry) => entry.kind === item.file); if (file) { file.content = item.proposed; file.revision += 1; file.updatedAt = now(); } state.events.unshift(event("system", `${item.file}.md approved`, "The protected meaning file was updated and versioned.", "positive")); } else state.events.unshift(event("system", `${item.file}.md proposal rejected`, "The current meaning stays unchanged.", "quiet")); return state; }
+    case "resolveProposal": { const item = state.proposals.find((entry) => entry.id === operation.id); if (!item || item.status !== "pending") return state; item.status = operation.decision === "approve" ? "approved" : "rejected"; if (operation.decision === "approve") { const file = state.files.find((entry) => entry.kind === item.file); if (file) { file.content = item.proposed; file.revision += 1; file.updatedAt = now(); } if (item.target?.type === "presence_identity") { const updated = state.presences.find((presence) => presence.id === item.target?.presenceId); if (updated) { const nextPresence = { ...updated, name: item.target.name, publicSelf: { ...updated.publicSelf, displayName: item.target.name } }; nextPresence.context = compilePresenceContext(nextPresence); state.presences = state.presences.map((presence) => presence.id === nextPresence.id ? nextPresence : presence); if (state.presence?.id === nextPresence.id) state.presence = nextPresence; } } state.events.unshift(event("system", `${item.file}.md approved`, "The protected meaning file and its Presence identity were updated and versioned.", "positive")); } else state.events.unshift(event("system", `${item.file}.md proposal rejected`, "The current meaning stays unchanged.", "quiet")); return state; }
     case "addSlot": { const targetPresence = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence; const slot = makeCalendarSlot(operation.instruction, targetPresence, operation.day, operation.time, operation.objective, operation.executionWindow); const standing = makeStandingIntent(state, slot.instruction, targetPresence, slot.day, slot.time, slot.objective, slot.executionWindow); slot.standingIntentId = standing.id; state.standingIntents.push(standing); state.calendar.push(slot); recordChangeSet(state, "Create standing intent", [{ path: "standingIntents", action: "create", after: standing.instruction }]); state.events.unshift(event("system", "Standing intention added", `${slot.label} · ${slot.day} at ${slot.time}.`, "positive")); return state; }
     case "editSlot": { const slot = state.calendar.find((item) => item.id === operation.id); if (!slot) return state; const targetPresence = state.presences.find((item) => item.id === slot.presence) ?? state.presence; const previous = { ...slot }; const scheduleChanged = previous.day !== operation.day || previous.time !== operation.time; slot.instruction = operation.instruction.trim() || slot.instruction; slot.label = slot.instruction.length > 34 ? `${slot.instruction.slice(0, 34).trim()}…` : slot.instruction; slot.day = operation.day; slot.time = operation.time; slot.objective = operation.objective; slot.executionWindow = operation.executionWindow; slot.mode = targetPresence?.execution.post ?? slot.mode; if (scheduleChanged) slot.lastEvaluatedAt = undefined; const standing = state.standingIntents.find((item) => item.id === slot.standingIntentId); if (standing) { const [startsAt, endsAt] = slot.executionWindow.split(/[–-]/).map((part) => part.trim()); standing.instruction = slot.instruction; standing.presenceId = targetPresence?.id; standing.trigger = { type: "schedule", config: { day: slot.day, time: slot.time } }; standing.objective = slot.objective; standing.executionWindow = { startsAt, endsAt: endsAt || startsAt }; standing.updatedAt = now(); } recordChangeSet(state, "Edit standing intent", [{ path: `calendar.${slot.id}`, action: "update", before: previous.instruction, after: slot.instruction }]); state.events.unshift(event("system", "Standing intention updated", `${slot.label} · ${slot.day} at ${slot.time}.`, "positive")); return state; }
     case "createSkill": { if (!state.agent || !operation.name.trim() || !operation.description.trim()) return state; const skillId = `${operation.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "skill"}-${Date.now().toString(36)}`; const skill = { id: skillId, name: operation.name.trim(), description: operation.description.trim(), channels: ["x", "linkedin"] as import("./types").ChannelId[], requiresTools: [], compatibleFormats: [] }; state.skills.push(skill); state.agentSkills.push({ id: id("agent-skill"), agentId: state.agent.id, skillId: skill.id, enabled: true }); state.events.unshift(event("learning", "Skill created", `${skill.name} is installed and enabled for ${state.agent.name}.`, "positive")); return state; }
     case "editSkill": { const skill = state.skills.find((item) => item.id === operation.id); if (!skill || !operation.name.trim() || !operation.description.trim()) return state; const previous = { name: skill.name, description: skill.description }; skill.name = operation.name.trim(); skill.description = operation.description.trim(); state.events.unshift(event("learning", "Skill updated", `${skill.name} instruction prompt updated.`, "positive")); recordChangeSet(state, "Edit skill", [{ path: `skills.${skill.id}`, action: "update", before: previous.description, after: skill.description }]); return state; }
     case "configureProvider": { if (!state.agent) return state; const name = providerName(operation.provider); const existing = state.providerConnections.find((item) => item.provider === operation.provider); const status = operation.provider === "ollama" ? "local" as const : "available" as const; if (existing) { existing.label = name; existing.status = status; existing.endpoint = operation.endpoint?.trim() || existing.endpoint; existing.secretConfigured = operation.hasSecret || existing.secretConfigured; } else state.providerConnections.push({ id: id("connection"), provider: operation.provider, label: name, status, endpoint: operation.endpoint?.trim() || undefined, secretConfigured: operation.hasSecret, createdAt: now() }); state.events.unshift(event("system", `${name} connected`, operation.provider === "ollama" ? "Local models are ready to use." : "Provider access is configured for this Agent.", "positive")); return state; }
+    case "configureAssetProvider": { if (!state.agent) return state; const existing = state.assetProviderConnections.find((item) => item.provider === operation.provider); if (existing) { existing.label = operation.label.trim(); existing.status = operation.hasSecret ? "available" : existing.status; existing.secretConfigured = operation.hasSecret || existing.secretConfigured; } else state.assetProviderConnections.push({ id: id("asset-connection"), provider: operation.provider, label: operation.label.trim(), status: operation.hasSecret ? "available" : "needs-configuration", secretConfigured: operation.hasSecret, createdAt: now() }); state.events.unshift(event("system", `${operation.label.trim()} connected`, "Asset discovery is ready for operator-approved source research.", "positive")); return state; }
+    case "disconnectAssetProvider": { const connection = state.assetProviderConnections.find((item) => item.provider === operation.provider); if (connection) { state.assetProviderConnections = state.assetProviderConnections.filter((item) => item.id !== connection.id); state.events.unshift(event("system", `${connection.label} disconnected`, "Asset discovery will ask for setup before searching again.", "quiet")); } return state; }
     case "runSlot": { const slot = state.calendar.find((item) => item.id === operation.id); if (!slot) return state; const standing = state.standingIntents.find((item) => item.id === slot.standingIntentId) ?? makeStandingIntent(state, slot.instruction, state.presence, slot.day, slot.time, slot.objective, slot.executionWindow); addSocialEvaluation(state, standing, slot); return state; }
     case "confirmAutoMode": return confirmAutoMode(state, operation.presenceId, operation.capabilities, operation.executionIds);
     case "approveExecution": { const execution = state.executions.find((item) => item.id === operation.id); if (execution?.status === "awaiting-review") { execution.status = execution.bridgeId ? "approved" : "approved"; execution.updatedAt = now(); state.events.unshift(event("execution", "Approved for execution", "The operator approved this social action; it remains separate from Jenny's judgment.", "positive", { executionId: execution.id })); } return state; }
@@ -1767,7 +2082,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     case "recordPreferenceEvidence": return state;
     case "approveSandboxIntroduction":
     case "declineSandboxIntroduction": return state;
-    case "setPresence": { if (state.presence) { const patch = operation.patch as typeof operation.patch & { publicSelf?: PublicSelf }; const requestedConnectionMode = patch.connectionMode ?? state.presence.connectionMode ?? (state.presence.environment === "sandbox" ? "sandbox" : state.presence.channel === "x" ? "native" : "bridge"); const connectionMode = requestedConnectionMode === "native" && state.presence.channel !== "x" ? "bridge" as const : requestedConnectionMode; const name = patch.name?.trim() || state.presence.name; const mode = patch.mode ?? state.presence.mode; const posture = patch.publicSelf?.posture ?? state.presence.publicSelf?.posture; const compatiblePostures = mode === "ghost" ? ["representational", "open-about-assistance"] : ["contextual", "ai-forward", "private"]; const publicSelf = { ...(patch.publicSelf ?? state.presence.publicSelf ?? defaultPublicSelf(name, mode)), displayName: name, posture: compatiblePostures.includes(posture as never) ? posture! : defaultPublicSelf(name, mode).posture }; const mediaPerceptionPolicy = patch.mediaPerceptionPolicy ?? state.presence.mediaPerceptionPolicy ?? (mode === "ghost" ? "review-uncertain" as const : "use-judgment" as const); const updated = { ...state.presence, ...patch, mediaPerceptionPolicy, publicSelf, connectionMode, environment: connectionMode === "sandbox" ? "sandbox" as const : "live" as const, name, mode, ghostProfile: patch.ghostProfile ?? state.presence.ghostProfile ?? (mode === "ghost" ? defaultGhostProfile() : undefined), execution: patch.execution ? { ...state.presence.execution, ...patch.execution } : state.presence.execution }; updated.executionEnvelope = { ...state.presence.executionEnvelope, affordances: Object.fromEntries(channelCapabilities(state, updated.channel).map((item) => [item.id, { mode: updated.execution[item.id] ?? "off" }])) }; updated.context = compilePresenceContext(updated); if (patch.brief) recordChangeSet(state, "Update Presence Brief", [{ path: `presences.${updated.id}.brief`, action: "update", before: state.presence.brief as unknown as JsonValue, after: updated.brief as unknown as JsonValue }]); state.presence = updated; state.presences = state.presences.map((item) => item.id === updated.id ? updated : item); const presenceFile = state.files.find((file) => file.kind === "PRESENCE"); if (presenceFile && state.agent) { presenceFile.content = fileContent("PRESENCE", { name: state.agent.name, description: state.agent.description, audience: state.agent.audience, mode, handle: updated.handle, accent: state.agent.accent }, updated); presenceFile.revision += 1; presenceFile.updatedAt = now(); } } state.events.unshift(event("system", "Presence settings updated", state.presence?.status === "paused" ? "All external actions are paused." : "The new execution envelope is active.", state.presence?.status === "paused" ? "warning" : "positive", { presenceId: state.presence?.id })); return state; }
+    case "setPresence": { if (state.presence) { const patch = operation.patch as typeof operation.patch & { publicSelf?: PublicSelf }; const requestedConnectionMode = patch.connectionMode ?? state.presence.connectionMode ?? (state.presence.environment === "sandbox" ? "sandbox" : state.presence.channel === "x" ? "native" : "bridge"); const connectionMode = requestedConnectionMode === "native" && state.presence.channel !== "x" ? "bridge" as const : requestedConnectionMode; const name = patch.name?.trim() || state.presence.name; const mode = patch.mode ?? state.presence.mode; const posture = patch.publicSelf?.posture ?? state.presence.publicSelf?.posture; const compatiblePostures = mode === "ghost" ? ["representational", "open-about-assistance"] : ["contextual", "ai-forward", "private"]; const publicSelf = { ...(patch.publicSelf ?? state.presence.publicSelf ?? defaultPublicSelf(name, mode)), displayName: name, posture: compatiblePostures.includes(posture as never) ? posture! : defaultPublicSelf(name, mode).posture }; const mediaPerceptionPolicy = patch.mediaPerceptionPolicy ?? state.presence.mediaPerceptionPolicy ?? (mode === "ghost" ? "review-uncertain" as const : "use-judgment" as const); const ghostProfile = normalizeGhostProfile(patch.ghostProfile ?? state.presence.ghostProfile ?? (mode === "ghost" ? defaultGhostProfile() : undefined)); const updated = { ...state.presence, ...patch, mediaPerceptionPolicy, publicSelf, connectionMode, environment: connectionMode === "sandbox" ? "sandbox" as const : "live" as const, name, mode, ghostProfile, execution: patch.execution ? { ...state.presence.execution, ...patch.execution } : state.presence.execution }; updated.executionEnvelope = { ...state.presence.executionEnvelope, affordances: Object.fromEntries(channelCapabilities(state, updated.channel).map((item) => [item.id, { mode: updated.execution[item.id] ?? "off" }])) }; updated.context = compilePresenceContext(updated); if (patch.brief) recordChangeSet(state, "Update Presence Brief", [{ path: `presences.${updated.id}.brief`, action: "update", before: state.presence.brief as unknown as JsonValue, after: updated.brief as unknown as JsonValue }]); state.presence = updated; state.presences = state.presences.map((item) => item.id === updated.id ? updated : item); const presenceFile = state.files.find((file) => file.kind === "PRESENCE"); if (presenceFile && state.agent) { presenceFile.content = fileContent("PRESENCE", { name: state.agent.name, description: state.agent.description, audience: state.agent.audience, mode, handle: updated.handle, accent: state.agent.accent }, updated); presenceFile.revision += 1; presenceFile.updatedAt = now(); } } state.events.unshift(event("system", "Presence settings updated", state.presence?.status === "paused" ? "All external actions are paused." : "The new execution envelope is active.", state.presence?.status === "paused" ? "warning" : "positive", { presenceId: state.presence?.id })); return state; }
   }
   return state;
 }

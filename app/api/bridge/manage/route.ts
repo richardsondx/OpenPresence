@@ -1,7 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createBridgeWithKey, removeBridge, rotateBridgeKey, revokeBridge } from "@/lib/bridge";
-import { readState } from "@/lib/db";
+import { readState, WorkspaceConflictError } from "@/lib/db";
 import { stateForContext } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
@@ -11,13 +11,19 @@ const input = z.discriminatedUnion("action", [z.object({ action: z.literal("crea
 export async function POST(request: Request) {
   try {
     const parsed = input.parse(await request.json());
-    const state = stateForContext(readState(), {
+    const context = {
       agentId: request.headers.get("x-openpresence-agent-id"),
       presenceId: request.headers.get("x-openpresence-presence-id"),
-    });
+    };
+    const state = stateForContext(readState(), context);
+    const revision = request.headers.get("x-openpresence-workspace-revision");
+    if (revision && /^\d+$/.test(revision)) state.workspaceRevision = Number(revision);
     if (parsed.action === "create") { const result = createBridgeWithKey(state, { type: "createBridge", input: parsed }); return NextResponse.json({ state: result.state, bridge: result.bridge, key: result.key }); }
     if (parsed.action === "rotate") { const result = rotateBridgeKey(state, parsed.bridgeId); return NextResponse.json({ state: result.state, key: result.key }); }
     if (parsed.action === "remove") return NextResponse.json({ state: removeBridge(state, parsed.bridgeId) });
     return NextResponse.json({ state: revokeBridge(state, parsed.bridgeId) });
-  } catch (error) { return NextResponse.json({ error: error instanceof Error ? error.message : "Bridge change could not be saved." }, { status: 400 }); }
+  } catch (error) {
+    if (error instanceof WorkspaceConflictError) return NextResponse.json({ error: error.message, conflict: true, state: stateForContext(readState(), { agentId: request.headers.get("x-openpresence-agent-id"), presenceId: request.headers.get("x-openpresence-presence-id") }) }, { status: error.status });
+    return NextResponse.json({ error: error instanceof Error ? error.message : "Bridge change could not be saved." }, { status: 400 });
+  }
 }

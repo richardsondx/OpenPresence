@@ -40,6 +40,16 @@ Language rules belong at the Expression and final-validation boundary, across Sa
 
 An OpenPresence Agent should be able to notice what is happening, decide what matters, choose whether to act or remain silent, express itself in the format best suited to the moment, remember people and relationships, and learn how to grow without losing its identity.
 
+### Visual evidence is an editorial judgment
+
+Search results are possibilities, not evidence. An asset earns its place by
+helping the audience see what the Agent means. Discovery metadata, filenames,
+OG images, and publisher reputation are search leads, not visual truth. The
+runtime must fetch original media, inspect the actual candidate pixels, retain
+source lineage, and make a bounded editorial choice: select, search again,
+render from grounded structured evidence, use text only, or replan. The final
+words and visual are reviewed together as one public act.
+
 ---
 
 ## 2. Mission
@@ -446,6 +456,28 @@ Examples:
 
 Folders are Sources, not Assets.
 
+An asset is evidence and expression, not decoration. The raw asset is evidence; perception is interpretation. The runtime preserves a canonical Asset Ledger for what media exists, where it came from, what was observed about it, how it was transformed, and where it was published. The Agent should remember what it has shown, not only what it has said.
+
+Discovery supplies candidates. Judgment chooses among them. The Agent may begin with an idea and seek evidence, or encounter a chart, image, video, or other media object and discover that it has something worth saying. Both are legitimate forms of original thought. A source URL is provenance, not verification, and an asset's existence does not prove that every claim in a publication is grounded.
+
+The runtime keeps separate:
+
+- **Source evidence:** where information came from, including publisher, page, date, and retrieval facts;
+- **Perception:** what the stored bytes appear to contain or mean;
+- **Claim grounding:** whether evidence supports a factual claim, or whether grounding is not applicable;
+- **Rights and authority:** whether the asset may be used under the operator's policy;
+- **Taste and planning:** whether the asset is good, relevant, and worth using.
+
+Unverified is not the same as intentionally fictional. Factual and analytical expression may require grounding; satire, parody, fiction, humor, and entertainment may intentionally invent. The runtime must still truthfully record whether media was observed, generated, edited, or composited, and must not erase provenance, rights, Channel rules, or execution authority. Truthfulness in the runtime does not require literalism in the art.
+
+Asset history is part of Agent competence. Exact identity, perceptual similarity, source identity, lineage, previous use, timestamps, Presence, Assignment, and observed outcomes are deterministic facts. Reuse should be deliberate, not an accidental consequence of limited options. A crop, resize, annotation, or render remains linked to its parent. There is no universal reuse cooldown: the Agent decides whether new data, a correction, follow-up, comparison, retrospective, or another meaningful reason warrants repurposing.
+
+Asset discovery is provider-independent. Tavily or another provider may retrieve candidates, but provider relevance is not trust or factual verification. Stronger tools and stronger future models should improve judgment without site-specific rewrites. The AssetStore persists immutable bytes; Sandbox, native, and Bridge paths consume the same Asset and Publication contract. Feed shows the verified public or simulated history, while Activity shows meaningful work such as comparing sources, inspecting media, checking prior visual history, and preparing delivery—not low-level requests.
+
+Evidence-led visual storytelling is a general capability, not a benchmark-specific template. When an expression depends on evidence, the Agent may form a StoryCandidate with a concrete trigger, why-now context, claim, Evidence Need, and Visual Brief. The Visual Brief describes the role an asset should perform; it does not prescribe one universal medium. A chart may fit a market claim, a photograph may fit a physical event, a screenshot may fit a product change, a document excerpt may fit a policy claim, or no asset may be the honest choice. Runtime fit checks compare a candidate with that contextual brief and must not encode that charts are always good, logos are always bad, or one source family is always preferred.
+
+Reference accounts are diagnostic examples, not generic specifications. Improve the Agent's ability to notice and understand evidence, then let Mission, Taste, Presence, Skills, and the observed world determine the expression. Generic runtime changes motivated by one Presence should be tested across substantially different Presence archetypes and counterfactual visual roles before they are treated as platform-wide improvements.
+
 ---
 
 ## 10. Publication parity
@@ -614,6 +646,8 @@ OpenPresence also distinguishes delegated responsibility from an opportunity for
 An Assignment remains active until it is completed, cancelled, blocked, or expires incomplete. Taste still protects the quality floor: “this candidate is not good enough” means reject the candidate and keep working, not publish filler and not silently complete the Assignment. Silence remains a valid social action, but it is not completion of an explicit Assignment.
 
 Assignments preserve the separation between intent, execution, delivery, and outcome. Only a verified world outcome, such as an authored publication observed in the Sandbox Social Mirror or live Mirror, advances progress. A draft, model response, Social Intent, or attempted delivery does not. Model failure and delivery failure are operational failures, never evidence that the Agent chose silence.
+
+Assignment fulfillment is persistent goal pursuit with bounded effort. A candidate rejection is recorded as candidate-level judgment, then the runtime may return to research and form a materially different candidate with the temporary rejection context available. For evidence-led work, story research, visual research, and final joint publication review are separate stages. The Assignment ends only with a verified deliverable, an explicit blocked result after the available evidence or effort is exhausted, or operator cancellation.
 
 ---
 

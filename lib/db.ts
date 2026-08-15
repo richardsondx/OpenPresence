@@ -18,8 +18,10 @@ const db = drizzle(sqlite);
 // migrations, and future queries. All mutations still pass through writeState.
 db.run(sql`CREATE TABLE IF NOT EXISTS app_state (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 sqlite.exec("CREATE TABLE IF NOT EXISTS agent_workspaces (agent_id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at TEXT NOT NULL)");
+sqlite.exec("CREATE TABLE IF NOT EXISTS agent_workspace_revisions (agent_id TEXT PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL)");
+sqlite.exec("INSERT INTO agent_workspace_revisions (agent_id, revision, updated_at) SELECT agent_id, 0, updated_at FROM agent_workspaces WHERE agent_id NOT IN (SELECT agent_id FROM agent_workspace_revisions)");
 const normalizedTables = [
-  "agents", "agent_files", "provider_connections", "agent_model_profiles", "agent_tool_bindings", "presences", "execution_envelopes", "conversations", "presence_chat_sessions", "messages", "change_sets", "standing_intents", "social_intents", "executions", "outcomes", "publications", "library_sources", "assets", "skills", "agent_skills", "content_drops", "channel_definitions", "native_channel_connections", "bridges", "mirror_objects", "mirror_events", "bridge_sync", "scenarios", "scenario_versions", "scenario_runs", "scenario_run_provenance", "scenario_evaluations",
+  "agents", "agent_files", "provider_connections", "asset_provider_connections", "agent_model_profiles", "agent_tool_bindings", "presences", "execution_envelopes", "conversations", "presence_chat_sessions", "messages", "change_sets", "standing_intents", "social_intents", "executions", "outcomes", "publications", "asset_usages", "source_evidence", "claim_grounding", "library_sources", "assets", "skills", "agent_skills", "content_drops", "channel_definitions", "native_channel_connections", "bridges", "mirror_objects", "mirror_events", "bridge_sync", "scenarios", "scenario_versions", "scenario_runs", "scenario_run_provenance", "scenario_evaluations",
 ];
 for (const table of normalizedTables) {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY, agent_id TEXT, parent_id TEXT, payload TEXT NOT NULL, updated_at TEXT NOT NULL)`);
@@ -51,15 +53,17 @@ function snapshotWorkspace(state: OpenPresenceState): AgentWorkspaceSnapshot {
 function hydrateAgentWorkspaces(state: OpenPresenceState): OpenPresenceState {
   const rows = sqlite.prepare("SELECT agent_id, payload FROM agent_workspaces").all() as Array<{ agent_id: string; payload: string }>;
   if (!rows.length) return state;
+  const revisionRows = sqlite.prepare("SELECT agent_id, revision FROM agent_workspace_revisions").all() as Array<{ agent_id: string; revision: number }>;
+  const revisions = new Map(revisionRows.map((row) => [row.agent_id, row.revision]));
   const stored = new Map<string, AgentWorkspaceSnapshot>();
   for (const row of rows) {
-    try { stored.set(row.agent_id, JSON.parse(row.payload) as AgentWorkspaceSnapshot); } catch { /* retain the compatibility snapshot below */ }
+    try { stored.set(row.agent_id, { ...(JSON.parse(row.payload) as AgentWorkspaceSnapshot), workspaceRevision: revisions.get(row.agent_id) ?? 0 }); } catch { /* retain the compatibility snapshot below */ }
   }
   const snapshots = state.agentWorkspaces.map((workspace) => workspace.agent?.id ? stored.get(workspace.agent.id) ?? workspace : workspace);
   for (const workspace of stored.values()) {
     if (workspace.agent?.id && workspace.agent.id !== state.activeAgentId && !snapshots.some((item) => item.agent?.id === workspace.agent?.id)) snapshots.push(workspace);
   }
-  return { ...state, agentWorkspaces: snapshots };
+  return { ...state, workspaceRevision: state.activeAgentId ? revisions.get(state.activeAgentId) ?? state.workspaceRevision ?? 0 : state.workspaceRevision, agentWorkspaces: snapshots };
 }
 
 export function readState(): OpenPresenceState {
@@ -76,12 +80,41 @@ export function readStateForAgent(agentId?: string | null): OpenPresenceState {
   return stateForAgent(readState(), agentId);
 }
 
+/** Resolve connector work from its durable Presence/Agent owner, never from the active projection. */
+export function readStateForBridge(bridgeId: string): OpenPresenceState {
+  const state = readState();
+  if (state.bridges.some((bridge) => bridge.id === bridgeId)) return state;
+  for (const workspace of state.agentWorkspaces) {
+    if (workspace.bridges.some((bridge) => bridge.id === bridgeId) && workspace.agent?.id) return stateForAgent(state, workspace.agent.id);
+  }
+  return state;
+}
+
+/** Resolve an immutable asset from its durable Agent workspace, not the active tab projection. */
+export function readStateForAsset(assetId: string): OpenPresenceState {
+  const state = readState();
+  if (state.assets.some((asset) => asset.id === assetId)) return state;
+  for (const workspace of state.agentWorkspaces) {
+    if (workspace.assets.some((asset) => asset.id === assetId) && workspace.agent?.id) return stateForAgent(state, workspace.agent.id);
+  }
+  return state;
+}
+
+export class WorkspaceConflictError extends Error {
+  readonly status = 409;
+  constructor(readonly agentId: string, readonly expectedRevision: number, readonly actualRevision: number) {
+    super("This Agent workspace changed in another tab or worker. Refreshing this context is required before applying the change.");
+    this.name = "WorkspaceConflictError";
+  }
+}
+
 function entityRows(state: OpenPresenceState): Record<string, { id: string; agentId?: string; parentId?: string; payload: unknown }[]> {
   const agentId = state.agent?.id;
   return {
     agents: state.agents.map((agent) => ({ id: agent.id, agentId: agent.id, payload: agent })),
     agent_files: state.files.map((item) => ({ id: `${agentId ?? "agent"}:${item.kind}`, agentId, payload: item })),
     provider_connections: state.providerConnections.map((item) => ({ id: item.id, payload: item })),
+    asset_provider_connections: state.assetProviderConnections.map((item) => ({ id: item.id, agentId, payload: item })),
     agent_model_profiles: state.modelProfiles.map((item) => ({ id: item.id, agentId: item.agentId, payload: item })),
     agent_tool_bindings: state.toolBindings.map((item) => ({ id: item.id, agentId: item.agentId, payload: item })),
     presences: state.presences.map((item) => ({ id: item.id, agentId, payload: item })),
@@ -95,6 +128,9 @@ function entityRows(state: OpenPresenceState): Record<string, { id: string; agen
     executions: state.executions.map((item) => ({ id: item.id, parentId: item.socialIntentId, payload: item })),
     outcomes: state.outcomes.map((item) => ({ id: item.id, parentId: item.executionId ?? item.socialIntentId, payload: item })),
     publications: state.publications.map((item) => ({ id: item.id, agentId, payload: item })),
+    asset_usages: state.assetUsages.map((item) => ({ id: item.id, agentId: item.agentId, parentId: item.assetId, payload: item })),
+    source_evidence: state.sourceEvidence.map((item) => ({ id: item.id, payload: item })),
+    claim_grounding: state.claimGrounding.map((item) => ({ id: item.id, parentId: item.publicationId, payload: item })),
     library_sources: state.librarySources.map((item) => ({ id: item.id, agentId: item.agentId, payload: item })),
     assets: state.assets.map((item) => ({ id: item.id, agentId: item.agentId, payload: item })),
     skills: state.skills.map((item) => ({ id: item.id, payload: item })),
@@ -146,18 +182,30 @@ function writeNormalized(state: OpenPresenceState) {
 
 export function writeState(state: OpenPresenceState) {
   const normalized = normalizeState(state);
-  sqlite.prepare("INSERT INTO app_state (id, payload, updated_at) VALUES (1, ?, datetime('now')) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at").run(JSON.stringify(normalized));
-  const timestamp = new Date().toISOString();
-  // A request mutates only its explicitly materialized Agent. Updating every
-  // snapshot here would let a concurrent tab write an older copy of another
-  // Agent back over that Agent's newer workspace.
-  const snapshots = normalized.agent ? [snapshotWorkspace(normalized)] : [];
-  const workspaceTransaction = sqlite.transaction(() => {
-    if (!snapshots.length) sqlite.prepare("DELETE FROM agent_workspaces").run();
-    const upsert = sqlite.prepare("INSERT INTO agent_workspaces (agent_id, payload, updated_at) VALUES (?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at");
-    for (const workspace of snapshots) if (workspace.agent?.id) upsert.run(workspace.agent.id, JSON.stringify(workspace), timestamp);
-  });
-  workspaceTransaction();
+  const agentId = normalized.agent?.id;
+  const expectedRevision = typeof state.workspaceRevision === "number" ? state.workspaceRevision : undefined;
+  const persistedAt = new Date().toISOString();
+  sqlite.transaction(() => {
+    let actualRevision = 0;
+    if (agentId) {
+      sqlite.prepare("INSERT OR IGNORE INTO agent_workspace_revisions (agent_id, revision, updated_at) VALUES (?, 0, ?)").run(agentId, persistedAt);
+      actualRevision = ((sqlite.prepare("SELECT revision FROM agent_workspace_revisions WHERE agent_id = ?").get(agentId) as { revision?: number } | undefined)?.revision ?? 0);
+      if (expectedRevision !== undefined && expectedRevision !== actualRevision) throw new WorkspaceConflictError(agentId, expectedRevision, actualRevision);
+      normalized.workspaceRevision = actualRevision + 1;
+    }
+    sqlite.prepare("INSERT INTO app_state (id, payload, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at").run(JSON.stringify(normalized), persistedAt);
+    if (!agentId) {
+      sqlite.prepare("DELETE FROM agent_workspaces").run();
+      sqlite.prepare("DELETE FROM agent_workspace_revisions").run();
+    } else {
+      const snapshot = snapshotWorkspace(normalized);
+      sqlite.prepare("INSERT INTO agent_workspaces (agent_id, payload, updated_at) VALUES (?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at").run(agentId, JSON.stringify(snapshot), persistedAt);
+      sqlite.prepare("INSERT INTO agent_workspace_revisions (agent_id, revision, updated_at) VALUES (?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET revision = excluded.revision, updated_at = excluded.updated_at").run(agentId, normalized.workspaceRevision, persistedAt);
+    }
+  })();
+  // Keep direct in-process callers aligned with the durable token as well;
+  // API callers still receive the same token in the JSON response/header.
+  state.workspaceRevision = normalized.workspaceRevision;
   writeNormalized(normalized);
 }
 
@@ -221,4 +269,5 @@ export function readProviderSecret(connectionId: string) {
   const row = sqlite.prepare("SELECT ciphertext, iv, auth_tag FROM provider_credentials WHERE connection_id = ?").get(connectionId) as { ciphertext: string; iv: string; auth_tag: string } | undefined;
   return row ? decryptSecret(row).secret : undefined;
 }
+export function deleteProviderSecret(connectionId: string) { sqlite.prepare("DELETE FROM provider_credentials WHERE connection_id = ?").run(connectionId); }
 export { authenticateBridgeKey, issueBridgeKey, revokeBridgeKey };

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addSandboxEvent, applyOperation, assignmentIsSatisfied, cleanSandboxDraft, compileAssignmentInstruction, compilePresenceContext, compileWatch, createAgent, deliverSandboxExecution, deriveActivitySummary, derivePublicHistory, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, identityLeakageReason, initialState, isActivityDecisionEvent, isExplicitGhostModeRequest, isExplicitXPostRequest, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, recordPublicFooting, recordStandingIntentNoOp, startPlaygroundSession } from "../lib/runtime";
+import { addSandboxEvent, applyOperation, assignmentIsSatisfied, cleanSandboxDraft, compileAssignmentInstruction, compilePresenceContext, compileWatch, createAgent, deliverSandboxExecution, deriveActivitySummary, derivePublicHistory, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, identityLeakageReason, inferExplicitDurableContext, inferPresenceIdentityChange, initialState, isActivityDecisionEvent, isExplicitGhostModeRequest, isExplicitXPostRequest, isTeachProposalConfirmation, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, recordPublicFooting, recordStandingIntentNoOp, startPlaygroundSession } from "../lib/runtime";
 import { acknowledgeExecution, claimExecutions, createBridgeWithKey, heartbeatBridge, ingestEvents, removeBridge, revokeBridge } from "../lib/bridge";
 import { readBridgeCredentialMetadata, readState, writeState } from "../lib/db";
 import { nextObservationAt } from "../lib/native-x";
@@ -135,12 +135,67 @@ describe("OpenPresence runtime boundaries", () => {
     expect(next.toolBindings.find((binding) => binding.toolId === "asset.inspect")).toMatchObject({ provider: "ollama", model: "qwen3-vl:8b", connectionId: "local-ollama" });
   });
 
+  it("toggles coherent Agent capabilities without creating an Agent-level channel authority", () => {
+    const state = createAgent(input);
+    const disabled = applyOperation(state, { type: "setCapability", capabilityId: "research", enabled: false });
+    expect(disabled.toolBindings.find((binding) => binding.toolId === "web.search")).toMatchObject({ enabled: false });
+    expect(disabled.toolBindings.find((binding) => binding.toolId === "channel.execute")).toMatchObject({ enabled: true });
+    const ignored = applyOperation(state, { type: "setCapability", capabilityId: "channel-action", enabled: false });
+    expect(ignored.toolBindings.find((binding) => binding.toolId === "channel.execute")).toMatchObject({ enabled: true });
+  });
+
   it("creates a proposal instead of silently mutating protected identity", () => {
     const state = createAgent(input);
     const original = state.files.find((file) => file.kind === "TASTE")?.content;
     const next = applyOperation(state, { type: "saveFile", kind: "TASTE", content: "# A new taste" });
     expect(next.files.find((file) => file.kind === "TASTE")?.content).toBe(original);
     expect(next.proposals[0]?.status).toBe("pending");
+  });
+
+  it("submits explicit Presence identity instructions and applies them only after review", () => {
+    const state = createAgent(input);
+    const instruction = `You are NOT "I'm Jenny — @jenny_ai." You are "Jenny". Your full name is "Jenny Presence".`;
+    expect(inferPresenceIdentityChange(instruction, state.presence!)).toEqual({ name: "Jenny Presence" });
+
+    const proposed = applyOperation(state, { type: "sendMessage", content: instruction });
+    expect(proposed.proposals[0]).toMatchObject({ status: "pending", file: "PRESENCE", target: { type: "presence_identity", name: "Jenny Presence" } });
+    expect(proposed.presence?.name).toBe("Jenny");
+    expect(proposed.conversations[0]?.messages.at(-1)?.content).toContain("submitted a Presence identity change");
+
+    const applied = applyOperation(proposed, { type: "resolveProposal", id: proposed.proposals[0]!.id, decision: "approve" });
+    expect(applied.presence?.name).toBe("Jenny Presence");
+    expect(applied.presence?.publicSelf.displayName).toBe("Jenny Presence");
+  });
+
+  it("asks once, then creates a real Mind File proposal when the operator confirms durable context", () => {
+    const state = createAgent(input);
+    const claim = "Alex Rivera built Jenny in his OpenPresence app.";
+    const waiting = applyOperation(state, { type: "sendMessage", content: claim });
+    expect(waiting.proposals).toHaveLength(0);
+    expect(waiting.conversations[0]?.messages.at(-1)?.content).toContain("Should I submit it as a reviewable proposal?");
+    expect(waiting.conversations[0]?.messages.at(-1)?.change).toBe("Teach confirmation requested");
+    expect(isTeachProposalConfirmation("yes submit it as proposal")).toBe(true);
+
+    const confirmed = applyOperation(waiting, { type: "sendMessage", content: "yes submit it as proposal" });
+    expect(confirmed.proposals[0]).toMatchObject({ file: "MEMORY", status: "pending" });
+    expect(confirmed.proposals[0]?.proposed).toContain("Alex Rivera built Jenny in his OpenPresence app");
+    expect(confirmed.changeSets[0]?.summary).toBe("Propose MEMORY.md change");
+    expect(confirmed.files.find((file) => file.kind === "MEMORY")?.content).not.toContain(claim);
+    expect(confirmed.conversations[0]?.messages.at(-1)?.content).toContain("reviewable proposal");
+  });
+
+  it("submits explicit memory instructions and applies simple chat settings", () => {
+    expect(inferExplicitDurableContext("Remember that Jenny was built for thoughtful agent builders.")).toBe("Jenny was built for thoughtful agent builders");
+    const state = createAgent(input);
+    const remembered = applyOperation(state, { type: "sendMessage", content: "Remember that Jenny was built for thoughtful agent builders." });
+    expect(remembered.proposals[0]?.file).toBe("MEMORY");
+
+    const focused = applyOperation(createAgent(input), { type: "sendMessage", content: "Focus on AI founders." });
+    expect(focused.presence?.brief.primaryTerritory).toEqual(["AI founders"]);
+
+    const configured = applyOperation(createAgent(input), { type: "sendMessage", content: "Set replies to manual." });
+    expect(configured.presence?.execution.reply).toBe("manual");
+    expect(configured.conversations[0]?.messages.at(-1)?.content).toContain("replies");
   });
 
   it("allows curated learning files to update directly", () => {
@@ -515,8 +570,10 @@ describe("OpenPresence runtime boundaries", () => {
     const ghost = applyOperation(state, { type: "setPresence", patch: { mode: "ghost" } });
     expect(ghost.presence?.ghostProfile?.subject).toBe("Me / my organization");
     expect(ghost.presence?.context.ghostProfile?.priorities).toBe("");
-    const configured = applyOperation(ghost, { type: "setPresence", patch: { ghostProfile: { subject: "Alex Rivera", priorities: "Build trustworthy open-source AI products.", preferences: "Prefer clear evidence and useful depth over hype.", voice: "Warm, direct, and technically sharp.", boundaries: "Never invent my views or disclose private community context." } } });
+    const configured = applyOperation(ghost, { type: "setPresence", patch: { ghostProfile: { subject: "Alex Rivera", representation: { kind: "individual", individual: { firstName: "Alex", middleName: "", lastName: "Rivera" }, organization: { name: "", website: "" } }, priorities: "Build trustworthy open-source AI products.", preferences: "Prefer clear evidence and useful depth over hype.", voice: "Warm, direct, and technically sharp.", boundaries: "Never invent my views or disclose private community context." } } });
     expect(configured.presence?.ghostProfile?.subject).toBe("Alex Rivera");
+    expect(configured.presence?.ghostProfile?.representation?.individual.firstName).toBe("Alex");
+    expect(configured.presence?.ghostProfile?.representation?.individual.lastName).toBe("Rivera");
     expect(configured.presence?.context.ghostProfile?.boundaries).toContain("private community");
     expect(configured.files.find((file) => file.kind === "SOUL")?.content).toBe(originalSoul);
     const agentOwned = applyOperation(configured, { type: "setPresence", patch: { mode: "agent" } });
@@ -545,6 +602,9 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.presence?.name).toBe("Jenny in Founders");
     expect(state.presence?.handle).toBe(originalHandle);
     expect(state.presence?.context.publicIdentity.displayName).toBe("Jenny in Founders");
+    state = applyOperation(state, { type: "setPresence", patch: { handle: "@genny" } });
+    expect(state.presence?.handle).toBe("@genny");
+    expect(state.presence?.context.publicIdentity.handle).toBe("@genny");
     state = applyOperation(state, { type: "renameAgent", name: "Juno" });
     expect(state.agent?.name).toBe("Juno");
     expect(state.agents[0]?.name).toBe("Juno");
@@ -661,6 +721,33 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.proposals[0]?.proposed).toContain("Replies can use normal paragraph formatting.");
     expect(state.conversations[0]?.messages.at(-1)?.content).toContain("one sentence per paragraph");
     expect(state.changeSets[0]?.summary).toBe("Propose TASTE.md change");
+  });
+
+  it("routes personality-style social guidance to a reviewable TASTE.md proposal", () => {
+    const state = applyOperation(createAgent(input), {
+      type: "sendMessage",
+      content: "The agent should be more curious, helpful, and inquisitive. Sometimes ask a genuine question to deepen engagement, and acknowledge something genuinely strong so people feel encouraged, but do not praise by default.",
+    });
+    const taste = state.files.find((file) => file.kind === "TASTE");
+    expect(state.proposals).toHaveLength(1);
+    expect(state.proposals[0]).toMatchObject({ file: "TASTE", status: "pending", title: "Update TASTE.md" });
+    expect(taste?.content).not.toContain("## Curiosity and encouragement");
+    expect(state.proposals[0]?.proposed).toContain("## Curiosity and encouragement");
+    expect(state.proposals[0]?.reason).toContain("Manage Agent");
+    expect(state.conversations[0]?.messages.at(-1)?.content).toContain("TASTE.md");
+    expect(state.conversations[0]?.messages.at(-1)?.change).toBe("Taste proposal created");
+  });
+
+  it("turns a follow-up request to propose the rule into the existing Taste proposal", () => {
+    let state = applyOperation(createAgent(input), {
+      type: "sendMessage",
+      content: "Be more curious and ask genuine questions when they can help someone think further. Encourage people selectively when they share something meaningful.",
+    });
+    state = applyOperation(state, { type: "sendMessage", content: "propose the rule" });
+    expect(state.proposals).toHaveLength(1);
+    expect(state.proposals[0]?.status).toBe("pending");
+    expect(state.conversations[0]?.messages.at(-1)?.content).toContain("submitted the rule");
+    expect(state.conversations[0]?.messages.at(-1)?.change).toBe("Taste proposal created");
   });
 
   it("keeps operator embodiment out of the cognition-safe PresenceContext", () => {

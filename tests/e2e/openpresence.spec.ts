@@ -243,6 +243,25 @@ test("Teach is the operator-facing surface for durable Agent changes", async ({ 
   await expect(navigation.getByRole("button", { name: /^Teach$/ })).toHaveClass(/active/);
 });
 
+test("Teach confirms and submits an operator-provided context proposal", async ({ page, request }) => {
+  test.skip(test.info().project.name === "mobile", "The existing mobile viewport suite covers Teach layout separately.");
+  await createAgent(page);
+  await navigate(page, "Teach");
+  const claim = "Alex Rivera built Jenny in his OpenPresence app.";
+  await page.getByLabel("Message your Presence").fill(claim);
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByText(/Should I submit it as a reviewable proposal/)).toBeVisible();
+  let state = await (await request.get("/api/state")).json();
+  expect(state.proposals).toHaveLength(0);
+
+  await page.getByLabel("Message your Presence").fill("yes submit it as proposal");
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByRole("button", { name: "Memory proposal created" })).toBeVisible();
+  state = await (await request.get("/api/state")).json();
+  expect(state.proposals[0]).toMatchObject({ file: "MEMORY", status: "pending" });
+  expect(state.proposals[0].proposed).toContain("Alex Rivera built Jenny in his OpenPresence app");
+});
+
 test("Teach treats a Ghost handle in quoted social text as context, not a mode command", async ({ page, request }) => {
   await createAgent(page);
   await navigate(page, "Teach");
@@ -285,7 +304,11 @@ test("Presence Settings makes the destination route explicit", async ({ page }) 
 
   const routeOptions = page.locator(".channel-mode-options");
   const identityBox = await page.locator(".identity-card").boundingBox();
+  const publicSelfBox = await page.locator(".public-self-card").boundingBox();
+  const briefBox = await page.locator(".presence-brief-card").boundingBox();
   const channelBox = await page.locator(".channel-settings-card").boundingBox();
+  expect(identityBox?.y).toBeLessThan(publicSelfBox?.y ?? Number.POSITIVE_INFINITY);
+  expect(publicSelfBox?.y).toBeLessThan(briefBox?.y ?? Number.POSITIVE_INFINITY);
   expect(identityBox?.y).toBeLessThan(channelBox?.y ?? Number.POSITIVE_INFINITY);
   await expect(routeOptions.getByRole("button", { name: /^Sandbox/ })).toHaveClass(/selected/);
   await expect(routeOptions.getByText("Sandbox · Simulated X", { exact: true })).toBeVisible();
@@ -321,6 +344,28 @@ test("Presence Settings makes the destination route explicit", async ({ page }) 
   await page.reload();
   await navigate(page, "Settings");
   await expect(routeOptions.getByRole("button", { name: /^Sandbox/ })).toHaveClass(/selected/);
+});
+
+test("Ghost Public Self names the represented person or organization", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Settings");
+
+  await page.locator(".identity-options").getByRole("button", { name: /Me \/ my organization/ }).click();
+  const publicSelf = page.locator(".public-self-card");
+  await expect(publicSelf.getByRole("button", { name: "Individual" })).toHaveAttribute("aria-pressed", "true");
+  await publicSelf.getByLabel("First name").fill("Alex");
+  await publicSelf.getByLabel("Last name").fill("Rivera");
+  await publicSelf.locator(".public-self-representation-options").getByRole("button", { name: /Organization Use an/ }).click();
+  await publicSelf.getByLabel("Organization name").fill("Alex's AI Founders Club");
+  const represented = publicSelf.getByLabel("Organization website");
+  await represented.fill("https://aifounders.club");
+  await publicSelf.getByRole("button", { name: "Save Public Self" }).click();
+  await expect(represented).toHaveValue("https://aifounders.club");
+  await page.reload();
+  await navigate(page, "Settings");
+  const reloadedPublicSelf = page.locator(".public-self-card");
+  await expect(reloadedPublicSelf.getByLabel("Organization name")).toHaveValue("Alex's AI Founders Club");
+  await expect(reloadedPublicSelf.getByLabel("Organization website")).toHaveValue("https://aifounders.club");
 });
 
 test("Review to Auto confirms and processes pending replies", async ({ page, request }) => {
@@ -448,18 +493,26 @@ test("Brain exposes OpenRouter without an editable connection name", async ({ pa
   await expect(page.getByRole("button", { name: "Use Auto medium" })).toBeVisible();
 });
 
-test("Manage Agent makes Agent tools discoverable", async ({ page }) => {
+test("Manage Agent makes Agent capabilities discoverable and Presence authority explicit", async ({ page }) => {
   await createAgent(page);
   await navigate(page, "Brain");
-  await expect(page.getByRole("heading", { name: "Tools bound to Jenny" })).toBeVisible();
-  for (const name of ["Web search", "Asset inspection", "Chart rendering", "Channel execution"]) {
+  await expect(page.getByRole("heading", { name: "What Jenny can use" })).toBeVisible();
+  for (const name of ["Web research", "Asset intelligence", "Visual creation", "Channel action"]) {
     await expect(page.getByText(name, { exact: true })).toBeVisible();
   }
-  await expect(page.getByText("Presence connector · Bound", { exact: true })).toBeVisible();
-  await expect(page.locator(".tool-boundary")).toContainText("Presence settings still control whether channel actions are off, manual, review, or auto.");
+  await expect(page.getByText("Managed by Presence", { exact: true })).toBeVisible();
+  await expect(page.getByRole("switch", { name: "Enable Channel action" })).toHaveCount(0);
+  await expect(page.locator(".tool-boundary")).toContainText("Disabling a capability withholds its callable tools");
+  await page.getByRole("switch", { name: "Enable Web research" }).click();
+  await expect(page.getByRole("switch", { name: "Enable Web research" })).not.toBeChecked();
+  await expect(page.getByText("Off · Registered", { exact: true }).first()).toBeVisible();
+  await page.reload();
+  await navigate(page, "Brain");
+  await expect(page.getByRole("switch", { name: "Enable Web research" })).not.toBeChecked();
+  await expect(page.getByText("Unavailable", { exact: true }).first()).toBeVisible();
   await navigate(page, "Teach");
   await expect(page.getByText("Tools available", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("Tools bound", { exact: true })).toBeVisible();
+  await expect(page.getByText("Capabilities enabled", { exact: true })).toBeVisible();
 });
 
 test("Brain makes skill creation and provider setup actionable", async ({ page }) => {
@@ -494,6 +547,25 @@ test("Teach creates a protected proposal and Brain can apply it", async ({ page 
   await expect(page.getByRole("heading", { name: "Protected changes" })).toBeVisible();
   await page.getByRole("button", { name: "Apply", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Protected changes" })).toHaveCount(0);
+});
+
+test("Teach submits an explicit Presence identity instruction for review", async ({ page, request }) => {
+  await createAgent(page);
+  await navigate(page, "Teach");
+  const instruction = `You are NOT "I'm Jenny — @jenny_ai." You are "Jenny". Your full name is "Jenny Presence".`;
+  await page.getByLabel("Message your Presence").fill(instruction);
+  await page.getByRole("button", { name: "Send message" }).click();
+  await expect(page.getByRole("button", { name: "Presence identity proposal created" })).toBeVisible();
+
+  const proposed = await (await request.get("/api/state")).json();
+  expect(proposed.proposals[0]).toMatchObject({ file: "PRESENCE", status: "pending", target: { type: "presence_identity", name: "Jenny Presence" } });
+  expect(proposed.presence.name).toBe("Jenny");
+
+  await navigate(page, "Brain");
+  await expect(page.getByRole("heading", { name: "Protected changes" })).toBeVisible();
+  await page.getByRole("button", { name: "Apply", exact: true }).click();
+  await navigate(page, "Settings");
+  await expect(page.getByLabel("Presence name")).toHaveValue("Jenny Presence");
 });
 
 test("Calendar stores a real Standing Intent and evaluates it now", async ({ page }) => {
@@ -812,10 +884,15 @@ test("Presence and Agent names can be edited at their own scopes", async ({ page
   await navigate(page, "Settings");
   await page.getByLabel("Presence name").fill("Jenny in Founders");
   await page.getByRole("button", { name: "Save name" }).click();
-  await expect(page.getByRole("heading", { name: "Jenny in Founders" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny in Founders", exact: true })).toBeVisible();
+  await page.getByLabel("Presence handle").fill("@genny");
+  await page.getByRole("button", { name: "Save handle", exact: true }).click();
+  await expect(page.getByLabel("Presence handle")).toHaveValue("@genny");
   await page.reload();
   await navigate(page, "Settings");
   await expect(page.getByLabel("Presence name")).toHaveValue("Jenny in Founders");
+  await expect(page.getByLabel("Presence handle")).toHaveValue("@genny");
+  await expect(presenceSwitcher(page, "@genny")).toBeVisible();
 
   await navigate(page, "Brain");
   await page.getByLabel("Agent name").fill("Juno");
@@ -824,7 +901,7 @@ test("Presence and Agent names can be edited at their own scopes", async ({ page
   await page.reload();
   await expect(page.getByRole("button", { name: "Switch agent, currently Juno" })).toBeVisible();
   await navigate(page, "Settings");
-  await expect(page.getByRole("heading", { name: "Jenny in Founders" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny in Founders", exact: true })).toBeVisible();
   await expect(page.getByLabel("Presence name")).toHaveValue("Jenny in Founders");
 });
 

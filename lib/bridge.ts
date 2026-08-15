@@ -1,6 +1,6 @@
 import { z } from "zod";
 import { applyOperation, blockExecutionForLanguage, languageValidationForExecution } from "./runtime";
-import { authenticateBridgeKey, deleteBridgeCredential, issueBridgeKey, readBridgeCredentialMetadata, readState, revokeBridgeKey, writeState } from "./db";
+import { authenticateBridgeKey, deleteBridgeCredential, issueBridgeKey, readBridgeCredentialMetadata, readStateForBridge, revokeBridgeKey, writeState } from "./db";
 import type { Bridge, Execution, LiveEvent, MirrorObject, OpenPresenceState, Outcome } from "./types";
 import { bridgeAdapterStatus } from "./bridge-contract";
 
@@ -24,7 +24,7 @@ export function bridgeFromRequest(request: Request): Bridge | undefined {
   const header = request.headers.get("authorization") ?? "";
   const token = header.startsWith("Bearer ") ? header.slice(7).trim() : request.headers.get("x-openpresence-bridge-key")?.trim();
   const bridgeId = token ? authenticateBridgeKey(token) : undefined;
-  return bridgeId ? readState().bridges.find((bridge) => bridge.id === bridgeId && bridge.state !== "offline") : undefined;
+  return bridgeId ? readStateForBridge(bridgeId).bridges.find((bridge) => bridge.id === bridgeId && bridge.state !== "offline") : undefined;
 }
 
 export function createBridgeWithKey(source: OpenPresenceState, input: Parameters<typeof applyOperation>[1] & { type: "createBridge" }) {
@@ -70,7 +70,7 @@ function touchBridge(state: OpenPresenceState, bridge: Bridge, synced = false) {
 }
 
 export function heartbeatBridge(bridge: Bridge, executorId: string) {
-  const state = readState();
+  const state = readStateForBridge(bridge.id);
   const current = state.bridges.find((item) => item.id === bridge.id);
   if (!current) throw new Error("Bridge not found");
   const now = timestamp();
@@ -96,7 +96,7 @@ function upsertObject(state: OpenPresenceState, bridge: Bridge, input: z.infer<t
 }
 
 export function ingestEvents(bridge: Bridge, payload: z.infer<typeof eventsInput>) {
-  const state = readState(); const current = state.bridges.find((item) => item.id === bridge.id); if (!current) throw new Error("Bridge not found");
+  const state = readStateForBridge(bridge.id); const current = state.bridges.find((item) => item.id === bridge.id); if (!current) throw new Error("Bridge not found");
   for (const item of payload.events) {
     if (state.mirrorEvents.some((event) => event.bridgeId === bridge.id && event.sourceEventId === item.sourceEventId)) continue;
     const object = upsertObject(state, current, item.object, item.sourceEventId, item.event === "deleted");
@@ -106,7 +106,7 @@ export function ingestEvents(bridge: Bridge, payload: z.infer<typeof eventsInput
 }
 
 export function reconcileBridge(bridge: Bridge, payload: z.infer<typeof reconcileInput>) {
-  const state = readState(); const current = state.bridges.find((item) => item.id === bridge.id); if (!current) throw new Error("Bridge not found");
+  const state = readStateForBridge(bridge.id); const current = state.bridges.find((item) => item.id === bridge.id); if (!current) throw new Error("Bridge not found");
   for (const input of payload.objects) upsertObject(state, current, input, `reconcile:${payload.cursor ?? "latest"}:${input.externalRef.type}:${input.externalRef.id}`);
   const sync = state.bridgeSync.find((item) => item.bridgeId === bridge.id); if (sync) sync.cursor = payload.cursor;
   touchBridge(state, current, true); state.events.unshift(bridgeEvent(state, "Mirror reconciled", `${payload.objects.length} external object${payload.objects.length === 1 ? "" : "s"} reconciled.`)); writeState(state); return state;
@@ -119,7 +119,7 @@ function expireIfNeeded(state: OpenPresenceState, execution: Execution) {
 }
 
 export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput>) {
-  const state = readState(); const current = state.bridges.find((item) => item.id === bridge.id); if (!current) throw new Error("Bridge not found"); const now = Date.now(); const expiresAt = new Date(now + 120_000).toISOString();
+  const state = readStateForBridge(bridge.id); const current = state.bridges.find((item) => item.id === bridge.id); if (!current) throw new Error("Bridge not found"); const now = Date.now(); const expiresAt = new Date(now + 120_000).toISOString();
   const candidates = state.executions.filter((execution) => execution.bridgeId === bridge.id && execution.status === "queued").slice(0, input.limit).filter((execution) => !expireIfNeeded(state, execution));
   const claimed: Execution[] = [];
   for (const execution of candidates) {
@@ -142,7 +142,7 @@ function leasedExecution(state: OpenPresenceState, bridge: Bridge, executionId: 
 }
 
 export function acknowledgeExecution(bridge: Bridge, executionId: string, input: z.infer<typeof ackInput>) {
-  const state = readState(); const execution = state.executions.find((item) => item.id === executionId && item.bridgeId === bridge.id);
+  const state = readStateForBridge(bridge.id); const execution = state.executions.find((item) => item.id === executionId && item.bridgeId === bridge.id);
   if (!execution) throw new Error("Execution not found");
   if (execution.status === "succeeded") { if (execution.externalRef?.id !== input.externalRef.id || execution.externalRef?.type !== input.externalRef.type) throw new Error("Execution already acknowledged with a different external reference"); return { state, execution }; }
   leasedExecution(state, bridge, executionId, input.executorId);
@@ -161,7 +161,7 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
 }
 
 export function failExecution(bridge: Bridge, executionId: string, input: z.infer<typeof failInput>) {
-  const state = readState(); const execution = leasedExecution(state, bridge, executionId, input.executorId); execution.failure = { code: input.code, message: input.message, retryable: input.retryable }; execution.lease = undefined; execution.status = input.retryable && execution.attempts < 5 ? "queued" : "failed"; execution.updatedAt = timestamp(); state.events.unshift(bridgeEvent(state, "Bridge execution failed", input.message, input.retryable ? "warning" : "neutral", execution.id)); touchBridge(state, bridge); writeState(state); return { state, execution };
+  const state = readStateForBridge(bridge.id); const execution = leasedExecution(state, bridge, executionId, input.executorId); execution.failure = { code: input.code, message: input.message, retryable: input.retryable }; execution.lease = undefined; execution.status = input.retryable && execution.attempts < 5 ? "queued" : "failed"; execution.updatedAt = timestamp(); state.events.unshift(bridgeEvent(state, "Bridge execution failed", input.message, input.retryable ? "warning" : "neutral", execution.id)); touchBridge(state, bridge); writeState(state); return { state, execution };
 }
 
-export function reportOutcome(bridge: Bridge, input: z.infer<typeof outcomeInput>) { const state = readState(); const execution = state.executions.find((item) => item.id === input.executionId && item.bridgeId === bridge.id); if (!execution) throw new Error("Execution not found"); const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, status: input.status, observedAt: timestamp(), metrics: input.metrics, evidence: input.evidence }; state.outcomes.unshift(outcome); touchBridge(state, bridge); writeState(state); return { state, outcome }; }
+export function reportOutcome(bridge: Bridge, input: z.infer<typeof outcomeInput>) { const state = readStateForBridge(bridge.id); const execution = state.executions.find((item) => item.id === input.executionId && item.bridgeId === bridge.id); if (!execution) throw new Error("Execution not found"); const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, status: input.status, observedAt: timestamp(), metrics: input.metrics, evidence: input.evidence }; state.outcomes.unshift(outcome); touchBridge(state, bridge); writeState(state); return { state, outcome }; }
