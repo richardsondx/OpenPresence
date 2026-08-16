@@ -157,6 +157,34 @@ copyable instruction. It requires the adapter to:
 - never expose the Bridge key;
 - stop if the Channel does not authorize the adapter.
 
+## X Browser Bridge worker
+
+For an X Presence, Bridge is an alternative route to the Official X API, not a
+second channel. Run the included worker with a persistent browser profile that
+you sign into as the Presence account:
+
+~~~bash
+OPENPRESENCE_BASE_URL=http://localhost:3015 \\
+OPENPRESENCE_BRIDGE_KEY=opb_replace_with_one_time_key \\
+BRIDGE_EXECUTOR_ID=genny-x-browser \\
+X_EXPECTED_HANDLE=example_agent \\
+X_BROWSER_PROFILE_DIR=/path/to/private/x-browser-profile \\
+X_BROWSER_DISCOVERY_URL=https://x.com/home \\
+pnpm bridge:x
+~~~
+
+The worker observes visible public posts into the Social Mirror, claims only
+queued Bridge executions, and performs an `x.reply` by opening the target post,
+using X's direct Reply control, and verifying the resulting post before
+acknowledging it. It never turns a reply into a quote post or lets the browser
+worker choose the text. The profile directory contains the signed-in browser
+session and must remain private.
+
+An existing Chrome instance can be used instead by setting
+`X_BROWSER_CDP_URL`; the instance must already be signed into the expected X
+account. The worker validates `X_EXPECTED_HANDLE` against visible page content
+before observing or delivering.
+
 ## Troubleshooting
 
 - 401: the key is missing, revoked, or belongs to another Bridge.

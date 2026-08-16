@@ -3,10 +3,11 @@
   "version": "0.1.0",
   "private": true,
   "scripts": {
-    "dev": "next dev",
+    "dev": "node scripts/openpresence-server.mjs dev",
     "build": "next build",
-    "start": "next start",
+    "start": "node scripts/openpresence-server.mjs start",
     "openpresence": "node bin/openpresence.mjs",
+    "bridge:x": "node scripts/x-browser-bridge.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

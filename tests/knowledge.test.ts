@@ -26,6 +26,12 @@ describe("Agent Knowledge", () => {
     expect(effectivePresenceKnowledgeUse(state, presenceId, collection.id, item)).toBe("none");
   });
 
+  it("updates collection details without changing its identity", () => {
+    const fixtureData = fixture();
+    const updated = applyOperation(fixtureData.state, { type: "updateKnowledgeCollection", collectionId: fixtureData.collection.id, name: "Published principles", description: "Reviewed guidance", defaultRole: "procedure", defaultUse: "public" });
+    expect(updated.knowledgeCollections[0]).toMatchObject({ id: fixtureData.collection.id, name: "Published principles", description: "Reviewed guidance", defaultRole: "procedure", defaultUse: "public" });
+  });
+
   it("preserves headings and exact text ranges during segmentation", () => {
     const content = "# Launch\n\n## Checklist\n\nShip after review.\n\n- Confirm owner\n- Confirm date";
     const segments = segmentKnowledgeContent(content);
