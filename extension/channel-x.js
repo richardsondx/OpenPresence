@@ -1,7 +1,7 @@
 (function () {
   let sessionState = "observing";
   let expectedHandle = "";
-  let presenceName = "OpenPresence";
+  let presenceName = "Waiting for Presence";
   const overlay = document.createElement("div");
   overlay.id = "openpresence-browser-overlay";
   overlay.attachShadow({ mode: "open" }).innerHTML = `<style>:host{all:initial}.wrap{position:fixed;z-index:2147483647;right:16px;bottom:16px;display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid rgba(213,146,103,.65);border-radius:999px;background:rgba(255,250,246,.96);box-shadow:0 5px 24px rgba(39,25,17,.14);color:#332a25;font:12px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.mark{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#c77d50;color:#fff;font-weight:700}.dot{width:7px;height:7px;border-radius:50%;background:#73a879}.text{max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.label{display:block;color:#766b63;font-size:10px;margin-top:2px}</style><div class="wrap"><span class="mark">◉</span><span class="text"><b id="name">OpenPresence</b><span class="label" id="state">Observing · browser hands ready</span></span><span class="dot"></span></div>`;
@@ -77,8 +77,12 @@
   }
 
   chrome.runtime.onMessage.addListener((message) => {
-    if (message?.type === "OPENPRESENCE_EXECUTE") { expectedHandle = message.expectedHandle || expectedHandle; presenceName = message.presenceName || presenceName; overlay.shadowRoot.getElementById("name").textContent = presenceName; void execute(message.execution).then((result) => { if (result) chrome.runtime.sendMessage({ type: "OPENPRESENCE_EXECUTION_RESULT", result }); }); }
-    if (message?.type === "OPENPRESENCE_SESSION_CONTEXT") { expectedHandle = message.expectedHandle || expectedHandle; presenceName = message.presenceName || presenceName; }
+    if (message?.type === "OPENPRESENCE_EXECUTE") { expectedHandle = message.expectedHandle || expectedHandle; presenceName = message.presenceName || presenceName; stateLabel(); void execute(message.execution).then((result) => { if (result) chrome.runtime.sendMessage({ type: "OPENPRESENCE_EXECUTION_RESULT", result }); }); }
+    if (message?.type === "OPENPRESENCE_SESSION_CONTEXT") {
+      expectedHandle = message.expectedHandle || expectedHandle;
+      presenceName = message.presenceName || presenceName;
+      stateLabel();
+    }
   });
   const pending = sessionStorage.getItem("openpresence-pending-execution");
   if (pending) {
@@ -87,7 +91,6 @@
       const restored = JSON.parse(pending);
       expectedHandle = restored.expectedHandle || expectedHandle;
       presenceName = restored.presenceName || presenceName;
-      overlay.shadowRoot.getElementById("name").textContent = presenceName;
       void execute(restored.execution, false).then((result) => { if (result) chrome.runtime.sendMessage({ type: "OPENPRESENCE_EXECUTION_RESULT", result }); });
     } catch { /* Ignore malformed session state and keep the tab observational. */ }
   }
