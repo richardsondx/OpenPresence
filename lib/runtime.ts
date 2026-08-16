@@ -9,6 +9,7 @@ import { createRememberedPerson, evidenceRefFromMirror, factForCorrection, relat
 import { ensureConversationEpisode, settleConversationClosure, updateConversationEpisodeFromMirror } from "./conversation-episodes";
 import { createPublicExpressionCandidate, PublicationSecurityError, verifyExecutionPermit } from "./publication-security";
 import { publicExpressionLeakageReason } from "./public-expression";
+import { normalizeMirrorObject } from "./mirror-content";
 import type { RelationshipVisibility } from "./types";
 import { addKnowledgeItem, archiveKnowledgeCollection, archiveKnowledgeItem, createKnowledgeCollection, setKnowledgeBinding, updateKnowledgeCollection, uploadKnowledgeVersion } from "./knowledge";
 
@@ -1908,7 +1909,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
       ? assignment
       : { ...assignment, preflight: preflightAssignment(normalized, assignment, assignment.executionPolicy.delegationPolicy) };
   });
-  normalized.mirrorObjects = repairNativeReplyClassifications(normalized);
+  normalized.mirrorObjects = repairNativeReplyClassifications({ ...normalized, mirrorObjects: (state.mirrorObjects ?? []).map(normalizeMirrorObject) });
   normalized.publishingPlans = state.publishingPlans ?? [];
   if (normalized.agent && normalized.scenarios.length === 0) {
     const builtins = builtinScenarioDefinitions(normalized.agent.id, normalized.presence?.channel ?? "x");

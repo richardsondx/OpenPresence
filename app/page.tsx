@@ -54,6 +54,7 @@ import { bridgeAdapterPrompt, bridgeAdapterStatus, bridgeAdapterStatusLabel, bri
 import { latestPerception } from "@/lib/perception";
 import { conversationStatusLabel } from "@/lib/conversation-episodes";
 import { validateScenarioFidelity } from "@/lib/scenarios";
+import { cleanMirrorText, normalizeMirrorAuthor } from "@/lib/mirror-content";
 import { cleanUserFacingAssignmentInstruction, deriveActivitySummary, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence } from "@/lib/runtime";
 import type {
   CalendarSlot,
@@ -4977,19 +4978,21 @@ function MirrorPanel({
           <div className="mirror-list">
             {objects.map((item) => {
               const ignored = isAlreadyIgnored(item);
-              const externalUrl = externalUrlForMirrorObject(item, item.author?.handle);
+              const observedText = cleanMirrorText(item.channelId, item.content?.text);
+              const observedAuthor = normalizeMirrorAuthor(item.channelId, item.content?.text, item.author);
+              const externalUrl = externalUrlForMirrorObject(item, observedAuthor?.handle);
               const externalLabel = `Open on ${channelLabel(item.channelId, state.channelDefinitions)}`;
               return (
               <article className={`mirror-post ${ignored ? "mirror-post-ignored" : ""}`} key={item.id}>
                 <div className="mirror-post-header">
-                  <ChannelAvatar className="mirror-avatar" avatarUrl={item.author?.avatarUrl} name={item.author?.displayName ?? "World"} />
+                  <ChannelAvatar className="mirror-avatar" avatarUrl={observedAuthor?.avatarUrl} name={observedAuthor?.displayName ?? "World"} />
                   <div className="mirror-post-author">
-                    <strong>{item.author?.displayName ?? item.objectType}</strong>
-                    <span>{item.author?.handle ?? "Public account"} · {channelLabel(item.channelId, state.channelDefinitions)}</span>
+                    <strong>{observedAuthor?.displayName ?? item.objectType}</strong>
+                    <span>{observedAuthor?.handle ?? "Public account"} · {channelLabel(item.channelId, state.channelDefinitions)}</span>
                   </div>
                   <time>{formatTime(item.occurredAt ?? item.observedAt)}</time>
                 </div>
-                <p className="mirror-post-content">{item.content?.text ?? "External activity received."}</p>
+                <p className="mirror-post-content">{observedText ?? "External activity received."}</p>
                 <div className="mirror-post-footer">
                   <span>Observed</span><span>{item.objectType.replaceAll("-", " ")}</span>
                   {externalUrl && <a className="mirror-open-link" href={externalUrl} target="_blank" rel="noreferrer" aria-label={`${externalLabel}: ${item.externalRef.id}`}><ArrowUpRight size={12} /> {externalLabel}</a>}

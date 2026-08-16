@@ -10,6 +10,17 @@
   const setState = (value) => { sessionState = value; stateLabel(); };
   const text = (node) => node?.innerText?.trim().replace(/\s+/g, " ") || "";
 
+  function readAuthor(article) {
+    const container = article.querySelector('[data-testid="User-Name"]');
+    const links = [...(container?.querySelectorAll('a[href]') || [])];
+    const handleLink = links.find((link) => {
+      try { return /^\/[A-Za-z0-9_]{1,30}$/.test(new URL(link.href).pathname); } catch { return false; }
+    });
+    const handle = handleLink ? new URL(handleLink.href).pathname.replace(/^\//, "") : undefined;
+    const displayLink = links.find((link) => !text(link).startsWith("@"));
+    return { displayName: text(displayLink) || (handle ? `@${handle}` : "X account"), handle };
+  }
+
   function verifyAccount() {
     if (!expectedHandle) return { ok: false, message: "The Presence account is not known to this tab." };
     const normalized = expectedHandle.replace(/^@/, "").toLowerCase();
@@ -29,8 +40,8 @@
       const link = article.querySelector('a[href*="/status/"]');
       const match = link?.href?.match(/status\/(\d+)/);
       if (!match) return null;
-      const userLink = article.querySelector('[data-testid="User-Name"] a');
-      return { id: match[1], text: text(article), handle: userLink?.textContent?.replace(/^@/, "").trim(), element: article };
+      const author = readAuthor(article);
+      return { id: match[1], text: text(article.querySelector('[data-testid="tweetText"]')), ...author, element: article };
     }).filter(Boolean);
   }
 
@@ -78,7 +89,7 @@
   function scan() {
     const account = verifyAccount();
     if (!account.ok) { setState("waiting"); return; }
-    for (const post of visiblePosts().slice(0, 12)) chrome.runtime.sendMessage({ type: "OPENPRESENCE_OBSERVATION", observation: { sourceEventId: `x:${post.id}`, externalRef: { type: "x.post", id: post.id }, object: { externalRef: { type: "x.post", id: post.id }, objectType: "post", author: { displayName: post.handle ? `@${post.handle}` : "X account", handle: post.handle }, content: { text: post.text }, visibility: "public", shareability: "presence-only" } } }).catch(() => {});
+    for (const post of visiblePosts().slice(0, 12)) chrome.runtime.sendMessage({ type: "OPENPRESENCE_OBSERVATION", observation: { sourceEventId: `x:${post.id}`, externalRef: { type: "x.post", id: post.id }, object: { externalRef: { type: "x.post", id: post.id }, objectType: "post", author: { displayName: post.displayName, handle: post.handle }, content: post.text ? { text: post.text } : undefined, visibility: "public", shareability: "presence-only" } } }).catch(() => {});
   }
 
   chrome.runtime.onMessage.addListener((message) => {
