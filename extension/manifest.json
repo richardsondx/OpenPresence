@@ -1,0 +1,22 @@
+{
+  "manifest_version": 3,
+  "name": "OpenPresence",
+  "version": "0.1.0",
+  "description": "Give an OpenPresence Presence visible, accountable browser hands.",
+  "permissions": ["storage", "tabs", "tabGroups"],
+  "host_permissions": [
+    "http://localhost:3015/*",
+    "http://127.0.0.1:3015/*",
+    "https://x.com/*",
+    "https://*.x.com/*",
+    "https://www.linkedin.com/*",
+    "https://substack.com/*",
+    "https://*.substack.com/*"
+  ],
+  "background": { "service_worker": "background.js" },
+  "action": { "default_title": "OpenPresence", "default_popup": "popup.html" },
+  "content_scripts": [
+    { "matches": ["http://localhost:3015/*", "http://127.0.0.1:3015/*"], "js": ["app-bridge.js"], "run_at": "document_idle" },
+    { "matches": ["https://x.com/*", "https://*.x.com/*"], "js": ["channel-x.js"], "run_at": "document_idle" }
+  ]
+}

@@ -35,6 +35,8 @@ test("Publishing Plan explains the next consideration in the operator view", asy
   await page.reload();
   await page.getByRole("button", { name: "Schedule", exact: true }).click();
   await expect(page.getByRole("region", { name: "Calendar layers" })).toContainText("Plan active");
+  await expect(page.getByRole("region", { name: "Agent publishing plan" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Agent publishing plan" })).toContainText("Replan now");
   await expect(page.getByText("The publishing plan shows flexible working windows underneath the Assignments", { exact: false })).toBeVisible();
 });
 

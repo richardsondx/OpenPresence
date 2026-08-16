@@ -42,6 +42,16 @@ describe("OpenPresence runtime boundaries", () => {
     expect(removed.watches).toHaveLength(0);
   });
 
+  it("makes Chrome hands a Presence-scoped bridge decision", () => {
+    const state = createAgent(input);
+    const enabled = applyOperation(state, { type: "setPresenceBrowserAccess", presenceId: state.presence!.id, enabled: true });
+    expect(enabled.presence?.browserAccess).toEqual({ enabled: true });
+    expect(enabled.presence?.connectionMode).toBe("bridge");
+    const disabled = applyOperation(enabled, { type: "setPresenceBrowserAccess", presenceId: state.presence!.id, enabled: false });
+    expect(disabled.presence?.browserAccess).toEqual({ enabled: false });
+    expect(disabled.presence?.connectionMode).toBe("bridge");
+  });
+
   it("keeps configuration churn out of the Presence decision feed", () => {
     expect(isActivityDecisionEvent({ id: "settings", type: "system", title: "Presence settings updated", detail: "The new execution envelope is active.", time: new Date().toISOString(), tone: "positive" })).toBe(false);
     expect(isActivityDecisionEvent({ id: "pulse", type: "system", title: "Pulse completed", detail: "The channel was checked.", time: new Date().toISOString(), tone: "positive" })).toBe(true);
@@ -888,6 +898,30 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.files.find((file) => file.kind === "TASTE")?.content).not.toContain("## Absurdist and blue humor");
     expect(state.conversations[0]?.messages.at(-1)?.content).toContain("playful absurdist");
     expect(state.conversations[0]?.messages.at(-1)?.change).toBe("Taste proposal created");
+  });
+
+  it("turns contextual humor calibration plus an update request into a durable Taste proposal", () => {
+    let state = applyOperation(createAgent(input), {
+      type: "sendMessage",
+      content: "I want the agent to use light sarcasm and an occasional emoji when a response can add humor to the context. ‘I was promised networking, not a funeral 😭’ is a good example.",
+    });
+    expect(state.proposals).toHaveLength(1);
+    expect(state.proposals[0]?.proposed).toContain("## Contextual humor and emoji");
+    expect(state.proposals[0]?.proposed).toContain("at most one familiar emoji");
+    expect(state.files.find((file) => file.kind === "TASTE")?.content).not.toContain("## Contextual humor and emoji");
+
+    state = applyOperation(state, { type: "sendMessage", content: "can you update taste with that" });
+    expect(state.proposals).toHaveLength(1);
+    expect(state.conversations[0]?.messages.at(-1)?.content).toContain("reviewable TASTE.md proposal");
+    expect(state.conversations[0]?.messages.at(-1)?.content).not.toContain("working context");
+    expect(state.conversations[0]?.messages.at(-1)?.change).toBe("Taste proposal created");
+  });
+
+  it("does not pretend to update Taste when the follow-up has no prior preference", () => {
+    const state = applyOperation(createAgent(input), { type: "sendMessage", content: "can you update taste with that" });
+    expect(state.proposals).toHaveLength(0);
+    expect(state.conversations[0]?.messages.at(-1)?.content).toContain("need the preference");
+    expect(state.conversations[0]?.messages.at(-1)?.change).toBe("Taste update needs a preference");
   });
 
   it("turns a follow-up request to propose the rule into the existing Taste proposal", () => {
