@@ -92,13 +92,15 @@ export function relationshipHistory(state: OpenPresenceState, personId: string, 
     .slice(0, Math.max(1, Math.min(50, limit)));
 }
 
-export function createRememberedPerson(input: { agentId: string; presenceId: string; channel: string; externalActorId: string; displayName: string; handle?: string; profileUrl?: string; personId?: string; source: "operator" | "current-context" | "watched" }, existingPeople: Person[], existingIdentities: PersonIdentity[], existingRelationships: Relationship[]) {
+export function createRememberedPerson(input: { agentId: string; presenceId: string; channel: string; externalActorId: string; displayName: string; handle?: string; profileUrl?: string; avatarUrl?: string; personId?: string; source: "operator" | "current-context" | "watched" }, existingPeople: Person[], existingIdentities: PersonIdentity[], existingRelationships: Relationship[]) {
   const timestamp = now();
   const existingIdentity = existingIdentities.find((identity) => identity.channel === input.channel && identity.externalActorId === input.externalActorId);
   const person = existingIdentity ? existingPeople.find((item) => item.id === existingIdentity.personId) : undefined;
   const personId = person?.id ?? input.personId ?? `person_${Math.random().toString(36).slice(2, 10)}`;
   const nextPerson: Person = person ?? { id: personId, agentId: input.agentId, displayName: input.displayName.trim(), memoryState: "active", createdAt: timestamp, updatedAt: timestamp };
-  const identity: PersonIdentity = existingIdentity ?? { id: `person-identity_${Math.random().toString(36).slice(2, 10)}`, personId, channel: input.channel, externalActorId: input.externalActorId, handle: input.handle?.trim() || undefined, profileUrl: input.profileUrl?.trim() || undefined, sourcePresenceId: input.presenceId, verificationMethod: input.source === "operator" ? "operator_confirmed" : "connector_verified", createdAt: timestamp };
+  const identity: PersonIdentity = existingIdentity
+    ? { ...existingIdentity, handle: input.handle?.trim() || existingIdentity.handle, profileUrl: input.profileUrl?.trim() || existingIdentity.profileUrl, avatarUrl: input.avatarUrl?.trim() || existingIdentity.avatarUrl }
+    : { id: `person-identity_${Math.random().toString(36).slice(2, 10)}`, personId, channel: input.channel, externalActorId: input.externalActorId, handle: input.handle?.trim() || undefined, profileUrl: input.profileUrl?.trim() || undefined, avatarUrl: input.avatarUrl?.trim() || undefined, sourcePresenceId: input.presenceId, verificationMethod: input.source === "operator" ? "operator_confirmed" : "connector_verified", createdAt: timestamp };
   const relationship = existingRelationships.find((item) => item.personId === personId) ?? { id: `relationship_${Math.random().toString(36).slice(2, 10)}`, agentId: input.agentId, personId, state: "active" as const, createdAt: timestamp, updatedAt: timestamp };
   return { person: nextPerson, identity, relationship };
 }

@@ -1,10 +1,20 @@
 import { describe, expect, it } from "vitest";
-import { containsLiteral, effectiveLanguagePolicy, mergeLanguagePolicies, validateLanguage } from "../lib/language-policy";
-import { applyOperation, completeNativeExecution, createAgent, deliverSandboxExecution, formChatPostIntent, formSandboxIntent, startPlaygroundSession } from "../lib/runtime";
+import { containsLiteral, effectiveLanguagePolicy, languagesMatch, mergeLanguagePolicies, presenceLanguageGuidance, validateLanguage } from "../lib/language-policy";
+import { addSandboxEvent, applyOperation, completeNativeExecution, createAgent, deliverSandboxExecution, formChatPostIntent, formSandboxIntent, startPlaygroundSession, targetLanguageValidationForAction } from "../lib/runtime";
 
 const input = { name: "Jenny", description: "A useful social Agent.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
 describe("Language & phrasing policy", () => {
+  it("gives every Presence an explicit English language and keeps it in the Presence context", () => {
+    const state = createAgent(input);
+    expect(state.presence?.language).toBe("en");
+    expect(state.presence?.context.language).toBe("en");
+    expect(presenceLanguageGuidance(undefined)).toContain("English");
+    const next = applyOperation(state, { type: "setPresence", patch: { language: "en" } });
+    expect(next.presence?.language).toBe("en");
+    expect(next.presence?.context.language).toBe("en");
+  });
+
   it("matches normalized literal phrases with lexical boundaries and exact punctuation", () => {
     expect(containsLiteral("A  BAD\r\nphrase.", "bad phrase")).toBe(true);
     expect(containsLiteral("badly phrased", "bad")).toBe(false);
@@ -31,6 +41,47 @@ describe("Language & phrasing policy", () => {
     expect(result.avoided).toEqual(["great"]);
     expect(result.valid).toBe(false);
     expect(result.violations).toEqual([{ literal: "vendor", kind: "prohibited" }]);
+  });
+
+  it("requires observed target language to match the Presence language", () => {
+    expect(languagesMatch("en", "en-US")).toBe(true);
+    expect(languagesMatch("en", "pt-BR")).toBe(false);
+    let state = createAgent(input);
+    const sessionState = startPlaygroundSession(state, state.presence!.id, "fresh");
+    state = sessionState;
+    const session = state.playgroundSessions[0]!;
+    state = addSandboxEvent(state, { sessionId: session.id, actionId: "post", actorName: "Brazilian author", content: "Eu vou votar em quem?", language: "pt" });
+    const target = state.mirrorObjects[0]!.externalRef;
+    expect(targetLanguageValidationForAction(state, { presenceId: state.presence!.id, target, environment: "sandbox", sessionId: session.id })).toMatchObject({ valid: false, expected: "en", observed: "pt" });
+  });
+
+  it("blocks a targeted Sandbox interaction when the observed post is not in the Presence language", () => {
+    let state = createAgent(input);
+    state = startPlaygroundSession(state, state.presence!.id, "fresh");
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { reply: "auto" } } });
+    const session = state.playgroundSessions[0]!;
+    state = addSandboxEvent(state, { sessionId: session.id, actionId: "post", actorName: "Japanese author", content: "技術的には可能だが面倒くさい", language: "ja" });
+    const target = state.mirrorObjects[0]!.externalRef;
+    state = formSandboxIntent(state, { sessionId: session.id, affordance: "reply", text: "I will leave this conversation alone.", target });
+    const execution = state.executions[0]!;
+    const blocked = deliverSandboxExecution(state, execution.id);
+    expect(blocked.socialIntents[0]?.state).toBe("active");
+    expect(blocked.executions[0]?.status).toBe("blocked");
+    expect(blocked.executions[0]?.failure?.code).toBe("TARGET_LANGUAGE_MISMATCH");
+    expect(blocked.mirrorObjects.filter((item) => item.actorPresenceId === state.presence?.id)).toHaveLength(0);
+  });
+
+  it("allows a targeted Sandbox interaction only after the target language matches", () => {
+    let state = createAgent(input);
+    state = startPlaygroundSession(state, state.presence!.id, "fresh");
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { reply: "auto" } } });
+    const session = state.playgroundSessions[0]!;
+    state = addSandboxEvent(state, { sessionId: session.id, actionId: "post", actorName: "English author", content: "What makes an agent worth following?", language: "en" });
+    const target = state.mirrorObjects[0]!.externalRef;
+    state = formSandboxIntent(state, { sessionId: session.id, affordance: "reply", text: "Specific judgment makes an agent worth returning to.", target });
+    const delivered = deliverSandboxExecution(state, state.executions[0]!.id);
+    expect(delivered.executions[0]?.status).toBe("succeeded");
+    expect(delivered.mirrorObjects.some((item) => item.actorPresenceId === state.presence?.id)).toBe(true);
   });
 
   it("keeps Social Intent chosen while blocking Sandbox execution and Mirror delivery", () => {

@@ -1,5 +1,29 @@
 # Active QA Work
 
+## IN_PROGRESS — Prevent native X replies to non-mention Mirror evidence
+
+- **Started:** 2026-08-16
+- **Scope:** Keep native X Pulse reply cognition restricted to provider-confirmed inbound mentions, prevent Exploration/search evidence from becoming reply targets, and make failed delivery activity retain its selected-intent lineage and warning state.
+- **Product boundary:** Social Mirror observation, Agent judgment, Execution, Delivery, and verified Outcome remain distinct. An observed public post is not an inbound mention or permission to reply; no public action is counted unless X accepts it.
+- **Verification:** Runtime telemetry will localize the observation → candidate selection → cognition → delivery path. Add focused native-X regression coverage for unrelated Search/Mirror evidence plus valid mention replies, then run typecheck, focused tests, browser Activity verification, and remove temporary telemetry.
+- **Status:** IN_PROGRESS
+
+## IN_PROGRESS — Align Exploration finding actions
+
+- **Started:** 2026-08-16
+- **Scope:** Make Recent worthwhile finding actions use the available row space consistently and remain readable at desktop and mobile widths.
+- **Product boundary:** Preserve the existing finding → operator-directed response boundary; this is a presentation-only change.
+- **Verification:** Chrome desktop shows all five finding actions in a consistent 200px right-hand column; Chrome at 390px shows full-width 312px actions below each finding with no horizontal overflow or new browser errors. Lint, typecheck, focused Exploration tests, and production build pass with existing warnings only.
+- **Status:** Complete.
+
+## IN_PROGRESS — Reproduce a successful X Exploration run
+
+- **Started:** 2026-08-16
+- **Scope:** Run a real local Exploration through the Chrome UI and verify that a successful X discovery run records an actual query, source, imported candidates, triage, and truthful outcome.
+- **Product boundary:** QA remains local/read-only with simulated or configured local connector state; no production deployment or unapproved live X write.
+- **Verification:** Using the preserved Genny Agent workspace and its existing connected X Presence, Chrome completed a native X Exploration with query provenance visible: 25 public results entered the Social Mirror, 25 were triaged, and 5 worthwhile findings were surfaced. Browser console errors: none. Focused Vitest passes 29/29; typecheck passes. No public write was triggered.
+- **Status:** Complete for successful local/native-read verification. The prior degraded run remains in history as an honest provider rejection; Retry/Look now produces a healthy, query-backed run.
+
 ## IN_PROGRESS — Review Feed channel scope without narrowing the Presence picker
 
 - **Started:** 2026-08-16

@@ -30,6 +30,12 @@ describe("Agent social decision parsing", () => {
     expect(parseAgentSocialDecision("Ada (reply): That is worth exploring.", ["reply", "post", "no_op"])).toMatchObject({ action: "no_op", text: "" });
   });
 
+  it("never turns planner metadata into public wording", () => {
+    expect(parseAgentSocialDecision('{"conversationDisposition":"react_only","action":"like","rationale":"A quiet signal is enough."}', ["reply", "no_op"])).toMatchObject({ action: "no_op", text: "" });
+    expect(parseAgentSocialDecision('{"conversationDisposition":"close_with_reply","speechAct":"playful acknowledgment","reply":"Nothing says audit-ready like a checklist with gills.","rationale":"A brief joke is enough."}', ["reply", "no_op"])).toMatchObject({ action: "no_op", text: "" });
+    expect(parseAgentSocialDecision('{"action":"reply","reply":"A bounded public reply."}', ["reply", "no_op"])).toMatchObject({ action: "reply", text: "A bounded public reply." });
+  });
+
   it("uses structured deterministic social fixtures in local mock mode", async () => {
     vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
     const state = createAgent({ name: "Ada", description: "Explain reliable AI agents.", mode: "agent", handle: "@ada", accent: "#D68754" });

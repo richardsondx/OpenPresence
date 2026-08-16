@@ -1,5 +1,33 @@
 # Regression rules
 
+## Rule: Repeated finding actions must share a stable action column
+
+**Defect class:** Inconsistent row alignment / cramped responsive action control
+
+**General principle:** Repeated social findings should spend available horizontal space on readable evidence while keeping the operator action visually predictable. Action controls align to a stable column on desktop and become full-width below the evidence on narrow screens.
+
+**Project enforcement:** `.exploration-finding` uses a content/action grid with a 200px desktop action column and a single-column mobile layout; the response button fills its assigned column.
+
+**Executable protection:** Chrome QA measures all rendered finding buttons for the same desktop width/right edge, verifies full-width mobile buttons, and asserts no horizontal overflow.
+
+**Apply when:** Changing Exploration finding cards, operator-directed response actions, repeated evidence lists, or responsive Watching layouts.
+
+**Added:** 2026-08-16
+
+## Rule: X Exploration success must prove query-backed discovery
+
+**Defect class:** False discovery coverage / missing search provenance
+
+**General principle:** A search strategy or connected badge is not evidence that a provider search ran. A successful Exploration must retain the compiled query, actual discovery source, considered-result count, triage count, and outcome; a degraded or Mirror-only run must say that no new external results were imported.
+
+**Project enforcement:** Native Exploration sessions persist `searchQuery`, `discoverySource`, `artifactIds`, counts, status, and failure reason. The Watching run monitor exposes the query and pipeline only after the provider-backed run returns, while degraded runs retain their failure and distinguish existing Social Mirror evidence from new X results.
+
+**Executable protection:** `tests/explorations.test.ts` covers the Exploration lifecycle and native assignment boundary; focused Chrome QA verifies the Watching success state, visible query, `X public search` source, `25 considered · 25 triaged · 5 worthwhile` pipeline, and zero browser errors.
+
+**Apply when:** Changing Exploration planning, X public search, Mirror fallback, session persistence, run monitor copy, or provider error handling.
+
+**Added:** 2026-08-16
+
 ## Rule: Feed scope must not narrow the Presence picker
 
 **Defect class:** Cross-channel navigation scope regression
@@ -39,6 +67,20 @@
 **Executable protection:** `tests/publication-security.test.ts` covers candidate sealing, payload mutation, expiry, replay, and runtime blocking. Native X tests assert cognition still records a blocked execution without calling the writer, while runtime Bridge tests preserve Sandbox outbox behavior and block live writes.
 
 **Apply when:** Changing Public Expression formation, Execution completion, native X delivery, Bridge claim/acknowledgement, test/mock runtimes, credentials, or publication provenance.
+
+**Added:** 2026-08-16
+
+## Rule: Planner-shaped model output must never become public expression
+
+**Defect class:** Internal planner metadata leakage / public-copy boundary failure
+
+**General principle:** Structured disposition, action, reply, and rationale fields are internal planning evidence when they appear in a social-world object or model response. They must remain untrusted input or private decision data and must never be echoed as public prose.
+
+**Project enforcement:** `publicExpressionLeakageReason` detects planner-shaped JSON; parser aliases are action-gated; Sandbox, native X, Bridge, sealing, and final delivery paths reject planner-shaped public text. Playground includes a frozen Security rehearsal with exact untrusted planner-like fixtures and a structural public-expression finding.
+
+**Executable protection:** `tests/ai.test.ts`, `tests/publication-security.test.ts`, `tests/runtime.test.ts`, `tests/x-connection.test.ts`, and `tests/scenarios.test.ts` cover parser, intent, permit, delivery, and rehearsal boundaries.
+
+**Apply when:** Changing social decision parsing, planner prompts, public-copy formation, Sandbox or live delivery, scenario fixtures, or any path that maps structured model output into public text.
 
 **Added:** 2026-08-16
 

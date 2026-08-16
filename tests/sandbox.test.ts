@@ -254,7 +254,7 @@ describe("Sandbox and Playground boundaries", () => {
   it("requires a stable confirmation set before enabling Auto for pending replies", () => {
     let state = startPlaygroundSession(createAgent(input));
     const session = state.playgroundSessions[0]!;
-    state = addSandboxEvent(state, { sessionId: session.id, kind: "post", actorName: "Maya Chen", content: "A question that deserves a careful answer." });
+    state = addSandboxEvent(state, { sessionId: session.id, kind: "post", actorName: "Maya Chen", content: "A question that deserves a careful answer.", language: "en" });
     state = formSandboxIntent(state, { sessionId: session.id, affordance: "reply", text: "A grounded response.", target: state.mirrorObjects[0]?.externalRef });
     const execution = state.executions[0]!;
 
@@ -291,7 +291,7 @@ describe("Sandbox and Playground boundaries", () => {
   it("confirms and delivers every pending Sandbox reply in one state transition", async () => {
     let state = startPlaygroundSession(createAgent(input));
     const session = state.playgroundSessions[0]!;
-    state = addSandboxEvent(state, { sessionId: session.id, kind: "post", actorName: "Maya Chen", content: "A question for the Presence." });
+    state = addSandboxEvent(state, { sessionId: session.id, kind: "post", actorName: "Maya Chen", content: "A question for the Presence.", language: "en" });
     state = formSandboxIntent(state, { sessionId: session.id, affordance: "reply", text: "A useful answer from Jenny.", target: state.mirrorObjects[0]?.externalRef });
     const execution = state.executions[0]!;
     writeState(state);
@@ -307,7 +307,7 @@ describe("Sandbox and Playground boundaries", () => {
   it("keeps off affordances truthful and can deliver empty-text signals", () => {
     let state = startPlaygroundSession(createAgent(input));
     const session = state.playgroundSessions[0]!;
-    state = addSandboxEvent(state, { sessionId: session.id, actionId: "post", actorName: "Maya Chen", content: "A post worth passing along." });
+    state = addSandboxEvent(state, { sessionId: session.id, actionId: "post", actorName: "Maya Chen", content: "A post worth passing along.", language: "en" });
     const target = state.mirrorObjects[0]!.externalRef;
     state = formSandboxIntent(state, { sessionId: session.id, affordance: "repost", text: "", target });
     expect(state.executions).toHaveLength(0);

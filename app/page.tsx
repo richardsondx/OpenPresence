@@ -138,6 +138,19 @@ const formatTime = (value: string) => {
         minute: "2-digit",
       }).format(date);
 };
+const formatCountdown = (value: string | undefined, now = Date.now()) => {
+  if (!value) return undefined;
+  const remaining = new Date(value).getTime() - now;
+  if (!Number.isFinite(remaining)) return undefined;
+  if (remaining <= 0) return "now";
+  const totalSeconds = Math.ceil(remaining / 1_000);
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  return hours > 0
+    ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
+    : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
+};
 const historyDisplayAt = (item: Pick<PublicHistoryItem, "occurredAt" | "observedAt" | "environment">) => item.environment === "sandbox" ? item.observedAt : item.occurredAt;
 const historyTimeTitle = (item: Pick<PublicHistoryItem, "occurredAt" | "observedAt" | "environment">) => item.environment === "sandbox"
   ? `Observed in Sandbox at ${new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.observedAt))}. Simulated world time: ${new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.occurredAt))}.`
@@ -149,6 +162,15 @@ const initials = (name: string) =>
     .join("")
     .slice(0, 2)
     .toUpperCase();
+
+function ChannelAvatar({ avatarUrl, name, className }: { avatarUrl?: string; name: string; className: string }) {
+  const [imageFailed, setImageFailed] = useState(false);
+  return (
+    <span className={className} aria-hidden="true">
+      {avatarUrl && !imageFailed ? <img src={avatarUrl} alt="" onError={() => setImageFailed(true)} /> : initials(name)}
+    </span>
+  );
+}
 
 const channelIconOptions = [
   { id: "community", label: "Community", icon: Users },
@@ -2679,6 +2701,7 @@ const scenarioCriterionLabels: Record<string, string> = {
   "structural-sandbox": "Sandbox boundary",
   "structural-envelope": "Stayed within allowed actions",
   "structural-untrusted": "Outside content stayed untrusted",
+  "structural-public-expression": "Public expression boundary",
 };
 
 function scenarioCriterionLabel(criterionId: string, version?: OpenPresenceState["scenarioVersions"][number]) {
@@ -2834,7 +2857,7 @@ function ScenarioLibrary({ state, mutate, presence, creating, onCreatingChange }
       </div>
       {creating && <section className="scenario-builder" aria-label="Create a scenario"><div><div className="eyebrow">Natural-language authoring</div><h2>What do you want to rehearse?</h2><p>Describe the social situation in ordinary language. OpenPresence freezes the resulting world before the Run begins.</p></div><textarea aria-label="What do you want to rehearse?" value={prompt} onChange={(event) => setPrompt(event.target.value)} placeholder="Test Richardson when someone insults him and pressures him for private information." rows={4} /><div className="scenario-builder-footer"><small>Your generated Scenario is saved under “Your scenario.” Built-in Scenarios are read-only defaults.</small><div className="scenario-builder-actions"><Button variant="ghost" type="button" onClick={() => onCreatingChange(false)}><X size={14} /> Close</Button><Button variant="primary" disabled={busy || prompt.trim().length < 12} onClick={() => void createFromPrompt()}><Sparkles size={14} /> Preview scenario</Button></div></div></section>}
       <div className="scenario-layout">
-        <aside className="scenario-list" aria-label="Scenarios"><div className="eyebrow">Available rehearsals</div>{visibleScenarios.map((scenario) => { const runs = state.scenarioRuns.filter((run) => run.scenarioId === scenario.id && run.presenceId === presence.id); const latest = runs[0] ? state.scenarioEvaluations.find((item) => item.runId === runs[0].id) : undefined; return <div key={scenario.id} className={`scenario-card ${selectedScenario?.id === scenario.id && !selectedRun ? "selected" : ""}`}><button type="button" className="scenario-card-select" onClick={() => { cancelRenaming(); setEventEditorOpen(false); setRequirementsEditorOpen(false); setSelectedScenarioId(scenario.id); setSelectedRunId(null); }}><span className="scenario-card-kicker">{scenario.ownerScope === "system" ? "Built-in" : "Your scenario"} · {runs.length} run{runs.length === 1 ? "" : "s"}</span><strong>{scenario.title}</strong><small className="scenario-card-description">{scenario.description}</small><small className="scenario-card-created">{scenario.ownerScope === "system" ? `Built-in default · ${scenarioTimestamp(scenario.createdAt)}` : `Generated · ${scenarioTimestamp(scenario.createdAt)}`}</small>{latest && <ScenarioRunStatus status={latest.status} />}</button>{scenario.ownerScope !== "system" && <button type="button" className="scenario-card-delete" aria-label={`Delete ${scenario.title}`} title={`Delete ${scenario.title}`} onClick={(event) => { event.stopPropagation(); cancelRenaming(); setEventEditorOpen(false); setRequirementsEditorOpen(false); setSelectedScenarioId(scenario.id); setSelectedRunId(null); setDeleteConfirmOpen(true); }}><Trash2 size={13} /></button>}</div>; })}{!visibleScenarios.length && <p className="scenario-empty">No scenarios yet. Describe the first situation you want to rehearse.</p>}</aside>
+        <aside className="scenario-list" aria-label="Scenarios"><div className="eyebrow">Available rehearsals</div>{visibleScenarios.map((scenario) => { const runs = state.scenarioRuns.filter((run) => run.scenarioId === scenario.id && run.presenceId === presence.id); const latest = runs[0] ? state.scenarioEvaluations.find((item) => item.runId === runs[0].id) : undefined; const category = scenario.riskCategories.includes("publication_security") ? "Security" : undefined; return <div key={scenario.id} className={`scenario-card ${selectedScenario?.id === scenario.id && !selectedRun ? "selected" : ""}`}><button type="button" className="scenario-card-select" onClick={() => { cancelRenaming(); setEventEditorOpen(false); setRequirementsEditorOpen(false); setSelectedScenarioId(scenario.id); setSelectedRunId(null); }}><span className="scenario-card-kicker">{scenario.ownerScope === "system" ? "Built-in" : "Your scenario"}{category ? ` · ${category}` : ""} · {runs.length} run{runs.length === 1 ? "" : "s"}</span><strong>{scenario.title}</strong><small className="scenario-card-description">{scenario.description}</small><small className="scenario-card-created">{scenario.ownerScope === "system" ? `Built-in default · ${scenarioTimestamp(scenario.createdAt)}` : `Generated · ${scenarioTimestamp(scenario.createdAt)}`}</small>{latest && <ScenarioRunStatus status={latest.status} />}</button>{scenario.ownerScope !== "system" && <button type="button" className="scenario-card-delete" aria-label={`Delete ${scenario.title}`} title={`Delete ${scenario.title}`} onClick={(event) => { event.stopPropagation(); cancelRenaming(); setEventEditorOpen(false); setRequirementsEditorOpen(false); setSelectedScenarioId(scenario.id); setSelectedRunId(null); setDeleteConfirmOpen(true); }}><Trash2 size={13} /></button>}</div>; })}{!visibleScenarios.length && <p className="scenario-empty">No scenarios yet. Describe the first situation you want to rehearse.</p>}</aside>
         <main className="scenario-main">
           {!selectedRun && selectedScenario && selectedVersion && selectedScenario.ownerScope !== "system" && <><ScenarioFidelityPanel fidelity={selectedFidelity} generationFailed={selectedVersion.generationStatus === "failed"} presenceName={presence.name} onGenerate={() => void generateMissingEvents()} onEdit={openEventEditor} onRequirements={openRequirementsEditor} busy={busy} />{eventEditorOpen && <ScenarioEventsEditor stimuli={eventDrafts} actors={selectedVersion.worldSpec.startingWorld?.actors} presenceName={presence.name} onChange={setEventDrafts} onSave={() => void saveEventDrafts()} onClose={() => setEventEditorOpen(false)} busy={busy} />}{requirementsEditorOpen && <ScenarioRequirementsEditor requirements={requirementsDraft} onChange={setRequirementsDraft} onSave={() => void saveRequirements()} onClose={() => setRequirementsEditorOpen(false)} busy={busy} />}<ScenarioEventSequence stimuli={selectedVersion.worldSpec.stimuli} actors={selectedVersion.worldSpec.startingWorld?.actors} presenceName={presence.name} /></>}
           {!selectedRun && selectedScenario && selectedVersion && selectedScenario.ownerScope === "system" && <ScenarioEventSequence stimuli={selectedVersion.worldSpec.stimuli} actors={selectedVersion.worldSpec.startingWorld?.actors} presenceName={presence.name} />}
@@ -3136,7 +3159,7 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
       <div className="people-form-actions"><Button variant="ghost" onClick={() => setRemembering(false)}>Cancel</Button><Button variant="primary" disabled={!rememberName.trim() || !rememberExternalId.trim()} onClick={() => void remember()}>Remember</Button></div>
     </section>}
     <div className="people-toolbar"><label className="people-search"><span>Search people</span><input aria-label="Search people" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by name or handle" /></label><span className="people-count">{people.length} remembered</span></div>
-    {!people.length ? <section className="people-empty"><div className="watch-empty-mark"><Users size={23} /></div><SectionEyebrow>People</SectionEyebrow><h2>No one remembered yet.</h2><p>People will appear as meaningful relationships develop here. A Watch or a feed appearance alone is not a relationship.</p></section> : <div className="people-layout"><section className="people-list" aria-label="Remembered people">{people.map((person) => { const identity = state.personIdentities.find((item) => item.personId === person.id && item.sourcePresenceId === presence.id); const rel = state.relationships.find((item) => item.personId === person.id); return <button type="button" className={`people-row ${selected?.id === person.id ? "active" : ""}`} key={person.id} onClick={() => setSelectedId(person.id)}><span className="people-avatar">{initials(person.displayName)}</span><span className="people-row-copy"><strong>{person.displayName}</strong><small>{identity?.handle ?? identity?.externalActorId} · {rel?.lastMeaningfulInteractionAt ? `Last interacted ${formatTime(rel.lastMeaningfulInteractionAt)}` : "Remembered explicitly"}</small><span>{factsForPerson(state, person.id)[0] ?? "Selective relationship context is available here."}</span></span><ChevronRight size={16} /></button>; })}</section>{selected && <section className="person-inspector" aria-label={`${selected.displayName} relationship`}><div className="person-inspector-heading"><div><SectionEyebrow>Person</SectionEyebrow><h2>{selected.displayName}</h2><p>{selectedIdentity?.handle ?? selectedIdentity?.externalActorId} · {channelLabel(presence.channel, state.channelDefinitions)}</p></div><span className="people-status">{relationship?.lastMeaningfulInteractionAt ? "Remembered relationship" : "Remembered identity"}</span></div><div className="person-inspector-section"><SectionEyebrow>How {presence.name} knows them</SectionEyebrow><p>{relationship?.lastMeaningfulInteractionAt ? "You've interacted meaningfully here. The details below remain linked to actual evidence." : "The operator explicitly asked the Agent to remember this person. No prior interaction is being implied."}</p></div><div className="person-inspector-section"><SectionEyebrow>What {presence.name} remembers</SectionEyebrow>{facts.length ? <ul>{facts.map((fact) => <li key={fact.id}><span>{fact.statement}</span><small>{fact.epistemicKind.replaceAll("_", " ")} · {fact.provenanceRefs.map((ref) => ref.kind).join(", ")}</small></li>)}</ul> : <p>No curated facts yet.</p>}</div><div className="person-inspector-section"><SectionEyebrow>Open threads</SectionEyebrow>{loops.length ? <ul>{loops.map((loop) => <li key={loop.id}>{loop.description}</li>)}</ul> : <p>No open loops.</p>}</div><div className="person-inspector-section"><SectionEyebrow>Recent interactions</SectionEyebrow>{recentHistory.length ? <div className="person-history">{recentHistory.map((item) => <article key={item.id}><small>{formatTime(item.occurredAt ?? item.observedAt)}</small><p>{item.content?.text ?? "[no text]"}</p></article>)}</div> : <p>No Mirror-backed interactions yet.</p>}</div><div className="person-inspector-actions"><Button variant="ghost" onClick={() => void mutate({ type: "forgetRelationship", relationshipId: relationship?.id })} disabled={!relationship}>Forget relationship</Button><Button variant="ghost" onClick={() => void mutate({ type: "createWatch", presenceId: presence.id, query: selectedIdentity?.handle ?? selected.displayName, purpose: "Keep this person in attention without treating Watching as relationship memory." })}>Watch</Button></div>{relationship && <div className="person-correction"><label>Correct memory<textarea aria-label="Correct relationship memory" value={correction} onChange={(event) => setCorrection(event.target.value)} placeholder="What should the Agent remember instead?" rows={3} /></label><Button variant="secondary" disabled={!correction.trim()} onClick={() => void correct()}><Pencil size={14} /> Save correction</Button></div>}</section>}</div>}
+    {!people.length ? <section className="people-empty"><div className="watch-empty-mark"><Users size={23} /></div><SectionEyebrow>People</SectionEyebrow><h2>No one remembered yet.</h2><p>People will appear as meaningful relationships develop here. A Watch or a feed appearance alone is not a relationship.</p></section> : <div className="people-layout"><section className="people-list" aria-label="Remembered people">{people.map((person) => { const identity = state.personIdentities.find((item) => item.personId === person.id && item.sourcePresenceId === presence.id); const avatarUrl = identity?.avatarUrl ?? state.mirrorObjects.find((item) => item.presenceId === presence.id && item.author?.externalRef?.id === identity?.externalActorId)?.author?.avatarUrl; const rel = state.relationships.find((item) => item.personId === person.id); return <button type="button" className={`people-row ${selected?.id === person.id ? "active" : ""}`} key={person.id} onClick={() => setSelectedId(person.id)}><ChannelAvatar className="people-avatar" avatarUrl={avatarUrl} name={person.displayName} /><span className="people-row-copy"><strong>{person.displayName}</strong><small>{identity?.handle ?? identity?.externalActorId} · {rel?.lastMeaningfulInteractionAt ? `Last interacted ${formatTime(rel.lastMeaningfulInteractionAt)}` : "Remembered explicitly"}</small><span>{factsForPerson(state, person.id)[0] ?? "Selective relationship context is available here."}</span></span><ChevronRight size={16} /></button>; })}</section>{selected && <section className="person-inspector" aria-label={`${selected.displayName} relationship`}><div className="person-inspector-heading"><div><SectionEyebrow>Person</SectionEyebrow><h2>{selected.displayName}</h2><p>{selectedIdentity?.handle ?? selectedIdentity?.externalActorId} · {channelLabel(presence.channel, state.channelDefinitions)}</p></div><span className="people-status">{relationship?.lastMeaningfulInteractionAt ? "Remembered relationship" : "Remembered identity"}</span></div><div className="person-inspector-section"><SectionEyebrow>How {presence.name} knows them</SectionEyebrow><p>{relationship?.lastMeaningfulInteractionAt ? "You've interacted meaningfully here. The details below remain linked to actual evidence." : "The operator explicitly asked the Agent to remember this person. No prior interaction is being implied."}</p></div><div className="person-inspector-section"><SectionEyebrow>What {presence.name} remembers</SectionEyebrow>{facts.length ? <ul>{facts.map((fact) => <li key={fact.id}><span>{fact.statement}</span><small>{fact.epistemicKind.replaceAll("_", " ")} · {fact.provenanceRefs.map((ref) => ref.kind).join(", ")}</small></li>)}</ul> : <p>No curated facts yet.</p>}</div><div className="person-inspector-section"><SectionEyebrow>Open threads</SectionEyebrow>{loops.length ? <ul>{loops.map((loop) => <li key={loop.id}>{loop.description}</li>)}</ul> : <p>No open loops.</p>}</div><div className="person-inspector-section"><SectionEyebrow>Recent interactions</SectionEyebrow>{recentHistory.length ? <div className="person-history">{recentHistory.map((item) => <article key={item.id}><small>{formatTime(item.occurredAt ?? item.observedAt)}</small><p>{item.content?.text ?? "[no text]"}</p></article>)}</div> : <p>No Mirror-backed interactions yet.</p>}</div><div className="person-inspector-actions"><Button variant="ghost" onClick={() => void mutate({ type: "forgetRelationship", relationshipId: relationship?.id })} disabled={!relationship}>Forget relationship</Button><Button variant="ghost" onClick={() => void mutate({ type: "createWatch", presenceId: presence.id, query: selectedIdentity?.handle ?? selected.displayName, purpose: "Keep this person in attention without treating Watching as relationship memory." })}>Watch</Button></div>{relationship && <div className="person-correction"><label>Correct memory<textarea aria-label="Correct relationship memory" value={correction} onChange={(event) => setCorrection(event.target.value)} placeholder="What should the Agent remember instead?" rows={3} /></label><Button variant="secondary" disabled={!correction.trim()} onClick={() => void correct()}><Pencil size={14} /> Save correction</Button></div>}</section>}</div>}
   </div>;
 }
 
@@ -3180,7 +3203,7 @@ function WatchingView({ state, mutate }: { state: OpenPresenceState; mutate: Mut
   const [query, setQuery] = useState("");
   const [purpose, setPurpose] = useState("");
   const [explorationBrief, setExplorationBrief] = useState("");
-  const [tab, setTab] = useState<"watchlist" | "explorations">("watchlist");
+  const [tab, setTab] = useState<"watchlist" | "explorations">("explorations");
   const [selectedExplorationId, setSelectedExplorationId] = useState<string | null>(null);
   const [editingExplorationId, setEditingExplorationId] = useState<string | null>(null);
   const [editingBrief, setEditingBrief] = useState("");
@@ -3237,7 +3260,7 @@ function WatchingView({ state, mutate }: { state: OpenPresenceState; mutate: Mut
       <div><SectionEyebrow>Presence attention</SectionEyebrow><h1>Watching</h1><p>What {presence.name} is paying extra attention to. Known people stay in the Watchlist; Explorations look for meaningful social reality.</p></div>
       <Button variant="primary" onClick={() => { setReviewing((value) => !value); setTab("explorations"); }}><Plus size={14} /> New exploration</Button>
     </div>
-    <div className="watch-tabs" role="tablist" aria-label="Watching categories"><button type="button" role="tab" aria-selected={tab === "watchlist"} className={tab === "watchlist" ? "active" : ""} onClick={() => { setTab("watchlist"); setReviewing(false); }}>Watchlist <span>{watches.length}</span></button><button type="button" role="tab" aria-selected={tab === "explorations"} className={tab === "explorations" ? "active" : ""} onClick={() => setTab("explorations")}>Explorations <span>{explorations.filter((item) => item.status !== "archived").length}</span></button></div>
+    <div className="watch-tabs" role="tablist" aria-label="Watching categories"><button type="button" role="tab" aria-selected={tab === "explorations"} className={tab === "explorations" ? "active" : ""} onClick={() => setTab("explorations")}>Explorations <span>{explorations.filter((item) => item.status !== "archived").length}</span></button><button type="button" role="tab" aria-selected={tab === "watchlist"} className={tab === "watchlist" ? "active" : ""} onClick={() => { setTab("watchlist"); setReviewing(false); }}>Watchlist <span>{watches.length}</span></button></div>
     {tab === "watchlist" && <>
       <div className="watchlist-toolbar"><div><SectionEyebrow>Known things</SectionEyebrow><h2>People and sources this Presence intentionally follows.</h2></div><Button variant="secondary" onClick={() => setReviewing((value) => !value)}>Add watch</Button></div>
       {reviewing && <section className="watch-composer" aria-label="Add a watch"><div><SectionEyebrow>New watch</SectionEyebrow><h2>What should {presence.name} notice?</h2><p>Describe a creator, source, or known conversation. This stays a Watchlist item, not a relationship memory.</p></div><label>Keep an eye on<textarea aria-label="What should this Presence watch?" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="@AlexHormozi or a known community" rows={3} /></label><label>Why should {presence.name} watch this? <span className="optional-label">Optional</span><input aria-label="Why should this Presence watch this?" value={purpose} onChange={(event) => setPurpose(event.target.value)} placeholder="Learn from strong offers without imitating the voice" /></label>{query.trim() && <div className="watch-review" aria-label="Watch review"><div><SectionEyebrow>Here&apos;s what {presence.name} will watch</SectionEyebrow><strong>{kindLabel}</strong><p>{preview.clean}</p></div><div><span>Use</span><strong>Notice relevant material</strong></div><div><span>Boundary</span><strong>Watching does not imitate identity or voice</strong></div><div><span>Source</span><strong>{preview.kind === "creator" && presence.channel === "x" ? "Automatic where available" : "Manual material or connected source"}</strong></div></div>}<div className="watch-form-actions"><Button variant="ghost" onClick={() => { setReviewing(false); setQuery(""); setPurpose(""); }}>Cancel</Button><Button variant="primary" disabled={busy || !preview.clean} onClick={() => void startWatching()}>{busy ? "Starting…" : "Start watching"}</Button></div></section>}
@@ -4144,8 +4167,19 @@ function LiveView({
   const checking = pendingOperation === "runPulse";
   const activity = deriveActivitySummary(state, selected?.id);
   const [selectedContext, setSelectedContext] = useState<MirrorObject | null>(null);
+  const [countdownNow, setCountdownNow] = useState<number | null>(null);
   const presenceCopy = (text: string) => text.replaceAll("Jenny", presenceName).replaceAll(state.agent?.name ?? "Jenny", presenceName);
   const activityEnvironment: PresenceEnvironment = selected?.environment ?? "live";
+  const nextObservationAt = activityEnvironment === "live"
+    ? state.nativeConnections.find((connection) => connection.presenceId === selected?.id && connection.channelId === selected?.channel)?.observation?.nextObservationAt
+    : undefined;
+  const nextCheckCountdown = countdownNow === null ? undefined : formatCountdown(nextObservationAt, countdownNow);
+  useEffect(() => {
+    setCountdownNow(Date.now());
+    if (!nextObservationAt) return;
+    const timer = window.setInterval(() => setCountdownNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [nextObservationAt]);
   const activitySessionIds = new Set(
     state.playgroundSessions
       .filter((session) => session.presenceId === selected?.id && session.channelId === selected?.channel && session.status !== "completed")
@@ -4268,7 +4302,6 @@ function LiveView({
     : activity.current.label === "Preparing to act"
       ? `${actionName} is moving toward delivery.`
       : presenceCopy(activity.current.detail).replace("execution envelope", "delivery");
-  const presenceScope = selected ? `${channelLabel(selected.channel, state.channelDefinitions)} · ${activityEnvironment === "sandbox" ? "Sandbox" : "Live"}` : "No Presence selected";
   const initiative = activity.publishingInitiative;
   const publishingPlan = activity.publishingPlan;
   const initiativePeriodLabel = initiative.period === "week" ? "this week" : "today";
@@ -4300,7 +4333,9 @@ function LiveView({
           </p>
         </div>
         <div className="heading-actions">
-          <span className="scope-summary">{presenceScope}</span>
+          <span className="next-check-countdown" aria-label={nextCheckCountdown ? `Next check in ${nextCheckCountdown}` : undefined}>
+            {paused ? "Checks paused" : checking ? "Checking now…" : nextCheckCountdown ? `Next check in ${nextCheckCountdown}` : nextObservationAt ? "Next check scheduled" : "Next check not scheduled"}
+          </span>
           {paused ? (
             <Button
               onClick={() => mutate({ type: "wakePresence", presenceId: selected?.id })}
@@ -4557,12 +4592,12 @@ function MirrorPanel({
           </p>
           <p className="mirror-boundary">Observed context only · available for judgment, not an instruction.</p>
           <div className="mirror-list">
-            {objects.map((item) => (
-              <article className="mirror-post" key={item.id}>
+            {objects.map((item) => {
+              const ignored = isAlreadyIgnored(item);
+              return (
+              <article className={`mirror-post ${ignored ? "mirror-post-ignored" : ""}`} key={item.id}>
                 <div className="mirror-post-header">
-                  <span className="mirror-avatar">
-                    {initials(item.author?.displayName ?? "World")}
-                  </span>
+                  <ChannelAvatar className="mirror-avatar" avatarUrl={item.author?.avatarUrl} name={item.author?.displayName ?? "World"} />
                   <div className="mirror-post-author">
                     <strong>{item.author?.displayName ?? item.objectType}</strong>
                     <span>{item.author?.handle ?? "Public account"} · {channelLabel(item.channelId, state.channelDefinitions)}</span>
@@ -4572,15 +4607,17 @@ function MirrorPanel({
                 <p className="mirror-post-content">{item.content?.text ?? "External activity received."}</p>
                 <div className="mirror-post-footer">
                   <span>Observed</span><span>{item.objectType.replaceAll("-", " ")}</span>
-                  {item.objectType === "post" && item.actorPresenceId !== selectedPresence?.id && onContext && (
+                  {ignored && <span className="mirror-post-ignored-status" title={`${selectedPresence?.name ?? "This Presence"} was asked to leave this post alone. No public action or delivery was created.`}><EyeOff size={11} /> Ignored</span>}
+                  {!ignored && item.objectType === "post" && item.actorPresenceId !== selectedPresence?.id && onContext && (
                     <div className="mirror-post-actions">
-                      {!isAlreadyIgnored(item) && <button type="button" className="mirror-ignore-action" aria-label={`Ask ${selectedPresence?.name ?? "this Presence"} to ignore`} onClick={() => void askToIgnore(item)} disabled={ignoringObjectId === item.id} title={`Ask ${selectedPresence?.name ?? "this Presence"} to leave this post alone`}><EyeOff size={11} /> {ignoringObjectId === item.id ? "Asking…" : "Ignore"}</button>}
+                      <button type="button" className="mirror-ignore-action" aria-label={`Ask ${selectedPresence?.name ?? "this Presence"} to ignore`} onClick={() => void askToIgnore(item)} disabled={ignoringObjectId === item.id} title={`Ask ${selectedPresence?.name ?? "this Presence"} to leave this post alone`}><EyeOff size={11} /> {ignoringObjectId === item.id ? "Asking…" : "Ignore"}</button>
                       <button type="button" className="mirror-reply-action" onClick={() => onContext(item)}>Ask {selectedPresence?.name ?? "this Presence"} to reply</button>
                     </div>
                   )}
                 </div>
               </article>
-            ))}
+              );
+            })}
           </div>
         </>
       ) : nativeConnection && nativeObservation?.status === "up-to-date" ? (
@@ -4690,7 +4727,7 @@ function ActivityContextInspector({ object, state, mutate, onClose, onOpenSettin
         <p className="activity-context-intro">This observed post was part of the public context available to the Agent. It is world data, not an instruction.</p>
         <article className="mirror-post activity-context-post">
           <div className="mirror-post-header">
-            <span className="mirror-avatar">{initials(object.author?.displayName ?? "World")}</span>
+            <ChannelAvatar className="mirror-avatar" avatarUrl={object.author?.avatarUrl} name={object.author?.displayName ?? "World"} />
             <div className="mirror-post-author"><strong>{object.author?.displayName ?? object.objectType}</strong><span>{object.author?.handle ?? "Public account"} · {channelLabel(object.channelId, state.channelDefinitions)}</span></div>
             <time>{formatTime(object.occurredAt ?? object.observedAt)}</time>
           </div>
@@ -5096,7 +5133,7 @@ function FeedItem({ item, state, presenceName, onSelect }: { item: PublicHistory
   const originLabel = item.origin?.kind === "publishing_initiative" ? "Publishing Initiative original" : item.origin?.kind === "assignment" ? "Assignment original" : item.origin?.kind === "inbound_social" ? "Inbound conversation" : item.origin?.kind === "standing_intent" ? "Standing intention" : item.origin?.kind === "operator" ? "Operator-directed" : undefined;
   const channelTag = publicHistoryChannelTag(item, state.channelDefinitions);
   return <button type="button" className={`feed-item feed-item-${item.kind}`} onClick={() => onSelect(item)}>
-    <span className="feed-item-header"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span className="feed-item-identity"><strong>{presence?.name ?? presenceName}</strong><small>{presence?.handle ?? ""} · {kindLabel}</small></span><time dateTime={displayAt} title={historyTimeTitle(item)}>{formatTime(displayAt)}</time></span>
+    <span className="feed-item-header"><ChannelAvatar className="feed-avatar" avatarUrl={item.authorAvatarUrl} name={presence?.name ?? presenceName} /><span className="feed-item-identity"><strong>{presence?.name ?? presenceName}</strong><small>{presence?.handle ?? ""} · {kindLabel}</small></span><time dateTime={displayAt} title={historyTimeTitle(item)}>{formatTime(displayAt)}</time></span>
     {item.kind === "reply" || item.kind === "comment" ? <span className="feed-item-context">Replying in a public conversation</span> : null}
     {originLabel ? <span className="feed-item-context">{originLabel}</span> : null}
     <span className="feed-item-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "Public expression without returned text.")}</span>
@@ -5110,7 +5147,7 @@ function HistoryCard({ item, state, onSelect, compact = false }: { item: PublicH
   const displayAt = historyDisplayAt(item);
   const channelTag = publicHistoryChannelTag(item, state.channelDefinitions);
   return <button type="button" className={`history-card history-card-${item.kind} ${compact ? "compact" : ""}`} onClick={() => onSelect(item)}>
-    <span className="history-card-kicker"><strong>{label}</strong><time dateTime={displayAt} title={historyTimeTitle(item)}>{formatTime(displayAt)}</time></span>
+    <span className="history-card-kicker"><span className="history-card-author"><ChannelAvatar className="history-card-avatar" avatarUrl={item.authorAvatarUrl} name={state.presences.find((presence) => presence.id === item.presenceId)?.name ?? "Presence"} /><strong>{label}</strong></span><time dateTime={displayAt} title={historyTimeTitle(item)}>{formatTime(displayAt)}</time></span>
     {item.text ? <span className="history-card-text">{item.text}</span> : <span className="history-card-text quiet">{item.kind === "repost" ? "Passed along publicly" : "Public expression"}</span>}
     <span className="history-card-footer"><span className="history-card-proof">{item.environment === "sandbox" ? "Verified in Sandbox Mirror · simulated only" : item.externalUrl ? "Verified on X" : "Verified in Social Mirror"}</span><span className="history-card-channel-badge" aria-label={`Channel: ${channelTag}`}><Badge size={11} aria-hidden="true" />{channelTag}</span></span>
   </button>;
@@ -6469,7 +6506,11 @@ function PresenceView({
           <div><SectionEyebrow>Presence taste · language</SectionEyebrow><h2>Language & phrasing here</h2></div>
           <ShieldCheck size={17} />
         </div>
-        <p className="muted">This Presence inherits the Agent&apos;s hard boundaries and can add local ones. Inherited rules are read-only here; this editor cannot weaken them.</p>
+        <p className="muted">This Presence reads the social world as evidence, but keeps one language for Agent-authored posts, replies, messages, and Presence Chat. Targeted interactions are delivered only when the observed target language matches this Presence; unknown target language is left alone. It inherits the Agent&apos;s hard boundaries and can add local ones.</p>
+        <div className="presence-language-selection">
+          <div><strong>Primary language</strong><small>The language this Presence uses when it speaks.</small></div>
+          <div className="presence-language-value"><select aria-label="Presence language" value={presence.language} onChange={(event) => void mutate({ type: "setPresence", patch: { language: event.target.value as "en" } })}><option value="en">English</option></select><small>English is the only supported Presence language right now.</small></div>
+        </div>
         <div className="language-inherited-rules">
           <span><strong>Inherited Never use</strong>{state.agent?.languagePolicy?.prohibited?.length ? state.agent.languagePolicy.prohibited.join(" · ") : "None set"}</span>
         </div>

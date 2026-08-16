@@ -133,7 +133,7 @@ describe("native X connection", () => {
 
   it("tests real OAuth requests with an OAuth 1.0a signature", async () => {
     process.env.OPENPRESENCE_X_API_MOCK = "0";
-    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { id: "1", username: "jenny_ai", name: "Jenny" } }), { status: 200, headers: { "content-type": "application/json" } }));
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { id: "1", username: "jenny_ai", name: "Jenny", profile_image_url: "https://pbs.twimg.com/profile_images/jenny.jpg" } }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     const request = new Request("http://localhost/api/x/manage", {
       method: "POST",
@@ -145,6 +145,7 @@ describe("native X connection", () => {
     const authorization = fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>;
     expect(authorization.Authorization).toMatch(/^OAuth /);
     expect(authorization.Authorization).toContain("oauth_signature=");
+    expect((await response.json()).result.account.profileImageUrl).toBe("https://pbs.twimg.com/profile_images/jenny.jpg");
     vi.unstubAllGlobals();
   });
 
@@ -155,7 +156,7 @@ describe("native X connection", () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     const credentials = { apiKey: "api", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" };
-    const query = { "tweet.fields": "created_at,conversation_id,referenced_tweets,attachments", expansions: "author_id,attachments.media_keys,referenced_tweets.id", "user.fields": "name,username", "media.fields": "type,url,preview_image_url,alt_text", max_results: "10" };
+    const query = { "tweet.fields": "created_at,conversation_id,referenced_tweets,attachments,lang", expansions: "author_id,attachments.media_keys,referenced_tweets.id", "user.fields": "name,username,profile_image_url", "media.fields": "type,url,preview_image_url,alt_text", max_results: "10" };
     await readRecentXPosts(credentials, "account-1", 10);
 
     const authorization = (fetchMock.mock.calls[0]?.[1]?.headers as Record<string, string>).Authorization;
@@ -174,7 +175,7 @@ describe("native X connection", () => {
     const base = ["GET", encoded("https://api.x.com/2/users/account-1/tweets"), encoded(parameterString)].join("&");
     const signature = crypto.createHmac("sha1", `${encoded("secret")}&${encoded("token-secret")}`).update(base).digest("base64");
     expect(authorization).toContain(`oauth_signature="${encoded(signature)}"`);
-    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.x.com/2/users/account-1/tweets?tweet.fields=created_at%2Cconversation_id%2Creferenced_tweets%2Cattachments&expansions=author_id%2Cattachments.media_keys%2Creferenced_tweets.id&user.fields=name%2Cusername&media.fields=type%2Curl%2Cpreview_image_url%2Calt_text&max_results=10");
+    expect(fetchMock.mock.calls[0]?.[0]).toBe("https://api.x.com/2/users/account-1/tweets?tweet.fields=created_at%2Cconversation_id%2Creferenced_tweets%2Cattachments%2Clang&expansions=author_id%2Cattachments.media_keys%2Creferenced_tweets.id&user.fields=name%2Cusername%2Cprofile_image_url&media.fields=type%2Curl%2Cpreview_image_url%2Calt_text&max_results=10");
     vi.useRealTimers();
     vi.restoreAllMocks();
     vi.unstubAllGlobals();
@@ -186,7 +187,7 @@ describe("native X connection", () => {
       data: [{ id: "mention-1", text: "@jenny_ai thoughts?", author_id: "user-1", conversation_id: "root-1", referenced_tweets: [{ type: "replied_to", id: "parent-1" }, { type: "quoted", id: "quote-1" }], attachments: { media_keys: ["media-1"] } }],
       includes: {
         tweets: [{ id: "parent-1", text: "The earlier public claim", author_id: "user-2", conversation_id: "root-1", referenced_tweets: [{ type: "replied_to", id: "root-1" }] }, { id: "quote-1", text: "Quoted evidence" }],
-        users: [{ id: "user-1", username: "builder", name: "Builder" }, { id: "user-2", username: "author", name: "Author" }],
+        users: [{ id: "user-1", username: "builder", name: "Builder", profile_image_url: "https://pbs.twimg.com/profile_images/builder.jpg" }, { id: "user-2", username: "author", name: "Author" }],
         media: [{ media_key: "media-1", type: "photo", url: "https://pbs.twimg.com/media/example.jpg", alt_text: "A useful chart" }],
       },
     }), { status: 200, headers: { "content-type": "application/json" } }));
@@ -194,7 +195,7 @@ describe("native X connection", () => {
     const posts = await readXPostsByIds({ apiKey: "api", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" }, ["mention-1"]);
     const mention = posts.find((post) => post.id === "mention-1");
     const parent = posts.find((post) => post.id === "parent-1");
-    expect(mention).toMatchObject({ conversationId: "root-1", parentId: "parent-1", authorUsername: "builder" });
+    expect(mention).toMatchObject({ conversationId: "root-1", parentId: "parent-1", authorUsername: "builder", authorAvatarUrl: "https://pbs.twimg.com/profile_images/builder.jpg" });
     expect(mention?.referencedPosts).toEqual([{ type: "replied_to", id: "parent-1" }, { type: "quoted", id: "quote-1" }]);
     expect(mention?.media?.[0]).toMatchObject({ type: "photo", url: "https://pbs.twimg.com/media/example.jpg", altText: "A useful chart" });
     expect(parent?.text).toBe("The earlier public claim");
@@ -209,6 +210,7 @@ describe("native X connection", () => {
       post: {
         id: "mention-1",
         text: "@jenny_ai thoughts?",
+        authorAvatarUrl: "https://pbs.twimg.com/profile_images/builder.jpg",
         conversationId: "root-1",
         parentId: "parent-1",
         referencedPosts: [{ type: "replied_to", id: "parent-1" }, { type: "quoted", id: "quote-1" }],
@@ -223,6 +225,7 @@ describe("native X connection", () => {
     expect(mirror.objectType).toBe("post");
     expect(next.assets[0]?.provenance.sourceUrl).toBe("https://pbs.twimg.com/media/example.jpg");
     expect(mirror.environment).toBe("live");
+    expect(mirror.author?.avatarUrl).toBe("https://pbs.twimg.com/profile_images/builder.jpg");
   });
 
   it("preserves native X replies and repairs legacy post classifications", () => {
@@ -367,7 +370,7 @@ describe("native X connection", () => {
     await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setModel", model: "gpt-5.6-luna", provider: "openai", quality: "high" }), headers: { "content-type": "application/json" } }));
     await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setPresence", patch: { status: "paused" } }), headers: { "content-type": "application/json" } }));
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: "I am here to make complicated AI systems feel more understandable. What are you trying to build?" } }] }), { status: 200, headers: { "content-type": "application/json" } }));
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ action: "post", text: "I am here to make complicated AI systems feel more understandable. What are you trying to build?", rationale: "A concise first contribution invites a concrete conversation." }) } }] }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "wakePresence", presenceId }), headers: { "content-type": "application/json" } }));
     const body = await response.json();
@@ -392,7 +395,7 @@ describe("native X connection", () => {
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "post-1", text: "Jenny's first post", created_at: "2026-08-13T01:00:00.000Z", conversation_id: "post-1" }] }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "mention-1", text: "@jenny_ai I'm building an AI product for founders. What are you interested in discussing?", created_at: "2026-08-13T01:01:00.000Z", author_id: "user-1", conversation_id: "post-1", referenced_tweets: [{ type: "replied_to", id: "post-1" }] }], includes: { users: [{ id: "user-1", username: "builder" }] } }), { status: 200, headers: { "content-type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: "I care about thoughtful AI products, durable relationships, and the ideas that help people build with more clarity. What are you working on?" } }] }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ action: "reply", text: "I care about thoughtful AI products, durable relationships, and the ideas that help people build with more clarity. What are you working on?", rationale: "The mention contains an open question worth answering." }) } }] }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: { id: "reply-1" } }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "runPulse", presenceId }), headers: { "content-type": "application/json" } }));
@@ -420,7 +423,7 @@ describe("native X connection", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "mention-1", text: "@jenny_ai What do you think?", created_at: "2026-08-15T12:00:00.000Z", author_id: "user-1", conversation_id: "root-1", referenced_tweets: [{ type: "replied_to", id: "parent-1" }] }], includes: { users: [{ id: "user-1", username: "builder", name: "Builder" }] } }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "parent-1", text: "The immediate public claim", created_at: "2026-08-15T11:59:00.000Z", author_id: "user-2", conversation_id: "root-1", referenced_tweets: [{ type: "replied_to", id: "root-1" }] }], includes: { tweets: [{ id: "root-1", text: "The root idea that gives this exchange meaning", created_at: "2026-08-15T11:58:00.000Z", author_id: "user-3", conversation_id: "root-1" }], users: [{ id: "user-2", username: "author", name: "Author" }, { id: "user-3", username: "originator", name: "Originator" }] } }), { status: 200, headers: { "content-type": "application/json" } }))
-      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: "The root claim is the interesting part here; the immediate reply makes the tradeoff clearer. What would you test next?" } }] }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ action: "reply", text: "The root claim is the interesting part here; the immediate reply makes the tradeoff clearer. What would you test next?", rationale: "The full ancestry supports one specific continuation." }) } }] }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: { id: "reply-1" } }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "syncNativeX", presenceId }), headers: { "content-type": "application/json" } }));
@@ -460,6 +463,23 @@ describe("native X connection", () => {
     expect(body.executions[0].externalRef).toBeUndefined();
     expect(body.events.some((event: { title: string }) => event.title === "Live publication blocked")).toBe(true);
     expect((await save.json()).state.nativeConnections[0].status).toBe("connected");
+    vi.unstubAllGlobals();
+  });
+
+  it("blocks the leaked planner object in the generic Chat-to-X path", async () => {
+    const presenceId = readState().presence?.id;
+    await POST(new Request("http://localhost/api/x/manage", { method: "POST", body: JSON.stringify({ action: "save", presenceId, credentials: { apiKey: "test_api", apiSecret: "test_secret", accessToken: "test_access", accessTokenSecret: "test_access_secret" } }), headers: { "content-type": "application/json" } }));
+    await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "configureProvider", provider: "openai", label: "OpenAI workspace", secret: "provider-secret-test", hasSecret: true }), headers: { "content-type": "application/json" } }));
+    await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setModel", model: "gpt-5.6-luna", provider: "openai", quality: "high" }), headers: { "content-type": "application/json" } }));
+    const leakedPlannerObject = '{"conversationDisposition":"react_only","action":"like","rationale":"Self-contained playful continuation; a quiet signal preserves the joke without competing for the last word."}';
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ choices: [{ message: { content: leakedPlannerObject } }] }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "sendMessage", content: "Introduce this Presence on X." }), headers: { "content-type": "application/json" } }));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.executions[0]).toMatchObject({ status: "blocked", failure: { code: "PUBLIC_TEXT_INTERNAL_MARKER" } });
+    expect(body.executions[0].externalRef).toBeUndefined();
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
   });
 });

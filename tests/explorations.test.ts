@@ -50,7 +50,7 @@ describe("Presence-scoped Explorations", () => {
     state = applyOperation(state, { type: "createExploration", presenceId, brief: "Keep an eye on concrete agent infrastructure problems." });
     const exploration = state.explorations[0]!;
     const mirrorId = "mirror-exploration-1";
-    state.mirrorObjects.unshift({ id: mirrorId, bridgeId: "sandbox", presenceId, channelId: "x", externalRef: { type: "x.post", id: "post-1" }, objectType: "post", author: { displayName: "Alex Builder", handle: "alexbuilder" }, content: { text: "We are struggling to deploy persistent agent infrastructure." }, observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", environment: "sandbox", source: "operator", trust: "untrusted_world_content" });
+    state.mirrorObjects.unshift({ id: mirrorId, bridgeId: "sandbox", presenceId, channelId: "x", externalRef: { type: "x.post", id: "post-1" }, objectType: "post", language: "en", author: { displayName: "Alex Builder", handle: "alexbuilder" }, content: { text: "We are struggling to deploy persistent agent infrastructure." }, observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", environment: "sandbox", source: "operator", trust: "untrusted_world_content" });
     const started = startExplorationSession(state, exploration.id, "mirror");
     const completed = finishExplorationSession(started.state, started.session.id, { status: "completed", candidatesSeen: 1, candidatesHydrated: 1, findings: [{ mirrorObjectId: mirrorId, safeSummary: "Alex Builder describes a deployment problem.", whyItMayMatter: "The post is directly related to the Exploration brief." }] });
     expect(completed.explorationFindings[0]).toMatchObject({ explorationId: exploration.id, mirrorObjectId: mirrorId, status: "surfaced" });
@@ -68,7 +68,7 @@ describe("Presence-scoped Explorations", () => {
     state = applyOperation(state, { type: "setExplorationEngagement", id: exploration.id, mode: "opportunistic" });
     state = (await import("../lib/runtime")).startPlaygroundSession(state, presenceId, "fresh");
     const sessionId = state.playgroundSessions[0]!.id;
-    state = (await import("../lib/runtime")).addSandboxEvent(state, { sessionId, actorName: "Founder", actorHandle: "founder", content: "Our persistent agent memory becomes incoherent after a few days." });
+    state = (await import("../lib/runtime")).addSandboxEvent(state, { sessionId, actorName: "Founder", actorHandle: "founder", content: "Our persistent agent memory becomes incoherent after a few days.", language: "en" });
     state.explorations[0]!.nextEligibleAt = new Date(Date.now() - 1_000).toISOString();
     writeState(state);
 

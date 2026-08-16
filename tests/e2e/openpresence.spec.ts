@@ -1266,6 +1266,7 @@ test("Activity addresses operator-directed replies to the selected Presence", as
   const dialog = page.getByRole("dialog", { name: "Decision context" });
   await expect(dialog.getByRole("heading", { name: "Ask Genny to reply" })).toBeVisible();
   await expect(dialog.getByLabel("Optional direction for Genny")).toBeVisible();
+  await expect(dialog.locator(".operator-reply-card .full-button")).toHaveCSS("justify-content", "center");
   await dialog.getByLabel("Optional direction for Genny").fill("Keep the answer concrete.");
   await dialog.getByRole("button", { name: "Ask Genny to reply", exact: true }).click();
   await expect(dialog.getByText("Genny is preparing the expression through the existing reply envelope.", { exact: true })).toBeVisible();
@@ -1299,6 +1300,8 @@ test("Activity lets the operator quietly ask a Presence to leave an observed pos
   await ignore.click();
   await expect(page.getByRole("button", { name: "Ask Jenny to ignore", exact: true })).toHaveCount(0);
   await expect(page.locator(".event-title", { hasText: "The operator asked Jenny to ignore this post" })).toBeVisible();
+  await expect(page.locator(".mirror-post-ignored-status", { hasText: "Ignored" })).toBeVisible();
+  await expect(page.locator(".mirror-post-ignored")).toHaveCount(1);
 
   const updated = await (await request.get("/api/state")).json();
   expect(updated.operatorDirectives[0]).toMatchObject({ requiredAct: "no_op", status: "expressed" });

@@ -123,7 +123,7 @@ describe("Publishing Plan", () => {
 
   it("does not count an inbound reply as Publishing Initiative progress", async () => {
     const fixture = publishingFixture("Look for one worthwhile original opportunity.");
-    const inbound = await stateOperation({ type: "addSandboxEvent", sessionId: fixture.sessionId, actionId: "post", actorName: "Maya Chen", content: "The best reply leaves the next person with a sharper thought, not a longer thread." });
+    const inbound = await stateOperation({ type: "addSandboxEvent", sessionId: fixture.sessionId, actionId: "post", actorName: "Maya Chen", content: "The best reply leaves the next person with a sharper thought, not a longer thread.", language: "en" });
     const replyIntent = inbound.socialIntents.find((item: { affordance: string }) => item.affordance === "reply");
     const replyExecution = replyIntent ? inbound.executions.find((item: { socialIntentId: string }) => item.socialIntentId === replyIntent.id) : undefined;
     const replyMirror = replyExecution ? inbound.mirrorObjects.find((item: { originExecutionId?: string }) => item.originExecutionId === replyExecution.id) : undefined;

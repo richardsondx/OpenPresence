@@ -1,6 +1,6 @@
 import { readProviderSecret } from "./db";
 import { publicSelfGuidance } from "./runtime";
-import { effectiveLanguagePolicy, languagePolicyGuidance } from "./language-policy";
+import { effectiveLanguagePolicy, languagePolicyGuidance, presenceLanguageGuidance } from "./language-policy";
 import { isAiMockEnabled } from "./test-runtime";
 import { marketMockCandidate } from "./market-research";
 import type { AssetSemanticKind, Conversation, ConversationDisposition, EvidenceNeed, ModelProvider, OpenPresenceState, Presence, PresenceChatMessage, PublishingPlanDraft, SocialAssetKind, StoryCandidate, VisualBrief, VisualNeed } from "./types";
@@ -108,7 +108,7 @@ function promptFor(state: OpenPresenceState, conversationId: string | undefined,
         options.socialEvidence ? `Perception and social evidence for this turn:\n${options.socialEvidence}` : "No attachment perception evidence was supplied. Do not infer contents that are not present in the text.",
       ] : []),
       selectedPresence ? publicSelfGuidance(selectedPresence) : "No active Presence Public Self is selected.",
-      selectedPresence ? "LANGUAGE AND PHRASING\n" + languagePolicyGuidance(effectiveLanguagePolicy(state.agent, selectedPresence)) : "",
+      selectedPresence ? "LANGUAGE AND PHRASING\n" + presenceLanguageGuidance(selectedPresence.language) + "\n" + languagePolicyGuidance(effectiveLanguagePolicy(state.agent, selectedPresence)) : "",
       selectedPresence?.mode === "ghost" ? `Represented identity:\n${JSON.stringify(selectedPresence.ghostProfile, null, 2)}` : "",
     ].join("\n\n")
     : [
@@ -524,7 +524,10 @@ export function parseAgentSocialDecision(raw: string, allowedActions: string[]):
   }
   const rawAction = typeof parsed.action === "string" ? parsed.action.trim().toLowerCase() : "no_op";
   const action = decisionAliases[rawAction] ?? rawAction;
-  const text = cleanDecisionText(parsed.text ?? parsed.draft ?? parsed.content);
+  // Some providers use `reply` for the public wording even when the schema
+  // asked for `text`. It is only eligible when the authoritative action is
+  // actually reply; never treat a planner object with no action as prose.
+  const text = cleanDecisionText(parsed.text ?? parsed.draft ?? parsed.content ?? (action === "reply" ? parsed.reply : undefined));
   const rationale = cleanDecisionText(parsed.rationale ?? parsed.reason);
   const rawDisposition = typeof parsed.conversationDisposition === "string"
     ? parsed.conversationDisposition.trim().toLowerCase()
@@ -850,10 +853,16 @@ function mockSocialDecision(state: OpenPresenceState, instruction: string, actio
   return { action: "no_op", text: "", rationale: "The deterministic Sandbox fixture found no supported action for this scenario." };
 }
 
-export async function generateAgentSocialDecision(state: OpenPresenceState, instruction: string, allowedActions: string[]) {
+export type SocialGenerationOptions = {
+  presence?: Presence;
+  socialEvidence?: string;
+  socialThreadContext?: string;
+};
+
+export async function generateAgentSocialDecision(state: OpenPresenceState, instruction: string, allowedActions: string[], options?: SocialGenerationOptions) {
   const actions = [...new Set(allowedActions.filter(Boolean))];
   if (isAiMockEnabled()) return mockSocialDecision(state, instruction, actions);
-      const raw = await generateAgentReply(state, `${instruction}\n\nChoose exactly one action from: ${actions.join(", ")}, or no_op. Return JSON only in this shape: {"action":"...","conversationDisposition":"continue|react_only|close_with_reply|close_silently|defer","format":"optional channel format","text":"...","rationale":"short explanation","storyCandidate":{"trigger":"optional observed trigger","whyNow":"optional reason this matters now","claim":"optional central claim","evidenceNeed":{"question":"what evidence would materially support the expression","mustShow":["optional visible facts or measures"],"preferredForms":["chart|screenshot|photo|illustration|logo|meme|diagram|clip|other"],"freshness":"current|recent|historical|any"},"visualBrief":{"role":"evidence|subject|context|identity|atmosphere|none","mustShow":["optional visible facts or measures"],"preferredForms":["optional semantic forms"],"avoidForms":["optional semantic forms"],"rationale":"optional fit explanation"}},"evidenceNeed":{"question":"optional evidence need"},"visualBrief":{"role":"optional role"},"assets":[{"kind":"image|video|gif|chart|link","name":"optional label","sourceUrl":"optional media URL","sourcePageUrl":"optional source page","publisher":"optional publisher"}]}. Include planning metadata when the expression depends on a story or visual; omit it when text-only is the honest format. Include assets only when the supplied context or an explicitly configured Sandbox asset capability supports them; never invent a URL or claim an asset was created when it was not. The rationale is for the internal audit and must not contain hidden chain-of-thought. Use an empty text for no_op, like, or reaction.`, undefined, { social: true });
+  const raw = await generateAgentReply(state, `${instruction}\n\nChoose exactly one action from: ${actions.join(", ")}, or no_op. Return JSON only in this shape: {"action":"...","conversationDisposition":"continue|react_only|close_with_reply|close_silently|defer","format":"optional channel format","text":"...","rationale":"short explanation","storyCandidate":{"trigger":"optional observed trigger","whyNow":"optional reason this matters now","claim":"optional central claim","evidenceNeed":{"question":"what evidence would materially support the expression","mustShow":["optional visible facts or measures"],"preferredForms":["chart|screenshot|photo|illustration|logo|meme|diagram|clip|other"],"freshness":"current|recent|historical|any"},"visualBrief":{"role":"evidence|subject|context|identity|atmosphere|none","mustShow":["optional visible facts or measures"],"preferredForms":["optional semantic forms"],"avoidForms":["optional semantic forms"],"rationale":"optional fit explanation"}},"evidenceNeed":{"question":"optional evidence need"},"visualBrief":{"role":"optional role"},"assets":[{"kind":"image|video|gif|chart|link","name":"optional label","sourceUrl":"optional media URL","sourcePageUrl":"optional source page","publisher":"optional publisher"}]}. Include planning metadata when the expression depends on a story or visual; omit it when text-only is the honest format. Include assets only when the supplied context or an explicitly configured Sandbox asset capability supports them; never invent a URL or claim an asset was created when it was not. The rationale is for the internal audit and must not contain hidden chain-of-thought. Use an empty text for no_op, like, or reaction.`, undefined, { social: true, presence: options?.presence ?? state.presence ?? undefined, socialEvidence: options?.socialEvidence, socialThreadContext: options?.socialThreadContext });
   return parseAgentSocialDecision(raw, actions);
 }
 

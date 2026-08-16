@@ -54,6 +54,7 @@ test("operator can configure Agent and Presence language boundaries", async ({ p
 
   await page.locator(".sidebar").getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Language & phrasing here" })).toBeVisible();
+  await expect(page.getByLabel("Presence language")).toHaveValue("en");
   const sectionLayout = await page.locator(".presence-language-policy-card").evaluate((section) => {
     const publicSelf = document.querySelector<HTMLElement>(".public-self-card");
     const button = section.querySelector<HTMLElement>("button");
@@ -82,4 +83,6 @@ test("operator can configure Agent and Presence language boundaries", async ({ p
   const state = await response.json();
   expect(state.agent.languagePolicy).toEqual({ avoid: ["great"], prohibited: ["secret"] });
   expect(state.presence.languagePolicy).toEqual({ avoid: [], prohibited: ["vendor"] });
+  expect(state.presence.language).toBe("en");
+  expect(state.presence.context.language).toBe("en");
 });

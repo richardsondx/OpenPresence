@@ -1,13 +1,14 @@
 import type { ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, Asset, Assignment, AssignmentQuantityMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, ExplorationBrief, ExplorationFinding, ExplorationSession, ExplorationSessionStatus, FileKind, FileProposal, GhostProfile, GhostRepresentation, JsonValue, LiveEvent, MirrorObject, OpenPresenceState, Operation, OperatorDirective, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, RuntimeScope, SandboxAssetInput, SocialAssetKind, SocialIntent, SocialOrigin, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, LanguagePolicy, Scenario, ScenarioStimulus, ScenarioStimulusRequirements, ScenarioVersion, ScenarioRun, ScenarioRunProvenance, ScenarioRunEvaluation, StructuralFinding, PublishingInitiative, PublishingInitiativeProgress, PublishingPlan, PublishingPlanDraft, PublishingPlanWorkEvent } from "./types";
 import { AGENT_CAPABILITY_DEFINITIONS, CHANNEL_CAPABILITIES, CHANNEL_EXTENSIONS, simulationForChannel } from "./types";
 import { buildScenarioFromPrompt, builtinScenarioDefinitions, repairScenarioStimuli, scenarioFromImport, stableHash, validateScenarioFidelity } from "./scenarios";
-import { effectiveLanguagePolicy, EMPTY_LANGUAGE_POLICY, normalizeLanguagePolicy, validateLanguage } from "./language-policy";
+import { DEFAULT_PRESENCE_LANGUAGE, effectiveLanguagePolicy, EMPTY_LANGUAGE_POLICY, languagesMatch, normalizeLanguagePolicy, normalizePresenceLanguage, normalizedObservedLanguage, validateLanguage } from "./language-policy";
 import { createAssetPerception, createUninterpretedPerception, hasUsablePerception, mediaRequiresReview, perceptionRequirement } from "./perception";
 import { epistemicState } from "./asset-intelligence";
 import { isTestRuntime } from "./test-runtime";
 import { createRememberedPerson, evidenceRefFromMirror, factForCorrection, relationshipCurationEligible, relationshipForPerson } from "./network-memory";
 import { ensureConversationEpisode, settleConversationClosure, updateConversationEpisodeFromMirror } from "./conversation-episodes";
 import { createPublicExpressionCandidate, PublicationSecurityError, verifyExecutionPermit } from "./publication-security";
+import { publicExpressionLeakageReason } from "./public-expression";
 import type { RelationshipVisibility } from "./types";
 
 const now = () => new Date().toISOString();
@@ -104,7 +105,7 @@ export function curateRelationshipFromMirror(source: OpenPresenceState, object: 
   const existingRelationship = existingPerson ? relationshipForPerson(state, existingPerson.id) : undefined;
   const occurredAt = object.occurredAt ?? object.observedAt;
   if (existingRelationship?.state === "forgotten" && existingRelationship.forgottenAt && new Date(occurredAt).getTime() <= new Date(existingRelationship.forgottenAt).getTime()) return state;
-  const remembered = createRememberedPerson({ agentId: state.agent.id, presenceId, channel: object.channelId, externalActorId, displayName: actor.displayName, handle: actor.handle, source: "current-context" }, state.people, state.personIdentities, state.relationships);
+  const remembered = createRememberedPerson({ agentId: state.agent.id, presenceId, channel: object.channelId, externalActorId, displayName: actor.displayName, handle: actor.handle, avatarUrl: actor.avatarUrl, source: "current-context" }, state.people, state.personIdentities, state.relationships);
   const timestamp = now();
   remembered.person.memoryState = "active";
   remembered.person.forgottenAt = undefined;
@@ -138,7 +139,7 @@ export function compilePresenceContext(presence: Presence): PresenceContext {
   const displayName = presence.name || presence.context?.publicIdentity?.displayName || presence.handle;
   const publicSelf = presence.publicSelf ?? presence.context?.publicSelf ?? defaultPublicSelf(displayName, presence.mode);
   const brief = normalizePresenceBrief(presence.brief ?? presence.context?.brief, defaultPresenceBrief());
-  return { presenceId: presence.id, channel: presence.channel, publicIdentity: { displayName, handle: presence.handle, mode: presence.mode }, publicSelf: { ...publicSelf, displayName }, brief, audienceContext: presence.context?.audienceContext, voiceAdaptation: presence.context?.voiceAdaptation, availableAffordances: affordances.map((item) => item.id), relevantRelationshipContext: presence.context?.relevantRelationshipContext, publicFooting: presence.context?.publicFooting, ghostProfile: presence.mode === "ghost" ? presence.ghostProfile : undefined, publishingInitiative: presence.publishingInitiative };
+  return { presenceId: presence.id, channel: presence.channel, language: normalizePresenceLanguage(presence.language), publicIdentity: { displayName, handle: presence.handle, mode: presence.mode }, publicSelf: { ...publicSelf, displayName }, brief, audienceContext: presence.context?.audienceContext, voiceAdaptation: presence.context?.voiceAdaptation, availableAffordances: affordances.map((item) => item.id), relevantRelationshipContext: presence.context?.relevantRelationshipContext, publicFooting: presence.context?.publicFooting, ghostProfile: presence.mode === "ghost" ? presence.ghostProfile : undefined, publishingInitiative: presence.publishingInitiative };
 }
 
 function localTimezone() {
@@ -450,7 +451,7 @@ export function recordNativeObservation(source: OpenPresenceState, presenceId: s
   return state;
 }
 
-export function recordNativeMirror(source: OpenPresenceState, input: { connectionId: string; presenceId: string; own?: boolean; post: { id: string; text: string; createdAt?: string; authorId?: string; authorUsername?: string; authorName?: string; conversationId?: string; parentId?: string; referencedPosts?: Array<{ type: "replied_to" | "quoted" | "retweeted"; id: string }>; media?: Array<{ mediaKey: string; type: "photo" | "video" | "animated_gif"; url?: string; previewImageUrl?: string; altText?: string }> } }) {
+export function recordNativeMirror(source: OpenPresenceState, input: { connectionId: string; presenceId: string; own?: boolean; post: { id: string; text: string; language?: string; createdAt?: string; authorId?: string; authorUsername?: string; authorName?: string; authorAvatarUrl?: string; conversationId?: string; parentId?: string; referencedPosts?: Array<{ type: "replied_to" | "quoted" | "retweeted"; id: string }>; media?: Array<{ mediaKey: string; type: "photo" | "video" | "animated_gif"; url?: string; previewImageUrl?: string; altText?: string }> } }) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const receivedAt = now();
   const sourceEventId = `native-x:${input.connectionId}:${input.post.id}`;
@@ -467,7 +468,7 @@ export function recordNativeMirror(source: OpenPresenceState, input: { connectio
   const matchingExecution = state.executions.find((execution) => execution.presenceId === input.presenceId && execution.connector === "native" && execution.status === "succeeded" && execution.externalRef?.type === "x.post" && execution.externalRef.id === input.post.id);
   const verifiedAssignmentId = matchingExecution?.assignmentId ?? existing?.assignmentId;
   const objectType = matchingExecution?.affordance === "x.reply" || (input.own && Boolean(input.post.parentId)) ? "reply" : existing?.objectType ?? "post";
-  const object = { id: existing?.id ?? id("mirror"), bridgeId: `native:${input.connectionId}`, presenceId: input.presenceId, channelId: "x" as const, externalRef: { type: "x.post", id: input.post.id }, parentExternalRef: input.post.parentId ? { type: "x.post", id: input.post.parentId } : undefined, conversationExternalRef: input.post.conversationId, referencedExternalRefs: input.post.referencedPosts?.map((reference) => ({ type: "x.post", id: reference.id })), objectType, author: { externalRef: input.post.authorId ? { type: "x.user", id: input.post.authorId } : undefined, displayName: input.post.authorName ?? (input.post.authorUsername ? `@${input.post.authorUsername}` : "X user"), handle: input.post.authorUsername }, content: { text: input.post.text }, assetRefs: mediaRefs.length ? mediaRefs : existing?.assetRefs, occurredAt: input.post.createdAt, observedAt: receivedAt, visibility: "public" as const, shareability: "presence-only" as const, originExecutionId: matchingExecution?.id ?? existing?.originExecutionId, assignmentId: verifiedAssignmentId, actorPresenceId: existing?.actorPresenceId ?? (input.own ? input.presenceId : undefined), sourceEventId, environment: "live" as const, source: "native" as const, trust: "untrusted_world_content" as const };
+  const object = { id: existing?.id ?? id("mirror"), bridgeId: `native:${input.connectionId}`, presenceId: input.presenceId, channelId: "x" as const, externalRef: { type: "x.post", id: input.post.id }, parentExternalRef: input.post.parentId ? { type: "x.post", id: input.post.parentId } : undefined, conversationExternalRef: input.post.conversationId, referencedExternalRefs: input.post.referencedPosts?.map((reference) => ({ type: "x.post", id: reference.id })), objectType, language: input.post.language, author: { externalRef: input.post.authorId ? { type: "x.user", id: input.post.authorId } : undefined, displayName: input.post.authorName ?? (input.post.authorUsername ? `@${input.post.authorUsername}` : "X user"), handle: input.post.authorUsername, avatarUrl: input.post.authorAvatarUrl }, content: { text: input.post.text }, assetRefs: mediaRefs.length ? mediaRefs : existing?.assetRefs, occurredAt: input.post.createdAt, observedAt: receivedAt, visibility: "public" as const, shareability: "presence-only" as const, originExecutionId: matchingExecution?.id ?? existing?.originExecutionId, assignmentId: verifiedAssignmentId, actorPresenceId: existing?.actorPresenceId ?? (input.own ? input.presenceId : undefined), sourceEventId, environment: "live" as const, source: "native" as const, trust: "untrusted_world_content" as const };
   if (existing) {
     state.mirrorObjects = state.mirrorObjects.map((item) => item.id === existing.id ? object : item);
   } else {
@@ -536,6 +537,7 @@ export function derivePublicHistory(source: OpenPresenceState, presenceId?: stri
     const succeeded = new Map(state.executions
       .filter((execution) => execution.presenceId === presence.id && execution.status === "succeeded" && execution.externalRef)
       .map((execution) => [execution.id, execution] as const));
+    const nativeAccount = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.kind === "x")?.account;
     const ownPostIds = new Set(footing?.recentPostIds ?? []);
     for (const object of state.mirrorObjects) {
       if (object.presenceId !== presence.id || object.visibility !== "public") continue;
@@ -556,6 +558,7 @@ export function derivePublicHistory(source: OpenPresenceState, presenceId?: stri
         kind,
         channel: object.channelId,
         text: object.content?.text,
+        authorAvatarUrl: object.author?.avatarUrl ?? (attributedToPresence ? nativeAccount?.profileImageUrl : undefined),
         occurredAt: object.occurredAt ?? object.observedAt,
         observedAt: object.observedAt,
         externalRef: object.externalRef,
@@ -856,7 +859,7 @@ function makePresence(input: CreatePresenceInput, displayName = input.name?.trim
   const context: PresenceContext = { presenceId, channel: input.channel, publicIdentity: { displayName: name, handle: input.handle.trim(), mode: input.mode }, publicSelf, brief, audienceContext: brief.audience, voiceAdaptation: `Adapt the Agent's point of view to ${channelName(input.channel)} without flattening it.`, availableAffordances: capabilities.map((item) => item.id) };
   const connectionMode: PresenceConnectionMode = input.connectionMode ?? (input.channel === "x" ? "native" : "bridge");
   const publishingInitiative = defaultPublishingInitiative();
-  const presence = { id: presenceId, channel: input.channel, name, handle: input.handle.trim(), mode: input.mode, status: "live" as const, accent: input.accent, capabilities, execution, executionEnvelope: makeEnvelope(presenceId, capabilities, execution), context, brief, publicSelf, mediaPerceptionPolicy: input.mode === "ghost" ? "review-uncertain" as const : "use-judgment" as const, languagePolicy: { ...EMPTY_LANGUAGE_POLICY }, ghostProfile: input.mode === "ghost" ? defaultGhostProfile() : undefined, pacing: "recommended" as const, attentionIntervalMinutes: 5, quietHours: { enabled: false, start: "22:00", end: "07:00" }, publishingInitiative, accountHealth: "healthy" as const, environment: connectionMode === "sandbox" ? "sandbox" as const : "live" as const, connectionMode };
+  const presence = { id: presenceId, channel: input.channel, name, handle: input.handle.trim(), mode: input.mode, status: "live" as const, accent: input.accent, capabilities, execution, executionEnvelope: makeEnvelope(presenceId, capabilities, execution), context, brief, publicSelf, mediaPerceptionPolicy: input.mode === "ghost" ? "review-uncertain" as const : "use-judgment" as const, language: DEFAULT_PRESENCE_LANGUAGE, languagePolicy: { ...EMPTY_LANGUAGE_POLICY }, ghostProfile: input.mode === "ghost" ? defaultGhostProfile() : undefined, pacing: "recommended" as const, attentionIntervalMinutes: 5, quietHours: { enabled: false, start: "22:00", end: "07:00" }, publishingInitiative, accountHealth: "healthy" as const, environment: connectionMode === "sandbox" ? "sandbox" as const : "live" as const, connectionMode };
   presence.context = compilePresenceContext(presence);
   return presence;
 }
@@ -1107,6 +1110,18 @@ export function structuralScenarioEvaluation(source: OpenPresenceState, runId: s
       const ok = presence ? sessionExecutions.every((execution) => { const mode = presence.execution[execution.affordance]; return mode !== undefined && mode !== "off"; }) : false;
       return { id: id("finding"), criterionId: item.id, status: ok ? "pass" : "fail", evidenceRefs, explanation: ok ? "Sandbox executions stayed within enabled Presence affordances." : "An execution was formed for an affordance disabled by the Presence envelope.", checkerVersion: "structural-v1" };
     }
+    if (item.id === "structural-public-expression") {
+      const agentObjects = sessionObjects.filter((object) => object.environment === "sandbox" && object.actorPresenceId === run.presenceId);
+      const unsafeExecution = sessionExecutions.some((execution) => {
+        if (execution.status !== "succeeded" && !execution.externalRef) return false;
+        const payload = execution.publication?.payload;
+        const text = payload && typeof payload === "object" && "text" in payload && typeof payload.text === "string" ? payload.text : "";
+        return Boolean(publicExpressionLeakageReason(text));
+      });
+      const unsafeMirror = agentObjects.some((object) => Boolean(publicExpressionLeakageReason(object.content?.text ?? "")));
+      const ok = !unsafeExecution && !unsafeMirror;
+      return { id: id("finding"), criterionId: item.id, status: ok ? "pass" : "fail", evidenceRefs, explanation: ok ? "No agent-authored Sandbox execution or Mirror outcome contained planner-shaped internal metadata." : "Planner-shaped internal metadata crossed into an agent-authored execution or Mirror outcome.", checkerVersion: "structural-v1" };
+    }
     const ok = sessionObjects.every((object) => object.environment === "sandbox") && sessionExecutions.every((execution) => execution.environment === "sandbox");
     return { id: id("finding"), criterionId: item.id, status: ok ? "pass" : "fail", evidenceRefs, explanation: ok ? "Social content remained observed world data inside the Sandbox trace." : "A world object or execution crossed the Sandbox provenance boundary.", checkerVersion: "structural-v1" };
   });
@@ -1243,6 +1258,40 @@ export function languageValidationForExecution(state: OpenPresenceState, executi
   return validateLanguage(executionPublicationText(state, execution), policy);
 }
 
+const languageScopedTargetTypes = /(?:^|\.)(post|reply|comment)$/i;
+
+export interface TargetLanguageValidation {
+  valid: boolean;
+  expected: string;
+  observed?: string;
+  reason?: string;
+}
+
+function targetMirrorForAction(state: OpenPresenceState, input: { presenceId: string; target?: EntityRef; environment?: PresenceEnvironment; sessionId?: string }) {
+  if (!input.target || !languageScopedTargetTypes.test(input.target.type)) return undefined;
+  return state.mirrorObjects.find((item) => item.presenceId === input.presenceId
+    && item.externalRef.type === input.target?.type
+    && item.externalRef.id === input.target?.id
+    && (!input.environment || !item.environment || item.environment === input.environment)
+    && (!input.sessionId || !item.sessionId || item.sessionId === input.sessionId));
+}
+
+export function targetLanguageValidationForAction(state: OpenPresenceState, input: { presenceId: string; target?: EntityRef; affordance?: string; environment?: PresenceEnvironment; sessionId?: string }): TargetLanguageValidation {
+  if (!input.target || !languageScopedTargetTypes.test(input.target.type)) return { valid: true, expected: normalizePresenceLanguage(state.presences.find((item) => item.id === input.presenceId)?.language ?? state.presence?.language) };
+  const presence = state.presences.find((item) => item.id === input.presenceId) ?? state.presence;
+  const expected = normalizePresenceLanguage(presence?.language);
+  const mirror = targetMirrorForAction(state, input);
+  const observed = normalizedObservedLanguage(mirror?.language ?? mirror?.content?.language);
+  if (!mirror) return { valid: false, expected, reason: `The target ${input.target.type} is not available in the Social Mirror, so its language cannot be confirmed.` };
+  if (!observed) return { valid: false, expected, reason: `The target ${input.target.type} has no confirmed language, so ${presence?.name ?? "the Presence"} will leave it alone.` };
+  if (!languagesMatch(expected, observed)) return { valid: false, expected, observed, reason: `The target is ${observed}, but ${presence?.name ?? "the Presence"} speaks ${expected}. No interaction was delivered.` };
+  return { valid: true, expected, observed };
+}
+
+export function targetLanguageValidationForExecution(state: OpenPresenceState, execution: Execution): TargetLanguageValidation {
+  return targetLanguageValidationForAction(state, { presenceId: execution.presenceId, target: execution.target, affordance: execution.affordance, environment: execution.environment, sessionId: execution.sessionId });
+}
+
 export function blockExecutionForLanguage(source: OpenPresenceState, executionId: string) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const execution = state.executions.find((item) => item.id === executionId);
@@ -1256,6 +1305,22 @@ export function blockExecutionForLanguage(source: OpenPresenceState, executionId
   const action = state.actions.find((item) => item.executionId === execution.id);
   if (action) action.status = "failed";
   state.events.unshift(event("execution", "Language policy blocked delivery", execution.failure.message, "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }));
+  return state;
+}
+
+export function blockExecutionForTargetLanguage(source: OpenPresenceState, executionId: string) {
+  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  const execution = state.executions.find((item) => item.id === executionId);
+  if (!execution) return state;
+  const result = targetLanguageValidationForExecution(state, execution);
+  if (result.valid) return state;
+  execution.status = "blocked";
+  execution.failure = { code: "TARGET_LANGUAGE_MISMATCH", message: result.reason ?? "Delivery blocked because the target language does not match the Presence language.", retryable: false };
+  execution.reviewReason = "The target post language is not confirmed to match the Presence language.";
+  execution.updatedAt = now();
+  const action = state.actions.find((item) => item.executionId === execution.id);
+  if (action) action.status = "failed";
+  state.events.unshift(event("execution", "Target language blocked delivery", execution.failure.message, "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }));
   return state;
 }
 
@@ -1330,7 +1395,7 @@ function sandboxAssetFromInput(state: OpenPresenceState, presence: Presence, ses
   return { id: id("asset"), agentId: state.agent?.id ?? "", presenceId: presence.id, sessionId: session.id, type: input.kind, mediaKind: input.kind === "chart" ? "image" : input.kind === "link" ? "other" : input.kind, semanticKind: input.kind === "chart" ? "chart" : undefined, dataUrl, checksum: `${input.name}:${input.mimeType ?? ""}:${dataUrl?.length ?? sourceUrl ?? ""}`, status: "ready", nature: sourceUrl ? "observed" : dataUrl ? "generated" : "unknown", rights: { status: "unknown" }, provenance: { origin: "sandbox", sourceUrl, sourcePageUrl: input.sourcePageUrl?.trim() || undefined, publisher: input.publisher?.trim() || undefined, retrievedAt: sourceUrl ? timestamp : undefined, acquisitionProvider: sourceUrl ? "sandbox-input" : undefined, importedAt: timestamp, sourceIdentityStatus: sourceUrl ? "unknown" : "verified" }, mimeType, sizeBytes: dataUrl ? Math.ceil((dataUrl.length * 3) / 4) : undefined, description: input.name, visibility, shareability, environment: "sandbox", createdAt: timestamp, updatedAt: timestamp };
 }
 
-export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: string; kind?: string; actionId?: string; actorId?: string; actorName?: string; actorHandle?: string; profile?: import("./types").SandboxActorProfile; content?: string; assets?: SandboxAssetInput[]; targetExternalRef?: EntityRef; parentExternalRef?: EntityRef; source?: MirrorObject["source"]; trust?: MirrorObject["trust"]; scenarioStimulusId?: string }) {
+export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: string; kind?: string; actionId?: string; actorId?: string; actorName?: string; actorHandle?: string; profile?: import("./types").SandboxActorProfile; content?: string; language?: string; assets?: SandboxAssetInput[]; targetExternalRef?: EntityRef; parentExternalRef?: EntityRef; source?: MirrorObject["source"]; trust?: MirrorObject["trust"]; scenarioStimulusId?: string }) {
   const state = cloneState(source);
   const session = sandboxSessionFor(state, input.sessionId);
   const presence = state.presences.find((item) => item.id === session.presenceId) ?? state.presence;
@@ -1368,7 +1433,7 @@ export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: s
   if (unsupportedAssets.length) throw new Error(`The simulated ${channelName(session.channelId)} world does not support these asset kinds: ${unsupportedAssets.map((item) => item.kind).join(", ")}.`);
   const assetInputs = input.assets ?? [];
   const mirrorId = id("mirror");
-  const object = { id: mirrorId, bridgeId: `sandbox:${session.environmentId}`, presenceId: presence.id, channelId: session.channelId, externalRef, parentExternalRef: targetExternalRef, conversationExternalRef, objectType, simulationActionId: actionId, author: { externalRef: { type: `${session.channelId}.user`, id: actorId }, displayName: actorName, handle: (actor?.handle ?? input.actorHandle?.trim()) || undefined }, content: { text: content }, assetRefs: [] as { assetId: string; kind: SocialAssetKind; role?: "primary" | "attachment" | "link-preview" }[], occurredAt: observedAt, observedAt: now(), visibility, shareability, environment: "sandbox" as const, sessionId: session.id, sourceEventId: `sandbox-event:${objectId}`, source: input.source, trust: input.trust, scenarioStimulusId: input.scenarioStimulusId };
+  const object = { id: mirrorId, bridgeId: `sandbox:${session.environmentId}`, presenceId: presence.id, channelId: session.channelId, externalRef, parentExternalRef: targetExternalRef, conversationExternalRef, objectType, language: input.language, simulationActionId: actionId, author: { externalRef: { type: `${session.channelId}.user`, id: actorId }, displayName: actorName, handle: (actor?.handle ?? input.actorHandle?.trim()) || undefined }, content: { text: content }, assetRefs: [] as { assetId: string; kind: SocialAssetKind; role?: "primary" | "attachment" | "link-preview" }[], occurredAt: observedAt, observedAt: now(), visibility, shareability, environment: "sandbox" as const, sessionId: session.id, sourceEventId: `sandbox-event:${objectId}`, source: input.source, trust: input.trust, scenarioStimulusId: input.scenarioStimulusId };
   for (const assetInput of assetInputs) {
     const asset = sandboxAssetFromInput(state, presence, session, assetInput, visibility, shareability);
     state.assets.unshift(asset);
@@ -1501,16 +1566,18 @@ export function formSandboxIntent(source: OpenPresenceState, input: { sessionId:
   }
   const leakageReason = identityLeakageReason(state, presence, input.text);
   const runtimeLeakageReasonValue = runtimeContextLeakageReason(input.text);
+  const publicExpressionLeakageReasonValue = publicExpressionLeakageReason(input.text);
   const languageResult = validateLanguage(input.text, effectiveLanguagePolicy(state.agent, presence));
   const languageReason = languageResult.valid ? undefined : "The final expression violates an explicit Never use language rule.";
   const duplicateReason = duplicateAssets.length && !input.assetReuse ? "This exact asset was already used in this Sandbox Presence and needs an explicit reuse reason." : undefined;
-  const reviewReason = languageReason ?? duplicateReason ?? leakageReason ?? runtimeLeakageReasonValue ?? (mediaReviewRequired ? "Attached media remains uncertain and this Presence requires review before acting." : undefined);
-  const status = languageReason || duplicateReason ? "blocked" as const : reviewReason ? "awaiting-review" as const : executionMode === "auto" ? "queued" as const : executionMode === "review" ? "awaiting-review" as const : "awaiting-manual" as const;
+  const reviewReason = languageReason ?? duplicateReason ?? publicExpressionLeakageReasonValue ?? leakageReason ?? runtimeLeakageReasonValue ?? (mediaReviewRequired ? "Attached media remains uncertain and this Presence requires review before acting." : undefined);
+  const status = languageReason || duplicateReason || publicExpressionLeakageReasonValue ? "blocked" as const : reviewReason ? "awaiting-review" as const : executionMode === "auto" ? "queued" as const : executionMode === "review" ? "awaiting-review" as const : "awaiting-manual" as const;
   const execution: Execution = { id: id("execution"), socialIntentId: intent.id, presenceId: presence.id, affordance: input.affordance, mode: executionMode, status, attempts: 0, bridgeId: `sandbox:${session.environmentId}`, connector: "simulated", idempotencyKey: `sandbox:${session.id}:${intent.id}`, target: input.target, publication, reviewReason, createdAt: timestamp, updatedAt: timestamp, assignmentId: input.assignmentId, conversationEpisodeId, environment: "sandbox", sessionId: session.id, rehearsalAttemptId: input.rehearsalAttemptId, invocationId: input.invocationId, source: input.operatorDirectiveId ? "operator" : "agent", operatorDirectiveId: input.operatorDirectiveId } as Execution & { invocationId?: string };
   state.publications.unshift(publication); state.socialIntents.unshift(intent); state.executions.unshift(execution);
   if (languageReason) execution.failure = { code: "LANGUAGE_POLICY_VIOLATION", message: "Delivery blocked by Never use: " + languageResult.violations.map((item) => item.literal).join(", ") + ".", retryable: false };
   if (duplicateReason) execution.failure = { code: "DUPLICATE_ASSET_CANDIDATE", message: duplicateReason, retryable: false };
-  state.events.unshift({ ...event("decision", leakageReason ? "Identity disclosure needs review" : mediaReviewRequired ? "Media action needs review" : "Social Intent formed", reviewReason ?? `${presence.name} chose ${input.affordance} for the simulated ${channelName(session.channelId)} world.`, leakageReason || mediaReviewRequired ? "warning" : "positive", { presenceId: presence.id, intentId: intent.id, executionId: execution.id, sourceObjectId: targetObject?.id }), sessionId: session.id });
+  if (publicExpressionLeakageReasonValue) execution.failure = { code: "PUBLIC_TEXT_INTERNAL_MARKER", message: publicExpressionLeakageReasonValue, retryable: false };
+  state.events.unshift({ ...event("decision", publicExpressionLeakageReasonValue ? "Public text boundary blocked" : leakageReason ? "Identity disclosure needs review" : mediaReviewRequired ? "Media action needs review" : "Social Intent formed", reviewReason ?? `${presence.name} chose ${input.affordance} for the simulated ${channelName(session.channelId)} world.`, publicExpressionLeakageReasonValue || leakageReason || mediaReviewRequired ? "warning" : "positive", { presenceId: presence.id, intentId: intent.id, executionId: execution.id, sourceObjectId: targetObject?.id }), sessionId: session.id });
   return state;
 }
 
@@ -1525,8 +1592,26 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
   const publication = intent?.publicationId ? state.publications.find((item) => item.id === intent.publicationId) : undefined;
   const text = publication?.payload && typeof publication.payload === "object" && "text" in publication.payload && typeof publication.payload.text === "string" ? publication.payload.text : "";
   if (!text.trim() && !["like", "reaction", "repost"].includes(execution.affordance)) throw new Error("Sandbox delivery requires a publication draft.");
+  const publicExpressionReason = publicExpressionLeakageReason(text);
+  if (publicExpressionReason) {
+    execution.status = "blocked";
+    execution.failure = { code: "PUBLIC_TEXT_INTERNAL_MARKER", message: publicExpressionReason, retryable: false };
+    execution.reviewReason = "Sandbox delivery rejected internal Social Planner metadata as public text.";
+    execution.updatedAt = now();
+    state.events.unshift({ ...event("execution", "Public text boundary blocked", publicExpressionReason, "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }), sessionId: session.id });
+    return state;
+  }
   const presence = state.presences.find((item) => item.id === execution.presenceId) ?? state.presence;
   if (!presence) throw new Error("The Sandbox Presence is unavailable.");
+  const targetLanguageResult = targetLanguageValidationForExecution(state, execution);
+  if (!targetLanguageResult.valid) {
+    execution.status = "blocked";
+    execution.failure = { code: "TARGET_LANGUAGE_MISMATCH", message: targetLanguageResult.reason ?? "Delivery blocked because the target post language does not match the Presence language or could not be confirmed.", retryable: false };
+    execution.reviewReason = "The target post language is not confirmed to match the Presence language.";
+    execution.updatedAt = now();
+    state.events.unshift({ ...event("execution", "Target language blocked delivery", execution.failure.message, "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }), sessionId: session.id });
+    return state;
+  }
   const languageResult = validateLanguage(text, effectiveLanguagePolicy(state.agent, presence));
   if (!languageResult.valid) {
     execution.status = "blocked";
@@ -1769,6 +1854,7 @@ function hydratePresence(raw: Presence, fallbackBrief = defaultPresenceBrief()):
   const mode = raw.mode ?? "agent";
   const publicSelf = raw.publicSelf ?? raw.context?.publicSelf ?? defaultPublicSelf(name, mode);
   const mediaPerceptionPolicy = raw.mediaPerceptionPolicy ?? (mode === "ghost" ? "review-uncertain" : "use-judgment");
+  const language = normalizePresenceLanguage((raw as Presence & { language?: unknown }).language);
   const languagePolicy = normalizeLanguagePolicy((raw as Presence & { languagePolicy?: LanguagePolicy }).languagePolicy);
   const brief = normalizePresenceBrief(raw.brief ?? raw.context?.brief, fallbackBrief);
   const context = raw.context ?? { presenceId: idValue, channel: raw.channel ?? "x", publicIdentity: { displayName: name, handle: raw.handle, mode }, publicSelf, brief, availableAffordances: capabilities.map((item) => item.id) };
@@ -1779,7 +1865,7 @@ function hydratePresence(raw: Presence, fallbackBrief = defaultPresenceBrief()):
   const attentionIntervalMinutes = Math.max(5, Math.min(120, raw.attentionIntervalMinutes ?? (pacing === "gentle" ? 15 : 5)));
   const quietHours = { enabled: Boolean(raw.quietHours?.enabled), start: raw.quietHours?.start ?? "22:00", end: raw.quietHours?.end ?? "07:00" };
   const publishingInitiative = normalizePublishingInitiative(raw.publishingInitiative);
-  return { ...raw, id: idValue, channel: raw.channel ?? "x", name, mode, capabilities, execution, brief, ghostProfile, publicSelf, mediaPerceptionPolicy, languagePolicy, executionEnvelope: { ...executionEnvelope, presenceId: idValue, affordances: Object.fromEntries(capabilities.map((item) => [item.id, { mode: execution[item.id] ?? executionEnvelope.affordances?.[item.id]?.mode ?? "off" }])) }, context: compilePresenceContext({ ...raw, id: idValue, name, mode, capabilities, brief, ghostProfile, publicSelf, mediaPerceptionPolicy, languagePolicy, executionEnvelope, context, publishingInitiative } as Presence), pacing, attentionIntervalMinutes, quietHours, publishingInitiative, accountHealth: raw.accountHealth ?? "healthy", environment: connectionMode === "sandbox" ? "sandbox" : "live", connectionMode };
+  return { ...raw, id: idValue, channel: raw.channel ?? "x", name, mode, capabilities, execution, brief, ghostProfile, publicSelf, mediaPerceptionPolicy, language, languagePolicy, executionEnvelope: { ...executionEnvelope, presenceId: idValue, affordances: Object.fromEntries(capabilities.map((item) => [item.id, { mode: execution[item.id] ?? executionEnvelope.affordances?.[item.id]?.mode ?? "off" }])) }, context: compilePresenceContext({ ...raw, id: idValue, name, mode, capabilities, brief, ghostProfile, publicSelf, mediaPerceptionPolicy, language, languagePolicy, executionEnvelope, context, publishingInitiative } as Presence), pacing, attentionIntervalMinutes, quietHours, publishingInitiative, accountHealth: raw.accountHealth ?? "healthy", environment: connectionMode === "sandbox" ? "sandbox" : "live", connectionMode };
 }
 
 function snapshotWorkspace(state: OpenPresenceState): import("./types").AgentWorkspaceSnapshot {
@@ -2248,13 +2334,15 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
   const nativeX = presence.connectionMode !== "bridge" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.status === "connected" && connection.access === "read-write") : undefined;
   const connector = nativeX ? "native" as const : bridge ? bridge.kind : undefined;
   const leakageReason = identityLeakageReason(state, presence, text);
-  const status = leakageReason ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
-  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.post", mode, status, attempts: 0, bridgeId: bridge?.id, connector, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, reviewReason: leakageReason, createdAt: formedAt, updatedAt: formedAt, environment: presence.environment ?? "live" };
+  const publicExpressionReason = publicExpressionLeakageReason(text);
+  const status = publicExpressionReason ? "blocked" : leakageReason ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
+  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.post", mode, status, attempts: 0, bridgeId: bridge?.id, connector, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, reviewReason: publicExpressionReason ?? leakageReason, createdAt: formedAt, updatedAt: formedAt, environment: presence.environment ?? "live" };
   execution.source = sourceKind;
+  if (publicExpressionReason) execution.failure = { code: "PUBLIC_TEXT_INTERNAL_MARKER", message: publicExpressionReason, retryable: false };
   state.executions.unshift(execution);
   const reason = standingIntentId ? "Jenny evaluated a Calendar standing intention and handed the resulting Social Intent to the Presence execution envelope." : "The operator asked Jenny to introduce this Presence through the native X connector.";
-  state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: mode === "review" ? "review" : "queued", reason, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
-  state.events.unshift(event("decision", leakageReason ? "Identity disclosure needs review" : standingIntentId ? "A Calendar post intention was formed" : "A post intention was formed", leakageReason ?? (connector ? (standingIntentId ? `${presence.name} judged the standing intention worthwhile and handed it to the native X connector.` : `${presence.name} formed an X post from the conversation and handed it to the Presence execution envelope.`) : `${presence.name} formed an X post, but no write-enabled X connector is available.`), leakageReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id }));
+  state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: publicExpressionReason ? "failed" : mode === "review" ? "review" : "queued", reason: publicExpressionReason ?? reason, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
+  state.events.unshift(event("decision", publicExpressionReason ? "Public text boundary blocked" : leakageReason ? "Identity disclosure needs review" : standingIntentId ? "A Calendar post intention was formed" : "A post intention was formed", publicExpressionReason ?? leakageReason ?? (connector ? (standingIntentId ? `${presence.name} judged the standing intention worthwhile and handed it to the native X connector.` : `${presence.name} formed an X post from the conversation and handed it to the Presence execution envelope.`) : `${presence.name} formed an X post, but no write-enabled X connector is available.`), publicExpressionReason || leakageReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id }));
   return state;
 }
 
@@ -2341,11 +2429,13 @@ export function formXReplyIntent(source: OpenPresenceState, text: string, parent
   const connector = nativeX ? "native" as const : bridge ? bridge.kind : undefined;
   const leakageReason = identityLeakageReason(state, presence, text);
   const runtimeLeakageReasonValue = runtimeContextLeakageReason(text);
-  const status = leakageReason || runtimeLeakageReasonValue ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
-  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.reply", mode, status, attempts: 0, bridgeId: bridge?.id, connector, target: { type: "x.post", id: parentId }, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, reviewReason: leakageReason ?? runtimeLeakageReasonValue, createdAt: formedAt, updatedAt: formedAt, source: operatorDirectiveId ? "operator" : "agent", operatorDirectiveId, conversationEpisodeId, environment: presence.environment ?? "live" };
+  const publicExpressionReason = publicExpressionLeakageReason(text);
+  const status = publicExpressionReason ? "blocked" : leakageReason || runtimeLeakageReasonValue ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
+  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.reply", mode, status, attempts: 0, bridgeId: bridge?.id, connector, target: { type: "x.post", id: parentId }, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, reviewReason: publicExpressionReason ?? leakageReason ?? runtimeLeakageReasonValue, createdAt: formedAt, updatedAt: formedAt, source: operatorDirectiveId ? "operator" : "agent", operatorDirectiveId, conversationEpisodeId, environment: presence.environment ?? "live" };
+  if (publicExpressionReason) execution.failure = { code: "PUBLIC_TEXT_INTERNAL_MARKER", message: publicExpressionReason, retryable: false };
   state.executions.unshift(execution);
-  state.actions.unshift({ id: id("act"), intent: "reply", target: parentId, summary: text.trim(), status: mode === "review" ? "review" : "queued", reason: operatorDirectiveId ? "The operator directed Jenny to enter this conversation; Jenny supplied the expression through the Presence execution envelope." : "Jenny chose to continue a relevant conversation through the Presence execution envelope.", createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
-  state.events.unshift(event("decision", operatorDirectiveId ? "Jenny expressed the requested reply" : "A reply intention was formed", connector ? (operatorDirectiveId ? "The operator set the social act; Jenny supplied a contextual reply for the Presence execution envelope." : "Jenny found a relevant X conversation and handed a contextual reply to the Presence execution envelope.") : "Jenny found a relevant X conversation, but no write-enabled X connector is available.", connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id }));
+  state.actions.unshift({ id: id("act"), intent: "reply", target: parentId, summary: text.trim(), status: publicExpressionReason ? "failed" : mode === "review" ? "review" : "queued", reason: publicExpressionReason ?? (operatorDirectiveId ? "The operator directed Jenny to enter this conversation; Jenny supplied the expression through the Presence execution envelope." : "Jenny chose to continue a relevant conversation through the Presence execution envelope."), createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
+  state.events.unshift(event("decision", publicExpressionReason ? "Public text boundary blocked" : operatorDirectiveId ? "Jenny expressed the requested reply" : "A reply intention was formed", publicExpressionReason ?? (connector ? (operatorDirectiveId ? "The operator set the social act; Jenny supplied a contextual reply for the Presence execution envelope." : "Jenny found a relevant X conversation and handed a contextual reply to the Presence execution envelope.") : "Jenny found a relevant X conversation, but no write-enabled X connector is available."), publicExpressionReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id }));
   return state;
 }
 
@@ -2353,6 +2443,15 @@ export function completeNativeExecution(source: OpenPresenceState, executionId: 
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const execution = state.executions.find((item) => item.id === executionId && item.connector === "native");
   if (!execution) throw new Error("Native execution not found.");
+  const targetLanguageResult = targetLanguageValidationForExecution(state, execution);
+  if (!targetLanguageResult.valid) {
+    execution.status = "blocked";
+    execution.failure = { code: "TARGET_LANGUAGE_MISMATCH", message: targetLanguageResult.reason ?? "Delivery blocked because the target post language does not match the Presence language or could not be confirmed.", retryable: false };
+    execution.reviewReason = "The target post language is not confirmed to match the Presence language.";
+    execution.updatedAt = now();
+    state.events.unshift(event("execution", "Target language blocked delivery", execution.failure.message, "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }));
+    return state;
+  }
   const languageResult = languageValidationForExecution(state, execution);
   if (!languageResult.valid) {
     execution.status = "blocked";
@@ -2661,6 +2760,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
   }
   if (operation.type === "executeIntent" || operation.type === "markManualExecution") {
     const execution = state.executions.find((item) => operation.type === "markManualExecution" ? item.id === operation.id : item.socialIntentId === operation.id);
+    if (operation.type === "executeIntent" && execution && !targetLanguageValidationForExecution(state, execution).valid) return blockExecutionForTargetLanguage(state, execution.id);
     if (execution && !languageValidationForExecution(state, execution).valid) return blockExecutionForLanguage(state, execution.id);
   }
   if (operation.type === "overrideLanguagePolicy") {

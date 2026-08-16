@@ -1,13 +1,13 @@
 import { z } from "zod";
-import { applyOperation, blockExecutionForLanguage, curateRelationshipFromMirror, languageValidationForExecution } from "./runtime";
+import { applyOperation, blockExecutionForLanguage, blockExecutionForTargetLanguage, curateRelationshipFromMirror, languageValidationForExecution, targetLanguageValidationForExecution } from "./runtime";
 import { authenticateBridgeKey, deleteBridgeCredential, issueBridgeKey, readBridgeCredentialMetadata, readStateForBridge, revokeBridgeKey, writeState } from "./db";
 import type { Bridge, Execution, LiveEvent, MirrorObject, OpenPresenceState, Outcome } from "./types";
 import { bridgeAdapterStatus } from "./bridge-contract";
 import { PublicationSecurityError, sealExecutionForDelivery, verifyExecutionPermit } from "./publication-security";
 
 const entityRef = z.object({ type: z.string().min(1).max(80), id: z.string().min(1).max(240) });
-const author = z.object({ externalRef: entityRef.optional(), displayName: z.string().min(1).max(160), handle: z.string().max(160).optional() }).optional();
-export const mirrorObjectInput = z.object({ externalRef: entityRef, parentExternalRef: entityRef.optional(), conversationExternalRef: z.string().max(240).optional(), referencedExternalRefs: z.array(entityRef).max(20).optional(), objectType: z.string().min(1).max(80), author, content: z.object({ text: z.string().max(100_000).optional(), payload: z.unknown().optional() }).optional(), occurredAt: z.string().datetime().optional(), visibility: z.enum(["public", "private-community", "private-thread", "direct-message", "unknown"]).default("unknown"), shareability: z.enum(["presence-only", "agent-wide", "public"]).default("presence-only"), originExecutionId: z.string().optional(), actorPresenceId: z.string().optional() });
+const author = z.object({ externalRef: entityRef.optional(), displayName: z.string().min(1).max(160), handle: z.string().max(160).optional(), avatarUrl: z.string().url().max(2_000).optional() }).optional();
+export const mirrorObjectInput = z.object({ externalRef: entityRef, parentExternalRef: entityRef.optional(), conversationExternalRef: z.string().max(240).optional(), referencedExternalRefs: z.array(entityRef).max(20).optional(), objectType: z.string().min(1).max(80), language: z.string().trim().max(20).optional(), author, content: z.object({ text: z.string().max(100_000).optional(), payload: z.unknown().optional(), language: z.string().trim().max(20).optional() }).optional(), occurredAt: z.string().datetime().optional(), visibility: z.enum(["public", "private-community", "private-thread", "direct-message", "unknown"]).default("unknown"), shareability: z.enum(["presence-only", "agent-wide", "public"]).default("presence-only"), originExecutionId: z.string().optional(), actorPresenceId: z.string().optional() });
 export const inboundEventInput = z.object({ sourceEventId: z.string().min(1).max(240), event: z.enum(["created", "updated", "deleted"]), object: mirrorObjectInput });
 export const eventsInput = z.object({ events: z.array(inboundEventInput).min(1).max(500) });
 export const reconcileInput = z.object({ cursor: z.string().max(500).optional(), objects: z.array(mirrorObjectInput).max(2_000) });
@@ -91,7 +91,7 @@ export function heartbeatBridge(bridge: Bridge, executorId: string) {
 
 function upsertObject(state: OpenPresenceState, bridge: Bridge, input: z.infer<typeof mirrorObjectInput>, sourceEventId?: string, archived = false): MirrorObject {
   const existing = state.mirrorObjects.find((item) => item.bridgeId === bridge.id && item.externalRef.type === input.externalRef.type && item.externalRef.id === input.externalRef.id);
-  const object: MirrorObject = { id: existing?.id ?? localId("mirror"), bridgeId: bridge.id, presenceId: bridge.presenceId, channelId: bridge.channelId, externalRef: input.externalRef, parentExternalRef: input.parentExternalRef, conversationExternalRef: input.conversationExternalRef, referencedExternalRefs: input.referencedExternalRefs, objectType: input.objectType, author: input.author, content: input.content as MirrorObject["content"], occurredAt: input.occurredAt, observedAt: timestamp(), visibility: input.visibility, shareability: input.shareability, originExecutionId: input.originExecutionId, actorPresenceId: input.actorPresenceId, sourceEventId, archived };
+  const object: MirrorObject = { id: existing?.id ?? localId("mirror"), bridgeId: bridge.id, presenceId: bridge.presenceId, channelId: bridge.channelId, externalRef: input.externalRef, parentExternalRef: input.parentExternalRef, conversationExternalRef: input.conversationExternalRef, referencedExternalRefs: input.referencedExternalRefs, objectType: input.objectType, language: input.language ?? input.content?.language, author: input.author, content: input.content as MirrorObject["content"], occurredAt: input.occurredAt, observedAt: timestamp(), visibility: input.visibility, shareability: input.shareability, originExecutionId: input.originExecutionId, actorPresenceId: input.actorPresenceId, sourceEventId, archived };
   if (existing) Object.assign(existing, object); else state.mirrorObjects.unshift(object);
   return object;
 }
@@ -146,6 +146,11 @@ export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput
         continue;
       }
     }
+    if (!targetLanguageValidationForExecution(state, execution).valid) {
+      const blocked = blockExecutionForTargetLanguage(state, execution.id);
+      Object.assign(state, blocked);
+      continue;
+    }
     if (!languageValidationForExecution(state, execution).valid) {
       const blocked = blockExecutionForLanguage(state, execution.id);
       Object.assign(state, blocked);
@@ -180,6 +185,16 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
       writeState(state);
       return { state, execution };
     }
+  }
+  if (!targetLanguageValidationForExecution(state, execution).valid) {
+    execution.status = "blocked";
+    execution.failure = { code: "TARGET_LANGUAGE_MISMATCH", message: "Delivery blocked because the target post language does not match the Presence language or could not be confirmed.", retryable: false };
+    execution.lease = undefined;
+    execution.updatedAt = timestamp();
+    state.events.unshift(bridgeEvent(state, "Target language blocked delivery", execution.failure.message, "warning", execution.id));
+    touchBridge(state, bridge);
+    writeState(state);
+    return { state, execution };
   }
   if (!languageValidationForExecution(state, execution).valid) {
     execution.status = "blocked";

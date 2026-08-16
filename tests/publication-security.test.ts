@@ -4,10 +4,10 @@ import { createPublicExpressionCandidate, sealExecutionForDelivery, verifyExecut
 import type { Execution } from "../lib/types";
 import { publishSealedXPost } from "../lib/x";
 
-function liveExecution(state: ReturnType<typeof createAgent>, source: "agent" | "operator" = "agent") {
+function liveExecution(state: ReturnType<typeof createAgent>, source: "agent" | "operator" = "agent", text = "A bounded public expression.") {
   const presence = { ...state.presence!, environment: "live" as const, connectionMode: "native" as const };
   const intentId = "intent-security-test";
-  const expression = createPublicExpressionCandidate({ state, presence, affordance: "x.post", text: "A bounded public expression.", source: source === "operator" ? "operator_manual" : "agent_model", socialIntentId: intentId });
+  const expression = createPublicExpressionCandidate({ state, presence, affordance: "x.post", text, source: source === "operator" ? "operator_manual" : "agent_model", socialIntentId: intentId });
   return {
     id: "execution-security-test",
     socialIntentId: intentId,
@@ -61,6 +61,15 @@ describe("publication security boundary", () => {
     const execution = liveExecution(state);
     execution.publication!.publicExpression!.provenance.artifactKind = "operational";
     expect(() => sealExecutionForDelivery(execution)).toThrow(/INVALID_PROVENANCE/);
+  });
+
+  it("rejects planner-shaped JSON before a live permit can be issued", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("OPENPRESENCE_TEST_MODE", "0");
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "0");
+    const state = createAgent({ name: "Ada", description: "A production agent", mode: "agent", handle: "@ada", accent: "#D68754" });
+    const plannerObject = '{"conversationDisposition":"react_only","action":"like","rationale":"A quiet signal is enough."}';
+    expect(() => sealExecutionForDelivery(liveExecution(state, "agent", plannerObject))).toThrow(/PUBLIC_TEXT_INTERNAL_MARKER/);
   });
 
   it("lets the writer consume a permit once and never accepts raw text", async () => {
