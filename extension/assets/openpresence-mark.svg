@@ -1,0 +1,5 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64" role="img" aria-label="OpenPresence">
+  <circle cx="32" cy="32" r="29" fill="#c77d50"/>
+  <circle cx="32" cy="32" r="12" fill="none" stroke="#fffaf6" stroke-width="4"/>
+  <circle cx="32" cy="32" r="4" fill="#fffaf6"/>
+</svg>

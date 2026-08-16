@@ -50,6 +50,7 @@ export type Shareability = "presence-only" | "agent-wide" | "public";
 export type VisibilityScope = "public" | "private-community" | "private-thread" | "direct-message" | "unknown";
 export type PresenceEnvironment = "live" | "sandbox";
 export type PresenceConnectionMode = "sandbox" | "native" | "bridge";
+export interface PresenceBrowserAccess { enabled: boolean; }
 export type RelationshipMemoryState = "active" | "forgotten";
 export type RelationshipEpistemicKind = "stated_by_person" | "inferred" | "operator_provided" | "connector_verified";
 export type RelationshipVisibility = "public" | `presence:${string}` | `community:${string}` | `conversation:${string}` | "operator_only";
@@ -826,7 +827,7 @@ export interface AssignmentPreflight {
 export interface PresenceContext { presenceId: string; channel: ChannelId; language?: PresenceLanguage; publicIdentity: { displayName: string; handle?: string; mode: PresenceMode }; publicSelf: PublicSelf; brief: PresenceBrief; audienceContext?: string; voiceAdaptation?: string; availableAffordances: string[]; relevantRelationshipContext?: string; publicFooting?: PublicFooting; ghostProfile?: GhostProfile; publishingInitiative?: PublishingInitiative; }
 export type PresencePacing = "recommended" | "gentle" | "custom";
 export interface PresenceQuietHours { enabled: boolean; start: string; end: string; }
-export interface Presence { id: string; channel: ChannelId; name: string; handle: string; mode: PresenceMode; status: "live" | "paused" | "disconnected"; accent: string; capabilities: ChannelCapability[]; execution: Record<string, ExecutionMode>; executionEnvelope: ExecutionEnvelope; context: PresenceContext; brief: PresenceBrief; publicSelf: PublicSelf; mediaPerceptionPolicy: MediaPerceptionPolicy; evidencePolicy?: "use-judgment" | "review-uncertain" | "always-review"; language?: PresenceLanguage; languagePolicy: LanguagePolicy; ghostProfile?: GhostProfile; pacing: PresencePacing; attentionIntervalMinutes: number; quietHours: PresenceQuietHours; publishingInitiative: PublishingInitiative; accountHealth: "healthy" | "elevated"; environment?: PresenceEnvironment; connectionMode?: PresenceConnectionMode; }
+export interface Presence { id: string; channel: ChannelId; name: string; handle: string; mode: PresenceMode; status: "live" | "paused" | "disconnected"; accent: string; capabilities: ChannelCapability[]; execution: Record<string, ExecutionMode>; executionEnvelope: ExecutionEnvelope; context: PresenceContext; brief: PresenceBrief; publicSelf: PublicSelf; mediaPerceptionPolicy: MediaPerceptionPolicy; evidencePolicy?: "use-judgment" | "review-uncertain" | "always-review"; language?: PresenceLanguage; languagePolicy: LanguagePolicy; ghostProfile?: GhostProfile; pacing: PresencePacing; attentionIntervalMinutes: number; quietHours: PresenceQuietHours; publishingInitiative: PublishingInitiative; accountHealth: "healthy" | "elevated"; environment?: PresenceEnvironment; connectionMode?: PresenceConnectionMode; browserAccess?: PresenceBrowserAccess; }
 
 export interface ChatMessage { id: string; role: "agent" | "operator"; content: string; timestamp: string; change?: string; }
 export interface Conversation { id: string; title: string; createdAt: string; updatedAt: string; messages: ChatMessage[]; }
@@ -1296,7 +1297,9 @@ export type ExplorationOperation =
   | { type: "setExplorationEngagement"; id: string; mode: ExplorationEngagementMode; objective?: string }
   | { type: "lookNow"; id: string }
   | { type: "runAttentionWorker" };
+export type BrowserOperation = { type: "setPresenceBrowserAccess"; presenceId?: string; enabled: boolean };
 export type Operation = AssignmentOperation | LanguagePolicyOperation | ScenarioOperation | PublishingPlanOperation | ExplorationOperation
+  | BrowserOperation
   | KnowledgeOperation
   | { type: "removeSandboxObject"; sessionId: string; objectId: string }
   | { type: "askPresenceToReply"; presenceId: string; objectId: string; sessionId?: string; optionalDirection?: string }

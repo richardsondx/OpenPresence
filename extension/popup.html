@@ -1,0 +1,14 @@
+<!doctype html>
+<html lang="en">
+  <head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>OpenPresence</title><link rel="stylesheet" href="popup.css"></head>
+  <body>
+    <main>
+      <header><img class="mark" src="assets/openpresence-mark.svg" alt="OpenPresence"><div><span class="eyebrow">OPENPRESENCE</span><h1>Chrome hands</h1></div></header>
+      <p class="intro">The extension follows the Presence selected in your local OpenPresence app.</p>
+      <section id="status" class="status">Looking for the OpenPresence app…</section>
+      <div class="actions"><button id="open" disabled>Open controlled Chrome</button><button id="stop" class="secondary" disabled>Close session</button></div>
+      <p class="footnote">No account or credential is stored here. The tab uses your existing Chrome session and checks the selected account before writing.</p>
+    </main>
+    <script src="popup.js"></script>
+  </body>
+</html>

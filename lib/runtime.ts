@@ -910,7 +910,7 @@ function makePresence(input: CreatePresenceInput, displayName = input.name?.trim
   const context: PresenceContext = { presenceId, channel: input.channel, publicIdentity: { displayName: name, handle: input.handle.trim(), mode: input.mode }, publicSelf, brief, audienceContext: brief.audience, voiceAdaptation: `Adapt the Agent's point of view to ${channelName(input.channel)} without flattening it.`, availableAffordances: capabilities.map((item) => item.id) };
   const connectionMode: PresenceConnectionMode = input.connectionMode ?? (input.channel === "x" ? "native" : "bridge");
   const publishingInitiative = defaultPublishingInitiative();
-  const presence = { id: presenceId, channel: input.channel, name, handle: input.handle.trim(), mode: input.mode, status: "live" as const, accent: input.accent, capabilities, execution, executionEnvelope: makeEnvelope(presenceId, capabilities, execution), context, brief, publicSelf, mediaPerceptionPolicy: input.mode === "ghost" ? "review-uncertain" as const : "use-judgment" as const, language: DEFAULT_PRESENCE_LANGUAGE, languagePolicy: { ...EMPTY_LANGUAGE_POLICY }, ghostProfile: input.mode === "ghost" ? defaultGhostProfile() : undefined, pacing: "recommended" as const, attentionIntervalMinutes: 5, quietHours: { enabled: false, start: "22:00", end: "07:00" }, publishingInitiative, accountHealth: "healthy" as const, environment: connectionMode === "sandbox" ? "sandbox" as const : "live" as const, connectionMode };
+  const presence = { id: presenceId, channel: input.channel, name, handle: input.handle.trim(), mode: input.mode, status: "live" as const, accent: input.accent, capabilities, execution, executionEnvelope: makeEnvelope(presenceId, capabilities, execution), context, brief, publicSelf, mediaPerceptionPolicy: input.mode === "ghost" ? "review-uncertain" as const : "use-judgment" as const, language: DEFAULT_PRESENCE_LANGUAGE, languagePolicy: { ...EMPTY_LANGUAGE_POLICY }, ghostProfile: input.mode === "ghost" ? defaultGhostProfile() : undefined, pacing: "recommended" as const, attentionIntervalMinutes: 5, quietHours: { enabled: false, start: "22:00", end: "07:00" }, publishingInitiative, accountHealth: "healthy" as const, environment: connectionMode === "sandbox" ? "sandbox" as const : "live" as const, connectionMode, browserAccess: { enabled: false } };
   presence.context = compilePresenceContext(presence);
   return presence;
 }
@@ -1935,7 +1935,8 @@ function hydratePresence(raw: Presence, fallbackBrief = defaultPresenceBrief()):
   const attentionIntervalMinutes = Math.max(5, Math.min(120, raw.attentionIntervalMinutes ?? (pacing === "gentle" ? 15 : 5)));
   const quietHours = { enabled: Boolean(raw.quietHours?.enabled), start: raw.quietHours?.start ?? "22:00", end: raw.quietHours?.end ?? "07:00" };
   const publishingInitiative = normalizePublishingInitiative(raw.publishingInitiative);
-  return { ...raw, id: idValue, channel: raw.channel ?? "x", name, mode, capabilities, execution, brief, ghostProfile, publicSelf, mediaPerceptionPolicy, language, languagePolicy, executionEnvelope: { ...executionEnvelope, presenceId: idValue, affordances: Object.fromEntries(capabilities.map((item) => [item.id, { mode: execution[item.id] ?? executionEnvelope.affordances?.[item.id]?.mode ?? "off" }])) }, context: compilePresenceContext({ ...raw, id: idValue, name, mode, capabilities, brief, ghostProfile, publicSelf, mediaPerceptionPolicy, language, languagePolicy, executionEnvelope, context, publishingInitiative } as Presence), pacing, attentionIntervalMinutes, quietHours, publishingInitiative, accountHealth: raw.accountHealth ?? "healthy", environment: connectionMode === "sandbox" ? "sandbox" : "live", connectionMode };
+  const browserAccess = raw.browserAccess ?? { enabled: false };
+  return { ...raw, id: idValue, channel: raw.channel ?? "x", name, mode, capabilities, execution, brief, ghostProfile, publicSelf, mediaPerceptionPolicy, language, languagePolicy, browserAccess, executionEnvelope: { ...executionEnvelope, presenceId: idValue, affordances: Object.fromEntries(capabilities.map((item) => [item.id, { mode: execution[item.id] ?? executionEnvelope.affordances?.[item.id]?.mode ?? "off" }])) }, context: compilePresenceContext({ ...raw, id: idValue, name, mode, capabilities, brief, ghostProfile, publicSelf, mediaPerceptionPolicy, language, languagePolicy, browserAccess, executionEnvelope, context, publishingInitiative } as Presence), pacing, attentionIntervalMinutes, quietHours, publishingInitiative, accountHealth: raw.accountHealth ?? "healthy", environment: connectionMode === "sandbox" ? "sandbox" : "live", connectionMode };
 }
 
 function snapshotWorkspace(state: OpenPresenceState): import("./types").AgentWorkspaceSnapshot {
@@ -2094,6 +2095,14 @@ const socialWarmthTasteGuidance = [
   "Be curious, helpful, and inquisitive in community conversations. Ask a genuine question when it can deepen engagement or help someone think further, but do not ask questions merely to keep a conversation going. When someone shares something genuinely strong, interesting, or meaningful, acknowledge it in a way that makes them feel seen and encouraged. Use praise and warmth selectively and honestly, based on the contribution and the conversation, never as a default engagement tactic.",
 ].join("\n");
 
+const socialContextualHumorTasteGuidance = [
+  "## Contextual humor and emoji",
+  "",
+  "Use dry, lightly self-aware humor when it understands the room and sharpens the point. A brief line such as ‘I was promised networking, not a funeral 😭’ works when the moment earns it; do not force a joke into a serious exchange or use humor to compete for attention.",
+  "",
+  "Emoji are seasoning, not grammar. Usually use none; when one makes the tone unmistakable, use at most one familiar emoji and keep it attached to the actual thought.",
+].join("\n");
+
 const socialHumorTasteGuidance = [
   "## Absurdist and blue humor",
   "",
@@ -2103,9 +2112,17 @@ const socialHumorTasteGuidance = [
 ].join("\n");
 
 function isHumorTastePreferenceLanguage(content: string) {
-  return /\b(?:absurd(?:ist)?|sophom(?:oric)?|blue\s+humou?r|raunch(?:y|iness)?|innuendo|playful|silly|personality|voice|tone|humou?r\s+(?:style|boundary|preference|policy))\b/i.test(content)
+  return /\b(?:absurd(?:ist)?|sophom(?:oric)?|blue\s+humou?r|raunch(?:y|iness)?|innuendo|playful|silly|sarcasm|sarcastic|emoji|dry|self-aware|contextual|light(?:ly)?|personality|voice|tone|humou?r\s+(?:style|boundary|preference|policy))\b/i.test(content)
     && /\b(?:should|want|prefer|use|have|make|keep|never|don['’]?t|do not|update|change|more|less|sometimes|occasionally|always)\b/i.test(content)
     && /\b(?:agent|you|we|repl(?:y|ies)|conversation|people|someone|social|public|presence|genny|gennyverse|humou?r|jok(?:e|es|ing)|personality|voice|tone)\b/i.test(content);
+}
+
+function isBlueHumorTastePreferenceLanguage(content: string) {
+  return /\b(?:absurd(?:ist)?|sophom(?:oric)?|blue\s+humou?r|raunch(?:y|iness)?|innuendo)\b/i.test(content);
+}
+
+function isTasteUpdateCommand(content: string) {
+  return /^(?:can\s+you\s+)?(?:please\s+)?(?:update|change|apply|save)\s+(?:the\s+)?(?:agent['’]?s\s+)?(?:taste(?:\.md)?|taste\s+setting|taste\s+file|preference|preferences)\b(?:[\s\S]*\b(?:with|from)\s+(?:that|this))?[.!?]?$/i.test(content.trim());
 }
 
 function isTastePreferenceLanguage(content: string) {
@@ -2128,7 +2145,7 @@ function priorTastePreferenceInstruction(conversation: import("./types").Convers
 
 function tasteProposalGuidance(content: string) {
   const sections = [];
-  if (isHumorTastePreferenceLanguage(content)) sections.push(socialHumorTasteGuidance);
+  if (isHumorTastePreferenceLanguage(content)) sections.push(isBlueHumorTastePreferenceLanguage(content) ? socialHumorTasteGuidance : socialContextualHumorTasteGuidance);
   if (/\b(?:curious|curiosity|inquisitive|helpful|encourag(?:e|ement)|praise|warmth|feel good|engage(?:ment)|ask(?:ing)? questions?)\b/i.test(content)) sections.push(socialWarmthTasteGuidance);
   return sections.join("\n\n");
 }
@@ -2144,7 +2161,9 @@ function submitTasteProposal(state: OpenPresenceState, conversationId: string, i
   const existing = state.proposals.find((item) => item.status === "pending" && item.file === "TASTE" && item.proposed === proposed);
   if (existing) return existing;
   const reason = isHumorTastePreferenceLanguage(instruction)
-    ? "You asked for durable personality guidance about absurdist and blue humor with explicit sensitive-topic boundaries. The protected TASTE.md file stays unchanged until you review and apply it in Manage Agent → Brain."
+    ? isBlueHumorTastePreferenceLanguage(instruction)
+      ? "You asked for durable personality guidance about absurdist and blue humor with explicit sensitive-topic boundaries. The protected TASTE.md file stays unchanged until you review and apply it in Manage Agent → Brain."
+      : "You asked for durable guidance about contextual humor and light emoji use. The protected TASTE.md file stays unchanged until you review and apply it in Manage Agent → Brain."
     : "You asked for a durable preference about curiosity, useful questions, and selective encouragement. The protected TASTE.md file stays unchanged until you review and apply it in Manage Agent → Brain.";
   const item = proposal(state, "TASTE", proposed, reason, conversationId);
   state.proposals.push(item);
@@ -2703,6 +2722,13 @@ export function confirmAutoMode(source: OpenPresenceState, presenceId: string, c
 
 export function applyOperation(source: OpenPresenceState, operation: Operation | import("./types").ToolBindingOperation | import("./types").CapabilityOperation): OpenPresenceState {
   let state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  if (operation.type === "setPresenceBrowserAccess") {
+    if (operation.presenceId && state.presence?.id !== operation.presenceId) return state;
+    return applyOperation(state, {
+      type: "setPresence",
+      patch: { browserAccess: { enabled: operation.enabled }, ...(operation.enabled ? { connectionMode: "bridge" } : {}) },
+    } as Operation);
+  }
   if (operation.type === "askPresenceToIgnore") {
     const presence = state.presences.find((item) => item.id === operation.presenceId);
     const target = state.mirrorObjects.find((item) => item.id === operation.objectId && item.presenceId === operation.presenceId && (!operation.sessionId || item.sessionId === operation.sessionId));
@@ -3083,7 +3109,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
         syncMessages(state);
         return state;
       }
-      const lower = content.toLowerCase(); let reply = "I heard you. I’ll keep that in the working context and use it when the next decision calls for it."; let change: string | undefined;
+      const lower = content.toLowerCase(); let reply = "I can use that in this conversation. If you want it to become a durable setting, tell me which preference to update."; let change: string | undefined;
       const briefChange = state.presence ? inferPresenceBriefChange(content, state.presence.brief) : undefined;
       const explicitContext = inferExplicitDurableContext(content);
       const durableClaim = inferDurableContextClaim(content);
@@ -3091,10 +3117,13 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       const currentModel = state.modelProfiles.find((item) => item.agentId === state.agent?.id);
       const modelChange = inferModelSettingChange(content, currentModel);
       const executionChange = state.presence ? inferExecutionSettingChange(content, state.presence) : undefined;
+      const tasteUpdateRequested = isTasteUpdateCommand(content);
       const tasteInstruction = isTastePreferenceLanguage(content)
         ? content
         : isTasteProposalCommand(content)
           ? priorTastePreferenceInstruction(conversation)
+          : tasteUpdateRequested
+            ? priorTastePreferenceInstruction(conversation)
           : undefined;
       if (confirmedContext) {
         const submitted = submitMemoryProposal(state, confirmedContext, conversation.id);
@@ -3134,13 +3163,19 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
         reply = `I submitted a Presence identity change for review: this Presence would appear as ${identity.name}. The live Presence remains ${state.presence.name} until you apply it in Manage Agent.`;
         change = "Presence identity proposal created";
       }
+      else if (tasteUpdateRequested && !tasteInstruction) {
+        reply = "I can update TASTE.md, but I need the preference you want to make durable. Tell me what should change, and I’ll prepare it for review.";
+        change = "Taste update needs a preference";
+      }
       else if (tasteInstruction) {
         const submitted = submitTasteProposal(state, conversation.id, tasteInstruction);
         if (submitted) {
           reply = isTasteProposalCommand(content)
             ? "I submitted the rule as a reviewable TASTE.md proposal. It is waiting in Manage Agent → Brain; applying it there will make the preference durable."
-            : isHumorTastePreferenceLanguage(tasteInstruction)
+            : isBlueHumorTastePreferenceLanguage(tasteInstruction)
               ? "I turned that into a reviewable TASTE.md proposal. It gives Genny playful absurdist and occasional sophomoric blue humor while keeping body image, gender, sex, race, and other vulnerable subjects out of the joke. Review and apply it in Manage Agent → Brain."
+              : isHumorTastePreferenceLanguage(tasteInstruction)
+                ? "I turned that into a reviewable TASTE.md proposal. It adds light, contextual humor and restrained emoji when they sharpen the moment. Review and apply it in Manage Agent → Brain."
               : "I turned that into a reviewable TASTE.md proposal. I’ll use curiosity, genuine questions, and selective encouragement as judgment—not as a default engagement tactic. Review and apply it in Manage Agent → Brain.";
           change = "Taste proposal created";
         }

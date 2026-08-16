@@ -4799,13 +4799,11 @@ function LiveView({
               <p>{presenceCopy(activity.nextAttention.detail)}</p>
               <small>{activity.nextIntent.label} · {presenceCopy(activity.nextIntent.detail)}</small>
             </div>
-            {latestConversationEpisode && (
+            {latestConversationEpisode && latestConversationEpisode.status !== "closed" && (
               <div className="activity-status-block" aria-label="Conversation status">
                 <SectionEyebrow>Conversation</SectionEyebrow>
                 <h3>{conversationStatusLabel(latestConversationEpisode.status)}</h3>
-                <p>{latestConversationEpisode.status === "closed"
-                  ? latestConversationEpisode.closureReason ?? "No meaningful unresolved work remained, so no further reply is planned."
-                  : latestConversationEpisode.status === "cooling"
+                <p>{latestConversationEpisode.status === "cooling"
                     ? latestConversationEpisode.eligibilityReason ?? "This conversation is being given space; new substance can reopen it."
                     : latestConversationEpisode.lastDispositionReason ?? "The Agent is judging whether another turn earns its place."}</p>
                 <small>{latestConversationEpisode.agentTurnCount + latestConversationEpisode.externalTurnCount} turn{latestConversationEpisode.agentTurnCount + latestConversationEpisode.externalTurnCount === 1 ? "" : "s"}{latestConversationEpisode.loopRisk ? " · loop risk reconsidered" : ""}</small>
@@ -4816,13 +4814,13 @@ function LiveView({
                 )}
               </div>
             )}
-            <div className="activity-status-block activity-publishing-block" aria-label="Publishing pace progress">
-              <SectionEyebrow>Publishing pace</SectionEyebrow>
+            <div className="activity-status-block activity-publishing-block" aria-label="Publishing plan status">
+              <SectionEyebrow>Publishing focus</SectionEyebrow>
               <h3>{initiative.mode === "pace" ? `${initiative.verifiedOriginals} of ~${initiative.target}` : initiative.mode === "adaptive" ? `Let ${presenceName} decide` : "Only when asked"}</h3>
-              <p>{initiativeStatus}</p>
-              {initiative.mode === "pace" && <small>{initiative.remaining ? `${initiative.remaining} remain · ${initiativePeriodLabel}` : `The target is not a maximum · ${initiativePeriodLabel}`}</small>}
+              <p>{publishingPlan?.currentWork?.[0]?.summary ?? initiativeStatus}</p>
+              <small>{publishingPlan?.nextAttentionAt ? `Next consideration · ${formatTime(publishingPlan.nextAttentionAt)}` : initiative.mode === "pace" ? `Self-directed pace · ${initiativePeriodLabel}` : "Self-directed work remains optional"}</small>
+              <Button variant="ghost" onClick={() => setView("schedule")}>Open in Schedule</Button>
             </div>
-            {initiative.mode !== "off" && <PublishingPlanCard plan={publishingPlan} presenceName={presenceName} mutate={mutate} setView={setView} compact />}
           </section>
           <div id="decision-and-action">
             <ExecutionLedger state={state} mutate={mutate} presenceId={selected?.id} environment={activityEnvironment} sessionIds={activitySessionIds} onContext={setSelectedContext} />
@@ -5176,15 +5174,15 @@ function ExecutionLedger({
           <SectionEyebrow>Decision & action</SectionEyebrow>
           <h3>
             {needsApproval
-              ? "Waiting for review"
+              ? "Needs your review"
               : languageBlocked
                 ? "Language policy blocked"
                 : latest.status === "succeeded"
-                ? "Action completed"
-                : "Intent ready"}
+                ? "Sent"
+                : executionStatusLabel(latest.status)}
           </h3>
         </div>
-        <span className="quiet-label">{executionStatusLabel(latest.status)}</span>
+        <span className="quiet-label">{actionName}</span>
       </div>
       <div className="execution-line">
         <div><SectionEyebrow>{actionContext ? `${actionName} to` : "Action"}</SectionEyebrow><strong>{actionContext ? targetLabel : actionName}</strong></div>
@@ -5208,6 +5206,8 @@ function ExecutionLedger({
             ? latest.failure?.message ?? "The final expression contains a prohibited literal. No external artifact was delivered."
             : latest.externalRef
             ? `Sent on ${presence ? channelLabel(presence.channel, state.channelDefinitions) : "the channel"}.`
+            : latest.status === "failed"
+            ? latest.failure?.message ?? "The channel did not accept the action. No external artifact was counted."
             : `${presence?.name ?? "The Presence"}'s decision, your approval, and the channel result are kept separate.`}
       </p>
       {needsApproval && (
@@ -5609,7 +5609,7 @@ function publishingWorkStageLabel(stage: string) {
   return stage.replaceAll("_", " ");
 }
 
-function PublishingPlanCard({ plan, presenceName, mutate, setView, compact = false }: { plan?: PublishingPlan; presenceName: string; mutate: Mutate; setView: (view: View) => void; compact?: boolean }) {
+function PublishingPlanCard({ plan, presenceName, mutate, setView, compact = false, showDetailsButton = true }: { plan?: PublishingPlan; presenceName: string; mutate: Mutate; setView: (view: View) => void; compact?: boolean; showDetailsButton?: boolean }) {
   if (!plan) return <section className={`publishing-plan-card ${compact ? "compact" : ""}`} aria-label="Agent publishing plan"><div><SectionEyebrow>{presenceName}&apos;s publishing plan</SectionEyebrow><h2>No publishing plan available</h2><p className="muted">Enable an ongoing publishing responsibility, then let {presenceName} create a visible working plan from its Mission, Taste, and current evidence.</p></div><Button variant="secondary" onClick={() => void mutate({ type: "replanPublishing" })}>Create plan</Button></section>;
   const expected = plan.expectedOriginals ? `${plan.expectedOriginals.min}–${plan.expectedOriginals.max}` : "adaptive";
   const next = plan.windows.find((window) => window.status === "active" || window.status === "future");
@@ -5630,7 +5630,7 @@ function PublishingPlanCard({ plan, presenceName, mutate, setView, compact = fal
     {plan.status === "blocked" ? <p className="settings-warning">{plan.rationaleSummary ?? "The latest planning pass could not complete."}</p> : <div className="publishing-plan-grid"><div><small>VERIFIED</small><strong>{plan.verifiedOriginals}{plan.expectedOriginals ? ` / ${expected}` : ""}</strong></div><div><small>NEXT</small><strong>{next ? publishingWindowLabel(next) : "Reassess later"}</strong><span>{next?.summary ?? plan.rationaleSummary ?? `${presenceName} will revisit the responsibility when useful.`}</span></div><div><small>WORKING ON</small><strong>{plan.currentWork?.[0]?.summary ?? "Watching for a worthwhile opportunity"}</strong></div></div>}
     {!compact && plan.windows.length > 0 && <div className="publishing-plan-windows">{plan.windows.map((window) => <div className="publishing-plan-window" key={window.id}><span>{publishingWindowLabel(window)}</span><strong>{window.purpose}</strong><p>{window.summary}</p></div>)}</div>}
     {!compact && <section className="publishing-plan-diagnostics" aria-label="Publishing plan diagnostics"><div><SectionEyebrow>Why no original yet?</SectionEyebrow><p>{whyNoOriginal}</p>{plan.nextAttentionAt && <small>Next consideration: {formatTime(plan.nextAttentionAt)}</small>}</div>{plan.workHistory?.length ? <div className="publishing-plan-work"><SectionEyebrow>Work history</SectionEyebrow>{plan.workHistory.slice(0, 6).map((work) => <div className="publishing-plan-work-row" key={work.id}><span>{publishingWorkStageLabel(work.stage)}</span><p>{work.detail}</p><time>{formatTime(work.at)}</time></div>)}</div> : <p className="muted">No work has been attempted in the current plan window.</p>}</section>}
-    <div className="publishing-plan-actions"><Button variant="ghost" onClick={() => setView("schedule")}>View details</Button><Button variant="secondary" onClick={() => void mutate({ type: "replanPublishing", presenceId: plan.presenceId })}>Replan now</Button></div>
+    <div className="publishing-plan-actions">{showDetailsButton && <Button variant="ghost" onClick={() => setView("schedule")}>View details</Button>}<Button variant="secondary" onClick={() => void mutate({ type: "replanPublishing", presenceId: plan.presenceId })}>Replan now</Button></div>
   </section>;
 }
 
@@ -5807,6 +5807,7 @@ function ScheduleView({
         </>}
       />
       {viewMode === "week" && <ScheduleLayerToolbar plan={publishingPlan} presenceName={presenceName} layers={calendarLayers} onToggle={toggleCalendarLayer} onReset={() => setCalendarLayers({ plan: true, intents: true, assignments: true })} mutate={mutate} />}
+      {selectedPresence?.publishingInitiative.mode !== "off" && <PublishingPlanCard plan={publishingPlan} presenceName={presenceName} mutate={mutate} setView={setView} showDetailsButton={false} />}
       {showForm && (
         <form className="add-slot-form" onSubmit={add}>
           <label className="instruction-field">
@@ -6773,7 +6774,7 @@ function PresenceView({
           </div>
           <div>
             <span>Route</span>
-            <strong>{connectionMode === "sandbox" ? "Sandbox" : connectionMode === "native" ? "Live API" : "Bridge"}</strong>
+            <strong>{connectionMode === "sandbox" ? "Sandbox" : connectionMode === "native" ? "Live API" : "OpenPresence Chrome"}</strong>
           </div>
           <div>
             <span>Status</span>
@@ -6817,7 +6818,7 @@ function PresenceView({
           </div>
           <Globe2 size={17} />
         </div>
-        <p className="muted channel-settings-intro">Choose one route for {simulation.worldLabel}. Sandbox is safe to rehearse; the official X API and the signed-in X Browser Bridge are alternative live routes.</p>
+        <p className="muted channel-settings-intro">Choose one route for {simulation.worldLabel}. Sandbox is safe to rehearse; the official X API and OpenPresence Chrome are the live routes.</p>
         {channelDefinition && (
           <div className="channel-definition-editor">
             {!editingChannel ? (
@@ -6848,15 +6849,15 @@ function PresenceView({
           </button>}
           <button className={connectionMode === "bridge" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { connectionMode: "bridge" } })}>
             <PlugZap size={17} />
-            <span><strong>X Browser Bridge</strong><small>Use a signed-in X browser session through the external Bridge worker</small></span>
+            <span><strong>OpenPresence Chrome</strong><small>Use a signed-in Chrome session through the OpenPresence extension</small></span>
           </button>
         </div>
         <div className="channel-selection-status">
           {connectionMode === "sandbox" && <div className="channel-sandbox-summary"><div><strong>This world is simulated.</strong><p>{simulation.worldLabel} history stays in this rehearsal session; {agentName}&apos;s mind is shared.</p></div><Button variant="secondary" onClick={() => setView?.("playground")}><FlaskConical size={14} /> Open Playground</Button></div>}
           {connectionMode === "native" && presence.channel === "x" && <XConnection state={state} presence={presence} manageX={manageX} />}
-          {connectionMode === "bridge" && <BridgeManager state={state} presence={presence} manageBridge={manageBridge} refreshState={refreshState} />}
+          {connectionMode === "bridge" && <ChromeConnectionPanel state={state} presence={presence} mutate={mutate} manageBridge={manageBridge} refreshState={refreshState} />}
         </div>
-        {connectionMode !== "sandbox" && !(connectionMode === "native" ? nativeConnection?.status === "connected" : activeBridge && bridgeAdapterStatus(activeBridge) === "connected") && <p className="channel-not-connected">{connectionMode === "bridge" && activeBridge ? "The Bridge is configured; waiting for the external adapter to check in." : "No live connection is active yet. Configure the selected route below when you’re ready."}</p>}
+        {connectionMode === "native" && !(nativeConnection?.status === "connected") && <p className="channel-not-connected">No live connection is active yet. Configure the selected route below when you’re ready.</p>}
       </section>
       <section className="identity-card settings-card">
         <div>
@@ -7322,6 +7323,58 @@ function XConnection({
           <div className="inline-form-actions"><Button type="button" variant="ghost" onClick={() => { clearForm(); setOpen(Boolean(connection)); }}>Cancel</Button><Button type="button" variant="secondary" onClick={() => void test()} disabled={working !== null || !apiKey || !apiSecret}>{working === "test" ? "Testing…" : "Test connection"}</Button><Button type="submit" variant="primary" disabled={working !== null}>{working === "save" ? "Saving…" : "Save connection"}</Button></div>
         </form>
       )}
+    </div>
+  );
+}
+
+function ChromeConnectionPanel({
+  state,
+  presence,
+  mutate,
+  manageBridge,
+  refreshState,
+}: {
+  state: OpenPresenceState;
+  presence: NonNullable<OpenPresenceState["presence"]>;
+  mutate: Mutate;
+  manageBridge: BridgeManage;
+  refreshState: () => Promise<OpenPresenceState>;
+}) {
+  const [refreshing, setRefreshing] = useState(false);
+  const extensionEnabled = presence.browserAccess?.enabled === true;
+  const activeBridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
+  const connected = Boolean(activeBridge && bridgeAdapterStatus(activeBridge) === "connected");
+  const status = !extensionEnabled ? "Disabled" : connected ? "Connected" : activeBridge ? "Waiting for extension" : "Not connected";
+  const openControlledChrome = () => window.postMessage({ source: "openpresence", type: "OPENPRESENCE_OPEN_CHROME", presenceId: presence.id }, "*");
+  const refresh = async () => {
+    setRefreshing(true);
+    try { await refreshState(); } finally { setRefreshing(false); }
+  };
+  return (
+    <div className="chrome-connection-panel" aria-label="Chrome connection">
+      <div className="chrome-connection-heading">
+        <div>
+          <SectionEyebrow>Chrome connection</SectionEyebrow>
+          <h2>Let {presence.name} use Chrome</h2>
+          <p className="muted">OpenPresence chooses what is worth doing. The Chrome extension provides the visible tab, uses the account you sign into, and reports back only verified outcomes.</p>
+        </div>
+        <ShieldCheck size={17} />
+      </div>
+      <div className="chrome-connection-controls">
+        <label className="toggle-row"><input type="checkbox" aria-label={`Enable Chrome for ${presence.name}`} checked={extensionEnabled} onChange={(event) => void mutate({ type: "setPresenceBrowserAccess", presenceId: presence.id, enabled: event.target.checked })} /><span className="toggle-track" aria-hidden="true"><span /></span><span>{extensionEnabled ? "Enabled" : "Disabled"}</span></label>
+        <Button type="button" variant="secondary" disabled={!extensionEnabled} onClick={openControlledChrome}><PlugZap size={14} /> Open controlled Chrome</Button>
+      </div>
+      <div className="chrome-connection-status" role="status">
+        <span className={`live-pill ${connected ? "" : "paused"}`}><span className="status-dot" /> {status}</span>
+        <span className="chrome-connection-status-copy">{!extensionEnabled ? "Enable Chrome hands for this Presence to make the extension available." : connected ? "The controlled browser is connected and ready for approved work." : "Install or enable the OpenPresence Chrome extension, then open the controlled browser."}</span>
+        {activeBridge && <Button type="button" variant="ghost" disabled={refreshing} onClick={() => void refresh()}><RotateCcw size={13} /> {refreshing ? "Refreshing…" : "Refresh status"}</Button>}
+      </div>
+      <small className="chrome-connection-safety"><ShieldCheck size={13} /> No account credentials are stored in OpenPresence or the extension. Before a write, the tab checks the selected account and verifies the resulting post.</small>
+      <details className="advanced-connector-details">
+        <summary>Advanced connector diagnostics</summary>
+        <p>For developers testing alternative local executors. Most users should only use the OpenPresence Chrome extension above.</p>
+        <BridgeManager state={state} presence={presence} manageBridge={manageBridge} refreshState={refreshState} />
+      </details>
     </div>
   );
 }

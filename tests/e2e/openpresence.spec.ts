@@ -747,9 +747,10 @@ test("Presence publishing pace separates responsibility from attention and persi
   await expect(pace.getByLabel("Publishing pace count")).toHaveValue("7");
   await expect(pace.getByLabel("Publishing pace period")).toHaveValue("week");
   await navigate(page, "Activity");
-  const publishingProgress = page.getByLabel("Publishing pace progress");
+  const publishingProgress = page.getByLabel("Publishing plan status");
   await expect(publishingProgress).toBeVisible();
   await expect(publishingProgress.getByText("0 of ~7", { exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Agent publishing plan" })).toHaveCount(0);
 });
 
 test("Presence Public Self saves its disclosure boundary", async ({ page }) => {
