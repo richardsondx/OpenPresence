@@ -193,9 +193,11 @@ function writeNormalized(state: OpenPresenceState) {
   transaction();
 }
 
-export function writeState(state: OpenPresenceState) {
+export function writeState(state: OpenPresenceState, options?: { advanceWorkspaceRevision?: boolean; syncNormalized?: boolean }) {
   const normalized = normalizeState(state);
   const agentId = normalized.agent?.id;
+  const advanceWorkspaceRevision = options?.advanceWorkspaceRevision !== false;
+  const syncNormalized = options?.syncNormalized !== false;
   const expectedRevision = typeof state.workspaceRevision === "number" ? state.workspaceRevision : undefined;
   const persistedAt = new Date().toISOString();
   sqlite.transaction(() => {
@@ -204,7 +206,7 @@ export function writeState(state: OpenPresenceState) {
       sqlite.prepare("INSERT OR IGNORE INTO agent_workspace_revisions (agent_id, revision, updated_at) VALUES (?, 0, ?)").run(agentId, persistedAt);
       actualRevision = ((sqlite.prepare("SELECT revision FROM agent_workspace_revisions WHERE agent_id = ?").get(agentId) as { revision?: number } | undefined)?.revision ?? 0);
       if (expectedRevision !== undefined && expectedRevision !== actualRevision) throw new WorkspaceConflictError(agentId, expectedRevision, actualRevision);
-      normalized.workspaceRevision = actualRevision + 1;
+      normalized.workspaceRevision = advanceWorkspaceRevision ? actualRevision + 1 : actualRevision;
     }
     sqlite.prepare("INSERT INTO app_state (id, payload, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at").run(JSON.stringify(normalized), persistedAt);
     if (!agentId) {
@@ -219,7 +221,7 @@ export function writeState(state: OpenPresenceState) {
   // Keep direct in-process callers aligned with the durable token as well;
   // API callers still receive the same token in the JSON response/header.
   state.workspaceRevision = normalized.workspaceRevision;
-  writeNormalized(normalized);
+  if (syncNormalized) writeNormalized(normalized);
 }
 
 function hashBridgeKey(key: string) { return crypto.createHash("sha256").update(key).digest("hex"); }

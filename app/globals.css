@@ -671,6 +671,13 @@ fieldset { border: none; padding: 0; margin: 0 0 26px; }
 .exploration-responsibility-options span { color: var(--muted); font-size: 10px; line-height: 1.4; }
 .exploration-assignment-note { display: flex; align-items: start; gap: 8px; color: var(--muted); font-size: 10px; line-height: 1.45; }
 .exploration-assignment-note .status-dot { flex: 0 0 auto; margin-top: 4px; }
+.exploration-connection-note { display: flex; align-items: start; gap: 8px; padding-top: 2px; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.exploration-connection-note .status-dot { flex: 0 0 auto; margin-top: 4px; background: #c78a35; }
+.exploration-connection-note > span:last-child { display: grid; gap: 2px; }
+.exploration-connection-note strong { color: var(--ink); font-size: 10px; font-weight: 600; }
+.exploration-connection-note small { color: var(--muted); font-size: 10px; }
+.exploration-connection-connected .status-dot { background: #5c9271; }
+.exploration-connection-unavailable .status-dot { background: #b7655c; }
 .exploration-objective { display: grid; gap: 6px; color: var(--muted); font-size: 10px; }
 .exploration-objective input { width: 100%; box-sizing: border-box; font-size: 11px; }
 .exploration-monitor { background: #fbfaf8; }
