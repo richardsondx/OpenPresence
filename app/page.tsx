@@ -6,6 +6,7 @@ import Image from "next/image";
 import {
   Activity,
   ArrowUpRight,
+  Badge,
   BookOpen,
   Bot,
   Brain,
@@ -17,7 +18,9 @@ import {
   Circle,
   CircleAlert,
   Clock3,
+  Copy,
   Eye,
+  EyeOff,
   FileText,
   FlaskConical,
   Globe2,
@@ -48,8 +51,9 @@ import {
 import { AGENT_CAPABILITY_DEFINITIONS, CHANNEL_CAPABILITIES, isAgentCapabilityEnabled, simulationForChannel } from "@/lib/types";
 import { bridgeAdapterPrompt, bridgeAdapterStatus, bridgeAdapterStatusLabel, bridgeApiExamples, bridgeEnvironmentExample } from "@/lib/bridge-contract";
 import { latestPerception } from "@/lib/perception";
+import { conversationStatusLabel } from "@/lib/conversation-episodes";
 import { validateScenarioFidelity } from "@/lib/scenarios";
-import { deriveActivitySummary, derivePublicHistory, emptyGhostRepresentation, formatGhostRepresentation, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities } from "@/lib/runtime";
+import { cleanUserFacingAssignmentInstruction, deriveActivitySummary, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, formatGhostRepresentation, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence } from "@/lib/runtime";
 import type {
   CalendarSlot,
   Assignment,
@@ -72,10 +76,12 @@ import type {
   PresenceBrief,
   PresenceEnvironment,
   PresenceMode,
+  PublishingPlan,
   MirrorObject,
   ModelReviewFinding,
   ModelProvider,
   PreferenceReason,
+  Presence,
   SandboxActor,
   SandboxAssetInput,
   ScenarioStimulus,
@@ -504,7 +510,23 @@ export default function Home() {
     const tracksAttention = ["wakePresence", "runPulse", "startAssignment", "workAssignment"].includes(operationType ?? "");
     if (tracksAttention) setPendingOperation(operationType);
     const context = requestContext ?? state;
+    let lookPoll: number | undefined;
     try {
+      if (operationType === "lookNow" && typeof window !== "undefined") {
+        lookPoll = window.setInterval(async () => {
+          try {
+            const query = new URLSearchParams(window.location.search);
+            query.set("read", Date.now().toString());
+            const pollResponse = await fetch(`/api/state?${query.toString()}`, { cache: "no-store" });
+            if (!pollResponse.ok) return;
+            const pollPayload = await readJsonResponse<OpenPresenceState>(pollResponse);
+            setState(pollPayload);
+            syncBrowserWorkspaceContext(pollPayload);
+          } catch {
+            // The final operation response remains authoritative if a poll races shutdown.
+          }
+        }, 750);
+      }
       const response = await fetch("/api/state", {
         method: "POST",
         headers: {
@@ -530,6 +552,7 @@ export default function Home() {
       setError(clientErrorMessage(reason, "That change could not be saved."));
       return null;
     } finally {
+      if (lookPoll !== undefined && typeof window !== "undefined") window.clearInterval(lookPoll);
       if (tracksAttention) setPendingOperation(null);
     }
   }
@@ -2858,6 +2881,8 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
   const [inspiration, setInspiration] = useState("");
   const [assignmentInstruction, setAssignmentInstruction] = useState("");
   const [assignmentDraftId, setAssignmentDraftId] = useState<string | null>(null);
+  const [assignmentPanelDismissed, setAssignmentPanelDismissed] = useState(false);
+  const [assignmentCancellationNotice, setAssignmentCancellationNotice] = useState(false);
   const [expandedRehearsalId, setExpandedRehearsalId] = useState<string | null>(null);
   const [feedbackAttemptId, setFeedbackAttemptId] = useState<string | null>(null);
   const [feedbackReasons, setFeedbackReasons] = useState<PreferenceReason[]>([]);
@@ -2872,8 +2897,9 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
   const latestAssignment = [...sessionAssignments]
     .filter((item) => item.status !== "cancelled")
     .sort((left, right) => new Date(right.updatedAt ?? right.createdAt).getTime() - new Date(left.updatedAt ?? left.createdAt).getTime())[0];
-  let displayedAssignment = assignmentDraft ?? latestAssignment;
-  const assignmentRun = displayedAssignment ? [...(state.assignmentRuns ?? [])].filter((run) => run.assignmentId === displayedAssignment.id).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] : undefined;
+  let displayedAssignment = assignmentPanelDismissed ? undefined : assignmentDraft ?? latestAssignment;
+  const displayedAssignmentId = displayedAssignment?.id;
+  const assignmentRun = displayedAssignmentId ? [...(state.assignmentRuns ?? [])].filter((run) => run.assignmentId === displayedAssignmentId).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] : undefined;
   const assignmentRunIsWorking = Boolean(assignmentRun && ["queued", "researching", "selecting", "writing", "delivering"].includes(assignmentRun.status));
   const assignmentIsWorking = Boolean(displayedAssignment && (busy || assignmentRunIsWorking || displayedAssignment.status === "working" || ["researching", "visual_research", "publishing"].includes(displayedAssignment.work?.phase ?? "")));
   const assignmentVerified = displayedAssignment?.progress.verified ?? 0;
@@ -2884,10 +2910,11 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
     : displayedAssignment?.status === "blocked"
       ? "Blocked"
       : assignmentRun?.currentStage?.replaceAll("_", " ") ?? displayedAssignment?.work?.phase?.replaceAll("_", " ") ?? "Queued";
-  const assignmentResearch = displayedAssignment ? [...state.assetResearchSessions].filter((item) => item.assignmentId === displayedAssignment.id).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] : undefined;
+  const assignmentResearch = displayedAssignmentId ? [...state.assetResearchSessions].filter((item) => item.assignmentId === displayedAssignmentId).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] : undefined;
   if (displayedAssignment?.lastOutcome?.message?.includes("No inspected candidate") && assignmentResearch?.candidates.length === 0) {
     displayedAssignment = { ...displayedAssignment, lastOutcome: { ...displayedAssignment.lastOutcome, message: "No usable visual leads were found. The bounded search ended without an inspectable candidate." } };
   }
+  const displayedAssignmentInstruction = displayedAssignment ? cleanUserFacingAssignmentInstruction(displayedAssignment.instruction) : "";
   const originalLabel = presence.channel === "x"
     ? "Consider an original post"
     : presence.channel === "substack"
@@ -2933,7 +2960,20 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
     if (!session) return;
     const next = await mutate({ type: "createAssignment", sessionId: session.id, presenceId: presence.id, environment: "sandbox", instruction: assignmentInstruction });
     const created = next?.assignments.find((item) => item.sessionId === session.id) ?? next?.assignments[0];
-    if (created) setAssignmentDraftId(created.id);
+    if (created) {
+      setAssignmentDraftId(created.id);
+      setAssignmentPanelDismissed(false);
+      setAssignmentCancellationNotice(false);
+    }
+  };
+  const cancelDisplayedAssignment = async () => {
+    if (!displayedAssignment || ["completed", "cancelled"].includes(displayedAssignment.status)) return;
+    if (!window.confirm(`Cancel this Assignment?\n\n${displayedAssignmentInstruction}`)) return;
+    const next = await mutate({ type: "cancelAssignment", id: displayedAssignment.id });
+    if (!next) return;
+    setAssignmentDraftId(null);
+    setAssignmentPanelDismissed(true);
+    setAssignmentCancellationNotice(true);
   };
   const saveFeedback = async (attemptId: string, reaction: "fits" | "does_not_fit" | "good_silence" | "expected_action") => {
     if (!session) return;
@@ -2980,10 +3020,11 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
         </>}
         {rehearsalMode === "assign" && <>
           <div><div className="eyebrow">Posting Assignment</div><h2>What do you expect {presence.name} to produce?</h2><p>OpenPresence will show the structured deliverable before work begins. Verified Sandbox publications determine progress.</p></div>
-          {!assignmentDraft ? <><label>Assignment instruction<textarea aria-label="Assignment instruction" value={assignmentInstruction} onChange={(event) => setAssignmentInstruction(event.target.value)} placeholder="Produce 3 original X posts about offers, pricing, sales, or execution. Choose your own angles and do not repeat yourself." rows={4} /></label><div className="original-rehearsal-actions"><small>The original instruction stays attached to the Assignment.</small><Button variant="primary" disabled={busy || !assignmentInstruction.trim()} onClick={() => void reviewAssignment()}><Check size={14} /> Review assignment</Button></div></> : <div className="assignment-review" aria-label="Assignment review"><div><span>Deliverable</span><strong>{assignmentDraft.progress.required} original {channelLabel(assignmentDraft.channelId, state.channelDefinitions)} publications</strong></div><div><span>Completion</span><strong>{assignmentDraft.progress.required} verified publications</strong></div><div><span>Agent decides how</span><strong>Topics · thesis · evidence · format · wording · timing strategy</strong></div><p>{assignmentDraft.instruction}</p><div className="original-rehearsal-actions"><Button variant="ghost" onClick={() => setAssignmentDraftId(null)}>Adjust</Button><Button variant="primary" disabled={busy} onClick={() => void runAssignment(assignmentDraft.id, true)}><Play size={14} /> Start rehearsal</Button></div></div>}
+          {!assignmentDraft ? <><label>Assignment instruction<textarea aria-label="Assignment instruction" value={assignmentInstruction} onChange={(event) => setAssignmentInstruction(event.target.value)} placeholder="Produce 3 original X posts about offers, pricing, sales, or execution. Choose your own angles and do not repeat yourself." rows={4} /></label><div className="original-rehearsal-actions"><small>The original instruction stays attached to the Assignment.</small><Button variant="primary" disabled={busy || !assignmentInstruction.trim()} onClick={() => void reviewAssignment()}><Check size={14} /> Review assignment</Button></div></> : <div className="assignment-review" aria-label="Assignment review"><div><span>Deliverable</span><strong>{assignmentDraft.progress.required} original {channelLabel(assignmentDraft.channelId, state.channelDefinitions)} publications</strong></div><div><span>Completion</span><strong>{assignmentDraft.progress.required} verified publications</strong></div><div><span>Agent decides how</span><strong>Topics · thesis · evidence · format · wording · timing strategy</strong></div><p>{cleanUserFacingAssignmentInstruction(assignmentDraft.instruction)}</p><div className="original-rehearsal-actions"><Button variant="ghost" onClick={() => setAssignmentDraftId(null)}>Adjust</Button><Button variant="primary" disabled={busy} onClick={() => void runAssignment(assignmentDraft.id, true)}><Play size={14} /> Start rehearsal</Button></div></div>}
         </>}
       </section>}
-      {displayedAssignment && <section className="assignment-progress-panel" aria-label="Assignment progress"><div className="assignment-progress-heading"><div><div className="eyebrow">Posting Assignment</div><h2>{displayedAssignment.instruction}</h2></div></div>{assignmentIsWorking && <aside className="assignment-live-card" role="status" aria-live="polite" aria-label={`Assignment ${assignmentPhase}. ${assignmentVerified} of ${assignmentRequired} published. ${displayedAssignment.rejectedCandidates} candidates rejected.`}><span className="assignment-progress-ring" style={{ background: `conic-gradient(#6f927d ${assignmentProgress}%, #e7eee8 0)` }}><span><strong>{assignmentVerified}/{assignmentRequired}</strong><small>published</small></span></span><span className="assignment-live-copy"><strong>{assignmentPhase}</strong><small>{displayedAssignment.rejectedCandidates} rejected · {assignmentResearch?.candidates.length ?? 0} inspected</small></span></aside>}<div className="assignment-progress-bar"><span style={{ width: `${assignmentProgress}%` }} /></div><div className="assignment-progress-meta"><strong>{assignmentVerified} / {displayedAssignment.progress.required} published</strong><span>{assignmentPhase}{assignmentIsWorking ? " · live" : displayedAssignment.status === "blocked" ? "" : ` · ${displayedAssignment.rejectedCandidates} rejected`}</span></div>{assignmentResearch && <AssignmentResearchReview research={assignmentResearch} assets={state.assets} />}{displayedAssignment.status === "blocked" && <div className="assignment-outcome" role="status" aria-live="polite"><div className="assignment-outcome-heading"><span className="assignment-outcome-label">Blocked</span><strong>No publication was counted</strong></div><p className="assignment-warning">{displayedAssignment.lastOutcome?.message ?? "The Assignment could not produce a verified publication."}</p><small>{(assignmentResearch as (typeof assignmentResearch & { outcome?: string }) | undefined)?.outcome === "discovery_empty" ? "No usable visual leads were found after one bounded reformulation. Nothing was published because this Assignment requires the visual; try again or revise that requirement." : (assignmentResearch as (typeof assignmentResearch & { outcome?: string }) | undefined)?.outcome === "inspection_rejected" ? "The downloaded candidates were inspected and rejected. Nothing was published because this Assignment requires a visual that meets the evidence standard." : "Nothing was published because the available evidence did not meet the visual requirement. Try again to begin a fresh bounded effort, or revise the Assignment if the evidence requirement is too strict."}</small></div>}{["active", "blocked"].includes(displayedAssignment.status) && <Button variant="secondary" disabled={busy || assignmentIsWorking} onClick={() => void runAssignment(displayedAssignment.id, displayedAssignment.status === "blocked")}><Play size={14} /> {displayedAssignment.status === "blocked" ? "Try again" : "Continue working"}</Button>}</section>}
+      {assignmentCancellationNotice && <section className="assignment-cancelled-notice" role="status" aria-live="polite"><strong>Assignment cancelled</strong><span>It will not continue. Its history remains available for review.</span></section>}
+      {displayedAssignment && <section className="assignment-progress-panel" aria-label="Assignment progress"><div className="assignment-progress-heading"><div><div className="eyebrow">Posting Assignment</div><h2>{displayedAssignmentInstruction}</h2></div></div>{assignmentIsWorking && <aside className="assignment-live-card" role="status" aria-live="polite" aria-label={`Assignment ${assignmentPhase}. ${assignmentVerified} of ${assignmentRequired} published. ${displayedAssignment.rejectedCandidates} candidates rejected.`}><span className="assignment-progress-ring" style={{ background: `conic-gradient(#6f927d ${assignmentProgress}%, #e7eee8 0)` }}><span><strong>{assignmentVerified}/{assignmentRequired}</strong><small>published</small></span></span><span className="assignment-live-copy"><strong>{assignmentPhase}</strong><small>{displayedAssignment.rejectedCandidates} rejected · {assignmentResearch?.candidates.length ?? 0} inspected</small></span></aside>}<div className="assignment-progress-bar"><span style={{ width: `${assignmentProgress}%` }} /></div><div className="assignment-progress-meta"><strong>{assignmentVerified} / {displayedAssignment.progress.required} published</strong><span>{assignmentPhase}{assignmentIsWorking ? " · live" : displayedAssignment.status === "blocked" ? "" : ` · ${displayedAssignment.rejectedCandidates} rejected`}</span></div>{assignmentResearch && <AssignmentResearchReview research={assignmentResearch} assets={state.assets} />}{displayedAssignment.status === "blocked" && <div className="assignment-outcome" role="status" aria-live="polite"><div className="assignment-outcome-heading"><span className="assignment-outcome-label">Blocked</span><strong>No publication was counted</strong></div><p className="assignment-warning">{displayedAssignment.lastOutcome?.message ?? "The Assignment could not produce a verified publication."}</p><small>{(assignmentResearch as (typeof assignmentResearch & { outcome?: string }) | undefined)?.outcome === "discovery_empty" ? "No usable visual leads were found after one bounded reformulation. Nothing was published because this Assignment requires the visual; try again or revise that requirement." : (assignmentResearch as (typeof assignmentResearch & { outcome?: string }) | undefined)?.outcome === "inspection_rejected" ? "The downloaded candidates were inspected and rejected. Nothing was published because this Assignment requires a visual that meets the evidence standard." : "Nothing was published because the available evidence did not meet the visual requirement. Try again to begin a fresh bounded effort, or revise the Assignment if the evidence requirement is too strict."}</small></div>}<div className="assignment-progress-actions">{["active", "blocked"].includes(displayedAssignment.status) && <Button variant="secondary" disabled={busy || assignmentIsWorking} onClick={() => void runAssignment(displayedAssignment.id, displayedAssignment.status === "blocked")}><Play size={14} /> {displayedAssignment.status === "blocked" ? "Try again" : "Continue working"}</Button>}{displayedAssignment.status !== "completed" && displayedAssignment.status !== "cancelled" && <Button variant="danger" disabled={busy} onClick={() => void cancelDisplayedAssignment()}>Cancel Assignment</Button>}</div><p className="assignment-cancel-help">Need to stop this? <strong>Cancel Assignment</strong> ends it now and keeps the history.</p></section>}
       <div className="playground-grid">
           <aside className="playground-rail">
             <section className="playground-panel"><div className="eyebrow">Starting world</div><strong>{simulation.startingStateLabel}</strong><p>Nothing here is live. Simulated history stays in this session.</p><p className="playground-handle-hint">Agent handle: <strong>{presence.handle}</strong>. Use @mentions in Chat when addressing {presence.name}.</p><div className="session-status"><span className="status-dot" /> {presence.status === "paused" ? "Paused" : "Awake"}</div></section>
@@ -3135,10 +3176,19 @@ function watchObservationCopy(watch: Watch) {
 function WatchingView({ state, mutate }: { state: OpenPresenceState; mutate: Mutate }) {
   const presence = state.presence ?? state.presences[0];
   const watches = state.watches.filter((item) => item.presenceId === presence?.id);
+  const explorations = state.explorations.filter((item) => item.presenceId === presence?.id);
   const [query, setQuery] = useState("");
   const [purpose, setPurpose] = useState("");
+  const [explorationBrief, setExplorationBrief] = useState("");
+  const [tab, setTab] = useState<"watchlist" | "explorations">("watchlist");
+  const [selectedExplorationId, setSelectedExplorationId] = useState<string | null>(null);
+  const [editingExplorationId, setEditingExplorationId] = useState<string | null>(null);
+  const [editingBrief, setEditingBrief] = useState("");
   const [reviewing, setReviewing] = useState(false);
   const [busy, setBusy] = useState(false);
+  const [busyExplorationId, setBusyExplorationId] = useState<string | null>(null);
+  const [objectiveDrafts, setObjectiveDrafts] = useState<Record<string, string>>({});
+  const [selectedExplorationSessionId, setSelectedExplorationSessionId] = useState<string | null>(null);
   if (!presence) return null;
   const preview = watchPreview(query);
   const kindLabel = preview.kind === "creator" ? "Creator" : preview.kind === "opportunity" ? "Opportunity" : "Topic or conversation";
@@ -3150,27 +3200,168 @@ function WatchingView({ state, mutate }: { state: OpenPresenceState; mutate: Mut
       if (next) { setQuery(""); setPurpose(""); setReviewing(false); }
     } finally { setBusy(false); }
   };
+  const startExploration = async () => {
+    if (explorationBrief.trim().length < 8) return;
+    setBusy(true);
+    try {
+      const next = await mutate({ type: "createExploration", brief: explorationBrief.trim(), presenceId: presence.id });
+      if (next) { setExplorationBrief(""); setReviewing(false); setTab("explorations"); }
+    } finally { setBusy(false); }
+  };
+  const selectedExploration = explorations.find((item) => item.id === selectedExplorationId) ?? explorations[0];
+  const findings = selectedExploration ? state.explorationFindings.filter((item) => item.explorationId === selectedExploration.id).slice(0, 5) : [];
+  const explorationSessions = selectedExploration ? state.explorationSessions.filter((item) => item.explorationId === selectedExploration.id).sort((a, b) => b.startedAt.localeCompare(a.startedAt)) : [];
+  const lastExplorationSession = explorationSessions.find((item) => item.id === selectedExplorationSessionId) ?? explorationSessions[0];
+  const assignment = selectedExploration?.engagement?.assignmentId ? state.assignments.find((item) => item.id === selectedExploration.engagement?.assignmentId) : undefined;
+  const searchQuery = lastExplorationSession?.searchQuery ?? "Query not recorded for this run";
+  const objectiveDraft = selectedExploration ? objectiveDrafts[selectedExploration.id] ?? assignment?.instruction ?? "" : "";
+  const setObjectiveDraft = (value: string) => {
+    if (selectedExploration) setObjectiveDrafts((items) => ({ ...items, [selectedExploration.id]: value }));
+  };
+  const lastRunObjects = lastExplorationSession ? (lastExplorationSession.artifactIds?.length ? state.mirrorObjects.filter((item) => item.presenceId === presence.id && lastExplorationSession.artifactIds?.includes(item.id)) : ["mirror", "native"].includes(lastExplorationSession.discoverySource) && lastExplorationSession.status !== "completed" ? state.mirrorObjects.filter((item) => item.presenceId === presence.id && item.visibility === "public" && item.objectType === "post").slice(0, 40) : []) : [];
+  const lookNow = async (id: string) => { setSelectedExplorationSessionId(null); setBusyExplorationId(id); try { await mutate({ type: "lookNow", id }); } finally { setBusyExplorationId(null); } };
+  const setEngagement = async (id: string, mode: "surface" | "opportunistic" | "objective") => {
+    setBusyExplorationId(id);
+    try { await mutate({ type: "setExplorationEngagement", id, mode, ...(mode === "objective" ? { objective: objectiveDraft.trim() || undefined } : {}) }); }
+    finally { setBusyExplorationId(null); }
+  };
+  const saveExploration = async () => {
+    if (!editingExplorationId || editingBrief.trim().length < 8) return;
+    setBusyExplorationId(editingExplorationId);
+    try {
+      const next = await mutate({ type: "updateExploration", id: editingExplorationId, brief: editingBrief.trim() });
+      if (next) { setEditingExplorationId(null); setEditingBrief(""); }
+    } finally { setBusyExplorationId(null); }
+  };
   return <div className="watching-page">
     <div className="watching-header">
-      <div><SectionEyebrow>Presence attention</SectionEyebrow><h1>Watching</h1><p>What {presence.name} is set up to notice. Observations appear when a source supplies evidence.</p></div>
-      <Button variant="primary" onClick={() => setReviewing((value) => !value)}><Plus size={14} /> Add watch</Button>
+      <div><SectionEyebrow>Presence attention</SectionEyebrow><h1>Watching</h1><p>What {presence.name} is paying extra attention to. Known people stay in the Watchlist; Explorations look for meaningful social reality.</p></div>
+      <Button variant="primary" onClick={() => { setReviewing((value) => !value); setTab("explorations"); }}><Plus size={14} /> New exploration</Button>
     </div>
-    {reviewing && <section className="watch-composer" aria-label="Add a watch">
-      <div><SectionEyebrow>New watch</SectionEyebrow><h2>What should {presence.name} notice?</h2><p>Describe a creator, topic, conversation, or opportunity. OpenPresence will keep the meaning understandable.</p></div>
-      <label>Keep an eye on
-        <textarea aria-label="What should this Presence watch?" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="@AlexHormozi or conversations involving AI agents and founder problems" rows={3} />
-      </label>
-      <label>Why should {presence.name} watch this? <span className="optional-label">Optional</span>
-        <input aria-label="Why should this Presence watch this?" value={purpose} onChange={(event) => setPurpose(event.target.value)} placeholder="Learn from strong offers without imitating the voice" />
-      </label>
-      {query.trim() && <div className="watch-review" aria-label="Watch review"><div><SectionEyebrow>Here&apos;s what {presence.name} will watch</SectionEyebrow><strong>{kindLabel}</strong><p>{preview.clean}</p></div><div><span>Use</span><strong>Notice relevant material</strong></div><div><span>Boundary</span><strong>Watching does not imitate identity or voice</strong></div><div><span>Source</span><strong>{preview.kind === "creator" && presence.channel === "x" ? "Automatic where available" : "Manual material or connected source"}</strong></div></div>}
-      <div className="watch-form-actions"><Button variant="ghost" onClick={() => { setReviewing(false); setQuery(""); setPurpose(""); }}>Cancel</Button><Button variant="primary" disabled={busy || !preview.clean} onClick={() => void startWatching()}>{busy ? "Starting…" : "Start watching"}</Button></div>
-    </section>}
-    {watches.length ? <>
-      <section className="watching-section"><div className="section-heading compact"><div><SectionEyebrow>Watching now</SectionEyebrow><h2>{watches.length} {watches.length === 1 ? "watch" : "watches"}</h2></div></div><div className="watch-list">{watches.map((watch) => { const observationCopy = watchObservationCopy(watch); return <article className="watch-card" key={watch.id}><div className="watch-card-main"><div className="watch-card-icon"><Eye size={17} /></div><div><div className="watch-card-heading"><strong>{watch.title}</strong><span className={`watch-status watch-status-${watch.observation.status}`}><span className="status-dot" /> {watch.observation.status === "manual" ? "Manual source" : "Active watch"}</span></div><small>{watch.kind === "creator" ? "Creator" : watch.kind === "opportunity" ? "Opportunity" : "Topic or conversation"} · {channelLabel(watch.channel, state.channelDefinitions)}</small><p>{watch.purpose || watch.query}</p><div className="watch-observation-state"><strong>{observationCopy.label}</strong><span>{observationCopy.detail}</span></div></div></div><Button variant="ghost" aria-label={`Remove ${watch.title}`} onClick={() => void mutate({ type: "deleteWatch", id: watch.id })}>Remove</Button></article>; })}</div></section>
-      <section className="watching-section noticed-section"><div><SectionEyebrow>Noticed recently</SectionEyebrow><h2>No observations yet</h2><p>Signals will appear here when a connected source supplies current social-world evidence. Adding a Watch does not invent activity or publish anything.</p></div></section>
-    </> : <section className="watching-empty"><div className="watch-empty-mark"><Eye size={23} /></div><SectionEyebrow>Watching</SectionEyebrow><h2>Give {presence.name} better eyes on the social world.</h2><p>Add creators, topics, conversations, or opportunities {presence.name} should notice. Observation helps the Agent decide what deserves attention; it does not turn every match into a post.</p><Button variant="primary" onClick={() => setReviewing(true)}><Plus size={14} /> Add material</Button></section>}
+    <div className="watch-tabs" role="tablist" aria-label="Watching categories"><button type="button" role="tab" aria-selected={tab === "watchlist"} className={tab === "watchlist" ? "active" : ""} onClick={() => { setTab("watchlist"); setReviewing(false); }}>Watchlist <span>{watches.length}</span></button><button type="button" role="tab" aria-selected={tab === "explorations"} className={tab === "explorations" ? "active" : ""} onClick={() => setTab("explorations")}>Explorations <span>{explorations.filter((item) => item.status !== "archived").length}</span></button></div>
+    {tab === "watchlist" && <>
+      <div className="watchlist-toolbar"><div><SectionEyebrow>Known things</SectionEyebrow><h2>People and sources this Presence intentionally follows.</h2></div><Button variant="secondary" onClick={() => setReviewing((value) => !value)}>Add watch</Button></div>
+      {reviewing && <section className="watch-composer" aria-label="Add a watch"><div><SectionEyebrow>New watch</SectionEyebrow><h2>What should {presence.name} notice?</h2><p>Describe a creator, source, or known conversation. This stays a Watchlist item, not a relationship memory.</p></div><label>Keep an eye on<textarea aria-label="What should this Presence watch?" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="@AlexHormozi or a known community" rows={3} /></label><label>Why should {presence.name} watch this? <span className="optional-label">Optional</span><input aria-label="Why should this Presence watch this?" value={purpose} onChange={(event) => setPurpose(event.target.value)} placeholder="Learn from strong offers without imitating the voice" /></label>{query.trim() && <div className="watch-review" aria-label="Watch review"><div><SectionEyebrow>Here&apos;s what {presence.name} will watch</SectionEyebrow><strong>{kindLabel}</strong><p>{preview.clean}</p></div><div><span>Use</span><strong>Notice relevant material</strong></div><div><span>Boundary</span><strong>Watching does not imitate identity or voice</strong></div><div><span>Source</span><strong>{preview.kind === "creator" && presence.channel === "x" ? "Automatic where available" : "Manual material or connected source"}</strong></div></div>}<div className="watch-form-actions"><Button variant="ghost" onClick={() => { setReviewing(false); setQuery(""); setPurpose(""); }}>Cancel</Button><Button variant="primary" disabled={busy || !preview.clean} onClick={() => void startWatching()}>{busy ? "Starting…" : "Start watching"}</Button></div></section>}
+      {watches.length ? <section className="watching-section"><div className="section-heading compact"><div><SectionEyebrow>Watchlist</SectionEyebrow><h2>{watches.length} {watches.length === 1 ? "watch" : "watches"}</h2></div></div><div className="watch-list">{watches.map((watch) => { const observationCopy = watchObservationCopy(watch); return <article className="watch-card" key={watch.id}><div className="watch-card-main"><div className="watch-card-icon"><Eye size={17} /></div><div><div className="watch-card-heading"><strong>{watch.title}</strong><span className={`watch-status watch-status-${watch.observation.status}`}><span className="status-dot" /> {watch.observation.status === "manual" ? "Manual source" : "Active watch"}</span></div><small>{watch.kind === "creator" ? "Creator" : watch.kind === "opportunity" ? "Opportunity" : "Topic or conversation"} · {channelLabel(watch.channel, state.channelDefinitions)}</small><p>{watch.purpose || watch.query}</p><div className="watch-observation-state"><strong>{observationCopy.label}</strong><span>{observationCopy.detail}</span></div></div></div><Button variant="ghost" aria-label={`Remove ${watch.title}`} onClick={() => void mutate({ type: "deleteWatch", id: watch.id })}>Remove</Button></article>; })}</div></section> : <section className="watching-empty"><div className="watch-empty-mark"><Eye size={23} /></div><SectionEyebrow>Watchlist</SectionEyebrow><h2>No known things yet.</h2><p>Follow a specific person, account, or source here. Use an Exploration when the meaning matters more than who started the conversation.</p><Button variant="primary" onClick={() => setReviewing(true)}><Plus size={14} /> Add watch</Button></section>}
+    </>}
+    {tab === "explorations" && <>
+      {reviewing && <section className="exploration-composer" aria-label="Create an Exploration"><div><SectionEyebrow>New Exploration</SectionEyebrow><h2>What should {presence.name} keep an eye on?</h2><p>Describe the conversations, problems, people, or developments that would be useful for {presence.name} to notice.</p></div><textarea aria-label="What should this Presence keep an eye on?" value={explorationBrief} onChange={(event) => setExplorationBrief(event.target.value)} placeholder="People struggling with agent infrastructure or asking how to deploy persistent agents." rows={4} />{explorationBrief.trim() && <div className="watch-review" aria-label="Exploration review"><div><SectionEyebrow>Genny understands this as</SectionEyebrow><p>{explorationInterpretation(explorationBrief)}</p></div><div><span>Use</span><strong>Discover social evidence</strong></div><div><span>Boundary</span><strong>Looking does not authorize speaking</strong></div><div><span>Scope</span><strong>{presence.name} · {channelLabel(presence.channel, state.channelDefinitions)}</strong></div></div>}<div className="watch-form-actions"><Button variant="ghost" onClick={() => { setReviewing(false); setExplorationBrief(""); }}>Cancel</Button><Button variant="primary" disabled={busy || explorationBrief.trim().length < 8} onClick={() => void startExploration()}>{busy ? "Starting…" : "Start exploring"}</Button></div></section>}
+      {!explorations.length ? <section className="watching-empty"><div className="watch-empty-mark"><Eye size={23} /></div><SectionEyebrow>Explorations</SectionEyebrow><h2>Give {presence.name} a reason to look around.</h2><p>Explorations are durable areas of attention. They discover evidence first; {presence.name} still decides whether anything deserves a Social Intent, memory, or silence.</p><Button variant="primary" onClick={() => setReviewing(true)}><Plus size={14} /> New exploration</Button></section> : <div className="exploration-layout"><section className="exploration-list" aria-label="Explorations">{explorations.filter((item) => item.status !== "archived").map((item) => <button type="button" key={item.id} className={`exploration-row ${selectedExploration?.id === item.id ? "active" : ""}`} onClick={() => setSelectedExplorationId(item.id)}><span className={`exploration-state exploration-state-${item.status}`} /> <span><strong>{item.title}</strong><small>{item.status === "active" ? "Active" : "Paused"} · {item.coverage.label}</small><em>{item.brief}</em></span><ChevronRight size={15} /></button>)}</section>{selectedExploration && <section className="exploration-detail" aria-label={`${selectedExploration.title} Exploration`}><div className="exploration-detail-header"><div><SectionEyebrow>Exploration · {channelLabel(selectedExploration.channel, state.channelDefinitions)}</SectionEyebrow><h2>{selectedExploration.title}</h2><p>{selectedExploration.brief}</p></div><span className={`watch-status ${selectedExploration.status === "active" ? "" : "watch-status-manual"}`}><span className="status-dot" /> {selectedExploration.status}</span></div>{editingExplorationId === selectedExploration.id ? <div className="exploration-edit"><label>What should {presence.name} keep an eye on?<textarea aria-label="Edit Exploration brief" value={editingBrief} onChange={(event) => setEditingBrief(event.target.value)} rows={4} /></label><div className="watch-form-actions"><Button variant="ghost" onClick={() => setEditingExplorationId(null)}>Cancel</Button><Button variant="primary" disabled={busyExplorationId === selectedExploration.id || editingBrief.trim().length < 8} onClick={() => void saveExploration()}>Save refinement</Button></div></div> : <><div className="exploration-interpretation"><SectionEyebrow>How {presence.name} is looking</SectionEyebrow><p>{selectedExploration.interpretation}</p></div><div className="exploration-coverage"><strong>{selectedExploration.coverage.label}</strong><span>{selectedExploration.coverage.detail}</span></div><ExplorationResponsibility exploration={selectedExploration} assignment={assignment} presence={presence} objectiveDraft={objectiveDraft} setObjectiveDraft={setObjectiveDraft} busy={busyExplorationId === selectedExploration.id} setEngagement={setEngagement} /><ExplorationRunMonitor exploration={selectedExploration} presence={presence} sessions={explorationSessions} lastSession={lastExplorationSession} searchQuery={searchQuery} artifacts={lastRunObjects} findings={findings} state={state} mutate={mutate} /><div className="exploration-meta"><span>Last looked {selectedExploration.lastLookedAt ? formatTime(selectedExploration.lastLookedAt) : "not yet"}</span><span>Brief revision {selectedExploration.revision}</span>{lastExplorationSession && <span className={lastExplorationSession.status === "completed" ? "" : "exploration-meta-warning"}>Last look {lastExplorationSession.status}{lastExplorationSession.failureReason ? ` · ${lastExplorationSession.failureReason}` : ""}</span>}</div><div className="exploration-actions"><Button variant="primary" disabled={busyExplorationId === selectedExploration.id || selectedExploration.status !== "active"} onClick={() => void lookNow(selectedExploration.id)}>{busyExplorationId === selectedExploration.id ? "Looking…" : "Look now"}</Button><Button variant="secondary" onClick={() => { setEditingExplorationId(selectedExploration.id); setEditingBrief(selectedExploration.brief); }}><Pencil size={14} /> Refine</Button><Button variant="ghost" onClick={() => void mutate({ type: "setExplorationStatus", id: selectedExploration.id, status: selectedExploration.status === "active" ? "paused" : "active" })}>{selectedExploration.status === "active" ? <><Pause size={14} /> Pause</> : <><Play size={14} /> Resume</>}</Button><Button variant="ghost" onClick={() => void mutate({ type: "setExplorationStatus", id: selectedExploration.id, status: "archived" })}>Archive</Button></div><div className="exploration-findings"><SectionEyebrow>Recent worthwhile findings</SectionEyebrow>{findings.length ? findings.map((finding) => { const object = state.mirrorObjects.find((item) => item.id === finding.mirrorObjectId); return <article className="exploration-finding" key={finding.id}><div><strong>{object?.author?.handle ? `@${object.author.handle}` : object?.author?.displayName ?? "Social object"}</strong><p>{finding.safeSummary}</p><small>{finding.whyItMayMatter}</small></div>{object && <Button variant="secondary" onClick={() => void mutate({ type: "askPresenceToReply", presenceId: presence.id, objectId: object.id })}>Ask {presence.name} to respond</Button>}</article>; }) : <p className="muted">No worthwhile findings yet. A look can complete successfully with silence.</p>}</div></>}</section>}</div>}
+    </>}
   </div>;
+}
+
+function explorationDiscoveryLabel(source: OpenPresenceState["explorationSessions"][number]["discoverySource"], presence: Presence) {
+  if (source === "native") return "X public search";
+  if (source === "bridge") return "Connected Bridge";
+  if (source === "mirror") return "Social Mirror";
+  return `${channelLabel(presence.channel, [])} unavailable`;
+}
+
+function ExplorationResponsibility({
+  exploration,
+  assignment,
+  presence,
+  objectiveDraft,
+  setObjectiveDraft,
+  busy,
+  setEngagement,
+}: {
+  exploration: OpenPresenceState["explorations"][number];
+  assignment?: Assignment;
+  presence: Presence;
+  objectiveDraft: string;
+  setObjectiveDraft: (value: string) => void;
+  busy: boolean;
+  setEngagement: (id: string, mode: "surface" | "opportunistic" | "objective") => Promise<void>;
+}) {
+  const mode = exploration.engagement?.mode ?? "surface";
+  const assignmentIsActive = assignment?.status === "active" || assignment?.status === "working";
+  return <section className="exploration-responsibility" aria-label="Exploration responsibility">
+    <div><SectionEyebrow>What happens when {presence.name} finds someone</SectionEyebrow><p>Looking creates evidence. This setting decides whether qualifying findings stop here or become an Assignment that can lead to a public interaction.</p></div>
+    <div className="exploration-responsibility-options">
+      <button type="button" aria-pressed={mode === "surface"} className={mode === "surface" ? "active" : ""} onClick={() => void setEngagement(exploration.id, "surface")} disabled={busy}><strong>Surface findings</strong><span>I decide what happens next.</span></button>
+      <button type="button" aria-pressed={mode === "opportunistic"} className={mode === "opportunistic" ? "active" : ""} onClick={() => void setEngagement(exploration.id, "opportunistic")} disabled={busy}><strong>Engage when useful</strong><span>{presence.name} may reply when a real contribution earns its place.</span></button>
+      <button type="button" aria-pressed={mode === "objective"} className={mode === "objective" ? "active" : ""} onClick={() => void setEngagement(exploration.id, "objective")} disabled={busy}><strong>Pursue an outcome</strong><span>Give {presence.name} a specific conversation objective.</span></button>
+    </div>
+    {mode !== "surface" && <div className="exploration-assignment-note"><span className="status-dot" /> <span>{assignmentIsActive && assignment ? <><strong>Assignment active.</strong> {assignment.progress.verified} verified interaction{assignment.progress.verified === 1 ? "" : "s"}; {assignment.environment === "sandbox" ? "Sandbox execution is enabled." : "Live delivery still follows this Presence's execution settings."}</> : assignment ? <>Assignment {assignment.status}. It will not act until it is active.</> : "Assignment is being prepared."}</span></div>}
+    {mode === "objective" && <label className="exploration-objective">Conversation objective <input aria-label="Conversation objective" value={objectiveDraft || assignment?.instruction || ""} onChange={(event) => setObjectiveDraft(event.target.value)} placeholder="Engage people describing a concrete problem with persistent agents." /></label>}
+  </section>;
+}
+
+function ExplorationRunMonitorLegacy({
+  presence,
+  sessions,
+  lastSession,
+  searchQuery,
+  artifacts,
+  state,
+  mutate,
+}: {
+  exploration: OpenPresenceState["explorations"][number];
+  presence: Presence;
+  sessions: OpenPresenceState["explorationSessions"];
+  lastSession?: OpenPresenceState["explorationSessions"][number];
+  searchQuery: string;
+  artifacts: MirrorObject[];
+  findings: OpenPresenceState["explorationFindings"];
+  state: OpenPresenceState;
+  mutate: Mutate;
+}) {
+  const findings: OpenPresenceState["explorationFindings"] = [];
+  const searchFailed = lastSession?.status === "degraded" || lastSession?.status === "failed";
+  return <>
+    <section className="exploration-monitor" aria-label="Exploration run monitor">
+      <div className="exploration-monitor-heading"><div><SectionEyebrow>Run monitor</SectionEyebrow><h3>{lastSession ? `Run ${lastSession.id.slice(-8)}` : "No run yet"}</h3></div>{lastSession && <span className={`exploration-run-status exploration-run-${lastSession.status}`}><span className="status-dot" /> {lastSession.status === "completed" ? "Completed" : lastSession.status === "running" ? "Running" : "Needs attention"}</span>}</div>
+      {lastSession ? <>
+        <div className="exploration-run-summary"><div><span>Discovery source</span><strong>{explorationDiscoveryLabel(lastSession.discoverySource, presence)}</strong></div><div><span>Search phrase</span><strong title={searchQuery}>{searchQuery || "Not sent"}</strong></div><div><span>Observed</span><strong>{lastSession.candidatesSeen}</strong></div><div><span>Worthwhile</span><strong>{lastSession.findingsCreated}</strong></div></div>
+        <div className="exploration-run-timeline"><div className="exploration-run-step is-complete"><span><Check size={12} /></span><div><strong>Run started</strong><small>{formatTime(lastSession.startedAt)} · Session recorded</small></div></div><div className={`exploration-run-step ${searchFailed ? "is-failed" : "is-complete"}`}><span>{searchFailed ? <CircleAlert size={12} /> : <Check size={12} />}</span><div><strong>{lastSession.discoverySource === "native" ? "X public search attempted" : "Social Mirror checked"}</strong><small>{lastSession.discoverySource === "native" ? searchFailed ? `${lastSession.candidatesSeen} existing Mirror object${lastSession.candidatesSeen === 1 ? " was" : "s were"} available; no new X results were imported.` : `${lastSession.candidatesSeen} public result${lastSession.candidatesSeen === 1 ? "" : "s"} entered the Mirror.` : `${lastSession.candidatesSeen} observed object${lastSession.candidatesSeen === 1 ? "" : "s"} available to inspect.`}</small></div></div><div className={`exploration-run-step ${searchFailed ? "is-failed" : "is-complete"}`}><span>{searchFailed ? <CircleAlert size={12} /> : <Check size={12} />}</span><div><strong>Agent triage</strong><small>{lastSession.candidatesHydrated} object{lastSession.candidatesHydrated === 1 ? "" : "s"} compared with the durable brief; {lastSession.findingsCreated} surfaced.</small></div></div><div className="exploration-run-step is-result"><span><Circle size={10} fill="currentColor" /></span><div><strong>{lastSession.status === "completed" ? "Outcome recorded" : "Run stopped with an issue"}</strong><small>{lastSession.failureReason || (lastSession.findingsCreated ? "Findings are available below. No public action is implied by a finding." : "The run completed without a worthwhile finding. Silence is a valid outcome.")}</small></div></div></div>
+        {lastSession.discoverySource === "native" && <p className="exploration-monitor-note">The search artifact is the Social Mirror record below. The query was sent to the connected X discovery source; credentials and raw provider responses stay out of the Agent view.</p>}
+      </> : <p className="muted">Use Look now to create a durable run record. The monitor will show the source, query, counts, and outcome here.</p>}
+    </section>
+    <section className="exploration-artifacts" aria-label="Search artifacts"><div className="exploration-artifacts-heading"><div><SectionEyebrow>Search artifacts</SectionEyebrow><h3>{artifacts.length || findings.length ? `${artifacts.length || findings.length} observed object${(artifacts.length || findings.length) === 1 ? "" : "s"}` : "No artifacts yet"}</h3></div><span>Social Mirror</span></div>{artifacts.length ? <div className="exploration-artifact-list">{artifacts.map((object) => <article className="exploration-artifact" key={object.id}><div><strong>{object.author?.handle ? `@${object.author.handle}` : object.author?.displayName ?? "X account"}</strong><p>{object.content?.text || "[No text returned]"}</p><small>Public X post · {object.externalRef.id} · observed {formatTime(object.observedAt)}</small></div><a href={`https://x.com/i/status/${encodeURIComponent(object.externalRef.id)}`} target="_blank" rel="noreferrer" aria-label={`Open X artifact ${object.externalRef.id}`}><ArrowUpRight size={14} /></a></article>)}</div> : findings.length ? <div className="exploration-artifact-list">{findings.map((finding) => { const object = state.mirrorObjects.find((item) => item.id === finding.mirrorObjectId); return <article className="exploration-artifact" key={finding.id}><div><strong>{object?.author?.handle ? `@${object.author.handle}` : object?.author?.displayName ?? "Social object"}</strong><p>{finding.safeSummary}</p><small>{finding.whyItMayMatter}</small></div>{object && <Button variant="secondary" onClick={() => void mutate({ type: "askPresenceToReply", presenceId: presence.id, objectId: object.id })}>Ask {presence.name} to respond</Button>}</article>; })}</div> : <p className="muted">No search objects were retained for this run. A completed search with no worthwhile finding is still recorded.</p>}</section>
+    <section className="exploration-history" aria-label="Exploration history"><div className="exploration-artifacts-heading"><div><SectionEyebrow>Run history</SectionEyebrow><h3>{sessions.length} recorded run{sessions.length === 1 ? "" : "s"}</h3></div><span>Auditable attempts</span></div>{sessions.slice(0, 5).map((session) => <div className="exploration-history-row" key={session.id}><span className={`exploration-history-dot exploration-history-${session.status}`} /><span><strong>{session.id.slice(-8)} · {session.discoverySource === "native" ? "X search" : "Mirror review"}</strong><small>{formatTime(session.startedAt)} · {session.candidatesSeen} observed · {session.findingsCreated} worthwhile</small></span><ChevronRight size={14} /></div>)}</section>
+  </>;
+}
+
+function ExplorationRunMonitor({
+  presence,
+  sessions,
+  lastSession,
+  searchQuery,
+  artifacts,
+}: {
+  exploration: OpenPresenceState["explorations"][number];
+  presence: Presence;
+  sessions: OpenPresenceState["explorationSessions"];
+  lastSession?: OpenPresenceState["explorationSessions"][number];
+  searchQuery: string;
+  artifacts: MirrorObject[];
+  findings: OpenPresenceState["explorationFindings"];
+  state: OpenPresenceState;
+  mutate: Mutate;
+}) {
+  void ExplorationRunMonitorLegacy;
+  void searchQuery;
+  const running = lastSession?.status === "running";
+  const searchFailed = lastSession?.status === "degraded" || lastSession?.status === "failed";
+  const artifactsAreExistingEvidence = !lastSession || lastSession.status !== "completed" || lastSession.discoverySource !== "native";
+  const xQuery = lastSession?.searchQuery?.trim() || "";
+  const xQueryWasUsed = lastSession?.discoverySource === "native";
+  const xQueryLabel = xQueryWasUsed ? xQuery || "Not recorded for this historical run" : "No X query was sent for this run";
+  return <>
+    <section className="exploration-monitor" aria-label="Exploration run monitor">
+      <div className="exploration-monitor-heading"><div><SectionEyebrow>Run monitor</SectionEyebrow><h3>{lastSession ? `Run ${lastSession.id.slice(-8)}` : "No run yet"}</h3></div>{lastSession && <span className={`exploration-run-status exploration-run-${lastSession.status}`}><span className="status-dot" /> {running ? "Running" : lastSession.status === "completed" ? "Completed" : "Needs attention"}</span>}</div>
+      {lastSession ? <>
+        <div className="exploration-run-summary"><div><span>Discovery source</span><strong>{explorationDiscoveryLabel(lastSession.discoverySource, presence)}</strong></div><div><span>X query</span><strong title={xQueryLabel}>{xQueryLabel}</strong></div><div><span>Observed</span><strong>{lastSession.candidatesSeen}</strong></div><div><span>Worthwhile</span><strong>{lastSession.findingsCreated}</strong></div></div>
+        <div className="exploration-query" aria-label="X query details"><div className="exploration-query-heading"><SectionEyebrow>{xQueryWasUsed ? "X query" : "X query status"}</SectionEyebrow><span>{xQueryWasUsed ? "GET /2/tweets/search/recent" : "No X request for this run"}</span></div><code>{xQueryLabel}</code><small>{xQueryWasUsed ? "This is the q parameter compiled from the durable Exploration brief. Additional parameters: tweet.fields=created_at,conversation_id,author_id · expansions=author_id · user.fields=name,username · max_results=25. Credentials and raw provider responses are never displayed." : "This run inspected existing Social Mirror evidence and did not make a new X search request."}</small></div>
+        {running ? <div className="exploration-run-live"><span className="status-dot" /><div><strong>X public search is in progress</strong><small>The request has been recorded and is waiting for the connected source. Triage and artifacts will update when it returns.</small></div></div> : <div className="exploration-run-timeline"><div className="exploration-run-step is-complete"><span><Check size={12} /></span><div><strong>Run started</strong><small>{formatTime(lastSession.startedAt)} · Session recorded</small></div></div><div className={`exploration-run-step ${searchFailed ? "is-failed" : "is-complete"}`}><span>{searchFailed ? <CircleAlert size={12} /> : <Check size={12} />}</span><div><strong>{lastSession.discoverySource === "native" ? "X public search attempted" : "Social Mirror checked"}</strong><small>{lastSession.discoverySource === "native" ? searchFailed ? `${lastSession.candidatesSeen} existing Mirror object${lastSession.candidatesSeen === 1 ? " was" : "s were"} available; no new X results were imported.` : `${lastSession.candidatesSeen} public result${lastSession.candidatesSeen === 1 ? "" : "s"} entered the Mirror.` : `${lastSession.candidatesSeen} observed object${lastSession.candidatesSeen === 1 ? "" : "s"} available to inspect.`}</small></div></div><div className={`exploration-run-step ${searchFailed ? "is-failed" : "is-complete"}`}><span>{searchFailed ? <CircleAlert size={12} /> : <Check size={12} />}</span><div><strong>Agent triage</strong><small>{lastSession.candidatesHydrated} object{lastSession.candidatesHydrated === 1 ? "" : "s"} compared with the durable brief; {lastSession.findingsCreated} surfaced.</small></div></div><div className="exploration-run-step is-result"><span><Circle size={10} fill="currentColor" /></span><div><strong>{lastSession.status === "completed" ? "Outcome recorded" : "Run stopped with an issue"}</strong><small>{lastSession.failureReason || (lastSession.findingsCreated ? "Findings are available below. No public action was created." : "The run completed without a worthwhile finding. Silence is a valid outcome.")}</small></div></div></div>}
+        {lastSession.discoverySource === "native" && <p className="exploration-monitor-note">The query was sent to the connected X discovery source. Credentials and raw provider responses stay out of the Agent view.</p>}
+      </> : <p className="muted">Use Look now to create a durable run record. The monitor will show the source, query, counts, and outcome here.</p>}
+    </section>
+    <section className="exploration-artifacts" aria-label="Search artifacts"><div className="exploration-artifacts-heading"><div><SectionEyebrow>{artifactsAreExistingEvidence ? "Mirror evidence available to inspect" : "Search artifacts from this run"}</SectionEyebrow><h3>{artifacts.length ? `${artifacts.length} observed object${artifacts.length === 1 ? "" : "s"}` : "No artifacts yet"}</h3></div><span>{artifactsAreExistingEvidence ? "Not attributed to this X attempt" : "Social Mirror"}</span></div>{artifacts.length ? <div className="exploration-artifact-list">{artifacts.map((object) => <article className="exploration-artifact" key={object.id}><div><strong>{object.author?.handle ? `@${object.author.handle}` : object.author?.displayName ?? "X account"}</strong><p>{object.content?.text || "[No text returned]"}</p><small>Public X post · {object.externalRef.id} · observed {formatTime(object.observedAt)}</small></div><a href={`https://x.com/i/status/${encodeURIComponent(object.externalRef.id)}`} target="_blank" rel="noreferrer" aria-label={`Open X artifact ${object.externalRef.id}`}><ArrowUpRight size={14} /></a></article>)}</div> : <p className="muted">No objects were retained for this run. A completed search with no worthwhile finding is still recorded.</p>}</section>
+    <section className="exploration-history" aria-label="Exploration history"><div className="exploration-artifacts-heading"><div><SectionEyebrow>Run history</SectionEyebrow><h3>{sessions.length} recorded run{sessions.length === 1 ? "" : "s"}</h3></div><span>Auditable attempts</span></div>{sessions.slice(0, 5).map((session) => <div className="exploration-history-row" key={session.id}><span className={`exploration-history-dot exploration-history-${session.status}`} /><span><strong>{session.id.slice(-8)} · {session.discoverySource === "native" ? "X search" : "Mirror review"}</strong><small>{formatTime(session.startedAt)} · {session.candidatesSeen} observed · {session.findingsCreated} worthwhile</small></span><ChevronRight size={14} /></div>)}</section>
+  </>;
 }
 
 function TeachView({
@@ -4009,9 +4200,10 @@ function LiveView({
       : presenceCopy(activity.current.detail).replace("execution envelope", "delivery");
   const presenceScope = selected ? `${channelLabel(selected.channel, state.channelDefinitions)} · ${activityEnvironment === "sandbox" ? "Sandbox" : "Live"}` : "No Presence selected";
   const initiative = activity.publishingInitiative;
+  const publishingPlan = activity.publishingPlan;
   const initiativePeriodLabel = initiative.period === "week" ? "this week" : "today";
   const initiativeStatus = initiative.mode === "adaptive"
-    ? "Autonomous origination is active; Jenny chooses the pace."
+    ? `Autonomous origination is active; ${presenceName} chooses the pace.`
     : initiative.mode === "off"
       ? "Only explicit requests and Assignments create original posts."
       : initiative.status === "at_pace"
@@ -4021,6 +4213,12 @@ function LiveView({
           : initiative.status === "awaiting_review"
             ? `${initiative.verifiedOriginals} of ~${initiative.target} ${initiativePeriodLabel} · waiting for your review`
             : `${initiative.verifiedOriginals} of ~${initiative.target} ${initiativePeriodLabel}`;
+  const latestConversationEpisode = state.conversationEpisodes
+    .filter((episode) => episode.presenceId === selected?.id && episode.environment === activityEnvironment)
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+  const latestConversationObject = latestConversationEpisode?.lastExternalObjectId
+    ? state.mirrorObjects.find((item) => item.id === latestConversationEpisode.lastExternalObjectId)
+    : undefined;
   return (
     <div className="page activity-page">
       <div className="page-heading activity-heading">
@@ -4074,7 +4272,7 @@ function LiveView({
       )}
       <div className="activity-main-grid">
         <div className="activity-left-column">
-          <MirrorPanel state={state} filter={selected?.id ?? "all"} channelId={selected?.channel} environment={activityEnvironment} sessionIds={activitySessionIds} onContext={setSelectedContext} />
+          <MirrorPanel state={state} mutate={mutate} filter={selected?.id ?? "all"} channelId={selected?.channel} environment={activityEnvironment} sessionIds={activitySessionIds} onContext={setSelectedContext} />
           <section className="event-stream activity-log">
             <div className="section-heading">
               <div>
@@ -4144,12 +4342,30 @@ function LiveView({
               <p>{presenceCopy(activity.nextAttention.detail)}</p>
               <small>{activity.nextIntent.label} · {presenceCopy(activity.nextIntent.detail)}</small>
             </div>
+            {latestConversationEpisode && (
+              <div className="activity-status-block" aria-label="Conversation status">
+                <SectionEyebrow>Conversation</SectionEyebrow>
+                <h3>{conversationStatusLabel(latestConversationEpisode.status)}</h3>
+                <p>{latestConversationEpisode.status === "closed"
+                  ? latestConversationEpisode.closureReason ?? "No meaningful unresolved work remained, so no further reply is planned."
+                  : latestConversationEpisode.status === "cooling"
+                    ? latestConversationEpisode.eligibilityReason ?? "This conversation is being given space; new substance can reopen it."
+                    : latestConversationEpisode.lastDispositionReason ?? "The Agent is judging whether another turn earns its place."}</p>
+                <small>{latestConversationEpisode.agentTurnCount + latestConversationEpisode.externalTurnCount} turn{latestConversationEpisode.agentTurnCount + latestConversationEpisode.externalTurnCount === 1 ? "" : "s"}{latestConversationEpisode.loopRisk ? " · loop risk reconsidered" : ""}</small>
+                {latestConversationObject && latestConversationEpisode.status !== "active" && (
+                  <Button variant="ghost" onClick={() => mutate({ type: "askPresenceToReply", presenceId: selected!.id, objectId: latestConversationObject.id, sessionId: latestConversationObject.sessionId })}>
+                    <Reply size={14} /> Ask {presenceName} to reply anyway
+                  </Button>
+                )}
+              </div>
+            )}
             <div className="activity-status-block activity-publishing-block" aria-label="Publishing pace progress">
               <SectionEyebrow>Publishing pace</SectionEyebrow>
-              <h3>{initiative.mode === "pace" ? `${initiative.verifiedOriginals} of ~${initiative.target}` : initiative.mode === "adaptive" ? "Let Jenny decide" : "Only when asked"}</h3>
+              <h3>{initiative.mode === "pace" ? `${initiative.verifiedOriginals} of ~${initiative.target}` : initiative.mode === "adaptive" ? `Let ${presenceName} decide` : "Only when asked"}</h3>
               <p>{initiativeStatus}</p>
               {initiative.mode === "pace" && <small>{initiative.remaining ? `${initiative.remaining} remain · ${initiativePeriodLabel}` : `The target is not a maximum · ${initiativePeriodLabel}`}</small>}
             </div>
+            {initiative.mode !== "off" && <PublishingPlanCard plan={publishingPlan} presenceName={presenceName} mutate={mutate} setView={setView} compact />}
           </section>
           <div id="decision-and-action">
             <ExecutionLedger state={state} mutate={mutate} presenceId={selected?.id} environment={activityEnvironment} sessionIds={activitySessionIds} onContext={setSelectedContext} />
@@ -4162,6 +4378,7 @@ function LiveView({
 }
 function MirrorPanel({
   state,
+  mutate,
   filter = "all",
   channelId,
   environment,
@@ -4169,12 +4386,14 @@ function MirrorPanel({
   onContext,
 }: {
   state: OpenPresenceState;
+  mutate: Mutate;
   filter?: string;
   channelId?: ChannelId;
   environment?: PresenceEnvironment;
   sessionIds?: Set<string>;
   onContext?: (object: MirrorObject) => void;
 }) {
+  const [ignoringObjectId, setIgnoringObjectId] = useState<string | null>(null);
   const selectedPresence =
     filter === "all"
       ? undefined
@@ -4209,6 +4428,15 @@ function MirrorPanel({
       )
     : undefined;
   const builtIn = channel?.builtIn ?? false;
+  const isAlreadyIgnored = (item: MirrorObject) => state.operatorDirectives.some((directive) => directive.presenceId === item.presenceId && directive.target.id === item.externalRef.id && directive.requiredAct === "no_op" && directive.status !== "failed") || state.events.some((event) => event.sourceObjectId === item.id && /silence|left alone|ignore/i.test(`${event.title} ${event.detail}`));
+  const askToIgnore = async (item: MirrorObject) => {
+    setIgnoringObjectId(item.id);
+    try {
+      await mutate({ type: "askPresenceToIgnore", presenceId: item.presenceId, objectId: item.id, sessionId: item.sessionId });
+    } finally {
+      setIgnoringObjectId(null);
+    }
+  };
   const syncLabel = nativeObservation
     ? nativeObservation.status === "up-to-date" ? "up to date" : nativeObservation.status.replaceAll("-", " ")
     : bridgeSync?.status === "healthy" ? "up to date" : bridgeSync?.status ?? "not observed";
@@ -4272,7 +4500,15 @@ function MirrorPanel({
                   <time>{formatTime(item.occurredAt ?? item.observedAt)}</time>
                 </div>
                 <p className="mirror-post-content">{item.content?.text ?? "External activity received."}</p>
-                <div className="mirror-post-footer"><span>Observed</span><span>{item.objectType.replaceAll("-", " ")}</span>{item.objectType === "post" && item.actorPresenceId !== selectedPresence?.id && onContext && <button type="button" className="mirror-reply-action" onClick={() => onContext(item)}>Ask {selectedPresence?.name ?? "this Presence"} to reply</button>}</div>
+                <div className="mirror-post-footer">
+                  <span>Observed</span><span>{item.objectType.replaceAll("-", " ")}</span>
+                  {item.objectType === "post" && item.actorPresenceId !== selectedPresence?.id && onContext && (
+                    <div className="mirror-post-actions">
+                      {!isAlreadyIgnored(item) && <button type="button" className="mirror-ignore-action" aria-label={`Ask ${selectedPresence?.name ?? "this Presence"} to ignore`} onClick={() => void askToIgnore(item)} disabled={ignoringObjectId === item.id} title={`Ask ${selectedPresence?.name ?? "this Presence"} to leave this post alone`}><EyeOff size={11} /> {ignoringObjectId === item.id ? "Asking…" : "Ignore"}</button>}
+                      <button type="button" className="mirror-reply-action" onClick={() => onContext(item)}>Ask {selectedPresence?.name ?? "this Presence"} to reply</button>
+                    </div>
+                  )}
+                </div>
               </article>
             ))}
           </div>
@@ -4362,9 +4598,10 @@ function ActivityContextInspector({ object, state, mutate, onClose, onOpenSettin
   const [requesting, setRequesting] = useState(false);
   const presence = state.presences.find((item) => item.id === object.presenceId) ?? state.presence;
   const presenceName = presence?.name ?? "this Presence";
-  const directive = state.operatorDirectives.find((item) => item.presenceId === object.presenceId && item.target.id === object.externalRef.id && (!object.sessionId || item.sessionId === object.sessionId) && item.status !== "failed");
+  const replyDirective = state.operatorDirectives.find((item) => item.presenceId === object.presenceId && item.target.id === object.externalRef.id && item.requiredAct === "reply" && (!object.sessionId || item.sessionId === object.sessionId) && item.status !== "failed");
+  const ignoreDirective = state.operatorDirectives.find((item) => item.presenceId === object.presenceId && item.target.id === object.externalRef.id && item.requiredAct === "no_op" && (!object.sessionId || item.sessionId === object.sessionId) && item.status !== "failed");
   const repliesOff = (presence?.execution.reply ?? "off") === "off";
-  const relatedJudgment = state.events.find((item) => item.sourceObjectId === object.id && (item.title.toLowerCase().includes("silence") || item.title.toLowerCase().includes("left alone") || item.title.toLowerCase().includes("reply observed")));
+  const relatedJudgment = state.events.find((item) => item.sourceObjectId === object.id && (item.title.toLowerCase().includes("silence") || item.title.toLowerCase().includes("left alone") || item.title.toLowerCase().includes("ignore") || item.title.toLowerCase().includes("reply observed")));
   async function askToReply() {
     setRequesting(true);
     try {
@@ -4392,11 +4629,11 @@ function ActivityContextInspector({ object, state, mutate, onClose, onOpenSettin
         </article>
         <section className="operator-reply-card" aria-label={`Ask ${presenceName} to reply`}>
           <SectionEyebrow>Operator direction</SectionEyebrow>
-          <h3>{directive ? "Reply requested" : `Ask ${presenceName} to reply`}</h3>
-          <p>{directive ? `The social act is set. ${presenceName} owns the wording; the Presence reply setting owns how it is delivered.` : `You choose that this interaction should happen. ${presenceName} still decides what to say, within the Presence's privacy and channel boundaries.`}</p>
-          {relatedJudgment && <div className="operator-judgment"><strong>{presenceName} chose silence</strong><span>{relatedJudgment.detail.replaceAll("Jenny", presenceName)}</span></div>}
-          {!directive && !repliesOff && <label className="operator-direction-field">Optional direction for {presenceName}<textarea aria-label={`Optional direction for ${presenceName}`} value={direction} onChange={(event) => setDirection(event.target.value)} placeholder={`Anything you want ${presenceName} to consider?`} rows={3} /></label>}
-          {repliesOff ? <div className="operator-replies-off"><span>Replies are disabled for this Presence.</span><button type="button" onClick={onOpenSettings}>Enable replies →</button></div> : directive ? <div className="operator-requested-state">{presenceName} is preparing the expression through the existing reply envelope.</div> : <Button variant="primary" className="full-button" onClick={() => void askToReply()} disabled={requesting}>{requesting ? <><LoaderCircle size={14} className="spin" /> Asking {presenceName}…</> : <><Reply size={14} /> Ask {presenceName} to reply</>}</Button>}
+          <h3>{replyDirective ? "Reply requested" : `Ask ${presenceName} to reply`}</h3>
+          <p>{replyDirective ? `The social act is set. ${presenceName} owns the wording; the Presence reply setting owns how it is delivered.` : `You choose that this interaction should happen. ${presenceName} still decides what to say, within the Presence's privacy and channel boundaries.`}</p>
+          {relatedJudgment && <div className="operator-judgment"><strong>{ignoreDirective ? `${presenceName} was asked to leave this alone` : `${presenceName} chose silence`}</strong><span>{relatedJudgment.detail.replaceAll("Jenny", presenceName)}</span></div>}
+          {!replyDirective && !repliesOff && <label className="operator-direction-field">Optional direction for {presenceName}<textarea aria-label={`Optional direction for ${presenceName}`} value={direction} onChange={(event) => setDirection(event.target.value)} placeholder={`Anything you want ${presenceName} to consider?`} rows={3} /></label>}
+          {repliesOff ? <div className="operator-replies-off"><span>Replies are disabled for this Presence.</span><button type="button" onClick={onOpenSettings}>Enable replies →</button></div> : replyDirective ? <div className="operator-requested-state">{presenceName} is preparing the expression through the existing reply envelope.</div> : <Button variant="primary" className="full-button" onClick={() => void askToReply()} disabled={requesting}>{requesting ? <><LoaderCircle size={14} className="spin" /> Asking {presenceName}…</> : <><Reply size={14} /> Ask {presenceName} to reply</>}</Button>}
         </section>
       </aside>
     </div>
@@ -4635,6 +4872,12 @@ function matchesPublicHistoryFilter(item: PublicHistoryItem, filter: PublicHisto
   return item.kind === filter;
 }
 
+function publicHistoryChannelTag(item: PublicHistoryItem, definitions: ChannelDefinition[]) {
+  if (item.environment === "sandbox") return "Sandbox";
+  const channel = channelLabel(item.channel, definitions);
+  return channel === "X" ? "X.com" : channel;
+}
+
 function PublicHistoryView({
   state,
   setView,
@@ -4650,10 +4893,9 @@ function PublicHistoryView({
   const [filter, setFilter] = useState<PublicHistoryFilter>("all");
   const [selected, setSelected] = useState<PublicHistoryItem | null>(null);
   const [anchor, setAnchor] = useState(() => new Date());
-  const history = derivePublicHistory(state, presence?.id).filter((item) => matchesPublicHistoryFilter(item, filter));
-  const filteredHistory = history.filter((item) => item.channel === presence?.channel);
+  const allHistory = derivePublicHistory(state, presence?.id).filter((item) => publicHistoryMatchesPresence(item, presence));
+  const filteredHistory = allHistory.filter((item) => matchesPublicHistoryFilter(item, filter));
   const selectedIndex = selected ? filteredHistory.findIndex((item) => item.id === selected.id) : -1;
-  const allHistory = derivePublicHistory(state, presence?.id).filter((item) => item.channel === presence?.channel);
   const counts = {
     publications: allHistory.filter((item) => ["post", "thread"].includes(item.kind)).length,
     replies: allHistory.filter((item) => ["reply", "comment"].includes(item.kind)).length,
@@ -4737,11 +4979,11 @@ function PublicHistoryView({
           {surface === "timeline" ? (
             <FeedHistory history={filteredHistory} state={state} presenceName={presence?.name ?? "this Presence"} onSelect={setSelected} />
           ) : range === "month" ? (
-            <MonthHistory anchor={anchor} history={filteredHistory} onSelect={setSelected} />
+            <MonthHistory anchor={anchor} history={filteredHistory} state={state} onSelect={setSelected} />
           ) : range === "day" ? (
-            <DayHistory date={anchor} history={historyForDay(anchor)} onSelect={setSelected} />
+            <DayHistory date={anchor} history={historyForDay(anchor)} state={state} onSelect={setSelected} />
           ) : (
-            <WeekHistory anchor={anchor} history={filteredHistory} presenceName={presence?.name ?? "this Presence"} onSelect={setSelected} />
+            <WeekHistory anchor={anchor} history={filteredHistory} state={state} presenceName={presence?.name ?? "this Presence"} onSelect={setSelected} />
           )}
           {!filteredHistory.length && <EmptyState title="No public expression yet" body={mirrorHealth.tone === "healthy" || mirrorHealth.tone === "sandbox" ? `${mirrorHealth.detail}. ${presence?.name ?? "This Presence"} has not put anything into the public world yet.` : `${mirrorHealth.detail}.` } action={<Button variant="secondary" onClick={() => setView("schedule")}><Clock3 size={14} /> Open Schedule</Button>} />}
         </section>
@@ -4781,26 +5023,30 @@ function FeedItem({ item, state, presenceName, onSelect }: { item: PublicHistory
   const kindLabel = item.kind === "post" ? "Original" : item.kind[0].toUpperCase() + item.kind.slice(1);
   const assets = (item.assetIds ?? []).map((id) => state.assets.find((asset) => asset.id === id)).filter((asset): asset is OpenPresenceState["assets"][number] => Boolean(asset));
   const displayAt = historyDisplayAt(item);
+  const originLabel = item.origin?.kind === "publishing_initiative" ? "Publishing Initiative original" : item.origin?.kind === "assignment" ? "Assignment original" : item.origin?.kind === "inbound_social" ? "Inbound conversation" : item.origin?.kind === "standing_intent" ? "Standing intention" : item.origin?.kind === "operator" ? "Operator-directed" : undefined;
+  const channelTag = publicHistoryChannelTag(item, state.channelDefinitions);
   return <button type="button" className={`feed-item feed-item-${item.kind}`} onClick={() => onSelect(item)}>
     <span className="feed-item-header"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span className="feed-item-identity"><strong>{presence?.name ?? presenceName}</strong><small>{presence?.handle ?? ""} · {kindLabel}</small></span><time dateTime={displayAt} title={historyTimeTitle(item)}>{formatTime(displayAt)}</time></span>
     {item.kind === "reply" || item.kind === "comment" ? <span className="feed-item-context">Replying in a public conversation</span> : null}
+    {originLabel ? <span className="feed-item-context">{originLabel}</span> : null}
     <span className="feed-item-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "Public expression without returned text.")}</span>
     {assets.length > 0 && <span className="feed-item-assets">{assets.map((asset) => { const source = asset?.storage ? `/api/assets/${asset.id}` : asset?.dataUrl ?? asset?.provenance.sourceUrl; return source && (asset.type === "image" || asset.type === "gif" || asset.type === "chart") ? <span className="feed-item-asset" key={asset.id}><img src={source} alt={asset.description ?? `Published ${asset.type}`} />{asset.provenance.sourcePageUrl && <span className="feed-item-source">Source: {asset.provenance.publisher ?? asset.description ?? "Open source"}</span>}</span> : source && asset.type === "video" ? <video key={asset.id} controls src={source} aria-label="Published video" /> : <span className="social-link-asset" key={asset?.id}>{asset?.type === "link" ? asset.provenance.sourceUrl : `${asset?.type ?? "Asset"} published`}</span>; })}</span>}
-    <span className="feed-item-footer"><span>View details <ChevronRight size={13} /></span></span>
+    <span className="feed-item-footer"><span>View details <ChevronRight size={13} /></span><span className="feed-item-channel-badge" aria-label={`Channel: ${channelTag}`}><Badge size={12} aria-hidden="true" />{channelTag}</span></span>
   </button>;
 }
 
-function HistoryCard({ item, onSelect, compact = false }: { item: PublicHistoryItem; onSelect: (item: PublicHistoryItem) => void; compact?: boolean }) {
+function HistoryCard({ item, state, onSelect, compact = false }: { item: PublicHistoryItem; state: OpenPresenceState; onSelect: (item: PublicHistoryItem) => void; compact?: boolean }) {
   const label = item.kind === "post" ? "POST" : item.kind.toUpperCase();
   const displayAt = historyDisplayAt(item);
+  const channelTag = publicHistoryChannelTag(item, state.channelDefinitions);
   return <button type="button" className={`history-card history-card-${item.kind} ${compact ? "compact" : ""}`} onClick={() => onSelect(item)}>
     <span className="history-card-kicker"><strong>{label}</strong><time dateTime={displayAt} title={historyTimeTitle(item)}>{formatTime(displayAt)}</time></span>
     {item.text ? <span className="history-card-text">{item.text}</span> : <span className="history-card-text quiet">{item.kind === "repost" ? "Passed along publicly" : "Public expression"}</span>}
-    <span className="history-card-proof">{item.environment === "sandbox" ? "Verified in Sandbox Mirror · simulated only" : item.externalUrl ? "Verified on X" : "Verified in Social Mirror"}</span>
+    <span className="history-card-footer"><span className="history-card-proof">{item.environment === "sandbox" ? "Verified in Sandbox Mirror · simulated only" : item.externalUrl ? "Verified on X" : "Verified in Social Mirror"}</span><span className="history-card-channel-badge" aria-label={`Channel: ${channelTag}`}><Badge size={11} aria-hidden="true" />{channelTag}</span></span>
   </button>;
 }
 
-function WeekHistory({ anchor, history, presenceName, onSelect }: { anchor: Date; history: PublicHistoryItem[]; presenceName: string; onSelect: (item: PublicHistoryItem) => void }) {
+function WeekHistory({ anchor, history, state, presenceName, onSelect }: { anchor: Date; history: PublicHistoryItem[]; state: OpenPresenceState; presenceName: string; onSelect: (item: PublicHistoryItem) => void }) {
   const start = new Date(anchor);
   const day = start.getDay();
   start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
@@ -4812,25 +5058,26 @@ function WeekHistory({ anchor, history, presenceName, onSelect }: { anchor: Date
       <div className="history-week-header"><span>Local time</span>{days.map((date) => <span key={date.toISOString()}>{date.toLocaleDateString("en", { weekday: "short" })}<small>{date.getDate()}</small></span>)}</div>
       <div className="history-week-body"><div className="history-time-rail">{hours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>{days.map((date) => {
         const dayItems = history.filter((item) => new Date(historyDisplayAt(item)).toDateString() === date.toDateString());
-        return <div className="history-day-column" key={date.toISOString()}>{hours.map((hour) => <div className="history-hour-cell" key={hour} />)}{dayItems.map((item) => { const timestamp = new Date(historyDisplayAt(item)); const top = Math.max(2, ((timestamp.getHours() + timestamp.getMinutes() / 60) * 56)); return <div key={item.id} className="history-positioned-card" style={{ top }}><HistoryCard item={item} onSelect={onSelect} compact={item.kind === "reply" || item.kind === "comment"} /></div>; })}</div>;
+        return <div className="history-day-column" key={date.toISOString()}>{hours.map((hour) => <div className="history-hour-cell" key={hour} />)}{dayItems.map((item) => { const timestamp = new Date(historyDisplayAt(item)); const top = Math.max(2, ((timestamp.getHours() + timestamp.getMinutes() / 60) * 56)); return <div key={item.id} className="history-positioned-card" style={{ top }}><HistoryCard item={item} state={state} onSelect={onSelect} compact={item.kind === "reply" || item.kind === "comment"} /></div>; })}</div>;
       })}</div>
     </div>
   </div>;
 }
 
-function MonthHistory({ anchor, history, onSelect }: { anchor: Date; history: PublicHistoryItem[]; onSelect: (item: PublicHistoryItem) => void }) {
+function MonthHistory({ anchor, history, state, onSelect }: { anchor: Date; history: PublicHistoryItem[]; state: OpenPresenceState; onSelect: (item: PublicHistoryItem) => void }) {
   const monthStart = new Date(anchor.getFullYear(), anchor.getMonth(), 1);
   const start = new Date(monthStart); const day = start.getDay(); start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
   const days = Array.from({ length: 42 }, (_, index) => new Date(start.getTime() + index * 86400000));
-  return <div className="history-month"><div className="history-month-header">{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => <span key={day}>{day}</span>)}</div><div className="history-month-grid">{days.map((date) => { const items = history.filter((item) => new Date(historyDisplayAt(item)).toDateString() === date.toDateString()); return <div className={`history-month-day ${date.getMonth() !== anchor.getMonth() ? "outside" : ""}`} key={date.toISOString()}><strong>{date.getDate()}</strong>{items.slice(0, 4).map((item) => <HistoryCard key={item.id} item={item} onSelect={onSelect} compact />)}{items.length > 4 && <small className="history-more">+ {items.length - 4} more</small>}</div>; })}</div></div>;
+  return <div className="history-month"><div className="history-month-header">{["Mon", "Tue", "Wed", "Thu", "Fri", "Sat", "Sun"].map((day) => <span key={day}>{day}</span>)}</div><div className="history-month-grid">{days.map((date) => { const items = history.filter((item) => new Date(historyDisplayAt(item)).toDateString() === date.toDateString()); return <div className={`history-month-day ${date.getMonth() !== anchor.getMonth() ? "outside" : ""}`} key={date.toISOString()}><strong>{date.getDate()}</strong>{items.slice(0, 4).map((item) => <HistoryCard key={item.id} item={item} state={state} onSelect={onSelect} compact />)}{items.length > 4 && <small className="history-more">+ {items.length - 4} more</small>}</div>; })}</div></div>;
 }
 
-function DayHistory({ date, history, onSelect }: { date: Date; history: PublicHistoryItem[]; onSelect: (item: PublicHistoryItem) => void }) {
+function DayHistory({ date, history, state, onSelect }: { date: Date; history: PublicHistoryItem[]; state: OpenPresenceState; onSelect: (item: PublicHistoryItem) => void }) {
   const hours = Array.from({ length: 24 }, (_, index) => index);
-  return <div className="history-day"><div className="history-day-header"><SectionEyebrow>{date.toLocaleDateString("en", { weekday: "long" })}</SectionEyebrow><h2>{date.toLocaleDateString("en", { month: "long", day: "numeric", year: "numeric" })}</h2><p>Public history appears here.</p></div><div className="history-day-timeline">{hours.map((hour) => <div className="history-timeline-row" key={hour}><span>{String(hour).padStart(2, "0")}:00</span><div>{history.filter((item) => new Date(historyDisplayAt(item)).getHours() === hour).map((item) => <HistoryCard key={item.id} item={item} onSelect={onSelect} />)}</div></div>)}</div></div>;
+  return <div className="history-day"><div className="history-day-header"><SectionEyebrow>{date.toLocaleDateString("en", { weekday: "long" })}</SectionEyebrow><h2>{date.toLocaleDateString("en", { month: "long", day: "numeric", year: "numeric" })}</h2><p>Public history appears here.</p></div><div className="history-day-timeline">{hours.map((hour) => <div className="history-timeline-row" key={hour}><span>{String(hour).padStart(2, "0")}:00</span><div>{history.filter((item) => new Date(historyDisplayAt(item)).getHours() === hour).map((item) => <HistoryCard key={item.id} item={item} state={state} onSelect={onSelect} />)}</div></div>)}</div></div>;
 }
 
 function PublicHistoryInspector({ item, state, index, total, onNavigate, onClose, onActivity }: { item: PublicHistoryItem; state: OpenPresenceState; index: number; total: number; onNavigate: (offset: number) => void; onClose: () => void; onActivity: () => void }) {
+  const [postIdCopied, setPostIdCopied] = useState(false);
   const presence = state.presences.find((candidate) => candidate.id === item.presenceId);
   const mirrorObject = state.mirrorObjects.find((object) => object.id === item.id || (object.externalRef.type === item.externalRef.type && object.externalRef.id === item.externalRef.id));
   const assignment = mirrorObject?.assignmentId ? state.assignments.find((candidate) => candidate.id === mirrorObject.assignmentId) : undefined;
@@ -4840,7 +5087,51 @@ function PublicHistoryInspector({ item, state, index, total, onNavigate, onClose
   const kindLabel = item.kind === "post" ? "Post" : item.kind[0].toUpperCase() + item.kind.slice(1);
   const position = Math.max(0, index) + 1;
   const displayAt = historyDisplayAt(item);
-  return <aside className="history-inspector" aria-label={`${kindLabel} details`}><div className="history-inspector-header"><div><SectionEyebrow>{kindLabel} details</SectionEyebrow><h2>{kindLabel}</h2><small title={historyTimeTitle(item)}>{formatTime(displayAt)}{item.environment === "sandbox" ? " · Sandbox observed" : ""}</small></div><button type="button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button></div><div className="history-inspector-navigation" aria-label="Browse public posts"><span aria-live="polite"><strong>Post {position}</strong> of {total}</span><div><button type="button" aria-label="Previous post" disabled={index <= 0} onClick={() => onNavigate(-1)}><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /></button><button type="button" aria-label="Next post" disabled={index < 0 || index >= total - 1} onClick={() => onNavigate(1)}><ChevronRight size={14} /></button></div></div><div className="history-inspector-identity"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span><strong>{presence?.name ?? "Presence"}</strong><small>{presence?.handle ?? ""}</small></span></div>{parent?.content?.text && <div className="history-parent-context"><SectionEyebrow>Replying to</SectionEyebrow><p>{parent.content.text}</p><small>{parent.author?.displayName ?? "Public conversation"}</small></div>}<p className="history-inspector-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "No text was returned by the channel.")}</p>{itemAssets.length > 0 && <section className="history-provenance"><SectionEyebrow>Attached sources</SectionEyebrow>{itemAssets.map((asset) => <div key={asset.id}><a className="history-external-link" href={asset.provenance.sourcePageUrl ?? asset.provenance.sourceUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {asset.provenance.publisher ?? asset.description ?? "Open source"}</a><small>Origin: {asset.provenance.origin}. Source identity: {asset.provenance.sourceIdentityStatus ?? "unknown"}. Rights: {asset.rights?.status ?? "unknown"}.</small></div>)}</section>}<div className="history-proof"><Check size={14} /><span>Observed in Social Mirror · {item.externalRef.type} · {item.externalRef.id}</span></div><section className="history-provenance"><SectionEyebrow>Provenance</SectionEyebrow><p>{item.executionId ? "Published by OpenPresence and verified in the Social Mirror." : "Observed on the connected channel and attributed to this Presence."}</p>{assignment && <p>Assignment output · {assignment.progress.verified} / {assignment.progress.required} verified publications</p>}{mirrorObject?.environment === "sandbox" && <small>Simulated social reality · this expression has no live destination. Sandbox world time: {formatTime(item.occurredAt)}.</small>}</section><section className="history-outcome"><SectionEyebrow>Outcome</SectionEyebrow>{metrics.length ? <div className="history-outcome-grid">{metrics.map(([key, value]) => <div key={key}><strong>{value}</strong><small>{key.replaceAll("_", " ")}</small></div>)}</div> : <p>No channel outcome evidence is attached to this expression yet.</p>}</section><div className="history-inspector-actions">{item.externalUrl ? <a className="history-external-link" href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> Open on X</a> : item.environment === "sandbox" && item.channel === "x" ? <p className="history-sandbox-note">Sandbox rehearsal only. This expression has no live X URL.</p> : null}<Button variant="secondary" onClick={onActivity}><Activity size={14} /> View in Activity</Button></div></aside>;
+  const originLabel = item.origin?.kind === "publishing_initiative" ? `Publishing Initiative · revision ${item.origin.planRevision ?? "current"}` : item.origin?.kind === "assignment" ? "Assignment output" : item.origin?.kind === "inbound_social" ? "Inbound conversation" : item.origin?.kind === "standing_intent" ? "Standing intention" : item.origin?.kind === "operator" ? "Operator-directed" : "Origin not recorded";
+  const copyPostId = async () => {
+    try {
+      await navigator.clipboard.writeText(item.id);
+      setPostIdCopied(true);
+      window.setTimeout(() => setPostIdCopied(false), 1600);
+    } catch {
+      setPostIdCopied(false);
+    }
+  };
+  return <aside className="history-inspector" aria-label={`${kindLabel} details`}><div className="history-inspector-header"><div><SectionEyebrow>{kindLabel} details</SectionEyebrow><h2>{kindLabel}</h2><small title={historyTimeTitle(item)}>{formatTime(displayAt)}{item.environment === "sandbox" ? " · Sandbox observed" : ""}</small></div><button type="button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button></div><div className="history-inspector-navigation" aria-label="Browse public posts"><span aria-live="polite"><strong>Post {position}</strong> of {total}</span><div><button type="button" aria-label="Previous post" disabled={index <= 0} onClick={() => onNavigate(-1)}><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /></button><button type="button" aria-label="Next post" disabled={index < 0 || index >= total - 1} onClick={() => onNavigate(1)}><ChevronRight size={14} /></button></div></div><div className="history-inspector-identity"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span><strong>{presence?.name ?? "Presence"}</strong><small>{presence?.handle ?? ""}</small></span></div>{parent?.content?.text && <div className="history-parent-context"><SectionEyebrow>Replying to</SectionEyebrow><p>{parent.content.text}</p><small>{parent.author?.displayName ?? "Public conversation"}</small></div>}<p className="history-inspector-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "No text was returned by the channel.")}</p>{itemAssets.length > 0 && <section className="history-provenance"><SectionEyebrow>Attached sources</SectionEyebrow>{itemAssets.map((asset) => <div key={asset.id}><a className="history-external-link" href={asset.provenance.sourcePageUrl ?? asset.provenance.sourceUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {asset.provenance.publisher ?? asset.description ?? "Open source"}</a><small>Origin: {asset.provenance.origin}. Source identity: {asset.provenance.sourceIdentityStatus ?? "unknown"}. Rights: {asset.rights?.status ?? "unknown"}.</small></div>)}</section>}<div className="history-proof"><Check size={14} /><span>Observed in Social Mirror · {item.externalRef.type}</span><button type="button" className="history-copy-id" aria-label="Copy internal post ID" title="Copy internal post ID" onClick={() => void copyPostId()}><Copy size={12} /> {postIdCopied ? "Copied" : "Copy ID"}</button></div><section className="history-provenance"><SectionEyebrow>Provenance</SectionEyebrow><p>{originLabel}</p><p>{item.executionId ? "Published by OpenPresence and verified in the Social Mirror." : "Observed on the connected channel and attributed to this Presence."}</p>{item.origin?.planWindowId && <small>Plan window: {item.origin.planWindowId}</small>}{assignment && <p>Assignment output · {assignment.progress.verified} / {assignment.progress.required} verified publications</p>}{mirrorObject?.environment === "sandbox" && <small>Simulated social reality · this expression has no live destination. Sandbox world time: {formatTime(item.occurredAt)}.</small>}</section><section className="history-outcome"><SectionEyebrow>Outcome</SectionEyebrow>{metrics.length ? <div className="history-outcome-grid">{metrics.map(([key, value]) => <div key={key}><strong>{value}</strong><small>{key.replaceAll("_", " ")}</small></div>)}</div> : <p>No channel outcome evidence is attached to this expression yet.</p>}</section><div className="history-inspector-actions">{item.externalUrl ? <a className="history-external-link" href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> Open on X</a> : item.environment === "sandbox" && item.channel === "x" ? <p className="history-sandbox-note">Sandbox rehearsal only. This expression has no live X URL.</p> : null}<Button variant="secondary" onClick={onActivity}><Activity size={14} /> View in Activity</Button></div></aside>;
+}
+
+function publishingWindowLabel(window: PublishingPlan["windows"][number]) {
+  const formatter = new Intl.DateTimeFormat(undefined, { hour: "numeric", minute: "2-digit" });
+  return `${formatter.format(new Date(window.startAt))}–${formatter.format(new Date(window.endAt))}`;
+}
+
+function publishingWorkStageLabel(stage: string) {
+  return stage.replaceAll("_", " ");
+}
+
+function PublishingPlanCard({ plan, presenceName, mutate, setView, compact = false }: { plan?: PublishingPlan; presenceName: string; mutate: Mutate; setView: (view: View) => void; compact?: boolean }) {
+  if (!plan) return <section className={`publishing-plan-card ${compact ? "compact" : ""}`} aria-label="Agent publishing plan"><div><SectionEyebrow>{presenceName}&apos;s publishing plan</SectionEyebrow><h2>No publishing plan available</h2><p className="muted">Enable an ongoing publishing responsibility, then let {presenceName} create a visible working plan from its Mission, Taste, and current evidence.</p></div><Button variant="secondary" onClick={() => void mutate({ type: "replanPublishing" })}>Create plan</Button></section>;
+  const expected = plan.expectedOriginals ? `${plan.expectedOriginals.min}–${plan.expectedOriginals.max}` : "adaptive";
+  const next = plan.windows.find((window) => window.status === "active" || window.status === "future");
+  const latestWork = plan.workHistory?.[0];
+  const whyNoOriginal = plan.status === "blocked"
+    ? plan.rationaleSummary ?? "The latest planning pass could not complete."
+    : latestWork?.stage === "awaiting_review"
+      ? "A candidate is waiting for operator review. It is not counted until the Social Mirror verifies delivery."
+      : latestWork?.stage === "candidate_rejected"
+        ? "The latest candidate did not meet the Presence's quality threshold. The responsibility remains active for a later consideration."
+        : latestWork?.stage === "delivery_failed"
+          ? "The latest candidate was not delivered. No publishing progress was counted."
+          : plan.verifiedOriginals > 0
+            ? `${plan.verifiedOriginals} original${plan.verifiedOriginals === 1 ? "" : "s"} verified in the Social Mirror.`
+            : "No original has been verified yet. The next consideration remains visible below.";
+  return <section className={`publishing-plan-card ${compact ? "compact" : ""} publishing-plan-${plan.status}`} aria-label="Agent publishing plan">
+    <div className="publishing-plan-header"><div><SectionEyebrow>{presenceName}&apos;s publishing plan</SectionEyebrow><h2>{plan.status === "blocked" ? "No publishing plan available" : `${expected} originals ${plan.operatorTarget ? `· ${plan.operatorTarget.quantity} / ${plan.operatorTarget.period}` : "today"}`}</h2><p className="muted">Self-planned future work for {presenceName}. Windows are flexible work periods, not scheduled posts.</p></div><span className="plan-status-label">{plan.status === "active" ? "Active" : plan.status}</span></div>
+    {plan.status === "blocked" ? <p className="settings-warning">{plan.rationaleSummary ?? "The latest planning pass could not complete."}</p> : <div className="publishing-plan-grid"><div><small>VERIFIED</small><strong>{plan.verifiedOriginals}{plan.expectedOriginals ? ` / ${expected}` : ""}</strong></div><div><small>NEXT</small><strong>{next ? publishingWindowLabel(next) : "Reassess later"}</strong><span>{next?.summary ?? plan.rationaleSummary ?? `${presenceName} will revisit the responsibility when useful.`}</span></div><div><small>WORKING ON</small><strong>{plan.currentWork?.[0]?.summary ?? "Watching for a worthwhile opportunity"}</strong></div></div>}
+    {!compact && plan.windows.length > 0 && <div className="publishing-plan-windows">{plan.windows.map((window) => <div className="publishing-plan-window" key={window.id}><span>{publishingWindowLabel(window)}</span><strong>{window.purpose}</strong><p>{window.summary}</p></div>)}</div>}
+    {!compact && <section className="publishing-plan-diagnostics" aria-label="Publishing plan diagnostics"><div><SectionEyebrow>Why no original yet?</SectionEyebrow><p>{whyNoOriginal}</p>{plan.nextAttentionAt && <small>Next consideration: {formatTime(plan.nextAttentionAt)}</small>}</div>{plan.workHistory?.length ? <div className="publishing-plan-work"><SectionEyebrow>Work history</SectionEyebrow>{plan.workHistory.slice(0, 6).map((work) => <div className="publishing-plan-work-row" key={work.id}><span>{publishingWorkStageLabel(work.stage)}</span><p>{work.detail}</p><time>{formatTime(work.at)}</time></div>)}</div> : <p className="muted">No work has been attempted in the current plan window.</p>}</section>}
+    <div className="publishing-plan-actions"><Button variant="ghost" onClick={() => setView("schedule")}>View details</Button><Button variant="secondary" onClick={() => void mutate({ type: "replanPublishing", presenceId: plan.presenceId })}>Replan now</Button></div>
+  </section>;
 }
 
 function ScheduleView({
@@ -4869,6 +5160,7 @@ function ScheduleView({
   const presenceId = state.activePresenceId ?? state.presence?.id ?? "";
   const selectedPresence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   const presenceName = selectedPresence?.name ?? "this Presence";
+  const publishingPlan = derivePublishingPlanProjection(state, selectedPresence?.id);
   const resetForm = () => {
     setInstruction("");
     setEditingSlot(null);
@@ -4942,7 +5234,7 @@ function ScheduleView({
     setShowForm(true);
   };
   const cancelAssignment = async (assignment: OpenPresenceState["assignments"][number]) => {
-    if (!window.confirm(`Cancel this Assignment?\n\n${assignment.instruction}`)) return;
+    if (!window.confirm(`Cancel this Assignment?\n\n${cleanUserFacingAssignmentInstruction(assignment.instruction)}`)) return;
     const next = await mutate({ type: "cancelAssignment", id: assignment.id });
     if (next) setSelectedAssignmentId(null);
   };
@@ -4985,6 +5277,7 @@ function ScheduleView({
           </Button>
         </div>
       </div>
+      <PublishingPlanCard plan={publishingPlan} presenceName={presenceName} mutate={mutate} setView={setView} />
       {showForm && (
         <form className="add-slot-form" onSubmit={add}>
           <label className="instruction-field">
@@ -5096,7 +5389,7 @@ function ScheduleView({
             </div>
             <button type="button" aria-label="Close Assignment details" onClick={() => setSelectedAssignmentId(null)}><X size={16} /></button>
           </div>
-          <p className="assignment-inspector-instruction">{selectedAssignment.instruction}</p>
+          <p className="assignment-inspector-instruction">{cleanUserFacingAssignmentInstruction(selectedAssignment.instruction)}</p>
           <div className="assignment-inspector-meta">
             <div><span>Window</span><strong>{selectedAssignment.schedule ? `${selectedAssignment.schedule.day} at ${selectedAssignment.schedule.time}` : "Unscheduled"}</strong><small>{selectedAssignment.schedule?.executionWindow ?? "Ready to start when you choose."}</small></div>
             <div><span>Progress</span><strong>{selectedAssignment.progress.verified} / {selectedAssignment.progress.required} published</strong><small>{selectedAssignment.status === "draft" ? "Not started" : `${selectedAssignment.status.replaceAll("_", " ")} · ${selectedAssignment.rejectedCandidates} rejected`}</small></div>
@@ -5108,7 +5401,7 @@ function ScheduleView({
           </div>
         </aside>
       )}
-      {visibleAssignments.length > 0 && viewMode === "list" && <section className="schedule-assignment-list" aria-label="Assignments"><div className="section-heading"><div><SectionEyebrow>Delegated responsibility</SectionEyebrow><h2>Assignments</h2><p className="muted">Assignments delegate an outcome to work toward. Open one to review its window and progress, run a Sandbox rehearsal, or cancel it. A rejected candidate is part of the work history, not a completed Assignment.</p></div></div>{visibleAssignments.map((assignment) => { const timing = assignment.schedule ? `${assignment.schedule.day} at ${assignment.schedule.time} · ${assignment.schedule.executionWindow === `${assignment.schedule.time}–${assignment.schedule.time}` ? "exact time" : assignment.schedule.executionWindow}` : "Unscheduled · ready to start"; const status = assignment.status === "draft" ? "not started" : assignment.status.replaceAll("_", " "); return <article className="schedule-assignment-row" key={assignment.id}><div><strong>{assignment.instruction}</strong><small>{timing} · {assignment.progress.verified} / {assignment.progress.required} published · {status} · {assignment.rejectedCandidates} rejected</small></div><div className="schedule-assignment-actions"><Button variant="secondary" onClick={() => openAssignment(assignment)}>Open details</Button></div></article>; })}</section>}
+      {visibleAssignments.length > 0 && viewMode === "list" && <section className="schedule-assignment-list" aria-label="Assignments"><div className="section-heading"><div><SectionEyebrow>Delegated responsibility</SectionEyebrow><h2>Assignments</h2><p className="muted">Assignments delegate an outcome to work toward. Open one to review its window and progress, run a Sandbox rehearsal, or cancel it. A rejected candidate is part of the work history, not a completed Assignment.</p></div></div>{visibleAssignments.map((assignment) => { const timing = assignment.schedule ? `${assignment.schedule.day} at ${assignment.schedule.time} · ${assignment.schedule.executionWindow === `${assignment.schedule.time}–${assignment.schedule.time}` ? "exact time" : assignment.schedule.executionWindow}` : "Unscheduled · ready to start"; const status = assignment.status === "draft" ? "not started" : assignment.status.replaceAll("_", " "); return <article className="schedule-assignment-row" key={assignment.id}><div><strong>{cleanUserFacingAssignmentInstruction(assignment.instruction)}</strong><small>{timing} · {assignment.progress.verified} / {assignment.progress.required} published · {status} · {assignment.rejectedCandidates} rejected</small></div><div className="schedule-assignment-actions"><Button variant="secondary" onClick={() => openAssignment(assignment)}>Open details</Button></div></article>; })}</section>}
       {viewMode === "week" ? (
         <WeekCalendar slots={visibleSlots} assignments={visibleAssignments} state={state} presenceName={presenceName} onEdit={beginEdit} onAssignment={openAssignment} onAdd={() => setShowForm(true)} />
       ) : (
@@ -6165,24 +6458,24 @@ function PresenceView({
       <section className="settings-card publishing-initiative-card" id="publishing-pace-settings">
         <div className="section-heading compact">
           <div>
-            <SectionEyebrow>Publishing pace · Presence-scoped</SectionEyebrow>
-            <h2>How often should {presence.name} aim to publish original posts?</h2>
+          <SectionEyebrow>Publishing initiative · Presence-scoped</SectionEyebrow>
+          <h2>How actively should {presence.name} publish?</h2>
           </div>
           <Sparkles size={17} />
         </div>
-        <p className="muted rhythm-intro">Give {presence.name} responsibility for originating here. {presence.name} still decides what is worth saying, what to research, and when within the period to publish.</p>
+        <p className="muted rhythm-intro">Set the responsibility, not the words. {presence.name} still decides what is worth saying, what to research, and when a particular post is ready.</p>
         <div className="rhythm-options publishing-initiative-options" role="group" aria-label="Publishing pace">
           <button type="button" className={publishingInitiative?.mode === "off" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { publishingInitiative: { ...(publishingInitiative ?? { timezone: "UTC", createdAt: new Date().toISOString() }), mode: "off", updatedAt: new Date().toISOString() } } })} aria-pressed={publishingInitiative?.mode === "off"}>
-            <strong>Only when I ask</strong>
-            <small>No autonomous original posting. Assignments and explicit requests still work.</small>
+            <strong>No publishing responsibility</strong>
+            <small>{presence.name} can still respond to events and explicit instructions, but does not maintain an ongoing original-publishing plan.</small>
           </button>
           <button type="button" className={publishingInitiative?.mode === "adaptive" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { publishingInitiative: { ...(publishingInitiative ?? { timezone: "UTC", createdAt: new Date().toISOString() }), mode: "adaptive", updatedAt: new Date().toISOString() } } })} aria-pressed={publishingInitiative?.mode === "adaptive"}>
             <strong>Let {presence.name} decide <em className="recommended-tag">Recommended</em></strong>
-            <small>{presence.name} determines the pace from its Mission, Growth evidence, and what is happening here.</small>
+            <small>{presence.name} determines an appropriate pace from its Mission, Growth evidence, recent activity, and what is happening here.</small>
           </button>
           <button type="button" className={publishingInitiative?.mode === "pace" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { publishingInitiative: { ...(publishingInitiative ?? { timezone: "UTC", createdAt: new Date().toISOString() }), mode: "pace", target: { count: Math.max(1, Math.round(Number(publishingCountDraft) || 5)), period: publishingPeriodDraft }, updatedAt: new Date().toISOString() } } })} aria-pressed={publishingInitiative?.mode === "pace"}>
             <strong>Set a pace</strong>
-            <small>Give {presence.name} an ongoing publishing target while preserving its judgment.</small>
+            <small>Give {presence.name} a publishing expectation. {presence.name} decides how to work toward it.</small>
           </button>
         </div>
         {publishingInitiative?.mode === "pace" && (

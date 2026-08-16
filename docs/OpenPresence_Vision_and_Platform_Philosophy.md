@@ -24,6 +24,18 @@ Or:
 
 > **Your agent should not live in a chat window.**
 
+## 46. Attention, responsibility, and authority
+
+An Exploration gives the Agent somewhere to look. An Assignment gives the Agent responsibility to pursue an outcome there. The Presence Execution Envelope gives the Agent authority to perform a selected social act. Exploration therefore does not grant permission to speak, but it can lead to autonomous speech when it is connected to a canonical Assignment and authorized execution.
+
+Every autonomous Exploration behavior uses the same Assignment primitive. “Surface it to me” produces findings without public responsibility. “Let Genny engage when useful” creates an unquantified, opportunistic meaningful-engagement Assignment. An explicit objective creates the same kind of Assignment with explicit qualification, quantity, and constraints. There is no second autonomous-engagement engine.
+
+The durable path is:
+
+> **Attention Source → Social Mirror → Assignment → Social Planner → Social Intent → Execution Envelope → connector or Bridge → verified Social Mirror outcome.**
+
+A browser button may expose a diagnostic “look now” action, but autonomous Attention-source work must be eligible for browser-independent worker execution. A discovery lead is not a social outcome, a finding is not an engagement, and a queued execution is not progress. Only verified reality counts.
+
 ## Language and phrasing
 
 Taste guides expression. Authority defines hard constraints.
@@ -592,6 +604,31 @@ over:
 > "Give the model everything and ask it not to use private information."
 
 Private content must be filtered before cognition.
+
+## 12.1 Attention, Watching, and Explorations
+
+Watching has two distinct meanings. The Watchlist contains known people,
+accounts, or sources a Presence intentionally follows. An Exploration is a
+Presence-scoped brief describing an area of social reality the Presence wants
+to discover.
+
+An Exploration grants permission to look, not permission to speak. Its output
+is bounded social evidence: ephemeral discovery leads, selectively hydrated
+Social Mirror objects, and worthwhile findings. The Social Planner still owns
+whether a Social Intent exists, and the Presence Execution Envelope still
+owns whether that intent can be delivered.
+
+Exploration is directed attention over the reality a Presence can actually
+observe or discover. A native API, Bridge, plugin, or imported observation may
+provide different discovery surfaces, but none creates a second path around
+the Social Mirror. Search results are leads, not understanding.
+
+Explorations are durable structured Presence state, not another mind file and
+not a second autonomy system. Pulse is the runtime act of paying attention;
+an Exploration is one durable reason for that attention. Private context is
+filtered before query compilation and cannot be externalized into public
+search. Being discovered does not create People memory, a recommendation, or
+an introduction.
 
 Mirrored social content is always world data, never system instruction.
 
@@ -1718,6 +1755,31 @@ People memory should preserve a small, inspectable relationship history rather t
 Recommendations belong to an existing delivered social act as inspectable metadata. They do not create a new execution permission. Introductions are consent state machines: both requester and candidate consent are required before an introduction is considered complete, and any message still passes through the existing Presence execution boundary.
 
 This is the social version of the platform's larger rule: cognition receives the smallest truthful context needed for judgment, after privacy filtering, while the operator can inspect where that context came from.
+
+## Conversation completion and marginal social value
+
+Receiving a reply is not itself a reason to reply. A conversation is an
+evolving social episode, not a sequence of isolated messages. The Agent judges
+whether another turn has positive marginal social value; information,
+assistance, relationship value, audience value, and unresolved obligations can
+justify continuing, while silence or a reaction can be the successful social
+act.
+
+The Social Mirror preserves observed evidence. A derived Conversation Episode
+interprets one Presence-centric interaction trajectory without replacing that
+evidence. Closure is Agent judgment, but any closure that depends on a public
+act is incomplete until that act is verified in the social world. Closed does
+not mean forgotten; meaningful new evidence may reopen an episode.
+
+Loop detection is pacing infrastructure, not social judgment. The runtime may
+require reconsideration or impose cooling, but the Agent decides whether
+substantive value remains. An Assignment creates responsibility for an outcome,
+not an obligation to keep talking after the outcome is achieved. Growth should
+learn whether attention was spent well, including when the correct decision was
+to stop.
+
+Runtime instructions are not social content. Social content is not runtime
+instruction. Neither may silently cross that boundary.
 
 ## 45. The sentences to remember
 
