@@ -4,6 +4,7 @@ import { authenticateBridgeKey, deleteBridgeCredential, issueBridgeKey, readBrid
 import type { Bridge, Execution, LiveEvent, MirrorObject, OpenPresenceState, Outcome } from "./types";
 import { bridgeAdapterStatus } from "./bridge-contract";
 import { PublicationSecurityError, sealExecutionForDelivery, verifyExecutionPermit } from "./publication-security";
+import { cleanMirrorText, normalizeMirrorAuthor } from "./mirror-content";
 
 const entityRef = z.object({ type: z.string().min(1).max(80), id: z.string().min(1).max(240) });
 const author = z.object({ externalRef: entityRef.optional(), displayName: z.string().min(1).max(160), handle: z.string().max(160).optional(), avatarUrl: z.string().url().max(2_000).optional() }).optional();
@@ -97,7 +98,8 @@ export function heartbeatBridge(bridge: Bridge, executorId: string) {
 
 function upsertObject(state: OpenPresenceState, bridge: Bridge, input: z.infer<typeof mirrorObjectInput>, sourceEventId?: string, archived = false): MirrorObject {
   const existing = state.mirrorObjects.find((item) => item.bridgeId === bridge.id && item.externalRef.type === input.externalRef.type && item.externalRef.id === input.externalRef.id);
-  const object: MirrorObject = { id: existing?.id ?? localId("mirror"), bridgeId: bridge.id, presenceId: bridge.presenceId, channelId: bridge.channelId, externalRef: input.externalRef, parentExternalRef: input.parentExternalRef, conversationExternalRef: input.conversationExternalRef, referencedExternalRefs: input.referencedExternalRefs, objectType: input.objectType, language: input.language ?? input.content?.language, author: input.author, content: input.content as MirrorObject["content"], occurredAt: input.occurredAt, observedAt: timestamp(), visibility: input.visibility, shareability: input.shareability, originExecutionId: input.originExecutionId, actorPresenceId: input.actorPresenceId, sourceEventId, archived };
+  const text = cleanMirrorText(bridge.channelId, input.content?.text);
+  const object: MirrorObject = { id: existing?.id ?? localId("mirror"), bridgeId: bridge.id, presenceId: bridge.presenceId, channelId: bridge.channelId, externalRef: input.externalRef, parentExternalRef: input.parentExternalRef, conversationExternalRef: input.conversationExternalRef, referencedExternalRefs: input.referencedExternalRefs, objectType: input.objectType, language: input.language ?? input.content?.language, author: normalizeMirrorAuthor(bridge.channelId, input.content?.text, input.author), content: input.content ? { ...input.content, text } as MirrorObject["content"] : undefined, occurredAt: input.occurredAt, observedAt: timestamp(), visibility: input.visibility, shareability: input.shareability, originExecutionId: input.originExecutionId, actorPresenceId: input.actorPresenceId, sourceEventId, archived };
   if (existing) Object.assign(existing, object); else state.mirrorObjects.unshift(object);
   return object;
 }
