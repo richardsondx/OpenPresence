@@ -31,6 +31,10 @@ function sendStatus(status) {
   chrome.tabs.query({ url: ["http://localhost:3015/*", "http://127.0.0.1:3015/*"] }).then((tabs) => tabs.forEach((tab) => chrome.tabs.sendMessage(tab.id, { type: "OPENPRESENCE_EXTENSION_STATUS", status }).catch(() => {})));
 }
 
+function sendSessionContext(session) {
+  return chrome.tabs.sendMessage(session.tabId, { type: "OPENPRESENCE_SESSION_CONTEXT", expectedHandle: session.presence.handle, presenceName: session.presence.name }).catch(() => {});
+}
+
 async function updateBadge() {
   const count = sessions.size;
   await chrome.action.setBadgeText({ text: count ? String(count) : "" });
@@ -58,7 +62,7 @@ async function startSession(presenceId) {
   await chrome.tabGroups.update(groupId, { title: `OpenPresence · ${presence.name} · ${presence.channel}`, color: groupColor(presence.accent) });
   const session = { presence, bridgeId: connected.bridgeId, bridgeKey: connected.bridgeKey, executorId, windowId: window.id, tabId: tab.id, groupId };
   sessions.set(presenceId, session);
-  chrome.tabs.sendMessage(tab.id, { type: "OPENPRESENCE_SESSION_CONTEXT", expectedHandle: presence.handle, presenceName: presence.name }).catch(() => {});
+  sendSessionContext(session);
   await updateBadge();
   sendStatus({ state: "connected", presenceId, presenceName: presence.name, tabId: tab.id });
   return session;
@@ -81,7 +85,10 @@ async function heartbeat(session) {
 async function claim(session) {
   try {
     const result = await bridgeRequest(session, "/api/bridge/v1/executions/claim", { method: "POST", body: JSON.stringify({ executorId: session.executorId, limit: 3 }) });
-    for (const execution of result.executions || []) chrome.tabs.sendMessage(session.tabId, { type: "OPENPRESENCE_EXECUTE", execution, expectedHandle: session.presence.handle, presenceName: session.presence.name }).catch(() => {});
+    for (const execution of result.executions || []) {
+      chrome.tabs.sendMessage(session.tabId, { type: "OPENPRESENCE_EXECUTE", execution, expectedHandle: session.presence.handle, presenceName: session.presence.name })
+        .catch((error) => finishExecution(session, { executionId: execution.id, ok: false, code: "CONTROLLED_TAB_UNAVAILABLE", message: error.message || "The controlled tab did not accept the execution.", retryable: true }));
+    }
   } catch (error) { sendStatus({ state: "error", presenceId: session.presence.id, message: error.message }); }
 }
 
@@ -129,7 +136,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status !== "complete") return;
   const session = [...sessions.values()].find((item) => item.tabId === tabId);
-  if (session) chrome.tabs.sendMessage(tabId, { type: "OPENPRESENCE_SESSION_CONTEXT", expectedHandle: session.presence.handle, presenceName: session.presence.name }).catch(() => {});
+  if (session) sendSessionContext(session);
+});
+
+chrome.tabs.onActivated.addListener(({ tabId }) => {
+  const session = [...sessions.values()].find((item) => item.tabId === tabId);
+  if (session) sendSessionContext(session);
 });
 
 setInterval(() => { for (const session of sessions.values()) { void heartbeat(session); void claim(session); } }, 5_000);

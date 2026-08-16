@@ -76,12 +76,16 @@ function unjudgedNativeInbound(source: OpenPresenceState, presenceId: string) {
 
 function publicExplorationQuery(brief: string) {
   const cleaned = brief
+    .replace(/https?:\/\/[^\s)]+/gi, " ")
+    .replace(/\b(?:x\.com|twitter\.com)\b/gi, " ")
     .replace(/\b(?:people|founders|friends)\s+in\s+(?:my|our)\s+network\b/gi, "")
     .replace(/\b(?:private|secret|internal|operator|credential|token|system prompt)\b/gi, "")
     .trim();
   const phrases = [...cleaned.matchAll(/\b(?:AI agents|agent infrastructure|meaningful opportunities)\b/gi)].map((match) => match[0]);
   const words = cleaned.match(/[A-Za-z0-9]+(?:-[A-Za-z0-9]+)*/g) ?? [];
-  const stopWords = new Set(["and", "the", "for", "with", "that", "this", "publicly", "discussing", "related", "find", "look", "around"]);
+  const stopWords = new Set([
+    "about", "allowing", "and", "are", "as", "between", "can", "com", "discussing", "excited", "find", "for", "getting", "have", "how", "in", "is", "it", "look", "media", "of", "on", "or", "people", "publicly", "related", "social", "that", "the", "them", "this", "to", "tools", "visits", "with", "work",
+  ]);
   const terms = [...phrases, ...words]
     .map((term) => term.toLowerCase())
     .filter((term) => term.length >= 3 && !stopWords.has(term) || term === "ai")
@@ -96,6 +100,62 @@ function explorationMirrorCandidates(state: OpenPresenceState, explorationId: st
     .filter((item) => item.presenceId === presenceId && item.visibility === "public" && item.objectType === "post" && !priorFindingIds.has(item.id))
     .sort(latestMirrorFirst)
     .slice(0, 40);
+}
+
+function mergeExplorationState(base: OpenPresenceState, candidate: OpenPresenceState, latest: OpenPresenceState) {
+  const merged = latest;
+  const collectionKeys = [
+    "explorations",
+    "discoveryPlans",
+    "explorationSessions",
+    "explorationFindings",
+    "mirrorObjects",
+    "events",
+    "socialIntents",
+    "executions",
+    "outcomes",
+    "publications",
+    "actions",
+    "assignments",
+    "assignmentContributions",
+    "conversationEpisodes",
+    "relationships",
+    "relationshipFacts",
+    "relationshipOpenLoops",
+    "people",
+    "personIdentities",
+  ] as const;
+
+  for (const key of collectionKeys) {
+    const baseItems = (base[key] ?? []) as Array<{ id: string }>;
+    const candidateItems = (candidate[key] ?? []) as Array<{ id: string }>;
+    const latestItems = (latest[key] ?? []) as Array<{ id: string }>;
+    const baseById = new Map(baseItems.map((item) => [item.id, JSON.stringify(item)]));
+    const changed = candidateItems.filter((item) => baseById.get(item.id) !== JSON.stringify(item));
+    if (!changed.length) continue;
+    const changedById = new Map(changed.map((item) => [item.id, item]));
+    (merged[key] as unknown as Array<{ id: string }>) = [
+      ...changed,
+      ...latestItems.filter((item) => !changedById.has(item.id)),
+    ];
+  }
+  merged.workspaceRevision = latest.workspaceRevision;
+  return merged;
+}
+
+function persistExplorationState(base: OpenPresenceState, candidate: OpenPresenceState) {
+  let pending = candidate;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      writeState(pending);
+      return pending;
+    } catch (error) {
+      if (!(error instanceof WorkspaceConflictError) || attempt === 4) throw error;
+      const latest = stateForContext(readState(), { agentId: candidate.agent?.id, presenceId: candidate.presence?.id });
+      pending = mergeExplorationState(base, pending, latest);
+    }
+  }
+  return pending;
 }
 
 /**
@@ -2434,8 +2494,9 @@ export async function POST(request: Request) {
       const presence = exploration ? current.presences.find((item) => item.id === exploration.presenceId) : undefined;
       if (!exploration || !presence || exploration.agentId !== current.agent?.id) throw new Error("That Exploration is not available in this Agent and Presence context.");
       if (exploration.status !== "active") throw new Error("Resume this Exploration before asking it to look.");
+      const baseState = current;
       const started = startExplorationSession(current, exploration.id, "mirror");
-      let next = started.state;
+      let next = persistExplorationState(baseState, started.state);
       const session = started.session;
       let candidates = explorationMirrorCandidates(next, exploration.id, presence.id);
       // Public discovery remains available when the connection warning is
@@ -2448,7 +2509,7 @@ export async function POST(request: Request) {
         runningSession.searchQuery = query || undefined;
         runningSession.discoverySource = presence.channel === "x" && connection && credentials && query ? "native" : presence.connectionMode === "bridge" ? "bridge" : candidates.length ? "mirror" : "unavailable";
       }
-      writeState(next);
+      next = persistExplorationState(baseState, next);
       if (presence.channel === "x" && connection && credentials && query) {
         try {
           const posts = await searchRecentXPosts(credentials, query, 25);
@@ -2464,8 +2525,8 @@ export async function POST(request: Request) {
           const currentSession = next.explorationSessions.find((item) => item.id === session.id);
           if (currentSession) currentSession.artifactIds = candidates.map((item) => item.id);
           const degraded = finishExplorationSession(next, session.id, { status: "degraded", candidatesSeen: candidates.length, candidatesHydrated: 0, findings: [], failureReason: error instanceof Error ? error.message : "The connected discovery source could not be checked." });
-          writeState(degraded);
-          return NextResponse.json(degraded);
+          const persisted = persistExplorationState(baseState, degraded);
+          return NextResponse.json(persisted);
         }
       } else if (presence.connectionMode === "bridge") {
         const currentSession = next.explorationSessions.find((item) => item.id === session.id);
@@ -2483,12 +2544,17 @@ export async function POST(request: Request) {
         findings = triage.filter((item) => item.relevant).map((item) => ({ mirrorObjectId: item.id, safeSummary: item.summary, whyItMayMatter: item.whyItMayMatter }));
       } catch (error) {
         const degraded = finishExplorationSession(next, session.id, { status: "degraded", candidatesSeen: candidates.length, candidatesHydrated: candidates.length, findings: [], failureReason: error instanceof Error ? error.message : "Exploration triage was unavailable." });
-        writeState(degraded);
-        return NextResponse.json(degraded);
+        const persisted = persistExplorationState(baseState, degraded);
+        return NextResponse.json(persisted);
       }
-      const completed = finishExplorationSession(next, session.id, { status: "completed", candidatesSeen: candidates.length, candidatesHydrated: candidates.length, findings });
-      writeState(completed);
-      return NextResponse.json(completed);
+      let completed = finishExplorationSession(next, session.id, { status: "completed", candidatesSeen: candidates.length, candidatesHydrated: candidates.length, findings });
+      const linkedAssignmentId = completed.explorations.find((item) => item.id === exploration.id)?.engagement?.assignmentId;
+      const assignment = linkedAssignmentId ? completed.assignments.find((item) => item.id === linkedAssignmentId && item.status === "active") : undefined;
+      if (assignment && findings.length && presence.environment !== "sandbox") {
+        completed = await runLiveExplorationEngagement(completed, exploration, presence, assignment, findings);
+      }
+      const persisted = persistExplorationState(baseState, completed);
+      return NextResponse.json(persisted);
     }
     if (parsed.type === "askPresenceToIgnore") {
       const presence = current.presences.find((item) => item.id === parsed.presenceId);

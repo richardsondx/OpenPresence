@@ -573,7 +573,8 @@ export default function Home() {
     const operationType = typeof operation === "object" && operation !== null && "type" in operation && typeof operation.type === "string" ? operation.type : null;
     const tracksAttention = ["wakePresence", "runPulse", "startAssignment", "workAssignment"].includes(operationType ?? "");
     if (tracksAttention) setPendingOperation(operationType);
-    const context = requestContext ?? state;
+    let context = requestContext ?? state;
+    let retriedConflict = false;
     let lookPoll: number | undefined;
     try {
       if (operationType === "lookNow" && typeof window !== "undefined") {
@@ -591,27 +592,31 @@ export default function Home() {
           }
         }, 750);
       }
-      const response = await fetch("/api/state", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(context?.activeAgentId ? { "x-openpresence-agent-id": context.activeAgentId } : {}),
-          ...(context?.activePresenceId ? { "x-openpresence-presence-id": context.activePresenceId } : {}),
-          ...(context?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(context.workspaceRevision) } : {}),
-        },
-        body: JSON.stringify(operation),
-      });
-      const payload = await readJsonResponse<OpenPresenceState & { error?: string; conflict?: boolean; state?: OpenPresenceState }>(response);
-      if (!response.ok && response.status === 409 && payload.state) {
-        setState(payload.state);
-        syncBrowserWorkspaceContext(payload.state);
-        throw new Error("This tab was refreshed because the Agent workspace changed elsewhere. Please retry the action.");
+      while (true) {
+        const response = await fetch("/api/state", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(context?.activeAgentId ? { "x-openpresence-agent-id": context.activeAgentId } : {}),
+            ...(context?.activePresenceId ? { "x-openpresence-presence-id": context.activePresenceId } : {}),
+            ...(context?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(context.workspaceRevision) } : {}),
+          },
+          body: JSON.stringify(operation),
+        });
+        const payload = await readJsonResponse<OpenPresenceState & { error?: string; conflict?: boolean; state?: OpenPresenceState }>(response);
+        if (!response.ok && response.status === 409 && payload.state && !retriedConflict) {
+          retriedConflict = true;
+          context = payload.state;
+          setState(payload.state);
+          syncBrowserWorkspaceContext(payload.state);
+          continue;
+        }
+        if (!response.ok)
+          throw new Error(payload.error ?? "That change could not be saved.");
+        setState(payload);
+        syncBrowserWorkspaceContext(payload);
+        return payload as OpenPresenceState;
       }
-      if (!response.ok)
-        throw new Error(payload.error ?? "That change could not be saved.");
-      setState(payload);
-      syncBrowserWorkspaceContext(payload);
-      return payload as OpenPresenceState;
     } catch (reason) {
       setError(clientErrorMessage(reason, "That change could not be saved."));
       return null;
@@ -3323,6 +3328,14 @@ function WatchingView({ state, mutate }: { state: OpenPresenceState; mutate: Mut
   const explorationSessions = selectedExploration ? state.explorationSessions.filter((item) => item.explorationId === selectedExploration.id).sort((a, b) => b.startedAt.localeCompare(a.startedAt)) : [];
   const lastExplorationSession = explorationSessions.find((item) => item.id === selectedExplorationSessionId) ?? explorationSessions[0];
   const assignment = selectedExploration?.engagement?.assignmentId ? state.assignments.find((item) => item.id === selectedExploration.engagement?.assignmentId) : undefined;
+  const chromeBridge = state.bridges.find((item) => item.presenceId === presence.id && item.kind === "bridge" && item.state !== "offline");
+  const chromeStatus = presence.connectionMode === "bridge"
+    ? chromeBridge && bridgeAdapterStatus(chromeBridge) === "connected"
+      ? "connected" as const
+      : presence.browserAccess?.enabled
+        ? "needed" as const
+        : "unavailable" as const
+    : "not-route" as const;
   const objectiveDraft = selectedExploration ? objectiveDrafts[selectedExploration.id] ?? assignment?.instruction ?? "" : "";
   const setObjectiveDraft = (value: string) => {
     if (selectedExploration) setObjectiveDrafts((items) => ({ ...items, [selectedExploration.id]: value }));
@@ -3359,7 +3372,7 @@ function WatchingView({ state, mutate }: { state: OpenPresenceState; mutate: Mut
     </>}
     {tab === "explorations" && <>
       {reviewing && <section className="exploration-composer" aria-label="Create an Exploration"><div><SectionEyebrow>New Exploration</SectionEyebrow><h2>What should {presence.name} keep an eye on?</h2><p>Describe the conversations, problems, people, or developments that would be useful for {presence.name} to notice.</p></div><textarea aria-label="What should this Presence keep an eye on?" value={explorationBrief} onChange={(event) => setExplorationBrief(event.target.value)} placeholder="People struggling with agent infrastructure or asking how to deploy persistent agents." rows={4} />{explorationBrief.trim() && <div className="watch-review" aria-label="Exploration review"><div><SectionEyebrow>Genny understands this as</SectionEyebrow><p>{explorationInterpretation(explorationBrief)}</p></div><div><span>Use</span><strong>Discover social evidence</strong></div><div><span>Boundary</span><strong>Looking does not authorize speaking</strong></div><div><span>Scope</span><strong>{presence.name} · {channelLabel(presence.channel, state.channelDefinitions)}</strong></div></div>}<div className="watch-form-actions"><Button variant="ghost" onClick={() => { setReviewing(false); setExplorationBrief(""); }}>Cancel</Button><Button variant="primary" disabled={busy || explorationBrief.trim().length < 8} onClick={() => void startExploration()}>{busy ? "Starting…" : "Start exploring"}</Button></div></section>}
-      {!explorations.length ? <section className="watching-empty"><div className="watch-empty-mark"><Eye size={23} /></div><SectionEyebrow>Explorations</SectionEyebrow><h2>Give {presence.name} a reason to look around.</h2><p>Explorations are durable areas of attention. They discover evidence first; {presence.name} still decides whether anything deserves a Social Intent, memory, or silence.</p><Button variant="primary" onClick={() => setReviewing(true)}><Plus size={14} /> New exploration</Button></section> : <div className="exploration-layout"><section className="exploration-list" aria-label="Explorations">{explorations.filter((item) => item.status !== "archived").map((item) => <button type="button" key={item.id} className={`exploration-row ${selectedExploration?.id === item.id ? "active" : ""}`} onClick={() => setSelectedExplorationId(item.id)}><span className={`exploration-state exploration-state-${item.status}`} /> <span><strong>{item.title}</strong><small>{item.status === "active" ? "Active" : "Paused"} · {item.coverage.label}</small><em>{item.brief}</em></span><ChevronRight size={15} /></button>)}</section>{selectedExploration && <section className="exploration-detail" aria-label={`${selectedExploration.title} Exploration`}><div className="exploration-detail-header"><div><SectionEyebrow>Exploration · {channelLabel(selectedExploration.channel, state.channelDefinitions)}</SectionEyebrow><h2>{selectedExploration.title}</h2><p>{selectedExploration.brief}</p></div><span className={`watch-status ${selectedExploration.status === "active" ? "" : "watch-status-manual"}`}><span className="status-dot" /> {selectedExploration.status}</span></div>{editingExplorationId === selectedExploration.id ? <div className="exploration-edit"><label>What should {presence.name} keep an eye on?<textarea aria-label="Edit Exploration brief" value={editingBrief} onChange={(event) => setEditingBrief(event.target.value)} rows={4} /></label><div className="watch-form-actions"><Button variant="ghost" onClick={() => setEditingExplorationId(null)}>Cancel</Button><Button variant="primary" disabled={busyExplorationId === selectedExploration.id || editingBrief.trim().length < 8} onClick={() => void saveExploration()}>Save refinement</Button></div></div> : <><div className="exploration-interpretation"><SectionEyebrow>How {presence.name} is looking</SectionEyebrow><p>{selectedExploration.interpretation}</p></div><div className="exploration-coverage"><strong>{selectedExploration.coverage.label}</strong><span>{selectedExploration.coverage.detail}</span></div><ExplorationResponsibility exploration={selectedExploration} assignment={assignment} presence={presence} objectiveDraft={objectiveDraft} setObjectiveDraft={setObjectiveDraft} busy={busyExplorationId === selectedExploration.id} setEngagement={setEngagement} /><ExplorationRunMonitor exploration={selectedExploration} presence={presence} sessions={explorationSessions} lastSession={lastExplorationSession} artifacts={lastRunObjects} state={state} mutate={mutate} /><div className="exploration-meta"><span>Last looked {selectedExploration.lastLookedAt ? formatTime(selectedExploration.lastLookedAt) : "not yet"}</span><span>Brief revision {selectedExploration.revision}</span>{lastExplorationSession && <span className={lastExplorationSession.status === "completed" ? "" : "exploration-meta-warning"}>Last look {lastExplorationSession.status}{lastExplorationSession.failureReason ? ` · ${lastExplorationSession.failureReason}` : ""}</span>}</div><div className="exploration-actions"><Button variant="primary" disabled={busyExplorationId === selectedExploration.id || selectedExploration.status !== "active"} onClick={() => void lookNow(selectedExploration.id)}>{busyExplorationId === selectedExploration.id ? "Looking…" : "Look now"}</Button><Button variant="secondary" onClick={() => { setEditingExplorationId(selectedExploration.id); setEditingBrief(selectedExploration.brief); }}><Pencil size={14} /> Refine</Button><Button variant="ghost" onClick={() => void mutate({ type: "setExplorationStatus", id: selectedExploration.id, status: selectedExploration.status === "active" ? "paused" : "active" })}>{selectedExploration.status === "active" ? <><Pause size={14} /> Pause</> : <><Play size={14} /> Resume</>}</Button><Button variant="ghost" onClick={() => void mutate({ type: "setExplorationStatus", id: selectedExploration.id, status: "archived" })}>Archive</Button></div><div className="exploration-findings"><SectionEyebrow>Recent worthwhile findings</SectionEyebrow>{findings.length ? findings.map((finding) => { const object = state.mirrorObjects.find((item) => item.id === finding.mirrorObjectId); return <article className="exploration-finding" key={finding.id}><div><strong>{object?.author?.handle ? `@${object.author.handle}` : object?.author?.displayName ?? "Social object"}</strong><p>{finding.safeSummary}</p><small>{finding.whyItMayMatter}</small></div>{object && <Button variant="secondary" onClick={() => void mutate({ type: "askPresenceToReply", presenceId: presence.id, objectId: object.id })}>Ask {presence.name} to respond</Button>}</article>; }) : <p className="muted">No worthwhile findings yet. A look can complete successfully with silence.</p>}</div></>}</section>}</div>}
+      {!explorations.length ? <section className="watching-empty"><div className="watch-empty-mark"><Eye size={23} /></div><SectionEyebrow>Explorations</SectionEyebrow><h2>Give {presence.name} a reason to look around.</h2><p>Explorations are durable areas of attention. They discover evidence first; {presence.name} still decides whether anything deserves a Social Intent, memory, or silence.</p><Button variant="primary" onClick={() => setReviewing(true)}><Plus size={14} /> New exploration</Button></section> : <div className="exploration-layout"><section className="exploration-list" aria-label="Explorations">{explorations.filter((item) => item.status !== "archived").map((item) => <button type="button" key={item.id} className={`exploration-row ${selectedExploration?.id === item.id ? "active" : ""}`} onClick={() => setSelectedExplorationId(item.id)}><span className={`exploration-state exploration-state-${item.status}`} /> <span><strong>{item.title}</strong><small>{item.status === "active" ? "Active" : "Paused"} · {item.coverage.label}</small><em>{item.brief}</em></span><ChevronRight size={15} /></button>)}</section>{selectedExploration && <section className="exploration-detail" aria-label={`${selectedExploration.title} Exploration`}><div className="exploration-detail-header"><div><SectionEyebrow>Exploration · {channelLabel(selectedExploration.channel, state.channelDefinitions)}</SectionEyebrow><h2>{selectedExploration.title}</h2><p>{selectedExploration.brief}</p></div><span className={`watch-status ${selectedExploration.status === "active" ? "" : "watch-status-manual"}`}><span className="status-dot" /> {selectedExploration.status}</span></div>{editingExplorationId === selectedExploration.id ? <div className="exploration-edit"><label>What should {presence.name} keep an eye on?<textarea aria-label="Edit Exploration brief" value={editingBrief} onChange={(event) => setEditingBrief(event.target.value)} rows={4} /></label><div className="watch-form-actions"><Button variant="ghost" onClick={() => setEditingExplorationId(null)}>Cancel</Button><Button variant="primary" disabled={busyExplorationId === selectedExploration.id || editingBrief.trim().length < 8} onClick={() => void saveExploration()}>Save refinement</Button></div></div> : <><div className="exploration-interpretation"><SectionEyebrow>How {presence.name} is looking</SectionEyebrow><p>{selectedExploration.interpretation}</p></div><div className="exploration-coverage"><strong>{selectedExploration.coverage.label}</strong><span>{selectedExploration.coverage.detail}</span></div><ExplorationResponsibility exploration={selectedExploration} assignment={assignment} presence={presence} objectiveDraft={objectiveDraft} setObjectiveDraft={setObjectiveDraft} busy={busyExplorationId === selectedExploration.id} setEngagement={setEngagement} chromeStatus={chromeStatus} /><ExplorationRunMonitor exploration={selectedExploration} presence={presence} sessions={explorationSessions} lastSession={lastExplorationSession} artifacts={lastRunObjects} state={state} mutate={mutate} /><div className="exploration-meta"><span>Last looked {selectedExploration.lastLookedAt ? formatTime(selectedExploration.lastLookedAt) : "not yet"}</span><span>Brief revision {selectedExploration.revision}</span>{lastExplorationSession && <span className={lastExplorationSession.status === "completed" ? "" : "exploration-meta-warning"}>Last look {lastExplorationSession.status}{lastExplorationSession.failureReason ? ` · ${lastExplorationSession.failureReason}` : ""}</span>}</div><div className="exploration-actions"><Button variant="primary" disabled={busyExplorationId === selectedExploration.id || selectedExploration.status !== "active"} onClick={() => void lookNow(selectedExploration.id)}>{busyExplorationId === selectedExploration.id ? "Looking…" : "Look now"}</Button><Button variant="secondary" onClick={() => { setEditingExplorationId(selectedExploration.id); setEditingBrief(selectedExploration.brief); }}><Pencil size={14} /> Refine</Button><Button variant="ghost" onClick={() => void mutate({ type: "setExplorationStatus", id: selectedExploration.id, status: selectedExploration.status === "active" ? "paused" : "active" })}>{selectedExploration.status === "active" ? <><Pause size={14} /> Pause</> : <><Play size={14} /> Resume</>}</Button><Button variant="ghost" onClick={() => void mutate({ type: "setExplorationStatus", id: selectedExploration.id, status: "archived" })}>Archive</Button></div><div className="exploration-findings"><SectionEyebrow>Recent worthwhile findings</SectionEyebrow>{findings.length ? findings.map((finding) => { const object = state.mirrorObjects.find((item) => item.id === finding.mirrorObjectId); return <article className="exploration-finding" key={finding.id}><div><strong>{object?.author?.handle ? `@${object.author.handle}` : object?.author?.displayName ?? "Social object"}</strong><p>{finding.safeSummary}</p><small>{finding.whyItMayMatter}</small></div>{object && <Button variant="secondary" onClick={() => void mutate({ type: "askPresenceToReply", presenceId: presence.id, objectId: object.id })}>Ask {presence.name} to respond</Button>}</article>; }) : <p className="muted">No worthwhile findings yet. A look can complete successfully with silence.</p>}</div></>}</section>}</div>}
     </>}
   </div>;
 }
@@ -3379,6 +3392,7 @@ function ExplorationResponsibility({
   setObjectiveDraft,
   busy,
   setEngagement,
+  chromeStatus,
 }: {
   exploration: OpenPresenceState["explorations"][number];
   assignment?: Assignment;
@@ -3387,6 +3401,7 @@ function ExplorationResponsibility({
   setObjectiveDraft: (value: string) => void;
   busy: boolean;
   setEngagement: (id: string, mode: "surface" | "opportunistic" | "objective") => Promise<void>;
+  chromeStatus: "connected" | "needed" | "unavailable" | "not-route";
 }) {
   const mode = exploration.engagement?.mode ?? "surface";
   const assignmentIsActive = assignment?.status === "active" || assignment?.status === "working";
@@ -3398,6 +3413,7 @@ function ExplorationResponsibility({
       <button type="button" aria-pressed={mode === "objective"} className={mode === "objective" ? "active" : ""} onClick={() => void setEngagement(exploration.id, "objective")} disabled={busy}><strong>Pursue an outcome</strong><span>Give {presence.name} a specific ongoing Assignment.</span></button>
     </div>
     {mode !== "surface" && <div className="exploration-assignment-note"><span className="status-dot" /> <span>{assignmentIsActive && assignment ? <><strong>Assignment active.</strong> {assignment.progress.verified} verified interaction{assignment.progress.verified === 1 ? "" : "s"}; {assignment.environment === "sandbox" ? "Sandbox execution is enabled." : "Live delivery still follows this Presence's execution settings."}</> : assignment ? <>Assignment {assignment.status}. It will not act until it is active.</> : "Assignment is being prepared."}</span></div>}
+    {mode !== "surface" && chromeStatus !== "not-route" && <div className={`exploration-connection-note exploration-connection-${chromeStatus}`} role="status"><span className="status-dot" /><span><strong>{chromeStatus === "connected" ? "Chrome connected" : chromeStatus === "needed" ? "Chrome connection needed" : "Chrome not enabled"}</strong><small>{chromeStatus === "connected" ? "Genny can use the selected signed-in tab when a reply earns its place." : chromeStatus === "needed" ? "Open Settings → Chrome connection before enabling live engagement." : "Enable OpenPresence Chrome in Settings before enabling live engagement."}</small></span></div>}
     {mode === "objective" && <label className="exploration-objective">Conversation objective <input aria-label="Conversation objective" value={objectiveDraft || assignment?.instruction || ""} onChange={(event) => setObjectiveDraft(event.target.value)} placeholder="Engage people describing a concrete problem with persistent agents." /></label>}
   </section>;
 }
@@ -4489,9 +4505,28 @@ function LiveView({
   const presenceCopy = (text: string) => text.replaceAll("Jenny", presenceName).replaceAll(state.agent?.name ?? "Jenny", presenceName);
   const activityEnvironment: PresenceEnvironment = selected?.environment ?? "live";
   const nextObservationAt = activityEnvironment === "live"
-    ? state.nativeConnections.find((connection) => connection.presenceId === selected?.id && connection.channelId === selected?.channel)?.observation?.nextObservationAt
+    ? selected?.connectionMode === "bridge"
+      ? undefined
+      : state.nativeConnections.find((connection) => connection.presenceId === selected?.id && connection.channelId === selected?.channel)?.observation?.nextObservationAt
     : undefined;
+  const activityBridge = selected?.connectionMode === "bridge"
+    ? state.bridges.find((bridge) => bridge.presenceId === selected.id && bridge.state !== "offline")
+    : undefined;
+  const bridgeConnected = Boolean(activityBridge && bridgeAdapterStatus(activityBridge) === "connected");
   const nextCheckCountdown = countdownNow === null ? undefined : formatCountdown(nextObservationAt, countdownNow);
+  const nextCheckStatus = paused
+    ? "Checks paused"
+    : checking
+      ? "Checking now…"
+      : selected?.connectionMode === "bridge"
+        ? bridgeConnected ? "Chrome connected" : "Chrome connection needed"
+        : nextCheckCountdown === "now"
+          ? "Next check due now"
+          : nextCheckCountdown
+            ? `Next check in ${nextCheckCountdown}`
+            : nextObservationAt
+              ? "Next check scheduled"
+              : "Next check not scheduled";
   useEffect(() => {
     if (!nextObservationAt) return;
     const timer = window.setInterval(() => setCountdownNow(Date.now()), 1_000);
@@ -4669,9 +4704,7 @@ function LiveView({
         description={`A clear view of what ${presenceName} has seen, decided, and done.`}
         actionsClassName="heading-actions"
         actions={<>
-          <span className="next-check-countdown" aria-label={nextCheckCountdown ? `Next check in ${nextCheckCountdown}` : undefined}>
-            {paused ? "Checks paused" : checking ? "Checking now…" : nextCheckCountdown ? `Next check in ${nextCheckCountdown}` : nextObservationAt ? "Next check scheduled" : "Next check not scheduled"}
-          </span>
+          <span className="next-check-countdown" aria-label={nextCheckStatus}>{nextCheckStatus}</span>
           {paused ? (
             <Button
               onClick={() => mutate({ type: "wakePresence", presenceId: selected?.id })}

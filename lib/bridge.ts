@@ -71,6 +71,10 @@ function touchBridge(state: OpenPresenceState, bridge: Bridge, synced = false) {
 }
 
 export function heartbeatBridge(bridge: Bridge, executorId: string) {
+  // Heartbeats identify the live connector but do not carry user-domain
+  // changes. Keep the public API's executor context while avoiding the
+  // expensive normalized projection rewrite for this high-frequency path.
+  void executorId;
   const state = readStateForBridge(bridge.id);
   const current = state.bridges.find((item) => item.id === bridge.id);
   if (!current) throw new Error("Bridge not found");
@@ -84,8 +88,10 @@ export function heartbeatBridge(bridge: Bridge, executorId: string) {
   sync.status = "healthy";
   sync.error = undefined;
   if (!state.bridgeSync.some((item) => item.bridgeId === current.id)) state.bridgeSync.unshift(sync);
-  state.events.unshift(bridgeEvent(state, "Bridge adapter checked in", `${executorId} is connected and ready for ${current.name}.`, "positive"));
-  writeState(state);
+  // Connector health is intentionally revision-neutral. A heartbeat is
+  // operational telemetry, not a user workspace change, and must not make a
+  // long-running Exploration or operator action stale every five seconds.
+  writeState(state, { advanceWorkspaceRevision: false, syncNormalized: false });
   return { bridge: current, status: bridgeAdapterStatus(current) };
 }
 
@@ -131,6 +137,14 @@ function expireIfNeeded(state: OpenPresenceState, execution: Execution) {
 
 export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput>) {
   const state = readStateForBridge(bridge.id); const current = state.bridges.find((item) => item.id === bridge.id); if (!current) throw new Error("Bridge not found"); const now = Date.now(); const expiresAt = new Date(now + 120_000).toISOString();
+  for (const execution of state.executions) {
+    if (execution.bridgeId !== bridge.id || execution.status !== "claimed" || !execution.lease?.expiresAt) continue;
+    if (new Date(execution.lease.expiresAt).getTime() <= now) {
+      execution.status = "queued";
+      execution.lease = undefined;
+      execution.updatedAt = timestamp();
+    }
+  }
   const candidates = state.executions.filter((execution) => execution.bridgeId === bridge.id && execution.status === "queued").slice(0, input.limit).filter((execution) => !expireIfNeeded(state, execution));
   const claimed: Execution[] = [];
   for (const execution of candidates) {
@@ -159,7 +173,10 @@ export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput
     claimed.push(execution);
   }
   for (const execution of claimed) { execution.status = "claimed"; execution.attempts += 1; execution.lease = { executorId: input.executorId, claimedAt: new Date(now).toISOString(), expiresAt }; execution.updatedAt = timestamp(); }
-  touchBridge(state, current); writeState(state); return { state, executions: claimed };
+  if (claimed.length || candidates.length) {
+    touchBridge(state, current); writeState(state);
+  }
+  return { state, executions: claimed };
 }
 
 function leasedExecution(state: OpenPresenceState, bridge: Bridge, executionId: string, executorId: string) {

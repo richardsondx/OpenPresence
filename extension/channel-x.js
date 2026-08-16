@@ -13,8 +13,13 @@
   function verifyAccount() {
     if (!expectedHandle) return { ok: false, message: "The Presence account is not known to this tab." };
     const normalized = expectedHandle.replace(/^@/, "").toLowerCase();
-    const switcher = document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"]');
+    const switcher = document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"], [data-testid*="AccountSwitcher"], [aria-label*="Account"]');
     const visible = text(switcher).toLowerCase();
+    if (visible && visible.includes(normalized)) return { ok: true };
+    const profileLink = [...document.querySelectorAll('a[href]')].find((node) => {
+      try { return new URL(node.href).pathname.replace(/^\//, "").toLowerCase() === normalized; } catch { return false; }
+    });
+    if (profileLink && (text(profileLink).toLowerCase().includes(normalized) || profileLink.closest('nav'))) return { ok: true };
     if (!visible || !visible.includes(normalized)) return { ok: false, message: `Account check failed. Expected @${normalized}.` };
     return { ok: true };
   }
