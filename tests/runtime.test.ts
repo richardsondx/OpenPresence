@@ -312,6 +312,26 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.outcomes).toHaveLength(0);
   });
 
+  it("blocks planner metadata at every public intent constructor", () => {
+    const plannerObject = '{"conversationDisposition":"react_only","action":"like","rationale":"A quiet signal is enough."}';
+    let state = createAgent(input);
+    state = formChatPostIntent(state, plannerObject);
+    expect(state.executions[0]).toMatchObject({ status: "blocked", failure: { code: "PUBLIC_TEXT_INTERNAL_MARKER" } });
+    expect(state.mirrorObjects).toHaveLength(0);
+
+    state = createAgent(input);
+    state = formXReplyIntent(state, plannerObject, "post-1");
+    expect(state.executions[0]).toMatchObject({ status: "blocked", failure: { code: "PUBLIC_TEXT_INTERNAL_MARKER" } });
+
+    state = createAgent(input);
+    state = startPlaygroundSession(state, state.presence!.id, "fresh");
+    const session = state.playgroundSessions[0]!;
+    state = formSandboxIntent(state, { sessionId: session.id, affordance: "post", text: plannerObject });
+    expect(state.executions[0]).toMatchObject({ status: "blocked", failure: { code: "PUBLIC_TEXT_INTERNAL_MARKER" } });
+    expect(() => deliverSandboxExecution(state, state.executions[0]!.id)).toThrow(/Sandbox delivery is not ready/);
+    expect(state.mirrorObjects).toHaveLength(0);
+  });
+
   it("keeps public footing in Presence context and anchors replies to the observed post", () => {
     let state = createAgent(input);
     state = recordPublicFooting(state, state.presence!.id, { postsPublished: 0, recentPostIds: [], recentInboundIds: ["mention-1"], observedAt: new Date().toISOString() });

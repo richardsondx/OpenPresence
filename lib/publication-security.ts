@@ -1,5 +1,6 @@
 import type { AgentModelProfile, Execution, ExecutionPermit, OpenPresenceState, Presence, PublicExpression, PublicExpressionArtifactKind } from "./types";
 import { assertLiveWriteRuntimeAllowed, isAiMockEnabled, isTestRuntime } from "./test-runtime";
+import { publicExpressionLeakageReason } from "./public-expression";
 
 type NodeCryptoModule = {
   randomUUID: () => string;
@@ -119,6 +120,8 @@ export function sealExecutionForDelivery(execution: Execution) {
   }
   const text = publication.payload && typeof publication.payload === "object" && "text" in publication.payload && typeof publication.payload.text === "string" ? publication.payload.text.trim() : "";
   if (!text || text !== candidate.text) throw new PublicationSecurityError("PAYLOAD_MISMATCH", "The sealed expression does not match the publication payload.");
+  const publicExpressionReason = publicExpressionLeakageReason(text);
+  if (publicExpressionReason) throw new PublicationSecurityError("PUBLIC_TEXT_INTERNAL_MARKER", publicExpressionReason);
   const payloadHash = publicExpressionHash({ ...candidate, text, safetyStatus: "sealed" });
   const sealed: PublicExpression = { ...candidate, text, safetyStatus: "sealed", payloadHash };
   const issuedAt = new Date().toISOString();
@@ -133,6 +136,8 @@ export function sealExecutionForDelivery(execution: Execution) {
 export function verifyExecutionPermit(execution: Execution, expression: PublicExpression = execution.publication?.publicExpression as PublicExpression) {
   const permit = execution.permit;
   if (!permit || !expression) throw new PublicationSecurityError("MISSING_PERMIT", "Live writer requires a signed execution permit and sealed Public Expression.");
+  const publicExpressionReason = publicExpressionLeakageReason(expression.text);
+  if (publicExpressionReason) throw new PublicationSecurityError("PUBLIC_TEXT_INTERNAL_MARKER", publicExpressionReason);
   if (expression.safetyStatus !== "sealed" || !expression.payloadHash || publicExpressionHash(expression) !== expression.payloadHash) throw new PublicationSecurityError("PAYLOAD_MUTATION", "Public Expression hash does not match its sealed payload.");
   if (permit.executionId !== execution.id || permit.publicExpressionId !== expression.id || permit.presenceId !== execution.presenceId || permit.environment !== "live" || permit.channel !== expression.channel || permit.affordance !== execution.affordance || permit.payloadHash !== expression.payloadHash) throw new PublicationSecurityError("PERMIT_SCOPE_MISMATCH", "Execution permit scope does not match the sealed publication.");
   if (new Date(permit.expiresAt).getTime() <= Date.now()) throw new PublicationSecurityError("EXPIRED_PERMIT", "Execution permit has expired.");

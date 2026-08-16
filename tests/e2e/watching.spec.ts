@@ -5,6 +5,16 @@ test.beforeEach(async ({ request }) => {
   expect(response.ok()).toBeTruthy();
 });
 
+test("Watching opens on Explorations and places it first", async ({ page }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  await page.getByRole("button", { name: "Watching", exact: true }).first().click();
+
+  await expect(page.locator('[role="tab"]').first()).toContainText("Explorations");
+  await expect(page.getByRole("tab", { name: /Explorations/ })).toHaveAttribute("aria-selected", "true");
+  await expect(page.getByRole("tab", { name: /Watchlist/ })).toHaveAttribute("aria-selected", "false");
+});
+
 test("Watching lets a Presence review and persist a creator Watch", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();

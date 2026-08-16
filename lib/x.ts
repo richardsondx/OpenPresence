@@ -12,16 +12,19 @@ export interface XCredentials {
   accessTokenSecret?: string;
 }
 
-export interface XAccount { id: string; username: string; name: string; }
+export interface XAccount { id: string; username: string; name: string; profileImageUrl?: string; }
+interface XAccountResponse { id: string; username: string; name: string; profile_image_url?: string; }
 export interface XReferencedPost { type: "replied_to" | "quoted" | "retweeted"; id: string; }
 export interface XMediaAttachment { mediaKey: string; type: "photo" | "video" | "animated_gif"; url?: string; previewImageUrl?: string; altText?: string; }
 export interface XRecentPost {
   id: string;
   text: string;
+  language?: string;
   createdAt?: string;
   authorId?: string;
   authorUsername?: string;
   authorName?: string;
+  authorAvatarUrl?: string;
   conversationId?: string;
   parentId?: string;
   referencedPosts?: XReferencedPost[];
@@ -107,28 +110,32 @@ function mockAccount(credentials: XCredentials, handle: string): XAccount | unde
   return { id: "mock-x-user", username: normalizeHandle(handle) || "openpresence_test", name: "OpenPresence Test" };
 }
 
+function normalizeAccount(account: XAccountResponse): XAccount {
+  return { id: account.id, username: account.username, name: account.name, profileImageUrl: account.profile_image_url };
+}
+
 export async function testXCredentials(credentials: XCredentials, presenceHandle: string) {
   const mocked = mockAccount(credentials, presenceHandle);
   if (mocked) return { account: mocked, access: credentials.accessToken && credentials.accessTokenSecret ? "read-write" as const : "read" as const };
 
   if (credentials.accessToken && credentials.accessTokenSecret) {
     const url = `${apiBase()}/2/users/me`;
-    const response = await requestJson<{ data?: XAccount }>("/2/users/me?user.fields=name,username", {
+    const response = await requestJson<{ data?: XAccountResponse }>("/2/users/me?user.fields=name,username,profile_image_url", {
       method: "GET",
-      headers: { Authorization: oauthHeader("GET", url, credentials, { "user.fields": "name,username" }) },
+      headers: { Authorization: oauthHeader("GET", url, credentials, { "user.fields": "name,username,profile_image_url" }) },
     });
     if (!response.data) throw new Error("X authenticated-user response did not include an account.");
-    return { account: response.data, access: "read-write" as const };
+    return { account: normalizeAccount(response.data), access: "read-write" as const };
   }
   if (!credentials.bearerToken) throw new Error("Add a Bearer Token for read access, or add User Access Token and User Access Token Secret for read + write access.");
   const username = normalizeHandle(presenceHandle);
   if (!username) throw new Error("This X Presence needs a handle before it can test read access.");
-  const response = await requestJson<{ data?: XAccount }>(`/2/users/by/username/${encode(username)}?user.fields=name,username`, {
+  const response = await requestJson<{ data?: XAccountResponse }>(`/2/users/by/username/${encode(username)}?user.fields=name,username,profile_image_url`, {
     method: "GET",
     headers: { Authorization: `Bearer ${credentials.bearerToken}` },
   });
   if (!response.data) throw new Error("X public account lookup did not include an account.");
-  return { account: response.data, access: "read" as const };
+  return { account: normalizeAccount(response.data), access: "read" as const };
 }
 
 export async function publishSealedXPost(credentials: XCredentials, expression: PublicExpression, permit: ExecutionPermit, replyTo?: string): Promise<EntityRef> {
@@ -148,7 +155,7 @@ export async function publishSealedXPost(credentials: XCredentials, expression: 
 
 export async function readRecentXPosts(credentials: XCredentials, accountId: string, maxResults = 100): Promise<XRecentPost[]> {
   if (isXMockEnabled() && credentials.apiKey.startsWith("test_")) return [];
-  const query = { "tweet.fields": "created_at,conversation_id,referenced_tweets,attachments", expansions: "author_id,attachments.media_keys,referenced_tweets.id", "user.fields": "name,username", "media.fields": "type,url,preview_image_url,alt_text", max_results: String(Math.min(100, Math.max(5, maxResults))) };
+  const query = { "tweet.fields": "created_at,conversation_id,referenced_tweets,attachments,lang", expansions: "author_id,attachments.media_keys,referenced_tweets.id", "user.fields": "name,username,profile_image_url", "media.fields": "type,url,preview_image_url,alt_text", max_results: String(Math.min(100, Math.max(5, maxResults))) };
   const queryString = new URLSearchParams(query).toString();
   const url = `${apiBase()}/2/users/${encode(accountId)}/tweets?${queryString}`;
   const response = await requestJson<XPostResponse>(`/2/users/${encode(accountId)}/tweets?${queryString}`, {
@@ -160,7 +167,7 @@ export async function readRecentXPosts(credentials: XCredentials, accountId: str
 
 export async function readRecentXMentions(credentials: XCredentials, accountId: string, maxResults = 100): Promise<XRecentPost[]> {
   if (isXMockEnabled() && credentials.apiKey.startsWith("test_")) return [];
-  const query = { expansions: "author_id,attachments.media_keys,referenced_tweets.id", "tweet.fields": "created_at,conversation_id,referenced_tweets,attachments", "user.fields": "name,username", "media.fields": "type,url,preview_image_url,alt_text", max_results: String(Math.min(100, Math.max(5, maxResults))) };
+  const query = { expansions: "author_id,attachments.media_keys,referenced_tweets.id", "tweet.fields": "created_at,conversation_id,referenced_tweets,attachments,lang", "user.fields": "name,username,profile_image_url", "media.fields": "type,url,preview_image_url,alt_text", max_results: String(Math.min(100, Math.max(5, maxResults))) };
   const queryString = new URLSearchParams(query).toString();
   const url = `${apiBase()}/2/users/${encode(accountId)}/mentions?${queryString}`;
   const response = await requestJson<XPostResponse>(`/2/users/${encode(accountId)}/mentions?${queryString}`, {
@@ -178,9 +185,9 @@ export async function searchRecentXPosts(credentials: XCredentials, query: strin
   const searchQuery = /(?:^|\s)-is:retweet(?:\s|$)/i.test(clean) ? clean : `${clean} -is:retweet`;
   const params = {
     query: searchQuery,
-    "tweet.fields": "created_at,conversation_id,author_id",
+    "tweet.fields": "created_at,conversation_id,author_id,lang",
     expansions: "author_id",
-    "user.fields": "name,username",
+    "user.fields": "name,username,profile_image_url",
     max_results: String(Math.min(100, Math.max(10, maxResults))),
   };
   const queryString = new URLSearchParams(params).toString();
@@ -195,6 +202,7 @@ export async function searchRecentXPosts(credentials: XCredentials, query: strin
 interface XPostRecord {
     id?: string;
     text?: string;
+    lang?: string;
     created_at?: string;
     author_id?: string;
     conversation_id?: string;
@@ -205,7 +213,7 @@ interface XPostRecord {
 interface XPostResponse {
   data?: XPostRecord[];
   includes?: {
-    users?: Array<{ id?: string; username?: string; name?: string }>;
+    users?: Array<{ id?: string; username?: string; name?: string; profile_image_url?: string }>;
     media?: Array<{ media_key?: string; type?: string; url?: string; preview_image_url?: string; alt_text?: string }>;
   };
 }
@@ -218,10 +226,12 @@ function parseXPosts(response: XPostResponse): XRecentPost[] {
     return [{
       id: item.id,
       text: item.text,
+      language: item.lang,
       createdAt: item.created_at,
       authorId: item.author_id,
       authorUsername: item.author_id ? users.get(item.author_id)?.username : undefined,
       authorName: item.author_id ? users.get(item.author_id)?.name : undefined,
+      authorAvatarUrl: item.author_id ? users.get(item.author_id)?.profile_image_url : undefined,
       conversationId: item.conversation_id,
       parentId: item.referenced_tweets?.find((reference) => reference.type === "replied_to")?.id,
       referencedPosts: item.referenced_tweets?.filter((reference): reference is XReferencedPost => ["replied_to", "quoted", "retweeted"].includes(reference.type ?? "") && typeof reference.id === "string").map((reference) => ({ type: reference.type as XReferencedPost["type"], id: reference.id })),
@@ -241,9 +251,9 @@ export async function readXPostsByIds(credentials: XCredentials, ids: string[]):
   if (isXMockEnabled() && credentials.apiKey.startsWith("test_")) return [];
   const query = {
     ids: uniqueIds.join(","),
-    "tweet.fields": "created_at,conversation_id,referenced_tweets,attachments",
+    "tweet.fields": "created_at,conversation_id,referenced_tweets,attachments,lang",
     expansions: "author_id,attachments.media_keys,referenced_tweets.id",
-    "user.fields": "name,username",
+    "user.fields": "name,username,profile_image_url",
     "media.fields": "type,url,preview_image_url,alt_text",
   };
   const queryString = new URLSearchParams(query).toString();

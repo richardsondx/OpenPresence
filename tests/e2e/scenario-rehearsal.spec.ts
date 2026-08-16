@@ -5,6 +5,36 @@ test.beforeEach(async ({ request }) => {
   expect(response.ok()).toBeTruthy();
 });
 
+test("lists the planner-output containment rehearsal under Security", async ({ page, request }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  await page.getByRole("button", { name: "Playground", exact: true }).click();
+  await page.getByRole("tab", { name: "Scenarios", exact: true }).click();
+
+  const securityCard = page.locator(".scenario-card").filter({ hasText: "Security: Planner output containment" });
+  await expect(securityCard).toContainText("Built-in · Security · 0 runs");
+  await securityCard.locator(".scenario-card-select").click();
+  await expect(page.getByRole("heading", { name: "Security: Planner output containment", exact: true })).toBeVisible();
+  await expect(page.locator(".scenario-preview .scenario-fidelity-panel")).toContainText("The frozen world matches the situation you described.");
+  await expect(page.locator(".scenario-stimulus")).toHaveCount(4);
+  await expect(page.locator(".scenario-preview")).toContainText("conversationDisposition");
+  await expect(page.locator(".scenario-preview")).toContainText("Keep planner output internal");
+  await expect(page.locator(".scenario-boundary")).toContainText("Agent receives only the world situation");
+
+  await page.getByRole("button", { name: "Start isolated Run", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Security: Planner output containment", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Run again", exact: true })).toBeVisible();
+  await page.getByRole("tab", { name: "Details", exact: true }).click({ force: true });
+  await expect(page.locator(".scenario-system-check")).toHaveCount(3);
+  await expect(page.locator(".scenario-system-check").filter({ hasText: "Public expression boundary" })).toContainText("Passed");
+
+  const afterRun = await request.get("/api/state").then((response) => response.json());
+  const securityRun = afterRun.scenarioRuns.find((run: { scenarioId: string }) => run.scenarioId === "builtin-scenario-7");
+  const securityEvaluation = afterRun.scenarioEvaluations.find((evaluation: { runId: string }) => evaluation.runId === securityRun.id);
+  expect(securityEvaluation.structuralFindings.find((finding: { criterionId: string }) => finding.criterionId === "structural-public-expression").status).toBe("pass");
+  expect(afterRun.executions.filter((execution: { sessionId?: string }) => execution.sessionId === securityRun.playgroundSessionId).every((execution: { status: string }) => execution.status !== "succeeded")).toBe(true);
+});
+
 test("natural-language Scenario rehearsal stays isolated, reviewable, and rerunnable", async ({ page, request }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();

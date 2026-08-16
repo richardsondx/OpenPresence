@@ -64,6 +64,9 @@ What language fits this person here?
 PUBLIC SELF
 How this Presence describes/discloses itself publicly.
 
+PRESENCE · PRIMARY LANGUAGE
+The one language this Presence uses for Agent-authored expression.
+
 LANGUAGE · AVOID
 Exact language the Agent should normally steer away from.
 
@@ -78,6 +81,16 @@ Deterministic enforcement of hard output constraints before delivery.
 ```
 
 Do not collapse these layers.
+
+The Presence primary language is a scoped expression setting, separate from
+lexical Avoid/Never use rules. Inbound social content remains world evidence
+in its original form; selecting English means the Agent-authored post, reply,
+message, and Presence Chat response stay in English rather than matching the
+language of the inbound post. For targeted social interactions, the runtime
+also requires confirmed observed language metadata on the target and blocks
+delivery unless it matches the Presence language. Missing or unknown target
+language is conservatively left alone. V1 exposes English only while the
+runtime is being prepared for additional languages.
 
 ---
 

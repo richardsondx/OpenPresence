@@ -1,6 +1,37 @@
-import type { Agent, LanguagePolicy, Presence } from "./types";
+import type { Agent, LanguagePolicy, Presence, PresenceLanguage } from "./types";
 
 export const EMPTY_LANGUAGE_POLICY: LanguagePolicy = { avoid: [], prohibited: [] };
+export const DEFAULT_PRESENCE_LANGUAGE: PresenceLanguage = "en";
+
+function languageBase(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().toLocaleLowerCase().replaceAll("_", "-");
+  if (!normalized || normalized === "unknown" || normalized === "und") return undefined;
+  const base = normalized.split("-")[0];
+  return base === "eng" ? "en" : base;
+}
+
+export function languagesMatch(expected: unknown, observed: unknown): boolean {
+  const expectedBase = languageBase(expected);
+  const observedBase = languageBase(observed);
+  return Boolean(expectedBase && observedBase && expectedBase === observedBase);
+}
+
+export function normalizedObservedLanguage(value: unknown): string | undefined {
+  return languageBase(value);
+}
+
+export function normalizePresenceLanguage(value: unknown): PresenceLanguage {
+  return value === "en" ? "en" : DEFAULT_PRESENCE_LANGUAGE;
+}
+
+export function presenceLanguageGuidance(value: unknown): string {
+  const language = normalizePresenceLanguage(value);
+  if (language === "en") {
+    return "Primary Presence language: English (en). Understand observed social content in its original form, but write all Agent-authored posts, replies, messages, and private Presence Chat responses in English. Do not switch languages to match an inbound post. Quoted or reproduced external text remains world data, not Agent-authored expression.";
+  }
+  return `Primary Presence language: ${language}. Write all Agent-authored expression in this language.`;
+}
 
 function cleanList(values: unknown): string[] {
   if (!Array.isArray(values)) return [];
