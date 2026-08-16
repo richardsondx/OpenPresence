@@ -901,6 +901,62 @@ Load only when necessary:
 
 The best context is the **minimum sufficient context for a good decision**.
 
+## 18.1 Knowledge is source material, not another context box
+
+Knowledge is Agent-owned source material that can be retrieved into a specific
+Presence envelope. It is not a second Brain, an unbounded prompt appendix, or
+a free-form operator Context field. The Agent owns the collection and its
+durable source items; a Presence binding decides whether that Presence may
+retrieve them.
+
+V1 distinguishes only two source roles:
+
+- **Reference** explains facts, standards, preferences, or background.
+- **Procedure** explains operator-provided source material for a task. It is
+  not a reusable execution method; that belongs to a Skill.
+
+The Knowledge topology is:
+
+```text
+Agent
+  └── Knowledge Collection (default role + disclosure level)
+        └── Knowledge Item (Reference | Procedure)
+              └── immutable Version
+                    └── structured Segment (heading, page, text range)
+
+Presence ── binding(maximum disclosure) ──► Collection
+Invocation ── Context Compiler ──► scoped evidence + provenance
+Agent tool ── knowledge.search / knowledge.read (read-only)
+```
+
+Collection defaults may be narrowed by an item override. A Presence binding
+may narrow the effective level again; no layer may broaden it. The compiler
+filters inaccessible material before cognition, and public expression receives
+only evidence permitted for public use. Source text is untrusted content, so a
+passage that says “ignore the Agent’s instructions” remains a passage and
+cannot become runtime authority.
+
+Every retrieval and use should be inspectable through exact provenance: source
+collection, item, version, segment, heading, page when available, text range,
+retrieval run, and whether the passage was merely retrieved or relied upon.
+Supersession creates a new current version; it does not destructively erase the
+older source or its audit trail.
+
+For example, an operator may bind an internal launch checklist to a private
+Presence while leaving it unavailable to a public Presence. Both Presences can
+share the Agent's durable mind without sharing that collection's evidence. A
+public source may still be capped to internal use by a Presence binding, and an
+internal source must never reach public expression merely because a model was
+asked not to disclose it.
+
+The initial implementation is intentionally narrow: manual file upload,
+pasted text, and Markdown; immutable versions; structured segmentation;
+Reference and Procedure roles; Presence bindings; pre-cognition retrieval;
+read-only Knowledge tools; and operator-visible retrieval history. Connected
+source synchronization, crawling, visual/audio/video extraction, shared
+organization Knowledge, policy enforcement, and Agent-authored mutations remain
+separate future capabilities.
+
 ---
 
 ## 19. External agents and Content Drops

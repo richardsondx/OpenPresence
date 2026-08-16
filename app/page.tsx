@@ -80,6 +80,7 @@ import type {
   MirrorObject,
   ModelReviewFinding,
   ModelProvider,
+  KnowledgeUse,
   PreferenceReason,
   Presence,
   SandboxActor,
@@ -116,10 +117,12 @@ const navItems: { id: View; label: string; icon: typeof MessageCircle }[] = [
   { id: "schedule", label: "Schedule", icon: Clock3 },
   { id: "presence", label: "Settings", icon: Settings2 },
   { id: "teach", label: "Teach", icon: MessageCircle },
+  { id: "knowledge", label: "Knowledge", icon: BookOpen },
   { id: "playground", label: "Playground", icon: FlaskConical },
 ];
 const presenceNavItems = navItems.filter(({ id }) => id === "live" || id === "chat" || id === "watching" || id === "people" || id === "feed" || id === "schedule" || id === "presence" || id === "playground");
-const agentNavItems = navItems.filter(({ id }) => id === "teach");
+const agentNavItems = navItems.filter(({ id }) => id === "teach" || id === "knowledge");
+const ACTIVITY_PAGE_SIZE = 20;
 const channelLabel = (channel: ChannelId, definitions?: ChannelDefinition[]) =>
   definitions?.find((item) => item.id === channel)?.name ??
   (channel === "x"
@@ -1458,6 +1461,7 @@ function AgentWorkspaceShell({
         )}
         <div className="workspace-content">
           {view === "teach" && <TeachView state={state} mutate={mutate} setView={setView} />}
+          {view === "knowledge" && <KnowledgeView state={state} mutate={mutate} refreshState={refreshState} />}
           {view === "chat" && <PresenceChatView state={state} mutate={mutate} />}
           {view === "watching" && <WatchingView state={state} mutate={mutate} />}
           {view === "people" && <PeopleView state={state} mutate={mutate} />}
@@ -1465,7 +1469,7 @@ function AgentWorkspaceShell({
             <PlaygroundView state={state} mutate={mutate} />
           )}
           {view === "live" && (
-            <LiveView state={state} mutate={mutate} pendingOperation={pendingOperation} setView={setView} />
+            <LiveView key={`${state.presence?.id ?? "none"}-${state.presence?.channel ?? "none"}-${state.presence?.environment ?? "live"}`} state={state} mutate={mutate} pendingOperation={pendingOperation} setView={setView} />
           )}
           {view === "feed" && (
             <PublicHistoryView state={state} setView={setView} />
@@ -1634,7 +1638,7 @@ function LegacyAppShell({
           <Plus size={15} /> Add a Presence
         </button>
         <nav className="main-nav" aria-label="Primary navigation">
-          {navItems.map(({ id, label, icon: Icon }) => (
+          {presenceNavItems.map(({ id, label, icon: Icon }) => (
             <button
               key={id}
               onClick={() => setView(id)}
@@ -1663,6 +1667,13 @@ function LegacyAppShell({
         >
           <Brain size={17} />
           <span>Brain</span>
+        </button>
+        <button
+          className={`secondary-nav ${view === "knowledge" ? "active" : ""}`}
+          onClick={() => setView("knowledge")}
+        >
+          <BookOpen size={17} />
+          <span>Knowledge</span>
         </button>
       </aside>
       <section className={view === "chat" ? "workspace workspace-chat" : "workspace"}>
@@ -1709,8 +1720,9 @@ function LegacyAppShell({
           {view === "teach" && (
             <TeachView state={state} mutate={mutate} setView={setView} />
           )}
+          {view === "knowledge" && <KnowledgeView state={state} mutate={mutate} refreshState={refreshState} />}
           {view === "live" && (
-            <LiveView state={state} mutate={mutate} setView={setView} />
+            <LiveView key={`${state.presence?.id ?? "none"}-${state.presence?.channel ?? "none"}-${state.presence?.environment ?? "live"}`} state={state} mutate={mutate} setView={setView} />
           )}
           {view === "watching" && <WatchingView state={state} mutate={mutate} />}
           {view === "people" && <PeopleView state={state} mutate={mutate} />}
@@ -1743,7 +1755,7 @@ function LegacyAppShell({
         </div>
       </section>
       <nav className="mobile-nav" aria-label="Mobile navigation">
-        {navItems.map(({ id, label, icon: Icon }) => (
+        {presenceNavItems.map(({ id, label, icon: Icon }) => (
           <button
             key={id}
             onClick={() => setView(id)}
@@ -1759,6 +1771,13 @@ function LegacyAppShell({
         >
           <Brain size={18} />
           <span>Brain</span>
+        </button>
+        <button
+          onClick={() => setView("knowledge")}
+          className={view === "knowledge" ? "active" : ""}
+        >
+          <BookOpen size={18} />
+          <span>Knowledge</span>
         </button>
         <button
           onClick={() => setView("presence")}
@@ -3457,6 +3476,149 @@ function ExplorationRunMonitor({
   </>;
 }
 
+function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceState; mutate: Mutate; refreshState: () => Promise<OpenPresenceState> }) {
+  const agent = state.agent;
+  const presence = state.presence;
+  const collections = state.knowledgeCollections.filter((collection) => collection.agentId === agent?.id && collection.status === "active");
+  const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(collections[0]?.id ?? null);
+  const [collectionName, setCollectionName] = useState("");
+  const [collectionDescription, setCollectionDescription] = useState("");
+  const [collectionRole, setCollectionRole] = useState<"reference" | "procedure">("reference");
+  const [collectionUse, setCollectionUse] = useState<KnowledgeUse>("internal");
+  const [itemTitle, setItemTitle] = useState("");
+  const [itemRole, setItemRole] = useState<"reference" | "procedure" | "inherit">("inherit");
+  const [itemUse, setItemUse] = useState<KnowledgeUse | "inherit">("inherit");
+  const [itemContent, setItemContent] = useState("");
+  const [itemSourceType, setItemSourceType] = useState<"pasted_text" | "markdown">("pasted_text");
+  const [originalDataUrl, setOriginalDataUrl] = useState<string | undefined>();
+  const [originalFileName, setOriginalFileName] = useState<string | undefined>();
+  const [versionItemId, setVersionItemId] = useState<string | null>(null);
+  const [versionContent, setVersionContent] = useState("");
+  const [query, setQuery] = useState("");
+  const [retrieval, setRetrieval] = useState<{ results: Array<{ itemTitle: string; excerpt: string; effectiveUse: KnowledgeUse; headingPath?: string[]; pageNumber?: number; textRange?: { start: number; end: number }; collectionName: string; versionNumber: number; segmentId: string }>; missingEvidence?: string[]; staleWarnings?: string[]; unresolvedConflicts?: string[] } | null>(null);
+  const [busy, setBusy] = useState<string | null>(null);
+  const selectedCollection = collections.find((collection) => collection.id === selectedCollectionId) ?? collections[0];
+  const selectedItems = state.knowledgeItems.filter((item) => item.collectionId === selectedCollection?.id && item.status === "active");
+
+  const createCollection = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!collectionName.trim()) return;
+    setBusy("collection");
+    const next = await mutate({ type: "createKnowledgeCollection", name: collectionName, description: collectionDescription, defaultRole: collectionRole, defaultUse: collectionUse });
+    if (next) {
+      setCollectionName("");
+      setCollectionDescription("");
+      setSelectedCollectionId(next.knowledgeCollections[0]?.id ?? null);
+    }
+    setBusy(null);
+  };
+  const addItem = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedCollection || !itemTitle.trim() || !itemContent.trim()) return;
+    setBusy("item");
+    const next = await mutate({ type: "addKnowledgeItem", collectionId: selectedCollection.id, title: itemTitle, role: itemRole === "inherit" ? undefined : itemRole, useOverride: itemUse === "inherit" ? undefined : itemUse, sourceType: itemSourceType, content: itemContent, mimeType: itemSourceType === "markdown" ? "text/markdown" : "text/plain", originalDataUrl, originalFileName });
+    if (next) {
+      setItemTitle("");
+      setItemContent("");
+      setOriginalDataUrl(undefined);
+      setOriginalFileName(undefined);
+    }
+    setBusy(null);
+  };
+  const addVersion = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!versionItemId || !versionContent.trim()) return;
+    setBusy("version");
+    const next = await mutate({ type: "uploadKnowledgeVersion", itemId: versionItemId, content: versionContent, mimeType: "text/markdown" });
+    if (next) {
+      setVersionItemId(null);
+      setVersionContent("");
+    }
+    setBusy(null);
+  };
+  const handleFile = async (file: File | undefined) => {
+    if (!file) return;
+    const text = await file.text();
+    const dataUrl = await new Promise<string>((resolve, reject) => {
+      const reader = new FileReader();
+      reader.onload = () => resolve(String(reader.result));
+      reader.onerror = () => reject(reader.error ?? new Error("Could not preserve the original file."));
+      reader.readAsDataURL(file);
+    });
+    setItemTitle(file.name.replace(/\.(md|markdown|txt)$/i, ""));
+    setItemContent(text);
+    setItemSourceType(/\.md$|\.markdown$/i.test(file.name) ? "markdown" : "pasted_text");
+    setOriginalDataUrl(dataUrl);
+    setOriginalFileName(file.name);
+  };
+  const runRetrieval = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!query.trim() || !presence) return;
+    setBusy("retrieval");
+    try {
+      const response = await fetch("/api/knowledge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "search", query, purpose: "operator_chat" }) });
+      const payload = await response.json() as { packet?: typeof retrieval; error?: string };
+      if (!response.ok) throw new Error(payload.error ?? "Knowledge retrieval failed.");
+      setRetrieval(payload.packet ?? null);
+      await refreshState();
+    } catch (error) {
+      setRetrieval({ results: [], missingEvidence: [error instanceof Error ? error.message : "Knowledge retrieval failed."] });
+    } finally {
+      setBusy(null);
+    }
+  };
+  if (!agent) return <div className="page"><EmptyState title="Create an Agent first" body="Knowledge belongs to an Agent and is available to its Presences through explicit bindings." /></div>;
+  return <div className="page knowledge-page">
+    <div className="page-heading">
+      <div><SectionEyebrow>Agent-owned source material</SectionEyebrow><h1>Knowledge</h1><p className="muted">Keep durable reference and procedure material versioned, scoped, and inspectable before it reaches cognition.</p></div>
+      <div className="knowledge-page-meta"><span>{collections.length} collections</span><span>{state.knowledgeItems.filter((item) => item.status === "active").length} active items</span></div>
+    </div>
+    <div className="knowledge-layout">
+      <section className="settings-card knowledge-collections-card" aria-labelledby="knowledge-collections-title">
+        <div className="section-heading compact"><div><SectionEyebrow>Agent-owned</SectionEyebrow><h2 id="knowledge-collections-title">Collections</h2></div><BookOpen size={17} /></div>
+        <div className="knowledge-collection-list">
+          {collections.map((collection) => <button type="button" className={`knowledge-collection-row ${selectedCollection?.id === collection.id ? "selected" : ""}`} key={collection.id} onClick={() => setSelectedCollectionId(collection.id)}><span><strong>{collection.name}</strong><small>{collection.defaultRole === "procedure" ? "Procedure" : "Reference"} · {collection.defaultUse}</small></span><ChevronRight size={15} /></button>)}
+          {!collections.length && <p className="muted">Create the first collection to start adding source material.</p>}
+        </div>
+        <form className="knowledge-form" onSubmit={(event) => void createCollection(event)}>
+          <div className="section-heading compact"><div><SectionEyebrow>New collection</SectionEyebrow><h3>Set the default envelope</h3></div></div>
+          <label>Name<input aria-label="Collection name" value={collectionName} onChange={(event) => setCollectionName(event.target.value)} placeholder="Operating principles" /></label>
+          <label>Description<textarea aria-label="Collection description" value={collectionDescription} onChange={(event) => setCollectionDescription(event.target.value)} rows={2} placeholder="What belongs here?" /></label>
+          <div className="knowledge-form-grid"><label>Role<select value={collectionRole} onChange={(event) => setCollectionRole(event.target.value as "reference" | "procedure")}><option value="reference">Reference</option><option value="procedure">Procedure</option></select></label><label>Default use<select value={collectionUse} onChange={(event) => setCollectionUse(event.target.value as KnowledgeUse)}><option value="none">Not available</option><option value="internal">Internal</option><option value="public">Public</option></select></label></div>
+          <Button type="submit" variant="primary" disabled={busy === "collection" || !collectionName.trim()}><Plus size={14} /> {busy === "collection" ? "Creating…" : "Create collection"}</Button>
+        </form>
+      </section>
+      <section className="settings-card knowledge-items-card" aria-labelledby="knowledge-items-title">
+        <div className="section-heading compact"><div><SectionEyebrow>{selectedCollection?.name ?? "No collection selected"}</SectionEyebrow><h2 id="knowledge-items-title">Items and versions</h2></div><FileText size={17} /></div>
+        {!selectedCollection ? <p className="muted">Select or create a collection to add source material.</p> : <>
+          <div className="knowledge-item-list">
+            {selectedItems.map((item) => {
+              const versions = state.knowledgeVersions.filter((version) => version.itemId === item.id).sort((a, b) => b.versionNumber - a.versionNumber);
+              const current = versions.find((version) => version.id === item.currentVersionId);
+              return <article className="knowledge-item" key={item.id}><div className="knowledge-item-heading"><div><strong>{item.title}</strong><small>{item.role === "procedure" ? "Procedure" : "Reference"} · {item.useOverride ? `item override: ${item.useOverride}` : "inherits collection use"}</small></div><Button type="button" variant="ghost" onClick={() => setVersionItemId(versionItemId === item.id ? null : item.id)}><Plus size={13} /> New version</Button></div><p>{current?.normalizedContent.slice(0, 220)}{(current?.normalizedContent.length ?? 0) > 220 ? "…" : ""}</p><div className="knowledge-version-history"><span>Current v{current?.versionNumber ?? "—"} · {versions.length} immutable {versions.length === 1 ? "version" : "versions"}</span><details><summary>Version history</summary>{versions.map((version) => <small key={version.id}>v{version.versionNumber} · {version.parseStatus} · {version.contentHash}</small>)}</details></div>{versionItemId === item.id && <form className="knowledge-version-form" onSubmit={(event) => void addVersion(event)}><textarea aria-label={`New version content for ${item.title}`} value={versionContent} onChange={(event) => setVersionContent(event.target.value)} rows={4} placeholder="Paste the revised source material…" /><Button type="submit" variant="secondary" disabled={busy === "version" || !versionContent.trim()}>{busy === "version" ? "Saving…" : "Save immutable version"}</Button></form>}</article>;
+            })}
+            {!selectedItems.length && <p className="muted">No items yet. Add a source below.</p>}
+          </div>
+          <form className="knowledge-form knowledge-add-form" onSubmit={(event) => void addItem(event)}>
+            <div className="section-heading compact"><div><SectionEyebrow>Manual ingestion</SectionEyebrow><h3>Add source material</h3></div></div>
+            <div className="knowledge-form-grid"><label>Title<input aria-label="Knowledge item title" value={itemTitle} onChange={(event) => setItemTitle(event.target.value)} placeholder="Audience principles" /></label><label>Source file<input type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={(event) => void handleFile(event.target.files?.[0])} /></label></div>
+            <div className="knowledge-form-grid"><label>Role<select value={itemRole} onChange={(event) => setItemRole(event.target.value as "reference" | "procedure" | "inherit")}><option value="inherit">Inherit collection</option><option value="reference">Reference</option><option value="procedure">Procedure</option></select></label><label>Use override<select value={itemUse} onChange={(event) => setItemUse(event.target.value as KnowledgeUse | "inherit")}><option value="inherit">Inherit collection</option><option value="none">Not available</option><option value="internal">Internal</option><option value="public">Public</option></select></label></div>
+            <label>Paste text or Markdown<textarea aria-label="Knowledge content" value={itemContent} onChange={(event) => setItemContent(event.target.value)} rows={7} placeholder="# Heading\n\nPaste the source material here. Headings and semantic blocks are preserved for retrieval." /></label>
+            {originalFileName && <small className="form-hint">Original file preserved: {originalFileName}</small>}
+            <Button type="submit" variant="primary" disabled={busy === "item" || !itemTitle.trim() || !itemContent.trim()}><Plus size={14} /> {busy === "item" ? "Indexing…" : "Add Knowledge item"}</Button>
+          </form>
+        </>}
+      </section>
+    </div>
+    <section className="settings-card knowledge-retrieval-card" aria-labelledby="knowledge-retrieval-title">
+      <div className="section-heading compact"><div><SectionEyebrow>Operator-visible retrieval</SectionEyebrow><h2 id="knowledge-retrieval-title">Test scoped retrieval</h2></div><Activity size={17} /></div>
+      <form className="knowledge-retrieval-form" onSubmit={(event) => void runRetrieval(event)}><input aria-label="Knowledge retrieval query" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Ask what the active Presence can know…" /><Button type="submit" variant="secondary" disabled={busy === "retrieval" || !query.trim()}>{busy === "retrieval" ? "Searching…" : "Search"}</Button></form>
+      {retrieval && <div className="knowledge-results" role="status"><div className="knowledge-result-summary">{retrieval.results.length ? `${retrieval.results.length} passage${retrieval.results.length === 1 ? "" : "s"} retrieved` : "No matching accessible passage"}</div>{retrieval.results.map((result) => <article className="knowledge-result" key={result.segmentId}><div><strong>{result.itemTitle}</strong><small>{result.collectionName} · v{result.versionNumber} · {result.effectiveUse} · {result.headingPath?.join(" / ") ?? "Source passage"}</small></div><p>{result.excerpt}</p><small>Provenance: segment {result.segmentId} · characters {result.textRange?.start ?? "—"}–{result.textRange?.end ?? "—"}{result.pageNumber ? ` · page ${result.pageNumber}` : ""}</small></article>)}{[...(retrieval.missingEvidence ?? []), ...(retrieval.unresolvedConflicts ?? []), ...(retrieval.staleWarnings ?? [])].map((warning) => <p className="form-hint" key={warning}>{warning}</p>)}</div>}
+    </section>
+    <section className="settings-card knowledge-history-card" aria-labelledby="knowledge-history-title"><div className="section-heading compact"><div><SectionEyebrow>Audit trail</SectionEyebrow><h2 id="knowledge-history-title">Recent retrieval history</h2></div><ShieldCheck size={17} /></div>{state.knowledgeRetrievalRuns.filter((run) => run.agentId === agent.id).slice(0, 8).map((run) => <div className="knowledge-history-row" key={run.id}><span><strong>{run.purpose}</strong><small>{run.query}</small></span><span>{run.selectedSegmentIds.length} selected · {new Date(run.createdAt).toLocaleString()}</span></div>)}{!state.knowledgeRetrievalRuns.length && <p className="muted">Retrieval runs will appear here after a compiler or read-only Knowledge tool call.</p>}</section>
+  </div>;
+}
+
 function TeachView({
   state,
   mutate,
@@ -4167,6 +4329,7 @@ function LiveView({
   const checking = pendingOperation === "runPulse";
   const activity = deriveActivitySummary(state, selected?.id);
   const [selectedContext, setSelectedContext] = useState<MirrorObject | null>(null);
+  const [activityPage, setActivityPage] = useState(1);
   const [countdownNow, setCountdownNow] = useState<number | null>(null);
   const presenceCopy = (text: string) => text.replaceAll("Jenny", presenceName).replaceAll(state.agent?.name ?? "Jenny", presenceName);
   const activityEnvironment: PresenceEnvironment = selected?.environment ?? "live";
@@ -4175,7 +4338,6 @@ function LiveView({
     : undefined;
   const nextCheckCountdown = countdownNow === null ? undefined : formatCountdown(nextObservationAt, countdownNow);
   useEffect(() => {
-    setCountdownNow(Date.now());
     if (!nextObservationAt) return;
     const timer = window.setInterval(() => setCountdownNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
@@ -4207,6 +4369,12 @@ function LiveView({
         Math.abs(previousTime - itemTime) <= 10_000;
     });
   });
+  const activityPageCount = Math.max(1, Math.ceil(activityEvents.length / ACTIVITY_PAGE_SIZE));
+  const visibleActivityPage = Math.min(activityPage, activityPageCount);
+  const paginatedActivityEvents = activityEvents.slice(
+    (visibleActivityPage - 1) * ACTIVITY_PAGE_SIZE,
+    visibleActivityPage * ACTIVITY_PAGE_SIZE,
+  );
   const objectForReference = (reference?: { type: string; id: string }, sessionId?: string) =>
     reference
       ? state.mirrorObjects.find(
@@ -4245,19 +4413,34 @@ function LiveView({
     }
     return source;
   };
+  const executionForActivityEvent = (item: OpenPresenceState["events"][number]) => {
+    const explicit = item.executionId
+      ? state.executions.find((entry) => entry.id === item.executionId)
+      : undefined;
+    if (explicit || item.title !== "Pulse completed") return explicit;
+    const itemTime = new Date(item.time).getTime();
+    const nearbyDeliveryEvent = state.events
+      .filter((entry) => entry.id !== item.id && entry.presenceId === item.presenceId && Boolean(entry.executionId))
+      .map((entry) => ({ entry, distance: Math.abs(new Date(entry.time).getTime() - itemTime) }))
+      .filter(({ distance }) => Number.isFinite(distance) && distance <= 10_000)
+      .sort((left, right) => left.distance - right.distance)[0]?.entry;
+    return nearbyDeliveryEvent?.executionId
+      ? state.executions.find((entry) => entry.id === nearbyDeliveryEvent.executionId)
+      : undefined;
+  };
+  const activityEventTone = (item: OpenPresenceState["events"][number]) => {
+    const execution = executionForActivityEvent(item);
+    return item.title === "Pulse completed" && (execution?.status === "failed" || execution?.status === "blocked") ? "warning" : item.tone;
+  };
   const decisionTraceForEvent = (item: OpenPresenceState["events"][number]) => {
     const intent = item.intentId ? state.socialIntents.find((entry) => entry.id === item.intentId) : undefined;
-    const execution = item.executionId
-      ? state.executions.find((entry) => entry.id === item.executionId)
-      : item.outcomeId
-        ? (() => {
-            const outcome = state.outcomes.find((entry) => entry.id === item.outcomeId);
-            return outcome?.executionId ? state.executions.find((entry) => entry.id === outcome.executionId) : undefined;
-          })()
-        : undefined;
+    const execution = executionForActivityEvent(item);
+    const linkedIntent = intent ?? (execution
+      ? state.socialIntents.find((entry) => entry.id === execution.socialIntentId)
+      : undefined);
     const outcome = execution ? state.outcomes.find((entry) => entry.executionId === execution.id) : undefined;
-    const actionRecord = intent ? state.actions.find((entry) => entry.socialIntentId === intent.id) : undefined;
-    const standingIntent = intent?.standingIntentId ? state.standingIntents.find((entry) => entry.id === intent.standingIntentId) : undefined;
+    const actionRecord = linkedIntent ? state.actions.find((entry) => entry.socialIntentId === linkedIntent.id) : undefined;
+    const standingIntent = linkedIntent?.standingIntentId ? state.standingIntents.find((entry) => entry.id === linkedIntent.standingIntentId) : undefined;
     const context = contextForEvent(item);
     const observed = context?.content?.text
       ? `${context.author?.displayName ?? "Someone"} · “${context.content.text.slice(0, 150)}${context.content.text.length > 150 ? "…" : ""}”`
@@ -4269,10 +4452,10 @@ function LiveView({
             ? "New channel context became available to the Presence."
             : "No linked world object was recorded for this event.";
     const isSilence = actionRecord?.intent === "no_op" || /held|silence|off/i.test(`${item.title} ${item.detail}`);
-    const judgment = intent
+    const judgment = linkedIntent
       ? isSilence
         ? "Silence · no worthwhile action was selected"
-        : `Selected ${formatActivityAffordance(intent.affordance)}${standingIntent ? " from the standing intention" : ""}`
+        : `Selected ${formatActivityAffordance(linkedIntent.affordance)}${standingIntent ? " from the standing intention" : ""}`
       : item.type === "execution"
         ? "The selected Social Intent moved into delivery."
         : item.type === "system"
@@ -4280,7 +4463,7 @@ function LiveView({
           : item.detail;
     const delivery = execution
       ? `${execution.status.replaceAll("-", " ")} · ${execution.mode}${outcome ? ` · outcome ${outcome.status}` : ""}`
-      : intent
+      : linkedIntent
         ? "No execution created"
         : "No delivery selected";
     return { observed, judgment, delivery };
@@ -4402,10 +4585,11 @@ function LiveView({
                 }
               />
             ) : (
+              <>
               <div className="event-list">
-                {activityEvents.map((item) => (
+                {paginatedActivityEvents.map((item) => (
                   <button className="event-row event-row-button" type="button" key={item.id} data-event-id={item.id} onClick={() => { const context = contextForEvent(item); if (context) setSelectedContext(context); }} disabled={!contextForEvent(item)} aria-label={contextForEvent(item) ? `View the post ${presenceName} considered` : undefined}>
-                    <div className={`event-icon tone-${item.tone}`}>
+                    <div className={`event-icon tone-${activityEventTone(item)}`}>
                       {item.type === "execution" ? <ArrowUpRight size={15} /> : item.type === "learning" ? <Sparkles size={15} /> : item.type === "memory" ? <Brain size={15} /> : <Circle size={9} fill="currentColor" />}
                     </div>
                     <div className="event-copy">
@@ -4417,6 +4601,21 @@ function LiveView({
                   </button>
                 ))}
               </div>
+              <nav className="activity-pagination" aria-label="Activity pages">
+                <span className="activity-pagination-count">
+                  Showing {(visibleActivityPage - 1) * ACTIVITY_PAGE_SIZE + 1}–{Math.min(visibleActivityPage * ACTIVITY_PAGE_SIZE, activityEvents.length)} of {activityEvents.length}
+                </span>
+                <div className="activity-pagination-controls">
+                  <button type="button" className="activity-pagination-button" onClick={() => setActivityPage((current) => Math.max(1, current - 1))} disabled={visibleActivityPage <= 1}>
+                    <ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /> Newer
+                  </button>
+                  <span aria-live="polite">Page {visibleActivityPage} of {activityPageCount}</span>
+                  <button type="button" className="activity-pagination-button" onClick={() => setActivityPage((current) => Math.min(activityPageCount, current + 1))} disabled={visibleActivityPage >= activityPageCount}>
+                    Older <ChevronRight size={14} />
+                  </button>
+                </div>
+              </nav>
+              </>
             )}
           </section>
         </div>
@@ -6227,6 +6426,13 @@ function PresenceView({
     if (!count) return;
     void mutate({ type: "setPresence", patch: { publishingInitiative: { ...(publishingInitiative ?? { mode: "pace", timezone: "UTC", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }), mode: "pace", target: { count, period: publishingPeriodDraft }, updatedAt: new Date().toISOString() } } });
   };
+  const knowledgeCollections = state.knowledgeCollections.filter((collection) => collection.agentId === state.agent?.id && collection.status === "active");
+  const knowledgeUseOptions: { id: KnowledgeUse; label: string; detail: string }[] = [
+    { id: "none", label: "Not available", detail: "Do not retrieve this collection for this Presence." },
+    { id: "internal", label: "Internal", detail: "Available to the Presence, but never public source material." },
+    { id: "public", label: "Public", detail: "May support public expression when the Agent chooses it." },
+  ];
+  const knowledgeBindingFor = (collectionId: string) => state.presenceKnowledgeBindings.find((binding) => binding.presenceId === presence.id && binding.collectionId === collectionId && binding.enabled);
   return (
     <div className="page presence-settings-page">
       <div className="page-heading">
@@ -6295,6 +6501,32 @@ function PresenceView({
           </div>
         </div>
       </div>
+      <section className="settings-card knowledge-access-card" aria-labelledby="presence-knowledge-title">
+        <div className="section-heading compact">
+          <div>
+            <SectionEyebrow>Knowledge access</SectionEyebrow>
+            <h2 id="presence-knowledge-title">What may this Presence retrieve?</h2>
+          </div>
+          <BookOpen size={17} />
+        </div>
+        <p className="muted">Access is scoped to this Presence. A collection binding can only narrow the collection&apos;s own disclosure level.</p>
+        {knowledgeCollections.length === 0 ? (
+          <div className="knowledge-empty-access"><p>No Agent Knowledge collections yet.</p><Button type="button" variant="secondary" onClick={() => setView?.("knowledge")}><BookOpen size={14} /> Open Knowledge</Button></div>
+        ) : (
+          <div className="knowledge-access-list">
+            {knowledgeCollections.map((collection) => {
+              const binding = knowledgeBindingFor(collection.id);
+              const selectedUse = binding?.maximumUse ?? "none";
+              return <div className="knowledge-access-row" key={collection.id}>
+                <div><strong>{collection.name}</strong><small>{collection.defaultRole === "procedure" ? "Procedure" : "Reference"} · collection default: {collection.defaultUse}</small></div>
+                <select aria-label={`Knowledge access for ${collection.name}`} value={selectedUse} onChange={(event) => void mutate({ type: "setKnowledgeBinding", presenceId: presence.id, collectionId: collection.id, maximumUse: event.target.value as KnowledgeUse, enabled: event.target.value !== "none" })}>
+                  {knowledgeUseOptions.map((option) => <option value={option.id} key={option.id}>{option.label}</option>)}
+                </select>
+              </div>;
+            })}
+          </div>
+        )}
+      </section>
       <section className="settings-card channel-settings-card">
         <div className="section-heading compact">
           <div>

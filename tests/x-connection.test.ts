@@ -406,9 +406,39 @@ describe("native X connection", () => {
     expect(body.executions[0].status).toBe("blocked");
     expect(body.executions[0].failure.code).toBe("LIVE_WRITE_BLOCKED_NON_PRODUCTION_RUNTIME");
     expect(body.presence.context.publicFooting.judgedInboundIds).toContain("mention-1");
+    expect(body.events.find((event: { title: string }) => event.title === "Pulse completed")).toMatchObject({
+      intentId: body.executions[0].socialIntentId,
+      executionId: body.executions[0].id,
+    });
     const cognitionRequest = JSON.stringify(fetchMock.mock.calls[2]?.[1]?.body);
     expect(cognitionRequest).toContain("Jenny's first post");
     expect(cognitionRequest).toContain("Thread context (complete)");
+    vi.unstubAllGlobals();
+  });
+
+  it("does not treat unrelated Social Mirror search evidence as an inbound mention", async () => {
+    const presenceId = readState().presence?.id;
+    if (!presenceId) throw new Error("The test Presence was not created.");
+    const saved = await POST(new Request("http://localhost/api/x/manage", { method: "POST", body: JSON.stringify({ action: "save", presenceId, credentials: { apiKey: "test_api", apiSecret: "test_secret", accessToken: "test_access", accessTokenSecret: "test_access_secret" } }), headers: { "content-type": "application/json" } }));
+    const connected = (await saved.json()).state;
+    const mirrorEvidence = recordNativeMirror(connected, {
+      connectionId: connected.nativeConnections[0].id,
+      presenceId,
+      post: { id: "search-evidence-1", text: "A public post found through an unrelated search.", authorId: "other-user", authorUsername: "other_user", authorName: "Other User", conversationId: "search-evidence-1" },
+    });
+    writeState(mirrorEvidence);
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "own-post-1", text: "Jenny's existing public footing", created_at: "2026-08-15T11:00:00.000Z", author_id: "mock-x-user", conversation_id: "own-post-1" }] }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "runPulse", presenceId }), headers: { "content-type": "application/json" } }));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.executions).toHaveLength(0);
+    expect(body.events.some((event: { title: string }) => event.title === "Worth responding to")).toBe(false);
+    expect(body.presence.context.publicFooting.recentInboundIds).toEqual([]);
+    expect(fetchMock).toHaveBeenCalledTimes(2);
     vi.unstubAllGlobals();
   });
 
