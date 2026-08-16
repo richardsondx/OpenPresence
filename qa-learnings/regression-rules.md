@@ -1,5 +1,171 @@
 # Regression rules
 
+## Rule: Feed scope must not narrow the Presence picker
+
+**Defect class:** Cross-channel navigation scope regression
+
+**General principle:** A Feed filter may narrow the records shown for the selected Presence, but it must not change the operator's ability to discover or select other Presences. Navigation scope and content scope are separate concerns.
+
+**Project enforcement:** `PublicHistoryView` applies `publicHistoryMatchesPresence` to Feed records, while the Presence switcher renders the complete `state.presences` collection. `stateForContext` changes the active Presence without removing sibling Presences from the materialized Agent workspace.
+
+**Executable protection:** `tests/runtime.test.ts` verifies cross-channel Presence retention through `stateForContext`; `tests/e2e/sidebar-hierarchy.spec.ts` verifies the picker shows both X and LinkedIn Presences after selecting the LinkedIn Presence.
+
+**Apply when:** Changing Feed/history filters, Presence selection, Agent workspace materialization, sidebar/mobile navigation, or channel-scoped UI surfaces.
+
+**Added:** 2026-08-16
+
+## Rule: Conversation completion must be evidence-backed and marginal-value aware
+
+**Defect class:** Reciprocal loop / false closure / runtime-context leakage
+
+**General principle:** A received social object is not a reply obligation. Conversation interpretation must remain separate from Mirror evidence, Social Intent, Execution, Delivery, Outcome, and Assignment progress. Silence or reaction may complete an episode, but a requested closing reply is not closed until the public act is verified. Runtime envelopes, planner metadata, operator instructions, and untrusted social text must never become public expression.
+
+**Project enforcement:** `ConversationEpisode` groups Presence-scoped branches from observed Mirror relationships and tracks `active`, `cooling`, `closing`, and `closed` separately from planner disposition. Deterministic pacing only gates rapid reciprocal volume; the Agent decides marginal social value. Cooling suppresses generic acknowledgments and permits substantive reopening. `CLOSE_WITH_REPLY` and `REACT_ONLY` remain closing until verified delivery, while failed delivery enters cooling. Social cognition receives public Mirror evidence through a privacy filter, and final candidate checks flag runtime-context markers for review. Activity exposes the episode state and an operator override that bypasses closure/cooldown without bypassing privacy, policy, or execution boundaries.
+
+**Executable protection:** `tests/conversation-episodes.test.ts` covers branch grouping, closure verification, generic-ack suppression, substantive reopening, loop-risk gating, and disposition mapping. `tests/conversation-boundary.test.ts` covers disposition parsing and runtime-marker detection. Native X tests preserve bounded thread evidence and sandbox tests preserve execution lineage. Feature QA must verify Activity status and the Playground → Mirror → episode path without requiring a live connector.
+
+**Apply when:** Changing social cognition, Mirror filtering, thread/episode grouping, pacing or reopen behavior, closure semantics, operator-directed replies, public-copy sanitization, or Assignment engagement accounting.
+
+**Added:** 2026-08-15
+
+## Rule: Live publication must cross a sealed Public Expression boundary
+
+**Defect class:** Unauthorized live write / provenance bypass / mock-runtime side effect
+
+**General principle:** Cognition may form a candidate, but only a sealed Public Expression with a short-lived, scoped execution permit may reach a native or Bridge writer. Test and mock runtimes must not retrieve live write credentials or contact an external writer.
+
+**Project enforcement:** Native delivery seals and verifies the expression before invoking X; Bridge claim/acknowledgement requires the same permit; direct native completion is blocked without it; test/mock runtimes fail closed before credential retrieval or external write.
+
+**Executable protection:** `tests/publication-security.test.ts` covers candidate sealing, payload mutation, expiry, replay, and runtime blocking. Native X tests assert cognition still records a blocked execution without calling the writer, while runtime Bridge tests preserve Sandbox outbox behavior and block live writes.
+
+**Apply when:** Changing Public Expression formation, Execution completion, native X delivery, Bridge claim/acknowledgement, test/mock runtimes, credentials, or publication provenance.
+
+**Added:** 2026-08-16
+
+## Rule: A scheduled no-op must preserve its bounded rationale
+
+**Defect class:** Silent judgment / opaque autonomy
+
+**General principle:** Taste and silence are valid, but `NO_OP` without an inspectable reason turns Agent autonomy into an unreviewable black box. A rationale must explain the observable decision boundary without exposing hidden chain-of-thought or inventing certainty.
+
+**Incident:** Live Calendar evaluation returned a bare `NO_OP`, and the runtime replaced it with the same generic “no worthwhile action” sentence for every scheduled intention. The operator could not tell whether the issue was timing, repetition, missing evidence, a sensitive boundary, or a runtime failure.
+
+**Project enforcement:** `evaluateCalendarSlot` requests a structured `post|no_op` decision with a short rationale. `recordStandingIntentNoOp` persists that rationale on the skipped Action and includes it in the Activity event. A bare no-op is labeled as an unavailable explanation; it is never silently converted into a fabricated reason.
+
+**Executable protection:** `tests/x-connection.test.ts` asserts that a Calendar no-op stores its model rationale and creates no execution; `tests/e2e/openpresence.spec.ts` verifies the Schedule → Evaluate → Activity surface exposes `Reason:` when silence is selected.
+
+**Apply when:** Changing Calendar evaluation, standing intentions, no-op semantics, Activity decision traces, model decision schemas, or operator calibration surfaces.
+
+**Added:** 2026-08-15
+
+## Rule: Native X replies must remain replies in the Social Mirror and Feed
+
+**Defect class:** Public provenance misclassification
+
+**General principle:** X uses `x.post` as the external reference for both originals and replies. Reply status must therefore be preserved from the parent reference and successful `x.reply` execution lineage; it cannot be inferred from the external reference type alone.
+
+**Project enforcement:** Native ingestion stores agent-authored replies as `objectType: "reply"`, leaves inbound standalone posts as `objectType: "post"`, and normalizes legacy live X mirrors when their parent and Presence/execution lineage prove they are replies.
+
+**Executable protection:** `tests/x-connection.test.ts` verifies inbound posts remain posts, native replies derive as `reply` history, and legacy post classifications are repaired.
+
+The Publishing Plan also rejects any public-history item with a parent reference from original-progress totals, providing a second guard if an old or external record is still typed incorrectly.
+
+**Apply when:** Changing native X reconciliation, Social Mirror object typing, execution lineage, public-history derivation, or Feed filters/counts.
+
+**Added:** 2026-08-15
+
+## Rule: Internal post IDs must be durable but never become public copy
+
+**Defect class:** Diagnostic marker leakage / opaque provenance UI
+
+**General principle:** Every verified post must retain a stable internal ID for lineage and support work, but QA run markers and raw implementation identifiers must not be placed in Assignment titles, post text, or routine Feed copy. Operators should get provenance through a quiet, intentional affordance.
+
+**Project enforcement:** `MirrorObject.id` is the internal post ID projected as `PublicHistoryItem.id`; user-facing Assignment summaries remove internal `QA-*` identifiers without changing the stored instruction, while the post details inspector offers `Copy ID` for the internal reference and does not print the raw ID in the normal proof label.
+
+**Executable protection:** Runtime tests cover marker-safe Assignment display projection; Playground E2E verifies that a diagnostic marker is absent from the progress surface and Feed, and that post details expose the discreet `Copy internal post ID` action.
+
+**Apply when:** Adding or changing post provenance, Assignment summaries, Feed/Activity copy, Sandbox QA fixtures, diagnostic identifiers, or operator support workflows.
+
+**Added:** 2026-08-15
+
+## Rule: Scheduled Consider intentions must distinguish silence from a missed run
+
+**Defect class:** Schedule expectation mismatch / false scheduler diagnosis
+
+**General principle:** A scheduled standing intent grants the Agent permission to consider an action; it does not require a public post. Runtime diagnosis must distinguish an evaluated `NO_OP` from an unevaluated slot, a blocked execution, and a connector delivery failure.
+
+**Incident:** The Saturday 07:00 Genny intention appeared to produce no post. The Calendar slot had in fact been evaluated and persisted `no_op / skipped`; the operator reasonably interpreted scheduled autonomy as a posting obligation.
+
+**Project enforcement:** `evaluateCalendarSlot` records `Calendar attention started`, marks the slot evaluated, and records `Standing intention held` for silence. Activity and Schedule copy retain the Consider-versus-Assign boundary, while native delivery records execution/outcome separately.
+
+**Executable protection:** `tests/x-connection.test.ts` asserts that an evaluated Calendar intention can form and deliver a native X publication; live QA must also inspect the persisted `lastEvaluatedAt` plus the corresponding Calendar/Standing-intent event before classifying a missing post as a runtime defect.
+
+**Apply when:** Changing Calendar/Standing Intent scheduling, autonomy language, native Pulse wake-up, execution delivery, or Activity diagnosis.
+
+**Added:** 2026-08-15
+
+## Rule: Mirror reconciliation must wake attention for unjudged inbound mentions
+
+**Defect class:** Live observer/pulse boundary loss / reply target drift
+
+**General principle:** In an autonomous social system, observing a new inbound mention is an attention trigger, not merely a storage update. Once cognition chooses to reply, delivery must target the focal object that mentioned the Presence; the parent is context, not the reply target.
+
+**Incident:** Automatic `syncNativeX` persisted the exact X mention and its complete parent chain but stopped after “Social Mirror updated.” No Pulse or cognition followed. Separately, the live reply path used the focal post's parent ID as the delivery target, which could place a response on the wrong post in the thread.
+
+**Project enforcement:** `syncNativeX` detects unjudged inbound native-X Mirror objects, records `New mention received`, and runs the shared native Pulse for live Presences. `runNativePulse` compiles the bounded thread context before cognition and passes the focal object's own external ID to `formXReplyIntent` and native delivery.
+
+**Executable protection:** `tests/x-connection.test.ts` exercises automatic sync with a multi-turn parent chain, asserts the cognition request contains root/parent/focal text and `Thread context (complete)`, verifies the focal mention is judged, and asserts both the Social Intent target and X write target equal the focal post ID.
+
+**Apply when:** Changing X observation scheduling, Social Mirror reconciliation, Pulse wake-up behavior, mention deduplication/judgment, reply targeting, or connector delivery envelopes.
+
+**Added:** 2026-08-15
+
+## Rule: Social cognition must never receive an opaque parent ID instead of public context
+
+**Defect class:** Connector/Social Mirror context loss / Live-Sandbox cognition divergence
+
+**General principle:** If a social object depends on earlier public context for its meaning, observation must hydrate or truthfully mark that context before cognition. A parent identifier is provenance, not conversation evidence, and must never be treated as a substitute for the referenced object's content.
+
+**Incident:** Sandbox walked the observed reply chain, while the Live X pulse passed the Agent only the new mention and an opaque parent post ID. Live and Sandbox therefore tested different social Agents, and the model could not reliably judge continuity, disagreement, humor, or relationship context.
+
+**Project enforcement:** `lib/thread-context.ts` owns bounded ancestry/reference compilation and hydration traversal; `lib/native-x.ts` uses direct X post lookup eagerly during reconciliation and lazily before pulse cognition; `recordNativeMirror` persists conversation identity, parent/reference relationships, authors, and media as live Mirror evidence; Sandbox and Live use `compileSocialThreadContext` with Presence/session scope isolation. Missing context is exposed as `complete`, `partial`, or `unavailable` evidence.
+
+**Executable protection:** `tests/thread-context.test.ts` covers 8-object bounded ancestry, multi-author ordering, quoted-object separation, cache-safe hydration, partial/unavailable context, and Sandbox session isolation. `tests/x-connection.test.ts` covers X field/expansion parsing, normalized Mirror persistence, and a Live pulse whose model request contains the actual ancestor text.
+
+**Apply when:** Changing connector observation, Social Mirror schemas, thread/reply context, native X reads, Bridge reconciliation, media/reference hydration, or prompts that assemble social-world evidence.
+
+**Added:** 2026-08-15
+
+## Rule: Visual necessity must not be confused with visual fit
+
+**Defect class:** Optional-media semantic failure / misleading Assignment terminal state
+
+**General principle:** A VisualBrief describes what a useful attachment would do; it does not decide whether the story requires one. `helpful`, `important`, and `required` visual needs must produce different fulfillment behavior, and zero discovery must never be described as candidate inspection.
+
+**Project enforcement:** Bounded research derives visual importance, permits one model-guided query reformulation, records distinct discovery/fetch/inspection/editorial outcomes, and lets helpful or important stories survive as text-only when the Agent judges that honest. Required visuals remain blocked without verified evidence. Playground exposes the outcome and zero-candidate explanation in the research trail.
+
+**Executable protection:** `tests/assignment-runtime.test.ts` covers optional fallback, required blocking, one reformulation, empty discovery, inspected rejection, and verified counting.
+
+**Apply when:** Changing Assignment visual requirements, asset discovery, perception/editorial review, research continuation, or Playground outcome copy.
+
+**Added:** 2026-08-15
+
+## Rule: Long-running Assignments need durable run truth and fast reads
+
+**Defect class:** Background Assignment lifecycle / stale progress UI / blocked retry reuse
+
+**General principle:** Provider and model work must not occupy the state mutation request. Operators need a durable run with stage, lease, heartbeat, attempt, and terminal status, while ordinary state reads remain responsive. A retry must create a new bounded run and preserve prior negative evidence instead of repeating the same failed candidates.
+
+**Incident:** Clicking an Assignment could leave the interface waiting on a slow asset/model call, show “Working…” after the bounded effort had already ended, or reuse an exhausted retry budget. The operator could not distinguish queued work, active research, and a terminal refusal.
+
+**Project enforcement:** `workAssignment` queues an `AssignmentRun` and returns immediately. The worker persists `queued`, `researching`, `writing`, and terminal states with lease/heartbeat metadata; visual research retains candidate decisions and known URLs across continuations; retry queues a fresh run; Playground polls active runs and renders a compact live card, a collapsible evidence trail, and terminal `Try again`/blocked or published states.
+
+**Executable protection:** `tests/assignment-runtime.test.ts` covers immediate queueing, provider failure, evidence-backed publication, candidate fallback, bounded exhaustion, fresh retry run IDs, and non-stranding clock sync. Browser QA verifies the main runtime remains readable while the worker runs and that terminal UI does not retain a working indicator.
+
+**Apply when:** Changing Assignment workers, asset/provider calls, Playground progress, retry semantics, workspace revision handling, or background polling.
+
+**Added:** 2026-08-15
+
 ## Rule: New Agents must start on the requested OpenAI runtime
 
 **Defect class:** Default model/provider selection / legacy seed migration
@@ -1497,3 +1663,57 @@
 **Executable protection:** `tests/runtime.test.ts` asserts that `QA-ONE-2026-08-14 ... exactly 1 ...` and `QA-TEN-2026-08-14 ... exactly 10 ...` compile to 1 and 10 respectively.
 
 **Apply when:** Changing Assignment instruction parsing, review-card quantities, schedule Assignment compilation, or QA-marker/test instructions.
+
+## Rule: Publishing responsibility must remain a visible Agent plan
+
+**Defect class:** Hidden intention / quota-to-post confusion
+
+**General principle:** A non-scheduled Publishing Initiative is an operator-owned expectation that the Agent must turn into a reviewable, Presence-scoped working plan. It is not a list of prewritten posts, a forced quota, or an execution bypass.
+
+**Project enforcement:** Publishing plans persist by Presence and environment, use bounded flexible research/origination/reassessment windows, derive verified progress only from Social Mirror history, and supersede prior revisions on explicit replanning. Schedule and Activity render the same projection; turning the initiative off supersedes the plan.
+
+**Executable protection:** `tests/publishing-plan.test.ts` covers persistence, scoping, revision supersession, and the absence of publications/executions. Browser acceptance verifies Settings activation, Schedule windows, Activity projection, and explicit replanning in an isolated Sandbox database.
+
+**Apply when:** Changing Publishing Initiative settings, plan generation/replanning, Schedule or Activity projections, publication pacing, or any path that could imply a plan guarantees public expression.
+
+## Rule: Publishing Plan progress requires original Social Mirror lineage
+
+**Defect class:** False end-to-end verification / reply counted as original
+
+**General principle:** A visible Publishing Plan window is durable permission to consider original expression, not a post. Progress is valid only after an original Social Intent with Publishing Initiative origin crosses the Execution Envelope, succeeds in the authorized environment, and is verified as an original object by the Social Mirror. Replies, NO_OP, review-waiting, failed delivery, and candidate rejection must remain separately inspectable.
+
+**Project enforcement:** Sandbox virtual-time advancement wakes due plan windows, records bounded work stages, carries `{ planId, planRevision, planWindowId }` through Social Intent, Publication, and Public History provenance, and increments `verifiedOriginals` only from Social Mirror-backed `post` history. Plan diagnostics expose the latest structured outcome and next consideration without exposing hidden model reasoning.
+
+**Executable protection:** `tests/publishing-plan.test.ts` proves the full 9-stage publish path, truthful NO_OP with a later consideration, inbound reply exclusion, and review without progress. `tests/e2e/playground-rehearsal.spec.ts` verifies the operator-facing “Why no original yet?” and next-consideration diagnostics. The isolated E2E database can be selected with `OPENPRESENCE_E2E_DB_PATH` to avoid parallel-session contamination.
+
+**Apply when:** Changing Publishing Plan wake logic, virtual-time workers, Social Intent/Publication provenance, Mirror-to-Feed projection, progress counters, review states, or deterministic Sandbox fixtures.
+
+## Rule: Browser verification must prove the resolved database and pre-reset WAL state
+
+**Defect class:** Parallel-runtime database drift / incomplete recovery
+
+**General principle:** A populated database file is not evidence that the browser is reading it. Every user-facing data verification must prove the server-resolved `OPENPRESENCE_DB_PATH`, the agent/presence scope, and the relevant records through the running API and UI. SQLite recovery must replay the WAL through the last committed pre-reset frame; inspecting only the main file can omit the newest People, Watchlist, Mirror, and publication records.
+
+**Incident:** The Genny UI on port 3006 was reading `data/three-agents-experiment-v4.db` while the recovered People and X history belonged to `data/openpresence.db`. The default database had then been reset to an empty state. The main-file snapshot recovered most history, but the exact final X exchange—including “A backup flounder credential…”—was only present in the pre-reset WAL commit.
+
+**Project enforcement:** Recovery and QA now compare the running API against the intended database path, preserve the original database and WAL, reconstruct the last pre-reset commit into a separate copy, and verify People, Watching, Activity, Feed, and relationship evidence in the browser. Restored inspection runs in test/mock mode so background observation cannot mutate the recovery copy while it is being reviewed.
+
+**Executable protection:** ⚠️ Missing — recommended: add a startup/health assertion that exposes the resolved database identity only in development, plus an isolated Chromium regression that seeds a known Person, Watch, Mirror thread, and publication and asserts those records through the running UI.
+
+**Apply when:** Changing database selection, Next.js startup scripts, parallel dev servers, SQLite WAL handling, recovery tooling, state hydration, or browser acceptance fixtures.
+
+**Added:** 2026-08-15
+
+## Rule: Feed items must display a concise channel tag
+
+**Defect class:** Mixed-channel or mixed-environment provenance ambiguity
+
+**General principle:** A Feed must never merge channel or environment histories. The active Presence selects the only channel/environment that may appear; each visible item also identifies its source surface concisely so a user can verify the boundary.
+
+**Project enforcement:** Feed and calendar projections match both the active Presence channel and environment. Timeline and calendar history cards render `X.com` for live X history and `Sandbox` for sandbox history from the item’s persisted provenance. The UI does not use the ambiguous `Live` label.
+
+**Executable protection:** `tests/runtime.test.ts` asserts that live and Sandbox Presence projections exclude the other environment. Browser verification asserts that restored Genny’s X Feed contains only `X.com` tags, with no Sandbox records. Recommended follow-up: add an isolated E2E fixture that switches the active Presence to Sandbox and asserts only Sandbox history appears.
+
+**Apply when:** Changing Feed/history projections, Presence/channel selection, Social Mirror environment metadata, or any UI that presents public history across environments.
+
+**Added:** 2026-08-15

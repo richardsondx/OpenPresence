@@ -1,10 +1,16 @@
 import type { Asset, AssetPerception, EntityRef, MirrorObject, OpenPresenceState, Presence, PlaygroundSession } from "./types";
 import type { NetworkSearchResult } from "./network";
 import { relationshipIdentity, relationshipProjection } from "./network-memory";
+import type { SocialThreadContext } from "./thread-context";
 
 function latestMirrorFirst(left: { occurredAt?: string; observedAt: string }, right: { occurredAt?: string; observedAt: string }) {
   return (right.occurredAt ?? "").localeCompare(left.occurredAt ?? "")
     || right.observedAt.localeCompare(left.observedAt);
+}
+
+/** Public cognition currently has no private-surface authorization envelope. */
+export function isCognitionEligibleMirrorObject(item: MirrorObject) {
+  return item.visibility === "public";
 }
 
 export interface SocialEvidenceObject {
@@ -80,6 +86,13 @@ export interface SocialEvidenceContext {
   schema: "openpresence.social-evidence.v1";
   session: { id: string; environment: string; virtualNow: string };
   target?: SocialEvidenceObject;
+  threadContext?: {
+    status: SocialThreadContext["status"];
+    conversationExternalRef?: string;
+    rootExternalRef?: EntityRef;
+    objectRefs: EntityRef[];
+    missingExternalRefs: string[];
+  };
   observedWorld: SocialEvidenceObject[];
   authorHistory: SocialAuthorHistory[];
   priorPresenceActions: SocialPresenceAction[];
@@ -184,16 +197,20 @@ export function buildSocialEvidenceContext(input: {
   mirror: MirrorObject[];
   relatedMirror: MirrorObject[];
   inbound?: MirrorObject;
+  threadContext?: SocialThreadContext;
   availableActions: string[];
   networkResult?: NetworkSearchResult;
 }): SocialEvidenceContext {
-  const targetId = input.inbound?.externalRef.id;
-  const target = input.inbound ? evidenceObject(input.inbound, targetId) : undefined;
-  const authorIds = new Set(input.inbound?.author?.externalRef?.id
-    ? [input.inbound.author.externalRef.id]
-    : input.mirror.filter((item) => item.actorPresenceId !== input.presence.id && item.author?.externalRef?.id).map((item) => item.author!.externalRef!.id));
+  const eligibleMirror = input.mirror.filter(isCognitionEligibleMirrorObject);
+  const eligibleRelatedMirror = input.relatedMirror.filter(isCognitionEligibleMirrorObject);
+  const eligibleInbound = input.inbound && isCognitionEligibleMirrorObject(input.inbound) ? input.inbound : undefined;
+  const targetId = eligibleInbound?.externalRef.id;
+  const target = eligibleInbound ? evidenceObject(eligibleInbound, targetId) : undefined;
+  const authorIds = new Set(eligibleInbound?.author?.externalRef?.id
+    ? [eligibleInbound.author.externalRef.id]
+    : eligibleMirror.filter((item) => item.actorPresenceId !== input.presence.id && item.author?.externalRef?.id).map((item) => item.author!.externalRef!.id));
   const authorHistory = [...authorIds].map((authorId) => {
-    const contributions = input.mirror
+    const contributions = eligibleMirror
       .filter((item) => item.author?.externalRef?.id === authorId)
       .sort(latestMirrorFirst)
       .slice(0, 20);
@@ -202,7 +219,7 @@ export function buildSocialEvidenceContext(input: {
       .filter((item) => item.actorPresenceId === input.presence.id && item.parentExternalRef && contributionIds.has(item.parentExternalRef.id) && item.content?.text)
       .sort(latestMirrorFirst)
       .slice(0, 12);
-    const author = contributions[0]?.author ?? input.inbound?.author;
+    const author = contributions[0]?.author ?? eligibleInbound?.author;
     return {
       author: author!,
       scope: "sandbox_session" as const,
@@ -218,7 +235,7 @@ export function buildSocialEvidenceContext(input: {
     limitation: input.networkResult.limitation,
     source: "sandbox_network_search" as const,
   } : undefined;
-  const targetIdentity = input.inbound?.author?.externalRef?.id ? relationshipIdentity(input.source, input.presence.channel, input.inbound.author.externalRef.id) : undefined;
+  const targetIdentity = eligibleInbound?.author?.externalRef?.id ? relationshipIdentity(input.source, input.presence.channel, eligibleInbound.author.externalRef.id) : undefined;
   const projection = targetIdentity ? relationshipProjection(input.source, targetIdentity.personId, input.presence.id) : undefined;
   const priorAuditEvents = input.source.events
     .filter((event) => event.sessionId === input.session.id)
@@ -245,9 +262,16 @@ export function buildSocialEvidenceContext(input: {
     schema: "openpresence.social-evidence.v1",
     session: { id: input.session.id, environment: "sandbox", virtualNow: input.session.virtualNow },
     target,
-    observedWorld: input.relatedMirror.map((item) => evidenceObject(item, targetId)),
+    threadContext: input.threadContext ? {
+      status: input.threadContext.status,
+      conversationExternalRef: input.threadContext.conversationExternalRef,
+      rootExternalRef: input.threadContext.rootExternalRef,
+      objectRefs: input.threadContext.objects.map((item) => item.externalRef),
+      missingExternalRefs: input.threadContext.missingExternalRefs,
+    } : undefined,
+    observedWorld: eligibleRelatedMirror.map((item) => evidenceObject(item, targetId)),
     authorHistory,
-    priorPresenceActions: actionsFor(input.source, input.session, input.presence, input.inbound),
+    priorPresenceActions: actionsFor(input.source, input.session, input.presence, eligibleInbound),
     priorPlannerActs,
     priorAuditEvents,
     interactionFacts: {
@@ -255,7 +279,7 @@ export function buildSocialEvidenceContext(input: {
       pendingIntroductionPermissions,
       priorNetworkSearches,
     },
-    media: mediaEvidence(input.source.assets, input.source.perceptions, input.inbound),
+    media: mediaEvidence(input.source.assets, input.source.perceptions, eligibleInbound),
     availableActions: input.availableActions,
     executionEnvelope: Object.fromEntries(Object.entries(input.presence.execution ?? {})),
     networkSearch,

@@ -1,5 +1,116 @@
 # Active QA Work
 
+## IN_PROGRESS — Review Feed channel scope without narrowing the Presence picker
+
+- **Started:** 2026-08-16
+- **Scope:** Verify that Feed may remain scoped to the selected Presence's channel/environment while the Presence picker continues to expose every Presence owned by the Agent, including Presences on other channels.
+- **Finding:** The Feed filter is Presence/channel/environment-scoped; the picker still maps the full `state.presences` collection. The current local database contains one X Presence, so a second channel cannot appear until it exists.
+- **Executable protection:** `tests/runtime.test.ts` verifies `stateForContext` preserves X and LinkedIn Presences when LinkedIn is selected; `tests/e2e/sidebar-hierarchy.spec.ts` verifies the visible picker keeps both handles.
+- **Verification:** Direct source review and read-only SQLite inspection complete. Chrome reached the shared local runtime but the page was blocked by an unrelated `node:crypto` client-bundle Build Error from the concurrent publication-security work; browser acceptance remains pending.
+- **Status:** IN_PROGRESS
+
+## IN_PROGRESS — Conversation completion and marginal social value
+
+- **Started:** 2026-08-15
+- **Scope:** Add Presence-centric Conversation Episodes, disposition-aware social planning, truthful close lifecycle, reciprocal loop-risk/cooling behavior, public-expression boundary protection, and concise Activity status without conflating conversation interpretation with Social Mirror evidence, Social Intent, Execution, Delivery, Outcome, or Assignment progress.
+- **Product boundary:** Silence and reactions remain valid social outcomes. A closing episode is not `closed` until a required public act is verified; failed delivery remains distinct. Runtime and untrusted social content stay outside public expression authority.
+- **Executable protection:** `tests/conversation-episodes.test.ts` and `tests/conversation-boundary.test.ts` cover branch grouping, closure verification, generic acknowledgment suppression, substantive reopening eligibility, loop-risk detection, disposition parsing, and runtime-leak markers. `tests/publication-security.test.ts` covers sealed-expression hashing, permit scope, expiry, replay, and test-runtime write blocking. Focused feature/security coverage passes 117/117; full Vitest passes 279/279; typecheck passes; ESLint has zero errors and 15 existing warnings; production build passes with existing CSS/React/image warnings; `git diff --check` passes. Chrome QA verified Playground event → Social Mirror → Activity episode status on a fresh local runtime with no client errors and no external write.
+- **Status:** Complete for conversation completion, pacing, privacy boundary, operator visibility, and publication-security enforcement. Live provider delivery remains intentionally unexercised in local QA.
+
+## IN_PROGRESS — Prove Publishing Plan execution end-to-end
+
+- **Started:** 2026-08-15
+- **Scope:** Close the verification gap from durable Publishing Plan materialization to Sandbox window wake, Agent consideration, Social Intent, simulated delivery, Social Mirror verification, Feed classification, and original-progress accounting. Add lineage and operator-safe breadcrumbs so replies, Assignments, and Publishing Initiative output remain distinguishable.
+- **Product boundary:** A plan window grants permission to consider original expression; it never forces publication. NO_OP, candidate rejection, review, execution failure, and delivery failure remain distinct. QA remains isolated to Sandbox/mock state with no live connector writes.
+- **Verification:** Full Vitest passes 263/263; focused Publishing Plan/Sandbox tests pass 35/35; typecheck passes; lint passes with 15 pre-existing warnings and no errors; production build passes with existing CSS/React/image warnings; isolated Chromium acceptance passes 1/1 on a separate port and database. The end-to-end fixture proves due virtual-time wake → plan work breadcrumbs → Agent original decision → Social Intent origin → simulated Execution → Social Mirror → Feed Original → verified plan progress. NO_OP, review, inbound reply exclusion, and next-consideration persistence are covered. No live connector write or production mutation occurred.
+- **Status:** Complete for Sandbox Publishing Plan execution, provenance, truthful progress, diagnostics, and operator-visible work history. Native/live autonomous cadence and provider-specific plan quality remain outside this feature scope.
+
+## IN_PROGRESS — Canonical Publishing Assignment execution
+
+- **Started:** 2026-08-15
+- **Scope:** Connect the Presence-facing Publishing Initiative to the canonical Assignment responsibility model and consume that responsibility from the browser-independent Native X pulse path. This QA slice preserves existing reply behavior, makes autonomous original-post decisions inspectable, and keeps verified delivery as the only progress signal.
+- **Human-found defect:** A live Presence can reply to mentions, but its configured original-post pace is not consumed by `wakePresence`/`runPulse`; the visible Publishing Plan is planning-only and the browser Calendar timer is not a durable autonomous scheduler.
+- **Product boundary:** Existing live configuration is not mutated during QA. Tests use the isolated connector/model mocks; no external X write or deployment is authorized.
+- **Executable protection:** Add regression coverage for canonical Assignment linkage, quantity semantics, pulse eligibility/no-op, queued execution lineage, and verified progress after delivery.
+- **Verification:** Full Vitest passes 23/23 files and 264/264 tests; the native X regression covers browser-independent Attention Worker → reconcile → canonical Publishing Assignment → Social Intent → Execution Envelope → connector → later Mirror verification. Typecheck passes; production build passes; ESLint has zero errors and 15 existing warnings; `git diff --check` passes. Chrome local smoke on a fresh dev port loaded the app without a current client exception; the first stale-port ChunkLoadError was caused by running the production build concurrently with the dev server and disappeared after restart. No live connector write or deployment occurred.
+- **Remaining production gate:** `runAttentionWorker` is now an explicit browser-independent worker entry point, but this repository still lacks a durable external scheduler/lease service that invokes it when the browser is closed. Native delivery also still needs durable cross-process claiming and provider-level idempotency before unattended live posting is production-safe.
+- **Status:** QA implementation complete for canonical linkage, native pulse consumption, verified progress, and Sandbox Exploration lineage. Live autonomous cadence remains an explicitly documented follow-up, not a claimed completion.
+
+## COMPLETE — Presence-scoped Explorations
+
+- **Started:** 2026-08-15
+- **Scope:** Add natural-language Explorations inside Watching so a Presence can direct durable attention toward social topics and problems without turning discovery into a reply bot, a second permission system, or a second Social Mirror.
+- **Product boundary:** Explorations produce bounded social evidence and findings. The Social Planner owns judgment; the existing Presence Execution Envelope owns outbound action. Watchlist remains for known identities, and Exploration state remains Presence-scoped.
+- **Verification:** Full Vitest passes 255/255; typecheck passes; changed-source ESLint passes with zero errors and eight existing warnings; production build passes; `git diff --check` passes. Chrome QA covered create, interpretation, look-now, refine, pause, reload persistence, resume, archive, and the responsive Watching state. Mobile layout reported no horizontal overflow; no browser runtime errors were observed. The connected X look was read-only and no reply action was triggered.
+- **Status:** Complete for the Presence-scoped Exploration MVP: durable briefs, refinement, lifecycle controls, bounded Mirror/native discovery, triaged findings, truthful coverage/outcome states, and no automatic Social Intent or execution creation. Background worker cadence, Teach ChangeSets, broader Bridge/import adapters, Activity finding cards, and Growth attribution remain follow-up scope.
+
+## IN_PROGRESS — Add visible Agent Publishing Plan
+
+- **Started:** 2026-08-15
+- **Scope:** Materialize non-scheduled Publishing Initiative responsibility as a durable, Presence/environment-scoped Agent Publishing Plan with bounded windows, visible Schedule/Activity projections, and explicit replanning.
+- **Product boundary:** The operator owns the expectation; the Agent owns the plan; windows grant future work context and never represent prewritten posts or bypass the Presence Execution Envelope. Live QA remains read-only/local unless explicitly approved.
+- **Executable protection:** `tests/publishing-plan.test.ts` covers Presence/environment scoping, revision supersession, projection isolation, and the no-publication/no-execution boundary. The browser acceptance path covers Settings → Schedule → Activity, explicit replanning, visible bounded windows, and adaptive progress.
+- **Verification:** Full Vitest passes 252/252; focused publishing/runtime/AI tests pass 105/105; typecheck passes; ESLint passes with existing warnings only; production build passes; `git diff --check` passes. Isolated browser QA with a mock planner confirms two revisions with the first superseded, three flexible windows, four plan events, and zero publications/executions. No live connector write or production mutation occurred.
+- **Status:** Complete for the durable Publishing Plan domain, bounded planner/replan operation, and Schedule/Activity projections. Live cadence execution and provider-specific plan quality remain outside this feature scope.
+
+## COMPLETE — Explain Calendar no-op decisions
+
+- **Started:** 2026-08-15
+- **Scope:** Preserve Calendar silence as valid Agent judgment while recording a concise, user-understandable reason for each live no-op and surfacing it through Activity/action provenance.
+- **Generalizable principle:** Silence remains valid Agent judgment, but a repeated no-op without a bounded rationale is not an inspectable decision and cannot improve operator trust or future calibration.
+- **Project enforcement:** Live Calendar evaluation now uses the structured social-decision contract, persists the model's short rationale on the skipped Action, and includes it in the `Standing intention held` Activity event. Bare `NO_OP` remains truthful and is explicitly labeled as an unavailable explanation.
+- **Executable protection:** Native X tests cover rationale persistence for Calendar no-op and the post-delivery path; the Schedule → Evaluate → Activity Chromium regression checks the visible `Reason:` copy when silence is selected.
+- **Verification:** Focused Calendar/native-X tests pass 3/3, full Vitest passes, typecheck passes, changed-source ESLint passes with no errors, production build passes with existing warnings, `git diff --check` passes, and the focused Chromium regression passes 1/1. No live X write was triggered.
+- **Status:** Complete.
+
+## COMPLETE — Scheduled X post was evaluated and intentionally held
+
+- **Started:** 2026-08-15
+- **Scope:** Trace why Genny's scheduled/standing-intent task for today produced no visible X post, from Schedule state through runtime wake, cognition, execution, and native X delivery.
+- **Human-found expectation mismatch:** The Saturday 07:00 standing intent was configured as `Consider`, so it granted permission to evaluate rather than requiring a publication. The operator expected autonomy plus a scheduled time to produce a post.
+- **Runtime evidence:** The persisted Calendar slot was evaluated at `2026-08-15T11:00:00.290Z` (07:00 Toronto), then recorded `Standing intention held` at `2026-08-15T11:00:02.405Z` with `no_op / skipped`. No execution or delivery failure exists for that slot. Native X delivery was independently healthy because Genny published contextual replies at 08:40 and 09:08.
+- **Generalizable principle:** A scheduled standing intent must be diagnosed as a three-state outcome—evaluated and held, evaluated and delivered, or never evaluated—before it is called a scheduler or connector failure. “Consider” is Agent autonomy with permission to remain silent, not a guaranteed post.
+- **Executable protection:** `tests/x-connection.test.ts` covers the schedule evaluation → native X delivery path; the live audit verified the complementary `NO_OP` path and persisted Calendar/Activity evidence.
+- **Verification:** Read-only browser inspection of Schedule and Activity, direct persisted-state inspection, and the focused Calendar/native-X test passed 1/1. No live X write or production mutation was triggered.
+- **Status:** Complete; no code fix was warranted because the runtime behaved according to the configured `Consider` semantics.
+
+## COMPLETE — Live X mention wake-up and focal reply targeting
+
+- **Started:** 2026-08-15
+- **Scope:** Ensure automatic Native X reconciliation wakes live cognition for unjudged inbound mentions, preserves the full hydrated thread context, and targets replies at the focal mention rather than its parent.
+- **Human-found defect:** X post `2088596615653130686` was present in the Mirror with a complete five-object conversation chain, but the 12:05 observation ended at “Social Mirror updated”; no Pulse/evaluation followed, and the earlier reply path targeted parent context instead of the focal mention.
+- **Executable protection:** `tests/x-connection.test.ts` covers automatic sync → nudge → cognition → focal-target delivery with root, parent, and focal evidence.
+- **Verification:** Full Vitest passes 247/247; the new automatic-sync integration test passes; focused Chromium Activity coverage passes for the visible-navigation and Sandbox-scope flows, with one unrelated legacy Schedule test still timing out because its standing-intent fixture does not render an evaluable slot. Typecheck, production build, ESLint (0 errors, existing warnings), and `git diff --check` pass. The exact X post and live Mirror state were inspected read-only; no live sync or public X write was triggered.
+- **Status:** Complete for the Native X observation → attention → cognition → focal reply-target path.
+
+## COMPLETE — Live X thread context parity
+
+- **Started:** 2026-08-15
+- **Scope:** Hydrate missing public X ancestry and referenced evidence at the connector/Social Mirror boundary, persist it as normalized Mirror objects, and use one bounded thread compiler for Sandbox and Live cognition.
+- **Customer value:** A Presence mentioned in an existing conversation receives the actual public context needed for continuity, disagreement, humor, restraint, and relationship-aware judgment. Missing context remains explicit rather than inferred.
+- **Executable protection:** `tests/thread-context.test.ts` covers bounded ancestry, isolation, quote separation, cache/hydration, and partial/unavailable truth; `tests/x-connection.test.ts` covers X expansions, normalized Mirror persistence, and the Live cognition request containing ancestor text.
+- **Verification:** Full Vitest passes 245/245 with loopback-enabled QA; focused post-compatibility tests pass 26/26; typecheck, production build, changed-source lint (0 errors, existing warnings only), `git diff --check`, and Chrome smoke all pass. Chrome loaded the running app and showed the Activity/Social Mirror surface with no browser errors. No external X write or production mutation occurred.
+- **Status:** Complete for connector observation, Social Mirror persistence, shared thread compilation, and native Pulse context. Broader conversation/sibling-branch inspection remains intentionally out of scope.
+
+## COMPLETE — Visual necessity and truthful bounded research outcomes
+
+- **Started:** 2026-08-15
+- **Scope:** Separate optional/helpful/important/required visual needs from the visual brief, preserve the bounded evidence-first path, and make zero-result and rejection outcomes truthful in the Assignment UI.
+- **Coordination:** Preserved RuntimeScope, workspace revision/409 handling, Playground worldRevision, Assignment lineage/status checks, and durable bridge/asset ownership from the parallel concurrency work.
+- **Behavior:** Helpful visuals can fall back to a grounded text-only publication; important visuals may replan or publish text-only; required visuals remain blocked without verified media. Empty discovery receives exactly one model-guided query reformulation before the bounded effort ends. Research records `discovery_empty`, `fetch_failed`, `inspection_rejected`, or `editorial_rejected` and retains the trail across attempts.
+- **Executable protection:** Assignment tests cover helpful text-only fallback, required-visual blocking, one query reformulation, zero-candidate messaging, inspected rejection, and verified publication counting. The UI shows `No usable visual leads` for zero inspection and labels the research outcome in the collapsible trail.
+- **Verification:** Full Vitest passes 238/238; targeted AI/Assignment/perception tests pass 39/39; typecheck, production build, changed-source ESLint (0 errors, 8 existing warnings), and `git diff --check` pass. Browser QA on the main runtime confirmed the corrected zero-candidate card and `DISCOVERY EMPTY` trail. No live connector activity occurred.
+- **Status:** Complete for the bounded Sandbox Assignment path; provider-specific rendering and live connector delivery remain outside this scope.
+
+## COMPLETE — Evidence-led Assignment runs and truthful worker progress
+
+- **Started:** 2026-08-15
+- **Scope:** Execute the evidence-first Assignment feedback: reframe broad visual work around strong discovered evidence, create fresh bounded retry runs, keep state reads responsive during long work, and make terminal/progress UI truthful and compact.
+- **Coordination:** Preserve RuntimeScope, workspace revision/409 handling, Playground worldRevision, Assignment lineage/status checks, and durable bridge/asset ownership from the parallel concurrency work.
+- **Acceptance criteria:** A broad visual Assignment can publish around a strong alternative evidence candidate; Retry Assignment creates a fresh bounded run without repeating known negative evidence; `/api/state` remains responsive while work runs; queued/researching/selecting/writing/delivering are visible, while terminal blocked/published states never retain a working indicator.
+- **Verification:** Full Vitest passes 233/233; targeted Assignment/concurrency tests pass 82/82; typecheck, production build, changed-source ESLint, and `git diff --check` pass. The main runtime retry returned a queued run in 658ms, `/api/state` remained responsive during `visual_research`, and the worker reached a truthful terminal blocked state after 5 inspected candidates across 2 bounded searches. Browser QA confirmed compact terminal progress, the collapsible evidence trail, preserved candidate domains, and an actionable `Try again` control with no stale working indicator. No live connector activity occurred.
+- **Status:** Complete for the bounded Sandbox Assignment path; process-restart recovery and live connector delivery remain outside this scope.
+
 ## COMPLETE — Restore Presence handle editing
 
 - **Started:** 2026-08-15

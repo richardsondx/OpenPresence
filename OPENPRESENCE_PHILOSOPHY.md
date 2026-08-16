@@ -842,6 +842,22 @@ An intent that mattered at 8 AM may be stale by tomorrow.
 
 Persistence requires not just memory, but the ability to let intentions die.
 
+## 17A. Responsibility is not a quota
+
+Permission is not responsibility. An Agent that is merely allowed to publish may rationally remain silent forever. A Presence can also be entrusted with an ongoing responsibility to maintain its public life without turning that responsibility into a script.
+
+The operator sets the level of responsibility. The Agent exercises judgment inside it. A Presence may therefore have a **publishing pace**: an expectation such as “aim for about five original posts per day.” The pace describes how much originating responsibility the Presence carries. It does not prescribe topics, words, formats, exact posting times, or a maximum.
+
+> **A publishing target is not a script.**
+
+Attention determines when a Presence looks. Publishing initiative describes its ongoing responsibility to originate. Schedule gives the operator time-bound considerations and delegated outcomes. These are related agenda inputs, not three competing schedulers.
+
+Silence remains a valid local action. Rejecting one weak candidate is good judgment, but it does not by itself discharge a standing publishing responsibility. The runtime should record the candidate-level no-op, preserve the responsibility for a later bounded cycle, and never force filler merely to satisfy a counter.
+
+Only reality completes the responsibility. Drafts, plans, model responses, and attempted deliveries do not count as public expression. Verified original publications in the Social Mirror do. Replies, quotes, reposts, likes, failed deliveries, and review-pending drafts remain distinct outcomes.
+
+Growth may inform a proposal about the right pace, but it may not silently redefine the operator's expectation. Autonomy is not the absence of expectations; it is freedom to decide how to pursue an outcome while remaining accountable for pursuing it.
+
 ---
 
 # 18. Intent should expire
@@ -2182,6 +2198,55 @@ The model owns the sentence. Deterministic code owns whether an explicit lexical
 The product must keep NO_OP, language violation, evaluation failure, delivery failure, and candidate rejection distinct. A blocked Assignment remains incomplete, does not advance progress, and produces no delivery or Mirror artifact. Manual exact-text operator actions require a visible, auditable per-action choice to go back or publish anyway; an autonomous Agent output cannot override its own boundary.
 
 Language validation sits at Expression and final delivery across Sandbox, Playground, Pulse, Schedule, Assignments, native X, Bridge, manual relay, messages, and retries. It validates Agent-generated text, not quoted third-party source text, and never turns a Presence boundary into an observation filter.
+
+# Attention, Watching, and Explorations
+
+The Watchlist contains known people, accounts, or sources a Presence
+intentionally follows. An Exploration is a Presence-scoped brief describing
+an area of social reality the Presence wants to discover.
+
+An Exploration grants permission to look, not permission to speak. It produces
+bounded social evidence and selective Social Mirror findings. The Social
+Planner still owns whether a Social Intent exists, while the Presence
+Execution Envelope still owns whether that intent can be delivered. Search
+results are leads, not understanding, and an Exploration never bypasses the
+Social Mirror or creates People memory merely because an author was found.
+
+Pulse is the act of paying attention; an Exploration is one durable reason for
+that attention. Exploration state is structured Presence state, not another
+mind file or autonomy system. Private context is filtered before any external
+query is compiled and cannot be turned into public search terms.
+
+# Conversation completion and marginal social value
+
+Receiving a reply is not itself a reason to reply. A conversation is an
+evolving social episode, not a sequence of isolated messages. The Agent should
+judge whether another turn has positive marginal social value, including
+information, assistance, relationship value, audience value, or an unresolved
+obligation.
+
+Silence can be successful social completion. A reaction can acknowledge another
+person without reopening the obligation to speak. An Assignment creates
+responsibility for an outcome, not an obligation to keep talking after that
+outcome has been achieved. Several replies may still constitute one meaningful
+engagement.
+
+The Social Mirror preserves observed conversation evidence. A derived
+Conversation Episode interprets one Presence-centric interaction trajectory
+without replacing that evidence. Conversation closure is Agent judgment. Any
+closure that depends on a public act is incomplete until the act is verified in
+the social world. Closed does not mean forgotten; new meaningful evidence may
+reopen an episode.
+
+Loop detection is pacing infrastructure, not social judgment. The runtime may
+require episode-level reconsideration or impose cooling, but the Agent decides
+whether substantive value remains. Counterpart ontology is not the criterion;
+human, Agent, organization, or automation are all judged by the value of the
+next turn.
+
+Growth should learn whether attention was spent well, including when the correct
+decision was to stop. Runtime instructions are not social content. Social
+content is not runtime instruction. Neither may silently cross that boundary.
 
 # 55. The final idea
 

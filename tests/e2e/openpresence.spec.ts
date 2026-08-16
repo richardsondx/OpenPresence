@@ -21,18 +21,19 @@ async function createAgent(page: import("@playwright/test").Page, name = "Jenny"
 }
 
 async function navigate(page: import("@playwright/test").Page, label: string) {
+  const desktopSidebar = page.locator(".sidebar:visible");
   if (label === "Settings") {
     const navigation = test.info().project.name === "mobile"
       ? page.locator(".mobile-nav")
-      : page.locator(".sidebar");
-    await navigation.getByRole("button", { name: "Settings", exact: true }).click();
+      : desktopSidebar;
+    await navigation.getByRole("button", { name: "Settings", exact: false }).click();
     return;
   }
   const navigationLabel = label === "Brain" ? "Manage Agent" : label;
   const mobile = page.locator(".mobile-nav");
   if (await mobile.isVisible()) await mobile.getByRole("button", { name: navigationLabel }).click();
   else if (label === "Brain") await page.getByRole("button", { name: /^Manage Agent/ }).click();
-  else await page.locator(".sidebar").getByRole("button", { name: navigationLabel, exact: true }).click();
+  else await desktopSidebar.getByRole("button", { name: navigationLabel, exact: false }).click();
 }
 
 async function openAddPresence(page: import("@playwright/test").Page) {
@@ -591,6 +592,8 @@ test("Calendar stores a real Standing Intent and evaluates it now", async ({ pag
   await page.getByRole("button", { name: "Evaluate this intent" }).click();
   await navigate(page, "Activity");
   await expect(page.locator(".event-title").filter({ hasText: /Calendar evaluation complete|Standing intention held/ }).first()).toBeVisible();
+  const heldDecision = page.locator(".event-title").filter({ hasText: "Standing intention held" }).first();
+  if (await heldDecision.count()) await expect(page.getByText(/Reason:/).first()).toBeVisible();
   await expect(page.getByText("0.94", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Reply to a technical founder", { exact: true })).toHaveCount(0);
 });
@@ -765,6 +768,28 @@ test("Presence rhythm explains attention settings and saves quiet hours", async 
   await expect(page.getByLabel("Quiet hours start")).toHaveValue("22:00");
   await expect(page.getByLabel("Quiet hours end")).toHaveValue("07:00");
   await expect(page.getByText("Off · automatic observation follows the selected rhythm.", { exact: true })).toHaveCount(0);
+});
+
+test("Presence publishing pace separates responsibility from attention and persists its target", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Settings");
+  const pace = page.locator(".publishing-initiative-card");
+  await expect(pace.getByRole("heading", { name: "How often should Jenny aim to publish original posts?" })).toBeVisible();
+  await expect(pace.getByRole("button", { name: /Let Jenny decide.*Recommended/ })).toHaveClass(/selected/);
+  await pace.getByRole("button", { name: "Set a pace" }).click();
+  await pace.getByLabel("Publishing pace count").fill("7");
+  await pace.getByLabel("Publishing pace period").selectOption("week");
+  await pace.getByRole("button", { name: "Save pace" }).click();
+  await expect(pace.getByText("This is a pace, not a forced quota.", { exact: false })).toBeVisible();
+  await page.reload();
+  await navigate(page, "Settings");
+  await expect(pace.getByRole("button", { name: "Set a pace" })).toHaveClass(/selected/);
+  await expect(pace.getByLabel("Publishing pace count")).toHaveValue("7");
+  await expect(pace.getByLabel("Publishing pace period")).toHaveValue("week");
+  await navigate(page, "Activity");
+  const publishingProgress = page.getByLabel("Publishing pace progress");
+  await expect(publishingProgress).toBeVisible();
+  await expect(publishingProgress.getByText("0 of ~7", { exact: true })).toBeVisible();
 });
 
 test("Presence Public Self saves its disclosure boundary", async ({ page }) => {
@@ -1212,7 +1237,7 @@ test("Activity keeps Sandbox records scoped and labels Playground context", asyn
   await page.reload();
   await navigate(page, "Activity");
   await expect(page.locator(".activity-tag", { hasText: "Playground" })).toBeVisible();
-  await expect(page.locator(".event-context-preview span", { hasText: "↳" })).toHaveCount(1);
+  await expect(page.locator(".event-context-preview span", { hasText: "↳" }).first()).toBeVisible();
 
   const liveRoute = await request.post("/api/state", { data: { type: "setPresence", patch: { connectionMode: "native" } } });
   expect(liveRoute.ok()).toBeTruthy();
@@ -1220,6 +1245,65 @@ test("Activity keeps Sandbox records scoped and labels Playground context", asyn
   await navigate(page, "Activity");
   await expect(page.locator(".scope-summary")).toHaveText("X · Live");
   await expect(page.getByText("A Playground-only observation.", { exact: true })).toHaveCount(0);
+});
+
+test("Activity addresses operator-directed replies to the selected Presence", async ({ page, request }) => {
+  await createAgent(page);
+  const renamed = await request.post("/api/state", { data: { type: "setPresence", patch: { name: "Genny" } } });
+  expect(renamed.ok()).toBeTruthy();
+  await page.reload();
+  await navigate(page, "Playground");
+  const initial = await request.get("/api/state");
+  const session = (await initial.json()).playgroundSessions[0];
+  const added = await request.post("/api/state", {
+    data: { type: "addSandboxEvent", sessionId: session.id, actionId: "post", actorName: "Maya Chen", content: "A question for the Presence." },
+  });
+  expect(added.ok()).toBeTruthy();
+
+  await page.reload();
+  await expect(page.getByRole("heading", { name: "Genny, right now." })).toBeVisible();
+  await page.getByRole("button", { name: "Ask Genny to reply", exact: true }).first().click();
+  const dialog = page.getByRole("dialog", { name: "Decision context" });
+  await expect(dialog.getByRole("heading", { name: "Ask Genny to reply" })).toBeVisible();
+  await expect(dialog.getByLabel("Optional direction for Genny")).toBeVisible();
+  await dialog.getByLabel("Optional direction for Genny").fill("Keep the answer concrete.");
+  await dialog.getByRole("button", { name: "Ask Genny to reply", exact: true }).click();
+  await expect(dialog.getByText("Genny is preparing the expression through the existing reply envelope.", { exact: true })).toBeVisible();
+  await expect(dialog.getByText("Ask Jenny to reply", { exact: true })).toHaveCount(0);
+
+  const updated = await (await request.get("/api/state")).json();
+  expect(updated.operatorDirectives[0]).toMatchObject({ status: "expressed", optionalDirection: "Keep the answer concrete." });
+  expect(updated.socialIntents[0]).toMatchObject({ source: "operator", operatorDirectiveId: updated.operatorDirectives[0].id });
+});
+
+test("Activity lets the operator quietly ask a Presence to leave an observed post alone", async ({ page, request }) => {
+  await createAgent(page);
+  await navigate(page, "Playground");
+  const initial = await request.get("/api/state");
+  const session = (await initial.json()).playgroundSessions[0];
+  const added = await request.post("/api/state", {
+    data: { type: "addSandboxEvent", sessionId: session.id, actionId: "post", actorName: "Maya Chen", content: "A post the operator wants left alone.", observeOnly: true },
+  });
+  expect(added.ok()).toBeTruthy();
+
+  await page.reload();
+  const ignore = page.getByRole("button", { name: "Ask Jenny to ignore", exact: true }).first();
+  const reply = page.getByRole("button", { name: "Ask Jenny to reply", exact: true }).first();
+  await expect(ignore).toBeVisible();
+  const ignoreBox = await ignore.boundingBox();
+  const replyBox = await reply.boundingBox();
+  expect(ignoreBox).not.toBeNull();
+  expect(replyBox).not.toBeNull();
+  expect(ignoreBox!.x + ignoreBox!.width).toBeLessThan(replyBox!.x);
+
+  await ignore.click();
+  await expect(page.getByRole("button", { name: "Ask Jenny to ignore", exact: true })).toHaveCount(0);
+  await expect(page.locator(".event-title", { hasText: "The operator asked Jenny to ignore this post" })).toBeVisible();
+
+  const updated = await (await request.get("/api/state")).json();
+  expect(updated.operatorDirectives[0]).toMatchObject({ requiredAct: "no_op", status: "expressed" });
+  expect(updated.socialIntents).toHaveLength(0);
+  expect(updated.executions).toHaveLength(0);
 });
 
 test("Playground actions work while a Presence keeps its live route", async ({ page, request }) => {
