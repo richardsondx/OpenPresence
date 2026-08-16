@@ -1,4 +1,6 @@
 const sessions = new Map();
+const sessionStorageKey = "openpresenceChromeSessions";
+const heartbeatAlarmName = "openpresence-heartbeat";
 let lastConfig;
 const seenEvents = new Set();
 
@@ -41,6 +43,33 @@ async function updateBadge() {
   await chrome.action.setBadgeBackgroundColor({ color: count ? "#c77d50" : "#766b63" });
 }
 
+async function persistSessions() {
+  await chrome.storage.session.set({ [sessionStorageKey]: [...sessions.values()] });
+}
+
+async function restoreSessions() {
+  if (sessions.size) return;
+  const stored = await chrome.storage.session.get(sessionStorageKey);
+  const saved = Array.isArray(stored[sessionStorageKey]) ? stored[sessionStorageKey] : [];
+  for (const session of saved) {
+    if (!session?.presence?.id || !session.tabId || !session.bridgeKey || !session.bridgeId) continue;
+    try {
+      await chrome.tabs.get(session.tabId);
+      sessions.set(session.presence.id, session);
+      sendSessionContext(session);
+    } catch {
+      // The controlled tab was closed while the service worker was asleep.
+    }
+  }
+  if (sessions.size !== saved.length) await persistSessions();
+  await updateBadge();
+  await Promise.all([...sessions.values()].map((session) => heartbeat(session)));
+}
+
+async function ensureHeartbeatAlarm() {
+  await chrome.alarms.create(heartbeatAlarmName, { periodInMinutes: 0.5 });
+}
+
 async function startSession(presenceId) {
   const presence = lastConfig?.presences?.find((item) => item.id === presenceId) || lastConfig?.selected;
   if (!presence || presence.id !== presenceId || !presence.browserAccess?.enabled) throw new Error("Enable Chrome hands for the selected Presence in OpenPresence first.");
@@ -62,6 +91,7 @@ async function startSession(presenceId) {
   await chrome.tabGroups.update(groupId, { title: `OpenPresence · ${presence.name} · ${presence.channel}`, color: groupColor(presence.accent) });
   const session = { presence, bridgeId: connected.bridgeId, bridgeKey: connected.bridgeKey, executorId, windowId: window.id, tabId: tab.id, groupId };
   sessions.set(presenceId, session);
+  await persistSessions();
   sendSessionContext(session);
   await updateBadge();
   sendStatus({ state: "connected", presenceId, presenceName: presence.name, tabId: tab.id });
@@ -72,6 +102,7 @@ async function stopSession(presenceId) {
   const session = sessions.get(presenceId);
   if (!session) return;
   sessions.delete(presenceId);
+  await persistSessions();
   try { await chrome.tabs.remove(session.tabId); } catch { /* The user may have closed it already. */ }
   await updateBadge();
   sendStatus({ state: "stopped", presenceId });
@@ -111,6 +142,7 @@ async function finishExecution(session, result) {
 
 chrome.runtime.onMessage.addListener((message, sender) => {
   (async () => {
+    await restoreSessions();
     if (message?.type === "OPENPRESENCE_APP_STATE") {
       lastConfig = message.config;
       await chrome.storage.session.set({ openpresenceConfig: lastConfig });
@@ -144,5 +176,15 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
   if (session) sendSessionContext(session);
 });
 
-setInterval(() => { for (const session of sessions.values()) { void heartbeat(session); void claim(session); } }, 5_000);
+chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name !== heartbeatAlarmName) return;
+  void restoreSessions().then(() => Promise.all([...sessions.values()].map(async (session) => {
+    await heartbeat(session);
+    await claim(session);
+  })));
+});
+chrome.runtime.onInstalled.addListener(() => { void ensureHeartbeatAlarm(); });
+chrome.runtime.onStartup.addListener(() => { void ensureHeartbeatAlarm(); });
+void ensureHeartbeatAlarm();
+void restoreSessions();
 void updateBadge();
