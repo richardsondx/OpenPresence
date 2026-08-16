@@ -548,6 +548,7 @@ export default function Home() {
   const [selectedFile, setSelectedFile] = useState<FileKind>("BRAIN");
   const [pendingOperation, setPendingOperation] = useState<string | null>(null);
   const nativeSyncInFlight = useRef<string | null>(null);
+  const attentionOperationInFlight = useRef(false);
   const calendarRunInFlight = useRef<string | null>(null);
   const playgroundStartInFlight = useRef<string | null>(null);
   const playgroundClockSyncInFlight = useRef<string | null>(null);
@@ -573,7 +574,11 @@ export default function Home() {
     setError(null);
     const operationType = typeof operation === "object" && operation !== null && "type" in operation && typeof operation.type === "string" ? operation.type : null;
     const tracksAttention = ["wakePresence", "runPulse", "startAssignment", "workAssignment"].includes(operationType ?? "");
-    if (tracksAttention) setPendingOperation(operationType);
+    if (tracksAttention) {
+      if (attentionOperationInFlight.current) return null;
+      attentionOperationInFlight.current = true;
+      setPendingOperation(operationType);
+    }
     let context = requestContext ?? state;
     let retriedConflict = false;
     let lookPoll: number | undefined;
@@ -623,7 +628,10 @@ export default function Home() {
       return null;
     } finally {
       if (lookPoll !== undefined && typeof window !== "undefined") window.clearInterval(lookPoll);
-      if (tracksAttention) setPendingOperation(null);
+      if (tracksAttention) {
+        attentionOperationInFlight.current = false;
+        setPendingOperation(null);
+      }
     }
   }
   async function refreshState() {
@@ -718,6 +726,29 @@ export default function Home() {
     else schedule(observation.nextObservationAt);
     return () => { if (timer) clearTimeout(timer); };
   }, [state?.presence, state?.nativeConnections, pendingOperation]);
+  useEffect(() => {
+    const presenceId = state?.presence?.id;
+    const connectionMode = state?.presence?.connectionMode;
+    const browserAccessEnabled = state?.presence?.browserAccess?.enabled;
+    if (!presenceId || connectionMode !== "bridge" || !browserAccessEnabled) return;
+    const refreshBridgeHealth = async () => {
+      try {
+        const query = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
+        query.set("read", Date.now().toString());
+        const response = await fetch(`/api/state?${query.toString()}`, { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await readJsonResponse<OpenPresenceState>(response);
+        setState(payload);
+        syncBrowserWorkspaceContext(payload);
+      } catch {
+        // Bridge health is advisory and must not interrupt the current action.
+      }
+    };
+    const timer = window.setInterval(() => {
+      void refreshBridgeHealth();
+    }, 5_000);
+    return () => window.clearInterval(timer);
+  }, [state?.presence?.id, state?.presence?.connectionMode, state?.presence?.browserAccess?.enabled]);
   useEffect(() => {
     const presence = state?.presence;
     if (!presence || presence.status !== "live") return;
