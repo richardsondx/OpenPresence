@@ -569,51 +569,39 @@ test("Teach submits an explicit Presence identity instruction for review", async
   await expect(page.getByLabel("Presence name")).toHaveValue("Jenny Presence");
 });
 
-test("Calendar stores a real Standing Intent and evaluates it now", async ({ page }) => {
+test("Schedule stores an Assignment and shows its readiness contract", async ({ page }) => {
   await createAgent(page);
   await navigate(page, "Schedule");
   await page.getByRole("button", { name: "List", exact: true }).click();
-  await page.getByRole("button", { name: "Add intent" }).click();
-  await expect(page.getByLabel("Execution window")).toHaveCount(0);
+  await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
+  await expect(page.getByLabel("Assignment window")).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Timing options" })).toHaveAttribute("aria-expanded", "false");
   await expect(page.getByText("How long is this relevant?", { exact: true })).toHaveCount(0);
-  await page.getByLabel("What should Jenny do?").fill("Teach the audience one useful idea about persistent agents.");
+  await page.getByLabel("What should Jenny accomplish?").fill("Teach the audience one useful idea about persistent agents.");
   await page.getByRole("textbox", { name: "Time", exact: true }).fill("09:15");
-  await page.getByRole("button", { name: "Save standing intent" }).click();
+  await page.getByRole("button", { name: "Review assignment" }).click();
   await expect(page.getByText("Teach the audience one useful idea about persistent agents.")).toBeVisible();
-  await expect(page.locator(".slot-row")).toContainText("09:15");
-  await expect(page.getByLabel("Calendar presence filter")).toHaveCount(0);
-  await expect(page.getByLabel("Intent presence")).toHaveCount(0);
-  await page.getByRole("button", { name: /^Edit / }).click();
-  await page.getByLabel("What should Jenny do?").fill("Teach the audience one edited useful idea about persistent agents.");
-  await page.getByRole("button", { name: "Save changes", exact: true }).click();
-  await expect(page.getByText("Teach the audience one edited useful idea about persistent agents.")).toBeVisible();
-  await expect(page.locator(".slot-row")).toContainText("09:15");
-  await page.getByRole("button", { name: "Evaluate this intent" }).click();
-  await navigate(page, "Activity");
-  await expect(page.locator(".event-title").filter({ hasText: /Calendar evaluation complete|Standing intention held/ }).first()).toBeVisible();
-  const heldDecision = page.locator(".event-title").filter({ hasText: "Standing intention held" }).first();
-  if (await heldDecision.count()) await expect(page.getByText(/Reason:/).first()).toBeVisible();
-  await expect(page.getByText("0.94", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("Reply to a technical founder", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Ready to activate", { exact: true })).toBeVisible();
+  await expect(page.getByText("The post is live on X and confirmed.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Activate Assignment" }).click();
+  await expect(page.getByText("active", { exact: true })).toBeVisible();
 });
 
-test("Schedule reveals custom consideration timing only when requested", async ({ page }) => {
+test("Schedule reveals a custom Assignment window only when requested", async ({ page }) => {
   await createAgent(page);
   await navigate(page, "Schedule");
   await page.getByRole("button", { name: "List", exact: true }).click();
-  await page.getByRole("button", { name: "Add intent" }).click();
+  await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
   await page.getByRole("button", { name: "Timing options" }).click();
   await expect(page.getByText("How long is this relevant?", { exact: true })).toBeVisible();
-  await expect(page.getByText("Recommended · Jenny can consider this for a few hours.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Recommended · Jenny can work within a few hours.", { exact: true })).toBeVisible();
   await page.getByRole("radio", { name: /Custom/ }).check();
-  await page.getByLabel("Consideration starts").fill("07:00");
-  await page.getByLabel("Consideration ends").fill("10:30");
+  await page.getByLabel("Assignment starts").fill("07:00");
+  await page.getByLabel("Assignment ends").fill("10:30");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
-  await page.getByLabel("What should Jenny do?").fill("Review one useful idea for the audience.");
-  await page.getByRole("button", { name: "Save standing intent" }).click();
-  await expect(page.locator(".slot-row")).toContainText("consider 07:00–10:30");
-  await expect(page.locator(".slot-row")).not.toContainText("window");
+  await page.getByLabel("What should Jenny accomplish?").fill("Review one useful idea for the audience.");
+  await page.getByRole("button", { name: "Review assignment" }).click();
+  await expect(page.getByText("07:00–10:30", { exact: true })).toBeVisible();
 });
 
 test("Activity explains current work and next attention", async ({ page }) => {
@@ -621,7 +609,7 @@ test("Activity explains current work and next attention", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "When Jenny pays attention" })).toHaveCount(0);
   await expect(page.getByLabel("Operating status").getByRole("heading", { name: "Waiting for the next meaningful event" })).toBeVisible();
   await expect(page.getByLabel("Operating status").getByRole("heading", { name: "On demand" })).toBeVisible();
-  await expect(page.getByLabel("Operating status").getByText("No automatic scan is scheduled because no observer or standing intent is connected.", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Operating status").getByText("No automatic scan is scheduled because no observer or Assignment is connected.", { exact: true })).toBeVisible();
   await page.locator(".page-heading .heading-actions").getByRole("button", { name: "Check now", exact: true }).click();
   await expect(page.getByLabel("Operating status").getByRole("heading", { name: "Waiting for a better moment" })).toBeVisible();
   await expect(page.locator(".event-title").filter({ hasText: "Pulse completed" })).toBeVisible();
@@ -675,43 +663,15 @@ test("Activity does not guess a repeated post for legacy unlinked decisions", as
   await expect(rows.first().locator(".event-context-preview")).toHaveCount(0);
 });
 
-test("Activity completes review and manual execution lifecycles", async ({ page }) => {
+test("Schedule reviews and activates delegated work", async ({ page }) => {
   await createAgent(page);
-  await navigate(page, "Settings");
-  await page.getByRole("button", { name: "Posts review", exact: true }).click();
   await navigate(page, "Schedule");
-  await page.getByRole("button", { name: "Add intent" }).click();
-  await page.getByLabel("What should Jenny do?").fill("Review one useful idea before it is sent.");
-  await page.getByRole("button", { name: "Save standing intent" }).click();
-  await page.getByRole("button", { name: "Evaluate this intent" }).click();
-  await page.waitForTimeout(150);
-  await page.reload();
-  const reviewButton = page.getByRole("button", { name: "Approve execution" });
-  await expect(reviewButton).toHaveClass(/review-cta/);
-  await expect(reviewButton).toHaveCSS("background-color", "rgb(169, 81, 44)");
-  await expect(reviewButton).toHaveCSS("color", "rgb(255, 255, 255)");
-  await expect(reviewButton).toHaveCSS("min-height", "48px");
-  await reviewButton.focus();
-  await expect(reviewButton).toBeFocused();
-  await reviewButton.click();
-  await page.getByRole("button", { name: "Execute approved action" }).click();
-  await expect(page.locator(".execution-ledger").getByRole("heading", { name: "Action completed" })).toBeVisible();
-  await expect(page.locator(".execution-ledger")).not.toContainText("x.post");
-  await expect(page.locator(".execution-ledger")).not.toContainText("execution envelope");
-
-  await navigate(page, "Settings");
-  await page.getByRole("button", { name: "Posts manual", exact: true }).click();
-  await navigate(page, "Schedule");
-  await page.getByRole("button", { name: "Add intent" }).click();
-  await page.getByLabel("What should Jenny do?").fill("Carry one useful idea to the channel manually.");
-  await page.getByRole("button", { name: "Save standing intent" }).click();
-  await page.locator(".slot-row").filter({ hasText: "Carry one useful idea to the channel manually" }).getByRole("button", { name: "Evaluate this intent" }).click();
-  await page.waitForTimeout(150);
-  await page.reload();
-  await expect(page.getByLabel("External reference", { exact: true })).toBeVisible();
-  await page.getByLabel("External reference", { exact: true }).fill("manual-post-1");
-  await page.getByRole("button", { name: "Mark posted" }).click();
-  await expect(page.locator(".execution-ledger").getByRole("heading", { name: "Action completed" })).toBeVisible();
+  await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
+  await page.getByLabel("What should Jenny accomplish?").fill("Produce one useful idea before it is sent.");
+  await page.getByRole("button", { name: "Review assignment" }).click();
+  await expect(page.getByRole("heading", { name: "Ready to activate" })).toBeVisible();
+  await page.getByRole("button", { name: "Activate Assignment" }).click();
+  await expect(page.getByText("active", { exact: true })).toBeVisible();
 });
 
 test("Presence settings are generated from channel capabilities and pause truthfully", async ({ page }) => {
@@ -1408,23 +1368,12 @@ test("Custom Channel connects a Bridge, receives Mirror events, and completes qu
   await expect(page.getByText("How are people handling memory?")).toBeVisible();
 
   await navigate(page, "Schedule");
-  await page.getByRole("button", { name: "Add intent" }).click();
-  await page.getByLabel("What should Jenny in Founders do?").fill("Share one useful memory idea with the founders.");
-  await page.getByRole("button", { name: "Save standing intent" }).click();
-  await page.getByRole("button", { name: "Evaluate this intent" }).click();
-  const stateAfterRun = await (await request.get("/api/state")).json();
-  const execution = stateAfterRun.executions[0];
-  expect(execution.status).toBe("queued");
-
-  const claimed = await request.post("/api/bridge/v1/executions/claim", { headers: { Authorization: `Bearer ${bridgeKey}` }, data: { executorId: "playwright-bridge", limit: 1 } });
-  expect(claimed.ok()).toBeTruthy();
-  const claimedPayload = await claimed.json();
-  expect(claimedPayload.executions[0].status).toBe("claimed");
-  const acknowledged = await request.post(`/api/bridge/v1/executions/${execution.id}/ack`, { headers: { Authorization: `Bearer ${bridgeKey}` }, data: { executorId: "playwright-bridge", externalRef: { type: "post", id: "comment-8821" } } });
-  expect(acknowledged.ok()).toBeTruthy();
-  await page.reload();
-  await navigate(page, "Activity");
-  await expect(page.locator(".execution-ledger").getByRole("heading", { name: "Action completed" })).toBeVisible();
+  await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
+  await page.getByLabel("What should Jenny in Founders accomplish?").fill("Share one useful memory idea with the founders.");
+  await page.getByRole("button", { name: "Review assignment" }).click();
+  await expect(page.getByText("post is available through the Presence execution envelope.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Activate Assignment" }).click();
+  await expect(page.getByText("active", { exact: true })).toBeVisible();
 
   await navigate(page, "Settings");
   await page.getByRole("button", { name: "Disconnect", exact: true }).click();

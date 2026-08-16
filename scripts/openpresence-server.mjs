@@ -5,7 +5,7 @@ import fs from "node:fs";
 
 const projectRoot = path.resolve(path.dirname(fileURLToPath(import.meta.url)), "..");
 const mode = process.argv[2] === "start" ? "start" : "dev";
-const preferredDbPath = path.join(projectRoot, "data", "openpresence-genny-restored-full-v2.db");
+const preferredDbPath = path.join(projectRoot, "data", "openpresence-genny-restored-safe.db");
 const fallbackDbPath = path.join(projectRoot, "data", "openpresence.db");
 const dbPath = process.env.OPENPRESENCE_DB_PATH || (fs.existsSync(preferredDbPath) ? preferredDbPath : fallbackDbPath);
 const port = process.env.OPENPRESENCE_PORT || "3015";

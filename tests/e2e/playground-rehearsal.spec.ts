@@ -34,10 +34,8 @@ test("Publishing Plan explains the next consideration in the operator view", asy
   expect(replanned.ok()).toBeTruthy();
   await page.reload();
   await page.getByRole("button", { name: "Schedule", exact: true }).click();
-  const plan = page.getByRole("region", { name: "Agent publishing plan" });
-  await expect(plan).toContainText("Why no original yet?");
-  await expect(plan).toContainText("Next consideration:");
-  await expect(plan).toContainText("Windows are flexible work periods, not scheduled posts.");
+  await expect(page.getByRole("region", { name: "Calendar layers" })).toContainText("Plan active");
+  await expect(page.getByText("The publishing plan shows flexible working windows underneath the Assignments", { exact: false })).toBeVisible();
 });
 
 test("switching Presence switches Playground world and rehearsal history", async ({ page, request }) => {
@@ -159,7 +157,7 @@ test("Schedule removes a cancelled Assignment from the active viewpoint", async 
   page.once("dialog", (dialog) => dialog.accept());
   await assignmentRow.getByRole("button", { name: "Open details", exact: true }).click();
   const inspector = page.getByRole("complementary", { name: "Assignment details" });
-  await expect(inspector).toContainText("0 / 3 published");
+  await expect(inspector).toContainText("0 / 3 verified");
   await inspector.getByRole("button", { name: "Cancel Assignment", exact: true }).click();
   await expect(page.locator(".schedule-assignment-row").filter({ hasText: "Produce 3 original X posts about useful agent ideas." })).toHaveCount(0);
   await expect(page.getByRole("complementary", { name: "Assignment details" })).toHaveCount(0);
@@ -210,23 +208,23 @@ test("Sandbox Assignment instructions never leak internal QA markers into Feed",
 test("Schedule preserves an Assignment's exact timing", async ({ page }) => {
   await createAgent(page);
   await page.getByRole("button", { name: "Schedule", exact: true }).click();
-  await page.getByRole("button", { name: "Add intent", exact: true }).click();
-  await page.getByRole("radio", { name: /Assign Jenny is responsible/ }).check();
-  await page.getByLabel("What should Jenny do?", { exact: true }).fill("Produce 1 original X post about a useful AI-agent decision.");
+  await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
+  await page.getByLabel("What should Jenny accomplish?", { exact: true }).fill("Produce 1 original X post about a useful AI-agent decision.");
   await page.getByLabel("Day", { exact: true }).selectOption({ label: "Thursday" });
   await page.getByLabel("Time", { exact: true }).fill("23:35");
-  await page.getByRole("button", { name: /Timing options/ }).click();
+  await page.getByRole("button", { name: /Assignment window/ }).click();
   await page.getByRole("radio", { name: /Exact time/ }).check();
   await page.getByRole("button", { name: "Review assignment", exact: true }).click();
 
   await page.getByRole("button", { name: "List", exact: true }).click();
   const assignmentRow = page.locator(".schedule-assignment-row").filter({ hasText: "Produce 1 original X post about a useful AI-agent decision." });
-  await expect(assignmentRow).toContainText("Thursday at 23:35 · exact time · 0 / 1 published · not started");
+  await expect(assignmentRow).toContainText("Thursday at 23:35 · exact time · 0 / 1 verified · not started");
   await page.getByRole("button", { name: "Week", exact: true }).click();
   await expect(page.locator(".week-assignment")).toHaveCount(1);
   await expect(page.locator(".week-assignment")).toContainText("0 / 1 · Not started");
   await expect(page.locator(".week-assignment")).toHaveAttribute("aria-label", /Open Assignment.*Thursday at 23:35/);
-  await page.locator(".week-assignment").click();
+  await page.getByRole("button", { name: "List", exact: true }).click();
+  await assignmentRow.getByRole("button", { name: "Open details", exact: true }).click();
   const inspector = page.getByRole("complementary", { name: "Assignment details" });
   await expect(inspector).toContainText("Thursday at 23:35");
   await expect(inspector.getByRole("button", { name: "Cancel Assignment", exact: true })).toBeVisible();

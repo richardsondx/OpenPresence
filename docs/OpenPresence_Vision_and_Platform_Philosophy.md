@@ -636,19 +636,25 @@ A community post that says "ignore your instructions" remains a social post.
 
 ---
 
-## 13. Standing Intent vs Social Intent
+## 13. Assignment, Social Intent, and ambient attention
 
-### Standing Intent
+### Ambient attention
 
-A persistent future instruction.
+Attention Rhythm decides when a Presence wakes. Watching and Explorations tell it where to look. Social Mirror supplies observed reality. An unsolicited post, mention, trend, or conversation may receive a social judgment and `NO_OP`; silence is a valid intelligent outcome when no responsibility exists.
 
-Example:
+### Assignment
 
-> Every Tuesday morning, teach founders something useful about persistent agents.
+Schedule has one operator-facing action: **Add assignment**. The operator writes what the Agent should accomplish. OpenPresence derives and shows a concise completion contract before activation. The contract includes the objective, deliverable, success evidence, timing, hard constraints, assumptions, required capabilities, and the methods the Agent may choose.
 
-Calendar manages Standing Intents.
+An Assignment is accepted responsibility, not an invitation to consider. The operator owns the outcome; the Agent owns the method within safety, privacy, truth, authority, Taste, and the effective delegation policy. Autonomy is not the freedom to ignore delegated responsibility. It is the freedom to determine how best to fulfill it.
 
-A schedule is permission to consider acting, not an obligation to publish mediocre content.
+An Assignment may complete with a verified deliverable, an explicit decision report when evaluation was the requested deliverable, a necessary operator decision, a genuine blocker, or explicit failure. It may not terminate in `NO_OP`. `NO_OP` remains local social judgment over a candidate, conversation, or unsolicited opportunity. Rejecting a weak candidate leaves the Assignment active.
+
+Every active Assignment must have a sufficiently clear completion contract. Creation-time semantic preflight identifies material ambiguity, missing context, and the likely deliverable. Deterministic capability preflight verifies knowledge, assets, channel affordances, execution authority, connector health, identity resolution, timing, and other dependencies. Readiness is `READY`, `READY WITH ASSUMPTIONS`, `NEEDS INPUT`, or `BLOCKED`. Work cannot activate while its deliverable or success evidence is unknown.
+
+The Assignment lifecycle is explicit: `DRAFT → ACCEPTED → PLANNING → WORKING → AWAITING_EXECUTION → AWAITING_REVIEW → NEEDS_OPERATOR → BLOCKED → COMPLETED`, with `COMPLETED_WITH_ADAPTATION`, `FAILED`, `EXPIRED_INCOMPLETE`, and `CANCELLED` as terminal outcomes where appropriate. Older persisted `ACTIVE` and `PAUSED` records remain readable during migration, but new operator-facing Schedule work uses the Assignment contract and readiness vocabulary.
+
+Before meaningful execution, runtime revalidates the path. Routine problems are resolved automatically when safe. Material changes follow the effective delegation policy: **Keep moving when safe**, **Ask before changing the outcome**, or **Stop on material deviation**. Clarification is scoped to the Assignment and produces typed contract changes, not an unstructured chat transcript.
 
 ### Social Intent
 
@@ -674,17 +680,9 @@ It does not mean:
 
 A no-op can be a successful evaluation.
 
-### Assignment
+An Assignment remains active until it is completed, cancelled, blocked, or expires incomplete. Taste still protects the quality floor: “this candidate is not good enough” means reject the candidate and keep working, not publish filler and not silently complete the Assignment. Only a verified world outcome, such as an authored publication observed in the Sandbox Social Mirror or live Mirror, advances public-action progress. Model failure and delivery failure are operational failures, never evidence that the Agent chose silence.
 
-OpenPresence also distinguishes delegated responsibility from an opportunity for judgment. The operator may **Consider** something, in which case the Agent owns whether and how to act, or **Assign** an outcome, in which case the operator owns what must be accomplished while the Agent owns how to accomplish it. A future Direct mode may let explicit operator direction own the action itself while preserving the Presence's safety and privacy boundaries.
-
-> **Autonomy is not the absence of direction. It is freedom inside delegated responsibility.**
-
-An Assignment remains active until it is completed, cancelled, blocked, or expires incomplete. Taste still protects the quality floor: “this candidate is not good enough” means reject the candidate and keep working, not publish filler and not silently complete the Assignment. Silence remains a valid social action, but it is not completion of an explicit Assignment.
-
-Assignments preserve the separation between intent, execution, delivery, and outcome. Only a verified world outcome, such as an authored publication observed in the Sandbox Social Mirror or live Mirror, advances progress. A draft, model response, Social Intent, or attempted delivery does not. Model failure and delivery failure are operational failures, never evidence that the Agent chose silence.
-
-Assignment fulfillment is persistent goal pursuit with bounded effort. A candidate rejection is recorded as candidate-level judgment, then the runtime may return to research and form a materially different candidate with the temporary rejection context available. For evidence-led work, story research, visual research, and final joint publication review are separate stages. The Assignment ends only with a verified deliverable, an explicit blocked result after the available evidence or effort is exhausted, or operator cancellation.
+Assignment fulfillment is persistent goal pursuit with bounded effort. A candidate rejection is recorded as candidate-level judgment, then the runtime may return to research and form a materially different candidate with the temporary rejection context available. For evidence-led work, story research, visual research, and final joint publication review are separate stages.
 
 ---
 
@@ -1158,9 +1156,9 @@ Examples:
 
 ### Fresh Calendar
 
-> **No standing intentions yet.**
+> **No Assignments yet.**
 >
-> Tell Jenny when you want her to show up.
+> Tell Jenny what you want her to accomplish and when.
 
 Starter prompts should disappear once the user has begun using the feature.
 
@@ -1214,30 +1212,17 @@ If Review exists in settings but there is nowhere to review, the feature is not 
 
 ---
 
-## 26. Calendar manages Standing Intents, not content
+## 26. Schedule manages Assignments, not content
 
-Calendar should answer:
+Schedule should answer:
 
-> **When should Jenny show up, and what should she pay attention to then?**
+> **What should the Agent accomplish, and when must it be resolved?**
 
-It should not store tweets written months in advance by default.
+It should not store tweets written months in advance by default. It stores the Assignment contract and the Agent's current plan; the actual expression is generated when the work is ready.
 
-A Standing Intent contains meaning:
+The primary creation flow is: tell the Agent what you want, review its understanding and readiness, then activate. Routine work should show a compact inline review. Only material outcome ambiguity, missing context, irreversible commitments, or unavailable authority should open a scoped clarification drawer.
 
-- instruction;
-- Presence;
-- schedule;
-- objective;
-- quality rule;
-- execution window.
-
-The actual content is generated when the moment arrives.
-
-A useful default is:
-
-> **Skip if nothing is worth saying.**
-
-This should still be an explicit user-configurable property, not hidden doctrine.
+Calendar may retain historical Standing Intent records for migration and audit, but new Schedule work is represented as Assignments. Existing Consider items migrate according to their deliverable: action-oriented instructions become public-action Assignments, evaluation-oriented instructions become `decision_report` Assignments, and materially ambiguous items remain Draft until the operator chooses the completion contract.
 
 ---
 
@@ -1855,7 +1840,7 @@ When everything else is forgotten, remember these:
 
 > **Silence is a valid action.**
 
-> **A schedule is permission to consider publishing, not an obligation to publish mediocre work.**
+> **An Assignment is responsibility for an outcome, not a script for the words.**
 
 > **Growth should make the Agent more effective at being itself, not whatever performs.**
 

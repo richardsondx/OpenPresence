@@ -26,6 +26,7 @@ import {
   Globe2,
   Ghost,
   Heart,
+  Info,
   LoaderCircle,
   MessageCircle,
   MessageSquare,
@@ -140,6 +141,12 @@ const formatTime = (value: string) => {
         hour: "numeric",
         minute: "2-digit",
       }).format(date);
+};
+const formatHistoryTimestamp = (value: string) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "now"
+    : `${new Intl.DateTimeFormat("en", { hour: "numeric", minute: "2-digit" }).format(date)} · ${new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric" }).format(date)}`;
 };
 const formatCountdown = (value: string | undefined, now = Date.now()) => {
   if (!value) return undefined;
@@ -1520,7 +1527,7 @@ function AgentWorkspaceShell({
             <LiveView key={`${state.presence?.id ?? "none"}-${state.presence?.channel ?? "none"}-${state.presence?.environment ?? "live"}`} state={state} mutate={mutate} pendingOperation={pendingOperation} setView={setView} />
           )}
           {view === "feed" && (
-            <PublicHistoryView state={state} setView={setView} />
+            <PublicHistoryView state={state} setView={setView} mutate={mutate} />
           )}
           {view === "schedule" && (
             <ScheduleView state={state} mutate={mutate} setView={setView} />
@@ -1542,7 +1549,6 @@ function AgentWorkspaceShell({
               mutate={mutate}
               refreshState={refreshState}
               setView={setView}
-              pendingOperation={pendingOperation}
               manageBridge={manageBridge}
               manageX={manageX}
             />
@@ -1774,7 +1780,7 @@ function LegacyAppShell({
           {view === "watching" && <WatchingView state={state} mutate={mutate} />}
           {view === "people" && <PeopleView state={state} mutate={mutate} />}
           {view === "feed" && (
-            <PublicHistoryView state={state} setView={setView} />
+            <PublicHistoryView state={state} setView={setView} mutate={mutate} />
           )}
           {view === "schedule" && (
             <ScheduleView state={state} mutate={mutate} setView={setView} />
@@ -2981,7 +2987,10 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
   const assetKinds = channelDefinition?.supportedAssetKinds ?? ["image", "video", "gif", "link"] as SocialAssetKind[];
   const selectedObject = selectedObjectId ? objects.find((item) => item.id === selectedObjectId) : undefined;
   const rehearsalAttempts = sessionId ? state.originalPostRehearsals.filter((item) => item.sessionId === sessionId).slice(0, 5) : [];
-  const sessionAssignments = state.assignments.filter((item) => (sessionId && item.sessionId === sessionId) || (item.status === "draft" && item.presenceId === presence?.id));
+  const sessionAssignments = state.assignments.filter((item) => item.environment === "sandbox" && ((sessionId && item.sessionId === sessionId) || (item.status === "draft" && item.presenceId === presence?.id)));
+  const latestLiveAssignment = [...state.assignments]
+    .filter((item) => item.environment === "live" && item.presenceId === presence?.id && item.status === "draft")
+    .sort((left, right) => new Date(right.updatedAt ?? right.createdAt).getTime() - new Date(left.updatedAt ?? left.createdAt).getTime())[0];
   const assignmentDraft = assignmentDraftId ? sessionAssignments.find((item) => item.id === assignmentDraftId) : undefined;
   const latestAssignment = [...sessionAssignments]
     .filter((item) => item.status !== "cancelled")
@@ -2998,7 +3007,11 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
     ? "Completed"
     : displayedAssignment?.status === "blocked"
       ? "Blocked"
-      : assignmentRun?.currentStage?.replaceAll("_", " ") ?? displayedAssignment?.work?.phase?.replaceAll("_", " ") ?? "Queued";
+      : displayedAssignment?.status === "draft"
+        ? "Needs review"
+        : !assignmentRun && displayedAssignment?.status === "active"
+          ? "Ready to start"
+          : assignmentRun?.currentStage?.replaceAll("_", " ") ?? displayedAssignment?.work?.phase?.replaceAll("_", " ") ?? "Queued";
   const assignmentResearch = displayedAssignmentId ? [...state.assetResearchSessions].filter((item) => item.assignmentId === displayedAssignmentId).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] : undefined;
   if (displayedAssignment?.lastOutcome?.message?.includes("No inspected candidate") && assignmentResearch?.candidates.length === 0) {
     displayedAssignment = { ...displayedAssignment, lastOutcome: { ...displayedAssignment.lastOutcome, message: "No usable visual leads were found. The bounded search ended without an inspectable candidate." } };
@@ -3033,10 +3046,6 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
   };
   const wakeOrCheck = async () => {
     if (!session) return;
-    if (presence?.status === "paused") {
-      const next = await mutate({ type: "setPresence", patch: { status: "live" } });
-      if (!next) return;
-    }
     await run({ type: "runSandboxPulse", sessionId: session.id });
   };
   const considerOriginal = async (value?: string) => {
@@ -3063,6 +3072,14 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
     setAssignmentDraftId(null);
     setAssignmentPanelDismissed(true);
     setAssignmentCancellationNotice(true);
+  };
+  const rehearseAssignment = (assignment: typeof latestLiveAssignment) => {
+    if (!assignment) return;
+    setAssignmentInstruction(assignment.instruction);
+    setAssignmentDraftId(null);
+    setAssignmentPanelDismissed(false);
+    setRehearsalMode("assign");
+    setRehearsalOpen(true);
   };
   const saveFeedback = async (attemptId: string, reaction: "fits" | "does_not_fit" | "good_silence" | "expected_action") => {
     if (!session) return;
@@ -3112,14 +3129,15 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
         </>}
       </section>}
       {assignmentCancellationNotice && <section className="assignment-cancelled-notice" role="status" aria-live="polite"><strong>Assignment cancelled</strong><span>It will not continue. Its history remains available for review.</span></section>}
+      {latestLiveAssignment && <section className="assignment-scope-notice" aria-label="Live Assignment status"><div><div className="eyebrow">Live Activity Assignment</div><h2>{cleanUserFacingAssignmentInstruction(latestLiveAssignment.instruction)}</h2><p>This Assignment is still a live draft waiting for Activity to activate it. Pausing the Presence keeps it from running live; it is not stuck. Playground is independent.</p></div><Button variant="secondary" disabled={busy} onClick={() => rehearseAssignment(latestLiveAssignment)}><FlaskConical size={14} /> Rehearse in Sandbox</Button></section>}
       {displayedAssignment && <section className="assignment-progress-panel" aria-label="Assignment progress"><div className="assignment-progress-heading"><div><div className="eyebrow">Posting Assignment</div><h2>{displayedAssignmentInstruction}</h2></div></div>{assignmentIsWorking && <aside className="assignment-live-card" role="status" aria-live="polite" aria-label={`Assignment ${assignmentPhase}. ${assignmentVerified} of ${assignmentRequired} published. ${displayedAssignment.rejectedCandidates} candidates rejected.`}><span className="assignment-progress-ring" style={{ background: `conic-gradient(#6f927d ${assignmentProgress}%, #e7eee8 0)` }}><span><strong>{assignmentVerified}/{assignmentRequired}</strong><small>published</small></span></span><span className="assignment-live-copy"><strong>{assignmentPhase}</strong><small>{displayedAssignment.rejectedCandidates} rejected · {assignmentResearch?.candidates.length ?? 0} inspected</small></span></aside>}<div className="assignment-progress-bar"><span style={{ width: `${assignmentProgress}%` }} /></div><div className="assignment-progress-meta"><strong>{assignmentVerified} / {displayedAssignment.progress.required} published</strong><span>{assignmentPhase}{assignmentIsWorking ? " · live" : displayedAssignment.status === "blocked" ? "" : ` · ${displayedAssignment.rejectedCandidates} rejected`}</span></div>{assignmentResearch && <AssignmentResearchReview research={assignmentResearch} assets={state.assets} />}{displayedAssignment.status === "blocked" && <div className="assignment-outcome" role="status" aria-live="polite"><div className="assignment-outcome-heading"><span className="assignment-outcome-label">Blocked</span><strong>No publication was counted</strong></div><p className="assignment-warning">{displayedAssignment.lastOutcome?.message ?? "The Assignment could not produce a verified publication."}</p><small>{(assignmentResearch as (typeof assignmentResearch & { outcome?: string }) | undefined)?.outcome === "discovery_empty" ? "No usable visual leads were found after one bounded reformulation. Nothing was published because this Assignment requires the visual; try again or revise that requirement." : (assignmentResearch as (typeof assignmentResearch & { outcome?: string }) | undefined)?.outcome === "inspection_rejected" ? "The downloaded candidates were inspected and rejected. Nothing was published because this Assignment requires a visual that meets the evidence standard." : "Nothing was published because the available evidence did not meet the visual requirement. Try again to begin a fresh bounded effort, or revise the Assignment if the evidence requirement is too strict."}</small></div>}<div className="assignment-progress-actions">{["active", "blocked"].includes(displayedAssignment.status) && <Button variant="secondary" disabled={busy || assignmentIsWorking} onClick={() => void runAssignment(displayedAssignment.id, displayedAssignment.status === "blocked")}><Play size={14} /> {displayedAssignment.status === "blocked" ? "Try again" : "Continue working"}</Button>}{displayedAssignment.status !== "completed" && displayedAssignment.status !== "cancelled" && <Button variant="danger" disabled={busy} onClick={() => void cancelDisplayedAssignment()}>Cancel Assignment</Button>}</div><p className="assignment-cancel-help">Need to stop this? <strong>Cancel Assignment</strong> ends it now and keeps the history.</p></section>}
       <div className="playground-grid">
           <aside className="playground-rail">
-            <section className="playground-panel"><div className="eyebrow">Starting world</div><strong>{simulation.startingStateLabel}</strong><p>Nothing here is live. Simulated history stays in this session.</p><p className="playground-handle-hint">Agent handle: <strong>{presence.handle}</strong>. Use @mentions in Chat when addressing {presence.name}.</p><div className="session-status"><span className="status-dot" /> {presence.status === "paused" ? "Paused" : "Awake"}</div></section>
+            <section className="playground-panel"><div className="eyebrow">Starting world</div><strong>{simulation.startingStateLabel}</strong><p>Nothing here is live. Simulated history stays in this session.</p><p className="playground-handle-hint">Agent handle: <strong>{presence.handle}</strong>. Use @mentions in Chat when addressing {presence.name}.</p><div className="session-status"><span className="status-dot" /> Sandbox available</div>{presence.status === "paused" && <p className="playground-muted playground-pause-note">Activity is paused. Sandbox checks and rehearsals still run here.</p>}</section>
             <section className="playground-panel"><div className="eyebrow">People in the room</div>{state.sandboxActors.filter((actor) => actor.sessionId === session.id).length ? state.sandboxActors.filter((actor) => actor.sessionId === session.id).map((actor) => <div className="playground-actor" key={actor.id}><span className="actor-avatar">{initials(actor.displayName)}</span><span><strong>{actor.displayName}</strong><small>{actor.handle ?? "Audience"}</small></span></div>) : <p className="playground-muted">Add a person below to make the first social event.</p>}</section>
             <section className="playground-panel playground-time"><div className="eyebrow"><Clock3 size={12} /> Virtual time</div><strong>{new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(session.virtualNow))}</strong><div className="time-actions"><button onClick={() => void run({ type: "advanceSandboxTime", sessionId: session.id, minutes: 15 })}>+15m</button><button onClick={() => void run({ type: "advanceSandboxTime", sessionId: session.id, minutes: 60 })}>+1h</button><button onClick={() => void run({ type: "advanceSandboxTime", sessionId: session.id, minutes: 1440 })}>Tomorrow</button></div></section>
           </aside>
-          <main className="playground-world"><div className="world-heading"><div><div className="eyebrow">{simulation.worldLabel}</div><h2>What {presence.name} can see</h2></div><Button variant="primary" disabled={busy} onClick={() => void wakeOrCheck()}><Sparkles size={14} /> {presence.status === "paused" ? `Wake ${presence.name}` : "Check now"}</Button></div>{objects.length ? <PlaygroundThreadFeed objects={objects} assets={state.assets} presenceId={presence.id} presenceName={presence.name} onSelect={setSelectedObjectId} onRemove={(objectId) => void removeSandboxObject(objectId)} /> : <div className="world-blank"><MessageSquare size={20} /><p>The simulated {channelLabel(session.channelId, state.channelDefinitions)} world is quiet.</p><small>Check now to let {state.agent?.name ?? "the Agent"} choose a first move, or add an event from the control room.</small></div>}{selectedObject && <section className="perception-panel" aria-label={`What ${presence.name} sees`}><div className="section-heading compact"><div><div className="eyebrow">Perception</div><h3>What {presence.name} sees</h3></div><div className="perception-actions"><button type="button" className="what-sees-button" disabled={busy} onClick={() => void run({ type: "inspectSandboxMedia", sessionId: session.id, objectId: selectedObject.id })}>Inspect media</button><button type="button" className="perception-close" onClick={() => setSelectedObjectId(null)}>Close</button></div></div>{selectedObject.assetRefs?.map((ref) => { const asset = state.assets.find((item) => item.id === ref.assetId); const perception = latestPerception(state.perceptions, ref.assetId); return <div className="perception-item" key={ref.assetId}><strong>{asset?.type === "link" ? asset.provenance.sourceUrl : asset?.type ?? ref.kind}</strong><dl><div><dt>Appears to mean</dt><dd>{perception?.result.interpretation ?? perception?.result.observation ?? "No perception recorded."}</dd></div><div><dt>Uncertainty</dt><dd>{perception?.result.uncertainty ?? "insufficient"}</dd></div><div><dt>Missing context</dt><dd>{perception?.result.missingContext?.join(" ") ?? "None recorded."}</dd></div></dl></div>; })}<p className="perception-boundary">Perception explains what media appears to mean. Taste decides whether it is worth acting on. {presence.name} will not infer an uninspected asset.</p></section>}</main>
+          <main className="playground-world"><div className="world-heading"><div><div className="eyebrow">{simulation.worldLabel}</div><h2>What {presence.name} can see</h2></div><Button variant="primary" disabled={busy} onClick={() => void wakeOrCheck()}><Sparkles size={14} /> Check now</Button></div>{objects.length ? <PlaygroundThreadFeed objects={objects} assets={state.assets} presenceId={presence.id} presenceName={presence.name} onSelect={setSelectedObjectId} onRemove={(objectId) => void removeSandboxObject(objectId)} /> : <div className="world-blank"><MessageSquare size={20} /><p>The simulated {channelLabel(session.channelId, state.channelDefinitions)} world is quiet.</p><small>Check now to let {state.agent?.name ?? "the Agent"} choose a first move, or add an event from the control room.</small></div>}{selectedObject && <section className="perception-panel" aria-label={`What ${presence.name} sees`}><div className="section-heading compact"><div><div className="eyebrow">Perception</div><h3>What {presence.name} sees</h3></div><div className="perception-actions"><button type="button" className="what-sees-button" disabled={busy} onClick={() => void run({ type: "inspectSandboxMedia", sessionId: session.id, objectId: selectedObject.id })}>Inspect media</button><button type="button" className="perception-close" onClick={() => setSelectedObjectId(null)}>Close</button></div></div>{selectedObject.assetRefs?.map((ref) => { const asset = state.assets.find((item) => item.id === ref.assetId); const perception = latestPerception(state.perceptions, ref.assetId); return <div className="perception-item" key={ref.assetId}><strong>{asset?.type === "link" ? asset.provenance.sourceUrl : asset?.type ?? ref.kind}</strong><dl><div><dt>Appears to mean</dt><dd>{perception?.result.interpretation ?? perception?.result.observation ?? "No perception recorded."}</dd></div><div><dt>Uncertainty</dt><dd>{perception?.result.uncertainty ?? "insufficient"}</dd></div><div><dt>Missing context</dt><dd>{perception?.result.missingContext?.join(" ") ?? "None recorded."}</dd></div></dl></div>; })}<p className="perception-boundary">Perception explains what media appears to mean. Taste decides whether it is worth acting on. {presence.name} will not infer an uninspected asset.</p></section>}</main>
           <aside className="playground-activity">
             <div className="activity-rail-heading"><div className="eyebrow">Control room</div><span className="environment-chip">{channelLabel(session.channelId, state.channelDefinitions)} · Sandbox</span></div>
             <section>
@@ -3530,6 +3548,30 @@ function ExplorationRunMonitor({
   </>;
 }
 
+function KnowledgeChoiceNotice({ role, use, useLabel = "Default use" }: { role: "reference" | "procedure" | "inherit"; use: KnowledgeUse | "inherit"; useLabel?: string }) {
+  const roleName = role === "procedure" ? "Procedure" : role === "reference" ? "Reference" : "Inherit collection";
+  const roleDescription = role === "procedure"
+    ? "task-specific source material for relevant work; it is not a reusable Skill."
+    : role === "reference"
+      ? "background facts and context the Agent can draw on."
+      : "uses the collection's role for this item."
+  const useName = use === "public" ? "Public" : use === "internal" ? "Internal" : use === "none" ? "Not available" : "Inherit collection";
+  const useDescription = use === "public"
+    ? "eligible as public evidence, subject to Presence access limits."
+    : use === "internal"
+      ? "available for internal reasoning, but excluded from public expression."
+      : use === "none"
+        ? "not available to the Presence for retrieval."
+        : "uses the collection's default availability for this item."
+  return <div className="knowledge-choice-notice" role="status" aria-live="polite" aria-atomic="true">
+    <div className="knowledge-choice-notice-heading"><Info size={14} aria-hidden="true" /><strong>What this choice means</strong></div>
+    <div className="knowledge-choice-notice-grid">
+      <div><span>Role</span><p><strong>{roleName}</strong> — {roleDescription}</p></div>
+      <div><span>{useLabel}</span><p><strong>{useName}</strong> — {useDescription}</p></div>
+    </div>
+  </div>;
+}
+
 function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceState; mutate: Mutate; refreshState: () => Promise<OpenPresenceState> }) {
   const agent = state.agent;
   const presence = state.presence;
@@ -3701,6 +3743,7 @@ function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceSta
             <label>Name<input aria-label="Collection name" value={newCollectionName} onChange={(event) => setNewCollectionName(event.target.value)} placeholder="Operating principles" autoFocus /></label>
             <label>Description<span className="form-hint">A short note helps you recognize the collection later.</span><textarea aria-label="Collection description" value={newCollectionDescription} onChange={(event) => setNewCollectionDescription(event.target.value)} rows={4} placeholder="What belongs here?" /></label>
             <div className="knowledge-form-grid"><label>Role<select value={newCollectionRole} onChange={(event) => setNewCollectionRole(event.target.value as "reference" | "procedure")}><option value="reference">Reference</option><option value="procedure">Procedure</option></select></label><label>Default use<select value={newCollectionUse} onChange={(event) => setNewCollectionUse(event.target.value as KnowledgeUse)}><option value="none">Not available</option><option value="internal">Internal</option><option value="public">Public</option></select></label></div>
+            <KnowledgeChoiceNotice role={newCollectionRole} use={newCollectionUse} />
             <div className="knowledge-form-actions"><Button type="button" variant="secondary" onClick={closeCollectionWorkspace}>Cancel</Button><Button type="submit" variant="primary" disabled={busy === "collection" || !newCollectionName.trim()}><Plus size={14} /> {busy === "collection" ? "Creating…" : "Create collection"}</Button></div>
           </form>
         </section>}
@@ -3713,6 +3756,7 @@ function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceSta
             <label>Name<input aria-label="Collection name" value={editCollectionName} onChange={(event) => setEditCollectionName(event.target.value)} /></label>
             <label>Description<textarea aria-label="Collection description" value={editCollectionDescription} onChange={(event) => setEditCollectionDescription(event.target.value)} rows={3} placeholder="What belongs here?" /></label>
             <div className="knowledge-form-grid"><label>Role<select value={editCollectionRole} onChange={(event) => setEditCollectionRole(event.target.value as "reference" | "procedure")}><option value="reference">Reference</option><option value="procedure">Procedure</option></select></label><label>Default use<select value={editCollectionUse} onChange={(event) => setEditCollectionUse(event.target.value as KnowledgeUse)}><option value="none">Not available</option><option value="internal">Internal</option><option value="public">Public</option></select></label></div>
+            <KnowledgeChoiceNotice role={editCollectionRole} use={editCollectionUse} />
           </form>
           <section className="knowledge-source-section" aria-labelledby="knowledge-items-title">
             <div className="knowledge-form-heading"><div><SectionEyebrow>Source material</SectionEyebrow><h3 id="knowledge-items-title">Items and versions</h3><p className="form-hint">Keep each source inspectable and versioned.</p></div><Button type="button" variant="secondary" onClick={() => setItemFormOpen(!itemFormOpen)}>{itemFormOpen ? <><X size={14} /> Close</> : <><Plus size={14} /> Add source</>}</Button></div>
@@ -3728,6 +3772,7 @@ function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceSta
               <div className="knowledge-form-heading"><div><SectionEyebrow>Manual ingestion</SectionEyebrow><h3>Add source material</h3></div></div>
               <div className="knowledge-form-grid"><label>Title<input aria-label="Knowledge item title" value={itemTitle} onChange={(event) => setItemTitle(event.target.value)} placeholder="Audience principles" /></label><label>Source file<input type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={(event) => void handleFile(event.target.files?.[0])} /></label></div>
               <div className="knowledge-form-grid"><label>Role<select value={itemRole} onChange={(event) => setItemRole(event.target.value as "reference" | "procedure" | "inherit")}><option value="inherit">Inherit collection</option><option value="reference">Reference</option><option value="procedure">Procedure</option></select></label><label>Use override<select value={itemUse} onChange={(event) => setItemUse(event.target.value as KnowledgeUse | "inherit")}><option value="inherit">Inherit collection</option><option value="none">Not available</option><option value="internal">Internal</option><option value="public">Public</option></select></label></div>
+              <KnowledgeChoiceNotice role={itemRole} use={itemUse} useLabel="Use override" />
               <label>Paste text or Markdown<textarea aria-label="Knowledge content" value={itemContent} onChange={(event) => setItemContent(event.target.value)} rows={7} placeholder="# Heading\n\nPaste the source material here. Headings and semantic blocks are preserved for retrieval." /></label>
               {originalFileName && <small className="form-hint">Original file preserved: {originalFileName}</small>}
               <div className="knowledge-form-actions"><Button type="button" variant="secondary" onClick={() => setItemFormOpen(false)}>Cancel</Button><Button type="submit" variant="primary" disabled={busy === "item" || !itemTitle.trim() || !itemContent.trim()}><Plus size={14} /> {busy === "item" ? "Indexing…" : "Add Knowledge item"}</Button></div>
@@ -5251,6 +5296,28 @@ const considerationSummary = (time: string, value: string) => {
   return `consider ${start}–${end}`;
 };
 
+type ScheduleLayerVisibility = { plan: boolean; intents: boolean; assignments: boolean };
+
+function publishingWindowCalendarPosition(window: PublishingPlan["windows"][number], timezone?: string) {
+  const format = (value: string) => {
+    const options: Intl.DateTimeFormatOptions = { weekday: "long", hour: "2-digit", minute: "2-digit", hourCycle: "h23", ...(timezone ? { timeZone: timezone } : {}) };
+    try {
+      const parts = new Intl.DateTimeFormat("en-US", options).formatToParts(new Date(value));
+      return {
+        day: parts.find((part) => part.type === "weekday")?.value ?? "Monday",
+        time: `${parts.find((part) => part.type === "hour")?.value ?? "08"}:${parts.find((part) => part.type === "minute")?.value ?? "00"}`,
+      };
+    } catch {
+      const date = new Date(value);
+      return { day: new Intl.DateTimeFormat("en-US", { weekday: "long" }).format(date), time: `${String(date.getHours()).padStart(2, "0")}:${String(date.getMinutes()).padStart(2, "0")}` };
+    }
+  };
+  const start = format(window.startAt);
+  const end = format(window.endAt);
+  const endMinutes = end.day === start.day ? timeToMinutes(end.time) : 24 * 60;
+  return { ...window, day: start.day, startTime: start.time, endTime: end.time, startMinutes: timeToMinutes(start.time), endMinutes };
+}
+
 type PublicHistoryFilter = "all" | "originals" | "replies" | "quote" | "repost";
 
 type MirrorHealth = { label: string; detail: string; tone: "healthy" | "warning" | "offline" | "sandbox" };
@@ -5295,9 +5362,11 @@ function publicHistoryChannelTag(item: PublicHistoryItem, definitions: ChannelDe
 function PublicHistoryView({
   state,
   setView,
+  mutate,
 }: {
   state: OpenPresenceState;
   setView: (view: View) => void;
+  mutate: Mutate;
 }) {
   const presenceId = state.activePresenceId ?? state.presence?.id ?? "";
   const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
@@ -5306,8 +5375,19 @@ function PublicHistoryView({
   const [range, setRange] = useState<"week" | "month" | "day">("week");
   const [filter, setFilter] = useState<PublicHistoryFilter>("all");
   const [selected, setSelected] = useState<PublicHistoryItem | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const [anchor, setAnchor] = useState(() => new Date());
   const allHistory = derivePublicHistory(state, presence?.id).filter((item) => publicHistoryMatchesPresence(item, presence));
+  const canSyncNativeX = Boolean(presence && presence.connectionMode !== "bridge" && presence.channel === "x" && presence.environment !== "sandbox" && state.nativeConnections.some((item) => item.presenceId === presence.id && item.kind === "x"));
+  const syncNow = async () => {
+    if (!presence || !canSyncNativeX || refreshing) return;
+    setRefreshing(true);
+    try {
+      await mutate({ type: "syncNativeX", presenceId: presence.id });
+    } finally {
+      setRefreshing(false);
+    }
+  };
   const filteredHistory = allHistory.filter((item) => matchesPublicHistoryFilter(item, filter));
   const selectedIndex = selected ? filteredHistory.findIndex((item) => item.id === selected.id) : -1;
   const counts = {
@@ -5347,6 +5427,7 @@ function PublicHistoryView({
         actionsClassName="heading-actions calendar-heading-actions"
         actions={<>
           <span className="scope-summary">{presence ? `${channelLabel(presence.channel, state.channelDefinitions)} · ${presence.name}` : "No Presence selected"}</span>
+          {canSyncNativeX && <Button variant="secondary" onClick={() => void syncNow()} disabled={refreshing}><RotateCcw size={15} /> {refreshing ? "Syncing…" : "Sync now"}</Button>}
           <Button variant="secondary" onClick={() => setView("schedule")}><Clock3 size={15} /> Schedule</Button>
         </>}
       />
@@ -5438,24 +5519,29 @@ function FeedItem({ item, state, presenceName, onSelect }: { item: PublicHistory
   const displayAt = historyDisplayAt(item);
   const originLabel = item.origin?.kind === "publishing_initiative" ? "Publishing Initiative original" : item.origin?.kind === "assignment" ? "Assignment original" : item.origin?.kind === "inbound_social" ? "Inbound conversation" : item.origin?.kind === "standing_intent" ? "Standing intention" : item.origin?.kind === "operator" ? "Operator-directed" : undefined;
   const channelTag = publicHistoryChannelTag(item, state.channelDefinitions);
-  return <button type="button" className={`feed-item feed-item-${item.kind}`} onClick={() => onSelect(item)}>
-    <span className="feed-item-header"><ChannelAvatar className="feed-avatar" avatarUrl={item.authorAvatarUrl} name={presence?.name ?? presenceName} /><span className="feed-item-identity"><strong>{presence?.name ?? presenceName}</strong><small>{presence?.handle ?? ""} · {kindLabel}</small></span><time dateTime={displayAt} title={historyTimeTitle(item)}>{formatTime(displayAt)}</time></span>
-    {item.kind === "reply" || item.kind === "comment" ? <span className="feed-item-context">Replying in a public conversation</span> : null}
-    {originLabel ? <span className="feed-item-context">{originLabel}</span> : null}
-    <span className="feed-item-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "Public expression without returned text.")}</span>
-    {assets.length > 0 && <span className="feed-item-assets">{assets.map((asset) => { const source = asset?.storage ? `/api/assets/${asset.id}` : asset?.dataUrl ?? asset?.provenance.sourceUrl; return source && (asset.type === "image" || asset.type === "gif" || asset.type === "chart") ? <span className="feed-item-asset" key={asset.id}><img src={source} alt={asset.description ?? `Published ${asset.type}`} />{asset.provenance.sourcePageUrl && <span className="feed-item-source">Source: {asset.provenance.publisher ?? asset.description ?? "Open source"}</span>}</span> : source && asset.type === "video" ? <video key={asset.id} controls src={source} aria-label="Published video" /> : <span className="social-link-asset" key={asset?.id}>{asset?.type === "link" ? asset.provenance.sourceUrl : `${asset?.type ?? "Asset"} published`}</span>; })}</span>}
-    <span className="feed-item-footer"><span>View details <ChevronRight size={13} /></span><span className="feed-item-channel-badge" aria-label={`Channel: ${channelTag}`}><Badge size={12} aria-hidden="true" />{channelTag}</span></span>
-  </button>;
+  const isDeleted = item.availability === "deleted";
+  return <article className={`feed-item-shell ${isDeleted ? "feed-item-shell-deleted" : ""}`}>
+    <button type="button" className={`feed-item feed-item-${item.kind}`} onClick={() => onSelect(item)}>
+      <span className="feed-item-header"><ChannelAvatar className="feed-avatar" avatarUrl={item.authorAvatarUrl} name={presence?.name ?? presenceName} /><span className="feed-item-identity"><strong>{presence?.name ?? presenceName}</strong><small>{presence?.handle ?? ""} · {kindLabel}</small></span>{isDeleted && <span className="feed-item-availability feed-item-availability-deleted"><Trash2 size={11} /> Deleted on X</span>}<time dateTime={displayAt} title={historyTimeTitle(item)}>{formatHistoryTimestamp(displayAt)}</time></span>
+      {item.kind === "reply" || item.kind === "comment" ? <span className="feed-item-context">Replying in a public conversation</span> : null}
+      {originLabel ? <span className="feed-item-context">{originLabel}</span> : null}
+      <span className="feed-item-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "Public expression without returned text.")}</span>
+      {assets.length > 0 && <span className="feed-item-assets">{assets.map((asset) => { const source = asset?.storage ? `/api/assets/${asset.id}` : asset?.dataUrl ?? asset?.provenance.sourceUrl; return source && (asset.type === "image" || asset.type === "gif" || asset.type === "chart") ? <span className="feed-item-asset" key={asset.id}><img src={source} alt={asset.description ?? `Published ${asset.type}`} />{asset.provenance.sourcePageUrl && <span className="feed-item-source">Source: {asset.provenance.publisher ?? asset.description ?? "Open source"}</span>}</span> : source && asset.type === "video" ? <video key={asset.id} controls src={source} aria-label="Published video" /> : <span className="social-link-asset" key={asset?.id}>{asset?.type === "link" ? asset.provenance.sourceUrl : `${asset?.type ?? "Asset"} published`}</span>; })}</span>}
+      <span className="feed-item-footer"><span>View details <ChevronRight size={13} /></span><span className="feed-item-channel-badge" aria-label={`Channel: ${channelTag}`}><Badge size={12} aria-hidden="true" />{channelTag}</span></span>
+    </button>
+    {item.environment !== "sandbox" && (item.externalUrl ? <a className={`feed-item-source-link ${isDeleted ? "feed-item-source-link-deleted" : ""}`} href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={12} /> {isDeleted ? "Open original URL · deleted on X" : "Open original post on X"}</a> : <span className="feed-item-source-unavailable">Original X URL unavailable</span>)}
+  </article>;
 }
 
 function HistoryCard({ item, state, onSelect, compact = false }: { item: PublicHistoryItem; state: OpenPresenceState; onSelect: (item: PublicHistoryItem) => void; compact?: boolean }) {
   const label = item.kind === "post" ? "POST" : item.kind.toUpperCase();
   const displayAt = historyDisplayAt(item);
   const channelTag = publicHistoryChannelTag(item, state.channelDefinitions);
+  const isDeleted = item.availability === "deleted";
   return <button type="button" className={`history-card history-card-${item.kind} ${compact ? "compact" : ""}`} onClick={() => onSelect(item)}>
-    <span className="history-card-kicker"><span className="history-card-author"><ChannelAvatar className="history-card-avatar" avatarUrl={item.authorAvatarUrl} name={state.presences.find((presence) => presence.id === item.presenceId)?.name ?? "Presence"} /><strong>{label}</strong></span><time dateTime={displayAt} title={historyTimeTitle(item)}>{formatTime(displayAt)}</time></span>
+    <span className="history-card-kicker"><span className="history-card-author"><ChannelAvatar className="history-card-avatar" avatarUrl={item.authorAvatarUrl} name={state.presences.find((presence) => presence.id === item.presenceId)?.name ?? "Presence"} /><strong>{label}</strong>{isDeleted && <span className="history-card-availability"><Trash2 size={10} /> Deleted</span>}</span><time dateTime={displayAt} title={historyTimeTitle(item)}>{formatHistoryTimestamp(displayAt)}</time></span>
     {item.text ? <span className="history-card-text">{item.text}</span> : <span className="history-card-text quiet">{item.kind === "repost" ? "Passed along publicly" : "Public expression"}</span>}
-    <span className="history-card-footer"><span className="history-card-proof">{item.environment === "sandbox" ? "Verified in Sandbox Mirror · simulated only" : item.externalUrl ? "Verified on X" : "Verified in Social Mirror"}</span><span className="history-card-channel-badge" aria-label={`Channel: ${channelTag}`}><Badge size={11} aria-hidden="true" />{channelTag}</span></span>
+    <span className="history-card-footer"><span className="history-card-proof">{isDeleted ? "Deleted on X · retained in Social Mirror" : item.environment === "sandbox" ? "Verified in Sandbox Mirror · simulated only" : item.externalUrl ? "Verified on X" : "Verified in Social Mirror"}</span><span className="history-card-channel-badge" aria-label={`Channel: ${channelTag}`}><Badge size={11} aria-hidden="true" />{channelTag}</span></span>
   </button>;
 }
 
@@ -5500,6 +5586,7 @@ function PublicHistoryInspector({ item, state, index, total, onNavigate, onClose
   const kindLabel = item.kind === "post" ? "Post" : item.kind[0].toUpperCase() + item.kind.slice(1);
   const position = Math.max(0, index) + 1;
   const displayAt = historyDisplayAt(item);
+  const isDeleted = item.availability === "deleted";
   const originLabel = item.origin?.kind === "publishing_initiative" ? `Publishing Initiative · revision ${item.origin.planRevision ?? "current"}` : item.origin?.kind === "assignment" ? "Assignment output" : item.origin?.kind === "inbound_social" ? "Inbound conversation" : item.origin?.kind === "standing_intent" ? "Standing intention" : item.origin?.kind === "operator" ? "Operator-directed" : "Origin not recorded";
   const copyPostId = async () => {
     try {
@@ -5510,7 +5597,7 @@ function PublicHistoryInspector({ item, state, index, total, onNavigate, onClose
       setPostIdCopied(false);
     }
   };
-  return <aside className="history-inspector" aria-label={`${kindLabel} details`}><div className="history-inspector-header"><div><SectionEyebrow>{kindLabel} details</SectionEyebrow><h2>{kindLabel}</h2><small title={historyTimeTitle(item)}>{formatTime(displayAt)}{item.environment === "sandbox" ? " · Sandbox observed" : ""}</small></div><button type="button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button></div><div className="history-inspector-navigation" aria-label="Browse public posts"><span aria-live="polite"><strong>Post {position}</strong> of {total}</span><div><button type="button" aria-label="Previous post" disabled={index <= 0} onClick={() => onNavigate(-1)}><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /></button><button type="button" aria-label="Next post" disabled={index < 0 || index >= total - 1} onClick={() => onNavigate(1)}><ChevronRight size={14} /></button></div></div><div className="history-inspector-identity"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span><strong>{presence?.name ?? "Presence"}</strong><small>{presence?.handle ?? ""}</small></span></div>{parent?.content?.text && <div className="history-parent-context"><SectionEyebrow>Replying to</SectionEyebrow><p>{parent.content.text}</p><small>{parent.author?.displayName ?? "Public conversation"}</small></div>}<p className="history-inspector-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "No text was returned by the channel.")}</p>{itemAssets.length > 0 && <section className="history-provenance"><SectionEyebrow>Attached sources</SectionEyebrow>{itemAssets.map((asset) => <div key={asset.id}><a className="history-external-link" href={asset.provenance.sourcePageUrl ?? asset.provenance.sourceUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {asset.provenance.publisher ?? asset.description ?? "Open source"}</a><small>Origin: {asset.provenance.origin}. Source identity: {asset.provenance.sourceIdentityStatus ?? "unknown"}. Rights: {asset.rights?.status ?? "unknown"}.</small></div>)}</section>}<div className="history-proof"><Check size={14} /><span>Observed in Social Mirror · {item.externalRef.type}</span><button type="button" className="history-copy-id" aria-label="Copy internal post ID" title="Copy internal post ID" onClick={() => void copyPostId()}><Copy size={12} /> {postIdCopied ? "Copied" : "Copy ID"}</button></div><section className="history-provenance"><SectionEyebrow>Provenance</SectionEyebrow><p>{originLabel}</p><p>{item.executionId ? "Published by OpenPresence and verified in the Social Mirror." : "Observed on the connected channel and attributed to this Presence."}</p>{item.origin?.planWindowId && <small>Plan window: {item.origin.planWindowId}</small>}{assignment && <p>Assignment output · {assignment.progress.verified} / {assignment.progress.required} verified publications</p>}{mirrorObject?.environment === "sandbox" && <small>Simulated social reality · this expression has no live destination. Sandbox world time: {formatTime(item.occurredAt)}.</small>}</section><section className="history-outcome"><SectionEyebrow>Outcome</SectionEyebrow>{metrics.length ? <div className="history-outcome-grid">{metrics.map(([key, value]) => <div key={key}><strong>{value}</strong><small>{key.replaceAll("_", " ")}</small></div>)}</div> : <p>No channel outcome evidence is attached to this expression yet.</p>}</section><div className="history-inspector-actions">{item.externalUrl ? <a className="history-external-link" href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> Open on X</a> : item.environment === "sandbox" && item.channel === "x" ? <p className="history-sandbox-note">Sandbox rehearsal only. This expression has no live X URL.</p> : null}<Button variant="secondary" onClick={onActivity}><Activity size={14} /> View in Activity</Button></div></aside>;
+  return <aside className="history-inspector" aria-label={`${kindLabel} details`}><div className="history-inspector-header"><div><SectionEyebrow>{kindLabel} details</SectionEyebrow><h2>{kindLabel}</h2><small title={historyTimeTitle(item)}>{formatHistoryTimestamp(displayAt)}{item.environment === "sandbox" ? " · Sandbox observed" : ""}</small></div><button type="button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button></div>{isDeleted && <div className="history-availability history-availability-deleted"><Trash2 size={14} /><span><strong>Deleted on X</strong><small>The original is retained here as verified history, but X no longer serves it.</small></span></div>}<div className="history-inspector-navigation" aria-label="Browse public posts"><span aria-live="polite"><strong>Post {position}</strong> of {total}</span><div><button type="button" aria-label="Previous post" disabled={index <= 0} onClick={() => onNavigate(-1)}><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /></button><button type="button" aria-label="Next post" disabled={index < 0 || index >= total - 1} onClick={() => onNavigate(1)}><ChevronRight size={14} /></button></div></div><div className="history-inspector-identity"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span><strong>{presence?.name ?? "Presence"}</strong><small>{presence?.handle ?? ""}</small></span></div>{parent?.content?.text && <div className="history-parent-context"><SectionEyebrow>Replying to</SectionEyebrow><p>{parent.content.text}</p><small>{parent.author?.displayName ?? "Public conversation"}</small></div>}<p className="history-inspector-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "No text was returned by the channel.")}</p>{itemAssets.length > 0 && <section className="history-provenance"><SectionEyebrow>Attached sources</SectionEyebrow>{itemAssets.map((asset) => <div key={asset.id}><a className="history-external-link" href={asset.provenance.sourcePageUrl ?? asset.provenance.sourceUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {asset.provenance.publisher ?? asset.description ?? "Open source"}</a><small>Origin: {asset.provenance.origin}. Source identity: {asset.provenance.sourceIdentityStatus ?? "unknown"}. Rights: {asset.rights?.status ?? "unknown"}.</small></div>)}</section>}<div className="history-proof">{isDeleted ? <Trash2 size={14} /> : <Check size={14} />}<span>{isDeleted ? "Deleted on X · retained in Social Mirror" : `Observed in Social Mirror · ${item.externalRef.type}`}</span><button type="button" className="history-copy-id" aria-label="Copy internal post ID" title="Copy internal post ID" onClick={() => void copyPostId()}><Copy size={12} /> {postIdCopied ? "Copied" : "Copy ID"}</button></div><section className="history-provenance"><SectionEyebrow>Provenance</SectionEyebrow><p>{originLabel}</p><p>{item.executionId ? "Published by OpenPresence and verified in the Social Mirror." : "Observed on the connected channel and attributed to this Presence."}</p>{item.origin?.planWindowId && <small>Plan window: {item.origin.planWindowId}</small>}{assignment && <p>Assignment output · {assignment.progress.verified} / {assignment.progress.required} verified publications</p>}{mirrorObject?.environment === "sandbox" && <small>Simulated social reality · this expression has no live destination. Sandbox world time: {formatTime(item.occurredAt)}.</small>}</section><section className="history-outcome"><SectionEyebrow>Outcome</SectionEyebrow>{metrics.length ? <div className="history-outcome-grid">{metrics.map(([key, value]) => <div key={key}><strong>{value}</strong><small>{key.replaceAll("_", " ")}</small></div>)}</div> : <p>No channel outcome evidence is attached to this expression yet.</p>}</section><div className="history-inspector-actions">{item.externalUrl ? <a className="history-external-link" href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {isDeleted ? "Open original URL · deleted on X" : "Open original on X"}</a> : item.environment === "sandbox" && item.channel === "x" ? <p className="history-sandbox-note">Sandbox rehearsal only. This expression has no live X URL.</p> : item.channel === "x" ? <p className="history-sandbox-note">Original X URL unavailable from the connected account.</p> : null}<Button variant="secondary" onClick={onActivity}><Activity size={14} /> View in Activity</Button></div></aside>;
 }
 
 function publishingWindowLabel(window: PublishingPlan["windows"][number]) {
@@ -5547,6 +5634,48 @@ function PublishingPlanCard({ plan, presenceName, mutate, setView, compact = fal
   </section>;
 }
 
+function ScheduleLayerToolbar({
+  plan,
+  presenceName,
+  layers,
+  onToggle,
+  onReset,
+  mutate,
+}: {
+  plan?: PublishingPlan;
+  presenceName: string;
+  layers: ScheduleLayerVisibility;
+  onToggle: (layer: keyof ScheduleLayerVisibility) => void;
+  onReset: () => void;
+  mutate: Mutate;
+}) {
+  return (
+    <section className="schedule-layer-toolbar" aria-label="Calendar layers">
+      <div className="schedule-layer-intro">
+        <SectionEyebrow>Calendar layers</SectionEyebrow>
+        <p>Compare {presenceName}&apos;s flexible publishing plan with Assignments and any older calendar records preserved for migration history.</p>
+      </div>
+      <div className="schedule-layer-controls">
+        {(["plan", "intents", "assignments"] as const).map((layer) => {
+          const labels = { plan: "Publishing plan", intents: "Legacy entries", assignments: "Assignments" };
+          return <label className={`schedule-layer-toggle schedule-layer-toggle-${layer} ${layers[layer] ? "selected" : ""} ${layer === "plan" && !plan ? "unavailable" : ""}`} key={layer}>
+            <input type="checkbox" checked={layers[layer]} disabled={layer === "plan" && !plan} onChange={() => onToggle(layer)} />
+            <span className="schedule-layer-mark" aria-hidden="true" />
+            <span>{labels[layer]}</span>
+          </label>;
+        })}
+      </div>
+      <div className="schedule-layer-actions">
+        {plan ? <>
+          <span className="schedule-plan-status">Plan {plan.status === "active" ? "active" : plan.status}</span>
+          <Button type="button" variant="ghost" onClick={() => void mutate({ type: "replanPublishing", presenceId: plan.presenceId })}>Replan</Button>
+        </> : <Button type="button" variant="ghost" onClick={() => void mutate({ type: "replanPublishing" })}>Create plan</Button>}
+        <Button type="button" variant="ghost" onClick={onReset}>Show all</Button>
+      </div>
+    </section>
+  );
+}
+
 function ScheduleView({
   state,
   mutate,
@@ -5561,14 +5690,14 @@ function ScheduleView({
   const [day, setDay] = useState("Tuesday");
   const [time, setTime] = useState("08:00");
   const [objective, setObjective] = useState("audience_growth");
-  const [responsibility, setResponsibility] = useState<"consider" | "assign">("consider");
   const [executionWindow, setExecutionWindow] = useState("08:00–11:00");
   const [timingMode, setTimingMode] = useState<TimingMode>("flexible");
   const [timingOptionsOpen, setTimingOptionsOpen] = useState(false);
   const [considerationStart, setConsiderationStart] = useState("08:00");
   const [considerationEnd, setConsiderationEnd] = useState("11:00");
-  const [editingSlot, setEditingSlot] = useState<CalendarSlot | null>(null);
   const [viewMode, setViewMode] = useState<"list" | "week">("week");
+  const [compactSchedule, setCompactSchedule] = useState(true);
+  const [calendarLayers, setCalendarLayers] = useState<ScheduleLayerVisibility>({ plan: true, intents: true, assignments: true });
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null);
   const presenceId = state.activePresenceId ?? state.presence?.id ?? "";
   const selectedPresence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
@@ -5576,11 +5705,9 @@ function ScheduleView({
   const publishingPlan = derivePublishingPlanProjection(state, selectedPresence?.id);
   const resetForm = () => {
     setInstruction("");
-    setEditingSlot(null);
     setDay("Tuesday");
     setTime("08:00");
     setObjective("audience_growth");
-    setResponsibility("consider");
     setExecutionWindow("08:00–11:00");
     setTimingMode("flexible");
     setTimingOptionsOpen(false);
@@ -5611,30 +5738,19 @@ function ScheduleView({
   };
   const add = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (responsibility === "assign") {
-      const next = await mutate({ type: "createAssignment", instruction, presenceId, environment: selectedPresence?.connectionMode === "sandbox" ? "sandbox" : "live", schedule: { day, time, executionWindow } });
-      if (next) { resetForm(); setShowForm(false); }
-      return;
-    }
-    const next = await mutate({
-      type: editingSlot ? "editSlot" : "addSlot",
-      ...(editingSlot ? { id: editingSlot.id } : { presenceId }),
-      instruction,
-      day,
-      time,
-      objective,
-      executionWindow,
-    });
-    if (next) {
+    const next = await mutate({ type: "createAssignment", instruction, presenceId, environment: selectedPresence?.connectionMode === "sandbox" ? "sandbox" : "live", schedule: { day, time, executionWindow } });
+    const created = next?.assignments.find((item) => item.instruction === instruction.trim() && item.presenceId === presenceId);
+    if (next && created) {
       resetForm();
       setShowForm(false);
+      setSelectedAssignmentId(created.id);
     }
   };
-  const visibleSlots = state.calendar.filter((slot) => slot.presence === presenceId);
+  const visibleSlots = state.calendar.filter((slot) => slot.presence === presenceId && !slot.assignmentId);
   const visibleAssignments = state.assignments.filter((item) => item.presenceId === presenceId && item.status !== "cancelled");
+  const toggleCalendarLayer = (layer: keyof ScheduleLayerVisibility) => setCalendarLayers((current) => ({ ...current, [layer]: !current[layer] }));
   const beginEdit = (slot: CalendarSlot) => {
     const { start, end } = splitConsiderationWindow(slot.executionWindow, slot.time);
-    setEditingSlot(slot);
     setInstruction(slot.instruction);
     setDay(slot.day);
     setTime(slot.time);
@@ -5665,15 +5781,18 @@ function ScheduleView({
   };
   const openAssignment = (assignment: Assignment) => setSelectedAssignmentId(assignment.id);
   const selectedAssignment = visibleAssignments.find((assignment) => assignment.id === selectedAssignmentId) ?? null;
+  const activateAssignment = async (assignment: Assignment) => {
+    const next = await mutate({ type: "activateAssignment", id: assignment.id });
+    if (next) setSelectedAssignmentId(assignment.id);
+  };
   return (
     <div className="page">
       <PageHeader
         eyebrow="Future attention"
         title="Schedule"
-        description={<>Give {presenceName} time-bound permission to notice, decide, and work toward delegated outcomes.</>}
+        description={<>Tell {presenceName} what to accomplish. Genny will show how it understood the outcome and whether the Presence is ready before activation.</>}
         actionsClassName="heading-actions calendar-heading-actions"
         actions={<>
-          <span className="scope-summary">Planning for {presenceName}</span>
           <div className="calendar-view-toggle" role="group" aria-label="Calendar view mode">
             <button type="button" aria-pressed={viewMode === "list"} className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}>List</button>
             <button type="button" aria-pressed={viewMode === "week"} className={viewMode === "week" ? "active" : ""} onClick={() => setViewMode("week")}>Week</button>
@@ -5683,17 +5802,17 @@ function ScheduleView({
           </Button>
           <Button variant="primary" onClick={() => { setShowForm(!showForm); if (showForm) resetForm(); }}>
             {showForm ? <X size={15} /> : <Plus size={15} />}{" "}
-            {showForm ? "Close" : "Add intent"}
+            {showForm ? "Close" : "Add assignment"}
           </Button>
         </>}
       />
-      <PublishingPlanCard plan={publishingPlan} presenceName={presenceName} mutate={mutate} setView={setView} />
+      {viewMode === "week" && <ScheduleLayerToolbar plan={publishingPlan} presenceName={presenceName} layers={calendarLayers} onToggle={toggleCalendarLayer} onReset={() => setCalendarLayers({ plan: true, intents: true, assignments: true })} mutate={mutate} />}
       {showForm && (
         <form className="add-slot-form" onSubmit={add}>
           <label className="instruction-field">
-            {responsibility === "assign" ? "Assignment" : "Standing instruction"}
+            What should {presenceName} accomplish?
             <textarea
-              aria-label={`What should ${presenceName} do?`}
+              aria-label={`What should ${presenceName} accomplish?`}
               value={instruction}
               onChange={(event) => setInstruction(event.target.value)}
               placeholder="Teach the audience one useful thing about persistent agents."
@@ -5701,13 +5820,8 @@ function ScheduleView({
               required
             />
           </label>
-          <fieldset className="schedule-responsibility">
-            <legend>Responsibility</legend>
-            <label className={responsibility === "consider" ? "selected" : ""}><input type="radio" name="schedule-responsibility" checked={responsibility === "consider"} onChange={() => setResponsibility("consider")} /><span><strong>Consider</strong><small>{presenceName} may reasonably choose not to act.</small></span></label>
-            <label className={responsibility === "assign" ? "selected" : ""}><input type="radio" name="schedule-responsibility" checked={responsibility === "assign"} onChange={() => setResponsibility("assign")} /><span><strong>Assign</strong><small>{presenceName} is responsible for completing the outcome.</small></span></label>
-          </fieldset>
           <div className="when-field">
-            <span className="schedule-field-label">When</span>
+              <span className="schedule-field-label">Timing</span>
             <div className="when-field-controls">
               <label>
                 Day
@@ -5756,37 +5870,37 @@ function ScheduleView({
               onClick={() => setTimingOptionsOpen((open) => !open)}
             >
               <span>
-                <strong>Timing options</strong>
+                  <strong>Assignment window</strong>
                 <small>{timingMode === "flexible" ? "Flexible · a few hours" : timingMode === "exact" ? `Exact · ${time}` : `Custom · ${considerationStart}–${considerationEnd}`}</small>
               </span>
               <ChevronDown size={15} className={timingOptionsOpen ? "rotated" : ""} />
             </button>
             {timingOptionsOpen && (
               <fieldset className="timing-panel">
-                <legend>How long is this relevant?</legend>
+                  <legend>When must this be resolved?</legend>
                 <label className={`timing-choice ${timingMode === "flexible" ? "selected" : ""}`}>
                   <input type="radio" name="timing-mode" checked={timingMode === "flexible"} onChange={() => chooseTimingMode("flexible")} />
-                  <span><strong>Flexible</strong><small>Recommended · {presenceName} can consider this for a few hours.</small></span>
+                  <span><strong>Flexible</strong><small>Recommended · {presenceName} can work within a few hours.</small></span>
                 </label>
                 <label className={`timing-choice ${timingMode === "exact" ? "selected" : ""}`}>
                   <input type="radio" name="timing-mode" checked={timingMode === "exact"} onChange={() => chooseTimingMode("exact")} />
-                  <span><strong>Exact time</strong><small>Consider it at the scheduled time.</small></span>
+                  <span><strong>Exact time</strong><small>Start the Assignment at the scheduled time.</small></span>
                 </label>
                 <label className={`timing-choice ${timingMode === "custom" ? "selected" : ""}`}>
                   <input type="radio" name="timing-mode" checked={timingMode === "custom"} onChange={() => chooseTimingMode("custom")} />
-                  <span><strong>Custom</strong><small>Consider it between these times.</small></span>
+                  <span><strong>Custom</strong><small>Work on it within this window.</small></span>
                 </label>
                 {timingMode === "custom" && (
                   <div className="timing-custom-range">
-                    <label>From<input aria-label="Consideration starts" type="time" value={considerationStart} onChange={(event) => { setConsiderationStart(event.target.value); setExecutionWindow(`${event.target.value}–${considerationEnd}`); }} /></label>
-                    <label>Until<input aria-label="Consideration ends" type="time" value={considerationEnd} onChange={(event) => { setConsiderationEnd(event.target.value); setExecutionWindow(`${considerationStart}–${event.target.value}`); }} /></label>
+                    <label>From<input aria-label="Assignment starts" type="time" value={considerationStart} onChange={(event) => { setConsiderationStart(event.target.value); setExecutionWindow(`${event.target.value}–${considerationEnd}`); }} /></label>
+                    <label>Until<input aria-label="Assignment ends" type="time" value={considerationEnd} onChange={(event) => { setConsiderationEnd(event.target.value); setExecutionWindow(`${considerationStart}–${event.target.value}`); }} /></label>
                   </div>
                 )}
               </fieldset>
             )}
           </div>
           <Button type="submit" variant="secondary">
-            <Check size={14} /> {responsibility === "assign" ? "Review assignment" : editingSlot ? "Save changes" : "Save standing intent"}
+              <Check size={14} /> Review assignment
           </Button>
         </form>
       )}
@@ -5802,25 +5916,33 @@ function ScheduleView({
           <p className="assignment-inspector-instruction">{cleanUserFacingAssignmentInstruction(selectedAssignment.instruction)}</p>
           <div className="assignment-inspector-meta">
             <div><span>Window</span><strong>{selectedAssignment.schedule ? `${selectedAssignment.schedule.day} at ${selectedAssignment.schedule.time}` : "Unscheduled"}</strong><small>{selectedAssignment.schedule?.executionWindow ?? "Ready to start when you choose."}</small></div>
-            <div><span>Progress</span><strong>{selectedAssignment.progress.verified} / {selectedAssignment.progress.required} published</strong><small>{selectedAssignment.status === "draft" ? "Not started" : `${selectedAssignment.status.replaceAll("_", " ")} · ${selectedAssignment.rejectedCandidates} rejected`}</small></div>
+            <div><span>Status</span><strong>{selectedAssignment.status === "draft" ? "Review before activation" : selectedAssignment.status.replaceAll("_", " ")}</strong><small>{selectedAssignment.progress.verified} / {selectedAssignment.progress.required} verified · {selectedAssignment.rejectedCandidates} rejected</small></div>
           </div>
-          <p className="assignment-inspector-note">The outcome is delegated; {presenceName} still chooses the approach and may reject weak candidates. A rejection keeps the Assignment working. Only a verified deliverable, a bounded blocked result, or operator cancellation ends it.</p>
+          {selectedAssignment.preflight && <section className={`assignment-preflight assignment-preflight-${selectedAssignment.preflight.status}`} aria-label="Assignment readiness review">
+            <div className="assignment-preflight-header"><div><SectionEyebrow>Agent readiness review</SectionEyebrow><h3>{selectedAssignment.preflight.status === "ready" ? "Ready to activate" : selectedAssignment.preflight.status === "ready_with_assumptions" ? "Ready with assumptions" : selectedAssignment.preflight.status === "needs_input" ? "Needs input before activation" : "Blocked before activation"}</h3></div><span className="assignment-preflight-status">{selectedAssignment.preflight.status.replaceAll("_", " ")}</span></div>
+            <p>{selectedAssignment.preflight.semanticSummary}</p>
+            {selectedAssignment.preflight.contract && <div className="assignment-contract"><div><span>Outcome</span><strong>{selectedAssignment.preflight.contract.deliverable}</strong></div><div><span>Done when</span><strong>{selectedAssignment.preflight.contract.successEvidence}</strong></div><div><span>Genny decides</span><small>{selectedAssignment.preflight.contract.agentDecides.join(" · ")}</small></div>{selectedAssignment.preflight.contract.assumptions.length > 0 && <div><span>Assumptions</span><small>{selectedAssignment.preflight.contract.assumptions.join(" ")}</small></div>}</div>}
+            <div className="assignment-readiness-checks">{selectedAssignment.preflight.checks.map((check) => <div key={check.label} className={`assignment-readiness-check assignment-readiness-${check.status}`}><span aria-hidden="true">{check.status === "pass" ? "✓" : check.status === "warning" ? "!" : "×"}</span><div><strong>{check.label}</strong><small>{check.detail}</small></div></div>)}</div>
+            {selectedAssignment.preflight.issues.length > 0 && <div className="assignment-preflight-issues"><strong>Before activation</strong><ul>{selectedAssignment.preflight.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul></div>}
+          </section>}
+          <p className="assignment-inspector-note">The outcome is delegated; {presenceName} chooses the approach and may reject weak candidates. A rejection keeps the Assignment working. Only a verified deliverable, a bounded blocked result, or operator cancellation ends it.</p>
           <div className="assignment-inspector-actions">
-            {selectedAssignment.status !== "completed" && <Button variant="secondary" onClick={() => void runAssignmentInPlayground(selectedAssignment)}>{selectedAssignment.status === "blocked" ? "Retry in Playground" : "Run in Playground"}</Button>}
+            {selectedAssignment.status === "draft" && selectedAssignment.preflight && ["ready", "ready_with_assumptions"].includes(selectedAssignment.preflight.status) && <Button variant="primary" onClick={() => void activateAssignment(selectedAssignment)}>Activate Assignment</Button>}
+            {selectedAssignment.status !== "completed" && selectedAssignment.status !== "cancelled" && <Button variant="secondary" onClick={() => void runAssignmentInPlayground(selectedAssignment)}>{selectedAssignment.status === "blocked" ? "Retry in Playground" : "Run in Playground"}</Button>}
             {selectedAssignment.status !== "completed" && <Button variant="danger" onClick={() => void cancelAssignment(selectedAssignment)}>Cancel Assignment</Button>}
           </div>
         </aside>
       )}
-      {visibleAssignments.length > 0 && viewMode === "list" && <section className="schedule-assignment-list" aria-label="Assignments"><div className="section-heading"><div><SectionEyebrow>Delegated responsibility</SectionEyebrow><h2>Assignments</h2><p className="muted">Assignments delegate an outcome to work toward. Open one to review its window and progress, run a Sandbox rehearsal, or cancel it. A rejected candidate is part of the work history, not a completed Assignment.</p></div></div>{visibleAssignments.map((assignment) => { const timing = assignment.schedule ? `${assignment.schedule.day} at ${assignment.schedule.time} · ${assignment.schedule.executionWindow === `${assignment.schedule.time}–${assignment.schedule.time}` ? "exact time" : assignment.schedule.executionWindow}` : "Unscheduled · ready to start"; const status = assignment.status === "draft" ? "not started" : assignment.status.replaceAll("_", " "); return <article className="schedule-assignment-row" key={assignment.id}><div><strong>{cleanUserFacingAssignmentInstruction(assignment.instruction)}</strong><small>{timing} · {assignment.progress.verified} / {assignment.progress.required} published · {status} · {assignment.rejectedCandidates} rejected</small></div><div className="schedule-assignment-actions"><Button variant="secondary" onClick={() => openAssignment(assignment)}>Open details</Button></div></article>; })}</section>}
+      {visibleAssignments.length > 0 && viewMode === "list" && <section className="schedule-assignment-list" aria-label="Assignments"><div className="section-heading"><div><SectionEyebrow>Delegated responsibility</SectionEyebrow><h2>Assignments</h2><p className="muted">Assignments delegate an outcome to work toward. Open one to review its window and progress, run a Sandbox rehearsal, or cancel it. A rejected candidate is part of the work history, not a completed Assignment.</p></div></div>{visibleAssignments.map((assignment) => { const timing = assignment.schedule ? `${assignment.schedule.day} at ${assignment.schedule.time} · ${assignment.schedule.executionWindow === `${assignment.schedule.time}–${assignment.schedule.time}` ? "exact time" : assignment.schedule.executionWindow}` : "Unscheduled · ready to start"; const status = assignment.status === "draft" ? "not started" : assignment.status.replaceAll("_", " "); return <article className="schedule-assignment-row" key={assignment.id}><div><strong>{cleanUserFacingAssignmentInstruction(assignment.instruction)}</strong><small>{timing} · {assignment.progress.verified} / {assignment.progress.required} verified · {status} · {assignment.rejectedCandidates} rejected</small></div><div className="schedule-assignment-actions"><Button variant="secondary" onClick={() => openAssignment(assignment)}>Open details</Button></div></article>; })}</section>}
       {viewMode === "week" ? (
-        <WeekCalendar slots={visibleSlots} assignments={visibleAssignments} state={state} presenceName={presenceName} onEdit={beginEdit} onAssignment={openAssignment} onAdd={() => setShowForm(true)} />
+        <WeekCalendar slots={visibleSlots} assignments={visibleAssignments} publishingPlan={publishingPlan} layers={calendarLayers} compact={compactSchedule} onToggleCompact={() => setCompactSchedule((current) => !current)} state={state} presenceName={presenceName} onEdit={beginEdit} onAssignment={openAssignment} onAdd={() => setShowForm(true)} onResetLayers={() => setCalendarLayers({ plan: true, intents: true, assignments: true })} />
       ) : (
       <div className="calendar-layout">
         <section>
           <div className="section-heading">
             <div>
             <SectionEyebrow>Future attention</SectionEyebrow>
-          <h2>Standing intentions</h2>
+          <h2>Legacy calendar entries</h2>
             </div>
             <span className="quiet-label">
               {visibleSlots.filter((slot) => slot.enabled).length} active
@@ -5828,11 +5950,11 @@ function ScheduleView({
           </div>
           {visibleSlots.length === 0 ? (
             <EmptyState
-              title="No standing intentions"
-              body={`A quiet calendar is fine. ${presenceName} can still observe and respond through its normal operating rhythm; standing intentions are explicit scheduled considerations.`}
+              title="No legacy calendar entries"
+              body={`New scheduled work appears as an Assignment after its completion contract is reviewed. ${presenceName} can still notice unsolicited opportunities through its normal Attention Rhythm.`}
               action={
                 <Button onClick={() => setShowForm(true)} variant="secondary">
-                  <Plus size={14} /> Add first intent
+                  <Plus size={14} /> Add assignment
                 </Button>
               }
             />
@@ -5851,11 +5973,10 @@ function ScheduleView({
           )}
         </section>
         <aside className="calendar-note compact-note">
-          <SectionEyebrow>Standing intent</SectionEyebrow>
+          <SectionEyebrow>Assignment model</SectionEyebrow>
           <h3>Nothing is written months in advance.</h3>
           <p>
-            At run time, {presenceName} can publish, draft, or choose{" "}
-            <strong>NO_OP</strong>.
+            At run time, {presenceName} chooses the method, adapts, escalates, or reports a blocker. <strong>NO_OP</strong> remains local judgment over unsolicited opportunities, not Assignment completion.
           </p>
         </aside>
       </div>
@@ -5867,40 +5988,130 @@ function ScheduleView({
 function WeekCalendar({
   slots,
   assignments,
+  publishingPlan,
+  layers,
+  compact,
+  onToggleCompact,
   state,
   presenceName,
   onEdit,
   onAssignment,
   onAdd,
+  onResetLayers,
 }: {
   slots: CalendarSlot[];
   assignments: Assignment[];
+  publishingPlan?: PublishingPlan;
+  layers: ScheduleLayerVisibility;
+  compact: boolean;
+  onToggleCompact: () => void;
   state: OpenPresenceState;
   presenceName: string;
   onEdit: (slot: CalendarSlot) => void;
   onAssignment: (assignment: Assignment) => void;
   onAdd: () => void;
+  onResetLayers: () => void;
 }) {
   const scheduledSlots = slots.filter((slot) => slot.enabled);
   const scheduledAssignments = assignments.filter((assignment) => assignment.schedule && assignment.status !== "cancelled");
+  const scheduledPlanWindows = (publishingPlan?.windows ?? [])
+    .filter((window) => !["completed", "missed", "superseded"].includes(window.status))
+    .map((window) => publishingWindowCalendarPosition(window, publishingPlan?.timezone))
+    .filter((window) => calendarWeekDays.includes(window.day) && window.startMinutes < 24 * 60);
+  const dayPlanWindows = new Map(calendarWeekDays.map((day) => [day, scheduledPlanWindows.filter((window) => window.day === day)]));
   const daySlots = new Map(calendarWeekDays.map((day) => [day, scheduledSlots.filter((slot) => slot.day === day)]));
   const dayAssignments = new Map(calendarWeekDays.map((day) => [day, scheduledAssignments.filter((assignment) => assignment.schedule?.day === day)]));
   const gridHeight = calendarHours.length * 64;
-  const hasItems = scheduledSlots.length > 0 || scheduledAssignments.length > 0;
+  const hasAnyItems = scheduledPlanWindows.length > 0 || scheduledSlots.length > 0 || scheduledAssignments.length > 0;
+  const hasItems = (layers.plan && scheduledPlanWindows.length > 0) || (layers.intents && scheduledSlots.length > 0) || (layers.assignments && scheduledAssignments.length > 0);
+  const calendarLabel = [layers.plan && "publishing plan", layers.intents && "legacy entries", layers.assignments && "Assignments"].filter(Boolean).join(", ");
+  const compactDays = calendarWeekDays.map((day) => {
+    const items = [
+      ...(layers.plan ? (dayPlanWindows.get(day) ?? []).map((window) => ({
+        id: "plan-" + window.id,
+        kind: "plan" as const,
+        startMinutes: window.startMinutes,
+        time: window.startTime + "–" + window.endTime,
+        title: "Plan · " + window.purpose,
+        detail: window.summary,
+        meta: window.status === "active" ? "Active window" : window.status,
+        status: window.status,
+      })) : []),
+      ...(layers.intents ? (daySlots.get(day) ?? []).map((slot) => {
+        const target = state.presences.find((item) => item.id === slot.presence);
+        return {
+          id: "intent-" + slot.id,
+          kind: "intent" as const,
+          startMinutes: timeToMinutes(slot.time),
+          time: slot.time,
+          title: slot.label,
+          detail: (target?.name ?? presenceName) + " · " + objectiveLabel(slot.objective),
+          meta: (slot.mode === "auto" ? "Auto" : "Review") + " · " + considerationSummary(slot.time, slot.executionWindow),
+          slot,
+        };
+      }) : []),
+      ...(layers.assignments ? (dayAssignments.get(day) ?? []).map((assignment) => {
+        const schedule = assignment.schedule!;
+        const status = assignment.status === "draft" ? "Not started" : assignment.status.replaceAll("_", " ");
+        return {
+          id: "assignment-" + assignment.id,
+          kind: "assignment" as const,
+          startMinutes: timeToMinutes(schedule.time),
+          time: schedule.time,
+          title: "Assignment",
+          detail: assignment.instruction,
+          meta: assignment.progress.verified + " / " + assignment.progress.required + " · " + status,
+          assignment,
+        };
+      }) : []),
+    ].sort((left, right) => left.startMinutes - right.startMinutes || left.id.localeCompare(right.id));
+    return { day, items };
+  }).filter((entry) => entry.items.length > 0);
+  const renderCompactItem = (item: (typeof compactDays)[number]["items"][number]) => {
+    if (item.kind === "plan") {
+      return <article className={"compact-calendar-item compact-calendar-item-plan compact-calendar-item-" + item.status} key={item.id}>
+        <span className="compact-calendar-time">{item.time}</span>
+        <div><strong>{item.title}</strong><small>{item.detail}</small><em>{item.meta}</em></div>
+      </article>;
+    }
+    if (item.kind === "intent") {
+      return <button type="button" className={"compact-calendar-item compact-calendar-item-intent objective-" + objectiveTone(item.slot.objective)} key={item.id} onClick={() => onEdit(item.slot)} aria-label={"Edit " + item.slot.label + ", " + item.slot.day + " at " + item.slot.time}>
+        <span className="compact-calendar-time">{item.time}</span>
+        <div><strong>{item.title}</strong><small>{item.detail}</small><em>{item.meta}</em></div>
+      </button>;
+    }
+    return <button type="button" className="compact-calendar-item compact-calendar-item-assignment" key={item.id} onClick={() => onAssignment(item.assignment)} aria-label={"Open Assignment " + item.assignment.instruction + ", " + item.assignment.schedule?.day + " at " + item.assignment.schedule?.time}>
+      <span className="compact-calendar-time">{item.time}</span>
+      <div><strong>{item.title}</strong><small>{item.detail}</small><em>{item.meta}</em></div>
+    </button>;
+  };
+  const blockStyle = (start: number, end: number, minimum: number) => {
+    const top = Math.max(0, (start / 60) * 64);
+    const height = Math.max(minimum, Math.min(gridHeight - top - 8, (Math.max(start + 60, end) - start) / 60 * 64 - 8));
+    return { top, height };
+  };
   return (
-    <section className="week-calendar" aria-label="Weekly schedule">
+    <section className={compact ? "week-calendar week-calendar-compact-mode" : "week-calendar"} aria-label={`Weekly schedule showing ${calendarLabel || "no layers"}`}>
       <div className="week-calendar-toolbar">
         <div>
           <SectionEyebrow>Visual schedule</SectionEyebrow>
           <h2>When {presenceName} can notice and act</h2>
-          <p>Standing intents invite {presenceName} to notice and decide. Assignments delegate an outcome for a time window. Open an Assignment to review or cancel it; neither one guarantees a post.</p>
+          <p>The publishing plan shows flexible working windows underneath the Assignments that shape when {presenceName} can work toward an outcome. A plan window never counts as a verified result.</p>
         </div>
-        <div className="week-calendar-legend" aria-label="Schedule legend">
-          {["audience_growth", "education", "relationship", "reflection"].map((objective) => <span key={objective}><i className={`legend-dot objective-${objectiveTone(objective)}`} />{objectiveLabel(objective)}</span>)}
-          <span><i className="legend-dot assignment-legend-dot" />Assignment</span>
+        <div className="week-calendar-toolbar-side">
+          <div className="calendar-density-toggle" role="group" aria-label="Visual schedule density">
+            <button type="button" aria-pressed={compact} className={compact ? "active" : ""} onClick={() => { if (!compact) onToggleCompact(); }}>Compact</button>
+            <button type="button" aria-pressed={!compact} className={!compact ? "active" : ""} onClick={() => { if (compact) onToggleCompact(); }}>Full hours</button>
+          </div>
+          <div className="week-calendar-legend" aria-label="Schedule legend">
+          {publishingPlan && layers.plan && <span><i className="legend-dot plan-legend-dot" />Publishing plan</span>}
+          {layers.intents && ["audience_growth", "education", "relationship", "reflection"].map((objective) => <span key={objective}><i className={`legend-dot objective-${objectiveTone(objective)}`} />{objectiveLabel(objective)}</span>)}
+            {layers.assignments && <span><i className="legend-dot assignment-legend-dot" />Assignment</span>}
+          </div>
         </div>
       </div>
-      {!hasItems ? <EmptyState title="Nothing scheduled for this Presence" body={`Add a standing intent or schedule an Assignment to see when ${presenceName} can notice and act during the week.`} action={<Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add first intent</Button>} /> : <div className="week-grid-scroll"><div className="week-grid" style={{ "--week-grid-height": `${gridHeight}px` } as React.CSSProperties}><div className="week-grid-header"><span className="week-time-header">Local time</span>{calendarWeekDays.map((day) => <span key={day}>{day.slice(0, 3)}<small>{day}</small></span>)}</div><div className="week-grid-body"><div className="week-time-rail">{calendarHours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>{calendarWeekDays.map((day) => <div className="week-day-column" key={day}>{calendarHours.map((hour) => <div className="week-hour-cell" key={hour} />)}{(daySlots.get(day) ?? []).map((slot) => { const start = timeToMinutes(slot.time); const firstHour = calendarHours[0] * 60; const top = Math.max(0, ((start - firstHour) / 60) * 64); const windowParts = slot.executionWindow.split(/[–-]/).map((part) => part.trim()); const end = windowParts[1] ? timeToMinutes(windowParts[1]) : start + 60; const height = Math.max(54, Math.min(gridHeight - top - 8, ((Math.max(start + 60, end) - start) / 60) * 64 - 8)); const target = state.presences.find((item) => item.id === slot.presence); return <button type="button" key={slot.id} className={`week-intent objective-${objectiveTone(slot.objective)}`} style={{ top, height }} onClick={() => onEdit(slot)} aria-label={`Edit ${slot.label}, ${slot.day} at ${slot.time}`} title={`${slot.label} · ${slot.day} ${slot.time} · ${considerationSummary(slot.time, slot.executionWindow)}`}><span className="week-intent-time">{slot.time}</span><strong>{slot.label}</strong><small>{target?.name ?? presenceName} · {objectiveLabel(slot.objective)}</small><em>{slot.mode === "auto" ? "Auto" : "Review"}</em></button>; })}{(dayAssignments.get(day) ?? []).map((assignment) => { const schedule = assignment.schedule!; const start = timeToMinutes(schedule.time); const firstHour = calendarHours[0] * 60; const top = Math.max(0, ((start - firstHour) / 60) * 64); const windowParts = schedule.executionWindow.split(/[–-]/).map((part) => part.trim()); const end = windowParts[1] ? timeToMinutes(windowParts[1]) : start + 60; const height = Math.max(58, Math.min(gridHeight - top - 8, ((Math.max(start + 60, end) - start) / 60) * 64 - 8)); const status = assignment.status === "draft" ? "Not started" : assignment.status.replaceAll("_", " "); return <button type="button" key={assignment.id} className="week-assignment" style={{ top, height }} onClick={() => onAssignment(assignment)} aria-label={`Open Assignment ${assignment.instruction}, ${schedule.day} at ${schedule.time}`} title={`Open Assignment details · ${assignment.instruction} · ${schedule.day} ${schedule.time}`}><span className="week-intent-time">{schedule.time}</span><strong>Assignment</strong><small>{assignment.instruction}</small><em>{assignment.progress.verified} / {assignment.progress.required} · {status}</em></button>; })}</div>)}</div></div></div>}
+      {!hasItems ? <EmptyState title={hasAnyItems ? "Nothing shown on this calendar" : "Nothing scheduled for this Presence"} body={hasAnyItems ? "Turn on a calendar layer to compare the Presence plan or Assignments." : `Add an Assignment to see when ${presenceName} is expected to work during the week.`} action={hasAnyItems ? <Button onClick={onResetLayers} variant="secondary">Show all layers</Button> : <Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add assignment</Button>} /> : <div className="week-grid-scroll"><div className="week-grid" style={{ "--week-grid-height": `${gridHeight}px` } as React.CSSProperties}><div className="week-grid-header"><span className="week-time-header">Local time</span>{calendarWeekDays.map((day) => <span key={day}>{day.slice(0, 3)}<small>{day}</small></span>)}</div><div className="week-grid-body"><div className="week-time-rail">{calendarHours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>{calendarWeekDays.map((day) => <div className="week-day-column" key={day}>{calendarHours.map((hour) => <div className="week-hour-cell" key={hour} />)}{layers.plan && (dayPlanWindows.get(day) ?? []).map((window) => { const style = blockStyle(window.startMinutes, window.endMinutes, 42); return <div className={`week-plan-window week-plan-window-${window.status}`} key={window.id} style={style} title={`${window.purpose} window · ${window.summary}`}><span className="week-plan-window-time">{window.startTime}–{window.endTime}</span><strong>Plan · {window.purpose}</strong><small>{window.summary}</small></div>; })}{layers.intents && (daySlots.get(day) ?? []).map((slot) => { const style = blockStyle(timeToMinutes(slot.time), timeToMinutes(splitConsiderationWindow(slot.executionWindow, slot.time).end), 54); const target = state.presences.find((item) => item.id === slot.presence); return <button type="button" key={slot.id} className={`week-intent objective-${objectiveTone(slot.objective)}`} style={style} onClick={() => onEdit(slot)} aria-label={`Edit ${slot.label}, ${slot.day} at ${slot.time}`} title={`${slot.label} · ${slot.day} ${slot.time} · ${considerationSummary(slot.time, slot.executionWindow)}`}><span className="week-intent-time">{slot.time}</span><strong>{slot.label}</strong><small>{target?.name ?? presenceName} · {objectiveLabel(slot.objective)}</small><em>{slot.mode === "auto" ? "Auto" : "Review"}</em></button>; })}{layers.assignments && (dayAssignments.get(day) ?? []).map((assignment) => { const schedule = assignment.schedule!; const style = blockStyle(timeToMinutes(schedule.time), timeToMinutes(splitConsiderationWindow(schedule.executionWindow, schedule.time).end), 58); const status = assignment.status === "draft" ? "Not started" : assignment.status.replaceAll("_", " "); return <button type="button" key={assignment.id} className="week-assignment" style={style} onClick={() => onAssignment(assignment)} aria-label={`Open Assignment ${assignment.instruction}, ${schedule.day} at ${schedule.time}`} title={`Open Assignment details · ${assignment.instruction} · ${schedule.day} ${schedule.time}`}><span className="week-intent-time">{schedule.time}</span><strong>Assignment</strong><small>{assignment.instruction}</small><em>{assignment.progress.verified} / {assignment.progress.required} · {status}</em></button>; })}</div>)}</div></div></div>}
+      {hasItems && <div className="week-calendar-compact" aria-label="Compact weekly schedule">{compactDays.map(({ day, items }) => <section className="compact-calendar-day" key={day}><div className="compact-calendar-day-label"><strong>{day.slice(0, 3)}</strong><span>{day}</span></div><div className="compact-calendar-items">{items.map(renderCompactItem)}</div></section>)}</div>}
     </section>
   );
 }
@@ -6392,7 +6603,6 @@ function PresenceView({
   mutate,
   refreshState,
   setView,
-  pendingOperation,
   manageBridge,
   manageX,
 }: {
@@ -6400,13 +6610,11 @@ function PresenceView({
   mutate: Mutate;
   refreshState: () => Promise<OpenPresenceState>;
   setView?: (view: View) => void;
-  pendingOperation?: string | null;
   manageBridge: BridgeManage;
   manageX: XManage;
 }) {
   const presence = state.presence!;
   const agentName = state.agent?.name ?? "the Agent";
-  const waking = pendingOperation === "wakePresence";
   const capabilities =
     presence.capabilities ??
     CHANNEL_CAPABILITIES[
@@ -6534,23 +6742,6 @@ function PresenceView({
         eyebrow="One place, one envelope"
         title="Presence settings"
         description="Choose who speaks here and how independently this Presence acts."
-        actions={<Button
-          variant={presence.status === "paused" ? "primary" : "secondary"}
-          disabled={waking}
-          onClick={() => mutate(presence.status === "paused"
-            ? { type: "wakePresence", presenceId: presence.id }
-            : { type: "setPresence", patch: { status: "paused" } })}
-        >
-          {presence.status === "paused" ? (
-            <>
-              <Play size={14} /> {waking ? `Waking ${agentName}…` : `Wake up ${agentName}`}
-            </>
-          ) : (
-            <>
-              <Pause size={14} /> Pause Presence
-            </>
-          )}
-        </Button>}
       />
       <div className="presence-overview" style={{ "--agent-accent": presence.accent } as React.CSSProperties}>
         <div className="presence-identity">

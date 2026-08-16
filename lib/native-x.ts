@@ -1,5 +1,5 @@
 import { readNativeXCredentials, readRecentXMentions, readRecentXPosts, readXPostsByIds, testXCredentials, type XRecentPost } from "./x";
-import { recordNativeMirror, recordNativeObservation, recordPublicFooting, recordRuntimeEvent } from "./runtime";
+import { recordNativeMirror, recordNativeMirrorDeletion, recordNativeObservation, recordPublicFooting, recordRuntimeEvent } from "./runtime";
 import type { EntityRef, MirrorObject, OpenPresenceState, Presence, PresenceQuietHours } from "./types";
 import { hydrateThreadContext } from "./thread-context";
 
@@ -137,6 +137,14 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
   }
 
   try {
+    const knownOwnMirrorPostIds = next.mirrorObjects
+      .filter((item) => item.presenceId === presenceId && item.channelId === "x" && item.environment !== "sandbox" && item.externalRef.type === "x.post" && item.actorPresenceId === presenceId && !item.archived)
+      .slice(0, 100)
+      .map((item) => item.externalRef.id);
+    const previousOwnPostIds = new Set([
+      ...(targetPresence?.context.publicFooting?.recentPostIds ?? []),
+      ...knownOwnMirrorPostIds,
+    ]);
     const [postsResult, mentionsResult] = await Promise.allSettled([
       readRecentXPosts(credentials, accountId),
       readRecentXMentions(credentials, accountId),
@@ -148,6 +156,22 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
     const observedAt = new Date().toISOString();
     for (const post of posts) next = recordNativeMirror(next, { connectionId: connection.id, presenceId, own: true, post });
     for (const post of mentions) next = recordNativeMirror(next, { connectionId: connection.id, presenceId, post });
+    const currentPostIds = new Set(posts.map((post) => post.id));
+    const missingOwnPostIds = [...previousOwnPostIds].filter((postId) => !currentPostIds.has(postId));
+    let deletedOwnPostIds: string[] = [];
+    if (missingOwnPostIds.length) {
+      try {
+        const stillVisible: XRecentPost[] = [];
+        for (let offset = 0; offset < missingOwnPostIds.length; offset += 100) {
+          stillVisible.push(...await readXPostsByIds(credentials, missingOwnPostIds.slice(offset, offset + 100)));
+        }
+        const stillVisibleIds = new Set(stillVisible.map((post) => post.id));
+        deletedOwnPostIds = missingOwnPostIds.filter((postId) => !stillVisibleIds.has(postId));
+        for (const postId of deletedOwnPostIds) next = recordNativeMirrorDeletion(next, { connectionId: connection.id, presenceId, postId });
+      } catch (error) {
+        next = recordRuntimeEvent(next, presenceId, "Deleted-post check unavailable", error instanceof Error ? error.message : "X did not confirm whether missing posts were deleted.", "warning");
+      }
+    }
     // Eagerly make the public ancestry available before Pulse runs. The
     // hydrator is bounded and idempotent, so a later lazy check is cheap.
     for (const mention of mentions) {
@@ -190,9 +214,9 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
       presenceId,
       partial ? "Social Mirror partially updated" : "Social Mirror updated",
       partial
-        ? `Observed ${posts.length} public post${posts.length === 1 ? "" : "s"}; inbound mentions were unavailable. The last known Mirror remains available.`
+        ? `Observed ${posts.length} public post${posts.length === 1 ? "" : "s"}${deletedOwnPostIds.length ? ` and reconciled ${deletedOwnPostIds.length} deleted post${deletedOwnPostIds.length === 1 ? "" : "s"}` : ""}; inbound mentions were unavailable. The last known Mirror remains available.`
         : posts.length || mentions.length
-          ? `Observed ${posts.length} public post${posts.length === 1 ? "" : "s"} and ${mentions.length} inbound mention${mentions.length === 1 ? "" : "s"}.`
+          ? `Observed ${posts.length} public post${posts.length === 1 ? "" : "s"} and ${mentions.length} inbound mention${mentions.length === 1 ? "" : "s"}${deletedOwnPostIds.length ? `; reconciled ${deletedOwnPostIds.length} deleted post${deletedOwnPostIds.length === 1 ? "" : "s"}` : ""}.`
           : "X is up to date. No recent posts, mentions, or conversations were found.",
       partial ? "warning" : "positive",
     );

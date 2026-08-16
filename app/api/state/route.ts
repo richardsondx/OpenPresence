@@ -1770,6 +1770,39 @@ async function runSandboxAssignment(source: OpenPresenceState, assignmentId: str
   const assignmentPresence = next.presences.find((item) => item.id === assignment.presenceId) ?? next.presence;
   if (!assignmentPresence) return blockAssignment(next, assignmentId, "The Assignment's Presence is no longer available.");
 
+  if (assignment.deliverable.type === "decision_report") {
+    const current = next.assignments.find((item) => item.id === assignmentId);
+    if (!current) return next;
+    let report = `Evaluation completed for: ${current.instruction}. The Agent found no public action requirement in the requested deliverable; this conclusion is recorded for operator review.`;
+    try {
+      const raw = await generateIndependentModelText(next, "You are the Assignment evaluator. Return JSON only: {\"report\":\"concise decision report\"}. Evaluate the operator's requested situation using only the supplied Assignment and Presence context. A decision report may recommend no public action, but must explain why. Do not expose hidden reasoning or internal machinery.", JSON.stringify({ assignment: current.instruction, presence: assignmentPresence.name, channel: assignmentPresence.channel, mission: next.files.find((file) => file.kind === "MISSION")?.content?.slice(0, 2_000), taste: next.files.find((file) => file.kind === "TASTE")?.content?.slice(0, 2_000) }));
+      const start = raw.indexOf("{");
+      const end = raw.lastIndexOf("}");
+      if (start >= 0 && end > start) {
+        const parsed = JSON.parse(raw.slice(start, end + 1)) as { report?: unknown };
+        if (typeof parsed.report === "string" && parsed.report.trim()) report = parsed.report.trim().slice(0, 2_000);
+      }
+    } catch {
+      // A report still needs a truthful durable result when the independent
+      // evaluator is unavailable; the fallback names the limitation rather
+      // than pretending that a public action occurred.
+      report = `Evaluation could not use the independent evaluator. No public action was taken; review the Assignment before treating this report as a recommendation.`;
+    }
+    const completed = next.assignments.find((item) => item.id === assignmentId);
+    if (completed) {
+      completed.status = "completed";
+      completed.progress = { ...completed.progress, required: Math.max(1, completed.progress.required), verified: Math.max(1, completed.progress.required) };
+      completed.completionReport = report;
+      completed.work = { ...assignmentWorkDefaults(completed), phase: "completed" };
+      completed.lastOutcome = { class: "assignment_completed", message: "The decision report was persisted as the requested deliverable.", at: new Date().toISOString() };
+      completed.lastEvaluatedAt = completed.lastOutcome.at;
+      completed.updatedAt = completed.lastOutcome.at;
+      completed.attemptHistory = [...(completed.attemptHistory ?? []), { id: `attempt-${randomUUID()}`, attempt: completed.work.attempts, phase: "completed", outcome: "assignment_completed", message: completed.lastOutcome.message, at: completed.lastOutcome.at }];
+      next.events.unshift({ id: `event-${randomUUID()}`, type: "decision", title: "Assignment completed", detail: "The requested evaluation was completed as a decision report. A recommendation of no public action is a report, not silent NO_OP.", time: completed.lastOutcome.at, tone: "positive", presenceId: completed.presenceId, sessionId });
+    }
+    return next;
+  }
+
   while (true) {
     const current = next.assignments.find((item) => item.id === assignmentId);
     if (!current || current.status === "completed" || current.status === "blocked" || current.status === "cancelled") return next;
@@ -2181,7 +2214,8 @@ const operation: z.ZodType<RuntimeOperation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("setAgentLanguagePolicy"), policy: languagePolicy }),
   z.object({ type: z.literal("setPresenceLanguagePolicy"), policy: languagePolicy }),
   z.object({ type: z.literal("overrideLanguagePolicy"), id: z.string().min(1) }),
-  z.object({ type: z.literal("createAssignment"), instruction: z.string().trim().min(1).max(4000), presenceId: z.string().min(1).optional(), sessionId: z.string().min(1).optional(), environment: z.enum(["sandbox", "live"]).optional(), schedule: z.object({ day: z.string().min(1).max(20), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), executionWindow: z.string().min(1).max(40) }).optional() }),
+  z.object({ type: z.literal("createAssignment"), instruction: z.string().trim().min(1).max(4000), presenceId: z.string().min(1).optional(), sessionId: z.string().min(1).optional(), environment: z.enum(["sandbox", "live"]).optional(), delegationPolicy: z.enum(["keep_moving", "ask_before_change", "stop_on_deviation"]).optional(), schedule: z.object({ day: z.string().min(1).max(20), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), executionWindow: z.string().min(1).max(40) }).optional() }),
+  z.object({ type: z.literal("activateAssignment"), id: z.string().min(1), delegationPolicy: z.enum(["keep_moving", "ask_before_change", "stop_on_deviation"]).optional() }),
   z.object({ type: z.literal("startAssignment"), id: z.string().min(1), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("workAssignment"), id: z.string().min(1), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("cancelAssignment"), id: z.string().min(1) }),
