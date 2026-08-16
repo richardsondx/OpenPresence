@@ -530,13 +530,29 @@ function historyKind(value: string): PublicHistoryItem["kind"] | undefined {
   return publicHistoryKinds.has(normalized) ? normalized as PublicHistoryItem["kind"] : undefined;
 }
 
+/**
+ * Derive a navigable channel URL from provider-neutral Mirror identity.
+ * Unsupported or simulated objects intentionally return no URL rather than
+ * guessing a destination that may not exist.
+ */
+export function externalUrlForMirrorObject(input: Pick<MirrorObject, "channelId" | "externalRef" | "environment">, authorHandle?: string) {
+  if (input.environment === "sandbox" || !input.externalRef.id) return undefined;
+  if (/^https?:\/\//i.test(input.externalRef.id)) return input.externalRef.id;
+  const type = input.externalRef.type.toLowerCase();
+  const id = encodeURIComponent(input.externalRef.id);
+  if (input.channelId === "x" && ["x.post", "x.reply", "x.comment", "x.quote", "x.repost", "x.thread"].includes(type)) {
+    const handle = authorHandle?.replace(/^@/, "").trim();
+    return handle ? `https://x.com/${encodeURIComponent(handle)}/status/${id}` : `https://x.com/i/status/${id}`;
+  }
+  if (input.channelId === "linkedin" && ["linkedin.post", "linkedin.reply", "linkedin.comment", "linkedin.share"].includes(type)) {
+    return `https://www.linkedin.com/feed/update/${id}`;
+  }
+  return undefined;
+}
+
 function publicHistoryExternalUrl(state: OpenPresenceState, presence: Presence, externalRef: EntityRef, environment?: PresenceEnvironment, authorHandle?: string) {
-  if (environment === "sandbox" || presence.channel !== "x") return undefined;
-  if (!["x.post", "x.reply", "x.comment", "x.quote", "x.repost", "x.thread"].includes(externalRef.type)) return undefined;
   const account = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.kind === "x")?.account?.username;
-  const handle = (authorHandle ?? account)?.replace(/^@/, "").trim();
-  if (!handle || !externalRef.id) return undefined;
-  return `https://x.com/${encodeURIComponent(handle)}/status/${encodeURIComponent(externalRef.id)}`;
+  return externalUrlForMirrorObject({ channelId: presence.channel, externalRef, environment }, authorHandle ?? account);
 }
 
 /**

@@ -1301,6 +1301,8 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .mirror-post-content { margin: 15px 0 17px; color: var(--ink); font-size: 14px; line-height: 1.65; white-space: pre-wrap; }
 .mirror-post-footer { display: flex; align-items: center; gap: 10px; padding-top: 11px; border-top: 1px solid #f0ece7; color: var(--faint); font: 9px "DM Mono", monospace; text-transform: uppercase; letter-spacing: .04em; }
 .mirror-post-footer span:first-child { color: var(--green); }
+.mirror-open-link { display: inline-flex; align-items: center; gap: 4px; margin-left: auto; color: #8c5535; font: inherit; text-decoration: none; text-transform: none; letter-spacing: 0; }
+.mirror-open-link:hover { color: var(--ink); text-decoration: underline; }
 .mirror-post-ignored-status { display: inline-flex; align-items: center; gap: 5px; margin-left: auto; padding: 5px 8px; border: 1px solid #d8d0c7; border-radius: 999px; background: #f1ede8; color: #766d64; text-transform: none; letter-spacing: 0; }
 .mirror-post-actions { display: flex; align-items: center; justify-content: flex-end; flex-wrap: wrap; gap: 6px; margin-left: auto; }
 .mirror-ignore-action { display: inline-flex; align-items: center; gap: 4px; padding: 5px 4px; border: 0; background: transparent; color: var(--faint); font: 9px "DM Mono", monospace; text-transform: none; letter-spacing: 0; cursor: pointer; }
