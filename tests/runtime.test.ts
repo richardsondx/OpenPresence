@@ -467,6 +467,15 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.nativeConnections[0]?.healthMessage).toBeUndefined();
   });
 
+  it("keeps the native connection healthy when X rejects a reply target", () => {
+    let state = createAgent(input);
+    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "hourandcode", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    state = markNativeConnectionNeedsAttention(state, state.presence!.id, "X rejected this action: You can only reply to or quote posts where you are mentioned or are the author.");
+    expect(state.nativeConnections[0]?.status).toBe("connected");
+    expect(state.nativeConnections[0]?.deliveryError).toContain("only reply");
+    expect(state.nativeConnections[0]?.healthMessage).toBeUndefined();
+  });
+
   it("pauses the Presence deterministically", () => {
     const state = createAgent(input);
     const paused = applyOperation(state, { type: "setPresence", patch: { status: "paused" } });

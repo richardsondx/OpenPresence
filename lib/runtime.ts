@@ -10,7 +10,7 @@ import { ensureConversationEpisode, settleConversationClosure, updateConversatio
 import { createPublicExpressionCandidate, PublicationSecurityError, verifyExecutionPermit } from "./publication-security";
 import { publicExpressionLeakageReason } from "./public-expression";
 import type { RelationshipVisibility } from "./types";
-import { addKnowledgeItem, archiveKnowledgeCollection, archiveKnowledgeItem, createKnowledgeCollection, setKnowledgeBinding, uploadKnowledgeVersion } from "./knowledge";
+import { addKnowledgeItem, archiveKnowledgeCollection, archiveKnowledgeItem, createKnowledgeCollection, setKnowledgeBinding, updateKnowledgeCollection, uploadKnowledgeVersion } from "./knowledge";
 
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -445,8 +445,8 @@ export function recordStandingIntentNoOp(source: OpenPresenceState, presenceId: 
 export function recordNativeObservation(source: OpenPresenceState, presenceId: string, observation: OpenPresenceState["nativeConnections"][number]["observation"]) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   state.nativeConnections = state.nativeConnections.map((connection) => connection.presenceId === presenceId && connection.kind === "x"
-    ? /no API credits remaining|temporarily rate-limited/i.test(connection.healthMessage ?? "")
-      ? { ...connection, status: "connected" as const, healthMessage: undefined, deliveryError: connection.healthMessage, observation, updatedAt: now() }
+    ? nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? "")
+      ? { ...connection, status: "connected" as const, healthMessage: undefined, deliveryError: connection.deliveryError ?? connection.healthMessage, observation, updatedAt: now() }
       : { ...connection, observation, updatedAt: now() }
     : connection);
   return state;
@@ -589,13 +589,23 @@ export function recordRuntimeEvent(source: OpenPresenceState, presenceId: string
 
 export function markNativeConnectionNeedsAttention(source: OpenPresenceState, presenceId: string, message: string) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
-  const deliveryOnlyFailure = /no API credits remaining|temporarily rate-limited/i.test(message);
+  const deliveryOnlyFailure = nativeDeliveryFailureIsConnectionScoped(message);
   state.nativeConnections = state.nativeConnections.map((connection) => connection.presenceId === presenceId && connection.kind === "x"
     ? deliveryOnlyFailure
       ? { ...connection, status: "connected" as const, healthMessage: undefined, deliveryError: message, updatedAt: now() }
       : { ...connection, status: "needs-attention" as const, healthMessage: message, deliveryError: undefined, updatedAt: now() }
     : connection);
   return recordRuntimeEvent(state, presenceId, deliveryOnlyFailure ? "X delivery needs attention" : "X connection needs attention", message, "warning");
+}
+
+// A rejected reply target is a failed action, not evidence that the native
+// connection itself is unhealthy. Keep the connector available for unrelated
+// actions such as original posts while retaining the delivery error for review.
+export function nativeDeliveryFailureIsConnectionScoped(message: string) {
+  // A target-policy rejection means the requested interaction is not allowed
+  // for that post. It does not invalidate credentials or original-post
+  // delivery, so keep the native connection healthy for unrelated actions.
+  return /no API credits remaining|temporarily rate-limited|you can only reply to or quote posts where you are mentioned or are the author/i.test(message);
 }
 
 export function isLaunchCandidate(source: OpenPresenceState, presenceId: string) {
@@ -702,9 +712,14 @@ export function deriveActivitySummary(source: OpenPresenceState, presenceId?: st
   } else if (activeAssignment?.status === "blocked") {
     current = { label: "Assignment blocked", detail: activeAssignment.lastOutcome?.message ?? "Jenny needs a new candidate or operator guidance to continue this Assignment.", tone: "warning" };
   } else if (activeAssignment) {
+    const deliverableLabel = activeAssignment.deliverable.type === "original_publication"
+      ? "publication"
+      : activeAssignment.deliverable.type === "meaningful_engagement"
+        ? "meaningful engagement"
+        : activeAssignment.deliverable.type.replaceAll("_", " ");
     current = {
       label: activeAssignment.status === "working" ? "Working on assignment" : "Assignment in progress",
-      detail: `${activeAssignment.progress.verified} of ${activeAssignment.progress.required} verified publication${activeAssignment.progress.required === 1 ? "" : "s"} delivered. Jenny owns how to fulfill the expected outcome.`,
+      detail: `${activeAssignment.progress.verified} of ${activeAssignment.progress.required} verified ${deliverableLabel}${activeAssignment.progress.required === 1 ? "" : "s"} delivered. Jenny owns how to fulfill the expected outcome.`,
       tone: "positive",
     };
   } else if (reviewCount > 0) {
@@ -2333,7 +2348,7 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
     return state;
   }
   const bridge = presence.connectionMode === "bridge" ? bridgeFor(state, presence.id, "post") : undefined;
-  const nativeX = presence.connectionMode !== "bridge" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.status === "connected" && connection.access === "read-write") : undefined;
+  const nativeX = presence.connectionMode !== "bridge" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.access === "read-write" && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? "")))) : undefined;
   const connector = nativeX ? "native" as const : bridge ? bridge.kind : undefined;
   const leakageReason = identityLeakageReason(state, presence, text);
   const publicExpressionReason = publicExpressionLeakageReason(text);
@@ -2368,7 +2383,7 @@ export function formStandingPostIntent(source: OpenPresenceState, text: string, 
     return state;
   }
   const bridge = presence.connectionMode === "bridge" ? bridgeFor(state, presence.id, "post") : undefined;
-  const nativeX = presence.channel === "x" && presence.connectionMode !== "bridge" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.status === "connected" && connection.access === "read-write") : undefined;
+  const nativeX = presence.channel === "x" && presence.connectionMode !== "bridge" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.access === "read-write" && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? "")))) : undefined;
   const simulated = !bridge && !nativeX && presence.channel === "x" && isTestRuntime();
   const connector = nativeX ? "native" as const : bridge ? bridge.kind : simulated ? "simulated" as const : undefined;
   const status = simulated ? (mode === "auto" ? "succeeded" : mode === "review" ? "awaiting-review" : "awaiting-manual") : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
@@ -2406,7 +2421,7 @@ export function formAssignmentPostIntent(source: OpenPresenceState, text: string
   return state;
 }
 
-export function formXReplyIntent(source: OpenPresenceState, text: string, parentId: string, operatorDirectiveId?: string) {
+export function formXReplyIntent(source: OpenPresenceState, text: string, parentId: string, operatorDirectiveId?: string, assignmentId?: string) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presence;
   if (!state.agent || !presence || presence.status !== "live" || presence.channel !== "x" || !text.trim() || !parentId.trim()) return state;
@@ -2415,9 +2430,14 @@ export function formXReplyIntent(source: OpenPresenceState, text: string, parent
   const publication = makePublication(state, text.trim(), "x.reply", operatorDirectiveId ? "operator_manual" : "agent_model");
   const parentObject = state.mirrorObjects.find((item) => item.externalRef.type === "x.post" && item.externalRef.id === parentId && item.presenceId === presence.id);
   const conversationEpisodeId = parentObject ? ensureConversationEpisode(state, parentObject, presence.id).id : undefined;
-  const origin: SocialOrigin = operatorDirectiveId ? { kind: "operator", refId: operatorDirectiveId } : { kind: "inbound_social", refId: parentId };
+  const origin: SocialOrigin = assignmentId
+    ? { kind: "assignment", refId: assignmentId }
+    : operatorDirectiveId
+      ? { kind: "operator", refId: operatorDirectiveId }
+      : { kind: "inbound_social", refId: parentId };
   publication.origin = origin;
-  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: "x.reply", target: { type: "x.post", id: parentId }, publicationId: publication.id, priority: 60, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, origin, source: operatorDirectiveId ? "operator" : "agent", operatorDirectiveId, conversationEpisodeId };
+  publication.assignmentId = assignmentId;
+  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: "x.reply", target: { type: "x.post", id: parentId }, publicationId: publication.id, priority: 60, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, origin, source: operatorDirectiveId ? "operator" : "agent", operatorDirectiveId, conversationEpisodeId, assignmentId };
   if (publication.publicExpression) publication.publicExpression.socialIntentId = socialIntent.id;
   state.socialIntents.unshift(socialIntent);
   const mode = presence.execution.reply ?? "off";
@@ -2433,7 +2453,7 @@ export function formXReplyIntent(source: OpenPresenceState, text: string, parent
   const runtimeLeakageReasonValue = runtimeContextLeakageReason(text);
   const publicExpressionReason = publicExpressionLeakageReason(text);
   const status = publicExpressionReason ? "blocked" : leakageReason || runtimeLeakageReasonValue ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
-  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.reply", mode, status, attempts: 0, bridgeId: bridge?.id, connector, target: { type: "x.post", id: parentId }, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, reviewReason: publicExpressionReason ?? leakageReason ?? runtimeLeakageReasonValue, createdAt: formedAt, updatedAt: formedAt, source: operatorDirectiveId ? "operator" : "agent", operatorDirectiveId, conversationEpisodeId, environment: presence.environment ?? "live" };
+  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.reply", mode, status, attempts: 0, bridgeId: bridge?.id, connector, target: { type: "x.post", id: parentId }, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, reviewReason: publicExpressionReason ?? leakageReason ?? runtimeLeakageReasonValue, createdAt: formedAt, updatedAt: formedAt, source: operatorDirectiveId ? "operator" : "agent", operatorDirectiveId, conversationEpisodeId, assignmentId, environment: presence.environment ?? "live" };
   if (publicExpressionReason) execution.failure = { code: "PUBLIC_TEXT_INTERNAL_MARKER", message: publicExpressionReason, retryable: false };
   state.executions.unshift(execution);
   state.actions.unshift({ id: id("act"), intent: "reply", target: parentId, summary: text.trim(), status: publicExpressionReason ? "failed" : mode === "review" ? "review" : "queued", reason: publicExpressionReason ?? (operatorDirectiveId ? "The operator directed Jenny to enter this conversation; Jenny supplied the expression through the Presence execution envelope." : "Jenny chose to continue a relevant conversation through the Presence execution envelope."), createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
@@ -2776,6 +2796,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     return state;
   }
   if (operation.type === "createKnowledgeCollection") return createKnowledgeCollection(state, operation);
+  if (operation.type === "updateKnowledgeCollection") return updateKnowledgeCollection(state, operation);
   if (operation.type === "addKnowledgeItem") return addKnowledgeItem(state, operation);
   if (operation.type === "uploadKnowledgeVersion") return uploadKnowledgeVersion(state, operation);
   if (operation.type === "setKnowledgeBinding") return setKnowledgeBinding(state, operation);

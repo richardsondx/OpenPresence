@@ -1,4 +1,4 @@
-import { readNativeXCredentials, readRecentXMentions, readRecentXPosts, readXPostsByIds, type XRecentPost } from "./x";
+import { readNativeXCredentials, readRecentXMentions, readRecentXPosts, readXPostsByIds, testXCredentials, type XRecentPost } from "./x";
 import { recordNativeMirror, recordNativeObservation, recordPublicFooting, recordRuntimeEvent } from "./runtime";
 import type { EntityRef, MirrorObject, OpenPresenceState, Presence, PresenceQuietHours } from "./types";
 import { hydrateThreadContext } from "./thread-context";
@@ -114,8 +114,21 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
   });
   next = recordRuntimeEvent(next, presenceId, "Social Mirror syncing", "Reconciling the connected X account into the Social Mirror.", "positive");
 
-  const connection = next.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x");
+  let connection = next.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x");
   const credentials = connection ? readNativeXCredentials(connection.id) : undefined;
+  const targetPresence = next.presences.find((item) => item.id === presenceId) ?? next.presence;
+  const configuredHandle = targetPresence?.handle.replace(/^@/, "").trim().toLowerCase();
+  const connectedHandle = connection?.account?.username.replace(/^@/, "").trim().toLowerCase();
+  if (connection && credentials && configuredHandle && connectedHandle && configuredHandle !== connectedHandle) {
+    try {
+      const refreshed = await testXCredentials(credentials, targetPresence?.handle ?? "");
+      next.nativeConnections = next.nativeConnections.map((item) => item.id === connection?.id ? { ...item, account: refreshed.account, access: refreshed.access, updatedAt: new Date().toISOString() } : item);
+      connection = next.nativeConnections.find((item) => item.id === connection?.id);
+      next = recordRuntimeEvent(next, presenceId, "X identity refreshed", `The connected X account now reports @${refreshed.account.username}; the Presence identity cache was updated before observation.`, "positive");
+    } catch (error) {
+      next = recordRuntimeEvent(next, presenceId, "X identity refresh unavailable", error instanceof Error ? error.message : "The connected X account identity could not be refreshed.", "warning");
+    }
+  }
   const accountId = connection?.account?.id;
   if (!connection || !credentials || !accountId) {
     const message = "The native X connection could not provide a readable account context.";

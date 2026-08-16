@@ -352,6 +352,38 @@ function SectionEyebrow({ children }: { children: React.ReactNode }) {
     </div>
   );
 }
+function PageHeader({
+  eyebrow,
+  title,
+  titleAdornment,
+  description,
+  actions,
+  className = "",
+  actionsClassName = "",
+}: {
+  eyebrow: React.ReactNode;
+  title: React.ReactNode;
+  titleAdornment?: React.ReactNode;
+  description?: React.ReactNode;
+  actions?: React.ReactNode;
+  className?: string;
+  actionsClassName?: string;
+}) {
+  return (
+    <div className={`page-heading ${className}`.trim()}>
+      <div className="page-heading-copy">
+        <SectionEyebrow>{eyebrow}</SectionEyebrow>
+        {titleAdornment ? <div className="page-heading-title-row"><h1>{title}</h1>{titleAdornment}</div> : <h1>{title}</h1>}
+        {description && <p className="muted">{description}</p>}
+      </div>
+      {actions && (
+        <div className={`page-heading-actions ${actionsClassName}`.trim()}>
+          {actions}
+        </div>
+      )}
+    </div>
+  );
+}
 type Mutate = (operation: unknown, requestContext?: OpenPresenceState) => Promise<OpenPresenceState | null>;
 type BridgeManage = (
   operation: unknown,
@@ -677,7 +709,8 @@ export default function Home() {
     const presence = state?.presence;
     if (!presence || presence.status !== "live") return;
     const slots = state.calendar.filter((slot) => slot.presence === presence.id && slot.enabled && slot.day && slot.time);
-    if (!slots.length) return;
+    const assignments = state.assignments.filter((assignment) => assignment.presenceId === presence.id && assignment.environment === "live" && assignment.deliverable.type === "original_publication" && assignment.schedule && ["draft", "active", "working"].includes(assignment.status));
+    if (!slots.length && !assignments.length) return;
     const now = new Date();
     const dayIndex: Record<string, number> = { Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6 };
     const currentMinutes = now.getHours() * 60 + now.getMinutes();
@@ -685,9 +718,19 @@ export default function Home() {
       const [hours, minutes] = slot.time.split(":").map(Number);
       return dayIndex[slot.day] === now.getDay() && hours * 60 + minutes <= currentMinutes && (!slot.lastEvaluatedAt || new Date(slot.lastEvaluatedAt).toDateString() !== now.toDateString());
     });
+    const dueAssignment = assignments.find((assignment) => {
+      if (!assignment.schedule || dayIndex[assignment.schedule.day] !== now.getDay()) return false;
+      const [hours, minutes] = assignment.schedule.time.split(":").map(Number);
+      return Number.isFinite(hours) && Number.isFinite(minutes) && hours * 60 + minutes <= currentMinutes && (!assignment.lastEvaluatedAt || new Date(assignment.lastEvaluatedAt).toDateString() !== now.toDateString());
+    });
     if (due && calendarRunInFlight.current !== due.id) {
       calendarRunInFlight.current = due.id;
       void mutate({ type: "runSlot", id: due.id, scheduled: true }).finally(() => { calendarRunInFlight.current = null; });
+      return;
+    }
+    if (dueAssignment && calendarRunInFlight.current !== `assignment:${dueAssignment.id}`) {
+      calendarRunInFlight.current = `assignment:${dueAssignment.id}`;
+      void mutate({ type: "runPulse", presenceId: presence.id }).finally(() => { calendarRunInFlight.current = null; });
       return;
     }
     const nextSlots = slots.map((slot) => {
@@ -699,16 +742,26 @@ export default function Home() {
       if (target.getTime() <= now.getTime() || (slot.lastEvaluatedAt && new Date(slot.lastEvaluatedAt).toDateString() === target.toDateString())) target.setDate(target.getDate() + 7);
       return { slot, time: target.getTime() };
     });
-    const nextSlot = nextSlots.sort((left, right) => left.time - right.time)[0];
-    if (!nextSlot) return;
-    const delay = Math.max(1_000, nextSlot.time - now.getTime());
+    const nextAssignments = assignments.map((assignment) => {
+      const [hours, minutes] = assignment.schedule!.time.split(":").map(Number);
+      const target = new Date(now);
+      const targetDay = dayIndex[assignment.schedule!.day];
+      target.setDate(now.getDate() + ((targetDay - now.getDay() + 7) % 7));
+      target.setHours(hours, minutes, 0, 0);
+      if (target.getTime() <= now.getTime() || (assignment.lastEvaluatedAt && new Date(assignment.lastEvaluatedAt).toDateString() === target.toDateString())) target.setDate(target.getDate() + 7);
+      return { assignment, time: target.getTime() };
+    });
+    const next = [...nextSlots.map((item) => ({ kind: "slot" as const, item, time: item.time })), ...nextAssignments.map((item) => ({ kind: "assignment" as const, item, time: item.time }))].sort((left, right) => left.time - right.time)[0];
+    if (!next) return;
+    const delay = Math.max(1_000, next.time - now.getTime());
     const timer = setTimeout(() => {
-      if (calendarRunInFlight.current === nextSlot.slot.id) return;
-      calendarRunInFlight.current = nextSlot.slot.id;
-      void mutate({ type: "runSlot", id: nextSlot.slot.id, scheduled: true }).finally(() => { calendarRunInFlight.current = null; });
+      const key = next.kind === "slot" ? next.item.slot.id : `assignment:${next.item.assignment.id}`;
+      if (calendarRunInFlight.current === key) return;
+      calendarRunInFlight.current = key;
+      void mutate(next.kind === "slot" ? { type: "runSlot", id: next.item.slot.id, scheduled: true } : { type: "runPulse", presenceId: presence.id }).finally(() => { calendarRunInFlight.current = null; });
     }, delay);
     return () => clearTimeout(timer);
-  }, [state?.calendar, state?.presence, state?.activePresenceId]);
+  }, [state?.assignments, state?.calendar, state?.presence, state?.activePresenceId]);
   async function manageBridge(operation: unknown) {
     setError(null);
     try {
@@ -1042,7 +1095,6 @@ function AgentSwitcher({
         <PresenceGlyph accent={agent.accent} />
         <span>
           <strong>{agent.name}</strong>
-          <small>Persistent mind</small>
         </span>
         <ChevronRight size={14} className={open ? "agent-chevron-open" : ""} />
       </button>
@@ -1406,16 +1458,12 @@ function AgentWorkspaceShell({
           )}
         </button>
         <div className="sidebar-footer">
-          <div className="sidebar-runtime" aria-label="Local runtime">
-            <span className="status-dot" />
-            <span>Local runtime</span>
-          </div>
           <div className="sidebar-footer-actions">
             <AgentSwitcher state={state} mutate={mutate} />
           </div>
         </div>
       </aside>
-      <section className={view === "chat" || view === "teach" ? "workspace workspace-chat" : "workspace"}>
+      <section className={`${view === "chat" || view === "teach" ? "workspace workspace-chat" : "workspace"} ${view === "knowledge" ? "workspace-knowledge" : ""}`}>
         <header className="topbar">
           <div className="mobile-brand">
             <div className="brand-mark">◉</div>
@@ -1602,7 +1650,6 @@ function LegacyAppShell({
           <PresenceGlyph accent={agent.accent} />
           <span>
             <strong>{agent.name}</strong>
-            <small>Persistent mind</small>
           </span>
           <ChevronRight size={14} />
         </button>
@@ -1676,7 +1723,7 @@ function LegacyAppShell({
           <span>Knowledge</span>
         </button>
       </aside>
-      <section className={view === "chat" ? "workspace workspace-chat" : "workspace"}>
+      <section className={`${view === "chat" ? "workspace workspace-chat" : "workspace"} ${view === "knowledge" ? "workspace-knowledge" : ""}`}>
         <header className="topbar">
           <div className="mobile-brand">
             <div className="brand-mark">◉</div>
@@ -3027,27 +3074,26 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
   if (!presence) return null;
   return (
     <div className="playground-page">
-      <div className="playground-toolbar">
-        <div>
-          <div className="eyebrow">Presence rehearsal</div>
-          <div className="playground-title-row"><h1>Playground</h1><span className="environment-chip"><span className="status-dot" /> Sandbox</span></div>
-          <p>{simulation.worldDescription}</p>
-        </div>
-        <div className="playground-toolbar-actions">
-          <Button variant="primary" disabled={busy} onClick={() => scenarioMode ? setScenarioComposerOpen((open) => !open) : setRehearsalOpen((open) => !open)}>{(scenarioMode ? scenarioComposerOpen : rehearsalOpen) ? <X size={14} /> : <Sparkles size={14} />} {(scenarioMode ? scenarioComposerOpen : rehearsalOpen) ? "Close" : "Rehearse"}</Button>
-        </div>
-      </div>
+      <PageHeader
+        className="playground-toolbar"
+        eyebrow="Presence rehearsal"
+        title="Playground"
+        titleAdornment={<span className="environment-chip"><span className="status-dot" /> Sandbox</span>}
+        description={simulation.worldDescription}
+        actionsClassName="playground-toolbar-actions"
+        actions={<Button variant="primary" disabled={busy} onClick={() => scenarioMode ? setScenarioComposerOpen((open) => !open) : setRehearsalOpen((open) => !open)}>{(scenarioMode ? scenarioComposerOpen : rehearsalOpen) ? <X size={14} /> : <Sparkles size={14} />} {(scenarioMode ? scenarioComposerOpen : rehearsalOpen) ? "Close" : "Rehearse"}</Button>}
+      />
       <div className="playground-mode-bar">
         <div className="playground-mode-copy">{scenarioMode ? "Make it cheap to discover behavioral failure before it becomes public." : "A safe place to test the Presence before anything goes live."}</div>
-        <div className="playground-mode-switch" role="tablist" aria-label="Playground mode">
-          <Button role="tab" aria-selected={!scenarioMode} variant={!scenarioMode ? "primary" : "ghost"} onClick={() => setScenarioMode(false)}>Free play</Button>
-          <Button role="tab" aria-selected={scenarioMode} variant={scenarioMode ? "primary" : "ghost"} onClick={() => setScenarioMode(true)}>Scenarios</Button>
+        <div className="playground-mode-controls">
+          {session && <Button variant="ghost" disabled={busy} onClick={() => void run({ type: "resetPlayground", sessionId: session.id })}><RotateCcw size={14} /> Reset</Button>}
+          <div className="playground-mode-switch" role="tablist" aria-label="Playground mode">
+            <Button role="tab" aria-selected={!scenarioMode} variant={!scenarioMode ? "primary" : "ghost"} onClick={() => setScenarioMode(false)}>Free play</Button>
+            <Button role="tab" aria-selected={scenarioMode} variant={scenarioMode ? "primary" : "ghost"} onClick={() => setScenarioMode(true)}>Scenarios</Button>
+          </div>
         </div>
       </div>
       {scenarioMode ? <ScenarioLibrary state={state} mutate={mutate} presence={presence} creating={scenarioComposerOpen} onCreatingChange={setScenarioComposerOpen} /> : !session ? <div className="playground-loading" role="status">Opening a fresh simulated account…</div> : <>
-      <div className="playground-action-bar">
-        <Button variant="ghost" disabled={busy} onClick={() => void run({ type: "resetPlayground", sessionId: session.id })}><RotateCcw size={14} /> Reset</Button>
-      </div>
       {rehearsalOpen && <section className="original-rehearsal-panel" aria-label="Posting rehearsal controls">
         <div className="rehearsal-panel-header"><div className="eyebrow">Rehearsal controls</div><Button variant="ghost" type="button" onClick={() => setRehearsalOpen(false)}><X size={14} /> Close</Button></div>
         <div className="rehearsal-mode-menu" role="group" aria-label="Posting rehearsal mode">
@@ -3168,10 +3214,14 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
     if (next) setCorrection("");
   };
   return <div className="people-page">
-    <div className="people-header">
-      <div><SectionEyebrow>Presence relationships</SectionEyebrow><h1>People</h1><p>Who {presence.name} remembers here. Seeing someone in the world does not automatically create a relationship.</p></div>
-      <Button variant="primary" onClick={() => setRemembering((value) => !value)}><Plus size={14} /> Remember a person</Button>
-    </div>
+    <PageHeader
+      className="people-header"
+      eyebrow="Presence relationships"
+      title="People"
+      description={<>Who {presence.name} remembers here. Seeing someone in the world does not automatically create a relationship.</>}
+      actionsClassName="heading-actions"
+      actions={<Button variant="primary" onClick={() => setRemembering((value) => !value)}><Plus size={14} /> Remember a person</Button>}
+    />
     {remembering && <section className="people-composer" aria-label="Remember a person">
       <div><SectionEyebrow>Explicit memory</SectionEyebrow><h2>Who should {presence.name} remember?</h2><p>This creates identity context without inventing prior interaction history.</p></div>
       <div className="people-form-grid"><label>Name<input aria-label="Person name" value={rememberName} onChange={(event) => setRememberName(event.target.value)} placeholder="Maya Chen" /></label><label>Handle <span className="optional-label">Optional</span><input aria-label="Person handle" value={rememberHandle} onChange={(event) => setRememberHandle(event.target.value)} placeholder="@maya" /></label><label>Channel actor ID<input aria-label="Channel actor ID" value={rememberExternalId} onChange={(event) => setRememberExternalId(event.target.value)} placeholder="maya" /></label></div>
@@ -3275,10 +3325,14 @@ function WatchingView({ state, mutate }: { state: OpenPresenceState; mutate: Mut
     } finally { setBusyExplorationId(null); }
   };
   return <div className="watching-page">
-    <div className="watching-header">
-      <div><SectionEyebrow>Presence attention</SectionEyebrow><h1>Watching</h1><p>What {presence.name} is paying extra attention to. Known people stay in the Watchlist; Explorations look for meaningful social reality.</p></div>
-      <Button variant="primary" onClick={() => { setReviewing((value) => !value); setTab("explorations"); }}><Plus size={14} /> New exploration</Button>
-    </div>
+    <PageHeader
+      className="watching-header"
+      eyebrow="Presence attention"
+      title="Watching"
+      description={<>What {presence.name} is paying extra attention to. Known people stay in the Watchlist; Explorations look for meaningful social reality.</>}
+      actionsClassName="heading-actions"
+      actions={<Button variant="primary" onClick={() => { setReviewing((value) => !value); setTab("explorations"); }}><Plus size={14} /> New exploration</Button>}
+    />
     <div className="watch-tabs" role="tablist" aria-label="Watching categories"><button type="button" role="tab" aria-selected={tab === "explorations"} className={tab === "explorations" ? "active" : ""} onClick={() => setTab("explorations")}>Explorations <span>{explorations.filter((item) => item.status !== "archived").length}</span></button><button type="button" role="tab" aria-selected={tab === "watchlist"} className={tab === "watchlist" ? "active" : ""} onClick={() => { setTab("watchlist"); setReviewing(false); }}>Watchlist <span>{watches.length}</span></button></div>
     {tab === "watchlist" && <>
       <div className="watchlist-toolbar"><div><SectionEyebrow>Known things</SectionEyebrow><h2>People and sources this Presence intentionally follows.</h2></div><Button variant="secondary" onClick={() => setReviewing((value) => !value)}>Add watch</Button></div>
@@ -3480,11 +3534,17 @@ function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceSta
   const agent = state.agent;
   const presence = state.presence;
   const collections = state.knowledgeCollections.filter((collection) => collection.agentId === agent?.id && collection.status === "active");
-  const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(collections[0]?.id ?? null);
-  const [collectionName, setCollectionName] = useState("");
-  const [collectionDescription, setCollectionDescription] = useState("");
-  const [collectionRole, setCollectionRole] = useState<"reference" | "procedure">("reference");
-  const [collectionUse, setCollectionUse] = useState<KnowledgeUse>("internal");
+  const [collectionMode, setCollectionMode] = useState<"list" | "new" | "detail">("list");
+  const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
+  const [newCollectionName, setNewCollectionName] = useState("");
+  const [newCollectionDescription, setNewCollectionDescription] = useState("");
+  const [newCollectionRole, setNewCollectionRole] = useState<"reference" | "procedure">("reference");
+  const [newCollectionUse, setNewCollectionUse] = useState<KnowledgeUse>("internal");
+  const [editCollectionName, setEditCollectionName] = useState("");
+  const [editCollectionDescription, setEditCollectionDescription] = useState("");
+  const [editCollectionRole, setEditCollectionRole] = useState<"reference" | "procedure">("reference");
+  const [editCollectionUse, setEditCollectionUse] = useState<KnowledgeUse>("internal");
+  const [itemFormOpen, setItemFormOpen] = useState(false);
   const [itemTitle, setItemTitle] = useState("");
   const [itemRole, setItemRole] = useState<"reference" | "procedure" | "inherit">("inherit");
   const [itemUse, setItemUse] = useState<KnowledgeUse | "inherit">("inherit");
@@ -3497,19 +3557,62 @@ function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceSta
   const [query, setQuery] = useState("");
   const [retrieval, setRetrieval] = useState<{ results: Array<{ itemTitle: string; excerpt: string; effectiveUse: KnowledgeUse; headingPath?: string[]; pageNumber?: number; textRange?: { start: number; end: number }; collectionName: string; versionNumber: number; segmentId: string }>; missingEvidence?: string[]; staleWarnings?: string[]; unresolvedConflicts?: string[] } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
-  const selectedCollection = collections.find((collection) => collection.id === selectedCollectionId) ?? collections[0];
+  const selectedCollection = collections.find((collection) => collection.id === selectedCollectionId);
   const selectedItems = state.knowledgeItems.filter((item) => item.collectionId === selectedCollection?.id && item.status === "active");
+  const retrievalRuns = state.knowledgeRetrievalRuns.filter((run) => run.agentId === agent?.id).slice(0, 8);
+
+  const openCollection = (collectionId: string) => {
+    const collection = collections.find((candidate) => candidate.id === collectionId);
+    if (!collection) return;
+    setSelectedCollectionId(collection.id);
+    setEditCollectionName(collection.name);
+    setEditCollectionDescription(collection.description ?? "");
+    setEditCollectionRole(collection.defaultRole);
+    setEditCollectionUse(collection.defaultUse);
+    setVersionItemId(null);
+    setItemFormOpen(false);
+    setCollectionMode("detail");
+  };
+  const startNewCollection = () => {
+    setSelectedCollectionId(null);
+    setNewCollectionName("");
+    setNewCollectionDescription("");
+    setNewCollectionRole("reference");
+    setNewCollectionUse("internal");
+    setCollectionMode("new");
+  };
+  const closeCollectionWorkspace = () => {
+    setSelectedCollectionId(null);
+    setItemFormOpen(false);
+    setVersionItemId(null);
+    setCollectionMode("list");
+  };
 
   const createCollection = async (event: React.FormEvent) => {
     event.preventDefault();
-    if (!collectionName.trim()) return;
+    if (!newCollectionName.trim()) return;
     setBusy("collection");
-    const next = await mutate({ type: "createKnowledgeCollection", name: collectionName, description: collectionDescription, defaultRole: collectionRole, defaultUse: collectionUse });
+    const next = await mutate({ type: "createKnowledgeCollection", name: newCollectionName, description: newCollectionDescription, defaultRole: newCollectionRole, defaultUse: newCollectionUse });
     if (next) {
-      setCollectionName("");
-      setCollectionDescription("");
-      setSelectedCollectionId(next.knowledgeCollections[0]?.id ?? null);
+      const created = next.knowledgeCollections.find((collection) => !collections.some((existing) => existing.id === collection.id));
+      if (created) {
+        setSelectedCollectionId(created.id);
+        setEditCollectionName(created.name);
+        setEditCollectionDescription(created.description ?? "");
+        setEditCollectionRole(created.defaultRole);
+        setEditCollectionUse(created.defaultUse);
+        setCollectionMode("detail");
+      } else {
+        closeCollectionWorkspace();
+      }
     }
+    setBusy(null);
+  };
+  const saveCollection = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedCollection || !editCollectionName.trim()) return;
+    setBusy("collection-edit");
+    await mutate({ type: "updateKnowledgeCollection", collectionId: selectedCollection.id, name: editCollectionName, description: editCollectionDescription, defaultRole: editCollectionRole, defaultUse: editCollectionUse });
     setBusy(null);
   };
   const addItem = async (event: React.FormEvent) => {
@@ -3522,6 +3625,7 @@ function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceSta
       setItemContent("");
       setOriginalDataUrl(undefined);
       setOriginalFileName(undefined);
+      setItemFormOpen(false);
     }
     setBusy(null);
   };
@@ -3569,53 +3673,77 @@ function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceSta
   };
   if (!agent) return <div className="page"><EmptyState title="Create an Agent first" body="Knowledge belongs to an Agent and is available to its Presences through explicit bindings." /></div>;
   return <div className="page knowledge-page">
-    <div className="page-heading">
-      <div><SectionEyebrow>Agent-owned source material</SectionEyebrow><h1>Knowledge</h1><p className="muted">Keep durable reference and procedure material versioned, scoped, and inspectable before it reaches cognition.</p></div>
-      <div className="knowledge-page-meta"><span>{collections.length} collections</span><span>{state.knowledgeItems.filter((item) => item.status === "active").length} active items</span></div>
-    </div>
-    <div className="knowledge-layout">
-      <section className="settings-card knowledge-collections-card" aria-labelledby="knowledge-collections-title">
-        <div className="section-heading compact"><div><SectionEyebrow>Agent-owned</SectionEyebrow><h2 id="knowledge-collections-title">Collections</h2></div><BookOpen size={17} /></div>
-        <div className="knowledge-collection-list">
-          {collections.map((collection) => <button type="button" className={`knowledge-collection-row ${selectedCollection?.id === collection.id ? "selected" : ""}`} key={collection.id} onClick={() => setSelectedCollectionId(collection.id)}><span><strong>{collection.name}</strong><small>{collection.defaultRole === "procedure" ? "Procedure" : "Reference"} · {collection.defaultUse}</small></span><ChevronRight size={15} /></button>)}
-          {!collections.length && <p className="muted">Create the first collection to start adding source material.</p>}
-        </div>
-        <form className="knowledge-form" onSubmit={(event) => void createCollection(event)}>
-          <div className="section-heading compact"><div><SectionEyebrow>New collection</SectionEyebrow><h3>Set the default envelope</h3></div></div>
-          <label>Name<input aria-label="Collection name" value={collectionName} onChange={(event) => setCollectionName(event.target.value)} placeholder="Operating principles" /></label>
-          <label>Description<textarea aria-label="Collection description" value={collectionDescription} onChange={(event) => setCollectionDescription(event.target.value)} rows={2} placeholder="What belongs here?" /></label>
-          <div className="knowledge-form-grid"><label>Role<select value={collectionRole} onChange={(event) => setCollectionRole(event.target.value as "reference" | "procedure")}><option value="reference">Reference</option><option value="procedure">Procedure</option></select></label><label>Default use<select value={collectionUse} onChange={(event) => setCollectionUse(event.target.value as KnowledgeUse)}><option value="none">Not available</option><option value="internal">Internal</option><option value="public">Public</option></select></label></div>
-          <Button type="submit" variant="primary" disabled={busy === "collection" || !collectionName.trim()}><Plus size={14} /> {busy === "collection" ? "Creating…" : "Create collection"}</Button>
-        </form>
-      </section>
-      <section className="settings-card knowledge-items-card" aria-labelledby="knowledge-items-title">
-        <div className="section-heading compact"><div><SectionEyebrow>{selectedCollection?.name ?? "No collection selected"}</SectionEyebrow><h2 id="knowledge-items-title">Items and versions</h2></div><FileText size={17} /></div>
-        {!selectedCollection ? <p className="muted">Select or create a collection to add source material.</p> : <>
-          <div className="knowledge-item-list">
-            {selectedItems.map((item) => {
-              const versions = state.knowledgeVersions.filter((version) => version.itemId === item.id).sort((a, b) => b.versionNumber - a.versionNumber);
-              const current = versions.find((version) => version.id === item.currentVersionId);
-              return <article className="knowledge-item" key={item.id}><div className="knowledge-item-heading"><div><strong>{item.title}</strong><small>{item.role === "procedure" ? "Procedure" : "Reference"} · {item.useOverride ? `item override: ${item.useOverride}` : "inherits collection use"}</small></div><Button type="button" variant="ghost" onClick={() => setVersionItemId(versionItemId === item.id ? null : item.id)}><Plus size={13} /> New version</Button></div><p>{current?.normalizedContent.slice(0, 220)}{(current?.normalizedContent.length ?? 0) > 220 ? "…" : ""}</p><div className="knowledge-version-history"><span>Current v{current?.versionNumber ?? "—"} · {versions.length} immutable {versions.length === 1 ? "version" : "versions"}</span><details><summary>Version history</summary>{versions.map((version) => <small key={version.id}>v{version.versionNumber} · {version.parseStatus} · {version.contentHash}</small>)}</details></div>{versionItemId === item.id && <form className="knowledge-version-form" onSubmit={(event) => void addVersion(event)}><textarea aria-label={`New version content for ${item.title}`} value={versionContent} onChange={(event) => setVersionContent(event.target.value)} rows={4} placeholder="Paste the revised source material…" /><Button type="submit" variant="secondary" disabled={busy === "version" || !versionContent.trim()}>{busy === "version" ? "Saving…" : "Save immutable version"}</Button></form>}</article>;
-            })}
-            {!selectedItems.length && <p className="muted">No items yet. Add a source below.</p>}
+    <PageHeader
+      className="knowledge-page-heading"
+      eyebrow="Agent-owned source material"
+      title="Knowledge"
+      description="Keep durable reference and procedure material versioned, scoped, and inspectable before it reaches cognition."
+      actionsClassName="knowledge-heading-actions"
+      actions={<>
+        <div className="knowledge-page-meta"><span>{collections.length} collections</span><span>{state.knowledgeItems.filter((item) => item.status === "active").length} active items</span></div>
+        <Button type="button" variant="primary" onClick={startNewCollection}><Plus size={14} /> New collection</Button>
+      </>}
+    />
+    <div className="knowledge-workspace">
+      <main className="knowledge-primary" aria-live="polite">
+        {collectionMode === "list" && <section className="knowledge-collection-browser" aria-labelledby="knowledge-collections-title">
+          <div className="knowledge-section-heading"><div><SectionEyebrow>Agent-owned</SectionEyebrow><h2 id="knowledge-collections-title">Collections</h2><p className="muted">Choose a collection to inspect its source material and defaults.</p></div><BookOpen size={18} /></div>
+          <div className="knowledge-collection-list">
+            {collections.map((collection) => <button type="button" className="knowledge-collection-row" key={collection.id} onClick={() => openCollection(collection.id)}><span><strong>{collection.name}</strong><small>{collection.description || "No description yet"}</small><em>{collection.defaultRole === "procedure" ? "Procedure" : "Reference"} · {collection.defaultUse} · {state.knowledgeItems.filter((item) => item.collectionId === collection.id && item.status === "active").length} items</em></span><ChevronRight size={17} /></button>)}
+            {!collections.length && <div className="knowledge-empty-state"><FileText size={22} /><strong>No collections yet</strong><p>Create one to give durable source material a clear home.</p><Button type="button" variant="primary" onClick={startNewCollection}><Plus size={14} /> New collection</Button></div>}
           </div>
-          <form className="knowledge-form knowledge-add-form" onSubmit={(event) => void addItem(event)}>
-            <div className="section-heading compact"><div><SectionEyebrow>Manual ingestion</SectionEyebrow><h3>Add source material</h3></div></div>
-            <div className="knowledge-form-grid"><label>Title<input aria-label="Knowledge item title" value={itemTitle} onChange={(event) => setItemTitle(event.target.value)} placeholder="Audience principles" /></label><label>Source file<input type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={(event) => void handleFile(event.target.files?.[0])} /></label></div>
-            <div className="knowledge-form-grid"><label>Role<select value={itemRole} onChange={(event) => setItemRole(event.target.value as "reference" | "procedure" | "inherit")}><option value="inherit">Inherit collection</option><option value="reference">Reference</option><option value="procedure">Procedure</option></select></label><label>Use override<select value={itemUse} onChange={(event) => setItemUse(event.target.value as KnowledgeUse | "inherit")}><option value="inherit">Inherit collection</option><option value="none">Not available</option><option value="internal">Internal</option><option value="public">Public</option></select></label></div>
-            <label>Paste text or Markdown<textarea aria-label="Knowledge content" value={itemContent} onChange={(event) => setItemContent(event.target.value)} rows={7} placeholder="# Heading\n\nPaste the source material here. Headings and semantic blocks are preserved for retrieval." /></label>
-            {originalFileName && <small className="form-hint">Original file preserved: {originalFileName}</small>}
-            <Button type="submit" variant="primary" disabled={busy === "item" || !itemTitle.trim() || !itemContent.trim()}><Plus size={14} /> {busy === "item" ? "Indexing…" : "Add Knowledge item"}</Button>
+        </section>}
+
+        {collectionMode === "new" && <section className="knowledge-focused-panel" aria-labelledby="knowledge-new-title">
+          <div className="knowledge-detail-toolbar"><Button type="button" variant="ghost" onClick={closeCollectionWorkspace}><X size={15} /> All collections</Button><span>New collection</span></div>
+          <div className="knowledge-focused-heading"><div><SectionEyebrow>New collection</SectionEyebrow><h2 id="knowledge-new-title">Give source material a home</h2><p className="muted">Set the defaults once. You can adjust them later from the collection.</p></div><BookOpen size={20} /></div>
+          <form className="knowledge-collection-form" onSubmit={(event) => void createCollection(event)}>
+            <label>Name<input aria-label="Collection name" value={newCollectionName} onChange={(event) => setNewCollectionName(event.target.value)} placeholder="Operating principles" autoFocus /></label>
+            <label>Description<span className="form-hint">A short note helps you recognize the collection later.</span><textarea aria-label="Collection description" value={newCollectionDescription} onChange={(event) => setNewCollectionDescription(event.target.value)} rows={4} placeholder="What belongs here?" /></label>
+            <div className="knowledge-form-grid"><label>Role<select value={newCollectionRole} onChange={(event) => setNewCollectionRole(event.target.value as "reference" | "procedure")}><option value="reference">Reference</option><option value="procedure">Procedure</option></select></label><label>Default use<select value={newCollectionUse} onChange={(event) => setNewCollectionUse(event.target.value as KnowledgeUse)}><option value="none">Not available</option><option value="internal">Internal</option><option value="public">Public</option></select></label></div>
+            <div className="knowledge-form-actions"><Button type="button" variant="secondary" onClick={closeCollectionWorkspace}>Cancel</Button><Button type="submit" variant="primary" disabled={busy === "collection" || !newCollectionName.trim()}><Plus size={14} /> {busy === "collection" ? "Creating…" : "Create collection"}</Button></div>
           </form>
-        </>}
-      </section>
+        </section>}
+
+        {collectionMode === "detail" && selectedCollection && <section className="knowledge-focused-panel" aria-labelledby="knowledge-detail-title">
+          <div className="knowledge-detail-toolbar"><Button type="button" variant="ghost" onClick={closeCollectionWorkspace}><X size={15} /> All collections</Button><span>Collection details</span></div>
+          <div className="knowledge-focused-heading"><div><SectionEyebrow>Collection</SectionEyebrow><h2 id="knowledge-detail-title">{selectedCollection.name}</h2><p className="muted">{selectedCollection.description || "No description added yet."}</p></div><BookOpen size={20} /></div>
+          <form className="knowledge-collection-form knowledge-collection-edit-form" onSubmit={(event) => void saveCollection(event)}>
+            <div className="knowledge-form-heading"><div><h3>Collection details</h3><p className="form-hint">These defaults apply to new items. Existing items keep their own version history.</p></div><Button type="submit" variant="secondary" disabled={busy === "collection-edit" || !editCollectionName.trim()}>{busy === "collection-edit" ? "Saving…" : "Save changes"}</Button></div>
+            <label>Name<input aria-label="Collection name" value={editCollectionName} onChange={(event) => setEditCollectionName(event.target.value)} /></label>
+            <label>Description<textarea aria-label="Collection description" value={editCollectionDescription} onChange={(event) => setEditCollectionDescription(event.target.value)} rows={3} placeholder="What belongs here?" /></label>
+            <div className="knowledge-form-grid"><label>Role<select value={editCollectionRole} onChange={(event) => setEditCollectionRole(event.target.value as "reference" | "procedure")}><option value="reference">Reference</option><option value="procedure">Procedure</option></select></label><label>Default use<select value={editCollectionUse} onChange={(event) => setEditCollectionUse(event.target.value as KnowledgeUse)}><option value="none">Not available</option><option value="internal">Internal</option><option value="public">Public</option></select></label></div>
+          </form>
+          <section className="knowledge-source-section" aria-labelledby="knowledge-items-title">
+            <div className="knowledge-form-heading"><div><SectionEyebrow>Source material</SectionEyebrow><h3 id="knowledge-items-title">Items and versions</h3><p className="form-hint">Keep each source inspectable and versioned.</p></div><Button type="button" variant="secondary" onClick={() => setItemFormOpen(!itemFormOpen)}>{itemFormOpen ? <><X size={14} /> Close</> : <><Plus size={14} /> Add source</>}</Button></div>
+            <div className="knowledge-item-list">
+              {selectedItems.map((item) => {
+                const versions = state.knowledgeVersions.filter((version) => version.itemId === item.id).sort((a, b) => b.versionNumber - a.versionNumber);
+                const current = versions.find((version) => version.id === item.currentVersionId);
+                return <article className="knowledge-item" key={item.id}><div className="knowledge-item-heading"><div><strong>{item.title}</strong><small>{item.role === "procedure" ? "Procedure" : "Reference"} · {item.useOverride ? `item override: ${item.useOverride}` : "inherits collection use"}</small></div><Button type="button" variant="ghost" onClick={() => setVersionItemId(versionItemId === item.id ? null : item.id)}><Plus size={13} /> New version</Button></div><p>{current?.normalizedContent.slice(0, 220)}{(current?.normalizedContent.length ?? 0) > 220 ? "…" : ""}</p><div className="knowledge-version-history"><span>Current v{current?.versionNumber ?? "—"} · {versions.length} immutable {versions.length === 1 ? "version" : "versions"}</span><details><summary>Version history</summary>{versions.map((version) => <small key={version.id}>v{version.versionNumber} · {version.parseStatus} · {version.contentHash}</small>)}</details></div>{versionItemId === item.id && <form className="knowledge-version-form" onSubmit={(event) => void addVersion(event)}><textarea aria-label={`New version content for ${item.title}`} value={versionContent} onChange={(event) => setVersionContent(event.target.value)} rows={4} placeholder="Paste the revised source material…" /><Button type="submit" variant="secondary" disabled={busy === "version" || !versionContent.trim()}>{busy === "version" ? "Saving…" : "Save immutable version"}</Button></form>}</article>;
+              })}
+              {!selectedItems.length && <div className="knowledge-empty-state knowledge-empty-items"><FileText size={20} /><strong>No source items yet</strong><p>Add a file or paste text to begin building this collection.</p></div>}
+            </div>
+            {itemFormOpen && <form className="knowledge-form knowledge-add-form" onSubmit={(event) => void addItem(event)}>
+              <div className="knowledge-form-heading"><div><SectionEyebrow>Manual ingestion</SectionEyebrow><h3>Add source material</h3></div></div>
+              <div className="knowledge-form-grid"><label>Title<input aria-label="Knowledge item title" value={itemTitle} onChange={(event) => setItemTitle(event.target.value)} placeholder="Audience principles" /></label><label>Source file<input type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={(event) => void handleFile(event.target.files?.[0])} /></label></div>
+              <div className="knowledge-form-grid"><label>Role<select value={itemRole} onChange={(event) => setItemRole(event.target.value as "reference" | "procedure" | "inherit")}><option value="inherit">Inherit collection</option><option value="reference">Reference</option><option value="procedure">Procedure</option></select></label><label>Use override<select value={itemUse} onChange={(event) => setItemUse(event.target.value as KnowledgeUse | "inherit")}><option value="inherit">Inherit collection</option><option value="none">Not available</option><option value="internal">Internal</option><option value="public">Public</option></select></label></div>
+              <label>Paste text or Markdown<textarea aria-label="Knowledge content" value={itemContent} onChange={(event) => setItemContent(event.target.value)} rows={7} placeholder="# Heading\n\nPaste the source material here. Headings and semantic blocks are preserved for retrieval." /></label>
+              {originalFileName && <small className="form-hint">Original file preserved: {originalFileName}</small>}
+              <div className="knowledge-form-actions"><Button type="button" variant="secondary" onClick={() => setItemFormOpen(false)}>Cancel</Button><Button type="submit" variant="primary" disabled={busy === "item" || !itemTitle.trim() || !itemContent.trim()}><Plus size={14} /> {busy === "item" ? "Indexing…" : "Add Knowledge item"}</Button></div>
+            </form>}
+          </section>
+        </section>}
+      </main>
+      <aside className="knowledge-tools-sidebar" aria-label="Knowledge tools">
+        <section className="knowledge-tool-card" aria-labelledby="knowledge-retrieval-title">
+          <div className="knowledge-section-heading"><div><SectionEyebrow>Operator-visible</SectionEyebrow><h2 id="knowledge-retrieval-title">Check access</h2><p className="muted">See what the active Presence can retrieve.</p></div><Activity size={18} /></div>
+          <form className="knowledge-retrieval-form" onSubmit={(event) => void runRetrieval(event)}><input aria-label="Knowledge retrieval query" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Ask what it can know…" /><Button type="submit" variant="secondary" disabled={busy === "retrieval" || !query.trim()}>{busy === "retrieval" ? "Searching…" : "Search"}</Button></form>
+          {retrieval && <div className="knowledge-results" role="status"><div className="knowledge-result-summary">{retrieval.results.length ? `${retrieval.results.length} passage${retrieval.results.length === 1 ? "" : "s"} retrieved` : "No matching accessible passage"}</div>{retrieval.results.map((result) => <article className="knowledge-result" key={result.segmentId}><div><strong>{result.itemTitle}</strong><small>{result.collectionName} · v{result.versionNumber} · {result.effectiveUse} · {result.headingPath?.join(" / ") ?? "Source passage"}</small></div><p>{result.excerpt}</p><small>Provenance: segment {result.segmentId} · characters {result.textRange?.start ?? "—"}–{result.textRange?.end ?? "—"}{result.pageNumber ? ` · page ${result.pageNumber}` : ""}</small></article>)}{[...(retrieval.missingEvidence ?? []), ...(retrieval.unresolvedConflicts ?? []), ...(retrieval.staleWarnings ?? [])].map((warning) => <p className="form-hint" key={warning}>{warning}</p>)}</div>}
+        </section>
+        <section className="knowledge-tool-card knowledge-audit-sidebar" aria-labelledby="knowledge-history-title"><div className="knowledge-section-heading"><div><SectionEyebrow>Audit trail</SectionEyebrow><h2 id="knowledge-history-title">Recent retrievals</h2><p className="muted">A quiet record of what was actually made available.</p></div><ShieldCheck size={18} /></div>{retrievalRuns.map((run) => <div className="knowledge-history-row" key={run.id}><span><strong>{run.purpose}</strong><small>{run.query}</small></span><span>{run.selectedSegmentIds.length} selected · {new Date(run.createdAt).toLocaleString()}</span></div>)}{!retrievalRuns.length && <p className="muted">Retrieval history will appear here after a Knowledge check or Agent read.</p>}</section>
+      </aside>
     </div>
-    <section className="settings-card knowledge-retrieval-card" aria-labelledby="knowledge-retrieval-title">
-      <div className="section-heading compact"><div><SectionEyebrow>Operator-visible retrieval</SectionEyebrow><h2 id="knowledge-retrieval-title">Test scoped retrieval</h2></div><Activity size={17} /></div>
-      <form className="knowledge-retrieval-form" onSubmit={(event) => void runRetrieval(event)}><input aria-label="Knowledge retrieval query" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Ask what the active Presence can know…" /><Button type="submit" variant="secondary" disabled={busy === "retrieval" || !query.trim()}>{busy === "retrieval" ? "Searching…" : "Search"}</Button></form>
-      {retrieval && <div className="knowledge-results" role="status"><div className="knowledge-result-summary">{retrieval.results.length ? `${retrieval.results.length} passage${retrieval.results.length === 1 ? "" : "s"} retrieved` : "No matching accessible passage"}</div>{retrieval.results.map((result) => <article className="knowledge-result" key={result.segmentId}><div><strong>{result.itemTitle}</strong><small>{result.collectionName} · v{result.versionNumber} · {result.effectiveUse} · {result.headingPath?.join(" / ") ?? "Source passage"}</small></div><p>{result.excerpt}</p><small>Provenance: segment {result.segmentId} · characters {result.textRange?.start ?? "—"}–{result.textRange?.end ?? "—"}{result.pageNumber ? ` · page ${result.pageNumber}` : ""}</small></article>)}{[...(retrieval.missingEvidence ?? []), ...(retrieval.unresolvedConflicts ?? []), ...(retrieval.staleWarnings ?? [])].map((warning) => <p className="form-hint" key={warning}>{warning}</p>)}</div>}
-    </section>
-    <section className="settings-card knowledge-history-card" aria-labelledby="knowledge-history-title"><div className="section-heading compact"><div><SectionEyebrow>Audit trail</SectionEyebrow><h2 id="knowledge-history-title">Recent retrieval history</h2></div><ShieldCheck size={17} /></div>{state.knowledgeRetrievalRuns.filter((run) => run.agentId === agent.id).slice(0, 8).map((run) => <div className="knowledge-history-row" key={run.id}><span><strong>{run.purpose}</strong><small>{run.query}</small></span><span>{run.selectedSegmentIds.length} selected · {new Date(run.createdAt).toLocaleString()}</span></div>)}{!state.knowledgeRetrievalRuns.length && <p className="muted">Retrieval runs will appear here after a compiler or read-only Knowledge tool call.</p>}</section>
   </div>;
 }
 
@@ -3697,15 +3825,12 @@ function TeachView({
           <PanelRightOpen size={17} />
         )}
       </button>
-      <div className="page-heading teach-heading">
-        <div>
-          <SectionEyebrow>Agent teaching</SectionEyebrow>
-          <h1>Teach the Agent through conversation.</h1>
-          <p>
-            Tell {agent.name} what to notice, protect, pursue, or leave alone. This transcript stays with {agent.name}; durable meaning belongs in Brain.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        className="teach-heading"
+        eyebrow="Agent teaching"
+        title="Teach the Agent through conversation."
+        description={<>Tell {agent.name} what to notice, protect, pursue, or leave alone. This transcript stays with {agent.name}; durable meaning belongs in Brain.</>}
+      />
       <div
         className={`chat-layout ${contextOpen ? "context-open" : "context-collapsed"}`}
       >
@@ -3873,25 +3998,13 @@ function OldChatView({
   };
   return (
     <div className="page page-chat">
-      <div className="page-heading chat-heading">
-        <div>
-          <SectionEyebrow>
-            {messages.length
-              ? "Working conversation"
-              : "Conversation as configuration"}
-          </SectionEyebrow>
-          <h1>
-            {messages.length
-              ? (conversation?.title ?? `Conversation with ${agent.name}`)
-              : `Talk to ${agent.name}.`}
-          </h1>
-          <p className="muted">
-            {messages.length
-              ? `${agent.name} · ${model?.model ?? "Default model"} · Agent-wide context`
-              : "Start a conversation. Shape its personality, mission, taste, and way of showing up."}
-          </p>
-        </div>
-        <div className="heading-actions">
+      <PageHeader
+        className="chat-heading"
+        eyebrow={messages.length ? "Working conversation" : "Conversation as configuration"}
+        title={messages.length ? (conversation?.title ?? `Conversation with ${agent.name}`) : `Talk to ${agent.name}.`}
+        description={messages.length ? `${agent.name} · ${model?.model ?? "Default model"} · Agent-wide context` : "Start a conversation. Shape its personality, mission, taste, and way of showing up."}
+        actionsClassName="heading-actions"
+        actions={<>
           <label className="model-picker">
             Model
             <select
@@ -3911,8 +4024,8 @@ function OldChatView({
           >
             <Plus size={14} /> New conversation
           </Button>
-        </div>
-      </div>
+        </>}
+      />
       <div className="chat-layout">
         <section className="chat-thread">
           <div className="chat-history">
@@ -4139,15 +4252,12 @@ function PresenceChatView({
   };
   return (
     <div className="page page-chat">
-      <div className="page-heading chat-heading">
-        <div>
-          <SectionEyebrow>Chat · {channelLabel(presence.channel, state.channelDefinitions)}</SectionEyebrow>
-          <h1>See {presence.name} in the feed.</h1>
-          <p className="muted">
-            Add a post to the scene, or choose Reply on a post to continue its thread. Nothing publishes or changes the Agent during this rehearsal.
-          </p>
-        </div>
-      </div>
+      <PageHeader
+        className="chat-heading"
+        eyebrow={<>Chat · {channelLabel(presence.channel, state.channelDefinitions)}</>}
+        title={<>See {presence.name} in the feed.</>}
+        description="Add a post to the scene, or choose Reply on a post to continue its thread. Nothing publishes or changes the Agent during this rehearsal."
+      />
       <div className="chat-layout">
         <section className="chat-thread">
           <div className="chat-history">
@@ -4507,15 +4617,13 @@ function LiveView({
     : undefined;
   return (
     <div className="page activity-page">
-      <div className="page-heading activity-heading">
-        <div>
-          <SectionEyebrow>Activity</SectionEyebrow>
-          <h1>{presenceName}, right now.</h1>
-          <p className="muted">
-            A clear view of what {presenceName} has seen, decided, and done.
-          </p>
-        </div>
-        <div className="heading-actions">
+      <PageHeader
+        className="activity-heading"
+        eyebrow="Activity"
+        title={`${presenceName}, right now.`}
+        description={`A clear view of what ${presenceName} has seen, decided, and done.`}
+        actionsClassName="heading-actions"
+        actions={<>
           <span className="next-check-countdown" aria-label={nextCheckCountdown ? `Next check in ${nextCheckCountdown}` : undefined}>
             {paused ? "Checks paused" : checking ? "Checking now…" : nextCheckCountdown ? `Next check in ${nextCheckCountdown}` : nextObservationAt ? "Next check scheduled" : "Next check not scheduled"}
           </span>
@@ -4545,8 +4653,8 @@ function LiveView({
               </Button>
             </>
           )}
-        </div>
-      </div>
+        </>}
+      />
       {activity.needsAttention.count > 0 && (
         <section className="activity-attention" aria-label="Needs your attention">
           <div className="activity-attention-icon"><CircleAlert size={19} /></div>
@@ -5232,17 +5340,16 @@ function PublicHistoryView({
       : `${dateLabel(startOfWeek(anchor), { month: "short", day: "numeric" })} – ${dateLabel(new Date(startOfWeek(anchor).getTime() + 6 * 86400000), { month: "short", day: "numeric", year: "numeric" })}`;
   return (
     <div className={`page public-history-page ${surface === "timeline" ? "timeline-surface" : "calendar-surface"}`}>
-      <div className="page-heading">
-        <div>
-          <SectionEyebrow>Verified public history</SectionEyebrow>
-          <h1>Feed</h1>
-          <p className="muted">What {presence?.name ?? "this Presence"} has put into the world.</p>
-        </div>
-        <div className="heading-actions calendar-heading-actions">
+      <PageHeader
+        eyebrow="Verified public history"
+        title="Feed"
+        description={<>What {presence?.name ?? "this Presence"} has put into the world.</>}
+        actionsClassName="heading-actions calendar-heading-actions"
+        actions={<>
           <span className="scope-summary">{presence ? `${channelLabel(presence.channel, state.channelDefinitions)} · ${presence.name}` : "No Presence selected"}</span>
           <Button variant="secondary" onClick={() => setView("schedule")}><Clock3 size={15} /> Schedule</Button>
-        </div>
-      </div>
+        </>}
+      />
       <div className="public-history-view-controls">
         <div className="public-history-view-toggle" role="group" aria-label="Public history view">
           <button type="button" className={surface === "timeline" ? "active" : ""} aria-pressed={surface === "timeline"} onClick={() => { setSurface("timeline"); setSelected(null); }}>Timeline</button>
@@ -5560,15 +5667,12 @@ function ScheduleView({
   const selectedAssignment = visibleAssignments.find((assignment) => assignment.id === selectedAssignmentId) ?? null;
   return (
     <div className="page">
-      <div className="page-heading">
-        <div>
-          <SectionEyebrow>Future attention</SectionEyebrow>
-          <h1>Schedule</h1>
-          <p className="muted">
-            Give {presenceName} time-bound permission to notice, decide, and work toward delegated outcomes.
-          </p>
-        </div>
-        <div className="heading-actions calendar-heading-actions">
+      <PageHeader
+        eyebrow="Future attention"
+        title="Schedule"
+        description={<>Give {presenceName} time-bound permission to notice, decide, and work toward delegated outcomes.</>}
+        actionsClassName="heading-actions calendar-heading-actions"
+        actions={<>
           <span className="scope-summary">Planning for {presenceName}</span>
           <div className="calendar-view-toggle" role="group" aria-label="Calendar view mode">
             <button type="button" aria-pressed={viewMode === "list"} className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}>List</button>
@@ -5581,8 +5685,8 @@ function ScheduleView({
             {showForm ? <X size={15} /> : <Plus size={15} />}{" "}
             {showForm ? "Close" : "Add intent"}
           </Button>
-        </div>
-      </div>
+        </>}
+      />
       <PublishingPlanCard plan={publishingPlan} presenceName={presenceName} mutate={mutate} setView={setView} />
       {showForm && (
         <form className="add-slot-form" onSubmit={add}>
@@ -5931,21 +6035,12 @@ function BrainView({
     );
   return (
     <div className="page brain-page">
-      <div className="page-heading">
-        <div>
-          <SectionEyebrow>Managed Agent</SectionEyebrow>
-          <h1>Manage Agent</h1>
-          <p className="muted">
-            Manage {agent.name}&apos;s Brain, runtime, skills, and provider
-            access. These settings shape every Presence.
-          </p>
-        </div>
-        {pending.length > 0 && (
-          <span className="review-badge">
-            <CircleAlert size={14} /> {pending.length} to review
-          </span>
-        )}
-      </div>
+      <PageHeader
+        eyebrow="Managed Agent"
+        title="Manage Agent"
+        description={<>{agent.name}&apos;s Brain, runtime, skills, and provider access. These settings shape every Presence.</>}
+        actions={pending.length > 0 ? <span className="review-badge"><CircleAlert size={14} /> {pending.length} to review</span> : undefined}
+      />
       <section className="settings-card agent-identity-card">
         <div>
           <SectionEyebrow>Agent identity</SectionEyebrow>
@@ -6435,15 +6530,11 @@ function PresenceView({
   const knowledgeBindingFor = (collectionId: string) => state.presenceKnowledgeBindings.find((binding) => binding.presenceId === presence.id && binding.collectionId === collectionId && binding.enabled);
   return (
     <div className="page presence-settings-page">
-      <div className="page-heading">
-        <div>
-          <SectionEyebrow>One place, one envelope</SectionEyebrow>
-          <h1>Presence settings</h1>
-          <p className="muted">
-            Choose who speaks here and how independently this Presence acts.
-          </p>
-        </div>
-        <Button
+      <PageHeader
+        eyebrow="One place, one envelope"
+        title="Presence settings"
+        description="Choose who speaks here and how independently this Presence acts."
+        actions={<Button
           variant={presence.status === "paused" ? "primary" : "secondary"}
           disabled={waking}
           onClick={() => mutate(presence.status === "paused"
@@ -6459,8 +6550,8 @@ function PresenceView({
               <Pause size={14} /> Pause Presence
             </>
           )}
-        </Button>
-      </div>
+        </Button>}
+      />
       <div className="presence-overview" style={{ "--agent-accent": presence.accent } as React.CSSProperties}>
         <div className="presence-identity">
           <div className="presence-overview-logo">
@@ -6535,7 +6626,7 @@ function PresenceView({
           </div>
           <Globe2 size={17} />
         </div>
-        <p className="muted channel-settings-intro">Choose one destination for {simulation.worldLabel}. Sandbox is safe to rehearse; X and Bridge are live routes.</p>
+        <p className="muted channel-settings-intro">Choose one route for {simulation.worldLabel}. Sandbox is safe to rehearse; the official X API and the signed-in X Browser Bridge are alternative live routes.</p>
         {channelDefinition && (
           <div className="channel-definition-editor">
             {!editingChannel ? (
@@ -6566,7 +6657,7 @@ function PresenceView({
           </button>}
           <button className={connectionMode === "bridge" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { connectionMode: "bridge" } })}>
             <PlugZap size={17} />
-            <span><strong>Bridge</strong><small>Live channel through an external adapter</small></span>
+            <span><strong>X Browser Bridge</strong><small>Use a signed-in X browser session through the external Bridge worker</small></span>
           </button>
         </div>
         <div className="channel-selection-status">
@@ -6741,7 +6832,7 @@ function PresenceView({
         <p className="muted">This Presence reads the social world as evidence, but keeps one language for Agent-authored posts, replies, messages, and Presence Chat. Targeted interactions are delivered only when the observed target language matches this Presence; unknown target language is left alone. It inherits the Agent&apos;s hard boundaries and can add local ones.</p>
         <div className="presence-language-selection">
           <div><strong>Primary language</strong><small>The language this Presence uses when it speaks.</small></div>
-          <div className="presence-language-value"><select aria-label="Presence language" value={presence.language} onChange={(event) => void mutate({ type: "setPresence", patch: { language: event.target.value as "en" } })}><option value="en">English</option></select><small>English is the only supported Presence language right now.</small></div>
+          <div className="presence-language-value"><small>English is the only supported Presence language right now.</small><select aria-label="Presence language" value={presence.language} onChange={(event) => void mutate({ type: "setPresence", patch: { language: event.target.value as "en" } })}><option value="en">English</option></select></div>
         </div>
         <div className="language-inherited-rules">
           <span><strong>Inherited Never use</strong>{state.agent?.languagePolicy?.prohibited?.length ? state.agent.languagePolicy.prohibited.join(" · ") : "None set"}</span>
@@ -7055,7 +7146,7 @@ function BridgeManager({
   manageBridge: BridgeManage;
   refreshState: () => Promise<OpenPresenceState>;
 }) {
-  const [name, setName] = useState("Community Bridge");
+  const [name, setName] = useState(presence.channel === "x" ? "X Browser Bridge" : "External Channel Bridge");
   const [kind, setKind] = useState<ConnectorKind>("bridge");
   const [key, setKey] = useState<string | undefined>();
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
@@ -7187,8 +7278,8 @@ function BridgeManager({
     <div className="channel-connector-panel bridge-manager">
       <div className="section-heading compact">
         <div>
-          <SectionEyebrow>External Bridge</SectionEyebrow>
-          <h2>{activeBridges.length ? "External adapter setup" : "Connect this Presence through Bridge"}</h2>
+          <SectionEyebrow>{presence.channel === "x" ? "X Browser Bridge" : "External Bridge"}</SectionEyebrow>
+          <h2>{activeBridges.length ? "Signed-in browser route" : `Connect ${channelLabel(presence.channel, state.channelDefinitions)} through a Bridge`}</h2>
         </div>
         <ShieldCheck size={17} />
       </div>
@@ -7197,7 +7288,7 @@ function BridgeManager({
           <p>
             {channel?.builtIn
               ? `Use a Bridge when ${channelLabel(presence.channel, state.channelDefinitions)} should be reached through an external adapter. Only the selected route above can deliver actions.`
-              : "A Bridge is an external adapter for this channel. It sends inbound social objects to OpenPresence and receives only approved actions from this Presence's execution envelope."}
+              : `A Bridge is an external adapter for ${channelLabel(presence.channel, state.channelDefinitions)}. It sends observed channel objects to OpenPresence and receives only approved actions from this Presence's execution envelope.`}
           </p>
           <div className="form-grid">
             <label>
@@ -7217,7 +7308,7 @@ function BridgeManager({
                   setKind(event.target.value as ConnectorKind)
                 }
               >
-                <option value="bridge">Bridge · external executor</option>
+                <option value="bridge">{presence.channel === "x" ? "X Browser Bridge · signed-in session" : "Bridge · external executor"}</option>
                 <option value="manual">
                   Manual relay · you carry out actions
                 </option>
@@ -7302,7 +7393,7 @@ function BridgeManager({
                     <div>
                       <SectionEyebrow>Supervised test</SectionEyebrow>
                       <h4>Verify the adapter before it acts</h4>
-                      <p className="muted">Have the external agent follow the prompt, then refresh. This test stays inside the Bridge and never performs a live Skool action by itself.</p>
+                      <p className="muted">Have the external browser worker follow the prompt, then refresh. The Bridge only carries approved actions for this selected route; it never changes the channel or gives the worker independent Agent judgment.</p>
                     </div>
                     <ol>
                       <li className={supervisedTest.checkedIn ? "complete" : "pending"}><span>{supervisedTest.checkedIn ? "✓" : "1"}</span> Adapter checked in</li>
