@@ -24,6 +24,22 @@ test("Schedule sends post exploration to Playground", async ({ page }) => {
   await expect(page.getByRole("button", { name: /Give an Assignment/ })).toBeVisible();
 });
 
+test("Publishing Plan explains the next consideration in the operator view", async ({ page, request }) => {
+  await createAgent(page);
+  const initial = await request.get("/api/state").then((response) => response.json());
+  const presence = initial.presence;
+  const updated = await request.post("/api/state", { data: { type: "setPresence", patch: { execution: { post: "auto" }, publishingInitiative: { ...presence.publishingInitiative, mode: "pace", target: { count: 1, period: "day" } } } } });
+  expect(updated.ok()).toBeTruthy();
+  const replanned = await request.post("/api/state", { data: { type: "replanPublishing", presenceId: presence.id } });
+  expect(replanned.ok()).toBeTruthy();
+  await page.reload();
+  await page.getByRole("button", { name: "Schedule", exact: true }).click();
+  const plan = page.getByRole("region", { name: "Agent publishing plan" });
+  await expect(plan).toContainText("Why no original yet?");
+  await expect(plan).toContainText("Next consideration:");
+  await expect(plan).toContainText("Windows are flexible work periods, not scheduled posts.");
+});
+
 test("switching Presence switches Playground world and rehearsal history", async ({ page, request }) => {
   await createAgent(page);
   const initial = await request.get("/api/state");
@@ -85,6 +101,23 @@ test("Playground Assignments use the Sandbox session without requiring a Sandbox
   await page.getByRole("button", { name: "Start rehearsal", exact: true }).click();
   await expect(page.locator(".assignment-progress-panel")).toBeVisible();
   await expect(page.getByRole("alert").filter({ hasText: "Sandbox Presence" })).toHaveCount(0);
+});
+
+test("Playground Assignment exposes a clear cancel action", async ({ page, request }) => {
+  await createAgent(page);
+  const created = await request.post("/api/state", { data: { type: "createAssignment", instruction: "Produce exactly 10 original X posts about useful agent ideas. Choose distinct angles and do not repeat yourself." } });
+  expect(created.ok()).toBeTruthy();
+  const createdState = await created.json();
+  const assignmentId = createdState.assignments[0].id;
+  await page.getByRole("button", { name: "Playground", exact: true }).click();
+  await expect(page.locator(".assignment-progress-panel")).toBeVisible();
+  await expect(page.getByRole("button", { name: "Cancel Assignment", exact: true })).toBeVisible();
+  page.once("dialog", (dialog) => dialog.accept());
+  await page.getByRole("button", { name: "Cancel Assignment", exact: true }).click();
+  await expect(page.getByRole("status").filter({ hasText: "Assignment cancelled" })).toBeVisible();
+  await expect(page.locator(".assignment-progress-panel")).toHaveCount(0);
+  const afterCancel = await request.get("/api/state").then((response) => response.json());
+  expect(afterCancel.assignments.find((item: { id: string }) => item.id === assignmentId)?.status).toBe("cancelled");
 });
 
 test("Playground Assignment produces distinct posts and renders the requested media set", async ({ page }) => {
@@ -164,9 +197,14 @@ test("Sandbox Assignment instructions never leak internal QA markers into Feed",
   await page.getByRole("button", { name: "Review assignment", exact: true }).click();
   await page.getByRole("button", { name: "Start rehearsal", exact: true }).click();
   await expect(page.locator(".assignment-progress-panel")).toContainText("1 / 1 published", { timeout: 30000 });
+  await expect(page.locator(".assignment-progress-panel")).not.toContainText("QA-TEN-RUN-2026-08-14");
   await page.getByRole("button", { name: "Feed", exact: true }).click();
   await expect(page.locator(".feed-item")).toHaveCount(1);
   await expect(page.locator(".feed-item")).not.toContainText("QA-TEN-RUN-2026-08-14");
+  await page.locator(".feed-item").first().click();
+  const postInspector = page.getByRole("complementary", { name: "Post details" });
+  await expect(postInspector).toBeVisible();
+  await expect(postInspector.getByRole("button", { name: "Copy internal post ID" })).toBeVisible();
 });
 
 test("Schedule preserves an Assignment's exact timing", async ({ page }) => {

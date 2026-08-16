@@ -1,6 +1,7 @@
-import { readNativeXCredentials, readRecentXMentions, readRecentXPosts } from "./x";
+import { readNativeXCredentials, readRecentXMentions, readRecentXPosts, readXPostsByIds, type XRecentPost } from "./x";
 import { recordNativeMirror, recordNativeObservation, recordPublicFooting, recordRuntimeEvent } from "./runtime";
-import type { OpenPresenceState, Presence, PresenceQuietHours } from "./types";
+import type { EntityRef, MirrorObject, OpenPresenceState, Presence, PresenceQuietHours } from "./types";
+import { hydrateThreadContext } from "./thread-context";
 
 const intervalFor = (presence: Presence | undefined) => {
   if (presence?.pacing === "gentle") return 15 * 60_000;
@@ -35,6 +36,60 @@ const isQuiet = (quietHours: PresenceQuietHours | undefined, date: Date) => {
   const current = minuteOfDay(date);
   return start < end ? current >= start && current < end : current >= start || current < end;
 };
+
+function xPostMirrorObject(post: XRecentPost, presenceId: string, connectionId: string, observedAt = new Date().toISOString()): MirrorObject {
+  return {
+    id: `hydrated:${connectionId}:${post.id}`,
+    bridgeId: `native:${connectionId}`,
+    presenceId,
+    channelId: "x",
+    externalRef: { type: "x.post", id: post.id },
+    parentExternalRef: post.parentId ? { type: "x.post", id: post.parentId } : undefined,
+    conversationExternalRef: post.conversationId,
+    referencedExternalRefs: post.referencedPosts?.map((reference) => ({ type: "x.post", id: reference.id })),
+    objectType: "post",
+    author: { externalRef: post.authorId ? { type: "x.user", id: post.authorId } : undefined, displayName: post.authorName ?? (post.authorUsername ? `@${post.authorUsername}` : "X user"), handle: post.authorUsername },
+    content: { text: post.text },
+    occurredAt: post.createdAt,
+    observedAt,
+    visibility: "public",
+    shareability: "presence-only",
+    environment: "live",
+    source: "native",
+    trust: "untrusted_world_content",
+  };
+}
+
+/**
+ * Hydrate only missing X ancestry/references. This is a connector adapter for
+ * the provider-neutral traversal in thread-context.ts; fetched posts are
+ * returned to the caller as ordinary Mirror evidence.
+ */
+export async function hydrateNativeXThreadContext(source: OpenPresenceState, presenceId: string, observedObject: MirrorObject): Promise<OpenPresenceState> {
+  const connection = source.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x");
+  const credentials = connection ? readNativeXCredentials(connection.id) : undefined;
+  if (!connection || !credentials) return source;
+  const mirror = source.mirrorObjects.filter((item) => item.presenceId === presenceId && item.channelId === "x" && (item.environment === "live" || item.environment === undefined));
+  const fetchedPosts = new Map<string, XRecentPost>();
+  const hydrated = await hydrateThreadContext({
+    mirror,
+    observedObject,
+    maxDepth: 8,
+    maxObjects: 8,
+    fetchObjects: async (refs: EntityRef[]) => {
+      const posts = await readXPostsByIds(credentials, refs.filter((ref) => ref.type === "x.post").map((ref) => ref.id));
+      for (const post of posts) fetchedPosts.set(post.id, post);
+      return posts.map((post) => xPostMirrorObject(post, presenceId, connection.id));
+    },
+  });
+  let next = source;
+  for (const object of hydrated.objects) {
+    const sourcePost = fetchedPosts.get(object.externalRef.id);
+    if (!sourcePost) continue;
+    next = recordNativeMirror(next, { connectionId: connection.id, presenceId, post: sourcePost });
+  }
+  return next;
+}
 
 export const nextObservationAt = (presence: Presence | undefined, from = Date.now()) => {
   const base = new Date(from);
@@ -79,6 +134,17 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
     const observedAt = new Date().toISOString();
     for (const post of posts) next = recordNativeMirror(next, { connectionId: connection.id, presenceId, own: true, post });
     for (const post of mentions) next = recordNativeMirror(next, { connectionId: connection.id, presenceId, post });
+    // Eagerly make the public ancestry available before Pulse runs. The
+    // hydrator is bounded and idempotent, so a later lazy check is cheap.
+    for (const mention of mentions) {
+      const observed = next.mirrorObjects.find((item) => item.externalRef.type === "x.post" && item.externalRef.id === mention.id);
+      if (!observed?.parentExternalRef && !(observed?.referencedExternalRefs?.length)) continue;
+      try {
+        next = await hydrateNativeXThreadContext(next, presenceId, observed);
+      } catch (error) {
+        next = recordRuntimeEvent(next, presenceId, "Thread context partially available", error instanceof Error ? error.message : "X did not return all referenced public context.", "warning", { sourceObjectId: observed.id });
+      }
+    }
     next = recordPublicFooting(next, presenceId, {
       postsPublished: posts.length,
       recentPostIds: posts.map((post) => post.id),

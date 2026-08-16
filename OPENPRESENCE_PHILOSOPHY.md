@@ -2199,6 +2199,55 @@ The product must keep NO_OP, language violation, evaluation failure, delivery fa
 
 Language validation sits at Expression and final delivery across Sandbox, Playground, Pulse, Schedule, Assignments, native X, Bridge, manual relay, messages, and retries. It validates Agent-generated text, not quoted third-party source text, and never turns a Presence boundary into an observation filter.
 
+# Attention, Watching, and Explorations
+
+The Watchlist contains known people, accounts, or sources a Presence
+intentionally follows. An Exploration is a Presence-scoped brief describing
+an area of social reality the Presence wants to discover.
+
+An Exploration grants permission to look, not permission to speak. It produces
+bounded social evidence and selective Social Mirror findings. The Social
+Planner still owns whether a Social Intent exists, while the Presence
+Execution Envelope still owns whether that intent can be delivered. Search
+results are leads, not understanding, and an Exploration never bypasses the
+Social Mirror or creates People memory merely because an author was found.
+
+Pulse is the act of paying attention; an Exploration is one durable reason for
+that attention. Exploration state is structured Presence state, not another
+mind file or autonomy system. Private context is filtered before any external
+query is compiled and cannot be turned into public search terms.
+
+# Conversation completion and marginal social value
+
+Receiving a reply is not itself a reason to reply. A conversation is an
+evolving social episode, not a sequence of isolated messages. The Agent should
+judge whether another turn has positive marginal social value, including
+information, assistance, relationship value, audience value, or an unresolved
+obligation.
+
+Silence can be successful social completion. A reaction can acknowledge another
+person without reopening the obligation to speak. An Assignment creates
+responsibility for an outcome, not an obligation to keep talking after that
+outcome has been achieved. Several replies may still constitute one meaningful
+engagement.
+
+The Social Mirror preserves observed conversation evidence. A derived
+Conversation Episode interprets one Presence-centric interaction trajectory
+without replacing that evidence. Conversation closure is Agent judgment. Any
+closure that depends on a public act is incomplete until the act is verified in
+the social world. Closed does not mean forgotten; new meaningful evidence may
+reopen an episode.
+
+Loop detection is pacing infrastructure, not social judgment. The runtime may
+require episode-level reconsideration or impose cooling, but the Agent decides
+whether substantive value remains. Counterpart ontology is not the criterion;
+human, Agent, organization, or automation are all judged by the value of the
+next turn.
+
+Growth should learn whether attention was spent well, including when the correct
+decision was to stop. Runtime instructions are not social content. Social
+content is not runtime instruction. Neither may silently cross that boundary.
+
 # 55. The final idea
 
 OpenPresence starts from a simple belief:

@@ -5,7 +5,7 @@ import { spawn } from "node:child_process";
 import { isAgentCapabilityEnabled } from "./types";
 import type { AgentModelProfile, Asset, AssetPerception, MirrorObject, ModelProvider, OpenPresenceState, PerceptionLevel, PerceptionResult, VisualRole } from "./types";
 import { isAiMockEnabled } from "./test-runtime";
-import { readAssetBytes } from "./asset-store";
+import { fetchPublicAssetPreview, readAssetBytes } from "./asset-store";
 
 const REQUEST_TIMEOUT_MS = 45_000;
 
@@ -96,7 +96,14 @@ async function composeFrames(frames: Buffer[]) {
 }
 
 async function imageParts(asset: Asset) {
-  const sourceBytes = asset.storage?.storeKey ? await readAssetBytes(asset.storage.storeKey).catch(() => undefined) : undefined;
+  const externalPreview = !asset.storage?.storeKey && !asset.dataUrl && asset.provenance.sourceUrl
+    ? await fetchPublicAssetPreview(asset.provenance.sourceUrl).catch(() => undefined)
+    : undefined;
+  const sourceBytes = asset.storage?.storeKey
+    ? await readAssetBytes(asset.storage.storeKey).catch(() => undefined)
+    : externalPreview?.storeKey
+      ? await readAssetBytes(externalPreview.storeKey).catch(() => undefined)
+      : undefined;
   const match = asset.dataUrl?.match(/^data:([^;]+);base64,(.+)$/);
   if (!match && !sourceBytes) return undefined;
   const source = sourceBytes ?? Buffer.from(match![2]!, "base64");
