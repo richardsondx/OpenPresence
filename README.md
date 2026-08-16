@@ -64,7 +64,7 @@ cp .env.example .env.local
 pnpm dev
 ~~~
 
-Open [http://localhost:3000](http://localhost:3000). If port 3000 is already in use, Next.js will select another available port and print it in the terminal.
+Open [http://localhost:3015](http://localhost:3015). The local launcher uses the populated Genny workspace snapshot when it is present, so the default server opens with the main meaning files and Genny Agent. Set `OPENPRESENCE_DB_PATH` to use another local SQLite database explicitly.
 
 For a production-style local run:
 

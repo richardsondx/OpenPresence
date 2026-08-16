@@ -1225,6 +1225,7 @@ export type CapabilityOperation = { type: "setCapability"; capabilityId: AgentCa
 export type RuntimeOperation = Operation | ToolBindingOperation | CapabilityOperation;
 export type KnowledgeOperation =
   | { type: "createKnowledgeCollection"; name: string; description?: string; defaultRole: KnowledgeRole; defaultUse: KnowledgeUse }
+  | { type: "updateKnowledgeCollection"; collectionId: string; name: string; description?: string; defaultRole: KnowledgeRole; defaultUse: KnowledgeUse }
   | { type: "addKnowledgeItem"; collectionId: string; title: string; role?: KnowledgeRole; useOverride?: KnowledgeUse; sourceType: KnowledgeSourceType; content: string; mimeType?: string; originalDataUrl?: string; originalFileName?: string; originalAssetId?: string }
   | { type: "uploadKnowledgeVersion"; itemId: string; content: string; mimeType?: string; originalDataUrl?: string; originalFileName?: string; originalAssetId?: string }
   | { type: "setKnowledgeBinding"; presenceId: string; collectionId: string; maximumUse: KnowledgeUse; enabled?: boolean }
