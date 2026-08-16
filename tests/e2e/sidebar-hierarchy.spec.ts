@@ -55,6 +55,19 @@ test("Presence is selected from one dropdown and changes the active Presence", a
   await expect(page.getByRole("heading", { name: "Presence settings", exact: true })).toBeVisible();
 });
 
+test("Presence dropdown keeps cross-channel Presences visible while Feed scope changes", async ({ page, request }) => {
+  await createAgent(page);
+  const created = await request.post("/api/state", { data: { type: "createPresence", input: { channel: "linkedin", name: "Jenny LinkedIn", handle: "@jenny_linkedin", mode: "agent", accent: "#4F7CAC" } } });
+  expect(created.ok()).toBeTruthy();
+
+  await page.reload();
+  const host = test.info().project.name === "mobile" ? page.locator(".mobile-presence-switcher") : page.locator(".sidebar");
+  await host.getByRole("button", { name: /Switch Presence, currently/ }).click();
+  const menu = page.getByRole("menu", { name: "Your Presences" });
+  await expect(menu.getByRole("menuitem", { name: /@jenny_ai/ })).toBeVisible();
+  await expect(menu.getByRole("menuitem", { name: /@jenny_linkedin/ })).toBeVisible();
+});
+
 test("Agent is an account-style selector in the sidebar footer", async ({ page }) => {
   await createAgent(page);
   const footer = page.locator(".sidebar-footer");

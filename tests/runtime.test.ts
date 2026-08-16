@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addSandboxEvent, applyOperation, assignmentIsSatisfied, cleanSandboxDraft, compileAssignmentInstruction, compilePresenceContext, compileWatch, createAgent, deliverSandboxExecution, deriveActivitySummary, derivePublicHistory, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, identityLeakageReason, inferExplicitDurableContext, inferPresenceIdentityChange, initialState, isActivityDecisionEvent, isExplicitGhostModeRequest, isExplicitXPostRequest, isTeachProposalConfirmation, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, recordPublicFooting, recordStandingIntentNoOp, startPlaygroundSession } from "../lib/runtime";
+import { addSandboxEvent, applyOperation, assignmentIsSatisfied, cleanSandboxDraft, cleanUserFacingAssignmentInstruction, compileAssignmentInstruction, compilePresenceContext, compileWatch, createAgent, deliverSandboxExecution, defaultPublishingInitiative, deriveActivitySummary, derivePublicHistory, derivePublishingProgress, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, identityLeakageReason, inferExplicitDurableContext, inferPresenceIdentityChange, initialState, isActivityDecisionEvent, isExplicitGhostModeRequest, isExplicitXPostRequest, isTeachProposalConfirmation, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, publicHistoryMatchesPresence, recordPublicFooting, recordStandingIntentNoOp, startPlaygroundSession, stateForContext } from "../lib/runtime";
 import { acknowledgeExecution, claimExecutions, createBridgeWithKey, heartbeatBridge, ingestEvents, removeBridge, revokeBridge } from "../lib/bridge";
 import { readBridgeCredentialMetadata, readState, writeState } from "../lib/db";
 import { nextObservationAt } from "../lib/native-x";
@@ -11,6 +11,12 @@ describe("OpenPresence runtime boundaries", () => {
     expect(cleanSandboxDraft("A useful point. QA-TEN-RUN-2026-08-14")).toBe("A useful point.");
     expect(cleanSandboxDraft("QA-ONE-2026-08-14")).toBe("");
     expect(cleanSandboxDraft("A real QA process is worth discussing.")).toBe("A real QA process is worth discussing.");
+  });
+
+  it("keeps internal QA identifiers out of Assignment summaries", () => {
+    expect(cleanUserFacingAssignmentInstruction("QA-NOW-RUN-2026-08-14: Produce exactly 1 original X post about a practical lesson.")).toBe("Produce exactly 1 original X post about a practical lesson.");
+    expect(cleanUserFacingAssignmentInstruction("Produce exactly 1 post. Include QA-NOW-RUN-2026-08-14 only as an internal diagnostic marker and never publish it.")).toBe("Produce exactly 1 post.");
+    expect(cleanUserFacingAssignmentInstruction("QA-NOW-RUN-2026-08-14")).toBe("Original post Assignment");
   });
 
   it("preserves intentional paragraph breaks in long-form Sandbox drafts", () => {
@@ -316,6 +322,49 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.executions[0]?.target).toEqual({ type: "x.post", id: "post-1" });
   });
 
+  it("records operator-directed replies without giving the operator the Agent's expression", () => {
+    let state = createAgent(input);
+    const sessionState = startPlaygroundSession(state, state.presence!.id);
+    state = addSandboxEvent(sessionState, { sessionId: sessionState.playgroundSessions[0]!.id, actionId: "post", actorName: "Alex", content: "What changed your mind about persistent agents?" });
+    const target = state.mirrorObjects.find((item) => item.actorPresenceId !== state.presence!.id)!;
+    state = applyOperation(state, { type: "askPresenceToReply", presenceId: state.presence!.id, objectId: target.id, sessionId: target.sessionId, optionalDirection: "Keep it concrete and lightly playful." });
+    const directive = state.operatorDirectives[0]!;
+    expect(directive).toMatchObject({ target: target.externalRef, requiredAct: "reply", initialAct: "no_op", provenance: "operator", optionalDirection: "Keep it concrete and lightly playful." });
+    expect(state.socialIntents).toHaveLength(0);
+    state = formSandboxIntent(state, { sessionId: target.sessionId!, affordance: "reply", format: "x.reply", text: "The useful shift was treating memory as a product surface, not a hidden implementation detail.", target: target.externalRef, perceptionTarget: target.externalRef, operatorDirectiveId: directive.id });
+    expect(state.socialIntents[0]).toMatchObject({ source: "operator", operatorDirectiveId: directive.id, target: target.externalRef });
+    expect(state.executions[0]).toMatchObject({ source: "operator", operatorDirectiveId: directive.id });
+  });
+
+  it("does not create an operator reply directive when Replies are off", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { ...state.presence!.execution, reply: "off" } } });
+    const sessionState = startPlaygroundSession(state, state.presence!.id);
+    state = addSandboxEvent(sessionState, { sessionId: sessionState.playgroundSessions[0]!.id, actionId: "post", actorName: "Alex", content: "A question for Jenny." });
+    const target = state.mirrorObjects.find((item) => item.actorPresenceId !== state.presence!.id)!;
+    state = applyOperation(state, { type: "askPresenceToReply", presenceId: state.presence!.id, objectId: target.id, sessionId: target.sessionId });
+    expect(state.operatorDirectives).toHaveLength(0);
+  });
+
+  it("records an operator-directed ignore without creating intent or delivery", () => {
+    let state = createAgent(input);
+    const sessionState = startPlaygroundSession(state, state.presence!.id);
+    state = addSandboxEvent(sessionState, { sessionId: sessionState.playgroundSessions[0]!.id, actionId: "post", actorName: "Alex", content: "A post the operator wants left alone." });
+    const target = state.mirrorObjects.find((item) => item.actorPresenceId !== state.presence!.id)!;
+
+    state = applyOperation(state, { type: "askPresenceToIgnore", presenceId: state.presence!.id, objectId: target.id, sessionId: target.sessionId });
+
+    expect(state.operatorDirectives[0]).toMatchObject({ target: target.externalRef, requiredAct: "no_op", initialAct: "no_op", provenance: "operator", status: "expressed" });
+    expect(state.socialIntents).toHaveLength(0);
+    expect(state.executions).toHaveLength(0);
+    expect(state.events[0]).toMatchObject({ title: `The operator asked ${state.presence!.name} to ignore this post`, sourceObjectId: target.id, tone: "quiet" });
+
+    const eventCount = state.events.length;
+    state = applyOperation(state, { type: "askPresenceToIgnore", presenceId: state.presence!.id, objectId: target.id, sessionId: target.sessionId });
+    expect(state.operatorDirectives).toHaveLength(1);
+    expect(state.events).toHaveLength(eventCount);
+  });
+
   it("keeps observed inbound messages separate from messages already judged", () => {
     let state = createAgent(input);
     state = recordPublicFooting(state, state.presence!.id, { postsPublished: 1, recentPostIds: ["post-1"], recentInboundIds: ["new-mention", "old-mention"], observedAt: new Date().toISOString() });
@@ -386,7 +435,7 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.executions[0]?.externalRef).toBeUndefined();
     expect(state.outcomes[0]?.status).toBe("failed");
     expect(state.nativeConnections[0]?.status).toBe("needs-attention");
-    expect(deriveActivitySummary(state).current.label).toBe("X delivery failed");
+    expect(deriveActivitySummary(state).current.label).toBe("X connection needs attention");
   });
 
   it("keeps the Social Mirror connected when delivery is blocked by X billing", () => {
@@ -460,6 +509,28 @@ describe("OpenPresence runtime boundaries", () => {
     expect(deriveActivitySummary(state).rhythm.quietHours).toBe("22:00–07:00");
   });
 
+  it("derives publishing pace from verified original Mirror objects only", () => {
+    let state = createAgent(input);
+    const presenceId = state.presence!.id;
+    const timestamp = new Date().toISOString();
+    state = applyOperation(state, { type: "setPresence", patch: { publishingInitiative: { ...defaultPublishingInitiative(), mode: "pace", target: { count: 2, period: "day" }, timezone: "UTC" } } });
+    state.mirrorObjects.unshift(
+      { id: "verified-original", bridgeId: "sandbox:test", presenceId, channelId: "x", externalRef: { type: "x.post", id: "verified-original" }, objectType: "post", actorPresenceId: presenceId, content: { text: "A verified original." }, occurredAt: timestamp, observedAt: timestamp, visibility: "public", shareability: "presence-only", environment: "sandbox", sessionId: "pace-session" },
+      { id: "reply-not-original", bridgeId: "sandbox:test", presenceId, channelId: "x", externalRef: { type: "x.reply", id: "reply-not-original" }, objectType: "reply", actorPresenceId: presenceId, content: { text: "A reply." }, occurredAt: timestamp, observedAt: timestamp, visibility: "public", shareability: "presence-only", environment: "sandbox", sessionId: "pace-session" },
+    );
+    const progress = derivePublishingProgress(state, presenceId, timestamp);
+    expect(progress).toMatchObject({ mode: "pace", target: 2, verifiedOriginals: 1, remaining: 1, status: "seeking" });
+  });
+
+  it("keeps standing publishing responsibility after a local no-op", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { publishingInitiative: { ...defaultPublishingInitiative(), mode: "pace", target: { count: 5, period: "day" }, timezone: "UTC" } } });
+    state = applyOperation(state, { type: "runPulse" });
+    expect(state.actions[0]?.intent).toBe("no_op");
+    expect(derivePublishingProgress(state).status).toBe("seeking");
+    expect(state.presence?.publishingInitiative.mode).toBe("pace");
+  });
+
   it("moves automatic observation past an overnight quiet-hours window", () => {
     const state = createAgent(input);
     const next = nextObservationAt({ ...state.presence!, pacing: "custom", attentionIntervalMinutes: 30, quietHours: { enabled: true, start: "22:00", end: "07:00" } }, new Date(2026, 7, 13, 21, 50).getTime());
@@ -506,10 +577,10 @@ describe("OpenPresence runtime boundaries", () => {
 
   it("shows a Calendar no-op as the current truth instead of an older delivery", () => {
     let state = applyOperation(createAgent(input), { type: "addSlot", instruction: "Teach one useful thing", day: "Wednesday", time: "08:00", objective: "education", executionWindow: "08:00–11:00" });
-    state = recordStandingIntentNoOp(state, state.presence!.id, state.calendar[0]!.instruction);
+    state = recordStandingIntentNoOp(state, state.presence!.id, state.calendar[0]!.instruction, "No specific, timely contribution was available.");
     const summary = deriveActivitySummary(state);
     expect(summary.current.label).toBe("Waiting for a better moment");
-    expect(summary.current.detail).toContain("schedule grants permission");
+    expect(summary.current.detail).toContain("No specific, timely contribution was available.");
   });
 
   it("projects only delivered public expression into Calendar history", () => {
@@ -564,6 +635,20 @@ describe("OpenPresence runtime boundaries", () => {
     expect(history[0]?.externalUrl).toBeUndefined();
   });
 
+  it("keeps Feed history on the active Presence environment", () => {
+    const state = createAgent(input);
+    state.mirrorObjects.unshift(
+      { id: "live-feed-post", bridgeId: "native:test", presenceId: state.presence!.id, channelId: "x", externalRef: { type: "x.post", id: "live-feed-1" }, objectType: "post", actorPresenceId: state.presence!.id, content: { text: "Live history." }, occurredAt: new Date().toISOString(), observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", environment: "live" },
+      { id: "sandbox-feed-post", bridgeId: "sandbox:test", presenceId: state.presence!.id, channelId: "x", externalRef: { type: "x.post", id: "sandbox-feed-1" }, objectType: "post", actorPresenceId: state.presence!.id, content: { text: "Sandbox history." }, occurredAt: new Date().toISOString(), observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", environment: "sandbox", sessionId: "sandbox-session" },
+    );
+    const liveState = applyOperation(state, { type: "setPresence", patch: { connectionMode: "native" } });
+    const liveHistory = derivePublicHistory(liveState, liveState.presence!.id).filter((item) => publicHistoryMatchesPresence(item, liveState.presence));
+    expect(liveHistory.map((item) => item.text)).toEqual(["Live history."]);
+    const sandboxState = applyOperation(liveState, { type: "setPresence", patch: { connectionMode: "sandbox" } });
+    const sandboxHistory = derivePublicHistory(sandboxState, sandboxState.presence!.id).filter((item) => publicHistoryMatchesPresence(item, sandboxState.presence));
+    expect(sandboxHistory.map((item) => item.text)).toEqual(["Sandbox history."]);
+  });
+
   it("keeps Ghost representation Presence-scoped and reviewable", () => {
     const state = createAgent(input);
     const originalSoul = state.files.find((file) => file.kind === "SOUL")?.content;
@@ -592,6 +677,17 @@ describe("OpenPresence runtime boundaries", () => {
     expect(next.presence?.channel).toBe("linkedin");
     expect(next.presence?.capabilities.map((item) => item.id)).toContain("connect");
     expect(next.presence?.capabilities.map((item) => item.id)).not.toContain("quote");
+  });
+
+  it("keeps every channel Presence available when one Presence is selected", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "createPresence", input: { channel: "linkedin", handle: "@jenny_work", mode: "agent", accent: "#4F7CAC" } });
+    const selectedId = state.presence!.id;
+    const scoped = stateForContext(state, { presenceId: selectedId });
+
+    expect(scoped.presence?.id).toBe(selectedId);
+    expect(scoped.presences.map((presence) => presence.channel)).toEqual(["x", "linkedin"]);
+    expect(scoped.presences.map((presence) => presence.handle)).toEqual(["@jenny_ai", "@jenny_work"]);
   });
 
   it("edits Presence and Agent names without crossing identity boundaries", () => {
@@ -738,6 +834,25 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.conversations[0]?.messages.at(-1)?.change).toBe("Taste proposal created");
   });
 
+  it("routes absurdist blue humor into a guarded TASTE proposal", () => {
+    const state = applyOperation(createAgent(input), {
+      type: "sendMessage",
+      content: "Update Genny's personality to have great absurdist and sophomoric blue humor, but never use that humor around bodymorphia, gender, sex, or race.",
+    });
+    const proposed = state.proposals[0]?.proposed ?? "";
+    expect(state.proposals).toHaveLength(1);
+    expect(state.proposals[0]).toMatchObject({ file: "TASTE", status: "pending", title: "Update TASTE.md" });
+    expect(proposed).toContain("## Absurdist and blue humor");
+    expect(proposed).toContain("body dysmorphia or body image");
+    expect(proposed).toContain("gender identity or expression");
+    expect(proposed).toContain("sex or sexuality");
+    expect(proposed).toContain("race or ethnicity");
+    expect(proposed).toContain("switch to direct, respectful language");
+    expect(state.files.find((file) => file.kind === "TASTE")?.content).not.toContain("## Absurdist and blue humor");
+    expect(state.conversations[0]?.messages.at(-1)?.content).toContain("playful absurdist");
+    expect(state.conversations[0]?.messages.at(-1)?.change).toBe("Taste proposal created");
+  });
+
   it("turns a follow-up request to propose the rule into the existing Taste proposal", () => {
     let state = applyOperation(createAgent(input), {
       type: "sendMessage",
@@ -801,6 +916,8 @@ describe("OpenPresence runtime boundaries", () => {
     const definition = { id: "founder-community", name: "Founder Community", icon: "community", domain: "https://www.skool.com/", entities: [{ id: "member", label: "Member" }, { id: "post", label: "Post" }], affordances: [{ id: "post", label: "Posts", description: "Publish a post." }], formats: [{ id: "founder-community.text-post", label: "Text post", description: "A text post.", channel: "founder-community" }], relationships: [], metrics: [], privacyDefaults: { visibility: "private-community" as const, shareability: "presence-only" as const }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
     let state = createAgent(input);
     state = applyOperation(state, { type: "createPresence", input: { channel: definition.id, handle: "Jenny in Founders", mode: "agent", accent: "#D68754", channelDefinition: definition } });
+    state.presence!.environment = "sandbox";
+    state.presences = state.presences.map((item) => item.id === state.presence!.id ? { ...item, environment: "sandbox" as const } : item);
     expect(state.channelDefinitions.find((item) => item.id === definition.id)?.domain).toBe("https://www.skool.com/");
     expect(state.presence?.name).toBe("Jenny in Founders");
     state = applyOperation(state, { type: "updateChannel", definition: { ...definition, name: "SaaSpreneur Academy", domain: "https://www.skool.com/saaspreneur-academy", supportedAssetKinds: ["image", "gif"], updatedAt: new Date().toISOString() } });
@@ -808,8 +925,11 @@ describe("OpenPresence runtime boundaries", () => {
     state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto" } } });
     const result = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "Founder Bridge", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["post"], formats: ["founder-community.text-post"], metrics: [] } } });
     state = result.state;
+    state.presence!.environment = "sandbox";
+    state.presences = state.presences.map((item) => item.id === state.presence!.id ? { ...item, environment: "sandbox" as const } : item);
     state = applyOperation(state, { type: "addSlot", instruction: "Ask the founders what they are learning", day: "Tuesday", time: "08:00", objective: "relationship", executionWindow: "08:00–11:00" });
     state = applyOperation(state, { type: "runSlot", id: state.calendar[0]!.id });
+    state.executions[0]!.environment = "sandbox";
     expect(state.executions[0]?.status).toBe("queued");
     expect(state.executions[0]?.publication?.payload).toEqual({ text: "Ask the founders what they are learning" });
     writeState(state);
@@ -830,6 +950,8 @@ describe("OpenPresence runtime boundaries", () => {
   it("archives deleted Mirror objects and rejects conflicting acknowledgements", () => {
     const state = createAgent(input);
     const result = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "Founder Bridge", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["post"], formats: [], metrics: [] } } });
+    result.state.presence!.environment = "sandbox";
+    result.state.presences = result.state.presences.map((item) => item.id === result.state.presence!.id ? { ...item, environment: "sandbox" as const } : item);
     const bridge = result.state.bridges[0]!;
     writeState(result.state);
     const created = ingestEvents(bridge, { events: [{ sourceEventId: "evt-delete", event: "created", object: { externalRef: { type: "post", id: "post-1" }, objectType: "post", content: { text: "A post" }, visibility: "public", shareability: "presence-only" } }] });
@@ -839,6 +961,7 @@ describe("OpenPresence runtime boundaries", () => {
     let queued = applyOperation(deleted, { type: "setPresence", patch: { execution: { post: "auto" } } });
     queued = applyOperation(queued, { type: "addSlot", instruction: "Share one useful idea", day: "Tuesday", time: "08:00", objective: "education", executionWindow: "08:00–11:00" });
     queued = applyOperation(queued, { type: "runSlot", id: queued.calendar[0]!.id });
+    queued.executions[0]!.environment = "sandbox";
     writeState(queued);
     const claimed = claimExecutions(bridge, { executorId: "bridge-test", limit: 1 });
     const ack = acknowledgeExecution(bridge, claimed.executions[0]!.id, { executorId: "bridge-test", externalRef: { type: "post", id: "external-1" } });
