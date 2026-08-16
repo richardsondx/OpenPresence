@@ -66,6 +66,11 @@ export function bridgeAdapterPrompt(input: BridgePromptInput) {
     "3. Use POST " + input.baseUrl + bridgeEndpointPaths.reconcile + " for an initial or cursor-based sync.",
     "4. Poll POST " + input.baseUrl + bridgeEndpointPaths.claim + " to claim approved work, using {\"executorId\":\"<stable-adapter-id>\",\"limit\":10}.",
     "5. Perform only claimed executions. Use the supplied publication payload for posts/comments and the supplied target for likes.",
+    ...(input.presence.channel === "x" ? [
+      "   For an x.reply execution, open https://x.com/i/web/status/<target.id> in the already signed-in X browser session, choose Reply, enter exactly the supplied publication text, and submit the direct reply.",
+      "   This is a direct reply to the existing post. Do not convert it into a quote post, a new standalone post, or a reply to a different object.",
+      "   Verify the resulting reply appears under the target post and capture its X post id before acknowledging the execution.",
+    ] : []),
     "6. Verify the resulting channel object before POSTing to /api/bridge/v1/executions/{id}/ack with executorId, externalRef, and observedAt.",
     "7. If delivery fails, POST to /api/bridge/v1/executions/{id}/fail with a truthful message and retryable flag.",
     "8. Report verified world metrics only through POST " + input.baseUrl + bridgeEndpointPaths.outcomes + ".",

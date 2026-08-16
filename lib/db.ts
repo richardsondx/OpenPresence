@@ -9,7 +9,9 @@ import type { AgentWorkspaceSnapshot, OpenPresenceState } from "./types";
 
 const dataDir = path.join(process.cwd(), "data");
 fs.mkdirSync(dataDir, { recursive: true });
-const sqlite = new Database(process.env.OPENPRESENCE_DB_PATH ?? path.join(dataDir, "openpresence.db"));
+const restoredDefaultPath = path.join(dataDir, "openpresence-genny-restored-full-v2.db");
+const defaultDbPath = fs.existsSync(restoredDefaultPath) ? restoredDefaultPath : path.join(dataDir, "openpresence.db");
+const sqlite = new Database(process.env.OPENPRESENCE_DB_PATH ?? defaultDbPath);
 sqlite.pragma("journal_mode = WAL");
 const db = drizzle(sqlite);
 

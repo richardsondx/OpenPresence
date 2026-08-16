@@ -228,6 +228,18 @@ export function createKnowledgeCollection(source: OpenPresenceState, input: { na
   return state;
 }
 
+export function updateKnowledgeCollection(source: OpenPresenceState, input: { collectionId: string; name: string; description?: string; defaultRole: KnowledgeRole; defaultUse: KnowledgeUse }) {
+  const state = clone(source);
+  const collection = state.knowledgeCollections.find((candidate) => candidate.id === input.collectionId && candidate.agentId === state.agent?.id && candidate.status === "active");
+  if (!collection) throw new Error("That Knowledge collection is not available in this Agent.");
+  collection.name = input.name.trim();
+  collection.description = input.description?.trim() || undefined;
+  collection.defaultRole = input.defaultRole;
+  collection.defaultUse = input.defaultUse;
+  collection.updatedAt = now();
+  return state;
+}
+
 export function addKnowledgeItem(source: OpenPresenceState, input: { collectionId: string; title: string; sourceType: KnowledgeSourceType; role?: KnowledgeRole; useOverride?: KnowledgeUse; content: string; mimeType?: string; originalAssetId?: string }) {
   const state = clone(source);
   const collection = state.knowledgeCollections.find((candidate) => candidate.id === input.collectionId && candidate.agentId === state.agent?.id && candidate.status === "active");

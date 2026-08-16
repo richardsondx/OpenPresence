@@ -430,6 +430,7 @@ describe("native X connection", () => {
     process.env.OPENPRESENCE_X_API_MOCK = "0";
     const fetchMock = vi.fn()
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "own-post-1", text: "Jenny's existing public footing", created_at: "2026-08-15T11:00:00.000Z", author_id: "mock-x-user", conversation_id: "own-post-1" }] }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
     const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "runPulse", presenceId }), headers: { "content-type": "application/json" } }));
@@ -438,7 +439,7 @@ describe("native X connection", () => {
     expect(body.executions).toHaveLength(0);
     expect(body.events.some((event: { title: string }) => event.title === "Worth responding to")).toBe(false);
     expect(body.presence.context.publicFooting.recentInboundIds).toEqual([]);
-    expect(fetchMock).toHaveBeenCalledTimes(2);
+    expect(fetchMock).toHaveBeenCalledTimes(3);
     vi.unstubAllGlobals();
   });
 
