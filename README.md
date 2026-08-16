@@ -40,7 +40,7 @@ User
 - **Presence** answers where the Agent exists and who it is there. It owns channel identity, social context, privacy, connection health, and its Execution Envelope.
 - **Chat** is the operator’s continuous conversation for shaping judgment and durable configuration.
 - **Activity** shows what the Presence is doing now, what attention comes next, and what is waiting for review.
-- **Calendar** manages Standing Intents. A schedule grants permission to consider acting; it does not force publication.
+- **Schedule** manages operator Assignments. A schedule creates responsibility for an outcome; the Agent owns the method, and every active Assignment has a visible completion contract and readiness status.
 - **Manage Agent** is where model runtime, provider access, Skills, meaning files, and Agent-level tool bindings live.
 - **Presence Settings** controls one social incarnation: identity mode, Ghost profile, pause state, and channel affordance permissions.
 
@@ -191,15 +191,15 @@ Command meanings:
 - `consider` runs one attention cycle over the current simulated world, including a possible original post or `NO_OP`.
 - `rehearse` runs the original-publication rehearsal; `feedback` records session calibration evidence with `--reaction`, optional `--reasons`, and `--note`.
 - `assignment create|start|work|cancel|inspect` drives the Sandbox Assignment lifecycle. Assignments count only verified simulated publications and never enable live delivery.
-- `advance` moves virtual time with `--minutes <n>` and evaluates due Calendar standing intents.
-- `schedule` adds a Calendar Standing Intent to the selected Presence so a later `advance` can evaluate it against the current simulated world. Use `--day`/`--time`, or `--minutes-from-now <n>` for a session-relative slot.
+- `advance` moves virtual time with `--minutes <n>` and evaluates due Calendar Assignments.
+- `schedule` adds an Assignment to the selected Presence after compiling its completion contract and readiness checks. Use `--day`/`--time`, or `--minutes-from-now <n>` for a session-relative deadline/window.
 - `timeline` emits a chronological audit of observations, perceptions, Social Intents, Executions, Outcomes, and events.
 - `reset` clears only the selected Sandbox session’s world and relationships; it does not rewrite Agent meaning or live state.
 - `run <scenario.json>` executes a repeatable sequence of the commands above. Scenario values can refer to `$session`, `$latest-object`, `$latest-object-id`, and `$latest-inbound`.
 
 All commands accept `--session <id>` when more than one rehearsal is active. JSON is the default output for agent consumption; add `--human` for a concise terminal summary. `--assets-json` accepts inline asset objects or local fixture paths, for example `[{"kind":"image","path":"docs/screenshots/chat.png"}]`.
 
-The top-level `schedule` scope provides `list`, `add`, `edit`, `run`, and `cancel`. Use `--responsibility assign` (or `schedule assign`) to create a Sandbox Assignment with timing; the default is a Consider standing intention. The `run` command is blocked for non-Sandbox Presences. The top-level `watching` scope provides `list`, `add`, and `remove`, preserving the Watch's automatic/manual source status and explicit no-observation state.
+The top-level `schedule` scope provides `list`, `add`, `edit`, `run`, and `cancel`. Schedule creation is always an Assignment; use the Assignment contract and preflight result to resolve any material ambiguity before activation. The `run` command is blocked for non-Sandbox Presences. The top-level `watching` scope provides `list`, `add`, and `remove`, preserving the Watch's automatic/manual source status and explicit no-observation state.
 
 The projection keeps observation, Social Intent, Execution, Delivery, and Outcome visible as separate records while omitting unrelated application state. `NO_OP` remains a successful decision, and the CLI never enables live channel delivery.
 

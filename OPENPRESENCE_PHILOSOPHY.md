@@ -797,7 +797,7 @@ The philosophical distinction is:
 
 ---
 
-# 17. Calendar schedules intent, not content
+# 17. Schedule defines outcomes, not content
 
 Traditional social schedulers ask:
 
@@ -805,13 +805,13 @@ Traditional social schedulers ask:
 
 OpenPresence asks:
 
-> What should this Agent pay attention to Tuesday morning?
+> What should this Agent accomplish Tuesday morning?
 
-A Standing Intent might say:
+New scheduled work is an **Assignment** with a visible completion contract. It might say:
 
-> Teach founders one useful thing about persistent agents.
+> Teach founders one useful thing about persistent agents and leave verified evidence.
 
-At execution time Jenny should inspect the current world and decide what is actually worth saying.
+At execution time Jenny inspects the current world and decides the method, candidate, format, wording, and timing strategy.
 
 She may:
 
@@ -819,18 +819,14 @@ She may:
 - reply;
 - create a thread;
 - use an image;
-- draft for Review;
-- do nothing.
+- produce a decision report;
+- ask for operator input when the contract cannot be safely interpreted.
 
-The words should come from the moment.
+The words should come from the moment. An unsolicited social opportunity is different: it may receive `NO_OP` when no delegated responsibility exists. `NO_OP` is a candidate-level judgment, never completion of an active Assignment.
 
-This gives OpenPresence a crucial principle:
+Every Assignment is preflighted for semantic clarity, capability, authority, timing, and readiness. Missing capability or authority blocks activation. Existing Standing Intent records remain available as historical records and migrate to Assignments according to their deliverable.
 
-> **A schedule is permission to consider publishing, not an obligation to publish mediocre work.**
-
-Standing Intents should also have execution windows and expiration.
-
-Schedule also supports a distinct responsibility primitive: an **Assignment**. Consider means “at this time, decide whether anything is worth doing.” Assign means “this outcome is expected; decide how to accomplish it.” The operator decides what must be accomplished. The Agent decides how to accomplish it. An Assignment remains active until completed, cancelled, blocked, or expired incomplete.
+The operator decides the outcome and hard constraints. The Agent decides how to accomplish it. An Assignment remains active until completed with verified evidence, explicitly blocked, cancelled, or expired incomplete.
 
 > **Autonomy is not the absence of direction. It is freedom inside delegated responsibility.**
 
@@ -850,7 +846,7 @@ The operator sets the level of responsibility. The Agent exercises judgment insi
 
 > **A publishing target is not a script.**
 
-Attention determines when a Presence looks. Publishing initiative describes its ongoing responsibility to originate. Schedule gives the operator time-bound considerations and delegated outcomes. These are related agenda inputs, not three competing schedulers.
+Attention determines when a Presence looks. Publishing initiative describes its ongoing responsibility to originate. Schedule gives the operator time-bound Assignments. These are related agenda inputs, not competing schedulers; ambient attention can surface opportunities while Assignments carry delegated responsibility.
 
 Silence remains a valid local action. Rejecting one weak candidate is good judgment, but it does not by itself discharge a standing publishing responsibility. The runtime should record the candidate-level no-op, preserve the responsibility for a later bounded cycle, and never force filler merely to satisfy a counter.
 
@@ -1119,7 +1115,7 @@ The same:
 - Tools;
 - Pulse;
 - Context Compiler;
-- Standing Intents;
+- Assignments, with historical Standing Intent records retained for migration;
 - Execution Envelope;
 - Publication pipeline.
 
@@ -1142,7 +1138,7 @@ it has failed.
 
 The social event should exist in the simulated world.
 
-Playground also gives the operator a way to create an opportunity for original judgment and to rehearse delegated work. Original Post Rehearsal does not mean “generate a post.” The Presence may publish, choose another supported format, research, inspect, wait, or remain silent. A Consider trigger creates an opportunity for judgment; it does not force publication. An Assignment such as “produce 20 original Sandbox publications” is different: the operator owns the expected deliverable while the Agent owns the ideas, research, claims, examples, formats, wording, timing strategy, and candidate rejection.
+Playground also gives the operator a way to create an opportunity for original judgment and to rehearse delegated work. Original Post Rehearsal does not mean “generate a post.” The Presence may publish, choose another supported format, research, inspect, or wait when no Assignment requires a public act. An Assignment such as “produce 20 original Sandbox publications” carries an expected deliverable: the operator owns the outcome while the Agent owns the ideas, research, claims, examples, formats, wording, timing strategy, and candidate rejection.
 
 Assignment progress is grounded in the world. A draft, model response, Social Intent, or attempted delivery is not a completed publication. Only a verified authored object in the Social Mirror counts. An empty or malformed model response is evaluation failure, not NO_OP; an unavailable connector is delivery failure, not social silence.
 
@@ -1765,7 +1761,7 @@ Examples:
 
 > No recent activity. Mirror is up to date.
 
-> No Standing Intents yet.
+> No Assignments yet.
 
 Blank state is not missing content.
 
@@ -1901,7 +1897,7 @@ A Playground result should say:
 ✓ Made a first move without prompting
 ✓ Maintained a 3-turn conversation
 ✓ Preserved Ghost identity
-✓ Standing Intent fired
+✓ Assignment completed with verified evidence
 ! Visual behavior not demonstrated
 ```
 
@@ -2135,7 +2131,7 @@ These sentences should survive implementation changes.
 
 > **Pulse is intention to remain alive. The scheduler is machinery.**
 
-> **A schedule is permission to consider publishing, not an obligation to publish mediocre work.**
+> **An Assignment is responsibility for an outcome, not a script for the words.**
 
 > **Intents can expire.**
 

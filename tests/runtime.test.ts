@@ -587,10 +587,10 @@ describe("OpenPresence runtime boundaries", () => {
     expect(deriveActivitySummary(state).current.label).toBe("Watching X");
   });
 
-  it("surfaces a standing intent as the next explicit consideration", () => {
+  it("surfaces a scheduled Assignment as the next explicit responsibility", () => {
     const state = applyOperation(createAgent(input), { type: "addSlot", instruction: "Teach one useful thing", day: "Tuesday", time: "08:00", objective: "education", executionWindow: "08:00–11:00" });
     const summary = deriveActivitySummary(state);
-    expect(summary.nextAttention.label).toBe("Next standing intent");
+    expect(summary.nextAttention.label).toBe("Next Assignment");
     expect(summary.nextAttention.detail).toContain("Tuesday at 08:00");
     expect(summary.nextIntent.label).toContain("Teach one useful thing");
   });
@@ -636,6 +636,14 @@ describe("OpenPresence runtime boundaries", () => {
     expect(history).toHaveLength(1);
     expect(history[0]).toMatchObject({ text: "Published outside the runtime.", externalRef: { id: "observed-1" } });
     expect(history[0]?.executionId).toBeUndefined();
+  });
+
+  it("retains a deleted X post with its original URL and explicit availability state", () => {
+    const state = createAgent(input);
+    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "hourandcode", name: "Jenny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    state.mirrorObjects.unshift({ id: "deleted-mirror", bridgeId: "native:test", presenceId: state.presence!.id, channelId: "x", externalRef: { type: "x.post", id: "deleted-1" }, objectType: "post", author: { displayName: "Jenny", handle: "gennyverse" }, actorPresenceId: state.presence!.id, content: { text: "This was deleted on X." }, occurredAt: new Date().toISOString(), observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", archived: true });
+    const history = derivePublicHistory(state, state.presence!.id);
+    expect(history[0]).toMatchObject({ availability: "deleted", externalUrl: "https://x.com/gennyverse/status/deleted-1", text: "This was deleted on X." });
   });
 
   it("attributes connected-channel history by the Presence identity handle", () => {

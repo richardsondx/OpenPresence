@@ -30,6 +30,41 @@ async function waitForAssignment(assignmentId: string, timeoutMs = 5_000) {
 }
 
 describe("Sandbox assignment runtime", () => {
+  it("keeps Sandbox checks available while the Presence is paused", async () => {
+    process.env.OPENPRESENCE_AI_MOCK = "1";
+    let state = createAgent({ name: "Paused Sandbox Agent", description: "A careful operator", mode: "agent", handle: "@paused_sandbox", accent: "#D68754" });
+    state = startPlaygroundSession(state, state.presence!.id, "fresh");
+    const sessionId = state.playgroundSessions[0]!.id;
+    state = applyOperation(state, { type: "setPresence", patch: { status: "paused" } });
+    writeState(state);
+
+    const response = await POST(new Request("http://localhost/api/state", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({ type: "runSandboxPulse", sessionId }),
+    }));
+
+    expect(response.ok).toBe(true);
+    expect((await response.json()).presence?.status).toBe("paused");
+    expect(readState().presence?.status).toBe("paused");
+  });
+
+  it("completes an evaluation Assignment with a decision report rather than NO_OP", async () => {
+    process.env.OPENPRESENCE_AI_MOCK = "1";
+    let state = createAgent({ name: "Report Agent", description: "A careful evaluator", mode: "agent", handle: "@report_agent", accent: "#D68754" });
+    state = startPlaygroundSession(state, state.presence!.id, "fresh");
+    const sessionId = state.playgroundSessions[0]!.id;
+    state = applyOperation(state, { type: "createAssignment", presenceId: state.presence!.id, sessionId, environment: "sandbox", instruction: "Evaluate whether we should respond to this controversy." });
+    const assignmentId = state.assignments[0]!.id;
+    state = applyOperation(state, { type: "startAssignment", id: assignmentId, sessionId });
+    writeState(state);
+    expect((await POST(new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "workAssignment", id: assignmentId, sessionId }) }))).ok).toBe(true);
+    const result = await waitForAssignment(assignmentId);
+    const assignment = result.assignments.find((item) => item.id === assignmentId);
+    expect(assignment).toMatchObject({ status: "completed", deliverable: { type: "decision_report" }, completionReport: expect.any(String), lastOutcome: { class: "assignment_completed" } });
+    expect(result.publications.some((item) => item.assignmentId === assignmentId)).toBe(false);
+  });
+
   it("blocks an assignment on a missing model provider instead of looping active forever", async () => {
     let state = createAgent({ name: "KobeissiKlone", description: "Market commentary", mode: "agent", handle: "@kobeissi_klone", accent: "#D68754" });
     state = startPlaygroundSession(state, state.presence!.id, "fresh");

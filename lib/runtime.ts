@@ -1,4 +1,4 @@
-import type { ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, Asset, Assignment, AssignmentQuantityMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, ExplorationBrief, ExplorationFinding, ExplorationSession, ExplorationSessionStatus, FileKind, FileProposal, GhostProfile, GhostRepresentation, JsonValue, LiveEvent, MirrorObject, OpenPresenceState, Operation, OperatorDirective, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, RuntimeScope, SandboxAssetInput, SocialAssetKind, SocialIntent, SocialOrigin, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, LanguagePolicy, Scenario, ScenarioStimulus, ScenarioStimulusRequirements, ScenarioVersion, ScenarioRun, ScenarioRunProvenance, ScenarioRunEvaluation, StructuralFinding, PublishingInitiative, PublishingInitiativeProgress, PublishingPlan, PublishingPlanDraft, PublishingPlanWorkEvent } from "./types";
+import type { ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, Asset, Assignment, AssignmentDelegationPolicy, AssignmentPreflight, AssignmentQuantityMode, AssignmentReadinessCheck, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, ExplorationBrief, ExplorationFinding, ExplorationSession, ExplorationSessionStatus, FileKind, FileProposal, GhostProfile, GhostRepresentation, JsonValue, LiveEvent, MirrorObject, OpenPresenceState, Operation, OperatorDirective, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, RuntimeScope, SandboxAssetInput, SocialAssetKind, SocialIntent, SocialOrigin, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, LanguagePolicy, Scenario, ScenarioStimulus, ScenarioStimulusRequirements, ScenarioVersion, ScenarioRun, ScenarioRunProvenance, ScenarioRunEvaluation, StructuralFinding, PublishingInitiative, PublishingInitiativeProgress, PublishingPlan, PublishingPlanDraft, PublishingPlanWorkEvent } from "./types";
 import { AGENT_CAPABILITY_DEFINITIONS, CHANNEL_CAPABILITIES, CHANNEL_EXTENSIONS, simulationForChannel } from "./types";
 import { buildScenarioFromPrompt, builtinScenarioDefinitions, repairScenarioStimuli, scenarioFromImport, stableHash, validateScenarioFidelity } from "./scenarios";
 import { DEFAULT_PRESENCE_LANGUAGE, effectiveLanguagePolicy, EMPTY_LANGUAGE_POLICY, languagesMatch, normalizeLanguagePolicy, normalizePresenceLanguage, normalizedObservedLanguage, validateLanguage } from "./language-policy";
@@ -469,7 +469,7 @@ export function recordNativeMirror(source: OpenPresenceState, input: { connectio
   const matchingExecution = state.executions.find((execution) => execution.presenceId === input.presenceId && execution.connector === "native" && execution.status === "succeeded" && execution.externalRef?.type === "x.post" && execution.externalRef.id === input.post.id);
   const verifiedAssignmentId = matchingExecution?.assignmentId ?? existing?.assignmentId;
   const objectType = matchingExecution?.affordance === "x.reply" || (input.own && Boolean(input.post.parentId)) ? "reply" : existing?.objectType ?? "post";
-  const object = { id: existing?.id ?? id("mirror"), bridgeId: `native:${input.connectionId}`, presenceId: input.presenceId, channelId: "x" as const, externalRef: { type: "x.post", id: input.post.id }, parentExternalRef: input.post.parentId ? { type: "x.post", id: input.post.parentId } : undefined, conversationExternalRef: input.post.conversationId, referencedExternalRefs: input.post.referencedPosts?.map((reference) => ({ type: "x.post", id: reference.id })), objectType, language: input.post.language, author: { externalRef: input.post.authorId ? { type: "x.user", id: input.post.authorId } : undefined, displayName: input.post.authorName ?? (input.post.authorUsername ? `@${input.post.authorUsername}` : "X user"), handle: input.post.authorUsername, avatarUrl: input.post.authorAvatarUrl }, content: { text: input.post.text }, assetRefs: mediaRefs.length ? mediaRefs : existing?.assetRefs, occurredAt: input.post.createdAt, observedAt: receivedAt, visibility: "public" as const, shareability: "presence-only" as const, originExecutionId: matchingExecution?.id ?? existing?.originExecutionId, assignmentId: verifiedAssignmentId, actorPresenceId: existing?.actorPresenceId ?? (input.own ? input.presenceId : undefined), sourceEventId, environment: "live" as const, source: "native" as const, trust: "untrusted_world_content" as const };
+  const object = { id: existing?.id ?? id("mirror"), bridgeId: `native:${input.connectionId}`, presenceId: input.presenceId, channelId: "x" as const, externalRef: { type: "x.post", id: input.post.id }, parentExternalRef: input.post.parentId ? { type: "x.post", id: input.post.parentId } : undefined, conversationExternalRef: input.post.conversationId, referencedExternalRefs: input.post.referencedPosts?.map((reference) => ({ type: "x.post", id: reference.id })), objectType, language: input.post.language, author: { externalRef: input.post.authorId ? { type: "x.user", id: input.post.authorId } : undefined, displayName: input.post.authorName ?? (input.post.authorUsername ? `@${input.post.authorUsername}` : "X user"), handle: input.post.authorUsername, avatarUrl: input.post.authorAvatarUrl }, content: { text: input.post.text }, assetRefs: mediaRefs.length ? mediaRefs : existing?.assetRefs, occurredAt: input.post.createdAt, observedAt: receivedAt, visibility: "public" as const, shareability: "presence-only" as const, originExecutionId: matchingExecution?.id ?? existing?.originExecutionId, assignmentId: verifiedAssignmentId, actorPresenceId: existing?.actorPresenceId ?? (input.own ? input.presenceId : undefined), sourceEventId, archived: false, environment: "live" as const, source: "native" as const, trust: "untrusted_world_content" as const };
   if (existing) {
     state.mirrorObjects = state.mirrorObjects.map((item) => item.id === existing.id ? object : item);
   } else {
@@ -502,6 +502,21 @@ export function recordNativeMirror(source: OpenPresenceState, input: { connectio
   return curationTarget ? curateRelationshipFromMirror(state, curationTarget, input.presenceId) : state;
 }
 
+/** Mark a previously observed native X post as deleted when X no longer returns it. */
+export function recordNativeMirrorDeletion(source: OpenPresenceState, input: { connectionId: string; presenceId: string; postId: string }) {
+  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  const existing = state.mirrorObjects.find((item) => item.presenceId === input.presenceId && item.channelId === "x" && item.externalRef.type === "x.post" && item.externalRef.id === input.postId && item.environment !== "sandbox");
+  if (!existing || existing.archived) return state;
+  const receivedAt = now();
+  const sourceEventId = `native-x:${input.connectionId}:${input.postId}:deleted`;
+  const archived = { ...existing, archived: true, observedAt: receivedAt, sourceEventId };
+  state.mirrorObjects = state.mirrorObjects.map((item) => item.id === existing.id ? archived : item);
+  if (!state.mirrorEvents.some((item) => item.bridgeId === `native:${input.connectionId}` && item.sourceEventId === sourceEventId)) {
+    state.mirrorEvents.unshift({ id: id("mirror-event"), bridgeId: `native:${input.connectionId}`, presenceId: input.presenceId, sourceEventId, event: "deleted", externalRef: existing.externalRef, object: archived, receivedAt, environment: "live" });
+  }
+  return state;
+}
+
 const publicHistoryKinds = new Set(["post", "reply", "comment", "quote", "repost", "thread"]);
 
 /** Keep the Feed on the active Presence's channel and execution environment. */
@@ -515,11 +530,11 @@ function historyKind(value: string): PublicHistoryItem["kind"] | undefined {
   return publicHistoryKinds.has(normalized) ? normalized as PublicHistoryItem["kind"] : undefined;
 }
 
-function publicHistoryExternalUrl(state: OpenPresenceState, presence: Presence, externalRef: EntityRef, environment?: PresenceEnvironment) {
+function publicHistoryExternalUrl(state: OpenPresenceState, presence: Presence, externalRef: EntityRef, environment?: PresenceEnvironment, authorHandle?: string) {
   if (environment === "sandbox" || presence.channel !== "x") return undefined;
   if (!["x.post", "x.reply", "x.comment", "x.quote", "x.repost", "x.thread"].includes(externalRef.type)) return undefined;
   const account = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.kind === "x")?.account?.username;
-  const handle = account?.replace(/^@/, "").trim();
+  const handle = (authorHandle ?? account)?.replace(/^@/, "").trim();
   if (!handle || !externalRef.id) return undefined;
   return `https://x.com/${encodeURIComponent(handle)}/status/${encodeURIComponent(externalRef.id)}`;
 }
@@ -569,7 +584,8 @@ export function derivePublicHistory(source: OpenPresenceState, presenceId?: stri
         origin: execution?.publication?.origin ?? intent?.origin,
         assetIds: object.assetRefs?.map((ref) => ref.assetId),
         environment: object.environment,
-        externalUrl: publicHistoryExternalUrl(state, presence, object.externalRef, object.environment),
+        externalUrl: publicHistoryExternalUrl(state, presence, object.externalRef, object.environment, object.author?.handle),
+        availability: object.archived ? "deleted" : "available",
         metrics: outcome?.metrics ?? {},
       });
     }
@@ -694,13 +710,27 @@ export function deriveActivitySummary(source: OpenPresenceState, presenceId?: st
     })
     .sort((a, b) => a.nextAt - b.nextAt);
   const nextSlot = standingSlots[0]?.slot;
+  const scheduledAssignments = state.assignments
+    .filter((assignment) => assignment.presenceId === presence?.id && assignment.schedule && !["completed", "cancelled", "expired_incomplete"].includes(assignment.status))
+    .map((assignment) => {
+      const dayIndex: Record<string, number> = { Sunday: 0, Monday: 1, Tuesday: 2, Wednesday: 3, Thursday: 4, Friday: 5, Saturday: 6 };
+      const [hours, minutes] = assignment.schedule!.time.split(":").map(Number);
+      const candidate = new Date();
+      const targetDay = dayIndex[assignment.schedule!.day];
+      candidate.setDate(candidate.getDate() + ((targetDay - candidate.getDay() + 7) % 7));
+      candidate.setHours(Number.isFinite(hours) ? hours : 8, Number.isFinite(minutes) ? minutes : 0, 0, 0);
+      if (candidate.getTime() <= Date.now()) candidate.setDate(candidate.getDate() + 7);
+      return { assignment, nextAt: candidate.getTime() };
+    })
+    .sort((a, b) => a.nextAt - b.nextAt);
+  const nextAssignment = scheduledAssignments[0]?.assignment;
   const activeAssignment = state.assignments.find((assignment) =>
     assignment.presenceId === presence?.id && ["active", "working", "blocked"].includes(assignment.status),
   );
 
   let current: ActivitySummary["current"] = {
     label: "Waiting for the next meaningful event",
-    detail: "Nothing is running right now. Jenny will look again when you check now or a standing intent is invoked.",
+    detail: "Nothing is running right now. Jenny will look again when you check now or an Assignment becomes eligible.",
     tone: "neutral",
   };
   if (!presence) {
@@ -729,7 +759,7 @@ export function deriveActivitySummary(source: OpenPresenceState, presenceId?: st
   } else if (latestEventIsNewerThanExecution && latestEvent?.title === "Standing intention held") {
     current = { label: "Waiting for a better moment", detail: latestEvent.detail, tone: "quiet" };
   } else if (latestEventIsNewerThanExecution && latestEvent?.title === "Calendar attention started") {
-    current = { label: "Evaluating a standing intention", detail: latestEvent.detail, tone: "positive" };
+    current = { label: "Evaluating an Assignment", detail: latestEvent.detail, tone: "positive" };
   } else if (latestEventIsNewerThanExecution && latestEvent?.title === "Social Mirror updated" && observation?.status === "up-to-date") {
     const next = relativeSchedule(observation.nextObservationAt);
     current = { label: "Watching X", detail: next ? `The Social Mirror is up to date. Next observation ${next}.` : "The Social Mirror is up to date and ready for Jenny's next judgment.", tone: "positive" };
@@ -759,19 +789,23 @@ export function deriveActivitySummary(source: OpenPresenceState, presenceId?: st
   } else if (nativeConnection?.status === "needs-attention") {
     current = { label: "X connection needs attention", detail: nativeConnection.healthMessage ?? "The account is authenticated, but the last native action or observation was rejected.", tone: "warning" };
   } else if (nativeConnection) {
-    current = { label: `Ready to observe ${channelName(presence.channel)}`, detail: "The native channel is connected. Observation begins when you check now or a standing intent is invoked.", tone: "positive" };
+    current = { label: `Ready to observe ${channelName(presence.channel)}`, detail: "The native channel is connected. Observation begins when you check now or an Assignment becomes eligible.", tone: "positive" };
   }
 
   const nextAttention = presence?.status === "paused"
     ? { label: "After waking", detail: "Wake up Jenny to resume attention and begin a first check." }
-    : nextSlot
-      ? { label: "Next standing intent", detail: `${nextSlot.day} at ${nextSlot.time} · ${nextSlot.label}` }
+    : nextAssignment
+      ? { label: "Next Assignment", detail: `${nextAssignment!.schedule!.day} at ${nextAssignment!.schedule!.time} · ${nextAssignment!.title ?? nextAssignment!.instruction}` }
+      : nextSlot
+        ? { label: "Legacy calendar entry", detail: `${nextSlot.day} at ${nextSlot.time} · ${nextSlot.label}` }
       : observation?.nextObservationAt
         ? { label: "Next X observation", detail: relativeSchedule(observation.nextObservationAt) ?? "Scheduled by the connected observer." }
-        : { label: "On demand", detail: "No automatic scan is scheduled because no observer or standing intent is connected." };
-  const nextIntent = nextSlot
-    ? { label: nextSlot.label, detail: `${nextSlot.day} at ${nextSlot.time} · ${considerationTimingLabel(nextSlot.time, nextSlot.executionWindow)}` }
-    : { label: "No standing intent scheduled", detail: "Calendar is optional; Jenny can still be asked to check the channel now." };
+        : { label: "On demand", detail: "No automatic scan is scheduled because no observer or Assignment is connected." };
+  const nextIntent = nextAssignment
+    ? { label: nextAssignment.title ?? nextAssignment.instruction, detail: `${nextAssignment.schedule!.day} at ${nextAssignment.schedule!.time} · ${considerationTimingLabel(nextAssignment.schedule!.time, nextAssignment.schedule!.executionWindow)}` }
+    : nextSlot
+      ? { label: nextSlot.label, detail: `${nextSlot.day} at ${nextSlot.time} · legacy calendar entry` }
+      : { label: "No Assignment scheduled", detail: "Schedule is optional; Jenny can still be asked to check the channel now." };
   const rhythm = {
     attention: presence?.status === "paused" ? "Asleep" : nativeConnection ? `Every ${attentionIntervalLabel(presence ?? undefined)}` : "On demand",
     publishing: activityModeLabel(presence?.execution.post),
@@ -1839,6 +1873,25 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   const normalizedPresences = presences.map((item) => ({ ...item, languagePolicy: normalizeLanguagePolicy((item as Presence & { languagePolicy?: LanguagePolicy }).languagePolicy) }));
   const hydratedPresence = normalizedPresences.find((item) => item.id === activePresenceId) ?? normalizedPresences[0] ?? null;
   const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], workspaceRevision: state.workspaceRevision, presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], calendar, assignments: (state.assignments ?? []).map((assignment) => normalizeAssignment(assignment)), assignmentRuns: state.assignmentRuns ?? [], watches: state.watches ?? [], explorations: state.explorations ?? [], discoveryPlans: state.discoveryPlans ?? [], explorationSessions: state.explorationSessions ?? [], explorationFindings: state.explorationFindings ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, assetProviderConnections: state.assetProviderConnections ?? [], toolBindings: (state.toolBindings ?? []).map((binding) => ({ ...binding, enabled: binding.enabled !== false })), changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], operatorDirectives: state.operatorDirectives ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], assetUsages: state.assetUsages ?? [], sourceEvidence: state.sourceEvidence ?? [], claimGrounding: state.claimGrounding ?? [], preferenceEvidence: state.preferenceEvidence ?? [], originalPostRehearsals: state.originalPostRehearsals ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], perceptions: state.perceptions ?? [], assetResearchSessions: state.assetResearchSessions ?? [], skills, agentSkills, contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], conversationEpisodes: state.conversationEpisodes ?? [], assignmentContributions: state.assignmentContributions ?? [], people: state.people ?? [], personIdentities: state.personIdentities ?? [], relationships: state.relationships ?? [], relationshipFacts: state.relationshipFacts ?? [], relationshipOpenLoops: state.relationshipOpenLoops ?? [], recommendationRecords: state.recommendationRecords ?? [], introductionRecords: state.introductionRecords ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: (state.playgroundSessions ?? []).map((session) => ({ ...session, virtualTimeMode: session.virtualTimeMode ?? "realtime", worldRevision: session.worldRevision ?? 1 })), sandboxActors: state.sandboxActors ?? [], networkSearches: state.networkSearches ?? [], networkIntroductions: state.networkIntroductions ?? [], scenarios: state.scenarios ?? [], scenarioVersions: state.scenarioVersions ?? [], scenarioRuns: state.scenarioRuns ?? [], scenarioRunProvenance: state.scenarioRunProvenance ?? [], scenarioEvaluations: state.scenarioEvaluations ?? [], knowledgeCollections: state.knowledgeCollections ?? [], knowledgeItems: state.knowledgeItems ?? [], knowledgeVersions: state.knowledgeVersions ?? [], knowledgeSegments: state.knowledgeSegments ?? [], presenceKnowledgeBindings: state.presenceKnowledgeBindings ?? [], knowledgeRetrievalRuns: state.knowledgeRetrievalRuns ?? [], knowledgeCitations: state.knowledgeCitations ?? [] };
+  for (const slot of normalized.calendar) {
+    if (!slot.enabled || slot.assignmentId) continue;
+    const existing = normalized.assignments.find((assignment) => assignment.origin === "schedule" && assignment.presenceId === slot.presence && assignment.instruction === slot.instruction && assignment.schedule?.day === slot.day && assignment.schedule?.time === slot.time);
+    if (existing) {
+      slot.assignmentId = existing.id;
+      continue;
+    }
+    const migrated = compileAssignmentInstruction(normalized, slot.instruction, slot.presence, normalized.presences.find((item) => item.id === slot.presence)?.environment ?? "sandbox", undefined, { day: slot.day, time: slot.time, executionWindow: slot.executionWindow });
+    migrated.origin = "schedule";
+    normalized.assignments.unshift(migrated);
+    slot.assignmentId = migrated.id;
+  }
+  normalized.assignments = normalized.assignments.map((assignment) => {
+    const successEvidence = assignment.preflight?.contract?.successEvidence ?? "";
+    const needsPreflightCopyRefresh = successEvidence.includes("Social Mirror") || successEvidence.includes("persisted and explains");
+    return assignment.preflight && !needsPreflightCopyRefresh
+      ? assignment
+      : { ...assignment, preflight: preflightAssignment(normalized, assignment, assignment.executionPolicy.delegationPolicy) };
+  });
   normalized.mirrorObjects = repairNativeReplyClassifications(normalized);
   normalized.publishingPlans = state.publishingPlans ?? [];
   if (normalized.agent && normalized.scenarios.length === 0) {
@@ -2242,14 +2295,108 @@ function assignmentQuantity(instruction: string): { quantity: number; quantityMo
   return { quantity, quantityMode };
 }
 
-export function compileAssignmentInstruction(source: OpenPresenceState, instruction: string, presenceId?: string, environment: PresenceEnvironment = "sandbox", sessionId?: string, schedule?: Assignment["schedule"]): Assignment {
+function assignmentDeliverableType(instruction: string): Assignment["deliverable"]["type"] {
+  const evaluationOnly = /\b(?:evaluate|assess|review|recommend|decide\s+whether|tell\s+me\s+whether)\b/i.test(instruction)
+    && (!/\b(?:publish|post|reply|respond|answer|handle|send|engage|message)\b/i.test(instruction) || /\b(?:evaluate|assess|review)\s+(?:whether|if)\b/i.test(instruction));
+  if (evaluationOnly) return "decision_report";
+  if (/\b(reply|repl(?:y|ies)|respond|answer|engage|comment)\b/i.test(instruction)) return "reply";
+  if (/\b(quote|repost|message)\b/i.test(instruction)) return instruction.match(/\bquote\b/i) ? "quote" : instruction.match(/\brepost\b/i) ? "repost" : "message";
+  return "original_publication";
+}
+
+function assignmentDeliverableLabel(type: Assignment["deliverable"]["type"]) {
+  return type === "original_publication" ? "one original post published" : type === "reply" ? "one public reply or conversation contribution" : type === "decision_report" ? "one reasoned decision report" : `one ${type.replaceAll("_", " ")}`;
+}
+
+function assignmentSuccessEvidence(type: Assignment["deliverable"]["type"], presence: Presence | null | undefined, environment: PresenceEnvironment) {
+  if (type === "decision_report") return "A reasoned report is saved and explains the recommendation, including when no public action is warranted.";
+  const destination = presence?.channel === "x" ? "X" : presence?.name ?? "the selected channel";
+  if (environment === "sandbox") {
+    if (type === "original_publication") return "The post appears in the Sandbox and is confirmed.";
+    if (type === "reply") return "The reply is visible in the Sandbox conversation and confirmed.";
+    if (type === "quote") return "The quote-post appears in the Sandbox and is confirmed.";
+    if (type === "repost") return "The repost appears in the Sandbox and is confirmed.";
+  }
+  if (type === "original_publication") return `The post is live on ${destination} and confirmed.`;
+  if (type === "reply") return `The reply is visible in the conversation on ${destination} and confirmed.`;
+  if (type === "quote") return `The quote-post is live on ${destination} and confirmed.`;
+  if (type === "repost") return `The repost is live on ${destination} and confirmed.`;
+  if (type === "message") return "The message is delivered to the recipient and confirmed.";
+  return `The ${type.replaceAll("_", " ")} is completed and confirmed.`;
+}
+
+function assignmentAffordance(type: Assignment["deliverable"]["type"]) {
+  if (type === "original_publication") return "post";
+  if (type === "reply" || type === "meaningful_engagement") return "reply";
+  if (type === "quote" || type === "repost" || type === "message") return type;
+  return undefined;
+}
+
+export function preflightAssignment(source: OpenPresenceState, assignment: Assignment, delegationPolicy: AssignmentDelegationPolicy = "keep_moving"): AssignmentPreflight {
+  const presence = source.presences.find((item) => item.id === assignment.presenceId) ?? source.presence;
+  const instruction = assignment.instruction.trim();
+  const checks: AssignmentReadinessCheck[] = [];
+  const issues: string[] = [];
+  const assumptions: string[] = [];
+  const affordance = assignmentAffordance(assignment.deliverable.type);
+  const deliverable = assignmentDeliverableLabel(assignment.deliverable.type);
+  const timing = assignment.schedule ? `${assignment.schedule.day} · ${assignment.schedule.time} · ${assignment.schedule.executionWindow}` : undefined;
+
+  if (!presence) {
+    checks.push({ label: "Presence", status: "fail", detail: "No Presence is available to carry this Assignment." });
+    issues.push("Choose a Presence before activating this Assignment.");
+  } else {
+    checks.push({ label: "Presence", status: "pass", detail: `${presence.name} · ${presence.channel}` });
+  }
+
+  const materiallyUnclear = instruction.length < 8 || /^(?:think about|consider|look at|do something about)\b/i.test(instruction);
+  if (materiallyUnclear) {
+    checks.push({ label: "Completion contract", status: "fail", detail: "The instruction does not make the expected outcome clear enough to verify." });
+    issues.push("State what Genny should deliver or decide; this Assignment remains Draft until completion is clear.");
+  } else {
+    checks.push({ label: "Completion contract", status: "pass", detail: `${deliverable} · verified completion required` });
+  }
+
+  if (assignment.schedule) {
+    const validTime = /^([01]\d|2[0-3]):[0-5]\d$/.test(assignment.schedule.time) && /^([01]\d|2[0-3]):[0-5]\d[–-]([01]\d|2[0-3]):[0-5]\d$/.test(assignment.schedule.executionWindow);
+    checks.push({ label: "Timing", status: validTime ? "pass" : "fail", detail: validTime ? timing! : "The scheduled time or execution window is invalid." });
+    if (!validTime) issues.push("Choose a valid day, time, and execution window before activation.");
+  } else {
+    assumptions.push("Genny will work when the Assignment is activated or when its linked Attention Source makes it eligible.");
+    checks.push({ label: "Timing", status: "warning", detail: "No deadline or window was supplied; the Assignment remains manually startable." });
+  }
+
+  if (presence && affordance) {
+    const hasCapability = presence.capabilities.some((item) => item.id === affordance);
+    const mode = presence.execution[affordance];
+    const unavailable = !hasCapability || (assignment.environment === "live" && mode === "off");
+    checks.push({ label: "Channel capability", status: unavailable ? "fail" : "pass", detail: unavailable ? `${presence.name} cannot perform ${affordance} on ${presence.channel} with the current capability and authority.` : `${affordance} is available through the Presence execution envelope.` });
+    if (unavailable) issues.push(`Enable ${affordance} authority for ${presence.name} or change the Assignment's requested outcome.`);
+  } else {
+    checks.push({ label: "Channel capability", status: "pass", detail: "No public channel action is required for this deliverable." });
+  }
+
+  const status = issues.some((issue) => issue.includes("cannot perform") || issue.includes("Enable")) ? "blocked" : issues.length ? "needs_input" : assumptions.length ? "ready_with_assumptions" : "ready";
+  const contract = materiallyUnclear ? undefined : {
+    objective: instruction,
+    deliverable,
+    successEvidence: assignmentSuccessEvidence(assignment.deliverable.type, presence, assignment.environment),
+    timing,
+    agentDecides: ["angle and wording", "research and evidence", "format and assets", "sequencing and retries", "exact moment within the authorized window"],
+    hardConstraints: assignment.editorialContext?.constraints ?? [],
+    assumptions,
+  };
+  return { status, delegationPolicy, semanticSummary: assignment.deliverable.type === "decision_report" ? "This Assignment evaluates and reports; it does not require a public response." : `This Assignment requires ${deliverable}; a rejected candidate keeps the responsibility active.`, contract, checks, issues, reviewedAt: now(), reviewedRevision: assignment.revision ?? 0 };
+}
+
+export function compileAssignmentInstruction(source: OpenPresenceState, instruction: string, presenceId?: string, environment: PresenceEnvironment = "sandbox", sessionId?: string, schedule?: Assignment["schedule"], delegationPolicy: AssignmentDelegationPolicy = "keep_moving"): Assignment {
   const clean = instruction.trim();
   if (!clean) throw new Error("An Assignment needs an expected outcome.");
   const presence = source.presences.find((item) => item.id === (presenceId ?? source.activePresenceId)) ?? source.presence;
   if (!presence || !source.agent) throw new Error("Choose a Presence before creating an Assignment.");
   const { quantity, quantityMode } = assignmentQuantity(clean);
   const recurrence = /every\s+(?:weekday|workday)|each\s+weekday/i.test(clean) ? { kind: "weekdays" as const, label: "Every weekday" } : /every\s+day|each\s+day|per\s+day|daily/i.test(clean) ? { kind: "daily" as const, label: "Every day" } : /this\s+week|each\s+week|per\s+week|weekly/i.test(clean) ? { kind: "weekly" as const, label: "This week" } : { kind: "once" as const, label: "Once" };
-  const type = /\b(reply|repl(?:y|ies)|respond|engage)\b/i.test(clean) ? "reply" as const : /\b(quote|repost|message)\b/i.test(clean) ? (clean.match(/\bquote\b/i) ? "quote" as const : clean.match(/\brepost\b/i) ? "repost" as const : "message" as const) : "original_publication" as const;
+  const type = assignmentDeliverableType(clean);
   const topicMatch = clean.match(/\b(?:about|around|focus(?:ed)?\s+on|cover(?:ing)?)\s+(.+?)(?:\.|;|$)/i);
   const topics = topicMatch?.[1]?.split(/,|\bor\b|\band\b/i).map((item) => item.trim()).filter(Boolean).slice(0, 12);
   const constraints = [
@@ -2257,7 +2404,8 @@ export function compileAssignmentInstruction(source: OpenPresenceState, instruct
     /choose\s+your\s+own|find\s+your\s+own/i.test(clean) ? "The Agent chooses the topics, thesis, examples, format, and wording." : "",
   ].filter(Boolean);
   const timestamp = now();
-  const assignment: Assignment = { id: id("assignment"), agentId: source.agent.id, presenceId: presence.id, sessionId, channelId: presence.channel, environment, title: clean, origin: schedule ? "schedule" : "manual", activation: schedule ? { type: "scheduled", recurrence } : { type: "manual" }, instruction: clean, deliverable: { type, quantity, quantityMode }, quantityPolicy: { quantity, mode: quantityMode, period: recurrence.kind === "weekly" ? "week" : recurrence.kind === "daily" || recurrence.kind === "weekdays" ? "day" : "assignment" }, recurrence, schedule, editorialContext: { topics, constraints }, executionPolicy: { usePresenceEnvelope: true }, status: "draft", progress: { required: quantity, verified: 0 }, rejectedCandidates: 0, systemFailures: 0, work: { phase: "candidate_review", attempts: 0, maxAttempts: Math.min(12, Math.max(4, quantity * 4)), storiesResearched: 0 }, attemptHistory: [], storyResearch: [], createdAt: timestamp, updatedAt: timestamp };
+  const assignment: Assignment = { id: id("assignment"), agentId: source.agent.id, presenceId: presence.id, sessionId, channelId: presence.channel, environment, title: clean, origin: schedule ? "schedule" : "manual", activation: schedule ? { type: "scheduled", recurrence } : { type: "manual" }, instruction: clean, deliverable: { type, quantity, quantityMode }, quantityPolicy: { quantity, mode: quantityMode, period: recurrence.kind === "weekly" ? "week" : recurrence.kind === "daily" || recurrence.kind === "weekdays" ? "day" : "assignment" }, recurrence, schedule, editorialContext: { topics, constraints }, executionPolicy: { usePresenceEnvelope: true, delegationPolicy }, status: "draft", progress: { required: quantity, verified: 0 }, rejectedCandidates: 0, systemFailures: 0, work: { phase: "candidate_review", attempts: 0, maxAttempts: Math.min(12, Math.max(4, quantity * 4)), storiesResearched: 0 }, attemptHistory: [], storyResearch: [], createdAt: timestamp, updatedAt: timestamp };
+  assignment.preflight = preflightAssignment(source, assignment, delegationPolicy);
   return assignment;
 }
 
@@ -2580,15 +2728,35 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     return state;
   }
   if (operation.type === "createAssignment") {
-    const assignment = compileAssignmentInstruction(state, operation.instruction, operation.presenceId, operation.environment ?? "sandbox", operation.sessionId, operation.schedule);
+    const assignment = compileAssignmentInstruction(state, operation.instruction, operation.presenceId, operation.environment ?? "sandbox", operation.sessionId, operation.schedule, operation.delegationPolicy);
     assignment.revision = 0;
     state.assignments.unshift(assignment);
-    state.events.unshift(event("system", "Assignment drafted", `${assignment.progress.required} ${assignment.deliverable.type === "original_publication" ? "original publications" : assignment.deliverable.type} · ${assignment.recurrence?.label ?? "Once"}. Review the expected outcome before starting.`, "positive", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
+    state.events.unshift(event("system", "Assignment reviewed", `${assignment.preflight?.status === "ready" || assignment.preflight?.status === "ready_with_assumptions" ? "Ready to activate" : "Needs input before activation"} · ${assignment.progress.required} ${assignment.deliverable.type === "original_publication" ? "original publications" : assignment.deliverable.type} · ${assignment.recurrence?.label ?? "Once"}.`, assignment.preflight?.status === "blocked" || assignment.preflight?.status === "needs_input" ? "warning" : "positive", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
+    return state;
+  }
+  if (operation.type === "activateAssignment") {
+    const assignment = state.assignments.find((item) => item.id === operation.id);
+    if (!assignment || ["completed", "cancelled"].includes(assignment.status)) return state;
+    assignment.preflight = preflightAssignment(state, assignment, operation.delegationPolicy ?? assignment.executionPolicy.delegationPolicy);
+    if (!["ready", "ready_with_assumptions"].includes(assignment.preflight.status)) {
+      state.events.unshift(event("decision", "Assignment needs input", assignment.preflight.issues.join(" ") || "The completion contract is not ready to activate.", "warning", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
+      return state;
+    }
+    assignment.executionPolicy.delegationPolicy = operation.delegationPolicy ?? assignment.executionPolicy.delegationPolicy ?? "keep_moving";
+    assignment.status = assignment.status === "blocked" ? "active" : "active";
+    assignment.revision = (assignment.revision ?? 0) + 1;
+    assignment.updatedAt = now();
+    state.events.unshift(event("decision", "Assignment activated", `${assignment.preflight.semanticSummary} The Agent owns the method within the active delegation policy.`, "positive", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
     return state;
   }
   if (operation.type === "startAssignment") {
     const assignment = state.assignments.find((item) => item.id === operation.id);
     if (!assignment || assignment.status === "completed" || assignment.status === "cancelled") return state;
+    assignment.preflight = preflightAssignment(state, assignment, assignment.executionPolicy.delegationPolicy);
+    if (!["ready", "ready_with_assumptions"].includes(assignment.preflight.status)) {
+      state.events.unshift(event("decision", "Assignment needs input", assignment.preflight.issues.join(" ") || "The completion contract is not ready to activate.", "warning", { presenceId: assignment.presenceId, sessionId: operation.sessionId }));
+      return state;
+    }
     const retryingBlockedAssignment = assignment.status === "blocked";
     assignment.status = "active";
     assignment.sessionId = operation.sessionId;
@@ -2986,8 +3154,8 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     }
     case "saveFile": { const file = state.files.find((item) => item.kind === operation.kind); if (!file || file.content === operation.content) return state; if (file.protected) { state.proposals.push(proposal(state, operation.kind, operation.content, "Protected meaning files are reviewed before they change.")); state.events.unshift(event("system", `${operation.kind}.md needs your review`, "A protected meaning change is waiting in Brain.", "warning")); } else { const before = file.content; file.content = operation.content; file.revision += 1; file.updatedAt = now(); recordChangeSet(state, `Update ${operation.kind}.md`, [{ path: `agentFiles.${operation.kind}`, action: "update", before, after: operation.content }]); state.events.unshift(event("learning", `${operation.kind}.md updated`, "The change was saved to the local agent state.", "positive")); } return state; }
     case "resolveProposal": { const item = state.proposals.find((entry) => entry.id === operation.id); if (!item || item.status !== "pending") return state; item.status = operation.decision === "approve" ? "approved" : "rejected"; if (operation.decision === "approve") { const file = state.files.find((entry) => entry.kind === item.file); if (file) { file.content = item.proposed; file.revision += 1; file.updatedAt = now(); } if (item.target?.type === "presence_identity") { const updated = state.presences.find((presence) => presence.id === item.target?.presenceId); if (updated) { const nextPresence = { ...updated, name: item.target.name, publicSelf: { ...updated.publicSelf, displayName: item.target.name } }; nextPresence.context = compilePresenceContext(nextPresence); state.presences = state.presences.map((presence) => presence.id === nextPresence.id ? nextPresence : presence); if (state.presence?.id === nextPresence.id) state.presence = nextPresence; } } state.events.unshift(event("system", `${item.file}.md approved`, "The protected meaning file and its Presence identity were updated and versioned.", "positive")); } else state.events.unshift(event("system", `${item.file}.md proposal rejected`, "The current meaning stays unchanged.", "quiet")); return state; }
-    case "addSlot": { const targetPresence = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence; const slot = makeCalendarSlot(operation.instruction, targetPresence, operation.day, operation.time, operation.objective, operation.executionWindow); const standing = makeStandingIntent(state, slot.instruction, targetPresence, slot.day, slot.time, slot.objective, slot.executionWindow); slot.standingIntentId = standing.id; state.standingIntents.push(standing); state.calendar.push(slot); recordChangeSet(state, "Create standing intent", [{ path: "standingIntents", action: "create", after: standing.instruction }]); state.events.unshift(event("system", "Standing intention added", `${slot.label} · ${slot.day} at ${slot.time}.`, "positive")); return state; }
-    case "editSlot": { const slot = state.calendar.find((item) => item.id === operation.id); if (!slot) return state; const targetPresence = state.presences.find((item) => item.id === slot.presence) ?? state.presence; const previous = { ...slot }; const scheduleChanged = previous.day !== operation.day || previous.time !== operation.time; slot.instruction = operation.instruction.trim() || slot.instruction; slot.label = slot.instruction.length > 34 ? `${slot.instruction.slice(0, 34).trim()}…` : slot.instruction; slot.day = operation.day; slot.time = operation.time; slot.objective = operation.objective; slot.executionWindow = operation.executionWindow; slot.mode = targetPresence?.execution.post ?? slot.mode; if (scheduleChanged) slot.lastEvaluatedAt = undefined; const standing = state.standingIntents.find((item) => item.id === slot.standingIntentId); if (standing) { const [startsAt, endsAt] = slot.executionWindow.split(/[–-]/).map((part) => part.trim()); standing.instruction = slot.instruction; standing.presenceId = targetPresence?.id; standing.trigger = { type: "schedule", config: { day: slot.day, time: slot.time } }; standing.objective = slot.objective; standing.executionWindow = { startsAt, endsAt: endsAt || startsAt }; standing.updatedAt = now(); } recordChangeSet(state, "Edit standing intent", [{ path: `calendar.${slot.id}`, action: "update", before: previous.instruction, after: slot.instruction }]); state.events.unshift(event("system", "Standing intention updated", `${slot.label} · ${slot.day} at ${slot.time}.`, "positive")); return state; }
+    case "addSlot": { const targetPresence = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence; const slot = makeCalendarSlot(operation.instruction, targetPresence, operation.day, operation.time, operation.objective, operation.executionWindow); const standing = makeStandingIntent(state, slot.instruction, targetPresence, slot.day, slot.time, slot.objective, slot.executionWindow); const assignment = compileAssignmentInstruction(state, slot.instruction, targetPresence?.id, targetPresence?.environment ?? "sandbox", undefined, { day: slot.day, time: slot.time, executionWindow: slot.executionWindow }); assignment.origin = "schedule"; slot.standingIntentId = standing.id; slot.assignmentId = assignment.id; state.standingIntents.push(standing); state.assignments.unshift(assignment); state.calendar.push(slot); recordChangeSet(state, "Create Assignment", [{ path: "assignments", action: "create", after: assignment.instruction }]); state.events.unshift(event("system", "Assignment reviewed", `${slot.label} · ${slot.day} at ${slot.time}. ${assignment.preflight?.status === "ready" || assignment.preflight?.status === "ready_with_assumptions" ? "Ready to activate." : "Needs input before activation."}`, assignment.preflight?.status === "ready" || assignment.preflight?.status === "ready_with_assumptions" ? "positive" : "warning")); return state; }
+    case "editSlot": { const slot = state.calendar.find((item) => item.id === operation.id); if (!slot) return state; const targetPresence = state.presences.find((item) => item.id === slot.presence) ?? state.presence; const previous = { ...slot }; const scheduleChanged = previous.day !== operation.day || previous.time !== operation.time; slot.instruction = operation.instruction.trim() || slot.instruction; slot.label = slot.instruction.length > 34 ? `${slot.instruction.slice(0, 34).trim()}…` : slot.instruction; slot.day = operation.day; slot.time = operation.time; slot.objective = operation.objective; slot.executionWindow = operation.executionWindow; slot.mode = targetPresence?.execution.post ?? slot.mode; if (scheduleChanged) slot.lastEvaluatedAt = undefined; const standing = state.standingIntents.find((item) => item.id === slot.standingIntentId); if (standing) { const [startsAt, endsAt] = slot.executionWindow.split(/[–-]/).map((part) => part.trim()); standing.instruction = slot.instruction; standing.presenceId = targetPresence?.id; standing.trigger = { type: "schedule", config: { day: slot.day, time: slot.time } }; standing.objective = slot.objective; standing.executionWindow = { startsAt, endsAt: endsAt || startsAt }; standing.updatedAt = now(); } const assignment = slot.assignmentId ? state.assignments.find((item) => item.id === slot.assignmentId) : undefined; if (assignment) { assignment.instruction = slot.instruction; assignment.title = slot.instruction; assignment.schedule = { day: slot.day, time: slot.time, executionWindow: slot.executionWindow }; assignment.preflight = preflightAssignment(state, assignment, assignment.executionPolicy.delegationPolicy); assignment.updatedAt = now(); } recordChangeSet(state, "Edit Assignment", [{ path: `assignments.${slot.assignmentId ?? slot.id}`, action: "update", before: previous.instruction, after: slot.instruction }]); state.events.unshift(event("system", "Assignment updated", `${slot.label} · ${slot.day} at ${slot.time}.`, "positive")); return state; }
     case "createSkill": { if (!state.agent || !operation.name.trim() || !operation.description.trim()) return state; const skillId = `${operation.name.trim().toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "skill"}-${Date.now().toString(36)}`; const skill = { id: skillId, name: operation.name.trim(), description: operation.description.trim(), channels: ["x", "linkedin"] as import("./types").ChannelId[], requiresTools: [], compatibleFormats: [] }; state.skills.push(skill); state.agentSkills.push({ id: id("agent-skill"), agentId: state.agent.id, skillId: skill.id, enabled: true }); state.events.unshift(event("learning", "Skill created", `${skill.name} is installed and enabled for ${state.agent.name}.`, "positive")); return state; }
     case "editSkill": { const skill = state.skills.find((item) => item.id === operation.id); if (!skill || !operation.name.trim() || !operation.description.trim()) return state; const previous = { name: skill.name, description: skill.description }; skill.name = operation.name.trim(); skill.description = operation.description.trim(); state.events.unshift(event("learning", "Skill updated", `${skill.name} instruction prompt updated.`, "positive")); recordChangeSet(state, "Edit skill", [{ path: `skills.${skill.id}`, action: "update", before: previous.description, after: skill.description }]); return state; }
     case "configureProvider": { if (!state.agent) return state; const name = providerName(operation.provider); const existing = state.providerConnections.find((item) => item.provider === operation.provider); const status = operation.provider === "ollama" ? "local" as const : "available" as const; if (existing) { existing.label = name; existing.status = status; existing.endpoint = operation.endpoint?.trim() || existing.endpoint; existing.secretConfigured = operation.hasSecret || existing.secretConfigured; } else state.providerConnections.push({ id: id("connection"), provider: operation.provider, label: name, status, endpoint: operation.endpoint?.trim() || undefined, secretConfigured: operation.hasSecret, createdAt: now() }); state.events.unshift(event("system", `${name} connected`, operation.provider === "ollama" ? "Local models are ready to use." : "Provider access is configured for this Agent.", "positive")); return state; }

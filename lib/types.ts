@@ -57,7 +57,12 @@ export type PersonIdentityVerificationMethod = "provider_verified" | "connector_
 export type RelationshipOpenLoopStatus = "open" | "resolved" | "superseded";
 export type IntroductionState = "offered" | "requester_interested" | "candidate_contact_pending" | "candidate_contacted" | "candidate_accepted" | "candidate_declined" | "introduced" | "closed";
 export type BridgeAdapterStatus = "waiting" | "connected" | "stale" | "disconnected";
-export type AssignmentStatus = "draft" | "active" | "working" | "paused" | "blocked" | "completed" | "expired_incomplete" | "cancelled";
+// The richer lifecycle is the canonical vocabulary. `active` and `paused`
+// remain accepted for older persisted workspaces and are normalized by the
+// runtime without destroying their history.
+export type AssignmentStatus = "draft" | "accepted" | "planning" | "active" | "working" | "awaiting_execution" | "awaiting_review" | "needs_operator" | "paused" | "blocked" | "completed" | "completed_with_adaptation" | "failed" | "expired_incomplete" | "cancelled";
+export type AssignmentPreflightStatus = "ready" | "ready_with_assumptions" | "needs_input" | "blocked";
+export type AssignmentDelegationPolicy = "keep_moving" | "ask_before_change" | "stop_on_deviation";
 export type AssignmentQuantityMode = "target" | "at_least" | "exact" | "at_most" | "minimum" | "maximum";
 export type AssignmentOrigin = "schedule" | "exploration" | "watchlist" | "publishing_initiative" | "teach" | "manual" | "system";
 export type AssignmentActivation =
@@ -65,7 +70,7 @@ export type AssignmentActivation =
   | { type: "attention_source"; sourceIds: string[]; startsAt?: string; endsAt?: string }
   | { type: "continuous" }
   | { type: "manual" };
-export type AssignmentDeliverableType = "original_publication" | "maintain_original_presence" | "meaningful_engagement" | "reply" | "public_interaction" | "introduction" | "quote" | "repost" | "message" | "custom" | string;
+export type AssignmentDeliverableType = "original_publication" | "maintain_original_presence" | "meaningful_engagement" | "reply" | "public_interaction" | "introduction" | "quote" | "repost" | "message" | "decision_report" | "custom" | string;
 export type AssignmentOutcomeClass = "candidate_rejected" | "action_no_op" | "assignment_blocked" | "assignment_completed" | "assignment_cancelled" | "evaluation_failed" | "delivery_failed" | "language_policy_failed" | "incomplete";
 export type AssignmentWorkPhase = "researching" | "candidate_review" | "visual_research" | "publishing" | "blocked" | "completed";
 export type AssignmentRunStatus = "queued" | "researching" | "selecting" | "writing" | "delivering" | "published" | "blocked" | "failed" | "cancelled";
@@ -794,6 +799,30 @@ export interface AssignmentPeriod {
   createdAt: string;
   closedAt?: string;
 }
+export interface AssignmentContract {
+  objective: string;
+  deliverable: string;
+  successEvidence: string;
+  timing?: string;
+  agentDecides: string[];
+  hardConstraints: string[];
+  assumptions: string[];
+}
+export interface AssignmentReadinessCheck {
+  label: string;
+  status: "pass" | "warning" | "fail";
+  detail: string;
+}
+export interface AssignmentPreflight {
+  status: AssignmentPreflightStatus;
+  delegationPolicy: AssignmentDelegationPolicy;
+  semanticSummary: string;
+  contract?: AssignmentContract;
+  checks: AssignmentReadinessCheck[];
+  issues: string[];
+  reviewedAt: string;
+  reviewedRevision: number;
+}
 export interface PresenceContext { presenceId: string; channel: ChannelId; language?: PresenceLanguage; publicIdentity: { displayName: string; handle?: string; mode: PresenceMode }; publicSelf: PublicSelf; brief: PresenceBrief; audienceContext?: string; voiceAdaptation?: string; availableAffordances: string[]; relevantRelationshipContext?: string; publicFooting?: PublicFooting; ghostProfile?: GhostProfile; publishingInitiative?: PublishingInitiative; }
 export type PresencePacing = "recommended" | "gentle" | "custom";
 export interface PresenceQuietHours { enabled: boolean; start: string; end: string; }
@@ -927,7 +956,8 @@ export interface Assignment {
   schedule?: { day: string; time: string; executionWindow: string };
   timeframe?: { startsAt?: string; deadline?: string };
   editorialContext?: { topics?: string[]; sources?: string[]; constraints?: string[] };
-  executionPolicy: { usePresenceEnvelope: boolean };
+  executionPolicy: { usePresenceEnvelope: boolean; delegationPolicy?: AssignmentDelegationPolicy };
+  preflight?: AssignmentPreflight;
   status: AssignmentStatus;
   revision?: number;
   progress: { required: number; verified: number };
@@ -956,6 +986,7 @@ export interface Assignment {
     at: string;
   }>;
   lastOutcome?: { class: AssignmentOutcomeClass; message: string; at: string };
+  completionReport?: string;
   lastEvaluatedAt?: string;
   nextDueAt?: string;
   createdAt: string;
@@ -1173,7 +1204,7 @@ export interface ExplorationFinding {
 }
 
 export interface LiveEvent { id: string; type: "decision" | "execution" | "learning" | "memory" | "system"; title: string; detail: string; time: string; tone: EventTone; presenceId?: string; intentId?: string; executionId?: string; outcomeId?: string; sessionId?: string; invocationId?: string; sourceObjectId?: string; }
-export interface CalendarSlot { id: string; label: string; instruction: string; day: string; time: string; objective: string; presence: string; mode: ExecutionMode; enabled: boolean; executionWindow: string; standingIntentId?: string; lastEvaluatedAt?: string; }
+export interface CalendarSlot { id: string; label: string; instruction: string; day: string; time: string; objective: string; presence: string; mode: ExecutionMode; enabled: boolean; executionWindow: string; standingIntentId?: string; assignmentId?: string; lastEvaluatedAt?: string; }
 export type PublicHistoryKind = "post" | "reply" | "quote" | "repost" | "thread" | "comment";
 export interface PublicHistoryItem {
   id: string;
@@ -1192,6 +1223,7 @@ export interface PublicHistoryItem {
   assetIds?: string[];
   environment?: PresenceEnvironment;
   externalUrl?: string;
+  availability?: "available" | "deleted";
   metrics: Record<string, number>;
 }
 export interface ActivitySummary {
@@ -1233,7 +1265,8 @@ export type KnowledgeOperation =
   | { type: "archiveKnowledgeCollection"; collectionId: string };
 export interface CreatePresenceInput { channel: ChannelId; name?: string; handle: string; mode: PresenceMode; accent: string; channelDefinition?: ChannelDefinition; connectionMode?: PresenceConnectionMode; }
 export type AssignmentOperation =
-  | { type: "createAssignment"; instruction: string; presenceId?: string; sessionId?: string; environment?: PresenceEnvironment; schedule?: { day: string; time: string; executionWindow: string } }
+  | { type: "createAssignment"; instruction: string; presenceId?: string; sessionId?: string; environment?: PresenceEnvironment; schedule?: { day: string; time: string; executionWindow: string }; delegationPolicy?: AssignmentDelegationPolicy }
+  | { type: "activateAssignment"; id: string; delegationPolicy?: AssignmentDelegationPolicy }
   | { type: "startAssignment"; id: string; sessionId: string }
   | { type: "workAssignment"; id: string; sessionId: string }
   | { type: "cancelAssignment"; id: string };

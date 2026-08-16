@@ -4,6 +4,40 @@ import { applyOperation, compileAssignmentInstruction, createAgent, normalizeSta
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
 describe("canonical Assignment domain", () => {
+  it("compiles one clear completion contract without exposing Consider vs Assign", () => {
+    const state = createAgent(input);
+    const assignment = compileAssignmentInstruction(state, "Publish one useful lesson about persistent agents Tuesday morning.", state.presence!.id, "sandbox", undefined, { day: "Tuesday", time: "08:00", executionWindow: "08:00–11:00" });
+    expect(assignment.deliverable.type).toBe("original_publication");
+    expect(assignment.preflight).toMatchObject({ status: "ready", contract: { successEvidence: expect.stringContaining("confirmed") } });
+  });
+
+  it("turns evaluation-only language into a report deliverable", () => {
+    const state = createAgent(input);
+    const assignment = compileAssignmentInstruction(state, "Evaluate whether we should respond to this controversy Friday morning.", state.presence!.id, "sandbox", undefined, { day: "Friday", time: "09:00", executionWindow: "09:00–12:00" });
+    expect(assignment.deliverable.type).toBe("decision_report");
+    expect(assignment.preflight?.semanticSummary).toContain("does not require a public response");
+  });
+
+  it("keeps materially unclear work in preflight instead of activating it", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "createAssignment", instruction: "Think about our pricing announcement Friday.", presenceId: state.presence!.id, environment: "sandbox" });
+    const assignment = state.assignments[0]!;
+    expect(assignment.preflight?.status).toBe("needs_input");
+    state = applyOperation(state, { type: "activateAssignment", id: assignment.id });
+    expect(state.assignments[0]?.status).toBe("draft");
+  });
+
+  it("rechecks live authority before activation", () => {
+    let state = createAgent(input);
+    state.presence!.execution.post = "off";
+    state.presences[0]!.execution.post = "off";
+    state = applyOperation(state, { type: "createAssignment", instruction: "Publish one useful lesson about persistent agents.", presenceId: state.presence!.id, environment: "live", schedule: { day: "Tuesday", time: "08:00", executionWindow: "08:00–11:00" } });
+    const assignment = state.assignments[0]!;
+    expect(assignment.preflight?.status).toBe("blocked");
+    state = applyOperation(state, { type: "activateAssignment", id: assignment.id });
+    expect(state.assignments[0]?.status).toBe("draft");
+  });
+
   it("keeps quantity language distinct and accepts legacy aliases", () => {
     const state = createAgent(input);
     expect(compileAssignmentInstruction(state, "up to 5 original posts per day").quantityPolicy).toMatchObject({ quantity: 5, mode: "at_most", period: "day" });

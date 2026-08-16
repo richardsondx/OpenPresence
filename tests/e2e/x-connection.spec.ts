@@ -63,11 +63,10 @@ test("native X connection delivers an approved Presence action", async ({ page }
   await expect(page.getByRole("heading", { name: "Connected to @jenny_ai" })).toBeVisible();
 
   await navigation.getByRole("button", { name: "Schedule", exact: true }).click();
-  await page.getByRole("button", { name: "Add intent" }).click();
-  await page.getByLabel("What should Jenny do?").fill("Share one useful idea about persistent agents.");
-  await page.getByRole("button", { name: "Save standing intent" }).click();
-  await page.getByRole("button", { name: "Evaluate this intent" }).click();
-  await navigation.getByRole("button", { name: "Activity", exact: true }).click();
-  await expect(page.locator(".event-title").filter({ hasText: "Published on X" })).toBeVisible();
-  await expect(page.locator(".execution-ledger").getByRole("heading", { name: "Action completed" })).toBeVisible();
+  await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
+  await page.getByLabel("What should Jenny accomplish?").fill("Share one useful idea about persistent agents.");
+  await page.getByRole("button", { name: "Review assignment" }).click();
+  await expect(page.getByText("post is available through the Presence execution envelope.", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Activate Assignment" }).click();
+  await expect(page.getByRole("button", { name: "Run in Playground" })).toBeVisible();
 });

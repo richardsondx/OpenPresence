@@ -112,6 +112,36 @@ describe("native X connection", () => {
     expect(readChannelSecret(body.state.nativeConnections[0].id)).toMatchObject({ apiKey: "test_api", apiSecret: "test_secret" });
   });
 
+  it("retains a deleted X post in verified public history after targeted reconciliation", async () => {
+    const presenceId = readState().presence!.id;
+    const save = await POST(new Request("http://localhost/api/x/manage", {
+      method: "POST",
+      body: JSON.stringify({ action: "save", presenceId, credentials: { apiKey: "test_api", apiSecret: "test_secret", accessToken: "test_access", accessTokenSecret: "test_access_secret" } }),
+      headers: { "content-type": "application/json" },
+    }));
+    const saved = await save.json();
+    const connectionId = saved.state.nativeConnections[0].id;
+    let seeded = readState();
+    seeded = recordNativeMirror(seeded, { connectionId, presenceId, own: true, post: { id: "deleted-post", text: "This was deleted on X.", createdAt: "2026-08-15T11:00:00.000Z", authorId: "mock-x-user", authorUsername: "jenny_ai", authorName: "Jenny" } });
+    seeded = recordPublicFooting(seeded, presenceId, { postsPublished: 1, recentPostIds: ["deleted-post"], recentInboundIds: [], observedAt: new Date().toISOString() });
+    writeState(seeded);
+
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "current-post", text: "Still public", created_at: "2026-08-16T11:00:00.000Z", author_id: "mock-x-user" }] }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "syncNativeX", presenceId }), headers: { "content-type": "application/json" } }));
+    const body = await response.json();
+    expect(response.status).toBe(200);
+    expect(body.mirrorObjects.find((item: { externalRef: { id: string } }) => item.externalRef.id === "deleted-post").archived).toBe(true);
+    expect(derivePublicHistory(body, presenceId)).toEqual(expect.arrayContaining([expect.objectContaining({ externalRef: expect.objectContaining({ id: "deleted-post" }), availability: "deleted", externalUrl: "https://x.com/jenny_ai/status/deleted-post" })]));
+    expect(body.mirrorEvents.some((item: { event: string; externalRef: { id: string } }) => item.event === "deleted" && item.externalRef.id === "deleted-post")).toBe(true);
+    expect(body.events[0].detail).toContain("reconciled 1 deleted post");
+    vi.unstubAllGlobals();
+  });
+
   it("stores provider secrets in the encrypted vault instead of app state", async () => {
     const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "configureProvider", provider: "openai", label: "OpenAI workspace", secret: "provider-secret-test", hasSecret: true }), headers: { "content-type": "application/json" } }));
     const body = await response.json();
