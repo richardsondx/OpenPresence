@@ -1,12 +1,12 @@
 # Active QA Work
 
-## IN_PROGRESS — Prevent native X replies to non-mention Mirror evidence
+## COMPLETE — Prevent native X replies to non-mention Mirror evidence
 
 - **Started:** 2026-08-16
 - **Scope:** Keep native X Pulse reply cognition restricted to provider-confirmed inbound mentions, prevent Exploration/search evidence from becoming reply targets, and make failed delivery activity retain its selected-intent lineage and warning state.
 - **Product boundary:** Social Mirror observation, Agent judgment, Execution, Delivery, and verified Outcome remain distinct. An observed public post is not an inbound mention or permission to reply; no public action is counted unless X accepts it.
-- **Verification:** Runtime telemetry will localize the observation → candidate selection → cognition → delivery path. Add focused native-X regression coverage for unrelated Search/Mirror evidence plus valid mention replies, then run typecheck, focused tests, browser Activity verification, and remove temporary telemetry.
-- **Status:** IN_PROGRESS
+- **Verification:** Temporary runtime telemetry localized the mixed-Mirror candidate leak: unrelated Search evidence had `recentInboundCount: 0` and `eligibleCount: 0`, while a provider-confirmed mention formed a focal `x.reply`. Full Vitest passes 290/290; focused native-X coverage passes 26/26; the Activity legacy-event Chromium regression passes 1/1; focused Activity smoke passes 1/1; focused lint/typecheck passed before unrelated concurrent `knowledge*` changes made the workspace-wide gates red. Temporary telemetry was removed. Full lint/build remain blocked by pre-existing concurrent worktree issues: the Activity countdown `setState` lint error and missing knowledge fields in `initialState`.
+- **Status:** Complete for native X reply eligibility and Activity trace truthfulness.
 
 ## IN_PROGRESS — Align Exploration finding actions
 

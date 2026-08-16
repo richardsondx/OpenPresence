@@ -1,4 +1,4 @@
-export type View = "teach" | "chat" | "watching" | "people" | "playground" | "live" | "feed" | "calendar" | "schedule" | "brain" | "presence";
+export type View = "teach" | "knowledge" | "chat" | "watching" | "people" | "playground" | "live" | "feed" | "calendar" | "schedule" | "brain" | "presence";
 export type BuiltInChannelId = "x" | "linkedin" | "substack";
 export type ChannelId = string;
 export type ConnectorKind = "simulated" | "native" | "bridge" | "manual";
@@ -550,6 +550,129 @@ export function isAgentCapabilityEnabled(toolBindings: AgentToolBinding[], agent
   return Boolean(definition?.scope === "agent" && definition.toolIds.every((toolId) => isAgentToolEnabled(toolBindings, agentId, toolId)));
 }
 
+export type KnowledgeRole = "reference" | "procedure";
+export type KnowledgeUse = "none" | "internal" | "public";
+export type KnowledgeSourceType = "upload" | "pasted_text" | "markdown";
+
+export interface KnowledgeCollection {
+  id: string;
+  agentId: string;
+  name: string;
+  description?: string;
+  defaultRole: KnowledgeRole;
+  defaultUse: KnowledgeUse;
+  status: "active" | "archived";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeItem {
+  id: string;
+  collectionId: string;
+  title: string;
+  sourceType: KnowledgeSourceType;
+  role: KnowledgeRole;
+  useOverride?: KnowledgeUse;
+  effectiveFrom?: string;
+  reviewAfter?: string;
+  status: "active" | "archived";
+  currentVersionId?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface KnowledgeVersion {
+  id: string;
+  itemId: string;
+  versionNumber: number;
+  supersedesVersionId?: string;
+  originalAssetId?: string;
+  contentHash: string;
+  mimeType: string;
+  normalizedContent: string;
+  parseStatus: "pending" | "ready" | "failed";
+  parseError?: string;
+  effectiveAt?: string;
+  createdAt: string;
+}
+
+export interface KnowledgeSegment {
+  id: string;
+  knowledgeVersionId: string;
+  ordinal: number;
+  headingPath?: string[];
+  pageNumber?: number;
+  text: string;
+  textRange?: { start: number; end: number };
+  contentHash: string;
+  tokenCount: number;
+  indexStatus: "pending" | "ready" | "failed";
+}
+
+export interface PresenceKnowledgeBinding {
+  id: string;
+  agentId: string;
+  presenceId: string;
+  collectionId: string;
+  maximumUse: KnowledgeUse;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type KnowledgeRetrievalPurpose = "operator_chat" | "social_planning" | "public_expression" | "assignment" | "support" | string;
+export interface KnowledgeRetrievalRun {
+  id: string;
+  agentId: string;
+  presenceId: string;
+  invocationId: string;
+  purpose: KnowledgeRetrievalPurpose;
+  query: string;
+  accessibleCollectionIds: string[];
+  candidateSegmentIds: string[];
+  selectedSegmentIds: string[];
+  createdAt: string;
+}
+
+export type KnowledgeCitationUsage = "retrieved" | "relied_on" | "quoted" | "constraint";
+export interface KnowledgeCitation {
+  id: string;
+  retrievalRunId: string;
+  knowledgeItemId: string;
+  knowledgeVersionId: string;
+  knowledgeSegmentId: string;
+  usage: KnowledgeCitationUsage;
+  outputArtifactType?: string;
+  outputArtifactId?: string;
+  createdAt: string;
+}
+
+export interface KnowledgeEvidence {
+  collectionId: string;
+  collectionName: string;
+  itemId: string;
+  itemTitle: string;
+  versionId: string;
+  versionNumber: number;
+  segmentId: string;
+  headingPath?: string[];
+  pageNumber?: number;
+  textRange?: { start: number; end: number };
+  excerpt: string;
+  effectiveUse: Exclude<KnowledgeUse, "none">;
+  sourceType: KnowledgeSourceType;
+  reviewAfter?: string;
+}
+
+export interface KnowledgeContextPacket {
+  retrievalRunId: string;
+  publicEvidence: KnowledgeEvidence[];
+  restrictedEvidence: KnowledgeEvidence[];
+  unresolvedConflicts?: string[];
+  missingEvidence?: string[];
+  staleWarnings?: string[];
+}
+
 export interface ExecutionEnvelope { presenceId: string; affordances: Record<string, { mode: ExecutionMode }>; pacingProfile: "recommended" | "custom"; customPacing?: Record<string, JsonValue>; accountProtection: "guidance" | "auto-protect"; }
 export type PublishingInitiativeMode = "off" | "adaptive" | "pace";
 export type PublishingInitiativePeriod = "day" | "week";
@@ -1088,7 +1211,7 @@ export interface AgentWorkspaceSnapshot {
   onboarded: boolean; agent: Agent | null; presence: Presence | null; presences: Presence[]; activePresenceId: string | null;
   files: AgentFile[]; proposals: FileProposal[]; messages: ChatMessage[]; conversations: Conversation[]; activeConversationId: string | null; presenceChatSessions: PresenceChatSession[];
   events: LiveEvent[]; calendar: CalendarSlot[]; assignments: Assignment[]; watches: Watch[]; explorations: ExplorationBrief[]; discoveryPlans: DiscoveryPlan[]; explorationSessions: ExplorationSession[]; explorationFindings: ExplorationFinding[]; actions: ActionRecord[]; publishingPlans: PublishingPlan[]; metrics: { qualifiedFollows: number; conversations: number; opportunitiesIgnored: number; audienceHealth: number };
-  modelProfiles: AgentModelProfile[]; providerConnections: ProviderConnection[]; assetProviderConnections: AssetProviderConnection[]; toolBindings: AgentToolBinding[]; changeSets: ChangeSet[]; standingIntents: StandingIntent[]; operatorDirectives: OperatorDirective[]; socialIntents: SocialIntent[]; executions: Execution[]; outcomes: Outcome[]; publications: Publication[]; assetUsages: AssetUsage[]; sourceEvidence: SourceEvidence[]; claimGrounding: ClaimGrounding[]; preferenceEvidence: PreferenceEvidence[]; originalPostRehearsals: OriginalPostRehearsalAttempt[]; librarySources: LibrarySource[]; assets: Asset[]; perceptions: AssetPerception[]; assetResearchSessions: AssetResearchSession[]; skills: Skill[]; agentSkills: AgentSkill[]; contentDrops: ContentDrop[]; channelDefinitions: ChannelDefinition[]; nativeConnections: NativeChannelConnection[]; bridges: Bridge[]; mirrorObjects: MirrorObject[]; mirrorEvents: MirrorEvent[]; bridgeSync: BridgeSyncState[]; conversationEpisodes: ConversationEpisode[]; assignmentContributions: AssignmentContribution[]; people: Person[]; personIdentities: PersonIdentity[]; relationships: Relationship[]; relationshipFacts: RelationshipFact[]; relationshipOpenLoops: RelationshipOpenLoop[]; recommendationRecords: RecommendationRecord[]; introductionRecords: IntroductionRecord[]; sandboxEnvironments: SandboxEnvironment[]; playgroundSessions: PlaygroundSession[]; sandboxActors: SandboxActor[]; networkSearches: SandboxNetworkSearch[]; networkIntroductions: SandboxNetworkIntroduction[]; scenarios: Scenario[]; scenarioVersions: ScenarioVersion[]; scenarioRuns: ScenarioRun[]; scenarioRunProvenance: ScenarioRunProvenance[]; scenarioEvaluations: ScenarioRunEvaluation[];
+  modelProfiles: AgentModelProfile[]; providerConnections: ProviderConnection[]; assetProviderConnections: AssetProviderConnection[]; toolBindings: AgentToolBinding[]; changeSets: ChangeSet[]; standingIntents: StandingIntent[]; operatorDirectives: OperatorDirective[]; socialIntents: SocialIntent[]; executions: Execution[]; outcomes: Outcome[]; publications: Publication[]; assetUsages: AssetUsage[]; sourceEvidence: SourceEvidence[]; claimGrounding: ClaimGrounding[]; preferenceEvidence: PreferenceEvidence[]; originalPostRehearsals: OriginalPostRehearsalAttempt[]; librarySources: LibrarySource[]; assets: Asset[]; perceptions: AssetPerception[]; assetResearchSessions: AssetResearchSession[]; skills: Skill[]; agentSkills: AgentSkill[]; contentDrops: ContentDrop[]; channelDefinitions: ChannelDefinition[]; nativeConnections: NativeChannelConnection[]; bridges: Bridge[]; mirrorObjects: MirrorObject[]; mirrorEvents: MirrorEvent[]; bridgeSync: BridgeSyncState[]; conversationEpisodes: ConversationEpisode[]; assignmentContributions: AssignmentContribution[]; people: Person[]; personIdentities: PersonIdentity[]; relationships: Relationship[]; relationshipFacts: RelationshipFact[]; relationshipOpenLoops: RelationshipOpenLoop[]; recommendationRecords: RecommendationRecord[]; introductionRecords: IntroductionRecord[]; sandboxEnvironments: SandboxEnvironment[]; playgroundSessions: PlaygroundSession[]; sandboxActors: SandboxActor[]; networkSearches: SandboxNetworkSearch[]; networkIntroductions: SandboxNetworkIntroduction[]; scenarios: Scenario[]; scenarioVersions: ScenarioVersion[]; scenarioRuns: ScenarioRun[]; scenarioRunProvenance: ScenarioRunProvenance[]; scenarioEvaluations: ScenarioRunEvaluation[]; knowledgeCollections: KnowledgeCollection[]; knowledgeItems: KnowledgeItem[]; knowledgeVersions: KnowledgeVersion[]; knowledgeSegments: KnowledgeSegment[]; presenceKnowledgeBindings: PresenceKnowledgeBinding[]; knowledgeRetrievalRuns: KnowledgeRetrievalRun[]; knowledgeCitations: KnowledgeCitation[];
   workspaceRevision?: number;
 }
 
@@ -1100,6 +1223,13 @@ export interface CreateAgentInput { name: string; description: string; audience?
 export type ToolBindingOperation = { type: "setToolBinding"; toolId: string; provider?: ModelProvider; model?: string; connectionId?: string };
 export type CapabilityOperation = { type: "setCapability"; capabilityId: AgentCapabilityId; enabled: boolean };
 export type RuntimeOperation = Operation | ToolBindingOperation | CapabilityOperation;
+export type KnowledgeOperation =
+  | { type: "createKnowledgeCollection"; name: string; description?: string; defaultRole: KnowledgeRole; defaultUse: KnowledgeUse }
+  | { type: "addKnowledgeItem"; collectionId: string; title: string; role?: KnowledgeRole; useOverride?: KnowledgeUse; sourceType: KnowledgeSourceType; content: string; mimeType?: string; originalDataUrl?: string; originalFileName?: string; originalAssetId?: string }
+  | { type: "uploadKnowledgeVersion"; itemId: string; content: string; mimeType?: string; originalDataUrl?: string; originalFileName?: string; originalAssetId?: string }
+  | { type: "setKnowledgeBinding"; presenceId: string; collectionId: string; maximumUse: KnowledgeUse; enabled?: boolean }
+  | { type: "archiveKnowledgeItem"; itemId: string }
+  | { type: "archiveKnowledgeCollection"; collectionId: string };
 export interface CreatePresenceInput { channel: ChannelId; name?: string; handle: string; mode: PresenceMode; accent: string; channelDefinition?: ChannelDefinition; connectionMode?: PresenceConnectionMode; }
 export type AssignmentOperation =
   | { type: "createAssignment"; instruction: string; presenceId?: string; sessionId?: string; environment?: PresenceEnvironment; schedule?: { day: string; time: string; executionWindow: string } }
@@ -1133,6 +1263,7 @@ export type ExplorationOperation =
   | { type: "lookNow"; id: string }
   | { type: "runAttentionWorker" };
 export type Operation = AssignmentOperation | LanguagePolicyOperation | ScenarioOperation | PublishingPlanOperation | ExplorationOperation
+  | KnowledgeOperation
   | { type: "removeSandboxObject"; sessionId: string; objectId: string }
   | { type: "askPresenceToReply"; presenceId: string; objectId: string; sessionId?: string; optionalDirection?: string }
   | { type: "askPresenceToIgnore"; presenceId: string; objectId: string; sessionId?: string }

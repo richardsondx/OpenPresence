@@ -162,6 +162,24 @@ The Publishing Plan also rejects any public-history item with a parent reference
 
 **Added:** 2026-08-15
 
+## Rule: Search evidence must not become a native reply target
+
+**Defect class:** Live observer/reply eligibility confusion
+
+**General principle:** A public object discovered through search or another observation path is not an inbound mention and does not grant permission to reply. Provider-confirmed inbound scope must be preserved through cognition and delivery.
+
+**Incident:** Native Pulse selected an unrelated public post from the Social Mirror, formed a reply, and sent it to X. X rejected the action because the Presence was neither mentioned nor the author.
+
+**Why QA missed it:** The existing native reply test covered a valid mention and the candidate selector treated every external Mirror post as inbound, so it did not exercise mixed Search/Mirror evidence alongside provider-confirmed mentions.
+
+**Project enforcement:** `unjudgedNativeInbound` in `app/api/state/route.ts` may select only external X posts whose IDs are in the Presence's `context.publicFooting.recentInboundIds`; `runNativePulse` keeps the selected Social Intent and Execution linked to the `Pulse completed` event. Search/Exploration imports remain observation evidence and cannot enter native reply cognition.
+
+**Executable protection:** `tests/x-connection.test.ts` covers an unrelated Social Mirror search object with zero eligible inbound candidates and zero executions, while the adjacent mention regression covers valid focal reply targeting.
+
+**Apply when:** Changing X reconciliation, Exploration/search imports, Social Mirror candidate selection, native Pulse cognition, reply eligibility, or Activity lineage.
+
+**Added:** 2026-08-16
+
 ## Rule: Social cognition must never receive an opaque parent ID instead of public context
 
 **Defect class:** Connector/Social Mirror context loss / Live-Sandbox cognition divergence
