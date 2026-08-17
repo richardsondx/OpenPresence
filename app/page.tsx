@@ -4681,6 +4681,7 @@ function LiveView({
   const [selectedContext, setSelectedContext] = useState<MirrorObject | null>(null);
   const [selectedDecisionId, setSelectedDecisionId] = useState<string | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [activityFocus, setActivityFocus] = useState<"selected" | "preparing" | null>(null);
   const [activityPage, setActivityPage] = useState(1);
   const [countdownNow, setCountdownNow] = useState<number>(() => Date.now());
   const presenceCopy = (text: string) => text.replaceAll("Jenny", presenceName).replaceAll(state.agent?.name ?? "Jenny", presenceName);
@@ -4745,12 +4746,6 @@ function LiveView({
         Math.abs(previousTime - itemTime) <= 10_000;
     });
   });
-  const activityPageCount = Math.max(1, Math.ceil(activityEvents.length / ACTIVITY_PAGE_SIZE));
-  const visibleActivityPage = Math.min(activityPage, activityPageCount);
-  const paginatedActivityEvents = activityEvents.slice(
-    (visibleActivityPage - 1) * ACTIVITY_PAGE_SIZE,
-    visibleActivityPage * ACTIVITY_PAGE_SIZE,
-  );
   const objectForReference = (reference?: { type: string; id: string }, sessionId?: string) =>
     reference
       ? state.mirrorObjects.find(
@@ -4890,6 +4885,48 @@ function LiveView({
     .filter((item) => !selected?.id || (item.presenceId === selected.id && (activityEnvironment === "sandbox" ? item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && activitySessionIds.has(item.sessionId))) : item.environment !== "sandbox" && !item.sessionId)))
     .filter((item) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing"].includes(item.status))
     .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime());
+  const activityActionRecords = inFlightExecutions.map((execution) => {
+    const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
+    const decision = state.socialDecisions.find((item) => item.socialIntentId === execution.socialIntentId);
+    const context = objectForReference(execution.target, execution.sessionId);
+    const relatedEvent = activityEvents.find((event) =>
+      event.executionId === execution.id ||
+      event.intentId === execution.socialIntentId ||
+      event.decisionId === decision?.id ||
+      event.sourceObjectId === context?.id,
+    );
+    const action = formatActivityAffordance(execution.affordance ?? intent?.affordance);
+    const target = context?.author?.handle ?? context?.author?.displayName ?? (execution.target ? "the selected post" : "the selected context");
+    const targetDisplay = context?.author?.handle && !context.author.handle.startsWith("@") ? `@${context.author.handle}` : target;
+    return {
+      execution,
+      intent,
+      decision,
+      context,
+      relatedEvent,
+      action,
+      targetDisplay,
+      snippet: context?.content?.text?.trim(),
+    };
+  });
+  const selectedActionRecords = activityActionRecords.filter((record) => Boolean(record.decision || record.intent));
+  const preparingActionRecords = activityActionRecords;
+  const focusedActionRecords = activityFocus === "selected" ? selectedActionRecords : preparingActionRecords;
+  const focusedEventIds = new Set(focusedActionRecords.map((record) => record.relatedEvent?.id).filter(Boolean));
+  const displayedActivityEvents = activityFocus
+    ? activityEvents.filter((event) => focusedEventIds.has(event.id))
+    : activityEvents;
+  const activityPageCount = Math.max(1, Math.ceil(displayedActivityEvents.length / ACTIVITY_PAGE_SIZE));
+  const visibleActivityPage = Math.min(activityPage, activityPageCount);
+  const paginatedActivityEvents = displayedActivityEvents.slice(
+    (visibleActivityPage - 1) * ACTIVITY_PAGE_SIZE,
+    visibleActivityPage * ACTIVITY_PAGE_SIZE,
+  );
+  const openActivityFocus = (focus: "selected" | "preparing") => {
+    setActivityFocus(focus);
+    setActivityPage(1);
+    window.requestAnimationFrame(() => document.getElementById("recent-activity")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
   const relevantIntent = relevantExecution ? state.socialIntents.find((item) => item.id === relevantExecution.socialIntentId) : undefined;
   const actionContext = relevantIntent?.target
     ? state.mirrorObjects.find((item) => isScopedMirror(item) && item.externalRef.id === relevantIntent.target?.id)
@@ -4926,7 +4963,7 @@ function LiveView({
         : latestPulse?.detail
           ? presenceCopy(latestPulse.detail)
         : presenceCopy(activity.current.detail);
-  const judgedCount = relevantExecution ? Math.max(1, inFlightExecutions.length) : latestPulse?.detail && /no public action|kept .* dormant|silence/i.test(latestPulse.detail) ? 0 : undefined;
+  const judgedCount = selectedActionRecords.length || (latestPulse?.detail && /no public action|kept .* dormant|silence/i.test(latestPulse.detail) ? 0 : undefined);
   const actLabel = inFlightExecutions.length
     ? `${inFlightExecutions.length} preparing`
     : currentFailedExecution
@@ -5034,9 +5071,9 @@ function LiveView({
         <div className="activity-pipeline" aria-label="Autonomy pipeline">
           <button type="button" onClick={() => document.getElementById("observed-context")?.scrollIntoView({ behavior: "smooth", block: "start" })}><small>1 · OBSERVE</small><strong>{observedPostCount !== undefined ? `${observedPostCount} posts` : "Context"}</strong><span>{observedMentionCount !== undefined ? `${observedMentionCount} mentions` : "Latest channel read"}</span></button>
           <span className="activity-pipeline-arrow" aria-hidden="true">→</span>
-          <button type="button" onClick={() => document.getElementById("recent-activity")?.scrollIntoView({ behavior: "smooth", block: "start" })}><small>2 · JUDGE</small><strong>{judgedCount === undefined ? "Reviewing" : `${judgedCount} selected`}</strong><span>{judgedCount === 0 ? "No public action" : "Decision state"}</span></button>
+          <button type="button" className={activityFocus === "selected" ? "activity-pipeline-focus" : undefined} aria-pressed={activityFocus === "selected"} onClick={() => openActivityFocus("selected")}><small>2 · JUDGE</small><strong>{judgedCount === undefined ? "Reviewing" : `${judgedCount} selected`}</strong><span>{judgedCount === 0 ? "No public action" : "See selected decisions"}</span></button>
           <span className="activity-pipeline-arrow" aria-hidden="true">→</span>
-          <button type="button" onClick={() => document.getElementById("decision-and-action")?.scrollIntoView({ behavior: "smooth", block: "start" })}><small>3 · ACT</small><strong>{actLabel}</strong><span>{inFlightExecutions.length > 1 ? `${inFlightExecutions.length} actions can run from this check` : "Execution envelope"}</span></button>
+          <button type="button" className={activityFocus === "preparing" ? "activity-pipeline-focus" : undefined} aria-pressed={activityFocus === "preparing"} onClick={() => openActivityFocus("preparing")}><small>3 · ACT</small><strong>{actLabel}</strong><span>{inFlightExecutions.length > 1 ? "See the actions being prepared" : "See execution state"}</span></button>
           <span className="activity-pipeline-arrow" aria-hidden="true">→</span>
           <button type="button" onClick={() => document.getElementById("decision-and-action")?.scrollIntoView({ behavior: "smooth", block: "start" })}><small>4 · VERIFY</small><strong>{verifyLabel}</strong><span>Only confirmed results count</span></button>
         </div>
@@ -5071,14 +5108,49 @@ function LiveView({
             <div className="section-heading">
               <div>
                 <SectionEyebrow>Recent activity</SectionEyebrow>
-                <h2>What {presenceName} decided</h2>
+                <h2>{activityFocus ? (activityFocus === "selected" ? "Selected decisions" : "Actions being prepared") : `What ${presenceName} decided`}</h2>
               </div>
-              <span className="quiet-label">{paused ? "Presence asleep" : `${activityEvents.length} recorded event${activityEvents.length === 1 ? "" : "s"}`}</span>
+              <span className="quiet-label">{paused ? "Presence asleep" : activityFocus ? `${focusedActionRecords.length} linked action${focusedActionRecords.length === 1 ? "" : "s"}` : `${activityEvents.length} recorded event${activityEvents.length === 1 ? "" : "s"}`}</span>
             </div>
-            {activityEvents.length === 0 ? (
+            {activityFocus && (
+              <section className={`activity-focus-panel activity-focus-${activityFocus}`} aria-live="polite" aria-label={activityFocus === "selected" ? "Selected decisions from the latest check" : "Actions being prepared from the latest check"}>
+                <div className="activity-focus-heading">
+                  <div>
+                    <span className="activity-focus-kicker">{activityFocus === "selected" ? "JUDGE · SELECTED" : "ACT · PREPARING"}</span>
+                    <strong>{focusedActionRecords.length} {activityFocus === "selected" ? "decision" : "action"}{focusedActionRecords.length === 1 ? "" : "s"} from this check</strong>
+                    <p>{activityFocus === "selected" ? "These are the actions Genny selected after reviewing the observed context." : "These are the selected actions currently moving through the delivery envelope. Preparing does not mean delivered."}</p>
+                  </div>
+                  <button type="button" className="activity-focus-clear" onClick={() => { setActivityFocus(null); setActivityPage(1); }}>Show all activity</button>
+                </div>
+                {focusedActionRecords.length > 0 ? (
+                  <div className="activity-focus-list">
+                    {focusedActionRecords.map((record) => (
+                      <article className="activity-focus-card" key={record.execution.id}>
+                        <span className="activity-focus-marker" aria-hidden="true" />
+                        <div className="activity-focus-card-copy">
+                          <div className="activity-focus-card-meta">
+                            <span className="activity-state-chip">{activityFocus === "selected" ? "Selected" : "Preparing"}</span>
+                            <span>{record.action}</span>
+                            <span>{activityFocus === "selected" ? executionStatusLabel(record.execution.status) : executionStatusLabel(record.execution.status)}</span>
+                          </div>
+                          <h3>{record.action} {record.targetDisplay}</h3>
+                          {record.snippet && <p>“{record.snippet.slice(0, 180)}{record.snippet.length > 180 ? "…" : ""}”</p>}
+                          <small>{record.decision?.summary ?? "The selected intent is linked to this delivery."}</small>
+                        </div>
+                        {record.context && <button type="button" className="activity-focus-context" onClick={() => setSelectedContext(record.context!)}>View source</button>}
+                      </article>
+                    ))}
+                  </div>
+                ) : (
+                  <div className="activity-focus-empty">No public action was selected in the latest check.</div>
+                )}
+              </section>
+            )}
+            {activityFocus && displayedActivityEvents.length > 0 && <div className="activity-related-heading"><span>Linked activity</span><small>Only events tied to the selected actions are shown.</small></div>}
+            {displayedActivityEvents.length === 0 ? (
               <EmptyState
-                title="No Presence decisions yet"
-                body={paused ? `${presenceName} is asleep. Wake this Presence to begin a first attention cycle.` : "Activity will show what this Presence observed, chose, and delivered. Settings changes stay in Settings."}
+                title={activityFocus ? "No linked activity event yet" : "No Presence decisions yet"}
+                body={paused ? `${presenceName} is asleep. Wake this Presence to begin a first attention cycle.` : activityFocus ? "The action record above is the source of truth; its event will appear here when the runtime records the next decision or delivery update." : "Activity will show what this Presence observed, chose, and delivered. Settings changes stay in Settings."}
                 action={
                   <Button
                     onClick={() => mutate(paused ? { type: "wakePresence", presenceId: selected?.id } : { type: "runPulse", presenceId: selected?.id })}
@@ -5093,7 +5165,7 @@ function LiveView({
             ) : (
               <>
               <div className="event-list">
-                {paginatedActivityEvents.map((item) => (
+                  {paginatedActivityEvents.map((item) => (
                   <div className="event-row-shell" key={item.id}>
                     <button className="event-row event-row-button" type="button" data-event-id={item.id} onClick={() => setSelectedEventId((current) => current === item.id ? null : item.id)} aria-expanded={selectedEventId === item.id} aria-label={`View details for ${presenceCopy(item.title)}`}>
                       <div className={`event-icon tone-${activityEventTone(item)}`}>
@@ -5137,7 +5209,7 @@ function LiveView({
               </div>
               <nav className="activity-pagination" aria-label="Activity pages">
                 <span className="activity-pagination-count">
-                  Showing {(visibleActivityPage - 1) * ACTIVITY_PAGE_SIZE + 1}–{Math.min(visibleActivityPage * ACTIVITY_PAGE_SIZE, activityEvents.length)} of {activityEvents.length}
+                  Showing {(visibleActivityPage - 1) * ACTIVITY_PAGE_SIZE + 1}–{Math.min(visibleActivityPage * ACTIVITY_PAGE_SIZE, displayedActivityEvents.length)} of {displayedActivityEvents.length}
                 </span>
                 <div className="activity-pagination-controls">
                   <button type="button" className="activity-pagination-button" onClick={() => setActivityPage((current) => Math.max(1, current - 1))} disabled={visibleActivityPage <= 1}>

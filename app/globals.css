@@ -1338,6 +1338,7 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .activity-pipeline { display: grid; grid-template-columns: minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr) auto minmax(0, 1fr); gap: 8px; align-items: stretch; margin-top: 14px; }
 .activity-pipeline button { display: grid; gap: 5px; min-width: 0; padding: 11px 12px; border: 1px solid #eadfd5; border-radius: 8px; background: #fff; color: inherit; text-align: left; cursor: pointer; }
 .activity-pipeline button:hover { border-color: #d9bda8; background: #fffaf5; }
+.activity-pipeline button.activity-pipeline-focus { border-color: #c7845d; background: #fff5ed; box-shadow: 0 0 0 2px rgba(216,139,87,.12); }
 .activity-pipeline small { color: var(--faint); font: 8px "DM Mono", monospace; letter-spacing: .05em; }
 .activity-pipeline strong { font-size: 14px; letter-spacing: -.03em; }
 .activity-pipeline span:not(.activity-pipeline-arrow) { overflow: hidden; color: var(--muted); font-size: 9px; text-overflow: ellipsis; white-space: nowrap; }
@@ -1458,6 +1459,31 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .activity-log { max-width: 920px; margin-top: 59px; }
 .activity-log .section-heading { align-items: center; margin-bottom: 13px; }
 .activity-log .section-heading h2 { font-size: 24px; }
+.activity-focus-panel { margin: 0 0 15px; padding: 15px; border: 1px solid #e4c7b2; border-left: 3px solid #d88b57; border-radius: 9px; background: linear-gradient(135deg, #fff8f2, #fffdfb); }
+.activity-focus-preparing { border-color: #c9d8ee; border-left-color: #6687c8; background: linear-gradient(135deg, #f5f8ff, #fffdfb); }
+.activity-focus-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 14px; }
+.activity-focus-heading > div { display: grid; gap: 5px; min-width: 0; }
+.activity-focus-kicker { color: #9a6240; font: 9px "DM Mono", monospace; letter-spacing: .07em; }
+.activity-focus-preparing .activity-focus-kicker { color: #5e76ac; }
+.activity-focus-heading strong { font-size: 15px; letter-spacing: -.035em; }
+.activity-focus-heading p { max-width: 620px; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.activity-focus-clear, .activity-focus-context { flex: 0 0 auto; padding: 5px 7px; border: 1px solid #e1c9b7; border-radius: 5px; background: rgba(255,255,255,.75); color: #8c5535; font: 9px "DM Mono", monospace; cursor: pointer; }
+.activity-focus-clear:hover, .activity-focus-context:hover { border-color: #c7845d; background: white; color: var(--ink); }
+.activity-focus-list { display: grid; gap: 8px; margin-top: 13px; }
+.activity-focus-card { display: grid; grid-template-columns: 4px minmax(0, 1fr) auto; gap: 10px; align-items: start; padding: 10px; border: 1px solid #eadfd5; border-radius: 7px; background: rgba(255,255,255,.82); }
+.activity-focus-preparing .activity-focus-card { border-color: #dbe3f1; }
+.activity-focus-marker { width: 4px; min-height: 58px; border-radius: 999px; background: #d88b57; }
+.activity-focus-preparing .activity-focus-marker { background: #6687c8; }
+.activity-focus-card-copy { min-width: 0; }
+.activity-focus-card-meta { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; color: var(--faint); font: 9px "DM Mono", monospace; text-transform: uppercase; }
+.activity-state-chip { padding: 3px 6px; border: 1px solid #e3b28f; border-radius: 999px; background: #fff4ea; color: #8c5535; }
+.activity-focus-preparing .activity-state-chip { border-color: #b9cbea; background: #f1f5ff; color: #5e76ac; }
+.activity-focus-card h3 { margin: 6px 0 4px; overflow: hidden; font-size: 12px; letter-spacing: -.025em; text-overflow: ellipsis; white-space: nowrap; }
+.activity-focus-card p { overflow: hidden; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.activity-focus-card small { display: block; margin-top: 6px; overflow: hidden; color: var(--faint); font-size: 9px; line-height: 1.4; text-overflow: ellipsis; white-space: nowrap; }
+.activity-focus-empty { margin-top: 12px; padding: 10px; border: 1px dashed #e1c9b7; border-radius: 6px; color: var(--muted); font-size: 10px; }
+.activity-related-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; margin: 17px 0 9px; color: var(--ink); font: 10px "DM Mono", monospace; text-transform: uppercase; letter-spacing: .05em; }
+.activity-related-heading small { color: var(--faint); font: 9px inherit; text-transform: none; letter-spacing: 0; }
 .activity-log .event-list { border-top: 1px solid var(--line); }
 .activity-pagination { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 0 0; color: var(--muted); font: 9px "DM Mono", monospace; }
 .activity-pagination-count { color: var(--faint); }
@@ -1599,6 +1625,11 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
   .activity-log { margin-top: 43px; }
   .activity-log .section-heading { align-items: flex-start; flex-direction: column; gap: 9px; }
   .activity-log .empty-state { padding: 28px 16px 32px; }
+  .activity-focus-heading { flex-direction: column; }
+  .activity-focus-clear { align-self: flex-start; }
+  .activity-focus-card { grid-template-columns: 4px minmax(0, 1fr); }
+  .activity-focus-context { grid-column: 2; justify-self: start; }
+  .activity-related-heading { align-items: flex-start; flex-direction: column; gap: 4px; }
   .activity-pagination { align-items: flex-start; flex-direction: column; }
   .activity-pagination-controls { width: 100%; justify-content: space-between; }
   .event-context-preview { grid-template-columns: minmax(0, 1fr) auto; gap: 5px 8px; }
