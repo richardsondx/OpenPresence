@@ -784,7 +784,7 @@ test("Presence publishing pace separates responsibility from attention and persi
   await createAgent(page);
   await navigate(page, "Settings");
   const pace = page.locator(".publishing-initiative-card");
-  await expect(pace.getByRole("heading", { name: "How often should Jenny aim to publish original posts?" })).toBeVisible();
+  await expect(pace.getByRole("heading", { name: "How actively should Jenny publish?" })).toBeVisible();
   await expect(pace.getByRole("button", { name: /Let Jenny decide.*Recommended/ })).toHaveClass(/selected/);
   await pace.getByRole("button", { name: "Set a pace" }).click();
   await pace.getByLabel("Publishing pace count").fill("7");
@@ -801,6 +801,42 @@ test("Presence publishing pace separates responsibility from attention and persi
   await expect(publishingProgress).toBeVisible();
   await expect(publishingProgress.getByText("0 of ~7", { exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "Agent publishing plan" })).toHaveCount(0);
+});
+
+test("Presence publishing responsibility options change the canonical responsibility", async ({ page, request }) => {
+  await createAgent(page);
+  await navigate(page, "Settings");
+  const initiative = page.locator(".publishing-initiative-card");
+  const readState = async () => (await request.get("/api/state")).json();
+
+  await expect(initiative.getByRole("button", { name: /Let Jenny decide.*Recommended/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(initiative.getByLabel("Publishing pace count")).toHaveCount(0);
+
+  await initiative.getByRole("button", { name: "Set a pace" }).click();
+  await initiative.getByLabel("Publishing pace count").fill("7");
+  await initiative.getByLabel("Publishing pace period").selectOption("week");
+  await initiative.getByRole("button", { name: "Save pace" }).click();
+  await expect.poll(async () => (await readState()).presence.publishingInitiative).toMatchObject({ mode: "pace", target: { count: 7, period: "week" } });
+  let state = await readState();
+  expect(state.assignments.find((item: { origin?: string }) => item.origin === "publishing_initiative")).toMatchObject({ status: "active", quantityPolicy: { quantity: 7, period: "week" } });
+
+  await initiative.getByRole("button", { name: /Let Jenny decide.*Recommended/ }).click();
+  await expect(initiative.getByRole("button", { name: /Let Jenny decide.*Recommended/ })).toHaveAttribute("aria-pressed", "true");
+  await expect(initiative.getByLabel("Publishing pace count")).toHaveCount(0);
+  await expect.poll(async () => (await readState()).presence.publishingInitiative.mode).toBe("adaptive");
+  state = await readState();
+  expect(state.assignments.find((item: { origin?: string }) => item.origin === "publishing_initiative")).toMatchObject({ status: "active", deliverable: { type: "maintain_original_presence" }, quantityPolicy: { quantity: "agent_planned" } });
+
+  await initiative.getByRole("button", { name: "No publishing responsibility" }).click();
+  await expect(initiative.getByRole("button", { name: "No publishing responsibility" })).toHaveAttribute("aria-pressed", "true");
+  await expect.poll(async () => (await readState()).presence.publishingInitiative.mode).toBe("off");
+  state = await readState();
+  expect(state.presence.publishingInitiative.assignmentId).toBeUndefined();
+  expect(state.assignments.find((item: { origin?: string }) => item.origin === "publishing_initiative")).toMatchObject({ status: "paused" });
+
+  await page.reload();
+  await navigate(page, "Settings");
+  await expect(page.locator(".publishing-initiative-card").getByRole("button", { name: "No publishing responsibility" })).toHaveAttribute("aria-pressed", "true");
 });
 
 test("Presence Public Self saves its disclosure boundary", async ({ page }) => {
