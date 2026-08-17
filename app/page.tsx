@@ -71,6 +71,7 @@ import type {
   CreatePresenceInput,
   ExecutionMode,
   FileKind,
+  GrowthReview,
   GhostProfile,
   GhostRepresentation,
   OpenPresenceState,
@@ -89,6 +90,8 @@ import type {
   KnowledgeUse,
   PreferenceReason,
   Presence,
+  PresenceAudienceSnapshot,
+  PublicationMetricSnapshot,
   SandboxActor,
   SandboxAssetInput,
   SocialDecision,
@@ -6406,6 +6409,72 @@ function PublishingPlanScheduleSummary({ plan, presenceName }: { plan: Publishin
   </section>;
 }
 
+function GrowthEvidencePanel({
+  snapshots,
+  publicationSnapshots,
+  mirrorObjects,
+  review,
+  reviewIsStale,
+  unreviewedAudienceCount,
+  unreviewedPublicationCount,
+}: {
+  snapshots: PresenceAudienceSnapshot[];
+  publicationSnapshots: PublicationMetricSnapshot[];
+  mirrorObjects: MirrorObject[];
+  review?: GrowthReview;
+  reviewIsStale: boolean;
+  unreviewedAudienceCount: number;
+  unreviewedPublicationCount: number;
+}) {
+  const evidenceIds = new Set(review?.evidenceIds ?? []);
+  const newSnapshots = review ? snapshots.filter((item) => !evidenceIds.has(item.id)) : snapshots;
+  const newPublicationSnapshots = review ? publicationSnapshots.filter((item) => !evidenceIds.has(item.id)) : publicationSnapshots;
+  const latest = snapshots[0];
+  const latestPublication = publicationSnapshots[0];
+  const metricHighlights = latestPublication ? [
+    latestPublication.impressions !== undefined ? latestPublication.impressions.toLocaleString() + " impressions" : undefined,
+    latestPublication.likes !== undefined ? latestPublication.likes.toLocaleString() + " likes" : undefined,
+    latestPublication.replies !== undefined ? latestPublication.replies.toLocaleString() + " replies" : undefined,
+  ].filter(Boolean).slice(0, 2).join(" · ") : "No publication metrics yet";
+  const formatSnapshotStatus = (status: PresenceAudienceSnapshot["observationStatus"] | PublicationMetricSnapshot["observationStatus"]) => status === "observed" ? "Verified" : status.replaceAll("_", " ");
+  const totalNew = unreviewedAudienceCount + unreviewedPublicationCount;
+  const summary = reviewIsStale
+    ? totalNew + " new signal" + (totalNew === 1 ? "" : "s") + " arrived after the last Growth read. Genny has not interpreted them yet."
+    : review
+      ? "The evidence below is already included in Genny's latest Growth read."
+      : "These verified observations are waiting for Genny's first Growth read.";
+  return <section className="growth-evidence-panel settings-card" aria-label="Growth evidence">
+    <div className="growth-evidence-panel-heading"><div><SectionEyebrow>{reviewIsStale ? "New evidence" : "Evidence"}</SectionEyebrow><h2>{reviewIsStale ? "Fresh signals are ready" : "What Genny can see"}</h2><p>{summary}</p></div><span className={"growth-evidence-state " + (reviewIsStale ? "growth-evidence-state-new" : "")}>{reviewIsStale ? "Not read yet" : review ? "Included in read" : "Awaiting first read"}</span></div>
+    <div className="growth-evidence-summary-grid">
+      <div><span>Audience</span><strong>{latest ? latest.followers.toLocaleString() + " followers" : "Not observed"}</strong><small>{newSnapshots.length ? newSnapshots.length + " new snapshot" + (newSnapshots.length === 1 ? "" : "s") : "No new snapshot"}{latest ? " · " + formatHistoryTimestamp(latest.observedAt) : ""}</small></div>
+      <div><span>Publication performance</span><strong>{newPublicationSnapshots.length ? newPublicationSnapshots.length + " new post" + (newPublicationSnapshots.length === 1 ? "" : "s") : latestPublication ? "Up to date" : "Not observed"}</strong><small>{latestPublication ? metricHighlights + " · " + formatHistoryTimestamp(latestPublication.observedAt) : "No verified metrics yet"}</small></div>
+    </div>
+    <details className="growth-evidence-details" open={reviewIsStale}>
+      <summary><span>View the evidence</span><small>{reviewIsStale ? "These snapshots are not in the current read" : "Latest verified observations"}</small></summary>
+      <div className="growth-evidence-columns">
+        <div><div className="growth-evidence-subheading"><strong>Audience snapshots</strong><span>{newSnapshots.length || snapshots.length}</span></div>{(newSnapshots.length ? newSnapshots : snapshots).slice(0, 4).map((item) => <div className="growth-evidence-row" key={item.id}><strong>{item.followers.toLocaleString()} followers</strong><span>{formatHistoryTimestamp(item.observedAt)} · {item.source} · {formatSnapshotStatus(item.observationStatus)}</span></div>)}{!snapshots.length && <p className="muted">No verified audience snapshot has arrived.</p>}</div>
+        <div><div className="growth-evidence-subheading"><strong>Publication snapshots</strong><span>{newPublicationSnapshots.length || publicationSnapshots.length}</span></div>{(newPublicationSnapshots.length ? newPublicationSnapshots : publicationSnapshots).slice(0, 4).map((item) => { const object = mirrorObjects.find((candidate) => candidate.id === item.mirrorObjectId); const text = object?.content?.text?.trim() || "Publication performance observed"; const externalUrl = object ? externalUrlForMirrorObject(object, object.author?.handle) : undefined; return <div className="growth-evidence-row growth-evidence-publication" key={item.id}><div><strong>{object?.author?.handle ? "@" + object.author.handle : object?.author?.displayName ?? "X publication"}</strong><span>{text.length > 110 ? text.slice(0, 107) + "…" : text}</span></div><small>{[item.impressions !== undefined ? item.impressions.toLocaleString() + " views" : undefined, item.likes !== undefined ? item.likes.toLocaleString() + " likes" : undefined, formatSnapshotStatus(item.observationStatus)].filter(Boolean).join(" · ")}{externalUrl && <a href={externalUrl} target="_blank" rel="noreferrer">View post</a>}</small></div>; })}{!publicationSnapshots.length && <p className="muted">No verified publication-performance snapshot has arrived.</p>}</div>
+      </div>
+    </details>
+    <p className="growth-evidence-note">Evidence is shown immediately. Genny&apos;s interpretation updates on its scheduled review rhythm; viewing these snapshots does not spend a review call or change the plan.</p>
+  </section>;
+}
+
+function GrowthReadPanel({ review, reviewingGrowth, reviewGrowth }: { review?: GrowthReview; reviewingGrowth: boolean; reviewGrowth: (kind: "weekly" | "strategic") => void }) {
+  if (!review) return <section className="settings-card" aria-busy={reviewingGrowth}><div className="section-heading compact"><div><SectionEyebrow>Genny&apos;s current read</SectionEyebrow><h2>Growth read</h2></div><TrendingUp size={17} /></div><div className="growth-no-review"><p>Genny has not interpreted the available evidence yet. The observations are visible above and the next scheduled review will turn them into a decision.</p><Button variant="secondary" disabled={reviewingGrowth} onClick={() => void reviewGrowth("weekly")}>{reviewingGrowth ? <><LoaderCircle size={14} className="spin" /> Updating read…</> : "Update read now"}</Button></div></section>;
+  const signals = [
+    { key: "working", label: "Helping growth", tone: "positive", items: review.working },
+    { key: "uncertain", label: "Still unclear", tone: "uncertain", items: review.uncertain },
+    { key: "weak", label: "Holding growth back", tone: "weak", items: review.weak },
+  ];
+  return <section className="settings-card growth-read-panel" aria-busy={reviewingGrowth} aria-label="Genny's current read">
+    <div className="section-heading compact"><div><SectionEyebrow>Genny&apos;s current read</SectionEyebrow><h2>Growth read</h2></div><span className="growth-read-meta">{review.kind === "strategic" ? "Strategic" : "Weekly"} · {formatHistoryTimestamp(review.createdAt)}</span></div>
+    <p className="growth-read-lead">{review.working.length ? "The strongest signal is positive, but it is not proof of follower growth yet." : review.weak.length ? "The current evidence does not justify more aggressive growth activity." : "The evidence is still too early to support a strong conclusion."}</p>
+    <div className="growth-signal-grid">{signals.map((signal) => <div className={"growth-signal growth-signal-" + signal.tone} key={signal.key}><div><span>{signal.label}</span><strong>{signal.items.length}</strong></div>{signal.items.length ? <p>{signal.items[0]}</p> : <p>None recorded.</p>}</div>)}</div>
+    <details className="growth-read-details"><summary><span>Read the reasoning</span><small>Why Genny reached this read</small></summary><p>{review.summary}</p><div className="growth-read-list">{signals.map((signal) => <div key={signal.key}><strong>{signal.label}</strong>{signal.items.length ? <ul>{signal.items.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">None recorded.</p>}</div>)}</div></details>
+  </section>;
+}
+
 function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; mutate: Mutate; setView: (view: View) => void }) {
   const presence = state.presence;
   const [countdownNow, setCountdownNow] = useState<number | null>(null);
@@ -6470,6 +6539,8 @@ function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; muta
           <div><span>Next channel check</span><strong>{presence.status === "paused" ? "Paused" : nextChannelObservationAt ? (countdownNow === null ? "Scheduled" : formatCountdown(nextChannelObservationAt, countdownNow) === "now" ? "Due now" : `In ${formatCountdown(nextChannelObservationAt, countdownNow)}`) : bridgeConnected ? "Bridge-controlled" : "Unavailable"}</strong><small>{presence.status === "paused" ? "Wake the Presence to resume observation" : nextChannelObservationAt ? formatHistoryTimestamp(nextChannelObservationAt) : bridgeConnected && bridge?.lastHeartbeatAt ? `Last bridge heartbeat ${formatHistoryTimestamp(bridge.lastHeartbeatAt)} · adapter cadence not exposed` : "No connected observer is reporting a next check"}</small></div>
         </div>
       </section>
+      <GrowthEvidencePanel snapshots={snapshots} publicationSnapshots={publicationSnapshots} mirrorObjects={state.mirrorObjects} review={review} reviewIsStale={reviewIsStale} unreviewedAudienceCount={unreviewedAudienceCount} unreviewedPublicationCount={unreviewedPublicationCount} />
+      <GrowthReadPanel review={review} reviewingGrowth={reviewingGrowth} reviewGrowth={reviewGrowth} />
       <div className="growth-columns">
         <section className="settings-card" aria-busy={reviewingGrowth}><div className="section-heading compact"><div><SectionEyebrow>Genny&apos;s current read</SectionEyebrow><h2>What the evidence says</h2></div><TrendingUp size={17} /></div>{review ? <><p>{review.summary}</p><small className="muted">{review.reviewSource === "model" ? "Model-backed review" : "Deterministic evidence review"}{review.planChangeSummary ? ` · ${review.planChangeSummary}` : ""}</small>{reviewIsStale && <div className="growth-review-stale" role="status" aria-live="polite"><div><strong>New evidence since this review</strong><span>{[unreviewedAudienceCount ? `${unreviewedAudienceCount} audience snapshot${unreviewedAudienceCount === 1 ? "" : "s"}` : "", unreviewedPublicationCount ? `${unreviewedPublicationCount} publication-performance snapshot${unreviewedPublicationCount === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ")} has not been included in this read.</span></div><Button variant="secondary" disabled={reviewingGrowth} onClick={() => void reviewGrowth(review.kind)}>{reviewingGrowth ? <><LoaderCircle size={14} className="spin" /> Reviewing evidence…</> : "Review new evidence"}</Button></div>}<div className="growth-read-list"><div><strong>Working</strong>{review.working.length ? <ul>{review.working.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">Nothing strong enough to call yet.</p>}</div><div><strong>Uncertain</strong>{review.uncertain.length ? <ul>{review.uncertain.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">No open uncertainty recorded.</p>}</div><div><strong>Weak</strong>{review.weak.length ? <ul>{review.weak.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">No weak pattern recorded.</p>}</div></div></> : <div className="growth-no-review"><p>The Agent has not completed a Growth review yet. It will review follower movement and publication performance on the operating rhythm.</p><Button variant="secondary" disabled={reviewingGrowth} onClick={() => void reviewGrowth("weekly")}>{reviewingGrowth ? <><LoaderCircle size={14} className="spin" /> Reviewing evidence…</> : "Review available evidence"}</Button></div>}</section>
         <section className="settings-card"><div className="section-heading compact"><div><SectionEyebrow>Current approach</SectionEyebrow><h2>How the Agent is working</h2></div><Sparkles size={17} /></div>{assignment.plan ? <><p>{assignment.plan.summary}</p><div className="growth-plan-list"><div><strong>Publishing</strong><ul>{assignment.plan.publishingApproach.map((item) => <li key={item}>{item}</li>)}</ul></div><div><strong>Discovery</strong><ul>{assignment.plan.discoveryDirections.map((item) => <li key={item}>{item}</li>)}</ul></div><div><strong>Relationships</strong><ul>{assignment.plan.relationshipFocus.map((item) => <li key={item}>{item}</li>)}</ul></div></div><small className="muted">Plan revision {assignment.plan.revision} · Next weekly review {assignment.plan.nextWeeklyReviewAt ? formatHistoryTimestamp(assignment.plan.nextWeeklyReviewAt) : "not scheduled"}</small></> : <p className="muted">The Agent is preparing its first operating plan.</p>}</section>

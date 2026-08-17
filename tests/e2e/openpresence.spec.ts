@@ -665,6 +665,38 @@ test("Growth exposes evidence freshness and the next Agent review", async ({ pag
   await expect(cadence).toContainText("Next channel check");
 });
 
+test("Growth shows fresh evidence directly without requiring a review action", async ({ page, request }) => {
+  await createAgent(page);
+  const initial = await (await request.get("/api/state")).json();
+  const presenceId = initial.presence.id;
+  const created = await request.post("/api/state", { data: { type: "createAssignment", presenceId, environment: "live", instruction: "Grow this Presence toward 100,000 followers while building an audience of AI founders." } });
+  expect(created.ok()).toBeTruthy();
+  const afterAssignment = await (await request.get("/api/state")).json();
+  const assignment = afterAssignment.assignments.find((item: { presenceId: string; successEvidence?: { metric?: string } }) => item.presenceId === presenceId && item.successEvidence?.metric === "followers");
+  expect(assignment).toBeTruthy();
+  const reviewed = await request.post("/api/state", { data: { type: "reviewGrowth", presenceId, assignmentId: assignment.id, kind: "weekly" } });
+  expect(reviewed.ok()).toBeTruthy();
+  const observedAt = new Date().toISOString();
+  await page.route("**/api/state*", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    const payload = await response.json();
+    payload.audienceSnapshots = [...(payload.audienceSnapshots ?? []), { id: "fresh-audience", presenceId, channel: "x", followers: 4, source: "native", observationStatus: "observed", observedAt, environment: "live" }];
+    payload.mirrorObjects = [...(payload.mirrorObjects ?? []), { id: "fresh-post", bridgeId: "native:test", presenceId, channelId: "x", externalRef: { type: "x.post", id: "fresh-post" }, objectType: "post", language: "en", author: { displayName: "Builder", handle: "builder" }, content: { text: "A fresh implementation lesson." }, observedAt, visibility: "public", shareability: "public", environment: "live", source: "native", trust: "untrusted_world_content" }];
+    payload.publicationMetricSnapshots = [...(payload.publicationMetricSnapshots ?? []), { id: "fresh-publication", presenceId, mirrorObjectId: "fresh-post", observedAt, publicationAgeSeconds: 60, impressions: 120, likes: 8, replies: 2, source: "native", observationStatus: "observed" }];
+    return route.fulfill({ response, json: payload });
+  });
+  await page.reload();
+  await navigate(page, "Growth");
+  const evidence = page.getByRole("region", { name: "Growth evidence" });
+  await expect(evidence).toContainText("Fresh signals are ready");
+  await expect(evidence).toContainText("1 new snapshot");
+  await expect(evidence).toContainText("1 new post");
+  await expect(evidence).toContainText("A fresh implementation lesson.");
+  await expect(evidence).toContainText("View the evidence");
+  await expect(page.getByRole("button", { name: "Review new evidence" })).toHaveCount(0);
+});
+
 test("Growth review shows immediate feedback while new evidence is processing", async ({ page, request }) => {
   await createAgent(page);
   const initial = await (await request.get("/api/state")).json();
@@ -674,7 +706,7 @@ test("Growth review shows immediate feedback while new evidence is processing", 
 
   await page.reload();
   await navigate(page, "Growth");
-  const reviewButton = page.getByRole("button", { name: "Review available evidence" });
+  const reviewButton = page.getByRole("button", { name: "Update read now" });
   await expect(reviewButton).toBeVisible();
   await page.route(/\/api\/state(?:\?.*)?$/, async (route) => {
     if (route.request().method() !== "POST" || !route.request().postData()?.includes('"reviewGrowth"')) return route.continue();
@@ -682,9 +714,9 @@ test("Growth review shows immediate feedback while new evidence is processing", 
     return route.continue();
   });
   await reviewButton.click();
-  await expect(page.getByText("Reviewing evidence…", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Reviewing evidence…", exact: true })).toBeDisabled();
-  await expect(page.getByText("Reviewing evidence…", { exact: true })).toBeHidden({ timeout: 10_000 });
+  await expect(page.getByText("Updating read…", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Updating read…", exact: true })).toBeDisabled();
+  await expect(page.getByText("Updating read…", { exact: true })).toBeHidden({ timeout: 10_000 });
 });
 
 test("Activity filters mentions and shows whether each observed post was judged", async ({ page }) => {
