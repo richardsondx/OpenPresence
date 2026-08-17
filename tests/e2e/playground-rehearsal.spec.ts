@@ -38,7 +38,12 @@ test("Publishing Plan exposes its exact pace and windows in Schedule", async ({ 
   const plan = page.getByRole("region", { name: "Agent publishing plan" });
   await expect(plan).toBeVisible();
   await expect(plan).toContainText("A publishing pace to work toward");
+  await expect(plan.getByRole("button", { name: "Expand plan" })).toBeVisible();
   await expect(plan).toContainText("Chosen pace");
+  await expect(plan).not.toContainText("Current work");
+  await expect(plan).not.toContainText("Full consideration windows");
+  await plan.getByRole("button", { name: "Expand plan" }).click();
+  await expect(plan.getByRole("button", { name: "Minimize plan" })).toBeVisible();
   await expect(plan).toContainText("Current work");
   await expect(plan).toContainText("Full consideration windows");
   await expect(page.getByText("The publishing plan shows flexible working windows underneath the Assignments", { exact: false })).toBeVisible();

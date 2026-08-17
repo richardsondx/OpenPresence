@@ -6576,6 +6576,7 @@ function ScheduleLegend({ plan, layers }: { plan?: PublishingPlan; layers: Sched
 }
 
 function PublishingPlanScheduleSummary({ plan, presenceName }: { plan: PublishingPlan; presenceName: string }) {
+  const [expanded, setExpanded] = useState(false);
   const activeWindow = plan.windows.find((window) => window.status === "active") ?? plan.windows.find((window) => window.status === "future");
   const formatPlanDateTime = (value: string) => new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: plan.timezone }).format(new Date(value));
   const formatPlanDate = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: plan.timezone }).format(new Date(value));
@@ -6591,15 +6592,27 @@ function PublishingPlanScheduleSummary({ plan, presenceName }: { plan: Publishin
     : "An expectation, not a forced quota; silence remains allowed.";
   const workStatus = (status: NonNullable<PublishingPlan["currentWork"]>[number]["status"]) => status.replaceAll("_", " ");
   const visibleWindows = plan.windows.filter((window) => !["completed", "missed", "superseded"].includes(window.status));
-  return <section className="publishing-plan-schedule-summary" aria-label="Agent publishing plan">
+  return <section className={`publishing-plan-schedule-summary ${expanded ? "is-expanded" : "is-collapsed"}`} aria-label="Agent publishing plan">
     <div className="publishing-plan-schedule-header">
       <div>
         <SectionEyebrow>{presenceName}&apos;s current plan</SectionEyebrow>
         <h2>{plan.initiativeMode === "adaptive" ? "An adaptive publishing pace" : "A publishing pace to work toward"}</h2>
         <p>{plan.rationaleSummary ?? `${presenceName} is deciding what deserves to be published from the available evidence.`}</p>
       </div>
-      <div className="publishing-plan-schedule-badge"><strong>Revision {plan.revision}</strong><span>{plan.status === "active" ? "Active plan" : plan.status}</span></div>
+      <div className="publishing-plan-schedule-header-actions">
+        <div className="publishing-plan-schedule-badge"><strong>Revision {plan.revision}</strong><span>{plan.status === "active" ? "Active plan" : plan.status}</span></div>
+        <button type="button" className="publishing-plan-toggle" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
+          <span>{expanded ? "Minimize plan" : "Expand plan"}</span>
+          <ChevronDown size={14} className={expanded ? "publishing-plan-toggle-icon is-open" : "publishing-plan-toggle-icon"} aria-hidden="true" />
+        </button>
+      </div>
     </div>
+    {!expanded && <div className="publishing-plan-schedule-collapsed-summary" aria-label="Publishing plan summary">
+      <div><span>Chosen pace</span><strong>{pace}</strong></div>
+      <div><span>Next consideration</span><strong>{activeWindow ? `${activeWindow.purpose[0].toUpperCase()}${activeWindow.purpose.slice(1)}` : "No window queued"}</strong></div>
+      <div><span>Reassess</span><strong>{plan.nextReassessmentAt ? formatPlanDateTime(plan.nextReassessmentAt) : "Not scheduled"}</strong></div>
+    </div>}
+    {expanded && <>
     <div className="publishing-plan-schedule-facts">
       <div><span>Chosen pace</span><strong>{pace}</strong><small>{paceNote}</small></div>
       <div><span>Plan horizon</span><strong>{formatPlanDate(plan.horizonStart)}–{formatPlanDate(plan.horizonEnd)}</strong><small>{plan.timezone}</small></div>
@@ -6615,6 +6628,7 @@ function PublishingPlanScheduleSummary({ plan, presenceName }: { plan: Publishin
       <div className="publishing-plan-schedule-window-list">{visibleWindows.map((window) => <div key={window.id}><div><strong>{window.purpose}</strong><span>{formatPlanDateTime(window.startAt)} → {formatPlanDateTime(window.endAt)}</span></div><p>{window.summary}</p><small>{window.desiredContribution ? `${window.desiredContribution.min}–${window.desiredContribution.max} possible contribution${window.desiredContribution.max === 1 ? "" : "s"}` : "No contribution count set"} · {window.status === "active" ? "Active now" : "Future"}</small></div>)}</div>
     </details>
     <p className="publishing-plan-schedule-note">This is {presenceName}&apos;s current working plan. It explains when the Agent may consider publishing; it does not prewrite posts or turn every window into an obligation.</p>
+    </>}
   </section>;
 }
 
