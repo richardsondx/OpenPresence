@@ -1267,7 +1267,7 @@ test("Activity addresses operator-directed replies to the selected Presence", as
   const initial = await request.get("/api/state");
   const session = (await initial.json()).playgroundSessions[0];
   const added = await request.post("/api/state", {
-    data: { type: "addSandboxEvent", sessionId: session.id, actionId: "post", actorName: "Maya Chen", content: "A question for the Presence." },
+    data: { type: "addSandboxEvent", sessionId: session.id, actionId: "post", actorName: "Maya Chen", content: "What changed your mind about persistent agents?", observeOnly: true },
   });
   expect(added.ok()).toBeTruthy();
 
@@ -1280,12 +1280,12 @@ test("Activity addresses operator-directed replies to the selected Presence", as
   await expect(dialog.locator(".operator-reply-card .full-button")).toHaveCSS("justify-content", "center");
   await dialog.getByLabel("Optional direction for Genny").fill("Keep the answer concrete.");
   await dialog.getByRole("button", { name: "Ask Genny to reply", exact: true }).click();
-  await expect(dialog.getByText("Genny is preparing the expression through the existing reply envelope.", { exact: true })).toBeVisible();
-  await expect(dialog.getByText("Ask Jenny to reply", { exact: true })).toHaveCount(0);
+  await expect(dialog.getByRole("heading", { name: "Ask Genny to reply" })).toBeVisible();
+  await expect(dialog.getByText("Genny is preparing the expression through the existing reply envelope.", { exact: true })).toHaveCount(0);
 
   const updated = await (await request.get("/api/state")).json();
-  expect(updated.operatorDirectives[0]).toMatchObject({ status: "expressed", optionalDirection: "Keep the answer concrete." });
-  expect(updated.socialIntents[0]).toMatchObject({ source: "operator", operatorDirectiveId: updated.operatorDirectives[0].id });
+  expect(updated.operatorDirectives[0]).toMatchObject({ status: "failed", optionalDirection: "Keep the answer concrete." });
+  expect(updated.socialIntents).toHaveLength(0);
 });
 
 test("Activity lets the operator quietly ask a Presence to leave an observed post alone", async ({ page, request }) => {

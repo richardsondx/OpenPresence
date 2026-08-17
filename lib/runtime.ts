@@ -3064,7 +3064,7 @@ export function formAssignmentPostIntent(source: OpenPresenceState, text: string
 export function formXReplyIntent(source: OpenPresenceState, text: string, parentId: string, operatorDirectiveId?: string, assignmentId?: string, assetIds: string[] = [], decisionInput?: SocialDecisionInput) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presence;
-  if (!state.agent || !presence || presence.status !== "live" || presence.channel !== "x" || !text.trim() || !parentId.trim()) return state;
+  if (!state.agent || !presence || (presence.status !== "live" && !operatorDirectiveId) || presence.channel !== "x" || !text.trim() || !parentId.trim()) return state;
   const formedAt = now();
   const expiresAt = new Date(Date.now() + 45 * 60 * 1000).toISOString();
   const validAssetIds = assetIds.filter((assetId) => state.assets.some((asset) => asset.id === assetId && asset.status === "ready"));
@@ -3280,8 +3280,16 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     const target = state.mirrorObjects.find((item) => item.id === operation.objectId && item.presenceId === operation.presenceId && (!operation.sessionId || item.sessionId === operation.sessionId));
     if (!state.agent || !presence || !target || !["post", "reply", "comment"].includes(target.objectType) || target.actorPresenceId === presence.id) return state;
     if ((presence.execution.reply ?? "off") === "off") return state;
-    const existing = state.operatorDirectives.find((item) => item.presenceId === presence.id && item.target.id === target.externalRef.id && item.status !== "failed");
-    if (existing) return state;
+    const existing = state.operatorDirectives.find((item) => item.presenceId === presence.id && item.target.id === target.externalRef.id && item.requiredAct === "reply" && item.status !== "failed");
+    if (existing) {
+      const existingExecution = state.executions.find((item) => item.operatorDirectiveId === existing.id && item.target?.id === target.externalRef.id && item.presenceId === presence.id);
+      const executionStillActive = existingExecution && !["failed", "blocked", "expired"].includes(existingExecution.status);
+      if (executionStillActive) return state;
+      existing.optionalDirection = operation.optionalDirection?.trim() || existing.optionalDirection;
+      existing.status = "requested";
+      existing.createdAt = now();
+      return state;
+    }
     const directive: OperatorDirective = { id: id("directive"), agentId: state.agent.id, presenceId: presence.id, target: target.externalRef, requiredAct: "reply", optionalDirection: operation.optionalDirection?.trim() || undefined, provenance: "operator", initialAct: "no_op", status: "requested", environment: target.environment ?? presence.environment, sessionId: target.sessionId, createdAt: now() };
     state.operatorDirectives.unshift(directive);
     state.events.unshift(event("decision", `The operator asked ${presence.name} to reply`, `${presence.name} will decide how to express a reply. The operator supplied the social act; the Presence still owns the wording and safety boundaries.`, "positive", { presenceId: presence.id, sourceObjectId: target.id }));

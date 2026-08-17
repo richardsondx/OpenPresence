@@ -428,6 +428,25 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.executions[0]).toMatchObject({ source: "operator", operatorDirectiveId: directive.id });
   });
 
+  it("allows an explicit operator reply while the Presence is paused", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { status: "paused", execution: { ...state.presence!.execution, reply: "auto" } } });
+    state = formXReplyIntent(state, "A concrete reply from the paused Presence.", "post-1", "directive-paused");
+    expect(state.socialIntents[0]).toMatchObject({ source: "operator", operatorDirectiveId: "directive-paused" });
+    expect(state.executions[0]).toMatchObject({ source: "operator", operatorDirectiveId: "directive-paused", target: { type: "x.post", id: "post-1" } });
+  });
+
+  it("reopens an operator reply directive when its previous request has no execution", () => {
+    let state = createAgent(input);
+    const sessionState = startPlaygroundSession(state, state.presence!.id);
+    state = addSandboxEvent(sessionState, { sessionId: sessionState.playgroundSessions[0]!.id, actionId: "post", actorName: "Maya Chen", content: "A post that needs a retry." });
+    const target = state.mirrorObjects.find((item) => item.actorPresenceId !== state.presence!.id)!;
+    state = applyOperation(state, { type: "askPresenceToReply", presenceId: state.presence!.id, objectId: target.id, sessionId: target.sessionId });
+    state.operatorDirectives[0]!.status = "expressed";
+    state = applyOperation(state, { type: "askPresenceToReply", presenceId: state.presence!.id, objectId: target.id, sessionId: target.sessionId, optionalDirection: "Retry with one concrete point." });
+    expect(state.operatorDirectives[0]).toMatchObject({ status: "requested", optionalDirection: "Retry with one concrete point." });
+  });
+
   it("does not create an operator reply directive when Replies are off", () => {
     let state = createAgent(input);
     state = applyOperation(state, { type: "setPresence", patch: { execution: { ...state.presence!.execution, reply: "off" } } });
