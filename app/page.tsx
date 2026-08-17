@@ -3097,6 +3097,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
   const [assignmentInstruction, setAssignmentInstruction] = useState("");
   const [assignmentDraftId, setAssignmentDraftId] = useState<string | null>(null);
   const [assignmentPanelDismissed, setAssignmentPanelDismissed] = useState(false);
+  const [dismissedLiveAssignmentId, setDismissedLiveAssignmentId] = useState<string | null>(null);
   const [assignmentCancellationNotice, setAssignmentCancellationNotice] = useState(false);
   const [expandedRehearsalId, setExpandedRehearsalId] = useState<string | null>(null);
   const [feedbackAttemptId, setFeedbackAttemptId] = useState<string | null>(null);
@@ -3250,7 +3251,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
         </>}
       </section>}
       {assignmentCancellationNotice && <section className="assignment-cancelled-notice" role="status" aria-live="polite"><strong>Assignment cancelled</strong><span>It will not continue. Its history remains available for review.</span></section>}
-      {latestLiveAssignment && <section className="assignment-scope-notice" aria-label="Live Assignment status"><div><div className="eyebrow">Live Activity Assignment</div><h2>{cleanUserFacingAssignmentInstruction(latestLiveAssignment.instruction)}</h2><p>This Assignment is still a live draft waiting for Activity to activate it. Pausing the Presence keeps it from running live; it is not stuck. Playground is independent.</p></div><Button variant="secondary" disabled={busy} onClick={() => rehearseAssignment(latestLiveAssignment)}><FlaskConical size={14} /> Rehearse in Sandbox</Button></section>}
+      {latestLiveAssignment && dismissedLiveAssignmentId !== latestLiveAssignment.id && <section className="assignment-scope-notice" aria-label="Live Assignment status"><div><div className="eyebrow">Live Activity Assignment</div><h2>{cleanUserFacingAssignmentInstruction(latestLiveAssignment.instruction)}</h2><p>This Assignment is still a live draft waiting for Activity to activate it. Pausing the Presence keeps it from running live; it is not stuck. Playground is independent.</p></div><div className="assignment-scope-notice-actions"><Button variant="secondary" disabled={busy} onClick={() => rehearseAssignment(latestLiveAssignment)}><FlaskConical size={14} /> Rehearse in Sandbox</Button><button type="button" className="assignment-scope-notice-close" aria-label="Dismiss live Assignment notice" title="Dismiss" onClick={() => setDismissedLiveAssignmentId(latestLiveAssignment.id)}><X size={16} /></button></div></section>}
       {displayedAssignment && (
         <section className="assignment-progress-panel" aria-label="Assignment progress">
           <div className="assignment-progress-heading">

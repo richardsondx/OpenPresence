@@ -436,7 +436,11 @@ fieldset { border: none; padding: 0; margin: 0 0 26px; }
 .assignment-scope-notice { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 16px; padding: 13px 14px; border: 1px solid #d8d0c7; border-radius: 7px; background: #fbfaf8; }
 .assignment-scope-notice h2 { max-width: 900px; margin: 4px 0 5px; font-size: 14px; line-height: 1.3; overflow-wrap: anywhere; }
 .assignment-scope-notice p { max-width: 900px; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.assignment-scope-notice-actions { display: flex; align-items: center; gap: 8px; }
 .assignment-scope-notice .button { flex: 0 0 auto; }
+.assignment-scope-notice-close { display: inline-grid; width: 30px; height: 30px; place-items: center; padding: 0; border: 0; border-radius: 50%; background: transparent; color: var(--muted); cursor: pointer; }
+.assignment-scope-notice-close:hover { background: #f0ece7; color: var(--ink); }
+.assignment-scope-notice-close:focus-visible { outline: 2px solid #d88b57; outline-offset: 2px; }
 .assignment-warning { grid-column: 1 / -1; margin: 0; font-size: 11px; line-height: 1.45; }
 .assignment-outcome { display: grid; grid-column: 1 / -1; gap: 8px; min-width: 0; padding: 11px 12px; border: 1px solid #e7b59e; border-radius: 6px; background: #fff5f1; }
 .assignment-outcome-heading { display: flex; align-items: center; gap: 9px; flex-wrap: wrap; }
@@ -477,7 +481,7 @@ fieldset { border: none; padding: 0; margin: 0 0 26px; }
 @media (prefers-reduced-motion: reduce) { .assignment-progress-ring { animation: none; } }
 @media (max-width: 900px) { .assignment-candidate-list { grid-template-columns: repeat(2, minmax(0, 1fr)); } }
 @media (max-width: 680px) { .rehearsal-mode-menu, .assignment-review { grid-template-columns: 1fr; }.assignment-review .original-rehearsal-actions { justify-content: stretch; flex-direction: column; }.assignment-progress-panel { grid-template-columns: 1fr; }.assignment-live-card { grid-column: 1; grid-row: auto; justify-self: stretch; max-width: none; }.assignment-progress-meta { align-items: flex-start; flex-direction: column; gap: 4px; }.assignment-candidate-list { grid-template-columns: 1fr; } }
-@media (max-width: 680px) { .assignment-scope-notice { grid-template-columns: 1fr; align-items: start; }.assignment-scope-notice .button { width: 100%; justify-content: center; } }
+@media (max-width: 680px) { .assignment-scope-notice { grid-template-columns: 1fr; align-items: start; }.assignment-scope-notice-actions { width: 100%; justify-content: space-between; }.assignment-scope-notice-actions .button { width: 100%; justify-content: center; } }
 .scope-summary { color: var(--muted); font: 10px "DM Mono", monospace; padding: 9px 0; }
 .execution-line { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: baseline; gap: 12px; margin-top: 22px; padding-top: 14px; border-top: 1px solid var(--line); }
 .execution-line strong { min-width: 0; color: var(--ink); font-size: 21px; line-height: 1.15; letter-spacing: -.04em; overflow-wrap: anywhere; }
