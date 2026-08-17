@@ -4888,7 +4888,7 @@ function LiveView({
   };
   const relevantExecution = state.executions
     .filter((item) => !selected?.id || (item.presenceId === selected.id && (activityEnvironment === "sandbox" ? item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && activitySessionIds.has(item.sessionId))) : item.environment !== "sandbox" && !item.sessionId)))
-    .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
+    .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())
     .find((item) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing"].includes(item.status));
   const inFlightExecutions = state.executions
     .filter((item) => !selected?.id || (item.presenceId === selected.id && (activityEnvironment === "sandbox" ? item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && activitySessionIds.has(item.sessionId))) : item.environment !== "sandbox" && !item.sessionId)))
@@ -5942,10 +5942,12 @@ function ExecutionQueueSummary({
   state,
   executions,
   presenceId,
+  countdownNow,
 }: {
   state: OpenPresenceState;
   executions: OpenPresenceState["executions"];
   presenceId?: string;
+  countdownNow?: number;
 }) {
   const pendingStatuses = new Set<OpenPresenceState["executions"][number]["status"]>(["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing"]);
   const pending = executions.filter((execution) => pendingStatuses.has(execution.status));
@@ -5954,16 +5956,21 @@ function ExecutionQueueSummary({
   const connectorlessPending = pending.filter((execution) => !execution.connector).length;
   const reviewPending = pending.filter((execution) => execution.status === "awaiting-review").length;
   const failed = executions.filter((execution) => ["failed", "blocked", "expired"].includes(execution.status)).length;
+  const presence = state.presences.find((item) => item.id === presenceId);
   const bridge = state.bridges.find((item) => item.presenceId === presenceId && item.kind === "bridge" && item.state !== "offline");
   const bridgeStatus = bridge ? bridgeAdapterStatus(bridge) : "waiting";
+  const nativeConnection = state.nativeConnections.find((item) => item.presenceId === presenceId && item.channelId === "x" && item.status === "connected");
+  const bridgeNextCheckAt = bridge?.lastHeartbeatAt ? new Date(new Date(bridge.lastHeartbeatAt).getTime() + 30_000).toISOString() : undefined;
+  const nextQueueCheckAt = nativePending > 0 ? nativeConnection?.observation?.nextObservationAt : bridgePending > 0 ? bridgeNextCheckAt : undefined;
+  const nextQueueCountdown = formatCountdown(nextQueueCheckAt, countdownNow);
   const queueDetail = bridgePending > 0
     ? bridgeStatus === "connected"
-      ? `${bridgePending} Chrome fallback action${bridgePending === 1 ? " is" : "s are"} waiting for the next Bridge check.`
+      ? `${bridgePending} Chrome fallback action${bridgePending === 1 ? " is" : "s are"} waiting for the next Bridge check${nextQueueCountdown ? ` in ${nextQueueCountdown}` : ""}.`
       : `${bridgePending} Chrome fallback action${bridgePending === 1 ? " is" : "s are"} waiting because the extension is ${bridge ? bridgeStatus === "stale" ? "stale" : "not checked in" : "not connected"}.`
     : connectorlessPending > 0
       ? `${connectorlessPending} action${connectorlessPending === 1 ? " is" : "s are"} waiting for an authorized connector.`
       : nativePending > 0
-        ? `${nativePending} Native X action${nativePending === 1 ? " is" : "s are"} ready for API delivery.`
+        ? `${nativePending} Native X action${nativePending === 1 ? " is" : "s are"} waiting for the next API queue check${nextQueueCountdown ? ` in ${nextQueueCountdown}` : ". Click Check now to process the next one"}.`
         : pending.length === 0
           ? "Nothing is waiting to send. New actions will appear here with their route."
           : "The queue is waiting on the current decision state.";
@@ -5979,7 +5986,8 @@ function ExecutionQueueSummary({
         <span className="execution-queue-count execution-queue-count-review"><span aria-hidden="true" />Needs review · {reviewPending}</span>
       </div>
       <p>{queueDetail}</p>
-      {bridgePending > 0 && <small>Chrome is reserved for replies to posts that do not mention {state.presences.find((item) => item.id === presenceId)?.handle ?? "this Presence"}; Native X handles the normal X route.</small>}
+      {bridgePending > 0 && <small>Chrome is reserved for replies to posts that do not mention {presence?.handle ?? "this Presence"}; Native X handles the normal X route.</small>}
+      {nativePending > 0 && <small>One queued Native X action is processed per Check now or automatic attention cycle.</small>}
     </section>
   );
 }
@@ -6014,7 +6022,9 @@ function ExecutionLedger({
       return true;
     })
     .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
-  const latest = executions.find((item) => item.status === "awaiting-review") ?? executions[0];
+  const pendingStatuses = new Set<OpenPresenceState["executions"][number]["status"]>(["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing"]);
+  const pendingExecutions = executions.filter((item) => pendingStatuses.has(item.status)).sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime());
+  const latest = pendingExecutions.find((item) => item.status === "awaiting-review") ?? pendingExecutions[0] ?? executions[0];
   const intent = latest
     ? state.socialIntents.find((item) => item.id === latest.socialIntentId)
     : undefined;
@@ -6030,7 +6040,7 @@ function ExecutionLedger({
   if (!latest || !intent)
     return (
       <div className="execution-ledger-stack">
-        <ExecutionQueueSummary state={state} executions={executions} presenceId={presenceId} />
+        <ExecutionQueueSummary state={state} executions={executions} presenceId={presenceId} countdownNow={countdownNow} />
         <div className="decision-card execution-ledger">
           <div className="section-heading compact">
             <div>
@@ -6064,6 +6074,9 @@ function ExecutionLedger({
       })()
     : undefined;
   const nextBridgeAttemptCountdown = formatCountdown(nextBridgeAttemptAt, countdownNow);
+  const nativeConnection = state.nativeConnections.find((item) => item.presenceId === latest.presenceId && item.channelId === "x" && item.status === "connected");
+  const nextNativeCheckAt = nativeConnection?.observation?.nextObservationAt ?? presence?.nextExecutionCheckAt;
+  const nextNativeCheckCountdown = formatCountdown(nextNativeCheckAt, countdownNow);
   const sendTiming = latest.status === "awaiting-review"
     ? { kind: "blocked", label: "Waiting for your approval", detail: "Nothing will be sent until you approve this action." }
     : latest.status === "approved"
@@ -6071,7 +6084,7 @@ function ExecutionLedger({
       : latest.status === "queued" && nextBridgeAttemptCountdown
         ? { kind: "queued", label: nextBridgeAttemptCountdown === "now" ? "Next send attempt now" : `Next send attempt in ${nextBridgeAttemptCountdown}`, detail: "The Bridge checks the queue about every 30 seconds; the actual send may happen sooner when the controlled tab is ready." }
         : latest.status === "queued" && latest.connector === "native"
-          ? { kind: "queued", label: "Queued for immediate API delivery", detail: "Native X delivery is not scheduled for a future time; it runs as soon as the API worker accepts it." }
+          ? { kind: "queued", label: nextNativeCheckCountdown ? `Next API queue check in ${nextNativeCheckCountdown}` : "Queued for API delivery", detail: "One queued Native X action is processed per Check now or automatic attention cycle." }
         : latest.status === "queued" && latest.connector === "bridge"
           ? { kind: "blocked", label: bridgeConnected ? "Send time not available yet" : "No send time scheduled", detail: bridgeConnected ? "The Bridge is connected, but it has not reported a heartbeat to calculate the next send check." : "A connected Bridge is required before this reply can enter a send countdown. Reconnect the Bridge; the next queue check will then show a countdown." }
           : ["claimed", "executing"].includes(latest.status)
@@ -6081,11 +6094,11 @@ function ExecutionLedger({
               : latest.status === "awaiting-manual"
                 ? { kind: "blocked", label: "Waiting for manual confirmation", detail: "The action will not be counted until its external result is marked sent." }
                 : latest.status === "succeeded"
-                  ? { kind: "sent", label: "Sent", detail: latest.executedAt ? `Verified at ${formatHistoryTimestamp(latest.executedAt)}.` : "The channel result was verified." }
+                  ? { kind: "sent", label: "Sent", detail: `${latest.executedAt ? `Verified at ${formatHistoryTimestamp(latest.executedAt)}.` : "The channel result was verified."}${nextNativeCheckCountdown ? ` Next queue check in ${nextNativeCheckCountdown}.` : ""}` }
                   : undefined;
   return (
     <div className="execution-ledger-stack">
-      <ExecutionQueueSummary state={state} executions={executions} presenceId={presenceId} />
+      <ExecutionQueueSummary state={state} executions={executions} presenceId={presenceId} countdownNow={countdownNow} />
       <div className="decision-card execution-ledger">
         <div className="section-heading compact">
           <div>

@@ -127,13 +127,17 @@
 
   let lastIdentityReport = "";
   let lastIdentityReportAt = 0;
-  function reportAccountIdentity() {
+  function reportAccountIdentity(claimAfterVerification = true) {
     const account = verifyAccount();
+    // During an X SPA navigation the account controls may not have mounted
+    // yet. Unknown is a loading state, not proof that the wrong account is
+    // signed in; preserve the last verified identity until X exposes one.
+    if (!account.username) return;
     const identity = account.username || `unknown:${account.message || "unverified"}`;
     if (identity === lastIdentityReport && Date.now() - lastIdentityReportAt < 15_000) return;
     lastIdentityReport = identity;
     lastIdentityReportAt = Date.now();
-    sendMessage({ type: "OPENPRESENCE_ACCOUNT_IDENTITY", username: account.username });
+    sendMessage({ type: "OPENPRESENCE_ACCOUNT_IDENTITY", username: account.username, claimAfterVerification });
   }
 
   function visiblePosts() {
@@ -166,9 +170,12 @@
   async function execute(execution, canNavigate = true, pendingStage = "") {
     setState("preparing");
     const failure = (result) => { setState("observing"); return result; };
-    const account = verifyAccount();
+    const account = await waitFor(() => {
+      const result = verifyAccount();
+      return result.ok || result.username ? result : undefined;
+    }, 15_000);
     reportAccountIdentity();
-    if (!account.ok) return failure({ executionId: execution.id, ok: false, code: "ACCOUNT_MISMATCH", message: account.message, retryable: false });
+    if (!account?.ok) return failure({ executionId: execution.id, ok: false, code: account?.username ? "ACCOUNT_MISMATCH" : "ACCOUNT_NOT_READY", message: account?.message || `Account check failed. Expected ${expectedHandle}; X did not expose a signed-in account in time.`, retryable: !account?.username });
     if (execution.affordance !== "reply" && execution.affordance !== "x.reply") return failure({ executionId: execution.id, ok: false, code: "UNSUPPORTED_AFFORDANCE", message: "This first Chrome route only executes replies.", retryable: false });
     const targetId = execution.target?.id;
     if (!targetId) return failure({ executionId: execution.id, ok: false, code: "MISSING_TARGET", message: "The Bridge execution has no target post.", retryable: false });
@@ -183,11 +190,11 @@
     }
     const afterNavigation = await waitFor(() => {
       const result = verifyAccount();
-      return result.ok ? result : undefined;
-    }, 10_000);
+      return result.ok || result.username ? result : undefined;
+    }, 15_000);
     if (!afterNavigation?.ok) {
       const latest = verifyAccount();
-      return failure({ executionId: execution.id, ok: false, code: "ACCOUNT_MISMATCH", message: latest.message, retryable: false });
+      return failure({ executionId: execution.id, ok: false, code: latest.username ? "ACCOUNT_MISMATCH" : "ACCOUNT_NOT_READY", message: latest.message, retryable: !latest.username });
     }
     setState("acting");
     if (!composer) {
@@ -252,6 +259,7 @@
       // background alarm so recovery does not depend on message ordering.
       if (!activeExecutionId) window.setTimeout(() => void collectMetrics(), 750);
     }
+    if (message?.type === "OPENPRESENCE_REQUEST_IDENTITY") reportAccountIdentity(message.claimAfterVerification !== false);
     if (message?.type === "OPENPRESENCE_REQUEST_METRICS") void collectMetrics();
   });
   const pendingMetrics = sessionStorage.getItem("openpresence-pending-metrics");

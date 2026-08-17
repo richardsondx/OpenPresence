@@ -7,7 +7,7 @@ import { assessVisualFit } from "@/lib/visual-fit";
 import { generateAgentReply, generateAgentSocialDecision, generateAgentSocialEdit, generateAgentSocialJudgment, generateAssetPublicationReview, generateAssetResearchPlannerDecision, generateEvidenceLedDraft, generateEvidenceLedPublication, generateExplorationTriage, generateGrowthReview, generateIndependentModelText, generatePresenceChatReply, generatePublishingPlan, generateTextOnlyAssignmentPublication } from "@/lib/ai";
 import type { AgentSocialDecision } from "@/lib/ai";
 import { validateScenarioFidelity } from "@/lib/scenarios";
-import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntroduction, assertRuntimeScope, assignmentIsSatisfied, beginOriginalPostRehearsal, blockExecutionForLanguage, blockExecutionForTargetLanguage, cleanSandboxDraft, completeNativeExecution, completeOriginalPostRehearsal, confirmAutoMode, createRuntimeScope, declineSandboxIntroduction, deleteScenario, deliverSandboxExecution, derivePresenceCapabilityManifest, derivePublishingProgress, duePublishingPlanWindows, ensureCapabilityRequests, expireSandboxIntents, failNativeExecution, finishExplorationSession, finishPulse, formAssignmentPostIntent, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, formXActionIntent, createScenarioFromPrompt, generateMissingScenarioEvents, identityLeakageReason, importScenarioDefinition, isExplicitXPostRequest, isLaunchCandidate, isLowInformationCue, languageValidationForExecution, markCalendarSlotEvaluated, markInboundJudged, markNativeConnectionNeedsAttention, markScenarioStimulus, nativeDeliveryFailureIsConnectionScoped, openAgentRequest, publicSelfGuidance, publishingInitiativeGuidance, recordImportedXMirror, recordNativeMirror, recordPreferenceEvidence, recordPublishingPlanFailure, recordPublishingPlanWork, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, recordScenarioEvaluation, recordScenarioReview, renameScenario, replacePublishingPlan, resetPlaygroundSession, startExplorationSession, startScenarioRunState, completeScenarioRunState, stopScenarioRunState, stateForContext, structuralScenarioEvaluation, startPlaygroundSession, syncPlaygroundTime, syncPublishingInitiativeAssignment, targetLanguageValidationForExecution, updateScenarioEvents, updateScenarioRequirements } from "@/lib/runtime";
+import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntroduction, assertRuntimeScope, assignmentIsSatisfied, beginOriginalPostRehearsal, blockExecutionForLanguage, blockExecutionForTargetLanguage, cleanSandboxDraft, completeNativeExecution, completeOriginalPostRehearsal, confirmAutoMode, createRuntimeScope, declineSandboxIntroduction, deleteScenario, deliverSandboxExecution, derivePresenceCapabilityManifest, derivePublishingProgress, duePublishingPlanWindows, ensureCapabilityRequests, expireSandboxIntents, failNativeExecution, finishExplorationSession, finishPulse, formAssignmentPostIntent, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, formXActionIntent, createScenarioFromPrompt, generateMissingScenarioEvents, identityLeakageReason, importScenarioDefinition, isExplicitXPostRequest, isLaunchCandidate, isLowInformationCue, languageValidationForExecution, markCalendarSlotEvaluated, markInboundJudged, markNativeConnectionNeedsAttention, markScenarioStimulus, nativeDeliveryFailureIsConnectionScoped, openAgentRequest, publicSelfGuidance, publishingInitiativeGuidance, recordImportedXMirror, recordNativeMirror, recordPreferenceEvidence, recordPublishingPlanFailure, recordPublishingPlanWork, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, recordScenarioEvaluation, recordScenarioReview, renameScenario, replacePublishingPlan, resetPlaygroundSession, startExplorationSession, startScenarioRunState, completeScenarioRunState, stopScenarioRunState, stateForContext, structuralScenarioEvaluation, startPlaygroundSession, syncPlaygroundTime, syncPublishingInitiativeAssignment, targetLanguageValidationForExecution, unblockNativeExecutions, updateScenarioEvents, updateScenarioRequirements } from "@/lib/runtime";
 import { recordSocialDecision, nativeConnectionCanObserve } from "@/lib/runtime";
 
 import { followXUser, likeXPost, publishSealedXPost, readNativeXCredentials, readPublicXPostByUrl, readXPostsByIds, repostXPost, searchRecentXPosts, xPostIdFromUrl } from "@/lib/x";
@@ -698,8 +698,39 @@ async function runPublishingAssignmentPulse(source: OpenPresenceState, presenceI
   return recordRuntimeEvent(next, presenceId, execution?.status === "succeeded" ? "Publishing Assignment delivered" : execution?.status === "failed" ? "Publishing Assignment delivery failed" : "Publishing Assignment queued", execution?.status === "succeeded" ? `${presence.name} published an original contribution through the ${routeLabel}. The Social Mirror will verify progress on reconciliation.` : execution?.status === "failed" ? "The connector rejected the candidate; no verified Assignment progress was recorded." : `The candidate is waiting in the ${routeLabel}.`, execution?.status === "failed" ? "warning" : "positive");
 }
 
+function scheduleNextExecutionCheck(source: OpenPresenceState, presenceId: string) {
+  const presence = source.presences.find((item) => item.id === presenceId) ?? source.presence;
+  if (!presence || presence.id !== presenceId) return source;
+  const nextExecutionCheckAt = new Date(Date.now() + Math.max(5, presence.attentionIntervalMinutes || 5) * 60_000).toISOString();
+  const updated = { ...presence, nextExecutionCheckAt };
+  source.presences = source.presences.map((item) => item.id === presenceId ? updated : item);
+  if (source.presence?.id === presenceId) source.presence = updated;
+  return source;
+}
+
+function nextNativeQueuedExecution(source: OpenPresenceState, presenceId: string) {
+  return source.executions
+    .filter((item) => item.presenceId === presenceId && item.environment !== "sandbox" && item.connector === "native" && item.status === "queued" && item.mode === "auto")
+    .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())[0];
+}
+
 async function runNativePulse(source: OpenPresenceState, presenceId: string) {
-  let next = recordRuntimeEvent(source, presenceId, "Evaluating observed context", "Jenny is judging the Social Mirror before deciding whether anything is worth doing.", "positive");
+  let next = scheduleNextExecutionCheck(source, presenceId);
+  const presence = next.presences.find((item) => item.id === presenceId) ?? next.presence;
+  if (presence) unblockNativeExecutions(next, presence);
+  const queuedExecution = nextNativeQueuedExecution(next, presenceId);
+  if (queuedExecution) {
+    next = await deliverNativeExecutions(next, new Set([queuedExecution.id]));
+    const delivered = next.executions.find((item) => item.id === queuedExecution.id);
+    const remaining = next.executions.filter((item) => item.presenceId === presenceId && item.environment !== "sandbox" && ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing"].includes(item.status)).length;
+    const result = delivered?.status === "succeeded"
+      ? `Sent the next queued ${queuedExecution.affordance.replace("x.", "")} through Native X. ${remaining ? `${remaining} action${remaining === 1 ? "" : "s"} remain in the queue.` : "The queue is clear."}`
+      : delivered?.status === "failed" || delivered?.status === "blocked"
+        ? `The next queued action was not delivered. ${remaining} action${remaining === 1 ? "" : "s"} remain in the queue.`
+        : `The next queued action is still ${delivered?.status?.replaceAll("-", " ") ?? "pending"}. ${remaining} action${remaining === 1 ? "" : "s"} remain in the queue.`;
+    return finishPulse(next, presenceId, result, { intentId: queuedExecution.socialIntentId, executionId: queuedExecution.id });
+  }
+  next = recordRuntimeEvent(next, presenceId, "Evaluating observed context", "Jenny is judging the Social Mirror before deciding whether anything is worth doing.", "positive");
   const scheduledEventCount = next.events.length;
   next = await runScheduledLiveAssignments(next, presenceId);
   const observedMentions = unjudgedNativeInbound(next, presenceId);
@@ -2855,8 +2886,14 @@ export async function POST(request: Request) {
       if (!presenceId || !current.nativeConnections.some((item) => item.presenceId === presenceId && item.kind === "x")) throw new Error("No native X connection is configured for this Presence.");
       let next = await reconcileNativeX(current, presenceId);
       const inbound = unjudgedNativeInbound(next, presenceId)[0];
-      if (targetPresence?.status === "live" && inbound) {
-        next = recordRuntimeEvent(next, presenceId, "New mention received", "A new public mention entered the Social Mirror, so Jenny is considering it now.", "positive", { sourceObjectId: inbound.id });
+      if (targetPresence?.status === "live") {
+        if (inbound) {
+          next = recordRuntimeEvent(next, presenceId, "New mention received", "A new public mention entered the Social Mirror, so Jenny is considering it now.", "positive", { sourceObjectId: inbound.id });
+        }
+        // Native observation and autonomous delivery share the same attention
+        // cadence. A queue must not depend on an inbound mention existing;
+        // otherwise a connected API can observe forever while queued work
+        // remains stuck in "preparing".
         next = await runNativePulse(next, presenceId);
       }
       next = recordCapabilityFeedback(current, next, presenceId);

@@ -1,6 +1,10 @@
 const sessions = new Map();
 const sessionStorageKey = "openpresenceChromeSessions";
 const heartbeatAlarmName = "openpresence-heartbeat";
+// The Bridge lease is 120 seconds. Give a tab a small grace period, then
+// requeue work that was claimed by a content script that disappeared during
+// an X navigation or service-worker restart.
+const activeExecutionWatchdogMs = 135_000;
 let lastConfig;
 const seenEvents = new Set();
 const claimRuns = new Map();
@@ -38,6 +42,10 @@ function sendSessionContext(session) {
   return chrome.tabs.sendMessage(session.tabId, { type: "OPENPRESENCE_SESSION_CONTEXT", expectedHandle: session.presence.handle, presenceName: session.presence.name }).catch(() => {});
 }
 
+function requestIdentity(session, claimAfterVerification = true) {
+  return chrome.tabs.sendMessage(session.tabId, { type: "OPENPRESENCE_REQUEST_IDENTITY", expectedHandle: session.presence.handle, claimAfterVerification }).catch(() => {});
+}
+
 async function updateBadge() {
   const count = sessions.size;
   await chrome.action.setBadgeText({ text: count ? String(count) : "" });
@@ -64,12 +72,16 @@ async function requestMetrics(session) {
   }
 }
 
-async function reportIdentity(session, username) {
+async function reportIdentity(session, username, claimAfterVerification = true) {
+  // X can briefly expose neither the account switcher nor the profile link
+  // while its SPA is navigating. Do not overwrite a previously verified
+  // identity with an empty value during that loading window.
+  if (typeof username !== "string" || !username.trim()) return undefined;
   try {
     const result = await bridgeRequest(session, "/api/bridge/v1/identity", { method: "POST", body: JSON.stringify({ executorId: session.executorId, username }) });
     if (result.identity?.status === "verified") {
       sendStatus({ state: "connected", presenceId: session.presence.id, presenceName: session.presence.name, tabId: session.tabId });
-      await claim(session);
+      if (claimAfterVerification) await claim(session);
     } else {
       sendStatus({ state: "error", presenceId: session.presence.id, message: result.identity?.message || `The controlled tab must be signed in as ${session.presence.handle}.` });
     }
@@ -88,6 +100,14 @@ async function restoreSessions() {
     if (!session?.presence?.id || !session.tabId || !session.bridgeKey || !session.bridgeId) continue;
     try {
       await chrome.tabs.get(session.tabId);
+      if (session.activeExecutionId && (!session.activeExecutionStartedAt || Date.now() - session.activeExecutionStartedAt >= activeExecutionWatchdogMs)) {
+        // A previous service-worker instance may have persisted a claim that
+        // no longer has a living content-script execution attached to it.
+        // Clear it before restoring the session; claim() will let the Bridge
+        // expire/requeue the server-side lease and deliver the next item.
+        session.activeExecutionId = undefined;
+        session.activeExecutionStartedAt = undefined;
+      }
       sessions.set(session.presence.id, session);
       await sendSessionContext(session);
     } catch {
@@ -183,6 +203,7 @@ async function stopSession(presenceId) {
 async function heartbeat(session) {
   try {
     await bridgeRequest(session, "/api/bridge/v1/heartbeat", { method: "POST", body: JSON.stringify({ executorId: session.executorId }) });
+    await requestIdentity(session);
     return true;
   } catch (error) {
     sendStatus({ state: "error", presenceId: session.presence.id, message: error.message });
@@ -196,18 +217,35 @@ async function claim(session) {
   // the target post and reply composer. Keep the Bridge queue serialized for
   // the controlled tab; claim the next execution only after the current one
   // has returned an outcome.
-  if (existing || session.activeExecutionId) return existing;
+  if (existing) return existing;
+  if (session.activeExecutionId) {
+    if (session.activeExecutionStartedAt && Date.now() - session.activeExecutionStartedAt < activeExecutionWatchdogMs) return;
+    // The local execution watchdog is deliberately conservative: by this
+    // point the server lease has expired or is about to expire, so releasing
+    // the local guard is safer than blocking every later reply indefinitely.
+    session.activeExecutionId = undefined;
+    session.activeExecutionStartedAt = undefined;
+    await persistSessions();
+  }
   const run = (async () => {
     try {
       // A controlled tab is a single foreground executor. Claim one execution
       // at a time so concurrent target navigations cannot race each other.
       const result = await bridgeRequest(session, "/api/bridge/v1/executions/claim", { method: "POST", body: JSON.stringify({ executorId: session.executorId, limit: 1 }) });
-      for (const execution of result.executions || []) {
+      const claimed = result.executions || [];
+      for (const execution of claimed) {
         session.activeExecutionId = execution.id;
+        session.activeExecutionStartedAt = Date.now();
         await persistSessions();
         chrome.tabs.sendMessage(session.tabId, { type: "OPENPRESENCE_EXECUTE", execution, expectedHandle: session.presence.handle, presenceName: session.presence.name })
           .catch((error) => finishExecution(session, { executionId: execution.id, ok: false, code: "CONTROLLED_TAB_UNAVAILABLE", message: error.message || "The controlled tab did not accept the execution.", retryable: true }));
       }
+      // A healthy Bridge can still be unable to claim work when the tab's
+      // account identity is stale. Re-verify the signed-in account instead
+      // of leaving the queue blocked until a manual reload or navigation.
+      // Do not immediately claim from the identity callback: an empty queue
+      // would otherwise recurse forever between claim and identity checks.
+      if (!claimed.length) await requestIdentity(session, false);
     } catch (error) { sendStatus({ state: "error", presenceId: session.presence.id, message: error.message }); }
   })();
   claimRuns.set(session.presence.id, run);
@@ -239,6 +277,7 @@ async function finishExecution(session, result) {
   finally {
     if (session.activeExecutionId === result.executionId) {
       session.activeExecutionId = undefined;
+      session.activeExecutionStartedAt = undefined;
       await persistSessions();
     }
   }
@@ -262,7 +301,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
     const session = [...sessions.values()].find((item) => item.tabId === sender.tab?.id);
     if (!session) return;
     if (message?.type === "OPENPRESENCE_OBSERVATION") await ingest(session, message.observation);
-    if (message?.type === "OPENPRESENCE_ACCOUNT_IDENTITY") await reportIdentity(session, message.username);
+    if (message?.type === "OPENPRESENCE_ACCOUNT_IDENTITY") await reportIdentity(session, message.username, message.claimAfterVerification !== false);
     if (message?.type === "OPENPRESENCE_METRICS") {
       try {
         await reportMetrics(session, message.metrics);

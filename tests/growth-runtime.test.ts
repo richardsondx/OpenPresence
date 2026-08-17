@@ -229,6 +229,16 @@ describe("continuous growth responsibility", () => {
     const unmentioned = rebound.executions.find((execution) => execution.target?.id === "unmentioned-post");
     expect(mentioned).toMatchObject({ connector: "native", bridgeId: undefined });
     expect(unmentioned).toMatchObject({ connector: "bridge", bridgeId: "bridge-x" });
+
+    const alreadyNativeButBlocked: OpenPresenceState = {
+      ...rebound,
+      executions: rebound.executions.map((execution) => execution.target?.id === "mentioned-post"
+        ? { ...execution, connector: "native" as const, bridgeId: undefined, status: "awaiting-connector" as const }
+        : execution),
+    };
+    const recovered = applyOperation(alreadyNativeButBlocked, { type: "setPresence", patch: { connectionMode: "native" } });
+    expect(recovered.executions.find((execution) => execution.target?.id === "mentioned-post"))
+      .toMatchObject({ connector: "native", bridgeId: undefined, status: "queued" });
   });
 
   it.each([
