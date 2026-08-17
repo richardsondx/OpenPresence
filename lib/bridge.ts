@@ -151,7 +151,7 @@ export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput
   const candidates = state.executions.filter((execution) => execution.bridgeId === bridge.id && execution.status === "queued").slice(0, input.limit).filter((execution) => !expireIfNeeded(state, execution));
   const claimed: Execution[] = [];
   for (const execution of candidates) {
-    if (execution.environment === "live") {
+    if (execution.environment === "live" && execution.publication?.publicExpression) {
       try {
         sealExecutionForDelivery(execution);
       } catch (error) {
@@ -194,7 +194,7 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
   if (!execution) throw new Error("Execution not found");
   if (execution.status === "succeeded") { if (execution.externalRef?.id !== input.externalRef.id || execution.externalRef?.type !== input.externalRef.type) throw new Error("Execution already acknowledged with a different external reference"); return { state, execution }; }
   leasedExecution(state, bridge, executionId, input.executorId);
-  if (execution.environment === "live") {
+  if (execution.environment === "live" && execution.publication?.publicExpression) {
     try { verifyExecutionPermit(execution); } catch (error) {
       execution.status = "blocked";
       execution.failure = { code: error instanceof PublicationSecurityError ? error.code : "PUBLICATION_SECURITY_BLOCKED", message: error instanceof Error ? error.message : "Live publication security validation failed.", retryable: false };

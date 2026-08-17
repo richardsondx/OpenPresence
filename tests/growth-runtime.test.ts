@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyOperation, audienceDeltas, compileAssignmentInstruction, derivePresenceCapabilityManifest, publicationMetricBaseline } from "@/lib/runtime";
+import { applyOperation, audienceDeltas, compileAssignmentInstruction, completeNativeExecution, derivePresenceCapabilityManifest, formXActionIntent, publicationMetricBaseline } from "@/lib/runtime";
 import { createAgent } from "@/lib/runtime";
 import type { MirrorObject, OpenPresenceState } from "@/lib/types";
 
@@ -73,5 +73,18 @@ describe("continuous growth responsibility", () => {
     const manifest = derivePresenceCapabilityManifest(state, state.presence!.id);
     expect(manifest.items.find((item) => item.capability === "follower_measurement")?.availability).toBe("unavailable");
     expect(manifest.items.find((item) => item.capability === "follower_measurement")?.canExecute).toBe(false);
+  });
+
+  it("forms and verifies native X reactions instead of treating them as unavailable", () => {
+    const state = fixture();
+    state.presence!.execution.like = "auto";
+    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "genny", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    const manifest = derivePresenceCapabilityManifest(state, state.presence!.id);
+    expect(manifest.items.find((item) => item.capability === "like")).toMatchObject({ availability: "available", provider: "Native X", canExecute: true, canVerify: true });
+    const next = formXActionIntent(state, { affordance: "x.like", target: { type: "x.post", id: "post-1" } });
+    expect(next.executions[0]).toMatchObject({ affordance: "x.like", connector: "native", status: "queued", target: { type: "x.post", id: "post-1" } });
+    const completed = completeNativeExecution(next, next.executions[0]!.id, { type: "x.like", id: "post-1" });
+    expect(completed.executions[0]?.status).toBe("succeeded");
+    expect(completed.outcomes[0]?.evidence).toEqual([{ type: "x.like", id: "post-1" }]);
   });
 });

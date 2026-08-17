@@ -117,7 +117,7 @@ export function derivePresenceCapabilityManifest(source: OpenPresenceState, pres
   const native = state.nativeConnections.find((item) => item.presenceId === presence.id && item.channelId === presence.channel && item.status === "connected");
   const bridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
   const bridgeConnected = Boolean(bridge && bridgeAdapterIsConnected(bridge));
-  const nativeAction = (action: string) => Boolean(native && (action === "post" || action === "reply") && native.access === "read-write");
+  const nativeAction = (action: string) => Boolean(native && ["post", "reply", "like", "repost", "quote", "follow"].includes(action) && native.access === "read-write");
   const nativeReadable = Boolean(native && native.access !== undefined);
   const bridgeAction = (action: string) => Boolean(bridgeConnected && bridge?.capabilities.affordances.some((item) => item === action || item === `${presence.channel}.${action}`));
   const bridgeMetric = (metric: string) => Boolean(bridgeConnected && bridge?.capabilities.metrics.some((item) => item === metric || item.includes(metric)));
@@ -143,8 +143,15 @@ export function derivePresenceCapabilityManifest(source: OpenPresenceState, pres
   items.push({ capability: "public_discovery", label: capabilityLabel.public_discovery, availability: discoveryAvailable ? "available" : bridge && !bridgeConnected ? "temporarily-unavailable" : "unavailable", provider: nativeReadable ? "Native X" : bridgeConnected ? "Browser Bridge" : undefined, requiresBrowser: !nativeReadable && bridgeConnected, canObserve: discoveryAvailable, canExecute: false, canVerify: discoveryAvailable, limitation: discoveryAvailable ? undefined : "No connected channel body can search public conversation." });
   items.push(measurement("follower_measurement", presence.channel === "x", "followers"));
   items.push(measurement("post_performance", presence.channel === "x", "public_metrics"));
-  items.push({ ...actionItem("image", channelIds.has("post")), capability: "image", label: capabilityLabel.image, canExecute: false, availability: "unavailable", limitation: "Live media upload is not enabled for the current connector." });
-  items.push({ ...actionItem("video", channelIds.has("post")), capability: "video", label: capabilityLabel.video, canExecute: false, availability: "unavailable", limitation: "Live video upload is not enabled for the current connector." });
+  const mediaItem = (kind: "image" | "video"): PresenceCapability => {
+    const nativeCan = Boolean(native && native.access === "read-write" && presence.channel === "x");
+    const bridgeCan = Boolean(bridgeConnected && bridge?.capabilities.assetKinds?.includes(kind));
+    const canExecute = nativeCan || bridgeCan;
+    const canVerify = canExecute && (nativeCan || Boolean(bridge?.capabilities.reconcile));
+    return { capability: kind, label: capabilityLabel[kind], availability: canExecute && canVerify ? "available" : bridge && !bridgeConnected ? "temporarily-unavailable" : "unavailable", provider: nativeCan ? "Native X" : bridgeCan ? "Browser Bridge" : undefined, requiresBrowser: !nativeCan && bridgeCan, canObserve: canExecute, canExecute, canVerify, limitation: canExecute ? undefined : "The connected channel does not currently support this media type." };
+  };
+  items.push(mediaItem("image"));
+  items.push(mediaItem("video"));
   const requiredBody = items.some((item) => item.requiresBrowser && item.availability === "available");
   const bodyStatus = presence.status === "paused" ? "unavailable" : requiredBody && !bridgeConnected ? "degraded" : native || bridgeConnected ? "ready" : "unavailable";
   return { presenceId: presence.id, channel: presence.channel, generatedAt: now(), bodyStatus, items };
@@ -1855,7 +1862,7 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
   }
   const presence = state.presences.find((item) => item.id === execution.presenceId) ?? state.presence;
   if (!presence) throw new Error("The Sandbox Presence is unavailable.");
-  const targetLanguageResult = targetLanguageValidationForExecution(state, execution);
+  const targetLanguageResult = execution.publication ? targetLanguageValidationForExecution(state, execution) : { valid: true as const };
   if (!targetLanguageResult.valid) {
     execution.status = "blocked";
     execution.failure = { code: "TARGET_LANGUAGE_MISMATCH", message: targetLanguageResult.reason ?? "Delivery blocked because the target post language does not match the Presence language or could not be confirmed.", retryable: false };
@@ -2669,9 +2676,9 @@ export function assignmentIsSatisfied(assignment: Assignment, source?: OpenPrese
 
 function bridgeFor(state: OpenPresenceState, presenceId: string, affordance: string): Bridge | undefined { return state.bridges.find((bridge) => bridge.presenceId === presenceId && bridge.state !== "offline" && bridge.capabilities.affordances.includes(affordance)); }
 function normalizedCapabilities(input: ConnectorCapabilities): ConnectorCapabilities { return { inbound: input.inbound, reconcile: input.reconcile, affordances: [...new Set(input.affordances)], formats: [...new Set(input.formats)], metrics: [...new Set(input.metrics)], assetKinds: input.assetKinds?.length ? [...new Set(input.assetKinds)] : undefined }; }
-function makePublication(state: OpenPresenceState, text: string, format: string, source: "agent_model" | "operator_manual" | "operational" = "operational"): Publication {
+function makePublication(state: OpenPresenceState, text: string, format: string, source: "agent_model" | "operator_manual" | "operational" = "operational", assetIds: string[] = []): Publication {
   const presence = state.presence;
-  const publication: Publication = { id: id("publication"), format, payload: { text }, assetIds: [], links: [], publicExpression: presence ? createPublicExpressionCandidate({ state, presence, affordance: format, text, source }) : undefined, createdAt: now(), environment: presence?.environment ?? "live" };
+  const publication: Publication = { id: id("publication"), format, payload: { text }, assetIds: [...assetIds], links: [], publicExpression: presence ? createPublicExpressionCandidate({ state, presence, affordance: format, text, source, mediaIds: assetIds }) : undefined, createdAt: now(), environment: presence?.environment ?? "live" };
   state.publications.unshift(publication);
   return publication;
 }
@@ -2860,11 +2867,46 @@ export function formXReplyIntent(source: OpenPresenceState, text: string, parent
   return state;
 }
 
+/** Form a verified live X reaction or follow through the same execution envelope as publishing. */
+export function formXActionIntent(source: OpenPresenceState, input: { affordance: "x.like" | "x.repost" | "x.quote" | "x.follow"; target: EntityRef; text?: string; assignmentId?: string; assetIds?: string[] }) {
+  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  const presence = state.presence;
+  if (!state.agent || !presence || presence.status !== "live" || presence.channel !== "x" || !input.target.id) return state;
+  const capability = input.affordance.slice("x.".length);
+  const requiresExpression = capability === "quote";
+  if (requiresExpression && !input.text?.trim()) return state;
+  const formedAt = now();
+  const expiresAt = new Date(Date.now() + 45 * 60 * 1000).toISOString();
+  const origin: SocialOrigin = input.assignmentId ? { kind: "assignment", refId: input.assignmentId } : { kind: "inbound_social", refId: input.target.id };
+  const publication = requiresExpression ? makePublication(state, input.text!.trim(), input.affordance, "agent_model", input.assetIds) : undefined;
+  if (publication) { publication.origin = origin; publication.assignmentId = input.assignmentId; }
+  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: input.affordance, target: input.target, publicationId: publication?.id, priority: capability === "follow" ? 35 : 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, origin, assignmentId: input.assignmentId, environment: "live" };
+  if (publication?.publicExpression) publication.publicExpression.socialIntentId = socialIntent.id;
+  state.socialIntents.unshift(socialIntent);
+  const mode = presence.execution[capability] ?? "off";
+  if (mode === "off") {
+    state.actions.unshift({ id: id("act"), intent: capability as "like" | "repost" | "quote" | "follow", target: input.target.id, summary: input.text?.trim() ?? capability, status: "skipped", reason: `${capability} is off in the Presence execution envelope.`, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id });
+    return state;
+  }
+  const nativeX = presence.connectionMode !== "bridge" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.access === "read-write" && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? "")))) : undefined;
+  const connectedNative = nativeX;
+  const bridge = presence.connectionMode === "bridge" ? bridgeFor(state, presence.id, capability) : undefined;
+  const connector = connectedNative ? "native" as const : bridge ? bridge.kind : undefined;
+  const leakageReason = publication ? publicExpressionLeakageReason(input.text!.trim()) : undefined;
+  const status = leakageReason ? "blocked" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
+  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: input.affordance, mode, status, attempts: 0, bridgeId: bridge?.id, connector, target: input.target, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, reviewReason: leakageReason, createdAt: formedAt, updatedAt: formedAt, assignmentId: input.assignmentId, environment: "live", source: "agent" };
+  if (leakageReason) execution.failure = { code: "PUBLIC_TEXT_INTERNAL_MARKER", message: leakageReason, retryable: false };
+  state.executions.unshift(execution);
+  state.actions.unshift({ id: id("act"), intent: capability as "like" | "repost" | "quote" | "follow", target: input.target.id, summary: input.text?.trim() ?? capability, status: leakageReason ? "failed" : mode === "review" ? "review" : "queued", reason: leakageReason ?? `The Presence formed a ${capability} action through the live X execution envelope.`, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
+  state.events.unshift(event("decision", leakageReason ? "Public action blocked" : `X ${capability} intention formed`, leakageReason ?? `${capability} is ready for the authorized X connector.`, leakageReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id }));
+  return state;
+}
+
 export function completeNativeExecution(source: OpenPresenceState, executionId: string, externalRef: import("./types").EntityRef) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const execution = state.executions.find((item) => item.id === executionId && item.connector === "native");
   if (!execution) throw new Error("Native execution not found.");
-  const targetLanguageResult = targetLanguageValidationForExecution(state, execution);
+  const targetLanguageResult = execution.publication ? targetLanguageValidationForExecution(state, execution) : { valid: true as const, reason: undefined };
   if (!targetLanguageResult.valid) {
     execution.status = "blocked";
     execution.failure = { code: "TARGET_LANGUAGE_MISMATCH", message: targetLanguageResult.reason ?? "Delivery blocked because the target post language does not match the Presence language or could not be confirmed.", retryable: false };
@@ -2873,7 +2915,7 @@ export function completeNativeExecution(source: OpenPresenceState, executionId: 
     state.events.unshift(event("execution", "Target language blocked delivery", execution.failure.message, "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }));
     return state;
   }
-  const languageResult = languageValidationForExecution(state, execution);
+  const languageResult = execution.publication ? languageValidationForExecution(state, execution) : { valid: true as const, violations: [] as Array<{ literal: string }> };
   if (!languageResult.valid) {
     execution.status = "blocked";
     execution.failure = { code: "LANGUAGE_POLICY_VIOLATION", message: "Delivery blocked by Never use: " + languageResult.violations.map((item) => item.literal).join(", ") + ".", retryable: false };
@@ -2882,7 +2924,7 @@ export function completeNativeExecution(source: OpenPresenceState, executionId: 
     state.events.unshift(event("execution", "Language policy blocked delivery", execution.failure.message, "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }));
     return state;
   }
-  if (execution.environment === "live") {
+  if (execution.environment === "live" && execution.publication?.publicExpression) {
     try { verifyExecutionPermit(execution); } catch (error) {
       execution.status = "blocked";
       execution.failure = { code: error instanceof PublicationSecurityError ? error.code : "PUBLICATION_SECURITY_BLOCKED", message: error instanceof Error ? error.message : "Live completion requires a valid sealed Public Expression permit.", retryable: false };

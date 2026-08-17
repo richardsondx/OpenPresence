@@ -1,6 +1,7 @@
 import crypto from "node:crypto";
-import type { EntityRef, ExecutionPermit, NativeChannelConnection, OpenPresenceState, PublicExpression } from "./types";
+import type { Asset, EntityRef, ExecutionPermit, NativeChannelConnection, OpenPresenceState, PublicExpression } from "./types";
 import { deleteChannelSecret, readChannelSecret, saveChannelSecret } from "./db";
+import { readAssetBytes } from "./asset-store";
 import { consumeExecutionPermit, PublicationSecurityError } from "./publication-security";
 import { assertLiveWriteRuntimeAllowed, isXMockEnabled } from "./test-runtime";
 
@@ -32,10 +33,11 @@ export interface XRecentPost {
 }
 
 const apiBase = () => (process.env.OPENPRESENCE_X_API_BASE_URL ?? "https://api.x.com").replace(/\/$/, "");
+const uploadBase = () => (process.env.OPENPRESENCE_X_UPLOAD_BASE_URL ?? "https://upload.twitter.com").replace(/\/$/, "");
 const encode = (value: string) => encodeURIComponent(value).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
 const normalizeHandle = (handle: string) => handle.trim().replace(/^@/, "");
 
-export function oauthHeader(method: string, url: string, credentials: XCredentials, query: Record<string, string> = {}) {
+export function oauthHeader(method: string, url: string, credentials: XCredentials, query: Record<string, string> = {}, bodyParams: Record<string, string> = {}) {
   if (!credentials.accessToken || !credentials.accessTokenSecret) throw new Error("User access token and user access token secret are required for X write access.");
   const requestUrl = new URL(url);
   const baseUrl = `${requestUrl.origin}${requestUrl.pathname}`;
@@ -55,7 +57,7 @@ export function oauthHeader(method: string, url: string, credentials: XCredentia
   const signedQuery = Object.keys(query).length
     ? Object.entries(query)
     : [...requestUrl.searchParams.entries()];
-  const pairs = [...signedQuery, ...Object.entries(oauth)].map(([key, value]) => [encode(key), encode(value)] as const);
+  const pairs = [...signedQuery, ...Object.entries(bodyParams), ...Object.entries(oauth)].map(([key, value]) => [encode(key), encode(value)] as const);
   pairs.sort(([leftKey, leftValue], [rightKey, rightValue]) => leftKey.localeCompare(rightKey) || leftValue.localeCompare(rightValue));
   const parameterString = pairs.map(([key, value]) => `${key}=${value}`).join("&");
   const base = [method.toUpperCase(), encode(baseUrl), encode(parameterString)].join("&");
@@ -94,6 +96,55 @@ async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
   const body = await response.json().catch(() => undefined);
   if (!response.ok) throw apiError(response.status, body);
   return body as T;
+}
+
+async function requestUpload(path: string, init: RequestInit): Promise<Record<string, unknown>> {
+  const response = await fetch(`${uploadBase()}${path}`, { ...init, headers: { Accept: "application/json", ...init.headers } });
+  const body = await response.json().catch(() => ({}));
+  if (!response.ok) throw apiError(response.status, body);
+  return body as Record<string, unknown>;
+}
+
+async function assetBytes(asset: Asset) {
+  if (asset.dataUrl) {
+    const match = asset.dataUrl.match(/^data:[^;,]+;base64,([\s\S]+)$/);
+    if (!match) throw new Error(`Asset ${asset.id} is not a base64 data URL.`);
+    return Buffer.from(match[1]!, "base64");
+  }
+  if (asset.storagePath) return readAssetBytes(asset.storagePath);
+  throw new Error(`Asset ${asset.id} has no stored media bytes.`);
+}
+
+async function uploadXMedia(credentials: XCredentials, asset: Asset): Promise<string> {
+  const bytes = await assetBytes(asset);
+  const mimeType = asset.mimeType ?? asset.storage?.mimeType ?? (asset.type === "video" ? "video/mp4" : "image/jpeg");
+  const isVideo = asset.type === "video" || mimeType.startsWith("video/");
+  const url = `${uploadBase()}/1.1/media/upload.json`;
+  if (!isVideo) {
+    const form = new FormData();
+    form.append("media", new Blob([bytes], { type: mimeType }), asset.description ?? `${asset.id}.${mimeType.split("/")[1] ?? "bin"}`);
+    const body = await requestUpload("/1.1/media/upload.json", { method: "POST", headers: { Authorization: oauthHeader("POST", url, credentials) }, body: form });
+    const mediaId = typeof body.media_id_string === "string" ? body.media_id_string : typeof body.media_id === "number" ? String(body.media_id) : undefined;
+    if (!mediaId) throw new Error("X accepted the media upload without returning a media ID.");
+    return mediaId;
+  }
+  const initParams = { command: "INIT", total_bytes: String(bytes.byteLength), media_type: mimeType, media_category: "tweet_video" };
+  const init = await requestUpload("/1.1/media/upload.json", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: oauthHeader("POST", url, credentials, {}, initParams) }, body: new URLSearchParams(initParams) });
+  const mediaId = typeof init.media_id_string === "string" ? init.media_id_string : typeof init.media_id === "number" ? String(init.media_id) : undefined;
+  if (!mediaId) throw new Error("X did not return a media ID for video upload initialization.");
+  const chunkSize = 4 * 1024 * 1024;
+  for (let segmentIndex = 0; segmentIndex * chunkSize < bytes.byteLength; segmentIndex += 1) {
+    const form = new FormData();
+    const chunk = bytes.subarray(segmentIndex * chunkSize, Math.min(bytes.byteLength, (segmentIndex + 1) * chunkSize));
+    form.append("command", "APPEND");
+    form.append("media_id", mediaId);
+    form.append("segment_index", String(segmentIndex));
+    form.append("media", new Blob([chunk], { type: mimeType }), asset.description ?? `${asset.id}.part`);
+    await requestUpload("/1.1/media/upload.json", { method: "POST", headers: { Authorization: oauthHeader("POST", url, credentials, {}, { command: "APPEND", media_id: mediaId, segment_index: String(segmentIndex) }) }, body: form });
+  }
+  const finalizeParams = { command: "FINALIZE", media_id: mediaId };
+  await requestUpload("/1.1/media/upload.json", { method: "POST", headers: { "Content-Type": "application/x-www-form-urlencoded", Authorization: oauthHeader("POST", url, credentials, {}, finalizeParams) }, body: new URLSearchParams(finalizeParams) });
+  return mediaId;
 }
 
 function readAuthHeader(method: string, url: string, credentials: XCredentials, query: Record<string, string> = {}) {
@@ -155,12 +206,22 @@ export async function readXAudienceSnapshot(credentials: XCredentials, accountId
   return { followers: metrics.followers_count, following: metrics.following_count, observedAt: new Date().toISOString() };
 }
 
-export async function publishSealedXPost(credentials: XCredentials, expression: PublicExpression, permit: ExecutionPermit, replyTo?: string): Promise<EntityRef> {
+export async function publishSealedXPost(credentials: XCredentials, expression: PublicExpression, permit: ExecutionPermit, replyTo?: string, assets: Asset[] = [], quoteTweetId?: string): Promise<EntityRef> {
   assertLiveWriteRuntimeAllowed();
   const execution = { id: permit.executionId, socialIntentId: expression.socialIntentId, presenceId: expression.presenceId, affordance: permit.affordance, mode: "auto" as const, status: "queued" as const, attempts: 0, connector: "native" as const, idempotencyKey: permit.executionId, environment: "live" as const, publication: { id: expression.id, format: `${expression.channel}.${expression.affordance}`, payload: { text: expression.text }, assetIds: expression.mediaIds, links: [], publicExpression: expression, createdAt: expression.createdAt, environment: "live" as const }, permit, createdAt: expression.createdAt, updatedAt: expression.createdAt };
   try { consumeExecutionPermit(execution, expression); } catch (error) { throw error instanceof PublicationSecurityError ? error : new PublicationSecurityError("INVALID_PERMIT", "Live X write rejected."); }
   const url = `${apiBase()}/2/tweets`;
-  const body = replyTo ? { text: expression.text, reply: { in_reply_to_tweet_id: replyTo } } : { text: expression.text };
+  const mediaIds = expression.mediaIds.length
+    ? await Promise.all(expression.mediaIds.map((assetId) => {
+      const asset = assets.find((item) => item.id === assetId);
+      if (!asset) throw new Error(`The live publication references missing asset ${assetId}.`);
+      return uploadXMedia(credentials, asset);
+    }))
+    : [];
+  const body: Record<string, unknown> = { text: expression.text };
+  if (replyTo) body.reply = { in_reply_to_tweet_id: replyTo };
+  if (quoteTweetId) body.quote_tweet_id = quoteTweetId;
+  if (mediaIds.length) body.media = { media_ids: mediaIds };
   const response = await requestJson<{ data?: { id: string } }>("/2/tweets", {
     method: "POST",
     headers: { "Content-Type": "application/json", Authorization: oauthHeader("POST", url, credentials) },
@@ -168,6 +229,26 @@ export async function publishSealedXPost(credentials: XCredentials, expression: 
   });
   if (!response.data?.id) throw new Error("X accepted the request without returning a post ID.");
   return { type: "x.post", id: response.data.id };
+}
+
+async function postXAction(credentials: XCredentials, path: string, body: Record<string, string>, resultType: string, resultId: string): Promise<EntityRef> {
+  assertLiveWriteRuntimeAllowed();
+  const url = `${apiBase()}${path}`;
+  const response = await requestJson<{ data?: Record<string, unknown> }>(path, { method: "POST", headers: { "Content-Type": "application/json", Authorization: oauthHeader("POST", url, credentials) }, body: JSON.stringify(body) });
+  if (!response.data) throw new Error(`X accepted ${resultType} without returning a verified result.`);
+  return { type: resultType, id: resultId };
+}
+
+export function likeXPost(credentials: XCredentials, userId: string, postId: string) {
+  return postXAction(credentials, `/2/users/${encode(userId)}/likes`, { tweet_id: postId }, "x.like", postId);
+}
+
+export function repostXPost(credentials: XCredentials, userId: string, postId: string) {
+  return postXAction(credentials, `/2/users/${encode(userId)}/retweets`, { tweet_id: postId }, "x.repost", postId);
+}
+
+export function followXUser(credentials: XCredentials, userId: string, targetUserId: string) {
+  return postXAction(credentials, `/2/users/${encode(userId)}/following`, { target_user_id: targetUserId }, "x.follow", targetUserId);
 }
 
 export async function readRecentXPosts(credentials: XCredentials, accountId: string, maxResults = 100): Promise<XRecentPost[]> {

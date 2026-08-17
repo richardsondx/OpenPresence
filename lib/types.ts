@@ -515,6 +515,7 @@ export const CHANNEL_CAPABILITIES: Record<ChannelId, ChannelCapability[]> = {
     { id: "repost", label: "Reposts", description: "Pass along something worth seeing." },
     { id: "quote", label: "Quotes", description: "Add context to another post." },
     { id: "like", label: "Likes", description: "A quiet signal of attention." },
+    { id: "follow", label: "Follows", description: "Follow a relevant person in the Presence's territory." },
     { id: "message", label: "Messages", description: "Start or continue a private conversation." },
   ],
   linkedin: [
@@ -1329,7 +1330,7 @@ export interface ActivitySummary {
   publishingPlan?: PublishingPlan;
 }
 /** Legacy projection kept for the first UI and older local databases. */
-export interface ActionRecord { id: string; intent: "post" | "reply" | "like" | "repost" | "quote" | "no_op"; target?: string; summary: string; status: "queued" | "review" | "executed" | "skipped" | "failed"; reason: string; createdAt: string; expiresAt?: string; socialIntentId?: string; executionId?: string; outcomeId?: string; sessionId?: string; }
+export interface ActionRecord { id: string; intent: "post" | "reply" | "like" | "repost" | "quote" | "follow" | "no_op"; target?: string; summary: string; status: "queued" | "review" | "executed" | "skipped" | "failed"; reason: string; createdAt: string; expiresAt?: string; socialIntentId?: string; executionId?: string; outcomeId?: string; sessionId?: string; }
 
 export interface AgentWorkspaceSnapshot {
   onboarded: boolean; agent: Agent | null; presence: Presence | null; presences: Presence[]; activePresenceId: string | null;
