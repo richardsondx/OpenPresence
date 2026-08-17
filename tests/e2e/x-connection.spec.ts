@@ -12,6 +12,16 @@ async function createAgent(page: import("@playwright/test").Page) {
   await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
 }
 
+test("Activity keeps the Chrome connection notice out of the pulse controls", async ({ page, request }) => {
+  await createAgent(page);
+  const changed = await request.post("/api/state", { data: { type: "setPresence", patch: { connectionMode: "bridge" } } });
+  expect(changed.ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.getByRole("status")).toContainText("Chrome connection needed");
+  await expect(page.getByRole("button", { name: "Open Settings", exact: true })).toBeVisible();
+  await expect(page.locator(".next-check-countdown")).toHaveCount(0);
+});
+
 test("operator connects an X Presence through the official API", async ({ page }) => {
   const consoleErrors: string[] = [];
   const failedRequests: string[] = [];

@@ -13,6 +13,12 @@ describe("Bridge adapter contract", () => {
     expect(bridgeAdapterStatusLabel("waiting")).toContain("waiting for adapter");
   });
 
+  it("does not treat recent channel activity as a live adapter heartbeat", () => {
+    const now = Date.now();
+    expect(bridgeAdapterStatus({ state: "online", lastSeenAt: new Date(now).toISOString() }, now)).toBe("waiting");
+    expect(bridgeAdapterStatus({ state: "online", lastHeartbeatAt: new Date(now - 5 * 60_000).toISOString(), lastSeenAt: new Date(now).toISOString() }, now)).toBe("stale");
+  });
+
   it("generates a channel-aware prompt without a credential", () => {
     const prompt = bridgeAdapterPrompt({
       baseUrl: "http://localhost:3242",

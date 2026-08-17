@@ -5,6 +5,7 @@ describe("Social Mirror content normalization", () => {
   it("removes X rendered author metadata and engagement counts", () => {
     expect(cleanMirrorText("x", "Genny @example_agent · Aug 12 Hello! Let’s explore together! 1 1 89")).toBe("Hello! Let’s explore together!");
     expect(cleanMirrorText("x", "Genny @example_agent · 11h The hard part is deciding what deserves interruption. 10")).toBe("The hard part is deciding what deserves interruption.");
+    expect(cleanMirrorText("x", "Future Systems @VladBuildsAI Physical AI is huge, but a robotics ETF can hide very different businesses under one label. 2:44 PM · Aug 16, 2026 · 1 View")).toBe("Future Systems @VladBuildsAI Physical AI is huge, but a robotics ETF can hide very different businesses under one label.");
   });
 
   it("does not rewrite clean text or other channels", () => {

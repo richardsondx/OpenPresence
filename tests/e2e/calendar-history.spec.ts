@@ -25,7 +25,7 @@ test("Feed is verified history and Calendar remains a view over it", async ({ pa
   await page.getByRole("button", { name: "Month", exact: true }).click();
   await expect(page.locator(".history-month-grid")).toBeVisible();
   await page.getByRole("button", { name: "Day", exact: true }).click();
-  await expect(page.locator(".history-day-timeline")).toBeVisible();
+  await expect(page.getByText("No public activity on this day.", { exact: true })).toBeVisible();
 
   await page.getByRole("button", { name: "Schedule", exact: true }).first().click();
   await expect(page.getByRole("heading", { name: "Schedule", exact: true })).toBeVisible();
@@ -57,6 +57,9 @@ test("Calendar keeps a late-day publication card footer visible", async ({ page 
   await page.getByRole("button", { name: "Feed", exact: true }).click();
   await page.locator(".public-history-view-toggle").getByRole("button", { name: "Calendar", exact: true }).click();
   await expect(page.locator(".history-card").first()).toBeVisible();
+  const visibleHourCount = await page.locator(".history-time-rail span").count();
+  expect(visibleHourCount).toBeGreaterThan(0);
+  expect(visibleHourCount).toBeLessThan(24);
   const geometry = await page.locator(".history-week").evaluate((week) => {
     const card = week.querySelector<HTMLElement>(".history-card");
     const proof = week.querySelector<HTMLElement>(".history-card-proof");
@@ -65,6 +68,12 @@ test("Calendar keeps a late-day publication card footer visible", async ({ page 
   });
   expect(geometry.proofBottom).toBeLessThanOrEqual(geometry.weekBottom);
   expect(geometry.cardBottom).toBeLessThanOrEqual(geometry.weekBottom);
+
+  await page.getByRole("button", { name: "Day", exact: true }).click();
+  await expect(page.locator(".history-day-timeline")).toBeVisible();
+  const visibleDayHourCount = await page.locator(".history-timeline-row").count();
+  expect(visibleDayHourCount).toBeGreaterThan(0);
+  expect(visibleDayHourCount).toBeLessThan(24);
 });
 
 test("Feed inspector opens a verified publication", async ({ page }) => {

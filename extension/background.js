@@ -3,6 +3,7 @@ const sessionStorageKey = "openpresenceChromeSessions";
 const heartbeatAlarmName = "openpresence-heartbeat";
 let lastConfig;
 const seenEvents = new Set();
+const claimRuns = new Map();
 
 const channelHome = (presence) => presence.domain || (presence.channel === "x" ? "https://x.com/home" : "https://www.linkedin.com/feed/");
 const groupColor = (accent) => {
@@ -63,11 +64,32 @@ async function restoreSessions() {
   }
   if (sessions.size !== saved.length) await persistSessions();
   await updateBadge();
-  await Promise.all([...sessions.values()].map((session) => heartbeat(session)));
+  await Promise.all([...sessions.values()].map(async (session) => {
+    const connected = await heartbeat(session);
+    if (!connected) return;
+    sendStatus({ state: "connected", presenceId: session.presence.id, presenceName: session.presence.name, tabId: session.tabId });
+    // A service worker can wake after work was queued. Reconcile the queue
+    // immediately instead of waiting for the next alarm tick.
+    await claim(session);
+  }));
 }
 
 async function ensureHeartbeatAlarm() {
   await chrome.alarms.create(heartbeatAlarmName, { periodInMinutes: 0.5 });
+}
+
+async function waitForTabComplete(tabId, timeout = 10_000) {
+  const startedAt = Date.now();
+  while (Date.now() - startedAt < timeout) {
+    try {
+      const tab = await chrome.tabs.get(tabId);
+      if (tab.status === "complete") return true;
+    } catch {
+      return false;
+    }
+    await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  return false;
 }
 
 async function startSession(presenceId) {
@@ -75,8 +97,19 @@ async function startSession(presenceId) {
   if (!presence || presence.id !== presenceId || !presence.browserAccess?.enabled) throw new Error("Enable Chrome hands for the selected Presence in OpenPresence first.");
   if (sessions.has(presenceId)) {
     const current = sessions.get(presenceId);
-    if (current.windowId) await chrome.windows.update(current.windowId, { focused: true });
-    return current;
+    const connected = await heartbeat(current);
+    if (connected) {
+      if (current.windowId) await chrome.windows.update(current.windowId, { focused: true });
+      sendSessionContext(current);
+      sendStatus({ state: "connected", presenceId: current.presence.id, presenceName: current.presence.name, tabId: current.tabId });
+      await claim(current);
+      return current;
+    }
+
+    // The unpacked extension can retain a session after its tab or bridge
+    // credential has gone stale. Tear it down so this explicit user action
+    // repairs the session instead of silently reusing a dead executor.
+    await stopSession(presenceId);
   }
   const executorId = `openpresence-chrome-${crypto.randomUUID()}`;
   const connectOrigin = await appOrigin();
@@ -92,9 +125,14 @@ async function startSession(presenceId) {
   const session = { presence, bridgeId: connected.bridgeId, bridgeKey: connected.bridgeKey, executorId, windowId: window.id, tabId: tab.id, groupId };
   sessions.set(presenceId, session);
   await persistSessions();
-  sendSessionContext(session);
+  // The tab can finish loading before the session is inserted into `sessions`,
+  // so its only tabs.onUpdated event may already be gone. Reconcile explicitly
+  // after the content script is ready instead of relying on that event race.
+  await waitForTabComplete(tab.id);
+  await sendSessionContext(session);
   await updateBadge();
   sendStatus({ state: "connected", presenceId, presenceName: presence.name, tabId: tab.id });
+  await claim(session);
   return session;
 }
 
@@ -109,18 +147,37 @@ async function stopSession(presenceId) {
 }
 
 async function heartbeat(session) {
-  try { await bridgeRequest(session, "/api/bridge/v1/heartbeat", { method: "POST", body: JSON.stringify({ executorId: session.executorId }) }); }
-  catch (error) { sendStatus({ state: "error", presenceId: session.presence.id, message: error.message }); }
+  try {
+    await bridgeRequest(session, "/api/bridge/v1/heartbeat", { method: "POST", body: JSON.stringify({ executorId: session.executorId }) });
+    return true;
+  } catch (error) {
+    sendStatus({ state: "error", presenceId: session.presence.id, message: error.message });
+    return false;
+  }
 }
 
 async function claim(session) {
-  try {
-    const result = await bridgeRequest(session, "/api/bridge/v1/executions/claim", { method: "POST", body: JSON.stringify({ executorId: session.executorId, limit: 3 }) });
-    for (const execution of result.executions || []) {
-      chrome.tabs.sendMessage(session.tabId, { type: "OPENPRESENCE_EXECUTE", execution, expectedHandle: session.presence.handle, presenceName: session.presence.name })
-        .catch((error) => finishExecution(session, { executionId: execution.id, ok: false, code: "CONTROLLED_TAB_UNAVAILABLE", message: error.message || "The controlled tab did not accept the execution.", retryable: true }));
-    }
-  } catch (error) { sendStatus({ state: "error", presenceId: session.presence.id, message: error.message }); }
+  const existing = claimRuns.get(session.presence.id);
+  // A navigation fires tabs.onUpdated more than once while X moves through
+  // the target post and reply composer. Keep the Bridge queue serialized for
+  // the controlled tab; claim the next execution only after the current one
+  // has returned an outcome.
+  if (existing || session.activeExecutionId) return existing;
+  const run = (async () => {
+    try {
+      // A controlled tab is a single foreground executor. Claim one execution
+      // at a time so concurrent target navigations cannot race each other.
+      const result = await bridgeRequest(session, "/api/bridge/v1/executions/claim", { method: "POST", body: JSON.stringify({ executorId: session.executorId, limit: 1 }) });
+      for (const execution of result.executions || []) {
+        session.activeExecutionId = execution.id;
+        await persistSessions();
+        chrome.tabs.sendMessage(session.tabId, { type: "OPENPRESENCE_EXECUTE", execution, expectedHandle: session.presence.handle, presenceName: session.presence.name })
+          .catch((error) => finishExecution(session, { executionId: execution.id, ok: false, code: "CONTROLLED_TAB_UNAVAILABLE", message: error.message || "The controlled tab did not accept the execution.", retryable: true }));
+      }
+    } catch (error) { sendStatus({ state: "error", presenceId: session.presence.id, message: error.message }); }
+  })();
+  claimRuns.set(session.presence.id, run);
+  try { await run; } finally { claimRuns.delete(session.presence.id); }
 }
 
 async function ingest(session, observation) {
@@ -134,10 +191,24 @@ async function ingest(session, observation) {
 
 async function finishExecution(session, result) {
   if (!result.executionId) return;
+  let acknowledged = false;
   try {
-    if (result.ok) await bridgeRequest(session, `/api/bridge/v1/executions/${encodeURIComponent(result.executionId)}/ack`, { method: "POST", body: JSON.stringify({ executorId: session.executorId, externalRef: result.externalRef, observedAt: new Date().toISOString() }) });
-    else await bridgeRequest(session, `/api/bridge/v1/executions/${encodeURIComponent(result.executionId)}/fail`, { method: "POST", body: JSON.stringify({ executorId: session.executorId, code: result.code || "BROWSER_EXECUTION_FAILED", message: result.message || "The controlled tab could not verify the result.", retryable: Boolean(result.retryable) }) });
+    if (result.ok) {
+      await bridgeRequest(session, `/api/bridge/v1/executions/${encodeURIComponent(result.executionId)}/ack`, { method: "POST", body: JSON.stringify({ executorId: session.executorId, externalRef: result.externalRef, observedAt: new Date().toISOString() }) });
+      acknowledged = true;
+    }
+    else {
+      await bridgeRequest(session, `/api/bridge/v1/executions/${encodeURIComponent(result.executionId)}/fail`, { method: "POST", body: JSON.stringify({ executorId: session.executorId, code: result.code || "BROWSER_EXECUTION_FAILED", message: result.message || "The controlled tab could not verify the result.", retryable: Boolean(result.retryable) }) });
+      acknowledged = true;
+    }
   } catch (error) { sendStatus({ state: "error", presenceId: session.presence.id, message: error.message }); }
+  finally {
+    if (session.activeExecutionId === result.executionId) {
+      session.activeExecutionId = undefined;
+      await persistSessions();
+    }
+  }
+  if (acknowledged) setTimeout(() => void claim(session), 250);
 }
 
 chrome.runtime.onMessage.addListener((message, sender) => {
@@ -168,7 +239,12 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status !== "complete") return;
   const session = [...sessions.values()].find((item) => item.tabId === tabId);
-  if (session) sendSessionContext(session);
+  if (session) {
+    sendSessionContext(session);
+    // The channel content script is now ready to receive an autonomous
+    // execution. This keeps the queue moving without a manual reply click.
+    if (!session.activeExecutionId) void claim(session);
+  }
 });
 
 chrome.tabs.onActivated.addListener(({ tabId }) => {
