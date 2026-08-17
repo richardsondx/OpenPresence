@@ -189,6 +189,14 @@ export function ensureCapabilityRequests(source: OpenPresenceState, presenceId?:
   return source;
 }
 
+export function openAgentRequest(source: OpenPresenceState, input: { presenceId?: string; assignmentId?: string; kind: "capability" | "growth_review" | "operator_decision" | "connector"; importance: "blocking" | "important" | "informational"; title: string; need: string; why: string; currentWorkaround?: string; capability?: string; dedupeKey: string }) {
+  if (!source.agent || source.agentRequests.some((item) => item.dedupeKey === input.dedupeKey && !["rejected", "resolved"].includes(item.status))) return source;
+  const createdAt = now();
+  source.agentRequests.unshift({ id: id("agent-request"), agentId: source.agent.id, ...input, status: "open", createdAt, updatedAt: createdAt });
+  source.events.unshift(event("system", "Agent request opened", input.title, "warning", { presenceId: input.presenceId }));
+  return source;
+}
+
 function bridgeAdapterIsConnected(bridge: Bridge) {
   return bridge.state !== "offline" && (bridge.adapterStatus === "connected" || Boolean(bridge.lastHeartbeatAt && Date.now() - new Date(bridge.lastHeartbeatAt).getTime() < 90_000));
 }
@@ -1018,7 +1026,7 @@ function applyGrowthInterpretation(state: OpenPresenceState, assignment: Assignm
   }
 }
 
-function createGrowthReview(source: OpenPresenceState, assignment: Assignment, kind: import("./types").GrowthReviewKind) {
+function createGrowthReview(source: OpenPresenceState, assignment: Assignment, kind: import("./types").GrowthReviewKind, modelDecision?: import("./types").GrowthReviewDecision) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const recent = state.growthReviews.find((item) => item.assignmentId === assignment.id && item.kind === kind && Date.now() - new Date(item.createdAt).getTime() < 86_400_000);
   if (recent) return state;
@@ -1042,11 +1050,29 @@ function createGrowthReview(source: OpenPresenceState, assignment: Assignment, k
   if (strongMetricCount) working.push(`${strongMetricCount} recent publication${strongMetricCount === 1 ? "" : "s"} showed at least one metric at or above 1.5× its comparable baseline.`);
   if (weakMetricCount) weak.push(`${weakMetricCount} recent publication${weakMetricCount === 1 ? "" : "s"} showed at least one metric at or below 0.75× its comparable baseline.`);
   if (!recentMetrics.length) uncertain.push("No publication-performance snapshots were available for this review.");
-  const summary = `${kind === "strategic" ? "Strategic" : "Weekly"} review completed from ${state.audienceSnapshots.filter((item) => item.presenceId === assignment.presenceId).length} audience snapshot${state.audienceSnapshots.filter((item) => item.presenceId === assignment.presenceId).length === 1 ? "" : "s"} and ${recentMetrics.length} publication-performance snapshot${recentMetrics.length === 1 ? "" : "s"}. The current approach remains active unless repeated evidence justifies a change.`;
-  const review: import("./types").GrowthReview = { id: id("growth-review"), assignmentId: assignment.id, presenceId: assignment.presenceId, kind, periodStart, periodEnd, summary, working, uncertain, weak, changedPlan: false, assignmentPlanRevision: assignment.plan?.revision, evidenceIds: [...state.audienceSnapshots.filter((item) => item.presenceId === assignment.presenceId).map((item) => item.id), ...recentMetrics.map((item) => item.id)], createdAt: periodEnd };
-  applyGrowthInterpretation(state, assignment, review);
+  const summary = modelDecision?.summary ?? `${kind === "strategic" ? "Strategic" : "Weekly"} review completed from ${state.audienceSnapshots.filter((item) => item.presenceId === assignment.presenceId).length} audience snapshot${state.audienceSnapshots.filter((item) => item.presenceId === assignment.presenceId).length === 1 ? "" : "s"} and ${recentMetrics.length} publication-performance snapshot${recentMetrics.length === 1 ? "" : "s"}. The current approach remains active unless repeated evidence justifies a change.`;
+  const reviewedWorking = modelDecision?.working?.length ? modelDecision.working : working;
+  const reviewedUncertain = modelDecision?.uncertain?.length ? modelDecision.uncertain : uncertain;
+  const reviewedWeak = modelDecision?.weak?.length ? modelDecision.weak : weak;
   const persistedAssignment = state.assignments.find((item) => item.id === assignment.id);
-  if (persistedAssignment?.plan) {
+  let changedPlan = false;
+  let planChangeSummary: string | undefined;
+  if (modelDecision?.plan && persistedAssignment?.plan) {
+    const proposedPlan: AssignmentPlan = { ...persistedAssignment.plan, ...modelDecision.plan, id: id("assignment-plan"), assignmentId: persistedAssignment.id, revision: (persistedAssignment.plan.revision ?? 0) + 1, source: "agent", createdAt: periodEnd, updatedAt: periodEnd, nextWeeklyReviewAt: new Date(nowDate.getTime() + 7 * 86_400_000).toISOString(), nextStrategicReviewAt: new Date(nowDate.getTime() + 28 * 86_400_000).toISOString() };
+    const beforePlan = JSON.stringify(persistedAssignment.plan);
+    const afterPlan = JSON.stringify(proposedPlan);
+    if (beforePlan !== afterPlan) {
+      persistedAssignment.planHistory = [...(persistedAssignment.planHistory ?? []), proposedPlan];
+      persistedAssignment.plan = proposedPlan;
+      persistedAssignment.revision = (persistedAssignment.revision ?? 0) + 1;
+      persistedAssignment.updatedAt = periodEnd;
+      changedPlan = true;
+      planChangeSummary = modelDecision.rationale ?? "The model-backed Growth Review revised the operating approach from observed evidence.";
+    }
+  }
+  const review: import("./types").GrowthReview = { id: id("growth-review"), assignmentId: assignment.id, presenceId: assignment.presenceId, kind, periodStart, periodEnd, summary, working: reviewedWorking, uncertain: reviewedUncertain, weak: reviewedWeak, changedPlan, planChangeSummary, assignmentPlanRevision: persistedAssignment?.plan?.revision ?? assignment.plan?.revision, evidenceIds: [...state.audienceSnapshots.filter((item) => item.presenceId === assignment.presenceId).map((item) => item.id), ...recentMetrics.map((item) => item.id)], createdAt: periodEnd, reviewSource: modelDecision ? "model" : "deterministic" };
+  applyGrowthInterpretation(state, persistedAssignment ?? assignment, review);
+  if (persistedAssignment?.plan && !changedPlan) {
     const nextReviewAt = new Date(nowDate.getTime() + 7 * 86_400_000).toISOString();
     const nextStrategicAt = new Date(nowDate.getTime() + 28 * 86_400_000).toISOString();
     persistedAssignment.plan = { ...persistedAssignment.plan, nextWeeklyReviewAt: nextReviewAt, nextStrategicReviewAt: nextStrategicAt, updatedAt: periodEnd };
@@ -3123,7 +3149,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     const presence = state.presences.find((item) => item.id === (operation.presenceId ?? state.activePresenceId)) ?? state.presence;
     const assignment = presence ? growthAssignmentFor(state, presence.id, operation.assignmentId) : undefined;
     if (!assignment) return state;
-    const reviewed = createGrowthReview(state, assignment, operation.kind ?? "weekly");
+    const reviewed = createGrowthReview(state, assignment, operation.kind ?? "weekly", operation.modelDecision);
     reviewed.events.unshift(event("learning", "Growth review completed", reviewed.growthReviews[0]?.summary ?? "Genny reviewed the available Growth evidence.", "positive", { presenceId: assignment.presenceId }));
     return reviewed;
   }

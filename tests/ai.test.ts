@@ -1,9 +1,22 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { generateAgentReply, generateAgentSocialDecision, generateAssetResearchPlannerDecision, generatePresenceChatReply, parseAgentSocialDecision, parseAgentSocialEdit, parseAgentSocialJudgment, parseAssetResearchPlannerDecision } from "../lib/ai";
+import { generateAgentReply, generateAgentSocialDecision, generateAssetResearchPlannerDecision, generatePresenceChatReply, parseAgentSocialDecision, parseAgentSocialEdit, parseAgentSocialJudgment, parseAssetResearchPlannerDecision, parseGrowthReviewDecision } from "../lib/ai";
 import { saveProviderSecret } from "../lib/db";
 import { applyOperation, createAgent } from "../lib/runtime";
 
 describe("Agent social decision parsing", () => {
+  it("parses bounded model-backed Growth Review decisions", () => {
+    const decision = parseGrowthReviewDecision('```json\n{"summary":"Shift toward reply-led discovery.","working":["Evidence posts earn replies."],"uncertain":["Follower attribution is sparse."],"weak":[],"rationale":"Replies are the strongest observed signal.","plan":{"summary":"Reply-led discovery","dailyTargets":["Review 10 relevant conversations"],"discoveryDirections":["Prioritize AI builder threads"]}}\n```');
+    expect(decision).toMatchObject({
+      summary: "Shift toward reply-led discovery.",
+      working: ["Evidence posts earn replies."],
+      plan: { dailyTargets: ["Review 10 relevant conversations"] },
+    });
+  });
+
+  it("rejects Growth Review output without a summary", () => {
+    expect(parseGrowthReviewDecision('{"working":["Invented certainty"]}')).toBeUndefined();
+  });
+
   it("keeps visual research decisions bounded to supplied candidates and outcomes", () => {
     expect(parseAssetResearchPlannerDecision('{"decision":"select","candidateId":"good","rationale":"The inspected pixels match."}', ["good", "bad"])).toEqual({ decision: "select", candidateId: "good", rationale: "The inspected pixels match." });
     expect(parseAssetResearchPlannerDecision('{"decision":"select","candidateId":"not-supplied"}', ["good"])).toMatchObject({ decision: "select" });

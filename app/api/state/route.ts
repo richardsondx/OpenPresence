@@ -4,10 +4,10 @@ import { z } from "zod";
 import { deleteProviderSecret, readProviderSecret, readState, saveProviderSecret, WorkspaceConflictError, writeState } from "@/lib/db";
 import { materializeCandidate, previewCandidate, TavilyAssetDiscoveryProvider } from "@/lib/asset-discovery";
 import { assessVisualFit } from "@/lib/visual-fit";
-import { generateAgentReply, generateAgentSocialDecision, generateAgentSocialEdit, generateAgentSocialJudgment, generateAssetPublicationReview, generateAssetResearchPlannerDecision, generateEvidenceLedDraft, generateEvidenceLedPublication, generateExplorationTriage, generateIndependentModelText, generatePresenceChatReply, generatePublishingPlan, generateTextOnlyAssignmentPublication } from "@/lib/ai";
+import { generateAgentReply, generateAgentSocialDecision, generateAgentSocialEdit, generateAgentSocialJudgment, generateAssetPublicationReview, generateAssetResearchPlannerDecision, generateEvidenceLedDraft, generateEvidenceLedPublication, generateExplorationTriage, generateGrowthReview, generateIndependentModelText, generatePresenceChatReply, generatePublishingPlan, generateTextOnlyAssignmentPublication } from "@/lib/ai";
 import type { AgentSocialDecision } from "@/lib/ai";
 import { validateScenarioFidelity } from "@/lib/scenarios";
-import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntroduction, assertRuntimeScope, assignmentIsSatisfied, beginOriginalPostRehearsal, blockExecutionForLanguage, blockExecutionForTargetLanguage, cleanSandboxDraft, completeNativeExecution, completeOriginalPostRehearsal, confirmAutoMode, createRuntimeScope, declineSandboxIntroduction, deleteScenario, deliverSandboxExecution, derivePresenceCapabilityManifest, derivePublishingProgress, duePublishingPlanWindows, ensureCapabilityRequests, expireSandboxIntents, failNativeExecution, finishExplorationSession, finishPulse, formAssignmentPostIntent, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, formXActionIntent, createScenarioFromPrompt, generateMissingScenarioEvents, identityLeakageReason, importScenarioDefinition, isExplicitXPostRequest, isLaunchCandidate, isLowInformationCue, languageValidationForExecution, markCalendarSlotEvaluated, markInboundJudged, markNativeConnectionNeedsAttention, markScenarioStimulus, nativeDeliveryFailureIsConnectionScoped, publicSelfGuidance, publishingInitiativeGuidance, recordNativeMirror, recordPreferenceEvidence, recordPublishingPlanFailure, recordPublishingPlanWork, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, recordScenarioEvaluation, recordScenarioReview, renameScenario, replacePublishingPlan, resetPlaygroundSession, startExplorationSession, startScenarioRunState, completeScenarioRunState, stopScenarioRunState, stateForContext, structuralScenarioEvaluation, startPlaygroundSession, syncPlaygroundTime, syncPublishingInitiativeAssignment, targetLanguageValidationForExecution, updateScenarioEvents, updateScenarioRequirements } from "@/lib/runtime";
+import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntroduction, assertRuntimeScope, assignmentIsSatisfied, beginOriginalPostRehearsal, blockExecutionForLanguage, blockExecutionForTargetLanguage, cleanSandboxDraft, completeNativeExecution, completeOriginalPostRehearsal, confirmAutoMode, createRuntimeScope, declineSandboxIntroduction, deleteScenario, deliverSandboxExecution, derivePresenceCapabilityManifest, derivePublishingProgress, duePublishingPlanWindows, ensureCapabilityRequests, expireSandboxIntents, failNativeExecution, finishExplorationSession, finishPulse, formAssignmentPostIntent, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, formXActionIntent, createScenarioFromPrompt, generateMissingScenarioEvents, identityLeakageReason, importScenarioDefinition, isExplicitXPostRequest, isLaunchCandidate, isLowInformationCue, languageValidationForExecution, markCalendarSlotEvaluated, markInboundJudged, markNativeConnectionNeedsAttention, markScenarioStimulus, nativeDeliveryFailureIsConnectionScoped, openAgentRequest, publicSelfGuidance, publishingInitiativeGuidance, recordNativeMirror, recordPreferenceEvidence, recordPublishingPlanFailure, recordPublishingPlanWork, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, recordScenarioEvaluation, recordScenarioReview, renameScenario, replacePublishingPlan, resetPlaygroundSession, startExplorationSession, startScenarioRunState, completeScenarioRunState, stopScenarioRunState, stateForContext, structuralScenarioEvaluation, startPlaygroundSession, syncPlaygroundTime, syncPublishingInitiativeAssignment, targetLanguageValidationForExecution, updateScenarioEvents, updateScenarioRequirements } from "@/lib/runtime";
 import { followXUser, likeXPost, publishSealedXPost, readNativeXCredentials, repostXPost, searchRecentXPosts } from "@/lib/x";
 import { hydrateNativeXThreadContext, reconcileNativeX } from "@/lib/native-x";
 import { isAgentCapabilityEnabled, isAgentToolEnabled } from "@/lib/types";
@@ -343,6 +343,30 @@ function recordCapabilityFeedback(before: OpenPresenceState, next: OpenPresenceS
     return prior && prior.availability !== item.availability ? [{ capability: item.capability, previousAvailability: prior.availability, nextAvailability: item.availability, provider: item.provider, detail: `${item.label} changed from ${prior.availability} to ${item.availability}${item.provider ? ` through ${item.provider}` : ""}.` }] : [];
   });
   return ensureCapabilityRequests(changes.length ? applyOperation(next, { type: "recordCapabilityChange", presenceId: id, changes }) : next, id);
+}
+
+async function runModelGrowthReview(source: OpenPresenceState, assignment: Assignment, kind: "weekly" | "strategic") {
+  const presence = source.presences.find((item) => item.id === assignment.presenceId) ?? source.presence;
+  if (!presence) return source;
+  const evidence = {
+    audienceSnapshots: source.audienceSnapshots.filter((item) => item.presenceId === presence.id).slice(0, 32),
+    publicationMetricSnapshots: source.publicationMetricSnapshots.filter((item) => item.presenceId === presence.id).slice(0, 64),
+    recentPublications: source.mirrorObjects.filter((item) => item.presenceId === presence.id && item.actorPresenceId === presence.id && !item.archived).slice(0, 24).map((item) => ({ id: item.id, type: item.objectType, text: item.content?.text, occurredAt: item.occurredAt, externalRef: item.externalRef })),
+    capabilities: derivePresenceCapabilityManifest(source, presence.id).items,
+  };
+  try {
+    const decision = await generateGrowthReview(source, assignment, kind, evidence);
+    return applyOperation(source, { type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind, modelDecision: decision });
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "The selected model could not complete the Growth Review.";
+    openAgentRequest(source, { presenceId: presence.id, assignmentId: assignment.id, kind: "growth_review", importance: "blocking", title: "Growth Review needs a model runtime", need: "Connect the selected model so the Agent can evaluate evidence and revise growth tactics autonomously.", why: detail, currentWorkaround: "The prior plan remains active; no adaptive review is claimed until a model-backed review succeeds.", dedupeKey: `${presence.id}:${assignment.id}:growth-review` });
+    const currentAssignment = source.assignments.find((item) => item.id === assignment.id);
+    if (currentAssignment?.plan) {
+      const retryAt = new Date(Date.now() + 60 * 60_000).toISOString();
+      currentAssignment.plan = { ...currentAssignment.plan, ...(kind === "strategic" ? { nextStrategicReviewAt: retryAt } : { nextWeeklyReviewAt: retryAt }), updatedAt: new Date().toISOString() };
+    }
+    return recordRuntimeEvent(source, presence.id, "Growth Review unavailable", detail, "warning", { sourceObjectId: assignment.id });
+  }
 }
 
 function scheduledAssignmentIsDue(assignment: Assignment, now = new Date()) {
@@ -2540,8 +2564,8 @@ export async function POST(request: Request) {
             next = await runScheduledLiveAssignments(next, presence.id);
             next = await runPublishingAssignmentPulse(next, presence.id);
             for (const assignment of next.assignments.filter((item) => item.presenceId === presence.id && item.status === "active" && item.activation?.type === "continuous" && item.successEvidence?.metric === "followers")) {
-              if (assignment.plan?.nextWeeklyReviewAt && new Date(assignment.plan.nextWeeklyReviewAt).getTime() <= Date.now()) next = applyOperation(next, { type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind: "weekly" });
-              if (assignment.plan?.nextStrategicReviewAt && new Date(assignment.plan.nextStrategicReviewAt).getTime() <= Date.now()) next = applyOperation(next, { type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind: "strategic" });
+              if (assignment.plan?.nextWeeklyReviewAt && new Date(assignment.plan.nextWeeklyReviewAt).getTime() <= Date.now()) next = await runModelGrowthReview(next, assignment, "weekly");
+              if (assignment.plan?.nextStrategicReviewAt && new Date(assignment.plan.nextStrategicReviewAt).getTime() <= Date.now()) next = await runModelGrowthReview(next, assignment, "strategic");
             }
             continue;
           }
@@ -2550,8 +2574,8 @@ export async function POST(request: Request) {
           next = await reconcileNativeX(next, presence.id);
           next = await runNativePulse(next, presence.id);
           for (const assignment of next.assignments.filter((item) => item.presenceId === presence.id && item.status === "active" && item.activation?.type === "continuous" && item.successEvidence?.metric === "followers")) {
-            if (assignment.plan?.nextWeeklyReviewAt && new Date(assignment.plan.nextWeeklyReviewAt).getTime() <= Date.now()) next = applyOperation(next, { type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind: "weekly" });
-            if (assignment.plan?.nextStrategicReviewAt && new Date(assignment.plan.nextStrategicReviewAt).getTime() <= Date.now()) next = applyOperation(next, { type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind: "strategic" });
+            if (assignment.plan?.nextWeeklyReviewAt && new Date(assignment.plan.nextWeeklyReviewAt).getTime() <= Date.now()) next = await runModelGrowthReview(next, assignment, "weekly");
+            if (assignment.plan?.nextStrategicReviewAt && new Date(assignment.plan.nextStrategicReviewAt).getTime() <= Date.now()) next = await runModelGrowthReview(next, assignment, "strategic");
           }
         }
         next = recordCapabilityFeedback(current, next, current.presence?.id);
@@ -2910,6 +2934,15 @@ export async function POST(request: Request) {
       updatedSession.updatedAt = new Date().toISOString();
       writeState(next);
       return NextResponse.json(next);
+    }
+    if (parsed.type === "reviewGrowth") {
+      const presence = current.presences.find((item) => item.id === (parsed.presenceId ?? current.activePresenceId)) ?? current.presence;
+      const assignment = presence ? current.assignments.find((item) => item.id === parsed.assignmentId && item.presenceId === presence.id) ?? current.assignments.find((item) => item.presenceId === presence.id && item.successEvidence?.metric === "followers" && item.status === "active") : undefined;
+      if (!presence || !assignment) throw new Error("No active growth responsibility is available for this Presence.");
+      const next = await runModelGrowthReview(current, assignment, parsed.kind ?? "weekly");
+      const persisted = recordCapabilityFeedback(current, next, presence.id);
+      writeState(persisted);
+      return NextResponse.json(persisted);
     }
     let next = applyOperation(current, parsed);
     if (parsed.type === "replanPublishing" || (parsed.type === "setPresence" && parsed.patch.publishingInitiative?.mode && parsed.patch.publishingInitiative.mode !== "off")) {

@@ -101,6 +101,23 @@ export interface GrowthReview {
   growthFileRevision?: number;
   evidenceIds: string[];
   createdAt: string;
+  reviewSource?: "model" | "deterministic";
+  planChangeSummary?: string;
+}
+export interface GrowthReviewDecision {
+  summary: string;
+  working: string[];
+  uncertain: string[];
+  weak: string[];
+  rationale?: string;
+  plan?: {
+    summary?: string;
+    dailyTargets?: string[];
+    publishingApproach?: string[];
+    discoveryDirections?: string[];
+    relationshipFocus?: string[];
+    hypotheses?: string[];
+  };
 }
 export type AgentRequestKind = "capability" | "growth_review" | "operator_decision" | "connector";
 export type AgentRequestStatus = "open" | "accepted" | "rejected" | "resolved" | "snoozed";
@@ -1416,7 +1433,7 @@ export type PublishingPlanOperation = { type: "replanPublishing"; presenceId?: s
 export type GrowthOperation =
   | { type: "recordAudienceSnapshot"; presenceId?: string; followers: number; following?: number; source?: MetricObservationSource; observationStatus?: PresenceAudienceSnapshot["observationStatus"]; observedAt?: string }
   | { type: "recordPublicationMetricSnapshot"; presenceId?: string; mirrorObjectId: string; publicationAgeSeconds?: number; metrics: Partial<Pick<PublicationMetricSnapshot, "impressions" | "likes" | "replies" | "reposts" | "quotes">>; source?: MetricObservationSource; observationStatus?: PublicationMetricSnapshot["observationStatus"] }
-  | { type: "reviewGrowth"; assignmentId?: string; presenceId?: string; kind?: GrowthReviewKind };
+  | { type: "reviewGrowth"; assignmentId?: string; presenceId?: string; kind?: GrowthReviewKind; modelDecision?: GrowthReviewDecision };
 export type AgentRequestOperation =
   | { type: "updateAgentRequest"; id: string; status: AgentRequestStatus }
   | { type: "recordCapabilityChange"; presenceId: string; changes: Array<Pick<CapabilityChangeEvent, "capability" | "previousAvailability" | "nextAvailability" | "provider" | "detail">> };

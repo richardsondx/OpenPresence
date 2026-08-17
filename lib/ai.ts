@@ -4,7 +4,7 @@ import { effectiveLanguagePolicy, languagePolicyGuidance, presenceLanguageGuidan
 import { isAiMockEnabled } from "./test-runtime";
 import { marketMockCandidate } from "./market-research";
 import { compileKnowledgeContext } from "./knowledge";
-import type { AssetSemanticKind, Conversation, ConversationDisposition, EvidenceNeed, KnowledgeContextPacket, ModelProvider, OpenPresenceState, Presence, PresenceChatMessage, PublishingPlanDraft, SocialAssetKind, StoryCandidate, VisualBrief, VisualNeed } from "./types";
+import type { AssetSemanticKind, Assignment, Conversation, ConversationDisposition, EvidenceNeed, GrowthReviewDecision, GrowthReviewKind, KnowledgeContextPacket, ModelProvider, OpenPresenceState, Presence, PresenceChatMessage, PublishingPlanDraft, SocialAssetKind, StoryCandidate, VisualBrief, VisualNeed } from "./types";
 
 const REQUEST_TIMEOUT_MS = 60_000;
 
@@ -352,6 +352,40 @@ export async function generateIndependentModelText(state: OpenPresenceState, sys
   if (profile.provider === "openrouter") return runOpenAiCompatible(profile.provider, connection.endpoint || "https://openrouter.ai/api/v1", secret!, profile.model, prompt);
   if (profile.provider === "custom") return runOpenAiCompatible(profile.provider, connection.endpoint || "http://localhost:11434/v1", secret || "", profile.model, prompt);
   return runOpenAiCompatible(profile.provider, connection.endpoint || "https://api.openai.com/v1", secret!, profile.model, prompt, profile.quality === "low" || profile.quality === "medium" || profile.quality === "high" ? profile.quality : undefined);
+}
+
+function boundedReviewList(value: unknown) {
+  return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim().slice(0, 500)).slice(0, 8) : [];
+}
+
+export function parseGrowthReviewDecision(raw: string): GrowthReviewDecision | undefined {
+  const normalized = raw.trim().replace(/^```json\s*/i, "").replace(/\s*```$/, "");
+  const start = normalized.indexOf("{");
+  const end = normalized.lastIndexOf("}");
+  if (start < 0 || end <= start) return undefined;
+  let parsed: Record<string, unknown>;
+  try { parsed = JSON.parse(normalized.slice(start, end + 1)) as Record<string, unknown>; } catch { return undefined; }
+  if (typeof parsed.summary !== "string" || !parsed.summary.trim()) return undefined;
+  const rawPlan = parsed.plan && typeof parsed.plan === "object" ? parsed.plan as Record<string, unknown> : undefined;
+  const plan = rawPlan ? {
+    ...(typeof rawPlan.summary === "string" && rawPlan.summary.trim() ? { summary: rawPlan.summary.trim().slice(0, 2000) } : {}),
+    ...(boundedReviewList(rawPlan.dailyTargets).length ? { dailyTargets: boundedReviewList(rawPlan.dailyTargets) } : {}),
+    ...(boundedReviewList(rawPlan.publishingApproach).length ? { publishingApproach: boundedReviewList(rawPlan.publishingApproach) } : {}),
+    ...(boundedReviewList(rawPlan.discoveryDirections).length ? { discoveryDirections: boundedReviewList(rawPlan.discoveryDirections) } : {}),
+    ...(boundedReviewList(rawPlan.relationshipFocus).length ? { relationshipFocus: boundedReviewList(rawPlan.relationshipFocus) } : {}),
+    ...(boundedReviewList(rawPlan.hypotheses).length ? { hypotheses: boundedReviewList(rawPlan.hypotheses) } : {}),
+  } : undefined;
+  return { summary: parsed.summary.trim().slice(0, 2000), working: boundedReviewList(parsed.working), uncertain: boundedReviewList(parsed.uncertain), weak: boundedReviewList(parsed.weak), ...(typeof parsed.rationale === "string" && parsed.rationale.trim() ? { rationale: parsed.rationale.trim().slice(0, 1000) } : {}), ...(plan && Object.keys(plan).length ? { plan } : {}) };
+}
+
+export async function generateGrowthReview(state: OpenPresenceState, assignment: Assignment, kind: GrowthReviewKind, evidence: Record<string, unknown>): Promise<GrowthReviewDecision> {
+  if (isAiMockEnabled()) return { summary: `${kind === "strategic" ? "Strategic" : "Weekly"} model review: keep the current learning loop explicit while evidence accumulates.`, working: [], uncertain: ["The mock runtime does not invent performance evidence."], weak: [], rationale: "Test model fixture." };
+  const system = "You are the Growth Review role for an autonomous social Presence. Return JSON only with summary, working[], uncertain[], weak[], rationale, and optional plan {summary,dailyTargets,publishingApproach,discoveryDirections,relationshipFocus,hypotheses}. Use only the supplied evidence. You may revise the growth approach and hypotheses, but never modify identity files, Mission, Soul, Brain, Taste, or Presence identity. Do not invent metrics or claim follower growth without observed evidence.";
+  const content = JSON.stringify({ reviewKind: kind, responsibility: assignment.instruction, currentPlan: assignment.plan, evidence }, null, 2);
+  const raw = await generateIndependentModelText(state, system, content);
+  const decision = parseGrowthReviewDecision(raw);
+  if (!decision) throw new AiRuntimeError("The Growth Review runtime returned an invalid structured review.");
+  return decision;
 }
 
 export async function generatePresenceChatReply(state: OpenPresenceState, presenceId: string, content: string, history: Array<Pick<PresenceChatMessage, "role" | "content">>, socialEvidence?: string, socialThreadContext?: string) {

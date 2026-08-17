@@ -55,6 +55,33 @@ describe("continuous growth responsibility", () => {
     expect(next.growthReviews).toHaveLength(1);
   });
 
+  it("applies a model-backed Growth Review to the growth plan only", () => {
+    const state = fixture();
+    let next = applyOperation(state, { type: "createAssignment", presenceId: state.presence!.id, environment: "live", instruction: "Grow this Presence toward 100,000 followers while building an audience of AI founders." });
+    const assignment = next.assignments[0];
+    next = applyOperation(next, { type: "activateAssignment", id: assignment.id });
+    const beforeIdentity = Object.fromEntries(next.files.filter((file) => ["SOUL", "MISSION", "TASTE", "BRAIN"].includes(file.kind)).map((file) => [file.kind, file.content]));
+    next = applyOperation(next, {
+      type: "reviewGrowth",
+      presenceId: state.presence!.id,
+      assignmentId: assignment.id,
+      kind: "weekly",
+      modelDecision: {
+        summary: "Shift toward reply-led discovery.",
+        working: ["Evidence posts earn replies."],
+        uncertain: ["Follower attribution is sparse."],
+        weak: ["Standalone posts are not yet repeatable."],
+        rationale: "Replies are the strongest observed signal.",
+        plan: { summary: "Reply-led discovery", dailyTargets: ["Review 10 relevant conversations"] },
+      },
+    });
+    expect(next.growthReviews[0]).toMatchObject({ reviewSource: "model", changedPlan: true, planChangeSummary: "Replies are the strongest observed signal." });
+    expect(next.assignments[0].planHistory).toHaveLength(2);
+    expect(next.assignments[0].plan?.summary).toBe("Reply-led discovery");
+    expect(next.files.find((file) => file.kind === "GROWTH")?.content).toContain("Reply-led discovery");
+    expect(Object.fromEntries(next.files.filter((file) => ["SOUL", "MISSION", "TASTE", "BRAIN"].includes(file.kind)).map((file) => [file.kind, file.content]))).toEqual(beforeIdentity);
+  });
+
   it("uses a median comparable baseline and exposes low confidence with sparse evidence", () => {
     const state = fixture();
     const presenceId = state.presence!.id;
