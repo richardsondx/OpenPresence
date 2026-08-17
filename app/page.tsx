@@ -3141,6 +3141,18 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
     { id: "idea", label: "Idea" }, { id: "voice", label: "Voice" }, { id: "topic", label: "Topic" }, { id: "humor", label: "Humor" }, { id: "format", label: "Format" }, { id: "technical_depth", label: "Technical depth" }, { id: "too_generic", label: "Too generic" }, { id: "too_promotional", label: "Too promotional" }, { id: "too_long", label: "Too long" }, { id: "too_risky", label: "Too risky" }, { id: "factually_wrong", label: "Factually wrong" }, { id: "not_something_i_would_say", label: "Not something I'd say" },
   ];
   const run = async (operation: unknown) => { setBusy(true); try { await mutate(operation); } finally { setBusy(false); } };
+  const resetPlayground = async () => {
+    if (!session) return;
+    await run({ type: "resetPlayground", sessionId: session.id });
+    setSelectedObjectId(null);
+    setAssignmentDraftId(null);
+    setAssignmentPanelDismissed(false);
+    setAssignmentCancellationNotice(false);
+    setExpandedRehearsalId(null);
+    setFeedbackAttemptId(null);
+    setFeedbackReasons([]);
+    setFeedbackNote("");
+  };
   const runAssignment = async (assignmentId: string, start = false) => {
     if (!sessionId) return;
     setBusy(true);
@@ -3216,7 +3228,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
       <div className="playground-mode-bar">
         <div className="playground-mode-copy">{scenarioMode ? "Make it cheap to discover behavioral failure before it becomes public." : "A safe place to test the Presence before anything goes live."}</div>
         <div className="playground-mode-controls">
-          {session && <Button variant="ghost" disabled={busy} onClick={() => void run({ type: "resetPlayground", sessionId: session.id })}><RotateCcw size={14} /> Reset</Button>}
+          {session && <Button variant="ghost" disabled={busy} onClick={() => void resetPlayground()}><RotateCcw size={14} /> Reset</Button>}
           <div className="playground-mode-switch" role="tablist" aria-label="Playground mode">
             <Button role="tab" aria-selected={!scenarioMode} variant={!scenarioMode ? "primary" : "ghost"} onClick={() => setScenarioMode(false)}>Free play</Button>
             <Button role="tab" aria-selected={scenarioMode} variant={scenarioMode ? "primary" : "ghost"} onClick={() => setScenarioMode(true)}>Scenarios</Button>
@@ -3248,6 +3260,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
           <div className="assignment-progress-heading">
             <div>
               <div className="eyebrow">{assignmentIsComplete ? "Completed Assignment" : "Posting Assignment"}</div>
+              {displayedAssignment.environment === "sandbox" && !displayedAssignment.sessionId && <small className="assignment-scope-label">Durable Sandbox draft · not tied to this session</small>}
               <h2>{displayedAssignmentInstruction}</h2>
             </div>
           </div>
@@ -6093,7 +6106,7 @@ function ScheduleLegend({ plan, layers }: { plan?: PublishingPlan; layers: Sched
 function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; mutate: Mutate; setView: (view: View) => void }) {
   const presence = state.presence;
   const [countdownNow, setCountdownNow] = useState<number | null>(null);
-  const clockAssignment = presence ? state.assignments.find((item) => item.presenceId === presence.id && item.successEvidence?.metric === "followers" && item.status !== "cancelled") : undefined;
+  const clockAssignment = presence ? state.assignments.find((item) => item.presenceId === presence.id && item.successEvidence?.metric === "followers" && assignmentIsOpen(item)) : undefined;
   const nextGrowthReviewAt = [clockAssignment?.plan?.nextWeeklyReviewAt, clockAssignment?.plan?.nextStrategicReviewAt].filter((value): value is string => Boolean(value)).sort((left, right) => left.localeCompare(right))[0];
   useEffect(() => {
     if (!nextGrowthReviewAt) return;
@@ -6109,8 +6122,12 @@ function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; muta
   const latestPublicationSnapshot = publicationSnapshots[0];
   const latestEvidence = [latest?.observedAt, latestPublicationSnapshot?.observedAt].filter((value): value is string => Boolean(value)).sort((left, right) => right.localeCompare(left))[0];
   const review = state.growthReviews.filter((item) => item.presenceId === presence.id).sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+  const unreviewedAudienceCount = review ? snapshots.filter((item) => !(review.evidenceIds ?? []).includes(item.id)).length : 0;
+  const unreviewedPublicationCount = review ? publicationSnapshots.filter((item) => !(review.evidenceIds ?? []).includes(item.id)).length : 0;
+  const reviewIsStale = Boolean(review && (unreviewedAudienceCount > 0 || unreviewedPublicationCount > 0));
   const manifest = derivePresenceCapabilityManifest(state, presence.id);
   const limitations = manifest.items.filter((item) => item.availability !== "available");
+  const limitationCopy = [...new Set(limitations.map((item) => item.limitation).filter((item): item is string => Boolean(item)))];
   const goal = assignment?.successEvidence?.value ?? 100_000;
   const progress = latest ? Math.min(100, Math.round((latest.followers / goal) * 100)) : 0;
   const bridge = presence.connectionMode === "bridge" ? state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline") : undefined;
@@ -6118,6 +6135,7 @@ function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; muta
   const nativeConnection = presence.connectionMode === "native" ? state.nativeConnections.find((item) => item.presenceId === presence.id && item.channelId === presence.channel) : undefined;
   const nextChannelObservationAt = nativeConnection?.observation?.nextObservationAt;
   const nextGrowthReviewCountdown = countdownNow === null ? undefined : formatCountdown(nextGrowthReviewAt, countdownNow);
+  const bodyHeading = manifest.bodyStatus === "degraded" ? "Degraded" : manifest.bodyStatus === "ready" ? limitations.length ? "Ready with limits" : "Ready to work" : "Unavailable";
   const createGrowthResponsibility = async () => {
     await mutate({ type: "createAssignment", presenceId: presence.id, environment: presence.connectionMode === "sandbox" ? "sandbox" : "live", instruction: `Grow this Presence toward ${goal.toLocaleString()} followers while building an audience of ${presence.brief.audience}.` });
   };
@@ -6140,12 +6158,12 @@ function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; muta
         </div>
       </section>
       <div className="growth-columns">
-        <section className="settings-card"><div className="section-heading compact"><div><SectionEyebrow>Genny&apos;s current read</SectionEyebrow><h2>What the evidence says</h2></div><TrendingUp size={17} /></div>{review ? <><p>{review.summary}</p><small className="muted">{review.reviewSource === "model" ? "Model-backed review" : "Deterministic evidence review"}{review.planChangeSummary ? ` · ${review.planChangeSummary}` : ""}</small><div className="growth-read-list"><div><strong>Working</strong>{review.working.length ? <ul>{review.working.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">Nothing strong enough to call yet.</p>}</div><div><strong>Uncertain</strong>{review.uncertain.length ? <ul>{review.uncertain.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">No open uncertainty recorded.</p>}</div><div><strong>Weak</strong>{review.weak.length ? <ul>{review.weak.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">No weak pattern recorded.</p>}</div></div></> : <div className="growth-no-review"><p>The Agent has not completed a Growth review yet. It will review follower movement and publication performance on the operating rhythm.</p><Button variant="secondary" onClick={() => void mutate({ type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind: "weekly" })}>Review available evidence</Button></div>}</section>
+        <section className="settings-card"><div className="section-heading compact"><div><SectionEyebrow>Genny&apos;s current read</SectionEyebrow><h2>What the evidence says</h2></div><TrendingUp size={17} /></div>{review ? <><p>{review.summary}</p><small className="muted">{review.reviewSource === "model" ? "Model-backed review" : "Deterministic evidence review"}{review.planChangeSummary ? ` · ${review.planChangeSummary}` : ""}</small>{reviewIsStale && <div className="growth-review-stale" role="status"><div><strong>New evidence since this review</strong><span>{[unreviewedAudienceCount ? `${unreviewedAudienceCount} audience snapshot${unreviewedAudienceCount === 1 ? "" : "s"}` : "", unreviewedPublicationCount ? `${unreviewedPublicationCount} publication-performance snapshot${unreviewedPublicationCount === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ")} has not been included in this read.</span></div><Button variant="secondary" onClick={() => void mutate({ type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind: review.kind })}>Review new evidence</Button></div>}<div className="growth-read-list"><div><strong>Working</strong>{review.working.length ? <ul>{review.working.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">Nothing strong enough to call yet.</p>}</div><div><strong>Uncertain</strong>{review.uncertain.length ? <ul>{review.uncertain.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">No open uncertainty recorded.</p>}</div><div><strong>Weak</strong>{review.weak.length ? <ul>{review.weak.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">No weak pattern recorded.</p>}</div></div></> : <div className="growth-no-review"><p>The Agent has not completed a Growth review yet. It will review follower movement and publication performance on the operating rhythm.</p><Button variant="secondary" onClick={() => void mutate({ type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind: "weekly" })}>Review available evidence</Button></div>}</section>
         <section className="settings-card"><div className="section-heading compact"><div><SectionEyebrow>Current approach</SectionEyebrow><h2>How the Agent is working</h2></div><Sparkles size={17} /></div>{assignment.plan ? <><p>{assignment.plan.summary}</p><div className="growth-plan-list"><div><strong>Publishing</strong><ul>{assignment.plan.publishingApproach.map((item) => <li key={item}>{item}</li>)}</ul></div><div><strong>Discovery</strong><ul>{assignment.plan.discoveryDirections.map((item) => <li key={item}>{item}</li>)}</ul></div><div><strong>Relationships</strong><ul>{assignment.plan.relationshipFocus.map((item) => <li key={item}>{item}</li>)}</ul></div></div><small className="muted">Plan revision {assignment.plan.revision} · Next weekly review {assignment.plan.nextWeeklyReviewAt ? formatHistoryTimestamp(assignment.plan.nextWeeklyReviewAt) : "not scheduled"}</small></> : <p className="muted">The Agent is preparing its first operating plan.</p>}</section>
       </div>
       <div className="growth-columns">
         <section className="settings-card"><div className="section-heading compact"><div><SectionEyebrow>Evidence quality</SectionEyebrow><h2>Recent audience observations</h2></div><ShieldCheck size={17} /></div>{snapshots.length ? <div className="growth-evidence-list">{snapshots.slice(0, 5).map((item) => <div key={item.id}><strong>{item.followers.toLocaleString()} followers</strong><span>{formatHistoryTimestamp(item.observedAt)} · {item.source} · {item.observationStatus}</span></div>)}</div> : <p className="muted">No verified audience snapshot has arrived from the selected channel.</p>}</section>
-        <section className="settings-card"><div className="section-heading compact"><div><SectionEyebrow>Body & limitations</SectionEyebrow><h2>{manifest.bodyStatus === "ready" ? "Ready to work" : manifest.bodyStatus === "degraded" ? "Degraded" : "Unavailable"}</h2></div><PlugZap size={17} /></div><p className="muted">The Agent can only claim autonomy where the connected channel body can observe, execute, and verify.</p><div className="capability-list">{manifest.items.filter((item) => ["post", "reply", "follow", "follower_measurement", "post_performance"].includes(item.capability)).map((item) => <div className="capability-row" key={item.capability}><div><strong>{item.label}</strong><small>{item.provider ?? "No provider"}{item.requiresBrowser ? " · browser required" : ""}</small></div><span className={`capability-state capability-state-${item.availability}`}>{item.availability.replaceAll("-", " ")}</span></div>)}</div>{limitations.length > 0 && <p className="settings-warning">{limitations.slice(0, 2).map((item) => item.limitation).filter(Boolean).join(" ")}</p>}<Button variant="ghost" onClick={() => setView("presence")}>Review Settings</Button></section>
+        <section className="settings-card"><div className="section-heading compact"><div><SectionEyebrow>Body & limitations</SectionEyebrow><h2>{bodyHeading}</h2></div><PlugZap size={17} /></div><p className="muted">The Agent can only claim autonomy where the connected channel body can observe, execute, and verify.</p><div className="capability-list">{manifest.items.filter((item) => ["post", "reply", "follow", "follower_measurement", "post_performance"].includes(item.capability)).map((item) => <div className="capability-row" key={item.capability}><div><strong>{item.label}</strong><small>{item.provider ?? "No provider"}{item.requiresBrowser ? " · browser required" : ""}</small></div><span className={`capability-state capability-state-${item.availability}`}>{item.availability.replaceAll("-", " ")}</span></div>)}</div>{limitationCopy.length > 0 && <p className="settings-warning">Some channel capabilities are unavailable: {limitationCopy.slice(0, 2).join(" ")}</p>}<Button variant="ghost" onClick={() => setView("presence")}>Review Settings</Button></section>
       </div>
     </>}
   </div>;

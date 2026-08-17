@@ -417,6 +417,7 @@ fieldset { border: none; padding: 0; margin: 0 0 26px; }
 .assignment-progress-panel { grid-template-columns: minmax(0, 1fr) auto; min-width: 0; }
 .assignment-progress-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 12px; min-width: 0; }
 .assignment-progress-heading > div { min-width: 0; }
+.assignment-scope-label { display: block; margin-top: 5px; color: var(--muted); font-size: 10px; }
 .assignment-progress-panel h2 { max-width: 720px; margin: 4px 0 0; font-size: 15px; overflow-wrap: anywhere; }
 .assignment-live-card { display: flex; grid-column: 2; grid-row: 1; align-items: center; justify-self: end; gap: 9px; min-width: 170px; max-width: 230px; padding: 7px 9px; border: 1px solid #dce8df; border-radius: 7px; background: #f7fbf8; }
 .assignment-progress-ring { display: grid; width: 46px; height: 46px; flex: 0 0 auto; place-items: center; border-radius: 50%; animation: assignment-progress-pulse 1.8s ease-in-out infinite; }
@@ -2157,6 +2158,11 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .growth-read-list p { margin: 0; }
 .growth-no-review { display: grid; gap: 14px; align-items: start; }
 .growth-no-review p { margin: 0; color: var(--muted); line-height: 1.6; }
+.growth-review-stale { display: flex; align-items: center; justify-content: space-between; gap: 14px; margin: 14px 0 4px; padding: 12px; border: 1px solid #e3c7b3; border-radius: 6px; background: #fff8f3; color: #7d4a30; }
+.growth-review-stale > div { display: grid; gap: 3px; }
+.growth-review-stale strong { font-size: 12px; }
+.growth-review-stale span { font-size: 11px; line-height: 1.45; }
+@media (max-width: 720px) { .growth-review-stale { align-items: stretch; flex-direction: column; } }
 .growth-evidence-list { display: grid; gap: 0; margin-top: 10px; }
 .growth-evidence-list > div { display: grid; gap: 4px; padding: 12px 0; border-top: 1px solid var(--line); }
 .growth-evidence-list span { color: var(--muted); font-size: 10px; }

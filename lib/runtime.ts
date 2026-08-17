@@ -1091,12 +1091,16 @@ function applyGrowthInterpretation(state: OpenPresenceState, assignment: Assignm
 
 function createGrowthReview(source: OpenPresenceState, assignment: Assignment, kind: import("./types").GrowthReviewKind, modelDecision?: import("./types").GrowthReviewDecision) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
-  const recent = state.growthReviews.find((item) => item.assignmentId === assignment.id && item.kind === kind && Date.now() - new Date(item.createdAt).getTime() < 86_400_000);
-  if (recent) return state;
   const nowDate = new Date();
   const periodDays = kind === "strategic" ? 28 : 7;
   const periodEnd = nowDate.toISOString();
   const periodStart = new Date(nowDate.getTime() - periodDays * 86_400_000).toISOString();
+  const audienceSnapshotIds = state.audienceSnapshots.filter((snapshot) => snapshot.presenceId === assignment.presenceId).map((snapshot) => snapshot.id);
+  const recentMetricIds = state.publicationMetricSnapshots.filter((snapshot) => snapshot.presenceId === assignment.presenceId && new Date(snapshot.observedAt).getTime() >= new Date(periodStart).getTime()).map((snapshot) => snapshot.id);
+  const currentEvidenceIds = new Set([...audienceSnapshotIds, ...recentMetricIds]);
+  const recent = state.growthReviews.find((item) => item.assignmentId === assignment.id && item.kind === kind && Date.now() - new Date(item.createdAt).getTime() < 86_400_000);
+  const hasNewEvidence = recent ? [...currentEvidenceIds].some((evidenceId) => !(recent.evidenceIds ?? []).includes(evidenceId)) : false;
+  if (recent && !hasNewEvidence) return state;
   const deltas = audienceDeltas(state, assignment.presenceId);
   const recentMetrics = state.publicationMetricSnapshots.filter((snapshot) => snapshot.presenceId === assignment.presenceId && new Date(snapshot.observedAt).getTime() >= new Date(periodStart).getTime());
   const working: string[] = [];

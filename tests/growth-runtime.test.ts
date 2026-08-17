@@ -55,6 +55,20 @@ describe("continuous growth responsibility", () => {
     expect(next.growthReviews).toHaveLength(1);
   });
 
+  it("allows a fresh review when new evidence arrives within the normal review cooldown", () => {
+    const state = fixture();
+    let next = applyOperation(state, { type: "createAssignment", presenceId: state.presence!.id, environment: "live", instruction: "Grow this Presence toward 100,000 followers while building an audience of AI founders." });
+    const assignment = next.assignments[0];
+    next = applyOperation(next, { type: "activateAssignment", id: assignment.id });
+    next = applyOperation(next, { type: "recordAudienceSnapshot", presenceId: state.presence!.id, followers: 20_000, source: "native", observedAt: new Date().toISOString() });
+    next = applyOperation(next, { type: "reviewGrowth", presenceId: state.presence!.id, assignmentId: assignment.id, kind: "weekly" });
+    expect(next.growthReviews).toHaveLength(1);
+    next = applyOperation(next, { type: "recordAudienceSnapshot", presenceId: state.presence!.id, followers: 20_100, source: "native", observedAt: new Date(Date.now() + 1_000).toISOString() });
+    next = applyOperation(next, { type: "reviewGrowth", presenceId: state.presence!.id, assignmentId: assignment.id, kind: "weekly" });
+    expect(next.growthReviews).toHaveLength(2);
+    expect(next.growthReviews[0]?.evidenceIds).toContain(next.audienceSnapshots[0]?.id);
+  });
+
   it("applies a model-backed Growth Review to the growth plan only", () => {
     const state = fixture();
     let next = applyOperation(state, { type: "createAssignment", presenceId: state.presence!.id, environment: "live", instruction: "Grow this Presence toward 100,000 followers while building an audience of AI founders." });
