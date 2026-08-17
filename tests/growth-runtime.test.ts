@@ -79,6 +79,8 @@ describe("continuous growth responsibility", () => {
     expect(next.assignments[0].planHistory).toHaveLength(2);
     expect(next.assignments[0].plan?.summary).toBe("Reply-led discovery");
     expect(next.files.find((file) => file.kind === "GROWTH")?.content).toContain("Reply-led discovery");
+    expect(next.growthFileVersions).toHaveLength(2);
+    expect(next.growthFileVersions[0]).toMatchObject({ version: 2, previousVersion: 1, reviewId: next.growthReviews[0]?.id, reviewSource: "model" });
     expect(Object.fromEntries(next.files.filter((file) => ["SOUL", "MISSION", "TASTE", "BRAIN"].includes(file.kind)).map((file) => [file.kind, file.content]))).toEqual(beforeIdentity);
   });
 
