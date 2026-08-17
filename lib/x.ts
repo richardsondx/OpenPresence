@@ -32,6 +32,77 @@ export interface XRecentPost {
   media?: XMediaAttachment[];
 }
 
+export function xPostIdFromUrl(value: string) {
+  try {
+    const url = new URL(value.trim());
+    if (!['x.com', 'www.x.com', 'twitter.com', 'www.twitter.com'].includes(url.hostname.toLowerCase())) return undefined;
+    const match = url.pathname.match(/^\/[^/]+\/(?:status|statuses)\/(\d+)/i) ?? url.pathname.match(/^\/i\/status\/(\d+)/i);
+    return match?.[1];
+  } catch {
+    return undefined;
+  }
+}
+
+function decodeHtml(value: string) {
+  return value
+    .replace(/<br\s*\/?\s*>/gi, "\n")
+    .replace(/<[^>]+>/g, "")
+    .replace(/&#x27;|&#39;|&apos;/gi, "'")
+    .replace(/&quot;/gi, '"')
+    .replace(/&amp;/gi, "&")
+    .replace(/&lt;/gi, "<")
+    .replace(/&gt;/gi, ">")
+    .replace(/&#(\d+);/g, (_, code: string) => String.fromCodePoint(Number(code)))
+    .replace(/&#x([\da-f]+);/gi, (_, code: string) => String.fromCodePoint(parseInt(code, 16)))
+    .replace(/[ \t]+/g, " ")
+    .replace(/\n[ \t]+/g, "\n")
+    .trim();
+}
+
+/** Read one public X post without requiring the operator to connect an X API. */
+export async function readPublicXPostByUrl(value: string): Promise<XRecentPost> {
+  const postId = xPostIdFromUrl(value);
+  if (!postId) throw new Error("Paste a public X post URL such as https://x.com/boardyai/status/2089200546477420956.");
+  const inputUrl = new URL(value.trim());
+  const canonicalUrl = `https://x.com${inputUrl.pathname}`;
+  const endpoint = `https://publish.x.com/oembed?url=${encodeURIComponent(canonicalUrl)}`;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 12_000);
+  try {
+    const response = await fetch(endpoint, { headers: { Accept: "application/json" }, signal: controller.signal });
+    if (!response.ok) throw new Error(`X could not provide this public post (HTTP ${response.status}).`);
+    const payload = await response.json() as { html?: string; author_name?: string; author_url?: string };
+    const html = payload.html ?? "";
+    const paragraph = html.match(/<p([^>]*)>([\s\S]*?)<\/p>/i);
+    const text = decodeHtml(paragraph?.[2] ?? "");
+    const language = paragraph?.[1]?.match(/\blang=["']([^"']+)["']/i)?.[1];
+    if (!text) throw new Error("X returned the post shell but not its text.");
+    const authorUrl = payload.author_url;
+    const authorUsername = authorUrl ? new URL(authorUrl).pathname.split("/").filter(Boolean).at(-1) : undefined;
+    const dateText = [...html.matchAll(/<a[^>]*>([^<]+)<\/a>/gi)]
+      .map((match) => decodeHtml(match[1] ?? ""))
+      .find((candidate) => /^(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}$/i.test(candidate));
+    const createdAt = dateText ? new Date(`${dateText} UTC`).toISOString() : undefined;
+    let media: XMediaAttachment[] | undefined;
+    try {
+      const pageResponse = await fetch(canonicalUrl, { headers: { Accept: "text/html", "User-Agent": "OpenPresence/1.0" }, signal: controller.signal });
+      if (pageResponse.ok) {
+        const page = await pageResponse.text();
+        const mediaUrls = [...new Set([...page.matchAll(/https:\/\/pbs\.twimg\.com\/(?:media|amplify_video_thumb|ext_tw_video_thumb)\/[^"'\\s<]+/gi)].map((match) => decodeHtml(match[0])))].slice(0, 4);
+        media = mediaUrls.map((url, index) => ({ mediaKey: `${postId}-public-${index}`, type: /(?:amplify_video_thumb|ext_tw_video_thumb)/i.test(url) ? "video" : /\.gif(?:[?:]|$)/i.test(url) ? "animated_gif" : "photo", url }));
+      }
+    } catch {
+      // The oEmbed payload remains valid text evidence when the public page is unavailable.
+    }
+    return { id: postId, text, language, createdAt, authorUsername, authorName: payload.author_name, conversationId: postId, media: media?.length ? media : undefined };
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("X ")) throw error;
+    throw new Error("X could not read that public post right now. Check the URL or try again.");
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 const apiBase = () => (process.env.OPENPRESENCE_X_API_BASE_URL ?? "https://api.x.com").replace(/\/$/, "");
 const uploadBase = () => (process.env.OPENPRESENCE_X_UPLOAD_BASE_URL ?? "https://upload.twitter.com").replace(/\/$/, "");
 const encode = (value: string) => encodeURIComponent(value).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);

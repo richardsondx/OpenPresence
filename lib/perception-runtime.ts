@@ -107,13 +107,18 @@ async function imageParts(asset: Asset) {
   const match = asset.dataUrl?.match(/^data:([^;]+);base64,(.+)$/);
   if (!match && !sourceBytes) return undefined;
   const source = sourceBytes ?? Buffer.from(match![2]!, "base64");
+  // X often exposes a video poster as a pbs.twimg.com thumbnail while the
+  // native API still identifies the attachment as video. Inspect that
+  // verified preview as a still image instead of sending JPEG bytes through
+  // ffmpeg and incorrectly reporting that the video is unreadable.
+  const isVideoPreview = asset.type === "video" && Boolean(asset.provenance.sourceUrl?.match(/pbs\.twimg\.com\/(?:amplify_video_thumb|ext_tw_video_thumb|media)\//i));
   try {
-    const frames = asset.type === "video" ? await extractVideoFrames(source) : asset.type === "gif" ? await extractGifFrames(source) : [source];
+    const frames = asset.type === "video" && !isVideoPreview ? await extractVideoFrames(source) : asset.type === "gif" ? await extractGifFrames(source) : [source];
     if (!frames.length) return undefined;
     const resized = await composeFrames(frames);
     return { mimeType: "image/png", data: resized.toString("base64") };
   } catch {
-    if (asset.type === "video" || asset.type === "gif") return undefined;
+    if ((asset.type === "video" && !isVideoPreview) || asset.type === "gif") return undefined;
     return { mimeType: match?.[1] ?? asset.storage?.mimeType ?? "application/octet-stream", data: source.toString("base64") };
   }
 }

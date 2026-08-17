@@ -1791,6 +1791,24 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .social-card-asset img { width: min(520px, 100%); max-height: 310px; object-fit: contain; border: 1px solid var(--line); border-radius: 5px; background: #f7f3ef; }
 .social-card-asset a { color: #8c5535; font: 9px "DM Mono", monospace; text-decoration: none; }
 .social-card-asset a:hover { text-decoration: underline; }
+.media-perception-disclosure { display: grid; gap: 10px; margin: 0 0 14px; border: 1px solid #ead6c5; border-radius: 7px; background: #fffaf5; }
+.media-perception-summary { display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 10px 11px; color: #8c5535; cursor: pointer; font: 10px "DM Mono", monospace; }
+.media-perception-summary span { color: var(--muted); }
+.media-perception-body { display: grid; gap: 10px; padding: 0 11px 11px; }
+.media-perception-grid { display: grid; gap: 10px; }
+.media-perception-item { display: grid; grid-template-columns: minmax(130px, 220px) minmax(0, 1fr); gap: 11px; padding-top: 10px; border-top: 1px solid #eadfd5; }
+.media-perception-visual { min-width: 0; }
+.media-perception-visual img, .media-perception-visual video { display: block; width: 100%; max-height: 220px; object-fit: contain; border: 1px solid var(--line); border-radius: 5px; background: #f7f3ef; }
+.media-perception-copy { display: grid; align-content: start; gap: 6px; min-width: 0; }
+.media-perception-copy strong { font-size: 11px; overflow-wrap: anywhere; }
+.media-perception-copy div { display: grid; gap: 2px; }
+.media-perception-copy div span, .media-perception-copy small, .media-perception-boundary { color: var(--muted); font: 9px/1.4 "DM Mono", monospace; }
+.media-perception-copy p { margin: 0; font-size: 11px; line-height: 1.45; overflow-wrap: anywhere; }
+.media-perception-unavailable { color: var(--muted); }
+.media-perception-action { width: max-content; padding: 0; border: 0; background: transparent; color: #8c5535; cursor: pointer; font: 10px "DM Mono", monospace; }
+.media-perception-action:disabled { cursor: wait; opacity: .6; }
+.media-perception-error { margin: 0; color: #a9524c; font: 10px/1.4 "DM Mono", monospace; }
+.media-perception-boundary { margin: 0; }
 .feed-item-asset { display: grid; gap: 4px; max-width: min(420px, 100%); }
 .feed-item-assets img { width: min(420px, 100%); max-height: 280px; object-fit: contain; }
 .feed-item-source { color: var(--muted); font: 9px "DM Mono", monospace; }

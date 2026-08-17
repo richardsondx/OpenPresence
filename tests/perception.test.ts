@@ -86,6 +86,37 @@ describe("sandbox link perception", () => {
     }
   });
 
+  it("inspects live Mirror media through the same visual path as Sandbox media", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (_input: string | URL, init?: RequestInit) => {
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      expect(body.model).toBe("gpt-5.6-luna");
+      return new Response(JSON.stringify({ choices: [{ message: { content: JSON.stringify({ observation: "A chart is visible.", interpretation: "The image presents a visual claim that can be considered with the post text.", uncertainty: "medium" }) } }] }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+    try {
+      let state = createAgent({ name: "Live Vision Agent", description: "Inspect live social evidence.", mode: "agent", handle: "@live_vision", accent: "#D68754" });
+      state = applyOperation(state, { type: "configureProvider", provider: "openai", label: "OpenAI", hasSecret: true });
+      const connection = state.providerConnections.find((item) => item.provider === "openai");
+      saveProviderSecret(connection!.id, "test-openai-key");
+      state = applyOperation(state, { type: "setModel", provider: "openai", model: "gpt-5.6-luna", quality: "low", vision: true });
+      state = applyOperation(state, { type: "setToolBinding", toolId: "asset.inspect", provider: "openai", model: "gpt-5.6-luna", connectionId: connection!.id });
+      state = startPlaygroundSession(state);
+      const session = state.playgroundSessions[0]!;
+      state = addSandboxEvent(state, { sessionId: session.id, actionId: "post", actorName: "Public author", content: "A live visual post.", assets: [{ name: "chart", kind: "image", dataUrl: "data:image/png;base64,iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAQAAAC1HAwCAAAAC0lEQVR42mNk+A8AAQUBAScY42YAAAAASUVORK5CYII=" }] });
+      const sourceObject = state.mirrorObjects[0]!;
+      const assetId = sourceObject.assetRefs?.[0]?.assetId;
+      state = {
+        ...state,
+        mirrorObjects: state.mirrorObjects.map((item) => item.id === sourceObject.id ? { ...item, environment: "live", sessionId: undefined } : item),
+        assets: state.assets.map((asset) => asset.id === assetId ? { ...asset, environment: "live", sessionId: undefined } : asset),
+      };
+      const inspected = await inspectSandboxObject(state, { ...sourceObject, environment: "live", sessionId: undefined }, "inspect");
+      expect(inspected.perceptions[0]).toMatchObject({ environment: "live", socialObjectId: sourceObject.id, providerId: "openai" });
+      expect(inspected.perceptions[0]?.result.observation).toContain("chart");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("compares a bounded preview batch in one multi-image request", async () => {
     const calls: Array<Record<string, unknown>> = [];
     vi.stubGlobal("fetch", vi.fn(async (_input: string | URL, init?: RequestInit) => {

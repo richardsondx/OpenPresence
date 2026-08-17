@@ -2,7 +2,7 @@ import type { Asset, AssetPerception, EntityRef, MirrorObject, OpenPresenceState
 import type { NetworkSearchResult } from "./network";
 import { relationshipIdentity, relationshipProjection } from "./network-memory";
 import type { SocialThreadContext } from "./thread-context";
-import { languagesMatch } from "./language-policy";
+import { languageEligibleForObservation } from "./language-policy";
 
 function latestMirrorFirst(left: { occurredAt?: string; observedAt: string }, right: { occurredAt?: string; observedAt: string }) {
   return (right.occurredAt ?? "").localeCompare(left.occurredAt ?? "")
@@ -13,7 +13,7 @@ function latestMirrorFirst(left: { occurredAt?: string; observedAt: string }, ri
 export function isCognitionEligibleMirrorObject(item: MirrorObject, expectedLanguage?: unknown) {
   if (item.visibility !== "public") return false;
   if (expectedLanguage === undefined) return true;
-  return languagesMatch(expectedLanguage, item.language ?? item.content?.language);
+  return languageEligibleForObservation(expectedLanguage, item.language ?? item.content?.language, item.content?.text, Boolean(item.assetRefs?.length));
 }
 
 export interface SocialEvidenceObject {

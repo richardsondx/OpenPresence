@@ -474,7 +474,7 @@ async function researchLiveAssignment(source: OpenPresenceState, presenceId: str
 async function runLiveExplorationEngagement(source: OpenPresenceState, exploration: NonNullable<OpenPresenceState["explorations"]>[number], presence: NonNullable<OpenPresenceState["presence"]>, assignment: Assignment, findings: Array<{ mirrorObjectId: string; safeSummary: string; whyItMayMatter: string }>) {
   if (presence.channel !== "x" || presence.execution.reply === "off") return source;
   const connection = source.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x" && item.access === "read-write" && nativeConnectionCanAct(item));
-  const bridge = presence.connectionMode === "bridge"
+  const bridge = !connection
     ? source.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline" && (item.capabilities.affordances.includes("reply") || item.capabilities.affordances.includes("comment")))
     : undefined;
   if (!connection && !bridge) return recordRuntimeEvent(source, presence.id, "Exploration engagement unavailable", "A qualifying Exploration finding was recorded, but no write-enabled X route is available for a direct reply.", "warning");
@@ -573,7 +573,7 @@ async function runScheduledLiveAssignments(source: OpenPresenceState, presenceId
   const presence = source.presences.find((item) => item.id === presenceId) ?? source.presence;
   if (!presence || presence.id !== presenceId || presence.status !== "live" || presence.channel !== "x" || presence.execution.post === "off") return source;
   const connection = source.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x" && item.access === "read-write" && nativeConnectionCanAct(item));
-  const bridge = presence.connectionMode === "bridge"
+  const bridge = !connection
     ? source.bridges.find((item) => item.presenceId === presenceId && item.state !== "offline" && item.capabilities.affordances.includes("post"))
     : undefined;
   if (!connection && !bridge) return source;
@@ -638,7 +638,7 @@ async function runPublishingAssignmentPulse(source: OpenPresenceState, presenceI
   const presence = source.presences.find((item) => item.id === presenceId) ?? source.presence;
   if (!presence || presence.id !== presenceId || presence.status !== "live" || presence.channel !== "x" || presence.publishingInitiative.mode === "off") return source;
   const connection = source.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x" && nativeConnectionCanAct(item) && item.access === "read-write");
-  const bridge = presence.connectionMode === "bridge"
+  const bridge = !connection
     ? source.bridges.find((item) => item.presenceId === presenceId && item.state !== "offline" && item.capabilities.affordances.includes("post"))
     : undefined;
   if ((!connection && !bridge) || presence.execution.post === "off") return source;
@@ -1508,7 +1508,7 @@ async function runSandboxAgentCycle(source: OpenPresenceState, sessionId: string
       const priorPresenceReplies = mirror.filter((item) => item.actorPresenceId === presence.id && item.parentExternalRef && history.some((inboundItem) => inboundItem.externalRef.id === item.parentExternalRef?.id) && item.content?.text).slice(0, 8);
       return `${author.displayName}${author.handle ? ` (${author.handle})` : ""}: ${history.length} observed contribution${history.length === 1 ? "" : "s"} from this author, not necessarily one thread. Use this history to judge continuity, repetition, and what this person has actually supplied; do not treat another author's exchange as theirs. Recent context: ${history.map((item) => item.content?.text ?? "[no text]").join(" | ")}${priorPresenceReplies.length ? ` Previous Presence replies to this author: ${priorPresenceReplies.map((item) => item.content?.text ?? "[no text]").join(" | ")}. Do not reuse one of these replies unless the newest contribution genuinely requires the same answer.` : ""}`;
     }).join("\n");
-  const inboundIdentity = inbound?.author?.externalRef?.id ? relationshipIdentity(source, presence.channel, inbound.author.externalRef.id) : undefined;
+  const inboundIdentity = inbound?.author?.externalRef?.id ? relationshipIdentity(source, presence.channel, inbound.author.externalRef.id, presence.id, presence.environment ?? "live") : undefined;
   const inboundProjection = inboundIdentity ? relationshipProjection(source, inboundIdentity.personId, presence.id) : undefined;
   const networkMemoryContext = inboundProjection
     ? `Remembered relationship context, filtered for this Presence:\n- status: remembered\n${inboundProjection.facts.slice(0, 6).map((fact) => `- ${fact.statement}`).join("\n") || "- No current relationship facts."}${inboundProjection.openLoops.length ? `\nOpen loops:\n${inboundProjection.openLoops.slice(0, 4).map((loop) => `- ${loop.description}`).join("\n")}` : ""}\nUse this as evidence, not as a requirement to mention familiarity.`
@@ -2402,8 +2402,9 @@ const operation: z.ZodType<RuntimeOperation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("runPulse"), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("replanPublishing"), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("syncNativeX"), presenceId: z.string().min(1).optional() }),
-  z.object({ type: z.literal("askPresenceToReply"), presenceId: z.string().min(1), objectId: z.string().min(1), sessionId: z.string().min(1).optional(), optionalDirection: z.string().trim().max(1000).optional() }),
   z.object({ type: z.literal("removeLegacyCalendarEntries") }),
+  z.object({ type: z.literal("importXPost"), presenceId: z.string().min(1), url: z.string().url().max(2000) }),
+  z.object({ type: z.literal("askPresenceToReply"), presenceId: z.string().min(1), objectId: z.string().min(1), sessionId: z.string().min(1).optional(), optionalDirection: z.string().trim().max(1000).optional() }),
   z.object({ type: z.literal("askPresenceToIgnore"), presenceId: z.string().min(1), objectId: z.string().min(1), sessionId: z.string().min(1).optional() }),
   z.object({ type: z.literal("setModel"), model: z.string().trim().min(1).max(80), provider: z.enum(["openai", "anthropic", "gemini", "openrouter", "ollama", "custom"]).optional(), quality: z.enum(["low", "medium", "high", "local"]).optional(), vision: z.boolean().optional() }),
   z.object({ type: z.literal("setAgentLanguagePolicy"), policy: languagePolicy }),
@@ -2429,6 +2430,7 @@ const operation: z.ZodType<RuntimeOperation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("startPlayground"), presenceId: z.string().min(1).optional(), source: z.enum(["fresh", "scenario", "replay"]).optional() }),
   z.object({ type: z.literal("syncPlaygroundTime"), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("resetPlayground"), sessionId: z.string().min(1) }),
+  z.object({ type: z.literal("inspectMirrorMedia"), presenceId: z.string().min(1), objectId: z.string().min(1) }),
   z.object({ type: z.literal("removeSandboxObject"), sessionId: z.string().min(1), objectId: z.string().min(1) }),
   z.object({ type: z.literal("inspectSandboxMedia"), sessionId: z.string().min(1), objectId: z.string().min(1) }),
   z.object({ type: z.literal("addSandboxEvent"), sessionId: z.string().min(1), kind: z.string().trim().min(1).max(40).optional(), actionId: z.string().trim().min(1).max(60).optional(), actorId: z.string().trim().min(1).max(100).optional(), actorName: z.string().trim().max(120).optional(), actorHandle: z.string().trim().max(80).optional(), profile: z.object({ bio: z.string().trim().max(1000).optional(), location: z.string().trim().max(200).optional(), roles: z.array(z.string().trim().min(1).max(120)).max(10).optional(), skills: z.array(z.string().trim().min(1).max(120)).max(20).optional(), introductionPermission: z.enum(["allowed", "ask-first", "not-available"]).optional() }).optional(), content: z.string().trim().max(4000).optional(), language: z.string().trim().max(20).optional(), assets: z.array(z.object({ name: z.string().trim().min(1).max(160), kind: z.enum(["image", "video", "gif", "audio", "document", "chart", "link"]), mimeType: z.string().trim().max(120).optional(), dataUrl: z.string().max(2_500_000).optional(), sourceUrl: z.string().url().max(2000).optional() })).max(4).optional(), targetExternalRef: z.object({ type: z.string().min(1), id: z.string().min(1) }).optional(), parentExternalRef: z.object({ type: z.string().min(1), id: z.string().min(1) }).optional(), observeOnly: z.boolean().optional() }),
@@ -2719,6 +2721,43 @@ export async function POST(request: Request) {
       const persisted = persistExplorationState(baseState, completed);
       return NextResponse.json(persisted);
     }
+    if (parsed.type === "importXPost") {
+      const presence = current.presences.find((item) => item.id === parsed.presenceId);
+      if (!presence || presence.channel !== "x") throw new Error("Only an X Presence can receive an X post.");
+      const postId = xPostIdFromUrl(parsed.url);
+      if (!postId) throw new Error("Paste a public X post URL such as https://x.com/boardyai/status/2089200546477420956.");
+      const connection = current.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x");
+      const credentials = connection ? readNativeXCredentials(connection.id) : undefined;
+      let post;
+      if (credentials) {
+        try { post = (await readXPostsByIds(credentials, [postId]))[0]; } catch { /* Public oEmbed is a useful read-only fallback. */ }
+      }
+      if (!post) {
+        post = await readPublicXPostByUrl(parsed.url);
+      } else {
+        // The native API remains authoritative for text, author, and IDs, but
+        // its media expansion can be absent or incomplete. Enrich every
+        // successful native read from the public page and deduplicate by the
+        // provider URL so a multi-asset post is not silently truncated.
+        try {
+          const publicPost = await readPublicXPostByUrl(parsed.url);
+          const existingMedia = post.media ?? [];
+          const knownMediaUrls = new Set(existingMedia.flatMap((media) => [media.url, media.previewImageUrl].filter((value): value is string => Boolean(value))));
+          const additionalMedia = (publicPost.media ?? []).filter((media) => {
+            const url = media.url ?? media.previewImageUrl;
+            return url && !knownMediaUrls.has(url);
+          });
+          if (additionalMedia.length) post = { ...post, media: [...existingMedia, ...additionalMedia] };
+        } catch {
+          // A native result remains valid world evidence when the public page
+          // cannot be fetched for enrichment.
+        }
+      }
+      let next = recordImportedXMirror(current, { connectionId: connection?.id ?? `manual-x:${post.id}`, presenceId: presence.id, post });
+      next = recordRuntimeEvent(next, presence.id, "Post brought into view", `${presence.name} can now judge the supplied X post. It remains untrusted world content; no action was created yet.`, "positive", { sourceObjectId: next.mirrorObjects.find((item) => item.presenceId === presence.id && item.externalRef.id === post.id)?.id });
+      writeState(next);
+      return NextResponse.json(next);
+    }
     if (parsed.type === "askPresenceToIgnore") {
       const presence = current.presences.find((item) => item.id === parsed.presenceId);
       const target = current.mirrorObjects.find((item) => item.id === parsed.objectId && item.presenceId === parsed.presenceId && (!parsed.sessionId || item.sessionId === parsed.sessionId));
@@ -2874,6 +2913,28 @@ export async function POST(request: Request) {
       if (!session || !object) throw new Error("That simulated social object is no longer available.");
       const next = await inspectSandboxObject(current, object);
       next.events.unshift({ id: `sandbox-perception:${randomUUID()}`, type: "decision", title: "Media inspected", detail: "The Social Mirror stored a new perception result without changing Agent-wide meaning.", time: new Date().toISOString(), tone: next.perceptions.some((item) => item.socialObjectId === object.id && item.result.uncertainty !== "insufficient") ? "positive" : "warning", presenceId: session.presenceId, sessionId: session.id });
+      writeState(next);
+      return NextResponse.json(next);
+    }
+    if (parsed.type === "inspectMirrorMedia") {
+      const presence = current.presences.find((item) => item.id === parsed.presenceId);
+      const object = current.mirrorObjects.find((item) => item.id === parsed.objectId && item.presenceId === parsed.presenceId && item.environment !== "sandbox");
+      if (!presence || !object) throw new Error("That observed social object is no longer available in this Presence context.");
+      if (!object.assetRefs?.length) throw new Error("This observed post has no attached visual asset to inspect.");
+      const next = await inspectSandboxObject(current, object, "inspect");
+      const usable = next.perceptions.some((item) => item.socialObjectId === object.id && item.result.uncertainty !== "insufficient");
+      next.events.unshift({
+        id: `mirror-perception:${randomUUID()}`,
+        type: "decision",
+        title: "Media inspected",
+        detail: usable
+          ? `${presence.name}'s visual interpretation is now available in the Social Mirror.`
+          : `${presence.name} could not produce a usable interpretation for this visual asset.`,
+        time: new Date().toISOString(),
+        tone: usable ? "positive" : "warning",
+        presenceId: presence.id,
+        sourceObjectId: object.id,
+      });
       writeState(next);
       return NextResponse.json(next);
     }

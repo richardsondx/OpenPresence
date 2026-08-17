@@ -1940,32 +1940,6 @@ function LegacyAppShell({
   );
 }
 
-function OperatorInbox({ state, mutate, onClose }: { state: OpenPresenceState; mutate: Mutate; onClose: () => void }) {
-  const requests = state.agentRequests.filter((item) => ["open", "accepted"].includes(item.status) && (!item.presenceId || item.presenceId === state.presence?.id));
-  return (
-    <aside className="operator-inbox" aria-label="Operator Inbox">
-      <div className="operator-inbox-header">
-        <div><span className="eyebrow">Operator Inbox</span><h2>What the Agent needs</h2></div>
-        <button type="button" className="icon-button" aria-label="Close Operator Inbox" onClick={onClose}><X size={17} /></button>
-      </div>
-      <p className="operator-inbox-intro">Durable requests and capability gaps that affect autonomous work. Review the reason before changing the operating envelope.</p>
-      {requests.length ? <div className="operator-inbox-list">{requests.map((request) => <article className={`operator-request operator-request-${request.importance}`} key={request.id}>
-        <div className="operator-request-meta"><span className="status-chip">{request.importance}</span><span>{request.kind.replaceAll("_", " ")}</span></div>
-        <h3>{request.title}</h3>
-        <p>{request.need}</p>
-        <small>{request.why}</small>
-        {request.currentWorkaround && <div className="operator-request-workaround"><strong>Current boundary</strong><span>{request.currentWorkaround}</span></div>}
-        <div className="operator-request-actions">
-          <Button variant="ghost" onClick={() => mutate({ type: "updateAgentRequest", id: request.id, status: "snoozed" })}>Snooze</Button>
-          {request.status === "open" && <Button variant="ghost" onClick={() => mutate({ type: "updateAgentRequest", id: request.id, status: "accepted" })}>Accept</Button>}
-          <Button variant="secondary" onClick={() => mutate({ type: "updateAgentRequest", id: request.id, status: "resolved" })}>Resolve</Button>
-        </div>
-      </article>)}</div> : <div className="operator-inbox-empty"><Check size={18} /><strong>No open requests</strong><span>The Agent has no current capability or decision request for this Presence.</span></div>}
-      {state.capabilityChangeEvents.filter((item) => item.presenceId === state.presence?.id).slice(0, 3).map((item) => <div className="operator-inbox-event" key={item.id}><span className="status-dot" /><span><strong>{item.capability.replaceAll("_", " ")}</strong> changed to {item.nextAvailability}.<small>{item.detail}</small></span></div>)}
-    </aside>
-  );
-}
-
 function AddPresenceDialog({
   agentName,
   accent,
@@ -2409,6 +2383,71 @@ function ContextSidebar({
         </div>
       </section>
     </aside>
+  );
+}
+
+function MediaPerceptionDisclosure({
+  object,
+  state,
+  mutate,
+  presenceName,
+}: {
+  object: MirrorObject;
+  state: OpenPresenceState;
+  mutate: Mutate;
+  presenceName: string;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const assets = (object.assetRefs ?? [])
+    .map((ref) => state.assets.find((asset) => asset.id === ref.assetId))
+    .filter((asset): asset is OpenPresenceState["assets"][number] => Boolean(asset));
+  const perceptions = assets.map((asset) => ({ asset, perception: latestPerception(state.perceptions, asset.id, "inspect") }));
+  if (!assets.length) return null;
+  const inspect = async () => {
+    if (busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await mutate({ type: "inspectMirrorMedia", presenceId: object.presenceId, objectId: object.id });
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The visual asset could not be inspected.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  const sourceFor = (asset: typeof assets[number]) => asset.storage ? `/api/assets/${asset.id}` : asset.dataUrl ?? asset.provenance.sourceUrl;
+  const isImagePreview = (source: string) => /\.(?:png|jpe?g|webp|gif)(?:$|\?)/i.test(source) || source.includes("/img/") || source.includes("media/");
+  return (
+    <details className="media-perception-disclosure">
+      <summary className="media-perception-summary">What {presenceName} sees <span>{assets.length} {assets.length === 1 ? "asset" : "assets"}</span></summary>
+      <div className="media-perception-body">
+        <div className="media-perception-grid">
+          {perceptions.map(({ asset, perception }) => {
+            const source = sourceFor(asset);
+            return (
+              <div className="media-perception-item" key={asset.id}>
+                <div className="media-perception-visual">
+                  {source && (asset.type === "image" || asset.type === "gif" || asset.type === "chart" || (asset.type === "video" && isImagePreview(source))) ? <img src={source} alt={asset.description ?? `Attached ${asset.type}`} /> : source && asset.type === "video" ? <video controls playsInline preload="metadata" src={source} aria-label="Attached video" /> : <span className="social-link-asset">{asset.type} attached</span>}
+                </div>
+                <div className="media-perception-copy">
+                  <strong>{asset.description ?? `Attached ${asset.type}`}</strong>
+                  {perception && perception.result.uncertainty !== "insufficient" ? <>
+                    <div><span>Observation</span><p>{perception.result.observation}</p></div>
+                    {perception.result.interpretation && <div><span>Possible meaning</span><p>{perception.result.interpretation}</p></div>}
+                    <small>Uncertainty: {perception.result.uncertainty}</small>
+                    {perception.result.missingContext?.length ? <small>Missing context: {perception.result.missingContext.join(" ")}</small> : null}
+                  </> : <p className="media-perception-unavailable">Not interpreted yet. {presenceName} must not infer what this asset contains.</p>}
+                </div>
+              </div>
+            );
+          })}
+        </div>
+        {perceptions.some(({ perception }) => !perception || perception.result.uncertainty === "insufficient") && <button type="button" className="media-perception-action" onClick={() => void inspect()} disabled={busy}>{busy ? "Inspecting visual asset…" : "Interpret asset"}</button>}
+        {error && <p className="media-perception-error" role="alert">{error}</p>}
+        <small className="media-perception-boundary">This is a stored visual observation, separate from the Agent&apos;s decision about whether to act.</small>
+      </div>
+    </details>
   );
 }
 
@@ -5271,6 +5310,7 @@ function MirrorPanel({
                   <time dateTime={item.occurredAt ?? item.observedAt}>{formatHistoryTimestamp(item.occurredAt ?? item.observedAt)}</time>
                 </div>
                 <p className="mirror-post-content">{observedText ?? "External activity received."}</p>
+                {item.assetRefs?.length ? <MediaPerceptionDisclosure object={item} state={state} mutate={mutate} presenceName={presenceName} /> : null}
                 <div className="mirror-post-footer">
                   <span>Observed</span><span>{item.objectType.replaceAll("-", " ")}</span>
                   {externalUrl && <a className="mirror-open-link" href={externalUrl} target="_blank" rel="noreferrer" aria-label={`${externalLabel}: ${item.externalRef.id}`}><ArrowUpRight size={12} /> {externalLabel}</a>}
@@ -5470,6 +5510,7 @@ function ActivityContextInspector({ object, state, mutate, onClose, onOpenSettin
             <time dateTime={object.occurredAt ?? object.observedAt}>{formatHistoryTimestamp(object.occurredAt ?? object.observedAt)}</time>
           </div>
           <p className="mirror-post-content">{observedText ?? "External activity received."}</p>
+          {object.assetRefs?.length ? <MediaPerceptionDisclosure object={object} state={state} mutate={mutate} presenceName={presenceName} /> : null}
           <div className="mirror-post-footer"><span>Observed</span><span>{object.objectType.replaceAll("-", " ")}</span>{externalUrl && <a className="mirror-open-link" href={externalUrl} target="_blank" rel="noreferrer" aria-label={`${externalLabel}: ${object.externalRef.id}`}><ArrowUpRight size={12} /> {externalLabel}</a>}</div>
         </article>
         <section className="operator-reply-card" aria-label={`Ask ${presenceName} to reply`}>
@@ -5917,7 +5958,7 @@ function PublicHistoryView({
           )}
           {!filteredHistory.length && <EmptyState title="No public expression yet" body={mirrorHealth.tone === "healthy" || mirrorHealth.tone === "sandbox" ? `${mirrorHealth.detail}. ${presence?.name ?? "This Presence"} has not put anything into the public world yet.` : `${mirrorHealth.detail}.` } action={<Button variant="secondary" onClick={() => setView("schedule")}><Clock3 size={14} /> Open Schedule</Button>} />}
         </section>
-        {selected && <PublicHistoryInspector item={selected} state={state} index={selectedIndex} total={filteredHistory.length} onNavigate={(offset) => { const next = filteredHistory[selectedIndex + offset]; if (next) setSelected(next); }} onClose={() => setSelected(null)} onActivity={() => setView("live")} />}
+        {selected && <PublicHistoryInspector item={selected} state={state} mutate={mutate} index={selectedIndex} total={filteredHistory.length} onNavigate={(offset) => { const next = filteredHistory[selectedIndex + offset]; if (next) setSelected(next); }} onClose={() => setSelected(null)} onActivity={() => setView("live")} />}
       </div>
     </div>
   );
@@ -6029,7 +6070,7 @@ function DayHistory({ date, history, state, onSelect }: { date: Date; history: P
   return <div className="history-day"><div className="history-day-header"><SectionEyebrow>{date.toLocaleDateString("en", { weekday: "long" })}</SectionEyebrow><h2>{date.toLocaleDateString("en", { month: "long", day: "numeric", year: "numeric" })}</h2><p>Public history appears here.</p></div>{dayItems.length ? <div className="history-day-timeline">{hours.map((hour) => <div className="history-timeline-row" key={hour}><span>{String(hour).padStart(2, "0")}:00</span><div>{dayItems.filter((item) => new Date(historyDisplayAt(item)).getHours() === hour).map((item) => <HistoryCard key={item.id} item={item} state={state} onSelect={onSelect} />)}</div></div>)}</div> : <div className="history-calendar-empty">No public activity on this day.</div>}</div>;
 }
 
-function PublicHistoryInspector({ item, state, index, total, onNavigate, onClose, onActivity }: { item: PublicHistoryItem; state: OpenPresenceState; index: number; total: number; onNavigate: (offset: number) => void; onClose: () => void; onActivity: () => void }) {
+function PublicHistoryInspector({ item, state, mutate, index, total, onNavigate, onClose, onActivity }: { item: PublicHistoryItem; state: OpenPresenceState; mutate: Mutate; index: number; total: number; onNavigate: (offset: number) => void; onClose: () => void; onActivity: () => void }) {
   const [postIdCopied, setPostIdCopied] = useState(false);
   const presence = state.presences.find((candidate) => candidate.id === item.presenceId);
   const mirrorObject = state.mirrorObjects.find((object) => object.id === item.id || (object.externalRef.type === item.externalRef.type && object.externalRef.id === item.externalRef.id));
@@ -6051,7 +6092,7 @@ function PublicHistoryInspector({ item, state, index, total, onNavigate, onClose
       setPostIdCopied(false);
     }
   };
-  return <aside className="history-inspector" aria-label={`${kindLabel} details`}><div className="history-inspector-header"><div><SectionEyebrow>{kindLabel} details</SectionEyebrow><h2>{kindLabel}</h2><small title={historyTimeTitle(item)}>{formatHistoryTimestamp(displayAt)}{item.environment === "sandbox" ? " · Sandbox observed" : ""}</small></div><button type="button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button></div>{isDeleted && <div className="history-availability history-availability-deleted"><Trash2 size={14} /><span><strong>Deleted on X</strong><small>The original is retained here as verified history, but X no longer serves it.</small></span></div>}<div className="history-inspector-navigation" aria-label="Browse public posts"><span aria-live="polite"><strong>Post {position}</strong> of {total}</span><div><button type="button" aria-label="Previous post" disabled={index <= 0} onClick={() => onNavigate(-1)}><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /></button><button type="button" aria-label="Next post" disabled={index < 0 || index >= total - 1} onClick={() => onNavigate(1)}><ChevronRight size={14} /></button></div></div><div className="history-inspector-identity"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span><strong>{presence?.name ?? "Presence"}</strong><small>{presence?.handle ?? ""}</small></span></div>{parent?.content?.text && <div className="history-parent-context"><SectionEyebrow>Replying to</SectionEyebrow><p>{parent.content.text}</p><small>{parent.author?.displayName ?? "Public conversation"}</small></div>}<p className="history-inspector-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "No text was returned by the channel.")}</p>{itemAssets.length > 0 && <section className="history-provenance"><SectionEyebrow>Attached sources</SectionEyebrow>{itemAssets.map((asset) => <div key={asset.id}><a className="history-external-link" href={asset.provenance.sourcePageUrl ?? asset.provenance.sourceUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {asset.provenance.publisher ?? asset.description ?? "Open source"}</a><small>Origin: {asset.provenance.origin}. Source identity: {asset.provenance.sourceIdentityStatus ?? "unknown"}. Rights: {asset.rights?.status ?? "unknown"}.</small></div>)}</section>}<div className="history-proof">{isDeleted ? <Trash2 size={14} /> : <Check size={14} />}<span>{isDeleted ? "Deleted on X · retained in Social Mirror" : `Observed in Social Mirror · ${item.externalRef.type}`}</span><button type="button" className="history-copy-id" aria-label="Copy internal post ID" title="Copy internal post ID" onClick={() => void copyPostId()}><Copy size={12} /> {postIdCopied ? "Copied" : "Copy ID"}</button></div><section className="history-provenance"><SectionEyebrow>Provenance</SectionEyebrow><p>{originLabel}</p><p>{item.executionId ? "Published by OpenPresence and verified in the Social Mirror." : "Observed on the connected channel and attributed to this Presence."}</p>{item.origin?.planWindowId && <small>Plan window: {item.origin.planWindowId}</small>}{assignment && <p>Assignment output · {assignment.progress.verified} / {assignment.progress.required} verified publications</p>}{mirrorObject?.environment === "sandbox" && <small>Simulated social reality · this expression has no live destination. Sandbox world time: {formatTime(item.occurredAt)}.</small>}</section><section className="history-outcome"><SectionEyebrow>Outcome</SectionEyebrow>{metrics.length ? <div className="history-outcome-grid">{metrics.map(([key, value]) => <div key={key}><strong>{value}</strong><small>{key.replaceAll("_", " ")}</small></div>)}</div> : <p>No channel outcome evidence is attached to this expression yet.</p>}</section><div className="history-inspector-actions">{item.externalUrl ? <a className="history-external-link" href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {isDeleted ? "Open original URL · deleted on X" : item.kind === "reply" || item.kind === "comment" ? "Open reply on X" : "Open original on X"}</a> : item.environment === "sandbox" && item.channel === "x" ? <p className="history-sandbox-note">Sandbox rehearsal only. This expression has no live destination.</p> : item.channel === "x" ? <p className="history-sandbox-note">X URL unavailable from the connected account.</p> : null}<Button variant="secondary" onClick={onActivity}><Activity size={14} /> View in Activity</Button></div></aside>;
+  return <aside className="history-inspector" aria-label={`${kindLabel} details`}><div className="history-inspector-header"><div><SectionEyebrow>{kindLabel} details</SectionEyebrow><h2>{kindLabel}</h2><small title={historyTimeTitle(item)}>{formatHistoryTimestamp(displayAt)}{item.environment === "sandbox" ? " · Sandbox observed" : ""}</small></div><button type="button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button></div>{isDeleted && <div className="history-availability history-availability-deleted"><Trash2 size={14} /><span><strong>Deleted on X</strong><small>The original is retained here as verified history, but X no longer serves it.</small></span></div>}<div className="history-inspector-navigation" aria-label="Browse public posts"><span aria-live="polite"><strong>Post {position}</strong> of {total}</span><div><button type="button" aria-label="Previous post" disabled={index <= 0} onClick={() => onNavigate(-1)}><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /></button><button type="button" aria-label="Next post" disabled={index < 0 || index >= total - 1} onClick={() => onNavigate(1)}><ChevronRight size={14} /></button></div></div><div className="history-inspector-identity"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span><strong>{presence?.name ?? "Presence"}</strong><small>{presence?.handle ?? ""}</small></span></div>{parent?.content?.text && <div className="history-parent-context"><SectionEyebrow>Replying to</SectionEyebrow><p>{parent.content.text}</p><small>{parent.author?.displayName ?? "Public conversation"}</small></div>}<p className="history-inspector-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "No text was returned by the channel.")}</p>{mirrorObject?.assetRefs?.length ? <MediaPerceptionDisclosure object={mirrorObject} state={state} mutate={mutate} presenceName={presence?.name ?? "this Presence"} /> : null}{itemAssets.length > 0 && <section className="history-provenance"><SectionEyebrow>Attached sources</SectionEyebrow>{itemAssets.map((asset) => <div key={asset.id}><a className="history-external-link" href={asset.provenance.sourcePageUrl ?? asset.provenance.sourceUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {asset.provenance.publisher ?? asset.description ?? "Open source"}</a><small>Origin: {asset.provenance.origin}. Source identity: {asset.provenance.sourceIdentityStatus ?? "unknown"}. Rights: {asset.rights?.status ?? "unknown"}.</small></div>)}</section>}<div className="history-proof">{isDeleted ? <Trash2 size={14} /> : <Check size={14} />}<span>{isDeleted ? "Deleted on X · retained in Social Mirror" : `Observed in Social Mirror · ${item.externalRef.type}`}</span><button type="button" className="history-copy-id" aria-label="Copy internal post ID" title="Copy internal post ID" onClick={() => void copyPostId()}><Copy size={12} /> {postIdCopied ? "Copied" : "Copy ID"}</button></div><section className="history-provenance"><SectionEyebrow>Provenance</SectionEyebrow><p>{originLabel}</p><p>{item.executionId ? "Published by OpenPresence and verified in the Social Mirror." : "Observed on the connected channel and attributed to this Presence."}</p>{item.origin?.planWindowId && <small>Plan window: {item.origin.planWindowId}</small>}{assignment && <p>Assignment output · {assignment.progress.verified} / {assignment.progress.required} verified publications</p>}{mirrorObject?.environment === "sandbox" && <small>Simulated social reality · this expression has no live destination. Sandbox world time: {formatTime(item.occurredAt)}.</small>}</section><section className="history-outcome"><SectionEyebrow>Outcome</SectionEyebrow>{metrics.length ? <div className="history-outcome-grid">{metrics.map(([key, value]) => <div key={key}><strong>{value}</strong><small>{key.replaceAll("_", " ")}</small></div>)}</div> : <p>No channel outcome evidence is attached to this expression yet.</p>}</section><div className="history-inspector-actions">{item.externalUrl ? <a className="history-external-link" href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {isDeleted ? "Open original URL · deleted on X" : item.kind === "reply" || item.kind === "comment" ? "Open reply on X" : "Open original on X"}</a> : item.environment === "sandbox" && item.channel === "x" ? <p className="history-sandbox-note">Sandbox rehearsal only. This expression has no live destination.</p> : item.channel === "x" ? <p className="history-sandbox-note">X URL unavailable from the connected account.</p> : null}<Button variant="secondary" onClick={onActivity}><Activity size={14} /> View in Activity</Button></div></aside>;
 }
 
 function ScheduleLayerToolbar({
