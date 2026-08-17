@@ -28,6 +28,7 @@ import {
   Ghost,
   Heart,
   Info,
+  Inbox,
   LoaderCircle,
   MessageCircle,
   MessageSquare,
@@ -1475,6 +1476,7 @@ function AgentWorkspaceShell({
   const presenceBridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
   const presenceBridgeStatus = presenceBridge ? bridgeAdapterStatus(presenceBridge) : undefined;
   const [showPresenceModal, setShowPresenceModal] = useState(false);
+  const [showInbox, setShowInbox] = useState(false);
   const pageLabel =
     view === "brain"
       ? "Manage Agent"
@@ -1494,6 +1496,7 @@ function AgentWorkspaceShell({
   const pendingAgentChangeCount = state.proposals.filter(
     (item) => item.status === "pending",
   ).length;
+  const openRequestCount = state.agentRequests.filter((item) => ["open", "accepted"].includes(item.status) && (!item.presenceId || item.presenceId === presence.id)).length;
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -1588,6 +1591,13 @@ function AgentWorkspaceShell({
                         : "Not connected"}
             </span>
           </div>}
+          <div className="topbar-actions operator-inbox-trigger">
+            <button type="button" className="inbox-trigger" aria-label={`Open Operator Inbox${openRequestCount ? `, ${openRequestCount} open request${openRequestCount === 1 ? "" : "s"}` : ""}`} onClick={() => setShowInbox((current) => !current)}>
+              <Inbox size={16} />
+              <span>Inbox</span>
+              {openRequestCount > 0 && <span className="nav-count">{openRequestCount}</span>}
+            </button>
+          </div>
         </header>
         {error && (
           <div className="toast-error" role="alert">
@@ -1636,6 +1646,7 @@ function AgentWorkspaceShell({
           )}
         </div>
       </section>
+      {showInbox && <OperatorInbox state={state} mutate={mutate} onClose={() => setShowInbox(false)} />}
       <nav className="mobile-nav" aria-label="Mobile navigation">
         {presenceNavItems.map(({ id, label, icon: Icon }) => (
           <button
@@ -1934,6 +1945,32 @@ function LegacyAppShell({
         />
       )}
     </main>
+  );
+}
+
+function OperatorInbox({ state, mutate, onClose }: { state: OpenPresenceState; mutate: Mutate; onClose: () => void }) {
+  const requests = state.agentRequests.filter((item) => ["open", "accepted"].includes(item.status) && (!item.presenceId || item.presenceId === state.presence?.id));
+  return (
+    <aside className="operator-inbox" aria-label="Operator Inbox">
+      <div className="operator-inbox-header">
+        <div><span className="eyebrow">Operator Inbox</span><h2>What the Agent needs</h2></div>
+        <button type="button" className="icon-button" aria-label="Close Operator Inbox" onClick={onClose}><X size={17} /></button>
+      </div>
+      <p className="operator-inbox-intro">Durable requests and capability gaps that affect autonomous work. Review the reason before changing the operating envelope.</p>
+      {requests.length ? <div className="operator-inbox-list">{requests.map((request) => <article className={`operator-request operator-request-${request.importance}`} key={request.id}>
+        <div className="operator-request-meta"><span className="status-chip">{request.importance}</span><span>{request.kind.replaceAll("_", " ")}</span></div>
+        <h3>{request.title}</h3>
+        <p>{request.need}</p>
+        <small>{request.why}</small>
+        {request.currentWorkaround && <div className="operator-request-workaround"><strong>Current boundary</strong><span>{request.currentWorkaround}</span></div>}
+        <div className="operator-request-actions">
+          <Button variant="ghost" onClick={() => mutate({ type: "updateAgentRequest", id: request.id, status: "snoozed" })}>Snooze</Button>
+          {request.status === "open" && <Button variant="ghost" onClick={() => mutate({ type: "updateAgentRequest", id: request.id, status: "accepted" })}>Accept</Button>}
+          <Button variant="secondary" onClick={() => mutate({ type: "updateAgentRequest", id: request.id, status: "resolved" })}>Resolve</Button>
+        </div>
+      </article>)}</div> : <div className="operator-inbox-empty"><Check size={18} /><strong>No open requests</strong><span>The Agent has no current capability or decision request for this Presence.</span></div>}
+      {state.capabilityChangeEvents.filter((item) => item.presenceId === state.presence?.id).slice(0, 3).map((item) => <div className="operator-inbox-event" key={item.id}><span className="status-dot" /><span><strong>{item.capability.replaceAll("_", " ")}</strong> changed to {item.nextAvailability}.<small>{item.detail}</small></span></div>)}
+    </aside>
   );
 }
 

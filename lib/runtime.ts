@@ -86,7 +86,7 @@ const fileContent = (kind: FileKind, input: CreateAgentInput, presence?: Presenc
 };
 
 export function initialState(): OpenPresenceState {
-  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], events: [], calendar: [], assignments: [], growthReviews: [], audienceSnapshots: [], publicationMetricSnapshots: [], watches: [], explorations: [], discoveryPlans: [], explorationSessions: [], explorationFindings: [], actions: [], publishingPlans: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], assetProviderConnections: [], toolBindings: [], changeSets: [], standingIntents: [], operatorDirectives: [], socialIntents: [], executions: [], outcomes: [], publications: [], assetUsages: [], sourceEvidence: [], claimGrounding: [], preferenceEvidence: [], originalPostRehearsals: [], librarySources: [], assets: [], perceptions: [], assetResearchSessions: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], conversationEpisodes: [], assignmentContributions: [], people: [], personIdentities: [], relationships: [], relationshipFacts: [], relationshipOpenLoops: [], recommendationRecords: [], introductionRecords: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], scenarios: [], scenarioVersions: [], scenarioRuns: [], scenarioRunProvenance: [], scenarioEvaluations: [], knowledgeCollections: [], knowledgeItems: [], knowledgeVersions: [], knowledgeSegments: [], presenceKnowledgeBindings: [], knowledgeRetrievalRuns: [], knowledgeCitations: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
+  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], agentRequests: [], capabilityChangeEvents: [], events: [], calendar: [], assignments: [], growthReviews: [], audienceSnapshots: [], publicationMetricSnapshots: [], watches: [], explorations: [], discoveryPlans: [], explorationSessions: [], explorationFindings: [], actions: [], publishingPlans: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], assetProviderConnections: [], toolBindings: [], changeSets: [], standingIntents: [], operatorDirectives: [], socialIntents: [], executions: [], outcomes: [], publications: [], assetUsages: [], sourceEvidence: [], claimGrounding: [], preferenceEvidence: [], originalPostRehearsals: [], librarySources: [], assets: [], perceptions: [], assetResearchSessions: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], conversationEpisodes: [], assignmentContributions: [], people: [], personIdentities: [], relationships: [], relationshipFacts: [], relationshipOpenLoops: [], recommendationRecords: [], introductionRecords: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], scenarios: [], scenarioVersions: [], scenarioRuns: [], scenarioRunProvenance: [], scenarioEvaluations: [], knowledgeCollections: [], knowledgeItems: [], knowledgeVersions: [], knowledgeSegments: [], presenceKnowledgeBindings: [], knowledgeRetrievalRuns: [], knowledgeCitations: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
 }
 
 const capabilityLabel: Record<string, string> = {
@@ -155,6 +155,38 @@ export function derivePresenceCapabilityManifest(source: OpenPresenceState, pres
   const requiredBody = items.some((item) => item.requiresBrowser && item.availability === "available");
   const bodyStatus = presence.status === "paused" ? "unavailable" : requiredBody && !bridgeConnected ? "degraded" : native || bridgeConnected ? "ready" : "unavailable";
   return { presenceId: presence.id, channel: presence.channel, generatedAt: now(), bodyStatus, items };
+}
+
+/** Turn missing runtime capabilities into durable, deduplicated Agent requests. */
+export function ensureCapabilityRequests(source: OpenPresenceState, presenceId?: string) {
+  const presence = source.presences.find((item) => item.id === (presenceId ?? source.activePresenceId)) ?? source.presence;
+  if (!source.agent || !presence) return source;
+  const manifest = derivePresenceCapabilityManifest(source, presence.id);
+  const growth = growthAssignmentFor(source, presence.id);
+  const requested = new Set(growth ? ["follower_measurement", "post_performance"] : ["follower_measurement", "post_performance", "image", "video"]);
+  const seenRequestKeys = new Set<string>();
+  source.agentRequests = source.agentRequests.filter((request) => {
+    if (seenRequestKeys.has(request.dedupeKey)) return false;
+    seenRequestKeys.add(request.dedupeKey);
+    return true;
+  });
+  for (const item of manifest.items.filter((candidate) => requested.has(candidate.capability))) {
+    const dedupeKey = `${presence.id}:${item.capability}`;
+    const existing = source.agentRequests.find((request) => request.dedupeKey === dedupeKey && request.status !== "rejected");
+    if (item.availability === "available") {
+      for (const request of source.agentRequests.filter((candidate) => candidate.dedupeKey === dedupeKey && ["open", "accepted", "snoozed"].includes(candidate.status))) {
+        request.status = "resolved";
+        request.resolvedAt = now();
+        request.updatedAt = now();
+      }
+      continue;
+    }
+    if (existing) continue;
+    const growthBlocking = Boolean(growth && ["follower_measurement", "post_performance"].includes(item.capability));
+    source.agentRequests.unshift({ id: id("agent-request"), agentId: source.agent.id, presenceId: presence.id, assignmentId: growth?.id, kind: "capability", importance: growthBlocking ? "blocking" : "important", title: `${item.label} unavailable`, need: growthBlocking ? `Connect a verified ${item.label.toLowerCase()} source so the 100K responsibility can measure progress.` : `Enable ${item.label.toLowerCase()} so the Presence can use the full X growth playbook.`, why: item.limitation ?? "The current connector cannot perform or observe this capability.", currentWorkaround: item.capability === "follower_measurement" ? "No workaround is counted as success; manual counts remain non-verifying." : item.capability === "post_performance" ? "Growth review can use only the evidence currently returned by the channel." : undefined, capability: item.capability, dedupeKey, status: "open", createdAt: now(), updatedAt: now() });
+    source.events.unshift(event("system", "Agent request opened", `${item.label} is unavailable for ${presence.name}; the limitation is now visible in Operator Inbox.`, "warning", { presenceId: presence.id }));
+  }
+  return source;
 }
 
 function bridgeAdapterIsConnected(bridge: Bridge) {
@@ -2080,7 +2112,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   const providerConnections = (state.providerConnections ?? []).map((connection) => ({ ...connection, label: providerName(connection.provider) }));
   const normalizedPresences = presences.map((item) => ({ ...item, languagePolicy: normalizeLanguagePolicy((item as Presence & { languagePolicy?: LanguagePolicy }).languagePolicy) }));
   const hydratedPresence = normalizedPresences.find((item) => item.id === activePresenceId) ?? normalizedPresences[0] ?? null;
-  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], workspaceRevision: state.workspaceRevision, presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], calendar, assignments: (state.assignments ?? []).map((assignment) => normalizeAssignment(assignment)), assignmentRuns: state.assignmentRuns ?? [], growthReviews: state.growthReviews ?? [], audienceSnapshots: state.audienceSnapshots ?? [], publicationMetricSnapshots: state.publicationMetricSnapshots ?? [], watches: state.watches ?? [], explorations: state.explorations ?? [], discoveryPlans: state.discoveryPlans ?? [], explorationSessions: state.explorationSessions ?? [], explorationFindings: state.explorationFindings ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, assetProviderConnections: state.assetProviderConnections ?? [], toolBindings: (state.toolBindings ?? []).map((binding) => ({ ...binding, enabled: binding.enabled !== false })), changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], operatorDirectives: state.operatorDirectives ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], assetUsages: state.assetUsages ?? [], sourceEvidence: state.sourceEvidence ?? [], claimGrounding: state.claimGrounding ?? [], preferenceEvidence: state.preferenceEvidence ?? [], originalPostRehearsals: state.originalPostRehearsals ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], perceptions: state.perceptions ?? [], assetResearchSessions: state.assetResearchSessions ?? [], skills, agentSkills, contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], conversationEpisodes: state.conversationEpisodes ?? [], assignmentContributions: state.assignmentContributions ?? [], people: state.people ?? [], personIdentities: state.personIdentities ?? [], relationships: state.relationships ?? [], relationshipFacts: state.relationshipFacts ?? [], relationshipOpenLoops: state.relationshipOpenLoops ?? [], recommendationRecords: state.recommendationRecords ?? [], introductionRecords: state.introductionRecords ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: (state.playgroundSessions ?? []).map((session) => ({ ...session, virtualTimeMode: session.virtualTimeMode ?? "realtime", worldRevision: session.worldRevision ?? 1 })), sandboxActors: state.sandboxActors ?? [], networkSearches: state.networkSearches ?? [], networkIntroductions: state.networkIntroductions ?? [], scenarios: state.scenarios ?? [], scenarioVersions: state.scenarioVersions ?? [], scenarioRuns: state.scenarioRuns ?? [], scenarioRunProvenance: state.scenarioRunProvenance ?? [], scenarioEvaluations: state.scenarioEvaluations ?? [], knowledgeCollections: state.knowledgeCollections ?? [], knowledgeItems: state.knowledgeItems ?? [], knowledgeVersions: state.knowledgeVersions ?? [], knowledgeSegments: state.knowledgeSegments ?? [], presenceKnowledgeBindings: state.presenceKnowledgeBindings ?? [], knowledgeRetrievalRuns: state.knowledgeRetrievalRuns ?? [], knowledgeCitations: state.knowledgeCitations ?? [] };
+  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], workspaceRevision: state.workspaceRevision, presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], agentRequests: state.agentRequests ?? [], capabilityChangeEvents: state.capabilityChangeEvents ?? [], calendar, assignments: (state.assignments ?? []).map((assignment) => normalizeAssignment(assignment)), assignmentRuns: state.assignmentRuns ?? [], growthReviews: state.growthReviews ?? [], audienceSnapshots: state.audienceSnapshots ?? [], publicationMetricSnapshots: state.publicationMetricSnapshots ?? [], watches: state.watches ?? [], explorations: state.explorations ?? [], discoveryPlans: state.discoveryPlans ?? [], explorationSessions: state.explorationSessions ?? [], explorationFindings: state.explorationFindings ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, assetProviderConnections: state.assetProviderConnections ?? [], toolBindings: (state.toolBindings ?? []).map((binding) => ({ ...binding, enabled: binding.enabled !== false })), changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], operatorDirectives: state.operatorDirectives ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], assetUsages: state.assetUsages ?? [], sourceEvidence: state.sourceEvidence ?? [], claimGrounding: state.claimGrounding ?? [], preferenceEvidence: state.preferenceEvidence ?? [], originalPostRehearsals: state.originalPostRehearsals ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], perceptions: state.perceptions ?? [], assetResearchSessions: state.assetResearchSessions ?? [], skills, agentSkills, contentDrops: state.contentDrops ?? [], channelDefinitions: state.channelDefinitions?.length ? state.channelDefinitions : base.channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], conversationEpisodes: state.conversationEpisodes ?? [], assignmentContributions: state.assignmentContributions ?? [], people: state.people ?? [], personIdentities: state.personIdentities ?? [], relationships: state.relationships ?? [], relationshipFacts: state.relationshipFacts ?? [], relationshipOpenLoops: state.relationshipOpenLoops ?? [], recommendationRecords: state.recommendationRecords ?? [], introductionRecords: state.introductionRecords ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: (state.playgroundSessions ?? []).map((session) => ({ ...session, virtualTimeMode: session.virtualTimeMode ?? "realtime", worldRevision: session.worldRevision ?? 1 })), sandboxActors: state.sandboxActors ?? [], networkSearches: state.networkSearches ?? [], networkIntroductions: state.networkIntroductions ?? [], scenarios: state.scenarios ?? [], scenarioVersions: state.scenarioVersions ?? [], scenarioRuns: state.scenarioRuns ?? [], scenarioRunProvenance: state.scenarioRunProvenance ?? [], scenarioEvaluations: state.scenarioEvaluations ?? [], knowledgeCollections: state.knowledgeCollections ?? [], knowledgeItems: state.knowledgeItems ?? [], knowledgeVersions: state.knowledgeVersions ?? [], knowledgeSegments: state.knowledgeSegments ?? [], presenceKnowledgeBindings: state.presenceKnowledgeBindings ?? [], knowledgeRetrievalRuns: state.knowledgeRetrievalRuns ?? [], knowledgeCitations: state.knowledgeCitations ?? [] };
   for (const slot of normalized.calendar) {
     if (!slot.enabled || slot.assignmentId) continue;
     const existing = normalized.assignments.find((assignment) => assignment.origin === "schedule" && assignment.presenceId === slot.presence && assignment.instruction === slot.instruction && assignment.schedule?.day === slot.day && assignment.schedule?.time === slot.time);
@@ -3066,6 +3098,27 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     state.events.unshift(event("learning", "Publication performance observed", `Performance evidence for a verified ${presence.channel === "x" ? "X" : presence.name} publication is available for Growth review.`, "positive", { presenceId: presence.id, sourceObjectId: mirror.id }));
     return state;
   }
+  if (operation.type === "updateAgentRequest") {
+    const request = state.agentRequests.find((item) => item.id === operation.id);
+    if (!request) return state;
+    request.status = operation.status;
+    request.updatedAt = now();
+    request.resolvedAt = operation.status === "resolved" ? now() : undefined;
+    state.events.unshift(event("system", "Agent request updated", `${request.title} is now ${operation.status}.`, operation.status === "resolved" ? "positive" : "neutral", { presenceId: request.presenceId }));
+    return state;
+  }
+  if (operation.type === "recordCapabilityChange") {
+    const presence = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence;
+    if (!presence) return state;
+    for (const change of operation.changes) {
+      state.capabilityChangeEvents.unshift({ id: id("capability-change"), presenceId: presence.id, ...change, createdAt: now() });
+      const dedupeKey = `${presence.id}:${change.capability}`;
+      if (change.nextAvailability === "available") {
+        for (const request of state.agentRequests.filter((item) => item.dedupeKey === dedupeKey && ["open", "accepted", "snoozed"].includes(item.status))) { request.status = "resolved"; request.resolvedAt = now(); request.updatedAt = now(); }
+      }
+    }
+    return state;
+  }
   if (operation.type === "reviewGrowth") {
     const presence = state.presences.find((item) => item.id === (operation.presenceId ?? state.activePresenceId)) ?? state.presence;
     const assignment = presence ? growthAssignmentFor(state, presence.id, operation.assignmentId) : undefined;
@@ -3078,6 +3131,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     const assignment = compileAssignmentInstruction(state, operation.instruction, operation.presenceId, operation.environment ?? "sandbox", operation.sessionId, operation.schedule, operation.delegationPolicy);
     assignment.revision = 0;
     state.assignments.unshift(assignment);
+    ensureCapabilityRequests(state, assignment.presenceId);
     state.events.unshift(event("system", "Assignment reviewed", `${assignment.preflight?.status === "ready" || assignment.preflight?.status === "ready_with_assumptions" ? "Ready to activate" : "Needs input before activation"} · ${assignment.progress.required} ${assignment.deliverable.type === "original_publication" ? "original publications" : assignment.deliverable.type} · ${assignment.recurrence?.label ?? "Once"}.`, assignment.preflight?.status === "blocked" || assignment.preflight?.status === "needs_input" ? "warning" : "positive", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
     return state;
   }
@@ -3093,6 +3147,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     assignment.status = assignment.status === "blocked" ? "active" : "active";
     assignment.revision = (assignment.revision ?? 0) + 1;
     assignment.updatedAt = now();
+    ensureCapabilityRequests(state, assignment.presenceId);
     state.events.unshift(event("decision", "Assignment activated", `${assignment.preflight.semanticSummary} The Agent owns the method within the active delegation policy.`, "positive", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
     return state;
   }

@@ -7,7 +7,7 @@ import { assessVisualFit } from "@/lib/visual-fit";
 import { generateAgentReply, generateAgentSocialDecision, generateAgentSocialEdit, generateAgentSocialJudgment, generateAssetPublicationReview, generateAssetResearchPlannerDecision, generateEvidenceLedDraft, generateEvidenceLedPublication, generateExplorationTriage, generateIndependentModelText, generatePresenceChatReply, generatePublishingPlan, generateTextOnlyAssignmentPublication } from "@/lib/ai";
 import type { AgentSocialDecision } from "@/lib/ai";
 import { validateScenarioFidelity } from "@/lib/scenarios";
-import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntroduction, assertRuntimeScope, assignmentIsSatisfied, beginOriginalPostRehearsal, blockExecutionForLanguage, blockExecutionForTargetLanguage, cleanSandboxDraft, completeNativeExecution, completeOriginalPostRehearsal, confirmAutoMode, createRuntimeScope, declineSandboxIntroduction, deleteScenario, deliverSandboxExecution, derivePublishingProgress, duePublishingPlanWindows, expireSandboxIntents, failNativeExecution, finishExplorationSession, finishPulse, formAssignmentPostIntent, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, formXActionIntent, createScenarioFromPrompt, generateMissingScenarioEvents, identityLeakageReason, importScenarioDefinition, isExplicitXPostRequest, isLaunchCandidate, isLowInformationCue, languageValidationForExecution, markCalendarSlotEvaluated, markInboundJudged, markNativeConnectionNeedsAttention, markScenarioStimulus, nativeDeliveryFailureIsConnectionScoped, publicSelfGuidance, publishingInitiativeGuidance, recordNativeMirror, recordPreferenceEvidence, recordPublishingPlanFailure, recordPublishingPlanWork, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, recordScenarioEvaluation, recordScenarioReview, renameScenario, replacePublishingPlan, resetPlaygroundSession, startExplorationSession, startScenarioRunState, completeScenarioRunState, stopScenarioRunState, stateForContext, structuralScenarioEvaluation, startPlaygroundSession, syncPlaygroundTime, syncPublishingInitiativeAssignment, targetLanguageValidationForExecution, updateScenarioEvents, updateScenarioRequirements } from "@/lib/runtime";
+import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntroduction, assertRuntimeScope, assignmentIsSatisfied, beginOriginalPostRehearsal, blockExecutionForLanguage, blockExecutionForTargetLanguage, cleanSandboxDraft, completeNativeExecution, completeOriginalPostRehearsal, confirmAutoMode, createRuntimeScope, declineSandboxIntroduction, deleteScenario, deliverSandboxExecution, derivePresenceCapabilityManifest, derivePublishingProgress, duePublishingPlanWindows, ensureCapabilityRequests, expireSandboxIntents, failNativeExecution, finishExplorationSession, finishPulse, formAssignmentPostIntent, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, formXActionIntent, createScenarioFromPrompt, generateMissingScenarioEvents, identityLeakageReason, importScenarioDefinition, isExplicitXPostRequest, isLaunchCandidate, isLowInformationCue, languageValidationForExecution, markCalendarSlotEvaluated, markInboundJudged, markNativeConnectionNeedsAttention, markScenarioStimulus, nativeDeliveryFailureIsConnectionScoped, publicSelfGuidance, publishingInitiativeGuidance, recordNativeMirror, recordPreferenceEvidence, recordPublishingPlanFailure, recordPublishingPlanWork, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, recordScenarioEvaluation, recordScenarioReview, renameScenario, replacePublishingPlan, resetPlaygroundSession, startExplorationSession, startScenarioRunState, completeScenarioRunState, stopScenarioRunState, stateForContext, structuralScenarioEvaluation, startPlaygroundSession, syncPlaygroundTime, syncPublishingInitiativeAssignment, targetLanguageValidationForExecution, updateScenarioEvents, updateScenarioRequirements } from "@/lib/runtime";
 import { followXUser, likeXPost, publishSealedXPost, readNativeXCredentials, repostXPost, searchRecentXPosts } from "@/lib/x";
 import { hydrateNativeXThreadContext, reconcileNativeX } from "@/lib/native-x";
 import { isAgentCapabilityEnabled, isAgentToolEnabled } from "@/lib/types";
@@ -331,6 +331,18 @@ async function deliverNativeExecutions(source: OpenPresenceState, executionIds: 
 function nativeConnectionCanAct(connection: OpenPresenceState["nativeConnections"][number]) {
   return connection.status === "connected"
     || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? ""));
+}
+
+function recordCapabilityFeedback(before: OpenPresenceState, next: OpenPresenceState, presenceId?: string) {
+  const id = presenceId ?? next.presence?.id;
+  if (!id) return next;
+  const previous = derivePresenceCapabilityManifest(before, id);
+  const current = derivePresenceCapabilityManifest(next, id);
+  const changes = current.items.flatMap((item) => {
+    const prior = previous.items.find((candidate) => candidate.capability === item.capability);
+    return prior && prior.availability !== item.availability ? [{ capability: item.capability, previousAvailability: prior.availability, nextAvailability: item.availability, provider: item.provider, detail: `${item.label} changed from ${prior.availability} to ${item.availability}${item.provider ? ` through ${item.provider}` : ""}.` }] : [];
+  });
+  return ensureCapabilityRequests(changes.length ? applyOperation(next, { type: "recordCapabilityChange", presenceId: id, changes }) : next, id);
 }
 
 function scheduledAssignmentIsDue(assignment: Assignment, now = new Date()) {
@@ -2315,6 +2327,8 @@ const operation: z.ZodType<RuntimeOperation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("recordAudienceSnapshot"), presenceId: z.string().min(1).optional(), followers: z.number().int().min(0), following: z.number().int().min(0).optional(), source: z.enum(["native", "bridge", "manual", "sandbox"]).optional(), observationStatus: z.enum(["observed", "partial", "unavailable"]).optional(), observedAt: z.string().datetime().optional() }),
   z.object({ type: z.literal("recordPublicationMetricSnapshot"), presenceId: z.string().min(1).optional(), mirrorObjectId: z.string().min(1), publicationAgeSeconds: z.number().int().min(0).optional(), metrics: z.object({ impressions: z.number().int().min(0).optional(), likes: z.number().int().min(0).optional(), replies: z.number().int().min(0).optional(), reposts: z.number().int().min(0).optional(), quotes: z.number().int().min(0).optional() }), source: z.enum(["native", "bridge", "manual", "sandbox"]).optional(), observationStatus: z.enum(["observed", "partial", "unavailable"]).optional() }),
   z.object({ type: z.literal("reviewGrowth"), presenceId: z.string().min(1).optional(), assignmentId: z.string().min(1).optional(), kind: z.enum(["weekly", "strategic"]).optional() }),
+  z.object({ type: z.literal("updateAgentRequest"), id: z.string().min(1), status: z.enum(["open", "accepted", "rejected", "resolved", "snoozed"]) }),
+  z.object({ type: z.literal("recordCapabilityChange"), presenceId: z.string().min(1), changes: z.array(z.object({ capability: z.string().min(1), previousAvailability: z.enum(["available", "temporarily-unavailable", "unavailable", "blocked", "unknown"]), nextAvailability: z.enum(["available", "temporarily-unavailable", "unavailable", "blocked", "unknown"]), provider: z.string().optional(), detail: z.string().min(1) })).max(20) }),
   z.object({ type: z.literal("startAssignment"), id: z.string().min(1), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("workAssignment"), id: z.string().min(1), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("cancelAssignment"), id: z.string().min(1) }),
@@ -2372,6 +2386,9 @@ export async function GET(request: Request) {
   const url = new URL(request.url);
   const stored = readState();
   const requestedAgentId = url.searchParams.get("agentId") || process.env.OPENPRESENCE_DEFAULT_AGENT_ID || stored.agents.find((agent) => agent.name.trim().toLowerCase() === (process.env.OPENPRESENCE_DEFAULT_AGENT_NAME?.trim().toLowerCase() || "genny"))?.id;
+  const requestCountBeforeMigration = stored.agentRequests.length;
+  ensureCapabilityRequests(stored, url.searchParams.get("presenceId") ?? stored.activePresenceId ?? undefined);
+  if (stored.agentRequests.length !== requestCountBeforeMigration) writeState(stored);
   const contextualState = stateForContext(stored, {
     agentId: requestedAgentId,
     presenceId: url.searchParams.get("presenceId"),
@@ -2537,6 +2554,7 @@ export async function POST(request: Request) {
             if (assignment.plan?.nextStrategicReviewAt && new Date(assignment.plan.nextStrategicReviewAt).getTime() <= Date.now()) next = applyOperation(next, { type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind: "strategic" });
           }
         }
+        next = recordCapabilityFeedback(current, next, current.presence?.id);
         writeState(next);
         return next;
       })();
@@ -2668,6 +2686,7 @@ export async function POST(request: Request) {
         const execution = next.executions.find((item) => item.id === executionId);
         if (execution?.connector === "simulated" && execution.status === "queued") next = deliverSandboxExecution(next, executionId);
       }
+      next = recordCapabilityFeedback(current, next, parsed.presenceId);
       writeState(next);
       return NextResponse.json(next);
     }
@@ -2712,6 +2731,7 @@ export async function POST(request: Request) {
         next = recordRuntimeEvent(next, presenceId, "New mention received", "A new public mention entered the Social Mirror, so Jenny is considering it now.", "positive", { sourceObjectId: inbound.id });
         next = await runNativePulse(next, presenceId);
       }
+      next = recordCapabilityFeedback(current, next, presenceId);
       writeState(next);
       return NextResponse.json(next);
     }
@@ -2960,6 +2980,7 @@ export async function POST(request: Request) {
       const connection = current.assetProviderConnections.find((item) => item.provider === parsed.provider);
       if (connection) deleteProviderSecret(connection.id);
     }
+    next = recordCapabilityFeedback(current, next, next.presence?.id);
     writeState(next);
     return NextResponse.json(next);
   } catch (error) {

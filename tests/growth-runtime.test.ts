@@ -87,4 +87,16 @@ describe("continuous growth responsibility", () => {
     expect(completed.executions[0]?.status).toBe("succeeded");
     expect(completed.outcomes[0]?.evidence).toEqual([{ type: "x.like", id: "post-1" }]);
   });
+
+  it("opens deduplicated durable requests for growth capabilities and resolves them on recovery", () => {
+    const state = fixture();
+    let next = applyOperation(state, { type: "createAssignment", presenceId: state.presence!.id, environment: "live", instruction: "Grow this Presence toward 100,000 followers while building an audience of AI founders." });
+    expect(next.agentRequests.filter((item) => item.kind === "capability").map((item) => item.capability)).toEqual(expect.arrayContaining(["follower_measurement", "post_performance"]));
+    const request = next.agentRequests.find((item) => item.capability === "follower_measurement")!;
+    next = applyOperation(next, { type: "updateAgentRequest", id: request.id, status: "accepted" });
+    expect(next.agentRequests.find((item) => item.id === request.id)?.status).toBe("accepted");
+    next = applyOperation(next, { type: "recordCapabilityChange", presenceId: state.presence!.id, changes: [{ capability: "follower_measurement", previousAvailability: "unavailable", nextAvailability: "available", provider: "Native X", detail: "Native X returned authenticated audience metrics." }] });
+    expect(next.agentRequests.find((item) => item.id === request.id)?.status).toBe("resolved");
+    expect(next.capabilityChangeEvents[0]).toMatchObject({ capability: "follower_measurement", nextAvailability: "available" });
+  });
 });

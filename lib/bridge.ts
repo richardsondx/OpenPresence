@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { applyOperation, blockExecutionForLanguage, blockExecutionForTargetLanguage, curateRelationshipFromMirror, languageValidationForExecution, targetLanguageValidationForExecution } from "./runtime";
+import { applyOperation, blockExecutionForLanguage, blockExecutionForTargetLanguage, curateRelationshipFromMirror, ensureCapabilityRequests, languageValidationForExecution, targetLanguageValidationForExecution } from "./runtime";
 import { authenticateBridgeKey, deleteBridgeCredential, issueBridgeKey, readBridgeCredentialMetadata, readStateForBridge, revokeBridgeKey, writeState } from "./db";
 import type { Bridge, Execution, LiveEvent, MirrorObject, OpenPresenceState, Outcome } from "./types";
 import { bridgeAdapterStatus } from "./bridge-contract";
@@ -257,6 +257,7 @@ export function reportMetrics(bridge: Bridge, input: z.infer<typeof metricsInput
   }
   const current = state.bridges.find((item) => item.id === bridge.id);
   if (current) touchBridge(state, current);
+  state = ensureCapabilityRequests(state, bridge.presenceId);
   writeState(state);
   return state;
 }

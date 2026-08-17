@@ -102,6 +102,36 @@ export interface GrowthReview {
   evidenceIds: string[];
   createdAt: string;
 }
+export type AgentRequestKind = "capability" | "growth_review" | "operator_decision" | "connector";
+export type AgentRequestStatus = "open" | "accepted" | "rejected" | "resolved" | "snoozed";
+export interface AgentRequest {
+  id: string;
+  agentId: string;
+  presenceId?: string;
+  assignmentId?: string;
+  kind: AgentRequestKind;
+  importance: "blocking" | "important" | "informational";
+  title: string;
+  need: string;
+  why: string;
+  currentWorkaround?: string;
+  capability?: string;
+  dedupeKey: string;
+  status: AgentRequestStatus;
+  createdAt: string;
+  updatedAt: string;
+  resolvedAt?: string;
+}
+export interface CapabilityChangeEvent {
+  id: string;
+  presenceId: string;
+  capability: string;
+  previousAvailability: CapabilityAvailability;
+  nextAvailability: CapabilityAvailability;
+  provider?: string;
+  detail: string;
+  createdAt: string;
+}
 export type MetricObservationSource = "native" | "bridge" | "manual" | "sandbox";
 export interface PresenceAudienceSnapshot {
   id: string;
@@ -1334,7 +1364,7 @@ export interface ActionRecord { id: string; intent: "post" | "reply" | "like" | 
 
 export interface AgentWorkspaceSnapshot {
   onboarded: boolean; agent: Agent | null; presence: Presence | null; presences: Presence[]; activePresenceId: string | null;
-  files: AgentFile[]; proposals: FileProposal[]; messages: ChatMessage[]; conversations: Conversation[]; activeConversationId: string | null; presenceChatSessions: PresenceChatSession[];
+  files: AgentFile[]; proposals: FileProposal[]; messages: ChatMessage[]; conversations: Conversation[]; activeConversationId: string | null; presenceChatSessions: PresenceChatSession[]; agentRequests: AgentRequest[]; capabilityChangeEvents: CapabilityChangeEvent[];
   events: LiveEvent[]; calendar: CalendarSlot[]; assignments: Assignment[]; growthReviews: GrowthReview[]; audienceSnapshots: PresenceAudienceSnapshot[]; publicationMetricSnapshots: PublicationMetricSnapshot[]; watches: Watch[]; explorations: ExplorationBrief[]; discoveryPlans: DiscoveryPlan[]; explorationSessions: ExplorationSession[]; explorationFindings: ExplorationFinding[]; actions: ActionRecord[]; publishingPlans: PublishingPlan[]; metrics: { qualifiedFollows: number; conversations: number; opportunitiesIgnored: number; audienceHealth: number };
   modelProfiles: AgentModelProfile[]; providerConnections: ProviderConnection[]; assetProviderConnections: AssetProviderConnection[]; toolBindings: AgentToolBinding[]; changeSets: ChangeSet[]; standingIntents: StandingIntent[]; operatorDirectives: OperatorDirective[]; socialIntents: SocialIntent[]; executions: Execution[]; outcomes: Outcome[]; publications: Publication[]; assetUsages: AssetUsage[]; sourceEvidence: SourceEvidence[]; claimGrounding: ClaimGrounding[]; preferenceEvidence: PreferenceEvidence[]; originalPostRehearsals: OriginalPostRehearsalAttempt[]; librarySources: LibrarySource[]; assets: Asset[]; perceptions: AssetPerception[]; assetResearchSessions: AssetResearchSession[]; skills: Skill[]; agentSkills: AgentSkill[]; contentDrops: ContentDrop[]; channelDefinitions: ChannelDefinition[]; nativeConnections: NativeChannelConnection[]; bridges: Bridge[]; mirrorObjects: MirrorObject[]; mirrorEvents: MirrorEvent[]; bridgeSync: BridgeSyncState[]; conversationEpisodes: ConversationEpisode[]; assignmentContributions: AssignmentContribution[]; people: Person[]; personIdentities: PersonIdentity[]; relationships: Relationship[]; relationshipFacts: RelationshipFact[]; relationshipOpenLoops: RelationshipOpenLoop[]; recommendationRecords: RecommendationRecord[]; introductionRecords: IntroductionRecord[]; sandboxEnvironments: SandboxEnvironment[]; playgroundSessions: PlaygroundSession[]; sandboxActors: SandboxActor[]; networkSearches: SandboxNetworkSearch[]; networkIntroductions: SandboxNetworkIntroduction[]; scenarios: Scenario[]; scenarioVersions: ScenarioVersion[]; scenarioRuns: ScenarioRun[]; scenarioRunProvenance: ScenarioRunProvenance[]; scenarioEvaluations: ScenarioRunEvaluation[]; knowledgeCollections: KnowledgeCollection[]; knowledgeItems: KnowledgeItem[]; knowledgeVersions: KnowledgeVersion[]; knowledgeSegments: KnowledgeSegment[]; presenceKnowledgeBindings: PresenceKnowledgeBinding[]; knowledgeRetrievalRuns: KnowledgeRetrievalRun[]; knowledgeCitations: KnowledgeCitation[];
   workspaceRevision?: number;
@@ -1387,6 +1417,9 @@ export type GrowthOperation =
   | { type: "recordAudienceSnapshot"; presenceId?: string; followers: number; following?: number; source?: MetricObservationSource; observationStatus?: PresenceAudienceSnapshot["observationStatus"]; observedAt?: string }
   | { type: "recordPublicationMetricSnapshot"; presenceId?: string; mirrorObjectId: string; publicationAgeSeconds?: number; metrics: Partial<Pick<PublicationMetricSnapshot, "impressions" | "likes" | "replies" | "reposts" | "quotes">>; source?: MetricObservationSource; observationStatus?: PublicationMetricSnapshot["observationStatus"] }
   | { type: "reviewGrowth"; assignmentId?: string; presenceId?: string; kind?: GrowthReviewKind };
+export type AgentRequestOperation =
+  | { type: "updateAgentRequest"; id: string; status: AgentRequestStatus }
+  | { type: "recordCapabilityChange"; presenceId: string; changes: Array<Pick<CapabilityChangeEvent, "capability" | "previousAvailability" | "nextAvailability" | "provider" | "detail">> };
 export type ExplorationOperation =
   | { type: "createExploration"; brief: string; presenceId?: string }
   | { type: "updateExploration"; id: string; brief: string }
@@ -1395,7 +1428,7 @@ export type ExplorationOperation =
   | { type: "lookNow"; id: string }
   | { type: "runAttentionWorker" };
 export type BrowserOperation = { type: "setPresenceBrowserAccess"; presenceId?: string; enabled: boolean };
-export type Operation = AssignmentOperation | LanguagePolicyOperation | ScenarioOperation | PublishingPlanOperation | GrowthOperation | ExplorationOperation
+export type Operation = AssignmentOperation | LanguagePolicyOperation | ScenarioOperation | PublishingPlanOperation | GrowthOperation | AgentRequestOperation | ExplorationOperation
   | BrowserOperation
   | KnowledgeOperation
   | { type: "removeSandboxObject"; sessionId: string; objectId: string }
