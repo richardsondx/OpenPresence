@@ -132,6 +132,14 @@ describe("continuous growth responsibility", () => {
     expect(post).toMatchObject({ availability: "unavailable", provider: undefined, canExecute: false });
   });
 
+  it("does not treat a stale Bridge adapter flag as a live body", () => {
+    const state = fixture();
+    const heartbeat = new Date(Date.now() - 5 * 60_000).toISOString();
+    const bridgePresence = { ...state.presence!, connectionMode: "bridge" as const };
+    const next = { ...state, presence: bridgePresence, presences: [bridgePresence], bridges: [{ id: "bridge-stale", presenceId: bridgePresence.id, channelId: "x", name: "Stale Bridge", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: heartbeat, capabilities: { inbound: true, reconcile: true, affordances: ["post"], formats: ["x.post"], metrics: [] }, createdAt: heartbeat, updatedAt: heartbeat }] };
+    expect(derivePresenceCapabilityManifest(next, bridgePresence.id).items.find((item) => item.capability === "post")).toMatchObject({ availability: "temporarily-unavailable", canExecute: false });
+  });
+
   it("forms and verifies native X reactions instead of treating them as unavailable", () => {
     const state = fixture();
     state.presence!.execution.like = "auto";

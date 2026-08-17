@@ -204,7 +204,7 @@ export function openAgentRequest(source: OpenPresenceState, input: { presenceId?
 }
 
 function bridgeAdapterIsConnected(bridge: Bridge) {
-  return bridge.state !== "offline" && (bridge.adapterStatus === "connected" || Boolean(bridge.lastHeartbeatAt && Date.now() - new Date(bridge.lastHeartbeatAt).getTime() < 90_000));
+  return bridge.state !== "offline" && Boolean(bridge.lastHeartbeatAt && Date.now() - new Date(bridge.lastHeartbeatAt).getTime() < 90_000);
 }
 
 export function latestAudienceSnapshot(source: OpenPresenceState, presenceId: string) {
