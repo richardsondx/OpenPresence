@@ -28,7 +28,6 @@ import {
   Ghost,
   Heart,
   Info,
-  Inbox,
   LoaderCircle,
   MessageCircle,
   MessageSquare,
@@ -1477,7 +1476,6 @@ function AgentWorkspaceShell({
   const presenceBridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
   const presenceBridgeStatus = presenceBridge ? bridgeAdapterStatus(presenceBridge) : undefined;
   const [showPresenceModal, setShowPresenceModal] = useState(false);
-  const [showInbox, setShowInbox] = useState(false);
   const pageLabel =
     view === "brain"
       ? "Manage Agent"
@@ -1497,7 +1495,6 @@ function AgentWorkspaceShell({
   const pendingAgentChangeCount = state.proposals.filter(
     (item) => item.status === "pending",
   ).length;
-  const openRequestCount = state.agentRequests.filter((item) => ["open", "accepted"].includes(item.status) && (!item.presenceId || item.presenceId === presence.id)).length;
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -1592,13 +1589,6 @@ function AgentWorkspaceShell({
                         : "Not connected"}
             </span>
           </div>}
-          <div className="topbar-actions operator-inbox-trigger">
-            <button type="button" className="inbox-trigger" aria-label={`Open Operator Inbox${openRequestCount ? `, ${openRequestCount} open request${openRequestCount === 1 ? "" : "s"}` : ""}`} onClick={() => setShowInbox((current) => !current)}>
-              <Inbox size={16} />
-              <span>Inbox</span>
-              {openRequestCount > 0 && <span className="nav-count">{openRequestCount}</span>}
-            </button>
-          </div>
         </header>
         {error && (
           <div className="toast-error" role="alert">
@@ -1647,7 +1637,6 @@ function AgentWorkspaceShell({
           )}
         </div>
       </section>
-      {showInbox && <OperatorInbox state={state} mutate={mutate} onClose={() => setShowInbox(false)} />}
       <nav className="mobile-nav" aria-label="Mobile navigation">
         {presenceNavItems.map(({ id, label, icon: Icon }) => (
           <button

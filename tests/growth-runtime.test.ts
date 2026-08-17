@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyOperation, audienceDeltas, compileAssignmentInstruction, completeNativeExecution, derivePresenceCapabilityManifest, ensureCapabilityRequests, formChatPostIntent, formXActionIntent, formXReplyIntent, publicationMetricBaseline, recordVerifiedFollow } from "@/lib/runtime";
+import { applyOperation, audienceDeltas, compileAssignmentInstruction, completeNativeExecution, derivePresenceCapabilityManifest, formChatPostIntent, formXActionIntent, formXReplyIntent, publicationMetricBaseline, recordVerifiedFollow } from "@/lib/runtime";
 import { createAgent } from "@/lib/runtime";
 import type { MirrorObject, OpenPresenceState } from "@/lib/types";
 
@@ -181,17 +181,10 @@ describe("continuous growth responsibility", () => {
     expect(quote.publications[0]).toMatchObject({ format: "x.media-post", assetIds: [asset.id] });
   });
 
-  it("opens deduplicated durable requests for growth capabilities and resolves them on recovery", () => {
+  it("keeps unavailable capabilities visible without creating Agent Requests", () => {
     const state = fixture();
-    let next = applyOperation(state, { type: "createAssignment", presenceId: state.presence!.id, environment: "live", instruction: "Grow this Presence toward 100,000 followers while building an audience of AI founders." });
-    expect(next.agentRequests.filter((item) => item.kind === "capability").map((item) => item.capability)).toEqual(expect.arrayContaining(["follower_measurement", "post_performance", "follow", "image", "video"]));
-    const request = next.agentRequests.find((item) => item.capability === "follower_measurement")!;
-    next = applyOperation(next, { type: "updateAgentRequest", id: request.id, status: "accepted" });
-    expect(next.agentRequests.find((item) => item.id === request.id)?.status).toBe("accepted");
-    next = applyOperation(next, { type: "recordCapabilityChange", presenceId: state.presence!.id, changes: [{ capability: "follower_measurement", previousAvailability: "unavailable", nextAvailability: "available", provider: "Native X", detail: "Native X returned authenticated audience metrics." }] });
-    expect(next.agentRequests.find((item) => item.id === request.id)?.status).toBe("resolved");
-    expect(next.capabilityChangeEvents[0]).toMatchObject({ capability: "follower_measurement", nextAvailability: "available" });
-    next = ensureCapabilityRequests(next, state.presence!.id);
-    expect(next.agentRequests.filter((item) => item.capability === "post_performance" && item.status === "open")).toHaveLength(1);
+    const next = applyOperation(state, { type: "createAssignment", presenceId: state.presence!.id, environment: "live", instruction: "Grow this Presence toward 100,000 followers while building an audience of AI founders." });
+    expect(next.agentRequests.filter((item) => item.kind === "capability")).toHaveLength(0);
+    expect(derivePresenceCapabilityManifest(next, state.presence!.id).items.find((item) => item.capability === "follower_measurement")).toMatchObject({ availability: "unavailable" });
   });
 });
