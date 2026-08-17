@@ -4624,7 +4624,7 @@ function LiveView({
   const [selectedContext, setSelectedContext] = useState<MirrorObject | null>(null);
   const [selectedDecisionId, setSelectedDecisionId] = useState<string | null>(null);
   const [activityPage, setActivityPage] = useState(1);
-  const [countdownNow, setCountdownNow] = useState<number | null>(null);
+  const [countdownNow, setCountdownNow] = useState<number>(() => Date.now());
   const presenceCopy = (text: string) => text.replaceAll("Jenny", presenceName).replaceAll(state.agent?.name ?? "Jenny", presenceName);
   const activityEnvironment: PresenceEnvironment = selected?.environment ?? "live";
   const nextObservationAt = activityEnvironment === "live"
@@ -4636,28 +4636,34 @@ function LiveView({
     ? state.bridges.find((bridge) => bridge.presenceId === selected.id && bridge.state !== "offline")
     : undefined;
   const bridgeConnected = Boolean(activityBridge && bridgeAdapterStatus(activityBridge) === "connected");
+  const bridgeNextCheckAt = bridgeConnected && activityBridge?.lastHeartbeatAt
+    ? (() => {
+        const heartbeatAt = new Date(activityBridge.lastHeartbeatAt).getTime();
+        return Number.isFinite(heartbeatAt) ? new Date(heartbeatAt + 30_000).toISOString() : undefined;
+      })()
+    : undefined;
   const bridgeNeedsAttention = selected?.connectionMode === "bridge" && !bridgeConnected;
   const effectiveCapabilities = selected ? derivePresenceCapabilityManifest(state, selected.id) : undefined;
   const growthAssignment = selected ? state.assignments.find((item) => item.presenceId === selected.id && item.successEvidence?.metric === "followers" && item.status !== "cancelled") : undefined;
-  const nextCheckCountdown = countdownNow === null ? undefined : formatCountdown(nextObservationAt, countdownNow);
+  const nextCheckAt = nextObservationAt ?? bridgeNextCheckAt;
+  const nextCheckCountdown = formatCountdown(nextCheckAt, countdownNow);
   const nextCheckStatus = paused
     ? "Checks paused"
     : checking
       ? undefined
-      : selected?.connectionMode === "bridge"
+      : selected?.connectionMode === "bridge" && !bridgeConnected
         ? undefined
-        : nextCheckCountdown === "now"
-          ? "Next check due now"
-          : nextCheckCountdown
-            ? `Next check in ${nextCheckCountdown}`
-            : nextObservationAt
-              ? "Next check scheduled"
-              : "Next check not scheduled";
+      : nextCheckCountdown === "now"
+        ? "Next check due now"
+        : nextCheckCountdown
+          ? `Next check in ${nextCheckCountdown}`
+          : nextCheckAt
+            ? "Next check scheduled"
+            : "Next check not scheduled";
   useEffect(() => {
-    if (!nextObservationAt) return;
     const timer = window.setInterval(() => setCountdownNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
-  }, [nextObservationAt]);
+  }, []);
   const activitySessionIds = new Set(
     state.playgroundSessions
       .filter((session) => session.presenceId === selected?.id && session.channelId === selected?.channel && session.status !== "completed")

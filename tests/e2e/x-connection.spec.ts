@@ -22,6 +22,29 @@ test("Activity keeps the Chrome connection notice out of the pulse controls", as
   await expect(page.locator(".next-check-countdown")).toHaveCount(0);
 });
 
+test("Activity shows the next-check countdown for a connected Bridge", async ({ page, request }) => {
+  await createAgent(page);
+  const changed = await request.post("/api/state", { data: { type: "setPresence", patch: { connectionMode: "bridge" } } });
+  expect(changed.ok()).toBeTruthy();
+  const current = await (await request.get("/api/state")).json();
+  const presenceId = current.presence.id;
+  const bridgeResponse = await request.post("/api/bridge/manage", {
+    data: {
+      action: "create",
+      presenceId,
+      name: "Countdown Bridge",
+      kind: "bridge",
+      capabilities: { inbound: true, reconcile: true, affordances: ["post"], formats: ["x.post"], metrics: ["followers"] },
+    },
+  });
+  expect(bridgeResponse.ok()).toBeTruthy();
+  const bridge = await bridgeResponse.json();
+  const heartbeat = await request.post("/api/bridge/v1/heartbeat", { headers: { Authorization: `Bearer ${bridge.key}` }, data: { executorId: "countdown-test" } });
+  expect(heartbeat.ok()).toBeTruthy();
+  await page.reload();
+  await expect(page.locator(".next-check-countdown")).toHaveText(/Next check in 00:\d{2}|Next check due now/);
+});
+
 test("operator connects an X Presence through the official API", async ({ page }) => {
   const consoleErrors: string[] = [];
   const failedRequests: string[] = [];
