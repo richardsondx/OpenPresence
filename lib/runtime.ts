@@ -628,6 +628,12 @@ export function recordNativeObservation(source: OpenPresenceState, presenceId: s
 
 export function recordNativeMirror(source: OpenPresenceState, input: { connectionId: string; presenceId: string; own?: boolean; post: { id: string; text: string; language?: string; createdAt?: string; authorId?: string; authorUsername?: string; authorName?: string; authorAvatarUrl?: string; conversationId?: string; parentId?: string; referencedPosts?: Array<{ type: "replied_to" | "quoted" | "retweeted"; id: string }>; media?: Array<{ mediaKey: string; type: "photo" | "video" | "animated_gif"; url?: string; previewImageUrl?: string; altText?: string }> } }) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  const presence = state.presences.find((item) => item.id === input.presenceId) ?? state.presence;
+  // Keep unverified provider data auditable, but never admit a confirmed
+  // non-English observation to this Presence. Feed and cognition projections
+  // reject unknown language as well, so a missing provider tag cannot bypass
+  // the English-only boundary.
+  if (!input.own && input.post.language !== undefined && !languagesMatch(presence?.language, input.post.language)) return state;
   const receivedAt = now();
   const sourceEventId = `native-x:${input.connectionId}:${input.post.id}`;
   const existing = state.mirrorObjects.find((item) => item.presenceId === input.presenceId && item.externalRef.type === "x.post" && item.externalRef.id === input.post.id);
@@ -1789,9 +1795,12 @@ export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: s
   const objectId = id("sandbox-object");
   const objectType = action?.objectType ?? input.kind ?? actionId;
   const targetExternalRef = input.targetExternalRef ?? input.parentExternalRef;
-  // Scenario stimuli are exact world content. LanguagePolicy applies only to
-  // what the Presence publishes, never to what the Agent is allowed to read.
+  // Scenario stimuli are exact world content. A simulated event without an
+  // explicit language uses the Presence language; an explicit mismatch is
+  // retained as world evidence but is excluded from cognition by the same
+  // observation boundary used by live connectors.
   const content = input.content ?? `${action?.label ?? "A simulated event"} occurred.`;
+  const observedLanguage = input.language ?? presence.language;
   const externalRef = { type: `${session.channelId}.${objectType}`, id: objectId };
   const parentObject = targetExternalRef ? state.mirrorObjects.find((item) => item.sessionId === session.id && item.externalRef.type === targetExternalRef.type && item.externalRef.id === targetExternalRef.id) : undefined;
   const conversationExternalRef = parentObject?.conversationExternalRef ?? parentObject?.externalRef.id ?? objectId;
@@ -1806,7 +1815,7 @@ export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: s
   if (unsupportedAssets.length) throw new Error(`The simulated ${channelName(session.channelId)} world does not support these asset kinds: ${unsupportedAssets.map((item) => item.kind).join(", ")}.`);
   const assetInputs = input.assets ?? [];
   const mirrorId = id("mirror");
-  const object = { id: mirrorId, bridgeId: `sandbox:${session.environmentId}`, presenceId: presence.id, channelId: session.channelId, externalRef, parentExternalRef: targetExternalRef, conversationExternalRef, objectType, language: input.language, simulationActionId: actionId, author: { externalRef: { type: `${session.channelId}.user`, id: actorId }, displayName: actorName, handle: (actor?.handle ?? input.actorHandle?.trim()) || undefined }, content: { text: content }, assetRefs: [] as { assetId: string; kind: SocialAssetKind; role?: "primary" | "attachment" | "link-preview" }[], occurredAt: observedAt, observedAt: now(), visibility, shareability, environment: "sandbox" as const, sessionId: session.id, sourceEventId: `sandbox-event:${objectId}`, source: input.source, trust: input.trust, scenarioStimulusId: input.scenarioStimulusId };
+  const object = { id: mirrorId, bridgeId: `sandbox:${session.environmentId}`, presenceId: presence.id, channelId: session.channelId, externalRef, parentExternalRef: targetExternalRef, conversationExternalRef, objectType, language: observedLanguage, simulationActionId: actionId, author: { externalRef: { type: `${session.channelId}.user`, id: actorId }, displayName: actorName, handle: (actor?.handle ?? input.actorHandle?.trim()) || undefined }, content: { text: content, language: observedLanguage }, assetRefs: [] as { assetId: string; kind: SocialAssetKind; role?: "primary" | "attachment" | "link-preview" }[], occurredAt: observedAt, observedAt: now(), visibility, shareability, environment: "sandbox" as const, sessionId: session.id, sourceEventId: `sandbox-event:${objectId}`, source: input.source, trust: input.trust, scenarioStimulusId: input.scenarioStimulusId };
   for (const assetInput of assetInputs) {
     const asset = sandboxAssetFromInput(state, presence, session, assetInput, visibility, shareability);
     state.assets.unshift(asset);
@@ -2000,7 +2009,7 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
     const asset = state.assets.find((item) => item.id === assetId);
     return { assetId, kind: asset?.type === "pdf" || asset?.type === "document" ? "document" as const : asset?.type ?? "image" as const, role: index === 0 && asset?.type !== "link" ? "primary" as const : asset?.type === "link" ? "link-preview" as const : "attachment" as const };
   });
-  const object = { id: id("mirror"), bridgeId: `sandbox:${session.environmentId}`, presenceId: presence.id, channelId: session.channelId, externalRef, parentExternalRef: execution.target, objectType: execution.affordance, author: { externalRef: { type: `${session.channelId}.user`, id: `agent:${presence.id}` }, displayName: presence.name, handle: presence.handle }, content: { text: text || undefined }, assetRefs, occurredAt: session.virtualNow, observedAt: now(), visibility: "public" as const, shareability: "presence-only" as const, originExecutionId: execution.id, actorPresenceId: presence.id, sourceEventId: `sandbox-delivery:${execution.id}`, environment: "sandbox" as const, sessionId: session.id, assignmentId: execution.assignmentId };
+  const object = { id: id("mirror"), bridgeId: `sandbox:${session.environmentId}`, presenceId: presence.id, channelId: session.channelId, externalRef, parentExternalRef: execution.target, objectType: execution.affordance, language: presence.language, author: { externalRef: { type: `${session.channelId}.user`, id: `agent:${presence.id}` }, displayName: presence.name, handle: presence.handle }, content: { text: text || undefined, language: presence.language }, assetRefs, occurredAt: session.virtualNow, observedAt: now(), visibility: "public" as const, shareability: "presence-only" as const, originExecutionId: execution.id, actorPresenceId: presence.id, sourceEventId: `sandbox-delivery:${execution.id}`, environment: "sandbox" as const, sessionId: session.id, assignmentId: execution.assignmentId };
   state.mirrorObjects.unshift(object);
   updateConversationEpisodeFromMirror(state, object, presence.id);
   state.mirrorEvents.unshift({ id: id("mirror-event"), bridgeId: object.bridgeId, presenceId: presence.id, sourceEventId: object.sourceEventId!, event: "created", externalRef, object, receivedAt: now(), environment: "sandbox", sessionId: session.id });

@@ -1,5 +1,6 @@
 import { readNativeXCredentials, readRecentXMentions, readRecentXPosts, readXAudienceSnapshot, readXPublicationMetrics, readXPostsByIds, testXCredentials, type XRecentPost } from "./x";
 import { applyOperation, recordNativeMirror, recordNativeMirrorDeletion, recordNativeObservation, recordPublicFooting, recordRuntimeEvent } from "./runtime";
+import { languagesMatch } from "./language-policy";
 import type { EntityRef, MirrorObject, OpenPresenceState, Presence, PresenceQuietHours } from "./types";
 import { hydrateThreadContext } from "./thread-context";
 
@@ -70,7 +71,8 @@ export async function hydrateNativeXThreadContext(source: OpenPresenceState, pre
   const connection = source.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x");
   const credentials = connection ? readNativeXCredentials(connection.id) : undefined;
   if (!connection || !credentials) return source;
-  const mirror = source.mirrorObjects.filter((item) => item.presenceId === presenceId && item.channelId === "x" && (item.environment === "live" || item.environment === undefined));
+  const presence = source.presences.find((item) => item.id === presenceId) ?? source.presence;
+  const mirror = source.mirrorObjects.filter((item) => item.presenceId === presenceId && item.channelId === "x" && (item.environment === "live" || item.environment === undefined) && Boolean(presence && languagesMatch(presence.language, item.language ?? item.content?.language)));
   const fetchedPosts = new Map<string, XRecentPost>();
   const hydrated = await hydrateThreadContext({
     mirror,

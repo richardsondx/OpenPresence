@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { containsLiteral, effectiveLanguagePolicy, languagesMatch, mergeLanguagePolicies, presenceLanguageGuidance, validateLanguage } from "../lib/language-policy";
-import { addSandboxEvent, applyOperation, completeNativeExecution, createAgent, deliverSandboxExecution, formChatPostIntent, formSandboxIntent, startPlaygroundSession, targetLanguageValidationForAction } from "../lib/runtime";
+import { isCognitionEligibleMirrorObject } from "../lib/social-context";
+import { addSandboxEvent, applyOperation, completeNativeExecution, createAgent, deliverSandboxExecution, formChatPostIntent, formSandboxIntent, recordNativeMirror, startPlaygroundSession, targetLanguageValidationForAction } from "../lib/runtime";
 
 const input = { name: "Jenny", description: "A useful social Agent.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
@@ -82,6 +83,18 @@ describe("Language & phrasing policy", () => {
     const delivered = deliverSandboxExecution(state, state.executions[0]!.id);
     expect(delivered.executions[0]?.status).toBe("succeeded");
     expect(delivered.mirrorObjects.some((item) => item.actorPresenceId === state.presence?.id)).toBe(true);
+  });
+
+  it("keeps non-English native observations out of the Presence mirror", () => {
+    const state = createAgent(input);
+    const next = recordNativeMirror(state, { connectionId: "connection-1", presenceId: state.presence!.id, post: { id: "pt-post", text: "Uma publicação", language: "pt-BR" } });
+    expect(next.mirrorObjects).toHaveLength(0);
+  });
+
+  it("does not admit unknown-language world objects to cognition", () => {
+    const state = createAgent(input);
+    const unknown = { id: "unknown", bridgeId: "native:test", presenceId: state.presence!.id, channelId: "x" as const, externalRef: { type: "x.post", id: "unknown" }, objectType: "post", content: { text: "No provider language tag" }, observedAt: new Date().toISOString(), visibility: "public" as const, shareability: "presence-only" as const };
+    expect(isCognitionEligibleMirrorObject(unknown, state.presence!.language)).toBe(false);
   });
 
   it("keeps Social Intent chosen while blocking Sandbox execution and Mirror delivery", () => {

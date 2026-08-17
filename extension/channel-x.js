@@ -132,6 +132,10 @@
     }).filter(Boolean);
   }
 
+  function isEnglishPost(post) {
+    return typeof post.language === "string" && /^(?:en|eng)(?:-|$)/i.test(post.language.trim());
+  }
+
   async function waitFor(predicate, timeout = 8_000) {
     const start = Date.now();
     while (Date.now() - start < timeout) { const value = predicate(); if (value) return value; await new Promise((resolve) => setTimeout(resolve, 250)); }
@@ -206,7 +210,7 @@
   function scan() {
     const account = verifyAccount();
     if (!account.ok) { setState("waiting"); return; }
-    for (const post of visiblePosts().slice(0, 12)) sendMessage({ type: "OPENPRESENCE_OBSERVATION", observation: { sourceEventId: `x:${post.id}`, externalRef: { type: "x.post", id: post.id }, object: { externalRef: { type: "x.post", id: post.id }, objectType: "post", language: post.language, author: { displayName: post.displayName, handle: post.handle }, content: post.text ? { text: post.text, language: post.language } : undefined, visibility: "public", shareability: "presence-only" } } });
+    for (const post of visiblePosts().filter(isEnglishPost).slice(0, 12)) sendMessage({ type: "OPENPRESENCE_OBSERVATION", observation: { sourceEventId: `x:${post.id}`, externalRef: { type: "x.post", id: post.id }, object: { externalRef: { type: "x.post", id: post.id }, objectType: "post", language: post.language, author: { displayName: post.displayName, handle: post.handle }, content: post.text ? { text: post.text, language: post.language } : undefined, visibility: "public", shareability: "presence-only" } } });
   }
 
   chrome.runtime.onMessage.addListener((message) => {

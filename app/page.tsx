@@ -57,6 +57,7 @@ import { latestPerception } from "@/lib/perception";
 import { conversationStatusLabel } from "@/lib/conversation-episodes";
 import { validateScenarioFidelity } from "@/lib/scenarios";
 import { cleanMirrorText, normalizeMirrorAuthor } from "@/lib/mirror-content";
+import { languagesMatch } from "@/lib/language-policy";
 import { assignmentIsOpen, audienceDeltas, cleanUserFacingAssignmentInstruction, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence } from "@/lib/runtime";
 import type {
   CalendarSlot,
@@ -5067,6 +5068,8 @@ function MirrorPanel({
   const allObjects = state.mirrorObjects
     .filter((item) => {
       if (filter !== "all" && item.presenceId !== filter) return false;
+      const itemPresence = state.presences.find((candidate) => candidate.id === item.presenceId);
+      if (!itemPresence || !languagesMatch(itemPresence.language, item.language ?? item.content?.language)) return false;
       if (channelId && item.channelId !== channelId) return false;
       if (environment === "sandbox") return item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && sessionIds?.has(item.sessionId)));
       if (environment === "live") return item.environment !== "sandbox" && !item.sessionId;
@@ -7386,7 +7389,7 @@ function PresenceView({
           <div><SectionEyebrow>Presence taste · language</SectionEyebrow><h2>Language & phrasing here</h2></div>
           <ShieldCheck size={17} />
         </div>
-        <p className="muted">This Presence reads the social world as evidence, but keeps one language for Agent-authored posts, replies, messages, and Presence Chat. Targeted interactions are delivered only when the observed target language matches this Presence; unknown target language is left alone. It inherits the Agent&apos;s hard boundaries and can add local ones.</p>
+        <p className="muted">This Presence admits only confirmed-English social observations into the Feed and Agent context. It also keeps posts, replies, messages, and Presence Chat in English. Non-English or unknown-language observations are left out rather than guessed or translated. It inherits the Agent&apos;s hard boundaries and can add local ones.</p>
         <div className="presence-language-selection">
           <div><strong>Primary language</strong><small>The language this Presence uses when it speaks.</small></div>
           <div className="presence-language-value"><small>English is the only supported Presence language right now.</small><select aria-label="Presence language" value={presence.language} onChange={(event) => void mutate({ type: "setPresence", patch: { language: event.target.value as "en" } })}><option value="en">English</option></select></div>

@@ -5,6 +5,7 @@ import type { Bridge, Execution, LiveEvent, MirrorObject, OpenPresenceState, Out
 import { bridgeAdapterStatus } from "./bridge-contract";
 import { PublicationSecurityError, sealExecutionForDelivery, verifyExecutionPermit } from "./publication-security";
 import { cleanMirrorText, normalizeMirrorAuthor } from "./mirror-content";
+import { languagesMatch } from "./language-policy";
 
 const entityRef = z.object({ type: z.string().min(1).max(80), id: z.string().min(1).max(240) });
 const author = z.object({ externalRef: entityRef.optional(), displayName: z.string().min(1).max(160), handle: z.string().max(160).optional(), avatarUrl: z.string().url().max(2_000).optional() }).optional();
@@ -109,6 +110,9 @@ export function ingestEvents(bridge: Bridge, payload: z.infer<typeof eventsInput
   const state = readStateForBridge(bridge.id); const current = state.bridges.find((item) => item.id === bridge.id); if (!current) throw new Error("Bridge not found");
   for (const item of payload.events) {
     if (state.mirrorEvents.some((event) => event.bridgeId === bridge.id && event.sourceEventId === item.sourceEventId)) continue;
+    const presence = state.presences.find((candidate) => candidate.id === current.presenceId) ?? state.presence;
+    const observedLanguage = item.object.language ?? item.object.content?.language;
+    if (observedLanguage !== undefined && !languagesMatch(presence?.language, observedLanguage)) continue;
     const object = upsertObject(state, current, item.object, item.sourceEventId, item.event === "deleted");
     const curationTarget = object.actorPresenceId === bridge.presenceId && object.parentExternalRef
       ? state.mirrorObjects.find((item) => item.externalRef.type === object.parentExternalRef?.type && item.externalRef.id === object.parentExternalRef?.id)
@@ -122,6 +126,9 @@ export function ingestEvents(bridge: Bridge, payload: z.infer<typeof eventsInput
 export function reconcileBridge(bridge: Bridge, payload: z.infer<typeof reconcileInput>) {
   const state = readStateForBridge(bridge.id); const current = state.bridges.find((item) => item.id === bridge.id); if (!current) throw new Error("Bridge not found");
   for (const input of payload.objects) {
+    const presence = state.presences.find((candidate) => candidate.id === current.presenceId) ?? state.presence;
+    const observedLanguage = input.language ?? input.content?.language;
+    if (observedLanguage !== undefined && !languagesMatch(presence?.language, observedLanguage)) continue;
     const object = upsertObject(state, current, input, `reconcile:${payload.cursor ?? "latest"}:${input.externalRef.type}:${input.externalRef.id}`);
     const curationTarget = object.actorPresenceId === bridge.presenceId && object.parentExternalRef
       ? state.mirrorObjects.find((item) => item.externalRef.type === object.parentExternalRef?.type && item.externalRef.id === object.parentExternalRef?.id)

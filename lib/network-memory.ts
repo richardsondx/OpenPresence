@@ -12,6 +12,7 @@ import type {
   RelationshipVisibility,
   SandboxActor,
 } from "./types";
+import { languagesMatch } from "./language-policy";
 
 const now = () => new Date().toISOString();
 
@@ -46,12 +47,19 @@ function hasPresenceReplyToActor(mirror: MirrorObject[], presenceId: string, act
   return mirror.some((item) => item.actorPresenceId === presenceId && item.parentExternalRef && actorObjectIds.has(item.parentExternalRef.id));
 }
 
+function languageEligibleMirror(state: OpenPresenceState, presenceId: string) {
+  const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
+  return state.mirrorObjects.filter((item) => item.presenceId === presenceId && Boolean(presence && languagesMatch(presence.language, item.language ?? item.content?.language)));
+}
+
 export function relationshipCurationEligible(state: OpenPresenceState, object: MirrorObject, presenceId = object.presenceId) {
+  const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
+  if (!presence || !languagesMatch(presence.language, object.language ?? object.content?.language)) return false;
   const actorId = object.author?.externalRef?.id;
   if (!actorId || object.actorPresenceId === presenceId || ["like", "reaction"].includes(object.objectType)) return false;
   const text = object.content?.text?.trim() ?? "";
   if (text.length < 12) return false;
-  const mirror = state.mirrorObjects.filter((item) => item.presenceId === presenceId);
+  const mirror = languageEligibleMirror(state, presenceId);
   return hasPresenceReplyToActor(mirror, presenceId, actorId);
 }
 
@@ -60,8 +68,8 @@ export function relationshipStatus(state: OpenPresenceState, presence: Presence,
   const person = identity ? state.people.find((item) => item.id === identity.personId) : undefined;
   const relationship = person ? relationshipForPerson(state, person.id) : undefined;
   if (person?.memoryState === "active" && relationship?.state === "active") return "remembered";
-  const mirror = state.mirrorObjects.filter((item) => item.presenceId === presence.id && item.author?.externalRef?.id === actorId);
-  if (mirror.length && hasPresenceReplyToActor(state.mirrorObjects, presence.id, actorId)) return "interacted";
+  const mirror = languageEligibleMirror(state, presence.id).filter((item) => item.author?.externalRef?.id === actorId);
+  if (mirror.length && hasPresenceReplyToActor(languageEligibleMirror(state, presence.id), presence.id, actorId)) return "interacted";
   const normalizedName = (displayName ?? "").toLowerCase();
   const watched = state.watches.some((watch) => watch.presenceId === presence.id && (watch.query.toLowerCase().includes(actorId.toLowerCase()) || (normalizedName && watch.query.toLowerCase().includes(normalizedName))));
   return watched ? "watched" : mirror.length ? "observed" : "observed";
@@ -87,7 +95,7 @@ export function relationshipHistory(state: OpenPresenceState, personId: string, 
   const identityIds = new Set(state.personIdentities.filter((identity) => identity.personId === personId && identity.sourcePresenceId === presenceId).map((identity) => identity.externalActorId));
   const normalizedQuery = query?.trim().toLowerCase();
   return state.mirrorObjects
-    .filter((object) => object.presenceId === presenceId && object.author?.externalRef?.id && identityIds.has(object.author.externalRef.id) && visibilityAllowed(relationshipVisibilityForMirror(object), presenceId) && (!normalizedQuery || object.content?.text?.toLowerCase().includes(normalizedQuery)))
+    .filter((object) => object.presenceId === presenceId && object.author?.externalRef?.id && identityIds.has(object.author.externalRef.id) && visibilityAllowed(relationshipVisibilityForMirror(object), presenceId) && languagesMatch((state.presences.find((item) => item.id === presenceId) ?? state.presence)?.language, object.language ?? object.content?.language) && (!normalizedQuery || object.content?.text?.toLowerCase().includes(normalizedQuery)))
     .sort((left, right) => (right.occurredAt ?? right.observedAt).localeCompare(left.occurredAt ?? left.observedAt))
     .slice(0, Math.max(1, Math.min(50, limit)));
 }

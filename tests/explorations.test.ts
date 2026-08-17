@@ -106,7 +106,7 @@ describe("Presence-scoped Explorations", () => {
     writeState(state);
     process.env.OPENPRESENCE_X_API_MOCK = "0";
     const fetchMock = vi.fn()
-      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "lead-1", text: "@jenny_ai We are building persistent agent memory and the hard part is keeping decisions coherent over time.", created_at: "2026-08-16T06:00:00.000Z", author_id: "builder-1", conversation_id: "lead-1" }], includes: { users: [{ id: "builder-1", username: "builder", name: "Builder" }] } }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "lead-1", text: "@jenny_ai We are building persistent agent memory and the hard part is keeping decisions coherent over time.", lang: "en", created_at: "2026-08-16T06:00:00.000Z", author_id: "builder-1", conversation_id: "lead-1" }], includes: { users: [{ id: "builder-1", username: "builder", name: "Builder" }] } }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }))
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);

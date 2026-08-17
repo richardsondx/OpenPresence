@@ -28,7 +28,7 @@ export function normalizePresenceLanguage(value: unknown): PresenceLanguage {
 export function presenceLanguageGuidance(value: unknown): string {
   const language = normalizePresenceLanguage(value);
   if (language === "en") {
-    return "Primary Presence language: English (en). Understand observed social content in its original form, but write all Agent-authored posts, replies, messages, and private Presence Chat responses in English. Do not switch languages to match an inbound post. Quoted or reproduced external text remains world data, not Agent-authored expression.";
+    return "Primary Presence language: English (en). Admit only confirmed-English social observations into the Feed and Agent context. Write all Agent-authored posts, replies, messages, and private Presence Chat responses in English. Do not switch languages to match an inbound post. Non-English or unconfirmed-language world content is excluded rather than guessed or translated.";
   }
   return `Primary Presence language: ${language}. Write all Agent-authored expression in this language.`;
 }

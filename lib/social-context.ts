@@ -2,6 +2,7 @@ import type { Asset, AssetPerception, EntityRef, MirrorObject, OpenPresenceState
 import type { NetworkSearchResult } from "./network";
 import { relationshipIdentity, relationshipProjection } from "./network-memory";
 import type { SocialThreadContext } from "./thread-context";
+import { languagesMatch } from "./language-policy";
 
 function latestMirrorFirst(left: { occurredAt?: string; observedAt: string }, right: { occurredAt?: string; observedAt: string }) {
   return (right.occurredAt ?? "").localeCompare(left.occurredAt ?? "")
@@ -9,8 +10,10 @@ function latestMirrorFirst(left: { occurredAt?: string; observedAt: string }, ri
 }
 
 /** Public cognition currently has no private-surface authorization envelope. */
-export function isCognitionEligibleMirrorObject(item: MirrorObject) {
-  return item.visibility === "public";
+export function isCognitionEligibleMirrorObject(item: MirrorObject, expectedLanguage?: unknown) {
+  if (item.visibility !== "public") return false;
+  if (expectedLanguage === undefined) return true;
+  return languagesMatch(expectedLanguage, item.language ?? item.content?.language);
 }
 
 export interface SocialEvidenceObject {
@@ -201,9 +204,9 @@ export function buildSocialEvidenceContext(input: {
   availableActions: string[];
   networkResult?: NetworkSearchResult;
 }): SocialEvidenceContext {
-  const eligibleMirror = input.mirror.filter(isCognitionEligibleMirrorObject);
-  const eligibleRelatedMirror = input.relatedMirror.filter(isCognitionEligibleMirrorObject);
-  const eligibleInbound = input.inbound && isCognitionEligibleMirrorObject(input.inbound) ? input.inbound : undefined;
+  const eligibleMirror = input.mirror.filter((item) => isCognitionEligibleMirrorObject(item, input.presence.language));
+  const eligibleRelatedMirror = input.relatedMirror.filter((item) => isCognitionEligibleMirrorObject(item, input.presence.language));
+  const eligibleInbound = input.inbound && isCognitionEligibleMirrorObject(input.inbound, input.presence.language) ? input.inbound : undefined;
   const targetId = eligibleInbound?.externalRef.id;
   const target = eligibleInbound ? evidenceObject(eligibleInbound, targetId) : undefined;
   const authorIds = new Set(eligibleInbound?.author?.externalRef?.id
@@ -216,7 +219,7 @@ export function buildSocialEvidenceContext(input: {
       .slice(0, 20);
     const contributionIds = new Set(contributions.map((item) => item.externalRef.id));
     const priorPresenceReplies = input.mirror
-      .filter((item) => item.actorPresenceId === input.presence.id && item.parentExternalRef && contributionIds.has(item.parentExternalRef.id) && item.content?.text)
+      .filter((item) => item.actorPresenceId === input.presence.id && item.parentExternalRef && contributionIds.has(item.parentExternalRef.id) && item.content?.text && isCognitionEligibleMirrorObject(item, input.presence.language))
       .sort(latestMirrorFirst)
       .slice(0, 12);
     const author = contributions[0]?.author ?? eligibleInbound?.author;
