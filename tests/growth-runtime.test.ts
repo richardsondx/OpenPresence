@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyOperation, audienceDeltas, capabilityProviderLabel, compileAssignmentInstruction, completeNativeExecution, derivePresenceCapabilityManifest, formChatPostIntent, formXActionIntent, formXReplyIntent, publicationMetricBaseline, recordVerifiedFollow } from "@/lib/runtime";
+import { applyOperation, audienceDeltas, capabilityProviderLabel, collapseAudienceSnapshots, compileAssignmentInstruction, completeNativeExecution, derivePresenceCapabilityManifest, formChatPostIntent, formXActionIntent, formXReplyIntent, publicationMetricBaseline, recordVerifiedFollow } from "@/lib/runtime";
 import { createAgent } from "@/lib/runtime";
 import type { MirrorObject, OpenPresenceState } from "@/lib/types";
 
@@ -67,6 +67,20 @@ describe("continuous growth responsibility", () => {
     next = applyOperation(next, { type: "reviewGrowth", presenceId: state.presence!.id, assignmentId: assignment.id, kind: "weekly" });
     expect(next.growthReviews).toHaveLength(2);
     expect(next.growthReviews[0]?.evidenceIds).toContain(next.audienceSnapshots[0]?.id);
+  });
+
+  it("collapses unchanged polling bursts but preserves later cadence and real changes", () => {
+    const state = fixture();
+    const presenceId = state.presence!.id;
+    let next = applyOperation(state, { type: "recordAudienceSnapshot", presenceId, followers: 3, following: 3, source: "native", observedAt: "2026-08-17T14:29:05.000Z" });
+    next = applyOperation(next, { type: "recordAudienceSnapshot", presenceId, followers: 3, following: 3, source: "native", observedAt: "2026-08-17T14:29:26.000Z" });
+    next = applyOperation(next, { type: "recordAudienceSnapshot", presenceId, followers: 3, following: 3, source: "native", observedAt: "2026-08-17T14:30:27.000Z" });
+    expect(next.audienceSnapshots).toHaveLength(1);
+    next = applyOperation(next, { type: "recordAudienceSnapshot", presenceId, followers: 3, following: 3, source: "native", observedAt: "2026-08-17T14:31:10.000Z" });
+    expect(next.audienceSnapshots).toHaveLength(2);
+    next = applyOperation(next, { type: "recordAudienceSnapshot", presenceId, followers: 4, following: 3, source: "native", observedAt: "2026-08-17T14:31:20.000Z" });
+    expect(next.audienceSnapshots).toHaveLength(3);
+    expect(collapseAudienceSnapshots(next.audienceSnapshots)).toHaveLength(3);
   });
 
   it("applies a model-backed Growth Review to the growth plan only", () => {
@@ -175,6 +189,46 @@ describe("continuous growth responsibility", () => {
     state.bridges = [{ id: "bridge-x", presenceId: state.presence.id, channelId: "x", name: "OpenPresence Chrome", kind: "bridge", state: "online", adapterStatus: "connected", lastHeartbeatAt: new Date().toISOString(), capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
     const next = formXReplyIntent(state, "A direct API reply.", "post-1");
     expect(next.executions[0]).toMatchObject({ connector: "native", bridgeId: undefined, status: "queued" });
+  });
+
+  it("uses the Chrome fallback only for a reply to an observed post without a mention", () => {
+    const state = fixture();
+    const presence = { ...state.presence!, environment: "live" as const, connectionMode: "native" as const, execution: { ...state.presence!.execution, reply: "auto" as const } };
+    const now = new Date().toISOString();
+    const next = {
+      ...state,
+      presence,
+      presences: [presence],
+      nativeConnections: [{ id: "native-x", presenceId: presence.id, channelId: "x" as const, kind: "x" as const, status: "connected" as const, access: "read-write" as const, account: { id: "account-1", username: "genny", name: "Genny" }, createdAt: now, updatedAt: now }],
+      bridges: [{ id: "bridge-x", presenceId: presence.id, channelId: "x" as const, name: "OpenPresence Chrome", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: now, capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] }, createdAt: now, updatedAt: now }],
+      mirrorObjects: [{ id: "observed-post", bridgeId: "native-x", presenceId: presence.id, channelId: "x" as const, externalRef: { type: "x.post" as const, id: "post-unmentioned" }, objectType: "post", content: { text: "A useful public post without a mention." }, observedAt: now, visibility: "public" as const, shareability: "presence-only" as const, environment: "live" as const }],
+    };
+    const reply = formXReplyIntent(next, "A grounded reply through the browser fallback.", "post-unmentioned");
+    expect(reply.executions[0]).toMatchObject({ connector: "bridge", bridgeId: "bridge-x", status: "queued" });
+  });
+
+  it("rebinds normal pending Bridge work to Native X without stealing the non-mention fallback", () => {
+    const state = fixture();
+    const now = new Date().toISOString();
+    const bridgePresence = { ...state.presence!, environment: "live" as const, connectionMode: "bridge" as const, execution: { ...state.presence!.execution, post: "auto" as const, reply: "auto" as const } };
+    let pending: OpenPresenceState = {
+      ...state,
+      presence: bridgePresence,
+      presences: [bridgePresence],
+      bridges: [{ id: "bridge-x", presenceId: bridgePresence.id, channelId: "x" as const, name: "OpenPresence Chrome", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: now, capabilities: { inbound: true, reconcile: true, affordances: ["post", "reply"], formats: ["x.post", "x.reply"], metrics: [] }, createdAt: now, updatedAt: now }],
+      mirrorObjects: [
+        { id: "mentioned-post", bridgeId: "bridge-x", presenceId: bridgePresence.id, channelId: "x" as const, externalRef: { type: "x.post" as const, id: "mentioned-post" }, objectType: "post", content: { text: "@example_agent a useful public post." }, observedAt: now, visibility: "public" as const, shareability: "presence-only" as const, environment: "live" as const },
+        { id: "unmentioned-post", bridgeId: "bridge-x", presenceId: bridgePresence.id, channelId: "x" as const, externalRef: { type: "x.post" as const, id: "unmentioned-post" }, objectType: "post", content: { text: "A useful public post without a mention." }, observedAt: now, visibility: "public" as const, shareability: "presence-only" as const, environment: "live" as const },
+      ],
+    };
+    pending = formXReplyIntent(pending, "A reply to the mentioned post.", "mentioned-post");
+    const fallback = formXReplyIntent(pending, "A reply through the browser fallback.", "unmentioned-post");
+    pending = { ...fallback, nativeConnections: [{ id: "native-x", presenceId: bridgePresence.id, channelId: "x" as const, kind: "x" as const, status: "connected" as const, access: "read-write" as const, account: { id: "account-1", username: "genny", name: "Genny" }, createdAt: now, updatedAt: now }] };
+    const rebound = applyOperation(pending, { type: "setPresence", patch: { connectionMode: "native" } });
+    const mentioned = rebound.executions.find((execution) => execution.target?.id === "mentioned-post");
+    const unmentioned = rebound.executions.find((execution) => execution.target?.id === "unmentioned-post");
+    expect(mentioned).toMatchObject({ connector: "native", bridgeId: undefined });
+    expect(unmentioned).toMatchObject({ connector: "bridge", bridgeId: "bridge-x" });
   });
 
   it.each([

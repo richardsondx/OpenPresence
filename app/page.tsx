@@ -5876,6 +5876,114 @@ const deliveryFailureExplanation = (failure?: { code?: string; message: string }
   };
 };
 
+const isPublicPostExecution = (execution: OpenPresenceState["executions"][number]) => /(^|\.)((post)|(reply))$/i.test(execution.affordance);
+
+function RecentPublicAttempts({
+  state,
+  executions,
+  onContext,
+}: {
+  state: OpenPresenceState;
+  executions: OpenPresenceState["executions"];
+  onContext?: (object: MirrorObject) => void;
+}) {
+  const attempts = executions
+    .filter((execution) => isPublicPostExecution(execution) && ["succeeded", "failed", "blocked", "expired"].includes(execution.status))
+    .sort((left, right) => new Date(right.updatedAt ?? right.createdAt).getTime() - new Date(left.updatedAt ?? left.createdAt).getTime())
+    .slice(0, 3);
+  const mirrorForExecution = (execution: OpenPresenceState["executions"][number]) => state.mirrorObjects.find((object) => {
+    if (object.presenceId !== execution.presenceId) return false;
+    if (execution.environment === "sandbox") return object.environment === "sandbox" && (!execution.sessionId || object.sessionId === execution.sessionId);
+    return object.environment !== "sandbox" && !object.sessionId && object.originExecutionId === execution.id;
+  }) ?? (execution.target ? state.mirrorObjects.find((object) => object.presenceId === execution.presenceId && object.externalRef.type === execution.target?.type && object.externalRef.id === execution.target?.id && execution.environment !== "sandbox" && object.environment !== "sandbox" && !object.sessionId) : undefined);
+  const expressionText = (execution: OpenPresenceState["executions"][number], object?: MirrorObject) => {
+    const payload = execution.publication?.payload;
+    const payloadText = payload && typeof payload === "object" && !Array.isArray(payload) && "text" in payload && typeof payload.text === "string" ? payload.text : undefined;
+    return execution.publication?.publicExpression?.text ?? payloadText ?? object?.content?.text ?? "No expression text was returned.";
+  };
+  return (
+    <section className="recent-public-attempts" aria-label="Recent public posts and replies">
+      <div className="recent-public-attempts-heading">
+        <div>
+          <SectionEyebrow>Recent public attempts</SectionEyebrow>
+          <h3>What happened to the last 3 posts or replies</h3>
+        </div>
+        <span>{attempts.length} of 3</span>
+      </div>
+      {attempts.length ? <div className="recent-public-attempts-list">{attempts.map((execution) => {
+        const object = mirrorForExecution(execution);
+        const target = execution.target ? state.mirrorObjects.find((candidate) => candidate.presenceId === execution.presenceId && candidate.externalRef.id === execution.target?.id && candidate.environment !== "sandbox") : undefined;
+        const presence = state.presences.find((candidate) => candidate.id === execution.presenceId);
+        const succeeded = execution.status === "succeeded";
+        const action = execution.affordance.split(".").at(-1) === "reply" ? "Reply" : "Original post";
+        const recipient = target?.author?.handle ?? target?.author?.displayName;
+        const externalUrl = object ? externalUrlForMirrorObject(object, object.author?.handle) : undefined;
+        const timestamp = execution.executedAt ?? execution.updatedAt ?? execution.createdAt;
+        const failure = !succeeded ? deliveryFailureExplanation(execution.failure, presence?.handle) : undefined;
+        return <article className={`recent-public-attempt recent-public-attempt-${succeeded ? "succeeded" : "failed"}`} key={execution.id}>
+          <div className="recent-public-attempt-topline">
+            <span className="recent-public-attempt-status"><span aria-hidden="true" /> {succeeded ? "Sent" : "Not sent"}</span>
+            <time dateTime={timestamp}>{formatHistoryTimestamp(timestamp)}</time>
+          </div>
+          <strong>{action}{recipient ? ` to ${recipient}` : ""}</strong>
+          <p>{expressionText(execution, object)}</p>
+          <div className="recent-public-attempt-footer">
+            <span>{succeeded ? "Verified channel outcome" : failure?.title ?? "Delivery failed"}</span>
+            {object && onContext && <button type="button" onClick={() => onContext(object)}>View post</button>}
+            {externalUrl && <a href={externalUrl} target="_blank" rel="noreferrer">Open on X</a>}
+          </div>
+        </article>;
+      })}</div> : <p className="recent-public-attempts-empty">No sent or failed posts/replies yet. A preparing action appears above until the channel returns a result.</p>}
+    </section>
+  );
+}
+
+function ExecutionQueueSummary({
+  state,
+  executions,
+  presenceId,
+}: {
+  state: OpenPresenceState;
+  executions: OpenPresenceState["executions"];
+  presenceId?: string;
+}) {
+  const pendingStatuses = new Set<OpenPresenceState["executions"][number]["status"]>(["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing"]);
+  const pending = executions.filter((execution) => pendingStatuses.has(execution.status));
+  const nativePending = pending.filter((execution) => execution.connector === "native").length;
+  const bridgePending = pending.filter((execution) => execution.connector === "bridge").length;
+  const connectorlessPending = pending.filter((execution) => !execution.connector).length;
+  const reviewPending = pending.filter((execution) => execution.status === "awaiting-review").length;
+  const failed = executions.filter((execution) => ["failed", "blocked", "expired"].includes(execution.status)).length;
+  const bridge = state.bridges.find((item) => item.presenceId === presenceId && item.kind === "bridge" && item.state !== "offline");
+  const bridgeStatus = bridge ? bridgeAdapterStatus(bridge) : "waiting";
+  const queueDetail = bridgePending > 0
+    ? bridgeStatus === "connected"
+      ? `${bridgePending} Chrome fallback action${bridgePending === 1 ? " is" : "s are"} waiting for the next Bridge check.`
+      : `${bridgePending} Chrome fallback action${bridgePending === 1 ? " is" : "s are"} waiting because the extension is ${bridge ? bridgeStatus === "stale" ? "stale" : "not checked in" : "not connected"}.`
+    : connectorlessPending > 0
+      ? `${connectorlessPending} action${connectorlessPending === 1 ? " is" : "s are"} waiting for an authorized connector.`
+      : nativePending > 0
+        ? `${nativePending} Native X action${nativePending === 1 ? " is" : "s are"} ready for API delivery.`
+        : pending.length === 0
+          ? "Nothing is waiting to send. New actions will appear here with their route."
+          : "The queue is waiting on the current decision state.";
+  return (
+    <section className="execution-queue-summary" aria-label="Execution queue" data-testid="execution-queue-summary">
+      <div className="execution-queue-heading">
+        <div><SectionEyebrow>Queue</SectionEyebrow><strong>{pending.length ? `${pending.length} pending` : "Queue clear"}</strong></div>
+        <span className={failed ? "execution-queue-failed" : "execution-queue-healthy"}>{failed ? `${failed} failed / blocked` : "No failed actions"}</span>
+      </div>
+      <div className="execution-queue-counts" aria-label="Queue counts by route">
+        <span className="execution-queue-count execution-queue-count-native"><span aria-hidden="true" />Native X · {nativePending}</span>
+        <span className="execution-queue-count execution-queue-count-bridge"><span aria-hidden="true" />Chrome fallback · {bridgePending}</span>
+        <span className="execution-queue-count execution-queue-count-review"><span aria-hidden="true" />Needs review · {reviewPending}</span>
+      </div>
+      <p>{queueDetail}</p>
+      {bridgePending > 0 && <small>Chrome is reserved for replies to posts that do not mention {state.presences.find((item) => item.id === presenceId)?.handle ?? "this Presence"}; Native X handles the normal X route.</small>}
+    </section>
+  );
+}
+
 function ExecutionLedger({
   state,
   mutate,
@@ -5921,16 +6029,20 @@ function ExecutionLedger({
   const actionSnippet = actionContext?.content?.text?.trim();
   if (!latest || !intent)
     return (
-      <div className="decision-card execution-ledger">
-        <div className="section-heading compact">
-          <div>
-            <SectionEyebrow>Decision & action</SectionEyebrow>
-            <h3>No action yet</h3>
+      <div className="execution-ledger-stack">
+        <ExecutionQueueSummary state={state} executions={executions} presenceId={presenceId} />
+        <div className="decision-card execution-ledger">
+          <div className="section-heading compact">
+            <div>
+              <SectionEyebrow>Decision & action</SectionEyebrow>
+              <h3>No action yet</h3>
+            </div>
           </div>
+          <p>
+            When {presence?.name ?? "this Presence"} decides a response is worth making, you&apos;ll see the source post and what happens next here.
+          </p>
         </div>
-        <p>
-          When {presence?.name ?? "this Presence"} decides a response is worth making, you&apos;ll see the source post and what happens next here.
-        </p>
+        <RecentPublicAttempts state={state} executions={executions} onContext={onContext} />
       </div>
     );
   const needsApproval = latest.status === "awaiting-review";
@@ -5961,37 +6073,39 @@ function ExecutionLedger({
         : latest.status === "queued" && latest.connector === "native"
           ? { kind: "queued", label: "Queued for immediate API delivery", detail: "Native X delivery is not scheduled for a future time; it runs as soon as the API worker accepts it." }
         : latest.status === "queued" && latest.connector === "bridge"
-          ? { kind: "blocked", label: bridgeConnected ? "Waiting for Bridge check" : "Waiting for connected Bridge", detail: bridgeConnected ? "The Bridge has not reported its next queue check yet." : "No connected Bridge is available to send this action." }
+          ? { kind: "blocked", label: bridgeConnected ? "Send time not available yet" : "No send time scheduled", detail: bridgeConnected ? "The Bridge is connected, but it has not reported a heartbeat to calculate the next send check." : "A connected Bridge is required before this reply can enter a send countdown. Reconnect the Bridge; the next queue check will then show a countdown." }
           : ["claimed", "executing"].includes(latest.status)
             ? { kind: "sending", label: "Sending now", detail: "The connected executor is delivering this action." }
             : latest.status === "awaiting-connector"
-              ? { kind: "blocked", label: "Waiting for connector", detail: "A connected channel writer is required before this action can be sent." }
+              ? { kind: "blocked", label: "No send time scheduled", detail: "A connected channel writer is required before this action can be queued. Once it connects, the next send check will show a countdown." }
               : latest.status === "awaiting-manual"
                 ? { kind: "blocked", label: "Waiting for manual confirmation", detail: "The action will not be counted until its external result is marked sent." }
                 : latest.status === "succeeded"
                   ? { kind: "sent", label: "Sent", detail: latest.executedAt ? `Verified at ${formatHistoryTimestamp(latest.executedAt)}.` : "The channel result was verified." }
                   : undefined;
   return (
-    <div className="decision-card execution-ledger">
-      <div className="section-heading compact">
-        <div>
-          <SectionEyebrow>Decision & action</SectionEyebrow>
-          <h3>
-            {needsApproval
-              ? "Needs your review"
-              : languageBlocked
-                ? "Language policy blocked"
-                : latest.status === "succeeded"
-                ? "Sent"
-                : executionStatusLabel(latest.status)}
-          </h3>
+    <div className="execution-ledger-stack">
+      <ExecutionQueueSummary state={state} executions={executions} presenceId={presenceId} />
+      <div className="decision-card execution-ledger">
+        <div className="section-heading compact">
+          <div>
+            <SectionEyebrow>Decision & action</SectionEyebrow>
+            <h3>
+              {needsApproval
+                ? "Needs your review"
+                : languageBlocked
+                  ? "Language policy blocked"
+                  : latest.status === "succeeded"
+                  ? "Sent"
+                  : executionStatusLabel(latest.status)}
+            </h3>
+          </div>
+          <span className="quiet-label">{actionName}</span>
         </div>
-        <span className="quiet-label">{actionName}</span>
-      </div>
-      <div className="execution-line">
-        <div><SectionEyebrow>{actionContext ? `${actionName} to` : "Action"}</SectionEyebrow><strong>{actionContext ? targetLabel : actionName}</strong></div>
-        <span className={`execution-status execution-status-${latest.status}`}>{executionStatusLabel(latest.status)}</span>
-      </div>
+        <div className="execution-line">
+          <div><SectionEyebrow>{actionContext ? `${actionName} to` : "Action"}</SectionEyebrow><strong>{actionContext ? targetLabel : actionName}</strong></div>
+          <span className={`execution-status execution-status-${latest.status}`}>{executionStatusLabel(latest.status)}</span>
+        </div>
       {actionContext && (
         <div className="action-context-card">
           <span>{actionSnippet ? `“${actionSnippet.slice(0, 130)}${actionSnippet.length > 130 ? "…" : ""}”` : "This post is the source context for the action."}</span>
@@ -6081,6 +6195,8 @@ function ExecutionLedger({
           </Button>
         </form>
       )}
+      </div>
+      <RecentPublicAttempts state={state} executions={executions} onContext={onContext} />
     </div>
   );
 }
@@ -8378,7 +8494,7 @@ function ChromeConnectionPanel({
   const connected = Boolean(activeBridge && bridgeAdapterStatus(activeBridge) === "connected");
   const identityMismatch = activeBridge?.accountIdentity?.status === "mismatch";
   const identityUnknown = activeBridge?.accountIdentity?.status === "unknown";
-  const status = !extensionEnabled ? "Disabled" : identityMismatch ? "Wrong X account" : identityUnknown ? "Account needs verification" : connected ? "Connected" : activeBridge ? "Waiting for extension" : "Not connected";
+  const status = !extensionEnabled ? "Disabled" : identityMismatch ? "Wrong X account" : identityUnknown ? "Account needs verification" : connected ? "Connected" : activeBridge ? "Extension not connected" : "Not connected";
   const openControlledChrome = () => window.postMessage({ source: "openpresence", type: "OPENPRESENCE_OPEN_CHROME", presenceId: presence.id }, "*");
   const refresh = async () => {
     setRefreshing(true);
@@ -8400,7 +8516,7 @@ function ChromeConnectionPanel({
       </div>
       <div className="chrome-connection-status" role="status">
         <span className={`live-pill ${connected && !identityMismatch && !identityUnknown ? "" : "paused"}`}><span className="status-dot" /> {status}</span>
-        <span className="chrome-connection-status-copy">{!extensionEnabled ? "Enable Chrome hands for this Presence to make the extension available." : identityMismatch ? `${activeBridge?.accountIdentity?.message} No live work can be claimed until the correct account is signed in.` : identityUnknown ? `${activeBridge?.accountIdentity?.message ?? `Expected ${presence.handle}.`} No live work can be claimed until X exposes the signed-in account.` : connected ? `The controlled browser is connected as ${presence.handle} and ready for approved work.` : "Install or enable the OpenPresence Chrome extension, then open the controlled browser."}</span>
+        <span className="chrome-connection-status-copy">{!extensionEnabled ? "Enable Chrome hands for this Presence to make the extension available." : identityMismatch ? `${activeBridge?.accountIdentity?.message} No live work can be claimed until the correct account is signed in.` : identityUnknown ? `${activeBridge?.accountIdentity?.message ?? `Expected ${presence.handle}.`} No live work can be claimed until X exposes the signed-in account.` : connected ? `The controlled browser is connected as ${presence.handle} and ready for approved work.` : activeBridge ? "The Chrome route is configured, but the extension has not checked in. Open the controlled Chrome tab and enable the extension." : "Install or enable the OpenPresence Chrome extension, then open the controlled browser."}</span>
         {activeBridge && <Button type="button" variant="ghost" disabled={refreshing} onClick={() => void refresh()}><RotateCcw size={13} /> {refreshing ? "Refreshing…" : "Refresh status"}</Button>}
       </div>
       <small className="chrome-connection-safety"><ShieldCheck size={13} /> No account credentials are stored in OpenPresence or the extension. Before a write, the tab checks the selected account and verifies the resulting post.</small>
@@ -8502,7 +8618,13 @@ function BridgeManager({
   };
   const externalEventsEndpoint = `${baseUrl}/api/bridge/v1/events`;
   const externalExecutionsEndpoint = `${baseUrl}/api/bridge/v1/executions/claim`;
-  const bridgeRows = bridges.map((bridge) => (
+  const bridgeStatus = (bridge: (typeof bridges)[number]) => {
+    const status = bridgeAdapterStatus(bridge);
+    return presence.channel === "x" && bridge.state !== "offline" && status === "waiting"
+      ? "Chrome extension not connected"
+      : bridgeAdapterStatusLabel(status);
+  };
+  const bridgeRow = (bridge: (typeof bridges)[number]) => (
     <div className="bridge-row" key={bridge.id}>
       <div>
         <strong>{bridge.name}</strong>
@@ -8534,7 +8656,7 @@ function BridgeManager({
           className={`live-pill ${bridgeAdapterStatus(bridge) === "connected" ? "" : "paused"}`}
         >
           <span className="status-dot" />{" "}
-          {bridgeAdapterStatusLabel(bridgeAdapterStatus(bridge))}
+          {bridgeStatus(bridge)}
         </span>
         {bridge.state !== "offline" && (
           <Button
@@ -8556,7 +8678,9 @@ function BridgeManager({
         )}
       </div>
     </div>
-  ));
+  );
+  const activeBridgeRows = activeBridges.map(bridgeRow);
+  const offlineBridgeRows = bridges.filter((item) => item.state === "offline").map(bridgeRow);
   return (
     <div className="channel-connector-panel bridge-manager">
       <div className="section-heading compact">
@@ -8605,12 +8729,19 @@ function BridgeManager({
       )}
       {bridges.length > 0 && (
         <div className="bridge-list">
-          {bridgeRows}
+          {activeBridgeRows.length > 0 && <div className="bridge-list-label">{presence.channel === "x" ? "Current Chrome extension route" : "Current route"}</div>}
+          {activeBridgeRows}
+          {offlineBridgeRows.length > 0 && (
+            <details className="bridge-history-details">
+              <summary>Connection history · {offlineBridgeRows.length} removed</summary>
+              <div className="bridge-history-list">{offlineBridgeRows}</div>
+            </details>
+          )}
           {bridge && (
             <div className="adapter-status-summary" role="status">
               <div>
-                <span className="eyebrow">Adapter status</span>
-                <strong>{bridgeAdapterStatusLabel(bridgeAdapterStatus(bridge))}</strong>
+                <span className="eyebrow">{presence.channel === "x" ? "Chrome extension status" : "Adapter status"}</span>
+                <strong>{bridgeStatus(bridge)}</strong>
                 <small>{bridge.lastSeenAt ? `Last check-in ${formatTime(bridge.lastSeenAt)}` : "No authenticated adapter request has arrived yet."}</small>
               </div>
               <Button variant="ghost" disabled={refreshing} onClick={() => void refresh()}>

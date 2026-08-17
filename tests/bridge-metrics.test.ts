@@ -20,5 +20,11 @@ describe("Bridge Growth metrics", () => {
 
     expect(next.audienceSnapshots[0]).toMatchObject({ presenceId, followers: 1_234, following: 321, source: "bridge", observationStatus: "observed" });
     expect(next.publicationMetricSnapshots[0]).toMatchObject({ presenceId, mirrorObjectId: mirror.id, impressions: 4_567, likes: 89, source: "bridge", observationStatus: "observed" });
+
+    const repeated = reportMetrics(bridge, {
+      audience: { followers: 1_234, following: 321, observedAt: "2026-08-17T01:00:20.000Z" },
+      publications: [],
+    });
+    expect(repeated.audienceSnapshots).toHaveLength(1);
   });
 });

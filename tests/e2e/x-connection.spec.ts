@@ -45,6 +45,37 @@ test("Activity shows the next-check countdown for a connected Bridge", async ({ 
   await expect(page.locator(".next-check-countdown")).toHaveText(/Next check in 00:\d{2}|Next check due now/);
 });
 
+test("Chrome settings show one current route and collapse disconnected Bridge history", async ({ page, request }) => {
+  await createAgent(page);
+  const current = await (await request.get("/api/state")).json();
+  const presenceId = current.presence.id;
+  const liveRoute = await request.post("/api/state", { data: { type: "setPresence", patch: { connectionMode: "bridge" } } });
+  expect(liveRoute.ok()).toBeTruthy();
+  const capabilities = { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: ["followers", "public_metrics"] };
+  const oldBridgeResponse = await request.post("/api/bridge/manage", { data: { action: "create", presenceId, name: "Old Chrome Bridge", kind: "bridge", capabilities } });
+  expect(oldBridgeResponse.ok()).toBeTruthy();
+  const oldBridge = await oldBridgeResponse.json();
+  const revoked = await request.post("/api/bridge/manage", { data: { action: "revoke", bridgeId: oldBridge.bridge.id } });
+  expect(revoked.ok()).toBeTruthy();
+  const currentBridgeResponse = await request.post("/api/bridge/manage", { data: { action: "create", presenceId, name: "Current Chrome Bridge", kind: "bridge", capabilities } });
+  expect(currentBridgeResponse.ok()).toBeTruthy();
+
+  await page.reload();
+  const navigation = test.info().project.name === "mobile" ? page.locator(".mobile-nav") : page.locator(".sidebar");
+  await navigation.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByText("Advanced connector diagnostics", { exact: true }).click();
+  await expect(page.getByText("Current Chrome extension route", { exact: true })).toBeVisible();
+  await expect(page.locator(".bridge-row").filter({ hasText: "Current Chrome Bridge" })).toBeVisible();
+  await expect(page.locator(".bridge-row").filter({ hasText: "Current Chrome Bridge" })).toContainText("Chrome extension not connected");
+  await expect(page.locator(".bridge-history-details")).toContainText("Connection history · 1 removed");
+  await expect(page.locator(".bridge-history-details")).not.toHaveAttribute("open", "");
+  await expect(page.locator(".bridge-history-list .bridge-row").filter({ hasText: "Old Chrome Bridge" })).toBeHidden();
+
+  await page.locator(".bridge-history-details summary").click();
+  await expect(page.locator(".bridge-history-list .bridge-row").filter({ hasText: "Old Chrome Bridge" })).toBeVisible();
+  await expect(page.locator(".bridge-history-list")).toContainText("Disconnected");
+});
+
 test("operator connects an X Presence through the official API", async ({ page }) => {
   const consoleErrors: string[] = [];
   const failedRequests: string[] = [];

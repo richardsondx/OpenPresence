@@ -1190,6 +1190,7 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .chrome-hands-card { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px 18px; align-items: center; padding: 13px 14px; border: 1px solid #e4d5ca; border-radius: 7px; background: linear-gradient(100deg, #fffaf6, #fffdfb); }.chrome-hands-copy { display: grid; gap: 4px; }.chrome-hands-copy strong { font-size: 13px; }.chrome-hands-copy p { margin: 0; max-width: 680px; color: var(--muted); font-size: 11px; line-height: 1.45; }.chrome-hands-actions { display: flex; align-items: center; justify-content: flex-end; gap: 10px; flex-wrap: wrap; }.toggle-row { display: inline-flex; align-items: center; gap: 7px; color: var(--muted); font-size: 10px; cursor: pointer; white-space: nowrap; }.toggle-row input { position: absolute; opacity: 0; pointer-events: none; }.toggle-track { display: inline-flex; align-items: center; width: 30px; height: 18px; padding: 2px; border-radius: 999px; background: #cfc5bc; transition: background .15s ease; }.toggle-track span { width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(0,0,0,.15); transition: transform .15s ease; }.toggle-row input:checked + .toggle-track { background: var(--agent-accent, #c87f51); }.toggle-row input:checked + .toggle-track span { transform: translateX(12px); }.chrome-hands-safety { grid-column: 1 / -1; display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 9px; }.chrome-hands-safety svg { color: var(--green); flex: 0 0 auto; }
 .chrome-connection-panel { display: grid; gap: 14px; padding: 16px; border: 1px solid #e4d5ca; border-radius: 8px; background: linear-gradient(100deg, #fffaf6, #fffdfb); }.chrome-connection-heading { display: flex; align-items: flex-start; justify-content: space-between; gap: 16px; }.chrome-connection-heading > svg { color: var(--green); flex: 0 0 auto; }.chrome-connection-heading h2 { margin: 4px 0 5px; font-size: 17px; }.chrome-connection-heading p { margin: 0; max-width: 760px; font-size: 11px; line-height: 1.5; }.chrome-connection-controls { display: flex; align-items: center; gap: 14px; flex-wrap: wrap; }.chrome-connection-status { display: flex; align-items: center; gap: 10px; min-height: 38px; padding-top: 12px; border-top: 1px solid var(--line); }.chrome-connection-status-copy { flex: 1; color: var(--muted); font-size: 10px; line-height: 1.4; }.chrome-connection-safety { display: flex; align-items: center; gap: 5px; color: var(--muted); font-size: 9px; }.chrome-connection-safety svg { color: var(--green); flex: 0 0 auto; }
 .advanced-connector-details { padding-top: 3px; border-top: 1px solid var(--line); }.advanced-connector-details summary { color: var(--muted); cursor: pointer; font: 9px "DM Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }.advanced-connector-details > p { margin: 10px 0 0; color: var(--muted); font-size: 10px; line-height: 1.4; }.advanced-connector-details[open] .bridge-manager { margin-top: 12px; padding: 0; border: 0; background: transparent; }
+.bridge-list-label { padding-top: 3px; color: var(--muted); font: 9px "DM Mono", monospace; letter-spacing: .08em; text-transform: uppercase; }.bridge-history-details { margin-top: 3px; border-top: 1px solid #eee5dc; padding-top: 10px; }.bridge-history-details summary { color: var(--muted); cursor: pointer; font: 9px "DM Mono", monospace; letter-spacing: .06em; text-transform: uppercase; }.bridge-history-list { display: grid; gap: 12px; margin-top: 4px; }
 .perception-actions { display: inline-flex; align-items: center; gap: 12px; }
 
 /* Scenario Runs lead with the social replay. Evidence remains available without becoming the first thing an operator has to decode. */
@@ -1457,6 +1458,43 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .mirror-zero-state strong { font-size: 13px; }
 .mirror-zero-state small { display: block; margin-top: 10px; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .execution-ledger { margin: 0; padding-top: 15px; }
+.execution-ledger-stack { display: grid; gap: 18px; }
+.execution-queue-summary { display: grid; gap: 11px; padding: 14px 15px; border: 1px solid #e1d7cc; border-left: 4px solid #6d8fbe; border-radius: 9px; background: #fbfaf8; }
+.execution-queue-heading { display: flex; align-items: center; justify-content: space-between; gap: 12px; }
+.execution-queue-heading > div { display: grid; gap: 4px; }
+.execution-queue-heading strong { font-size: 18px; letter-spacing: -.03em; }
+.execution-queue-heading > span { flex: 0 0 auto; font: 9px "DM Mono", monospace; text-transform: uppercase; letter-spacing: .04em; }
+.execution-queue-healthy { color: var(--green); }
+.execution-queue-failed { color: #a04e31; }
+.execution-queue-counts { display: flex; align-items: center; flex-wrap: wrap; gap: 7px; }
+.execution-queue-count { display: inline-flex; align-items: center; gap: 6px; padding: 5px 8px; border: 1px solid #e1d7cc; border-radius: 999px; color: var(--muted); background: #fff; font: 9px "DM Mono", monospace; }
+.execution-queue-count > span { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.execution-queue-count-native { border-color: #cfe2d4; color: #4c8761; }
+.execution-queue-count-bridge { border-color: #e5c7b2; color: #a25d39; }
+.execution-queue-count-review { border-color: #d9c8ed; color: #7256a6; }
+.execution-queue-summary p { margin: 0; color: var(--ink); font-size: 11px; line-height: 1.45; }
+.execution-queue-summary small { color: var(--muted); font-size: 9px; line-height: 1.45; }
+.recent-public-attempts { margin: 0; padding-top: 15px; border-top: 2px solid var(--ink); }
+.recent-public-attempts-heading { display: flex; align-items: end; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
+.recent-public-attempts-heading > div { display: grid; gap: 5px; min-width: 0; }
+.recent-public-attempts-heading h3 { margin: 0; font-size: 18px; letter-spacing: -.035em; }
+.recent-public-attempts-heading > span { flex: 0 0 auto; color: var(--faint); font: 9px "DM Mono", monospace; text-transform: uppercase; letter-spacing: .04em; }
+.recent-public-attempts-list { display: grid; gap: 9px; }
+.recent-public-attempt { display: grid; gap: 7px; padding: 12px 13px; border: 1px solid #e3ded7; border-left: 3px solid #b95f43; border-radius: 8px; background: #fff; }
+.recent-public-attempt-succeeded { border-color: #d6e7db; border-left-color: var(--green); background: #fbfefb; }
+.recent-public-attempt-topline { display: flex; align-items: center; justify-content: space-between; gap: 10px; color: var(--faint); font: 9px "DM Mono", monospace; }
+.recent-public-attempt-topline time { flex: 0 0 auto; }
+.recent-public-attempt-status { display: inline-flex; align-items: center; gap: 6px; color: #9b4e2e; text-transform: uppercase; letter-spacing: .04em; }
+.recent-public-attempt-succeeded .recent-public-attempt-status { color: var(--green); }
+.recent-public-attempt-status > span { width: 7px; height: 7px; border-radius: 50%; background: currentColor; }
+.recent-public-attempt > strong { overflow: hidden; font-size: 12px; letter-spacing: -.02em; text-overflow: ellipsis; white-space: nowrap; }
+.recent-public-attempt > p { margin: 0; overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
+.recent-public-attempt-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 8px; border-top: 1px solid #f0ece7; color: var(--faint); font: 9px "DM Mono", monospace; }
+.recent-public-attempt-footer span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.recent-public-attempt-footer button, .recent-public-attempt-footer a { margin-left: auto; border: 0; background: transparent; color: #8c5535; font: inherit; text-decoration: none; cursor: pointer; }
+.recent-public-attempt-footer a { margin-left: 0; }
+.recent-public-attempt-footer button:hover, .recent-public-attempt-footer a:hover { color: var(--ink); text-decoration: underline; }
+.recent-public-attempts-empty { margin: 0; padding: 14px; border: 1px dashed #e1c9b7; border-radius: 8px; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .execution-ledger .section-heading { margin-bottom: 13px; }
 .execution-ledger .section-heading h3 { font-size: 18px; }
 .review-cta { min-height: 48px; margin-top: 2px; padding: 0 16px; justify-content: center; border-color: #8f4527; border-radius: 9px; background: #a9512c; color: #fff; box-shadow: 0 8px 18px rgba(143, 69, 39, .22); font-size: 13px; font-weight: 800; letter-spacing: -.01em; }
