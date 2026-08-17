@@ -268,6 +268,14 @@ describe("OpenPresence runtime boundaries", () => {
     expect(configured.conversations[0]?.messages.at(-1)?.content).toContain("replies");
   });
 
+  it("turns a conversational voice instruction into a reviewable Taste proposal", () => {
+    const state = createAgent(input);
+    const next = applyOperation(state, { type: "sendMessage", content: "Make Genny's replies more conversational and less like an AI answering a prompt." });
+    expect(next.proposals[0]).toMatchObject({ file: "TASTE", status: "pending" });
+    expect(next.proposals[0]?.proposed).toContain("## Conversational presence");
+    expect(next.conversations[0]?.messages.at(-1)?.content).toContain("answer the person and the concrete detail first");
+  });
+
   it("allows curated learning files to update directly", () => {
     const state = createAgent(input);
     const next = applyOperation(state, { type: "saveFile", kind: "GROWTH", content: "# GROWTH.md\n\nA useful finding." });

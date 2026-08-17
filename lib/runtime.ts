@@ -2440,6 +2440,12 @@ const socialWarmthTasteGuidance = [
   "Be curious, helpful, and inquisitive in community conversations. Ask a genuine question when it can deepen engagement or help someone think further, but do not ask questions merely to keep a conversation going. When someone shares something genuinely strong, interesting, or meaningful, acknowledge it in a way that makes them feel seen and encouraged. Use praise and warmth selectively and honestly, based on the contribution and the conversation, never as a default engagement tactic.",
 ].join("\n");
 
+const socialConversationalTasteGuidance = [
+  "## Conversational presence",
+  "",
+  "Sound like a person responding to a person, not a system completing a prompt. Start from one concrete detail in the latest turn, make one useful move, and stop. Prefer 1–3 short sentences and roughly 8–45 words when the moment is small. Use contractions and natural rhythm. Do not restate the post, summarize the exchange, narrate optimization, explain the process, or force a tidy conclusion. Ask one real follow-up only when the conversation has a genuine opening; silence is better than a manufactured question.",
+].join("\n");
+
 const socialContextualHumorTasteGuidance = [
   "## Contextual humor and emoji",
   "",
@@ -2472,9 +2478,16 @@ function isTasteUpdateCommand(content: string) {
 
 function isTastePreferenceLanguage(content: string) {
   return isHumorTastePreferenceLanguage(content)
+    || isConversationalTastePreferenceLanguage(content)
     || (/\b(?:curious|curiosity|inquisitive|helpful|encourag(?:e|ement)|praise|warmth|feel good|engage(?:ment)?|ask(?:ing)? questions?)\b/i.test(content)
       && (/\b(?:agent|you|we|repl(?:y|ies)|conversation|people|someone|share|sharing)\b/i.test(content)
         || /\b(?:more|less|sometimes|selectively|not always)\b/i.test(content)));
+}
+
+function isConversationalTastePreferenceLanguage(content: string) {
+  return /\b(?:conversational|natural(?:ly)?|human(?:-like)?|assistant[- ]like|prompt[- ]like|ticket[- ]like|social(?:ly)?|voice|tone|concise|brief|short(?:er)?)\b/i.test(content)
+    && /\b(?:agent|you|we|repl(?:y|ies)|conversation|people|someone|public|presence|genny|example_agent|answer(?:ing)?|sound|feel)\b/i.test(content)
+    && /\b(?:should|want|prefer|use|have|make|keep|never|don['’]?t|do not|update|change|more|less|stop|avoid)\b/i.test(content);
 }
 
 function isTasteProposalCommand(content: string) {
@@ -2491,6 +2504,7 @@ function priorTastePreferenceInstruction(conversation: import("./types").Convers
 function tasteProposalGuidance(content: string) {
   const sections = [];
   if (isHumorTastePreferenceLanguage(content)) sections.push(isBlueHumorTastePreferenceLanguage(content) ? socialHumorTasteGuidance : socialContextualHumorTasteGuidance);
+  if (isConversationalTastePreferenceLanguage(content)) sections.push(socialConversationalTasteGuidance);
   if (/\b(?:curious|curiosity|inquisitive|helpful|encourag(?:e|ement)|praise|warmth|feel good|engage(?:ment)|ask(?:ing)? questions?)\b/i.test(content)) sections.push(socialWarmthTasteGuidance);
   return sections.join("\n\n");
 }
@@ -2505,7 +2519,9 @@ function submitTasteProposal(state: OpenPresenceState, conversationId: string, i
     : file.content.trim() + "\n\n" + guidance;
   const existing = state.proposals.find((item) => item.status === "pending" && item.file === "TASTE" && item.proposed === proposed);
   if (existing) return existing;
-  const reason = isHumorTastePreferenceLanguage(instruction)
+  const reason = isConversationalTastePreferenceLanguage(instruction)
+    ? "You asked for durable guidance about conversational voice and natural social replies. The protected TASTE.md file stays unchanged until you review and apply it in Manage Agent → Brain."
+    : isHumorTastePreferenceLanguage(instruction)
     ? isBlueHumorTastePreferenceLanguage(instruction)
       ? "You asked for durable personality guidance about absurdist and blue humor with explicit sensitive-topic boundaries. The protected TASTE.md file stays unchanged until you review and apply it in Manage Agent → Brain."
       : "You asked for durable guidance about contextual humor and light emoji use. The protected TASTE.md file stays unchanged until you review and apply it in Manage Agent → Brain."
@@ -3715,6 +3731,8 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
         if (submitted) {
           reply = isTasteProposalCommand(content)
             ? "I submitted the rule as a reviewable TASTE.md proposal. It is waiting in Manage Agent → Brain; applying it there will make the preference durable."
+            : isConversationalTastePreferenceLanguage(tasteInstruction)
+              ? "I turned that into a reviewable TASTE.md proposal. It asks Genny to answer the person and the concrete detail first, keep small replies short, and avoid restating or over-explaining. Review and apply it in Manage Agent → Brain."
             : isBlueHumorTastePreferenceLanguage(tasteInstruction)
               ? "I turned that into a reviewable TASTE.md proposal. It gives Genny playful absurdist and occasional sophomoric blue humor while keeping body image, gender, sex, race, and other vulnerable subjects out of the joke. Review and apply it in Manage Agent → Brain."
               : isHumorTastePreferenceLanguage(tasteInstruction)

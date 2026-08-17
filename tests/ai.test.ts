@@ -249,6 +249,7 @@ describe("Agent social decision parsing", () => {
     expect((chatCall?.body?.messages as unknown[])).toHaveLength(2);
     const system = String((chatCall?.body?.messages as Array<{ role: string; content: string }>)[0]?.content ?? "");
     expect(system).toContain("A draft that could be pasted into any AI account is a failed draft.");
+    expect(system).toContain("CONVERSATIONAL VOICE");
     expect(system).not.toContain("Live Presence snapshot");
     expect(system).toContain('"BRAIN"');
     expect(system).toContain("Low-information social cues are context-dependent.");
@@ -279,6 +280,7 @@ describe("Agent social decision parsing", () => {
     expect(messages[2]).toEqual({ role: "user", content: "I am listening." });
     expect(messages[3]).toEqual({ role: "user", content: "What should I notice next?" });
     expect(messages[0]?.content).toContain("This is a private test conversation with the Presence's public self");
+    expect(messages[0]?.content).toContain("CONVERSATIONAL REHEARSAL MODE");
     expect(messages[0]?.content).toContain("The attached chart was not inspected.");
     expect(messages[0]?.content).not.toContain("Private operator transcript");
   });
