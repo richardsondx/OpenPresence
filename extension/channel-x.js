@@ -235,6 +235,7 @@
       presenceName = restoredMetrics.presenceName || presenceName;
     } catch { sessionStorage.removeItem("openpresence-pending-metrics"); }
   }
+  if (pendingMetrics) window.setTimeout(() => void collectMetrics(), 1_500);
   const pending = sessionStorage.getItem("openpresence-pending-execution");
   if (pending) {
     sessionStorage.removeItem("openpresence-pending-execution");

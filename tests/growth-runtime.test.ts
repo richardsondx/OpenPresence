@@ -124,12 +124,53 @@ describe("continuous growth responsibility", () => {
     expect(follow?.limitation).not.toContain("not supported by X");
   });
 
-  it("does not borrow native capabilities when the Presence selected the Browser Bridge route", () => {
+  it("prefers native capabilities when both API and Browser Bridge routes exist", () => {
     const state = fixture();
     const bridgePresence = { ...state.presence!, connectionMode: "bridge" as const };
     const next = { ...state, presence: bridgePresence, presences: [bridgePresence], nativeConnections: [{ id: "native-x", presenceId: bridgePresence.id, channelId: "x", kind: "x" as const, status: "connected" as const, access: "read-write" as const, account: { id: "account-1", username: "genny", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }] };
     const post = derivePresenceCapabilityManifest(next, bridgePresence.id).items.find((item) => item.capability === "post");
-    expect(post).toMatchObject({ availability: "unavailable", provider: undefined, canExecute: false });
+    expect(post).toMatchObject({ availability: "available", provider: "Native X", canExecute: true, requiresBrowser: false });
+  });
+
+  it("keeps API evidence primary when native writes need attention", () => {
+    const state = fixture();
+    const presence = { ...state.presence!, connectionMode: "bridge" as const };
+    const now = new Date().toISOString();
+    const next = {
+      ...state,
+      presence,
+      presences: [presence],
+      nativeConnections: [{ id: "native-x", presenceId: presence.id, channelId: "x" as const, kind: "x" as const, status: "needs-attention" as const, access: "read-write" as const, healthMessage: "X rejected this action: You are not permitted to perform this action.", observation: { status: "up-to-date" as const, lastObservedAt: now }, account: { id: "account-1", username: "genny", name: "Genny" }, createdAt: now, updatedAt: now }],
+      bridges: [{ id: "bridge-x", presenceId: presence.id, channelId: "x" as const, name: "OpenPresence Chrome", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: now, capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: ["followers", "public_metrics"] }, createdAt: now, updatedAt: now }],
+    };
+    const manifest = derivePresenceCapabilityManifest(next, presence.id);
+    expect(manifest.items.find((item) => item.capability === "follower_measurement")).toMatchObject({ availability: "available", provider: "Native X", requiresBrowser: false });
+    expect(manifest.items.find((item) => item.capability === "post_performance")).toMatchObject({ availability: "available", provider: "Native X", requiresBrowser: false });
+    expect(manifest.items.find((item) => item.capability === "reply")).toMatchObject({ availability: "available", provider: "Browser Bridge", requiresBrowser: true });
+  });
+
+  it("routes an X reply through the API when the Presence also has a Bridge", () => {
+    const state = fixture();
+    state.presence = { ...state.presence!, connectionMode: "bridge", execution: { ...state.presence!.execution, reply: "auto" } };
+    state.presences = [state.presence];
+    state.nativeConnections = [{ id: "native-x", presenceId: state.presence.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "genny", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    state.bridges = [{ id: "bridge-x", presenceId: state.presence.id, channelId: "x", name: "OpenPresence Chrome", kind: "bridge", state: "online", adapterStatus: "connected", lastHeartbeatAt: new Date().toISOString(), capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    const next = formXReplyIntent(state, "A direct API reply.", "post-1");
+    expect(next.executions[0]).toMatchObject({ connector: "native", bridgeId: undefined, status: "queued" });
+  });
+
+  it.each([
+    ["like", "x.like"],
+    ["repost", "x.repost"],
+    ["quote", "x.quote"],
+  ] as const)("routes an X %s through the API when the Presence also has a Bridge", (_label, affordance) => {
+    const state = fixture();
+    state.presence = { ...state.presence!, connectionMode: "bridge", execution: { ...state.presence!.execution, [affordance.slice(2)]: "auto" } };
+    state.presences = [state.presence];
+    state.nativeConnections = [{ id: "native-x", presenceId: state.presence.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "genny", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    state.bridges = [{ id: "bridge-x", presenceId: state.presence.id, channelId: "x", name: "OpenPresence Chrome", kind: "bridge", state: "online", adapterStatus: "connected", lastHeartbeatAt: new Date().toISOString(), capabilities: { inbound: true, reconcile: true, affordances: ["like", "repost", "quote"], formats: ["x.like", "x.repost", "x.quote"], metrics: [] }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    const next = formXActionIntent(state, { affordance, target: { type: "x.post", id: "post-1" }, ...(affordance === "x.quote" ? { text: "A direct API quote." } : {}) });
+    expect(next.executions[0]).toMatchObject({ affordance, connector: "native", bridgeId: undefined, status: "queued" });
   });
 
   it("does not treat a stale Bridge adapter flag as a live body", () => {

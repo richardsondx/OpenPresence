@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createBridgeWithKey, rotateBridgeKey } from "@/lib/bridge";
+import { chromeBrowserBridgeCapabilities } from "@/lib/bridge-contract";
 import { readState, writeState } from "@/lib/db";
 import { stateForContext } from "@/lib/runtime";
 
@@ -25,16 +26,7 @@ export async function POST(request: Request) {
     if (!presence || state.presence?.id !== presence.id) return NextResponse.json({ error: "Select this Presence in OpenPresence before opening Chrome." }, { status: 409 });
     if (!presence.browserAccess?.enabled) return NextResponse.json({ error: "Chrome hands are disabled for this Presence." }, { status: 403 });
 
-    const capabilities = {
-      inbound: true,
-      reconcile: true,
-      affordances: presence.capabilities.map((capability) => capability.id),
-      formats: state.channelDefinitions.find((definition) => definition.id === presence.channel)?.formats.map((format) => format.id) ?? [],
-      // The Chrome route observes the signed-in account profile and its own
-      // publications, so Growth can consume verified audience and performance
-      // evidence from the same browser body as social activity.
-      metrics: ["followers", "public_metrics"],
-    };
+    const capabilities = chromeBrowserBridgeCapabilities();
     const existing = state.bridges.find((bridge) => bridge.presenceId === presence.id && bridge.kind === "bridge" && bridge.state !== "offline");
     const result = existing
       ? rotateBridgeKey(state, existing.id)
@@ -42,6 +34,7 @@ export async function POST(request: Request) {
     if (existing) {
       const renewed = result.state.bridges.find((bridge) => bridge.id === existing.id);
       if (renewed) {
+        renewed.capabilities = capabilities;
         renewed.state = "online";
         renewed.adapterStatus = "waiting";
         renewed.credentialRevokedAt = undefined;

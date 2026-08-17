@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { bridgeAdapterPrompt, bridgeAdapterStatus, bridgeAdapterStatusLabel } from "../lib/bridge-contract";
+import { bridgeAdapterPrompt, bridgeAdapterStatus, bridgeAdapterStatusLabel, chromeBrowserBridgeCapabilities } from "../lib/bridge-contract";
 
 describe("Bridge adapter contract", () => {
   const connectedAt = new Date("2026-08-14T12:00:00.000Z");
@@ -17,6 +17,14 @@ describe("Bridge adapter contract", () => {
     const now = Date.now();
     expect(bridgeAdapterStatus({ state: "online", lastSeenAt: new Date(now).toISOString() }, now)).toBe("waiting");
     expect(bridgeAdapterStatus({ state: "online", lastHeartbeatAt: new Date(now - 5 * 60_000).toISOString(), lastSeenAt: new Date(now).toISOString() }, now)).toBe("stale");
+  });
+
+  it("keeps the shipped Chrome adapter capability-scoped", () => {
+    expect(chromeBrowserBridgeCapabilities()).toMatchObject({
+      affordances: ["reply"],
+      formats: ["x.reply"],
+      metrics: ["followers", "public_metrics"],
+    });
   });
 
   it("generates a channel-aware prompt without a credential", () => {

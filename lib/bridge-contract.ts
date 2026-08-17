@@ -14,6 +14,21 @@ export const bridgeEndpointPaths = {
   metrics: "/api/bridge/v1/metrics",
 } as const;
 
+/**
+ * The shipped Chrome adapter is intentionally narrow: it observes X, reports
+ * verified profile/publication metrics, and delivers direct replies. Native X
+ * remains the preferred API body for the other actions and media formats.
+ */
+export function chromeBrowserBridgeCapabilities(): ConnectorCapabilities {
+  return {
+    inbound: true,
+    reconcile: true,
+    affordances: ["reply"],
+    formats: ["x.reply"],
+    metrics: ["followers", "public_metrics"],
+  };
+}
+
 export function bridgeAdapterStatus(bridge: Pick<Bridge, "state" | "lastHeartbeatAt" | "lastSeenAt">, now = Date.now()): BridgeAdapterStatus {
   if (bridge.state === "offline") return "disconnected";
   // `lastSeenAt` can move when a connector reports an observation or mirror
@@ -47,6 +62,8 @@ export interface BridgePromptInput {
 export function bridgeAdapterPrompt(input: BridgePromptInput) {
   const capabilities = input.capabilities.affordances.length ? input.capabilities.affordances.join(", ") : "none";
   const media = input.capabilities.assetKinds?.length ? input.capabilities.assetKinds.join(", ") : "none — media delivery not enabled yet";
+  const allowed = new Set(input.capabilities.affordances);
+  const supports = (action: string) => allowed.has(action) || allowed.has(`${input.presence.channel}.${action}`);
   const lines = [
     "You are the external browser adapter for the OpenPresence Presence \"" + input.presence.name + "\" (" + input.presence.handle + ") in the " + input.channelName + " channel.",
     "",
@@ -68,14 +85,16 @@ export function bridgeAdapterPrompt(input: BridgePromptInput) {
     "2. Send new, changed, and deleted channel objects to POST " + input.baseUrl + bridgeEndpointPaths.events + ". Use stable sourceEventId values. Include externalRef, objectType, author, content, occurredAt, visibility, shareability, and parentExternalRef for replies/comments.",
     "3. Use POST " + input.baseUrl + bridgeEndpointPaths.reconcile + " for an initial or cursor-based sync.",
     "4. Poll POST " + input.baseUrl + bridgeEndpointPaths.claim + " to claim approved work, using {\"executorId\":\"<stable-adapter-id>\",\"limit\":10}.",
-    "5. Perform only claimed executions. Use the supplied publication payload and target exactly as returned. The X adapter may deliver post, reply, quote, like, repost, and follow actions; media must be uploaded only from the supplied assetIds through the authenticated OpenPresence asset route.",
+    "5. Perform only claimed executions. Use the supplied publication payload and target exactly as returned. This adapter may deliver only the declared actions: " + capabilities + ". Media must be uploaded only from the supplied assetIds through the authenticated OpenPresence asset route.",
     ...(input.presence.channel === "x" ? [
-      "   For x.reply, open https://x.com/i/web/status/<target.id>, choose Reply, enter exactly the supplied publication text, and submit the direct reply.",
-      "   This is a direct reply to the existing post. Do not convert it into a quote post, a new standalone post, or a reply to a different object.",
-      "   Verify the resulting reply appears under the target post and capture its X post id before acknowledging the execution.",
-      "   For x.quote, open the target post, choose Quote, enter exactly the supplied publication text, upload only supplied media, and verify the resulting post id.",
-      "   For x.like and x.repost, open the target post, use the direct Like or Repost control, and verify the control state before acknowledging with the target post id.",
-      "   For x.follow, open https://x.com/i/user/<target.id>, choose Follow, and verify the control changes to Following before acknowledging with the target user id.",
+      ...(supports("reply") ? [
+        "   For x.reply, open https://x.com/i/web/status/<target.id>, choose Reply, enter exactly the supplied publication text, and submit the direct reply.",
+        "   This is a direct reply to the existing post. Do not convert it into a quote post, a new standalone post, or a reply to a different object.",
+        "   Verify the resulting reply appears under the target post and capture its X post id before acknowledging the execution.",
+      ] : []),
+      ...(supports("quote") ? ["   For x.quote, open the target post, choose Quote, enter exactly the supplied publication text, upload only supplied media, and verify the resulting post id."] : []),
+      ...(supports("like") || supports("repost") ? ["   For x.like and x.repost, open the target post, use only the declared direct control, and verify the control state before acknowledging with the target post id."] : []),
+      ...(supports("follow") ? ["   For x.follow, open https://x.com/i/user/<target.id>, choose Follow, and verify the control changes to Following before acknowledging with the target user id."] : []),
     ] : []),
     "6. Verify the resulting channel object before POSTing to /api/bridge/v1/executions/{id}/ack with executorId, externalRef, and observedAt.",
     "7. If delivery fails, POST to /api/bridge/v1/executions/{id}/fail with a truthful message and retryable flag.",

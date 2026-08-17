@@ -10,6 +10,7 @@ import { ensureConversationEpisode, settleConversationClosure, updateConversatio
 import { createPublicExpressionCandidate, PublicationSecurityError, verifyExecutionPermit } from "./publication-security";
 import { publicExpressionLeakageReason } from "./public-expression";
 import { normalizeMirrorObject } from "./mirror-content";
+import { chromeBrowserBridgeCapabilities } from "./bridge-contract";
 import type { RelationshipVisibility } from "./types";
 import { addKnowledgeItem, archiveKnowledgeCollection, archiveKnowledgeItem, createKnowledgeCollection, setKnowledgeBinding, updateKnowledgeCollection, uploadKnowledgeVersion } from "./knowledge";
 
@@ -117,11 +118,12 @@ export function derivePresenceCapabilityManifest(source: OpenPresenceState, pres
   // Connector selection is capability-first: a configured native X body is
   // preferred even when a Bridge is also available. The Bridge is the
   // fallback for capabilities the native body cannot perform.
-  const native = state.nativeConnections.find((item) => item.presenceId === presence.id && item.channelId === presence.channel && item.status === "connected");
+  const native = state.nativeConnections.find((item) => item.presenceId === presence.id && item.channelId === presence.channel);
   const bridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
   const bridgeConnected = Boolean(bridge && bridgeAdapterIsConnected(bridge));
-  const nativeAction = (action: string) => Boolean(native && ["post", "reply", "like", "repost", "quote", "follow"].includes(action) && native.access === "read-write");
-  const nativeReadable = Boolean(native && native.access !== undefined);
+  const nativeWritable = Boolean(native && native.access === "read-write" && (native.status === "connected" || (native.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(native.healthMessage ?? native.deliveryError ?? ""))));
+  const nativeAction = (action: string) => Boolean(nativeWritable && ["post", "reply", "like", "repost", "quote", "follow"].includes(action));
+  const nativeReadable = Boolean(native && nativeConnectionCanObserve(native));
   const bridgeAction = (action: string) => Boolean(bridgeConnected && bridge?.capabilities.affordances.some((item) => item === action || item === `${presence.channel}.${action}`));
   const bridgeMetric = (metric: string) => Boolean(bridgeConnected && bridge?.capabilities.metrics.some((item) => item === metric || item.includes(metric)));
   const actionItem = (action: string, supported = channelIds.has(action)): PresenceCapability => {
@@ -147,7 +149,7 @@ export function derivePresenceCapabilityManifest(source: OpenPresenceState, pres
   items.push(measurement("follower_measurement", presence.channel === "x", "followers"));
   items.push(measurement("post_performance", presence.channel === "x", "public_metrics"));
   const mediaItem = (kind: "image" | "video"): PresenceCapability => {
-    const nativeCan = Boolean(native && native.access === "read-write" && presence.channel === "x");
+    const nativeCan = Boolean(nativeWritable && presence.channel === "x");
     const bridgeCan = Boolean(bridgeConnected && bridge?.capabilities.assetKinds?.includes(kind));
     const canExecute = nativeCan || bridgeCan;
     const canVerify = canExecute && (nativeCan || Boolean(bridge?.capabilities.reconcile));
@@ -826,6 +828,16 @@ export function nativeDeliveryFailureIsConnectionScoped(message: string) {
   // for that post. It does not invalidate credentials or original-post
   // delivery, so keep the native connection healthy for unrelated actions.
   return /no API credits remaining|temporarily rate-limited|you can only reply to or quote posts where you are mentioned or are the author/i.test(message);
+}
+
+/**
+ * Read access is independent from the native writer's health. A write-only
+ * permission failure must not force follower or publication evidence through
+ * the browser Bridge when the API can still read it.
+ */
+export function nativeConnectionCanObserve(connection: Pick<OpenPresenceState["nativeConnections"][number], "access" | "status" | "observation">) {
+  return (connection.access === "read" || connection.access === "read-write")
+    && (connection.status === "connected" || connection.observation?.status === "up-to-date");
 }
 
 export function isLaunchCandidate(source: OpenPresenceState, presenceId: string) {
@@ -2810,16 +2822,7 @@ function migrateLegacyXBrowserBridge(bridge: Bridge): Bridge {
     && sameSet(capabilities.metrics, legacyMetrics)
     && !capabilities.assetKinds?.length;
   if (!isLegacyDefault) return bridge;
-  return {
-    ...bridge,
-    capabilities: normalizedCapabilities({
-      ...capabilities,
-      affordances: [...capabilities.affordances, "follow"],
-      formats: [...capabilities.formats, "x.reply"],
-      metrics: [...capabilities.metrics, "followers", "public_metrics"],
-      assetKinds: ["image", "video"],
-    }),
-  };
+  return { ...bridge, capabilities: chromeBrowserBridgeCapabilities() };
 }
 
 function makePublication(state: OpenPresenceState, text: string, format: string, source: "agent_model" | "operator_manual" | "operational" = "operational", assetIds: string[] = []): Publication {

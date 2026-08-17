@@ -737,11 +737,12 @@ describe("OpenPresence runtime boundaries", () => {
     state.presences = state.presences.map((presence) => presence.id === presenceId ? { ...presence, connectionMode: "bridge", status: "live" as const } : presence);
     state.bridges = [{ id: "legacy-x-bridge", presenceId, channelId: "x", name: "OpenPresence Chrome", kind: "bridge", state: "online", adapterStatus: "connected", lastHeartbeatAt: heartbeat, lastSeenAt: heartbeat, capabilities: { inbound: true, reconcile: true, affordances: ["post", "reply", "repost", "quote", "like", "message"], formats: ["x.post", "x.media-post", "x.thread"], metrics: ["replies", "reactions", "posts"] }, createdAt: heartbeat, updatedAt: heartbeat }];
     const manifest = derivePresenceCapabilityManifest(state, presenceId);
-    expect(manifest.items.find((item) => item.capability === "follow")).toMatchObject({ availability: "available", provider: "Browser Bridge" });
+    expect(manifest.items.find((item) => item.capability === "reply")).toMatchObject({ availability: "available", provider: "Browser Bridge", canExecute: true });
+    expect(manifest.items.find((item) => item.capability === "follow")).toMatchObject({ availability: "unavailable", canExecute: false });
     expect(manifest.items.find((item) => item.capability === "follower_measurement")).toMatchObject({ availability: "available", provider: "Browser Bridge" });
     expect(manifest.items.find((item) => item.capability === "post_performance")).toMatchObject({ availability: "available", provider: "Browser Bridge" });
-    expect(manifest.items.find((item) => item.capability === "image")).toMatchObject({ availability: "available", provider: "Browser Bridge" });
-    expect(manifest.items.find((item) => item.capability === "video")).toMatchObject({ availability: "available", provider: "Browser Bridge" });
+    expect(manifest.items.find((item) => item.capability === "image")).toMatchObject({ availability: "unavailable", canExecute: false });
+    expect(manifest.items.find((item) => item.capability === "video")).toMatchObject({ availability: "unavailable", canExecute: false });
     const created = applyOperation(state, { type: "createAssignment", presenceId, environment: "live", instruction: "Grow this Presence toward 100,000 followers." });
     expect(created.agentRequests.filter((request) => request.kind === "capability")).toHaveLength(0);
   });
