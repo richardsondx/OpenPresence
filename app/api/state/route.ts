@@ -2398,6 +2398,7 @@ const operation: z.ZodType<RuntimeOperation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("replanPublishing"), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("syncNativeX"), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("askPresenceToReply"), presenceId: z.string().min(1), objectId: z.string().min(1), sessionId: z.string().min(1).optional(), optionalDirection: z.string().trim().max(1000).optional() }),
+  z.object({ type: z.literal("removeLegacyCalendarEntries") }),
   z.object({ type: z.literal("askPresenceToIgnore"), presenceId: z.string().min(1), objectId: z.string().min(1), sessionId: z.string().min(1).optional() }),
   z.object({ type: z.literal("setModel"), model: z.string().trim().min(1).max(80), provider: z.enum(["openai", "anthropic", "gemini", "openrouter", "ollama", "custom"]).optional(), quality: z.enum(["low", "medium", "high", "local"]).optional(), vision: z.boolean().optional() }),
   z.object({ type: z.literal("setAgentLanguagePolicy"), policy: languagePolicy }),

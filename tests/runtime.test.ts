@@ -7,6 +7,23 @@ import { nextObservationAt } from "../lib/native-x";
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
 describe("OpenPresence runtime boundaries", () => {
+  it("removes legacy calendar records without removing Assignments", () => {
+    const state = applyOperation(createAgent(input), {
+      type: "addSlot",
+      instruction: "Teach one useful thing",
+      day: "Tuesday",
+      time: "08:00",
+      objective: "education",
+      executionWindow: "08:00–11:00",
+    });
+    const assignmentCount = state.assignments.length;
+    const removed = applyOperation(state, { type: "removeLegacyCalendarEntries" });
+    expect(removed.calendar).toHaveLength(0);
+    expect(removed.standingIntents).toHaveLength(0);
+    expect(removed.assignments).toHaveLength(assignmentCount);
+    expect(removed.events[0]?.title).toBe("Legacy calendar entries removed");
+  });
+
   it("keeps completed Assignments out of operational views while retaining their record", () => {
     const state = createAgent(input);
     const assignment = compileAssignmentInstruction(state, "Produce one original X post about a useful lesson.", state.presence!.id, "sandbox");
