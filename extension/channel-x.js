@@ -21,10 +21,10 @@
   }
 
   function metricFromLabels(labels, name) {
-    const pattern = new RegExp(`([\\d,.]+(?:[KMB])?)\\s+${name}`, "i");
+    const pattern = new RegExp(`(?:([\\d,.]+(?:[KMB])?)\\s+${name}|${name}\\s*[:·-]?\\s*([\\d,.]+(?:[KMB])?))`, "i");
     for (const label of labels) {
       const match = String(label).match(pattern);
-      const value = parseHumanMetric(match?.[1]);
+      const value = parseHumanMetric(match?.[1] || match?.[2]);
       if (value !== undefined) return value;
     }
     return undefined;
@@ -40,7 +40,15 @@
 
   function profileMetric(name) {
     const normalized = expectedHandle.replace(/^@/, "");
-    const links = [...document.querySelectorAll(`a[href*="/${normalized}/${name}"], a[href$="/${name}"]`)];
+    const links = [...document.querySelectorAll("a[href]")].filter((link) => {
+      try {
+        const parts = new URL(link.href).pathname.split("/").filter(Boolean).map((part) => part.toLowerCase());
+        const metricPath = parts.at(-1);
+        return parts[0] === normalized.toLowerCase() && (metricPath === name.toLowerCase() || metricPath === `verified_${name.toLowerCase()}`);
+      } catch {
+        return false;
+      }
+    });
     const labels = links.flatMap((link) => [link.getAttribute("aria-label"), text(link)]).filter(Boolean);
     return metricFromLabels(labels, name);
   }
@@ -48,7 +56,7 @@
   function publicationMetrics() {
     return visiblePosts().flatMap((post) => {
       const article = post.element;
-      const labels = [...article.querySelectorAll("button,[role=button]")].flatMap((button) => [button.getAttribute("aria-label"), text(button)]).filter(Boolean);
+      const labels = [...article.querySelectorAll('button,[role=button],a[href*="/analytics"]')].flatMap((button) => [button.getAttribute("aria-label"), text(button)]).filter(Boolean);
       const metrics = {
         impressions: metricFromLabels(labels, "(?:views|impressions)"),
         likes: metricFromLabels(labels, "likes?"),
@@ -228,6 +236,10 @@
       expectedHandle = message.expectedHandle || expectedHandle;
       presenceName = message.presenceName || presenceName;
       stateLabel();
+      // The Bridge may deliver session context after the tab has already
+      // finished loading. Start a measurement pass here as well as from the
+      // background alarm so recovery does not depend on message ordering.
+      if (!activeExecutionId) window.setTimeout(() => void collectMetrics(), 750);
     }
     if (message?.type === "OPENPRESENCE_REQUEST_METRICS") void collectMetrics();
   });

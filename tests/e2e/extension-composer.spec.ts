@@ -49,12 +49,12 @@ test("the Chrome adapter reads approved text from the Bridge publication envelop
 test("the Chrome adapter preserves X's confirmed post language in observations", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
-  await page.route("http://openpresence.test/", (route) => route.fulfill({
+  await page.route("http://openpresence.test/**", (route) => route.fulfill({
     status: 200,
     contentType: "text/html",
     body: "<!doctype html><html><body></body></html>",
   }));
-  await page.goto("http://openpresence.test/");
+  await page.goto("http://openpresence.test/example_agent");
   await page.evaluate(() => {
     document.body.innerHTML = `
       <nav><a href="/example_agent">@example_agent</a></nav>
@@ -90,4 +90,68 @@ test("the Chrome adapter preserves X's confirmed post language in observations",
   expect(pageErrors, pageErrors.join("\n")).toEqual([]);
   const observation = await page.evaluate(() => (window as typeof window & { __openPresenceMessages: Array<{ type?: string; observation?: { object?: { language?: string } } }> }).__openPresenceMessages.find((message) => message.type === "OPENPRESENCE_OBSERVATION"));
   expect(observation?.observation?.object?.language).toBe("en");
+});
+
+test("the Chrome adapter reports X profile and publication metrics", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await page.route("http://openpresence.test/**", (route) => route.fulfill({
+    status: 200,
+    contentType: "text/html",
+    body: "<!doctype html><html><body></body></html>",
+  }));
+  await page.goto("http://openpresence.test/example_agent");
+  await page.evaluate(() => {
+    document.body.innerHTML = `
+      <nav><a href="/example_agent">@example_agent</a><a href="/example_agent/following">321 Following</a><a href="/example_agent/verified_followers">3 Followers</a></nav>
+      <article>
+        <a href="/example_agent/status/123">Open post</a>
+        <div data-testid="User-Name"><a href="/example_agent">Genny</a><a href="/example_agent">@example_agent</a></div>
+        <div data-testid="tweetText" lang="en">A useful post about building agents.</div>
+        <time datetime="2026-08-17T00:00:00.000Z"></time>
+        <button aria-label="12 Replies. Reply">12</button>
+        <button aria-label="4 reposts. Repost">4</button>
+        <button aria-label="89 Likes. Like">89</button>
+        <a href="/example_agent/status/123/analytics" aria-label="4567 views. View post analytics">4.5K</a>
+      </article>
+    `;
+  });
+  await page.evaluate(() => {
+    const listeners: Array<(message: unknown) => void> = [];
+    const messages: unknown[] = [];
+    Object.assign(window, { __openPresenceMessages: messages, __openPresenceListeners: listeners });
+    Object.defineProperty(window, "chrome", {
+      configurable: true,
+      value: {
+        runtime: {
+          id: "test-extension",
+          onMessage: { addListener: (listener: (message: unknown) => void) => listeners.push(listener) },
+          sendMessage: (message: unknown) => { messages.push(message); return Promise.resolve(); },
+        },
+      },
+    });
+  });
+  await page.addScriptTag({ path: "extension/execution.js" });
+  await page.addScriptTag({ path: "extension/channel-x.js" });
+  await page.evaluate(() => {
+    const listeners = (window as typeof window & { __openPresenceListeners: Array<(message: unknown) => void> }).__openPresenceListeners;
+    listeners.forEach((listener) => listener({ type: "OPENPRESENCE_SESSION_CONTEXT", expectedHandle: "@example_agent", presenceName: "Genny" }));
+    listeners.forEach((listener) => listener({ type: "OPENPRESENCE_REQUEST_METRICS" }));
+  });
+  await page.waitForTimeout(750);
+  expect(pageErrors, pageErrors.join("\n")).toEqual([]);
+  const metrics = await page.evaluate(() => {
+    const messages = (window as typeof window & {
+      __openPresenceMessages: Array<{
+        type?: string;
+        metrics?: {
+          audience?: { followers?: number; following?: number };
+          publications?: Array<{ externalRef?: { id?: string }; metrics?: Record<string, number> }>;
+        };
+      }>;
+    }).__openPresenceMessages;
+    return messages.find((message) => message.type === "OPENPRESENCE_METRICS");
+  });
+  expect(metrics?.metrics?.audience).toMatchObject({ followers: 3, following: 321 });
+  expect(metrics?.metrics?.publications?.[0]).toMatchObject({ externalRef: { id: "123" }, metrics: { impressions: 4567, likes: 89, replies: 12, reposts: 4 } });
 });
