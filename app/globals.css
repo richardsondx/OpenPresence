@@ -1273,7 +1273,6 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .publishing-pace-sentence select { min-width: 100px; }
 .publishing-pace-sentence .button { margin-left: 4px; }
 .settings-warning { margin: 0; padding: 11px 12px; border: 1px solid #e3c7b3; border-radius: 6px; background: #fff8f3; color: #7d4a30; font-size: 11px; line-height: 1.5; }
-.activity-publishing-block { border-bottom: 0; }
 .presence-brief-card { display: grid; gap: 14px; border-top-color: var(--agent-accent); }
 .presence-brief-card .section-heading { margin-bottom: 0; }
 .presence-brief-intro { max-width: 780px; line-height: 1.55; }
@@ -1405,7 +1404,6 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .activity-next-window { display: flex; justify-content: space-between; gap: 10px; padding-top: 9px; border-top: 1px solid #eee5dc; color: var(--muted); font-size: 10px; }
 .activity-next-window strong { color: var(--ink); font-weight: 600; text-align: right; }
 .activity-status-block .activity-next-assignment-card > small { margin-top: -2px; color: var(--faint); }
-.activity-publishing-block .button { margin-top: 12px; }
 .activity-status-positive { border-left: 2px solid var(--green); padding-left: 13px; }
 .activity-status-warning { border-left: 2px solid var(--agent-accent); padding-left: 13px; }
 .activity-status-quiet { border-left: 2px solid #a59b91; padding-left: 13px; }

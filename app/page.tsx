@@ -54,7 +54,6 @@ import {
 import { AGENT_CAPABILITY_DEFINITIONS, CHANNEL_CAPABILITIES, isAgentCapabilityEnabled, simulationForChannel } from "@/lib/types";
 import { bridgeAdapterPrompt, bridgeAdapterStatus, bridgeAdapterStatusLabel, bridgeApiExamples, bridgeEnvironmentExample } from "@/lib/bridge-contract";
 import { latestPerception } from "@/lib/perception";
-import { conversationStatusLabel } from "@/lib/conversation-episodes";
 import { validateScenarioFidelity } from "@/lib/scenarios";
 import { cleanMirrorText, normalizeMirrorAuthor } from "@/lib/mirror-content";
 import { languagesMatch } from "@/lib/language-policy";
@@ -4995,26 +4994,6 @@ function LiveView({
     : activity.current.label === "Preparing to act"
       ? `${actionName} is moving toward delivery.`
       : presenceCopy(activity.current.detail).replace("execution envelope", "delivery");
-  const initiative = activity.publishingInitiative;
-  const publishingPlan = activity.publishingPlan;
-  const initiativePeriodLabel = initiative.period === "week" ? "this week" : "today";
-  const initiativeStatus = initiative.mode === "adaptive"
-    ? `Autonomous origination is active; ${presenceName} chooses the pace.`
-    : initiative.mode === "off"
-      ? "Only explicit requests and Assignments create original posts."
-      : initiative.status === "at_pace"
-        ? `At pace · ${initiative.verifiedOriginals} of ~${initiative.target} ${initiativePeriodLabel}`
-        : initiative.status === "blocked"
-          ? "Blocked by the current Posts setting."
-          : initiative.status === "awaiting_review"
-            ? `${initiative.verifiedOriginals} of ~${initiative.target} ${initiativePeriodLabel} · waiting for your review`
-            : `${initiative.verifiedOriginals} of ~${initiative.target} ${initiativePeriodLabel}`;
-  const latestConversationEpisode = state.conversationEpisodes
-    .filter((episode) => episode.presenceId === selected?.id && episode.environment === activityEnvironment)
-    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
-  const latestConversationObject = latestConversationEpisode?.lastExternalObjectId
-    ? state.mirrorObjects.find((item) => item.id === latestConversationEpisode.lastExternalObjectId)
-    : undefined;
   return (
     <div className="page activity-page">
       <PageHeader
@@ -5279,28 +5258,6 @@ function LiveView({
                 <p>{presenceCopy(activity.nextAttention.detail)}</p>
                 <small>{activity.nextIntent.label} · {presenceCopy(activity.nextIntent.detail)}</small>
               </>}
-            </div>
-            {latestConversationEpisode && latestConversationEpisode.status !== "closed" && (
-              <div className="activity-status-block" aria-label="Conversation status">
-                <SectionEyebrow>Conversation</SectionEyebrow>
-                <h3>{conversationStatusLabel(latestConversationEpisode.status)}</h3>
-                <p>{latestConversationEpisode.status === "cooling"
-                    ? latestConversationEpisode.eligibilityReason ?? "This conversation is being given space; new substance can reopen it."
-                    : latestConversationEpisode.lastDispositionReason ?? "The Agent is judging whether another turn earns its place."}</p>
-                <small>{latestConversationEpisode.agentTurnCount + latestConversationEpisode.externalTurnCount} turn{latestConversationEpisode.agentTurnCount + latestConversationEpisode.externalTurnCount === 1 ? "" : "s"}{latestConversationEpisode.loopRisk ? " · loop risk reconsidered" : ""}</small>
-                {latestConversationObject && latestConversationEpisode.status !== "active" && (
-                  <Button variant="ghost" onClick={() => mutate({ type: "askPresenceToReply", presenceId: selected!.id, objectId: latestConversationObject.id, sessionId: latestConversationObject.sessionId })}>
-                    <Reply size={14} /> Ask {presenceName} to reply anyway
-                  </Button>
-                )}
-              </div>
-            )}
-            <div className="activity-status-block activity-publishing-block" aria-label="Publishing plan status">
-              <SectionEyebrow>Publishing focus</SectionEyebrow>
-              <h3>{initiative.mode === "pace" ? `${initiative.verifiedOriginals} of ~${initiative.target}` : initiative.mode === "adaptive" ? `Let ${presenceName} decide` : "Only when asked"}</h3>
-              <p>{publishingPlan?.currentWork?.[0]?.summary ?? initiativeStatus}</p>
-              <small>{publishingPlan?.nextAttentionAt ? `Next consideration · ${formatTime(publishingPlan.nextAttentionAt)}` : initiative.mode === "pace" ? `Self-directed pace · ${initiativePeriodLabel}` : "Self-directed work remains optional"}</small>
-              <Button variant="ghost" onClick={() => setView("schedule")}>Open in Schedule</Button>
             </div>
           </section>
           <div id="decision-and-action">
