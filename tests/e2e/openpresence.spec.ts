@@ -615,6 +615,24 @@ test("Activity explains current work and next attention", async ({ page }) => {
   await expect(page.locator(".event-title").filter({ hasText: "Pulse completed" })).toBeVisible();
 });
 
+test("Growth exposes evidence freshness and the next Agent review", async ({ page, request }) => {
+  await createAgent(page);
+  const fresh = await request.get("/api/state");
+  const state = await fresh.json();
+  const changed = await request.post("/api/state", { data: { type: "createAssignment", presenceId: state.presence.id, environment: "live", instruction: "Grow this Presence toward 100,000 followers while building an audience of AI founders." } });
+  expect(changed.ok()).toBeTruthy();
+
+  await page.reload();
+  await navigate(page, "Growth");
+  const cadence = page.getByRole("region", { name: "Growth check status" });
+  await expect(cadence).toContainText("When Growth was checked");
+  await expect(cadence).toContainText("Last channel evidence");
+  await expect(cadence).toContainText("Not observed");
+  await expect(cadence).toContainText("Next Agent review");
+  await expect(cadence).toContainText(/In \d+:\d{2}:\d{2}|Scheduled|Due now/);
+  await expect(cadence).toContainText("Next channel check");
+});
+
 test("Activity separates configuration changes from Presence decisions", async ({ page, request }) => {
   await createAgent(page);
   const changed = await request.post("/api/state", { data: { type: "setPresence", patch: { execution: { post: "review" } } } });

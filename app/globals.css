@@ -2099,6 +2099,12 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .growth-stat-grid > div { display: grid; gap: 5px; padding-top: 12px; border-top: 1px solid var(--line); }
 .growth-stat-grid span, .growth-stat-grid small { color: var(--muted); font-size: 10px; }
 .growth-stat-grid strong { font-size: 19px; font-weight: 600; }
+.growth-freshness-card { display: grid; gap: 12px; }
+.growth-freshness-card > p { margin: -2px 0 2px; max-width: 880px; line-height: 1.55; }
+.growth-freshness-grid { display: grid; grid-template-columns: repeat(4, minmax(0, 1fr)); gap: 12px; }
+.growth-freshness-grid > div { display: grid; gap: 5px; min-width: 0; padding-top: 12px; border-top: 1px solid var(--line); }
+.growth-freshness-grid span, .growth-freshness-grid small { color: var(--muted); font-size: 10px; }
+.growth-freshness-grid strong { font-size: 15px; font-weight: 600; }
 .growth-columns { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 18px; }
 .growth-columns > .settings-card { min-width: 0; }
 .growth-read-list, .growth-plan-list { display: grid; gap: 14px; margin-top: 18px; }
@@ -2117,7 +2123,7 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .capability-row > div small { color: var(--muted); font-size: 10px; }
 
 @media (max-width: 760px) {
-  .growth-columns, .growth-stat-grid { grid-template-columns: 1fr; }
+  .growth-columns, .growth-stat-grid, .growth-freshness-grid { grid-template-columns: 1fr; }
   .growth-goal-heading { flex-direction: column; }
   .activity-autonomy-strip { align-items: flex-start; flex-direction: column; }
 }

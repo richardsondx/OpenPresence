@@ -5905,16 +5905,32 @@ function ScheduleLayerToolbar({
 
 function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; mutate: Mutate; setView: (view: View) => void }) {
   const presence = state.presence;
+  const [countdownNow, setCountdownNow] = useState<number | null>(null);
+  const clockAssignment = presence ? state.assignments.find((item) => item.presenceId === presence.id && item.successEvidence?.metric === "followers" && item.status !== "cancelled") : undefined;
+  const nextGrowthReviewAt = [clockAssignment?.plan?.nextWeeklyReviewAt, clockAssignment?.plan?.nextStrategicReviewAt].filter((value): value is string => Boolean(value)).sort((left, right) => left.localeCompare(right))[0];
+  useEffect(() => {
+    if (!nextGrowthReviewAt) return;
+    const timer = window.setInterval(() => setCountdownNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, [nextGrowthReviewAt]);
   if (!presence) return <div className="page"><PageHeader eyebrow="Growth" title="No Presence selected" description="Select a Presence before reviewing growth evidence." /></div>;
-  const assignment = state.assignments.find((item) => item.presenceId === presence.id && item.successEvidence?.metric === "followers" && item.status !== "cancelled");
+  const assignment = clockAssignment;
   const deltas = audienceDeltas(state, presence.id);
   const snapshots = state.audienceSnapshots.filter((item) => item.presenceId === presence.id).sort((left, right) => right.observedAt.localeCompare(left.observedAt));
   const latest = snapshots[0];
-  const review = state.growthReviews.find((item) => item.presenceId === presence.id);
+  const publicationSnapshots = state.publicationMetricSnapshots.filter((item) => item.presenceId === presence.id).sort((left, right) => right.observedAt.localeCompare(left.observedAt));
+  const latestPublicationSnapshot = publicationSnapshots[0];
+  const latestEvidence = [latest?.observedAt, latestPublicationSnapshot?.observedAt].filter((value): value is string => Boolean(value)).sort((left, right) => right.localeCompare(left))[0];
+  const review = state.growthReviews.filter((item) => item.presenceId === presence.id).sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
   const manifest = derivePresenceCapabilityManifest(state, presence.id);
   const limitations = manifest.items.filter((item) => item.availability !== "available");
   const goal = assignment?.successEvidence?.value ?? 100_000;
   const progress = latest ? Math.min(100, Math.round((latest.followers / goal) * 100)) : 0;
+  const bridge = presence.connectionMode === "bridge" ? state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline") : undefined;
+  const bridgeConnected = Boolean(bridge && bridgeAdapterStatus(bridge) === "connected");
+  const nativeConnection = presence.connectionMode === "native" ? state.nativeConnections.find((item) => item.presenceId === presence.id && item.channelId === presence.channel) : undefined;
+  const nextChannelObservationAt = nativeConnection?.observation?.nextObservationAt;
+  const nextGrowthReviewCountdown = countdownNow === null ? undefined : formatCountdown(nextGrowthReviewAt, countdownNow);
   const createGrowthResponsibility = async () => {
     await mutate({ type: "createAssignment", presenceId: presence.id, environment: presence.connectionMode === "sandbox" ? "sandbox" : "live", instruction: `Grow this Presence toward ${goal.toLocaleString()} followers while building an audience of ${presence.brief.audience}.` });
   };
@@ -5925,6 +5941,16 @@ function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; muta
         <div className="growth-goal-heading"><div><SectionEyebrow>Current goal</SectionEyebrow><h2>{goal.toLocaleString()} followers</h2><p>{assignment.audienceObjective ?? presence.brief.audience}</p></div><span className={`growth-status growth-status-${assignment.status}`}>{assignment.status.replaceAll("_", " ")}</span></div>
         <div className="growth-progress-track"><span style={{ width: `${progress}%` }} /></div>
         <div className="growth-stat-grid"><div><span>Observed now</span><strong>{latest ? latest.followers.toLocaleString() : "Not observed"}</strong><small>{latest ? `${formatHistoryTimestamp(latest.observedAt)} · ${latest.source}` : "Waiting for channel evidence"}</small></div><div><span>7-day change</span><strong>{deltas.sevenDay === undefined ? "Not enough data" : `${deltas.sevenDay >= 0 ? "+" : ""}${deltas.sevenDay.toLocaleString()}`}</strong><small>Compared with the latest prior snapshot</small></div><div><span>28-day change</span><strong>{deltas.twentyEightDay === undefined ? "Not enough data" : `${deltas.twentyEightDay >= 0 ? "+" : ""}${deltas.twentyEightDay.toLocaleString()}`}</strong><small>Strategic review window</small></div></div>
+      </section>
+      <section className="growth-freshness-card settings-card" aria-label="Growth check status">
+        <div className="section-heading compact"><div><SectionEyebrow>Evidence cadence</SectionEyebrow><h2>When Growth was checked</h2></div><Clock3 size={17} /></div>
+        <p className="muted">Channel evidence and Agent reviews have separate clocks. This status reports both so “not enough data” is never mistaken for a recent check.</p>
+        <div className="growth-freshness-grid">
+          <div><span>Last channel evidence</span><strong>{latestEvidence ? formatHistoryTimestamp(latestEvidence) : "Not observed"}</strong><small>{latestEvidence ? `${latest?.observedAt === latestEvidence ? "Audience" : "Publication performance"} · verified source` : bridgeConnected ? "Bridge is connected, but no metrics report has arrived" : "Waiting for a connected observer"}</small></div>
+          <div><span>Last Growth review</span><strong>{review ? formatHistoryTimestamp(review.createdAt) : "Not reviewed"}</strong><small>{review ? `${review.kind === "strategic" ? "Strategic" : "Weekly"} evidence review` : "No review has been completed yet"}</small></div>
+          <div><span>Next Agent review</span><strong aria-live="polite">{presence.status === "paused" ? "Paused" : nextGrowthReviewCountdown === "now" ? "Due now" : nextGrowthReviewCountdown ? `In ${nextGrowthReviewCountdown}` : nextGrowthReviewAt ? "Scheduled" : "Not scheduled"}</strong><small>{presence.status === "paused" ? "Wake the Presence to resume autonomous checks" : nextGrowthReviewAt ? formatHistoryTimestamp(nextGrowthReviewAt) : "The Agent has no review time saved"}</small></div>
+          <div><span>Next channel check</span><strong>{presence.status === "paused" ? "Paused" : nextChannelObservationAt ? (countdownNow === null ? "Scheduled" : formatCountdown(nextChannelObservationAt, countdownNow) === "now" ? "Due now" : `In ${formatCountdown(nextChannelObservationAt, countdownNow)}`) : bridgeConnected ? "Bridge-controlled" : "Unavailable"}</strong><small>{presence.status === "paused" ? "Wake the Presence to resume observation" : nextChannelObservationAt ? formatHistoryTimestamp(nextChannelObservationAt) : bridgeConnected && bridge?.lastHeartbeatAt ? `Last bridge heartbeat ${formatHistoryTimestamp(bridge.lastHeartbeatAt)} · adapter cadence not exposed` : "No connected observer is reporting a next check"}</small></div>
+        </div>
       </section>
       <div className="growth-columns">
         <section className="settings-card"><div className="section-heading compact"><div><SectionEyebrow>Genny&apos;s current read</SectionEyebrow><h2>What the evidence says</h2></div><TrendingUp size={17} /></div>{review ? <><p>{review.summary}</p><small className="muted">{review.reviewSource === "model" ? "Model-backed review" : "Deterministic evidence review"}{review.planChangeSummary ? ` · ${review.planChangeSummary}` : ""}</small><div className="growth-read-list"><div><strong>Working</strong>{review.working.length ? <ul>{review.working.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">Nothing strong enough to call yet.</p>}</div><div><strong>Uncertain</strong>{review.uncertain.length ? <ul>{review.uncertain.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">No open uncertainty recorded.</p>}</div><div><strong>Weak</strong>{review.weak.length ? <ul>{review.weak.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">No weak pattern recorded.</p>}</div></div></> : <div className="growth-no-review"><p>The Agent has not completed a Growth review yet. It will review follower movement and publication performance on the operating rhythm.</p><Button variant="secondary" onClick={() => void mutate({ type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind: "weekly" })}>Review available evidence</Button></div>}</section>
