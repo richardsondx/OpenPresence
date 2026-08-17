@@ -126,12 +126,8 @@ test("Activity pipeline cards reveal the exact selected and preparing actions", 
 
   await page.reload();
   await page.getByRole("button", { name: "Activity", exact: true }).click();
-  const nextAssignment = page.locator(".activity-status-block").filter({ hasText: "Next assignment" });
-  await expect(nextAssignment).toContainText("Assignment");
-  await expect(nextAssignment).toContainText("Tuesday at 08:00");
-  await expect(nextAssignment).toContainText("Instruction");
-  await expect(nextAssignment).toContainText("Surface one grounded founder question about AI agents and identify the most useful next step.");
-  await expect(nextAssignment).toContainText("This is not a drafted post or a warning.");
+  await expect(page.getByRole("heading", { name: "Next assignment" })).toHaveCount(0);
+  await expect(page.locator(".activity-next-assignment-card")).toHaveCount(0);
   await expect(page.locator(".execution-send-timing")).toContainText("Next send attempt in");
   await expect(page.locator(".execution-send-timing")).toContainText("Chrome extension checks the queue");
   await expect(page.getByRole("button", { name: /2 selected/ }).first()).toBeVisible();
