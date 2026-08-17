@@ -58,7 +58,7 @@ import { latestPerception } from "@/lib/perception";
 import { conversationStatusLabel } from "@/lib/conversation-episodes";
 import { validateScenarioFidelity } from "@/lib/scenarios";
 import { cleanMirrorText, normalizeMirrorAuthor } from "@/lib/mirror-content";
-import { audienceDeltas, cleanUserFacingAssignmentInstruction, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence } from "@/lib/runtime";
+import { assignmentIsOpen, audienceDeltas, cleanUserFacingAssignmentInstruction, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence } from "@/lib/runtime";
 import type {
   CalendarSlot,
   Assignment,
@@ -3107,7 +3107,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
   const assetKinds = channelDefinition?.supportedAssetKinds ?? ["image", "video", "gif", "link"] as SocialAssetKind[];
   const selectedObject = selectedObjectId ? objects.find((item) => item.id === selectedObjectId) : undefined;
   const rehearsalAttempts = sessionId ? state.originalPostRehearsals.filter((item) => item.sessionId === sessionId).slice(0, 5) : [];
-  const sessionAssignments = state.assignments.filter((item) => item.environment === "sandbox" && ((sessionId && item.sessionId === sessionId) || (item.status === "draft" && item.presenceId === presence?.id)));
+  const sessionAssignments = state.assignments.filter((item) => item.environment === "sandbox" && assignmentIsOpen(item) && ((sessionId && item.sessionId === sessionId) || (item.status === "draft" && item.presenceId === presence?.id)));
   const latestLiveAssignment = [...state.assignments]
     .filter((item) => item.environment === "live" && item.presenceId === presence?.id && item.status === "draft")
     .sort((left, right) => new Date(right.updatedAt ?? right.createdAt).getTime() - new Date(left.updatedAt ?? left.createdAt).getTime())[0];
@@ -4758,6 +4758,15 @@ function LiveView({
     const execution = executionForActivityEvent(item);
     return item.title === "Pulse completed" && (execution?.status === "failed" || execution?.status === "blocked") ? "warning" : item.tone;
   };
+  const decisionForEvent = (item: OpenPresenceState["events"][number]) => {
+    const direct = item.decisionId ? state.socialDecisions.find((entry) => entry.id === item.decisionId) : undefined;
+    if (direct) return direct;
+    const intent = item.intentId ? state.socialIntents.find((entry) => entry.id === item.intentId) : undefined;
+    const execution = executionForActivityEvent(item);
+    const linkedIntent = intent ?? (execution ? state.socialIntents.find((entry) => entry.id === execution.socialIntentId) : undefined);
+    return state.socialDecisions.find((entry) => linkedIntent && entry.socialIntentId === linkedIntent.id)
+      ?? state.socialDecisions.find((entry) => entry.presenceId === item.presenceId && Boolean(item.sourceObjectId && entry.focalMirrorObjectIds.includes(item.sourceObjectId)));
+  };
   const decisionTraceForEvent = (item: OpenPresenceState["events"][number]) => {
     const intent = item.intentId ? state.socialIntents.find((entry) => entry.id === item.intentId) : undefined;
     const execution = executionForActivityEvent(item);
@@ -6117,7 +6126,7 @@ function ScheduleView({
     }
   };
   const visibleSlots = state.calendar.filter((slot) => slot.presence === presenceId && !slot.assignmentId);
-  const visibleAssignments = state.assignments.filter((item) => item.presenceId === presenceId && item.status !== "cancelled");
+  const visibleAssignments = state.assignments.filter((item) => item.presenceId === presenceId && assignmentIsOpen(item));
   const toggleCalendarLayer = (layer: keyof ScheduleLayerVisibility) => setCalendarLayers((current) => ({ ...current, [layer]: !current[layer] }));
   const beginEdit = (slot: CalendarSlot) => {
     const { start, end } = splitConsiderationWindow(slot.executionWindow, slot.time);
@@ -6383,7 +6392,7 @@ function WeekCalendar({
   onResetLayers: () => void;
 }) {
   const scheduledSlots = slots.filter((slot) => slot.enabled);
-  const scheduledAssignments = assignments.filter((assignment) => assignment.schedule && assignment.status !== "cancelled");
+  const scheduledAssignments = assignments.filter((assignment) => assignment.schedule && assignmentIsOpen(assignment));
   const scheduledPlanWindows = (publishingPlan?.windows ?? [])
     .filter((window) => !["completed", "missed", "superseded"].includes(window.status))
     .map((window) => publishingWindowCalendarPosition(window, publishingPlan?.timezone))

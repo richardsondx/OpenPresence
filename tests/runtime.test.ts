@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addSandboxEvent, applyOperation, assignmentIsSatisfied, cleanSandboxDraft, cleanUserFacingAssignmentInstruction, compileAssignmentInstruction, compilePresenceContext, compileWatch, createAgent, deliverSandboxExecution, defaultPublishingInitiative, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingProgress, ensureCapabilityRequests, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, formXActionIntent, identityLeakageReason, inferExplicitDurableContext, inferPresenceIdentityChange, initialState, isActivityDecisionEvent, isExplicitGhostModeRequest, isExplicitXPostRequest, isTeachProposalConfirmation, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, publicHistoryMatchesPresence, recordPublicFooting, recordSocialDecision, recordStandingIntentNoOp, startPlaygroundSession, stateForContext } from "../lib/runtime";
+import { addSandboxEvent, applyOperation, assignmentIsOpen, assignmentIsSatisfied, cleanSandboxDraft, cleanUserFacingAssignmentInstruction, compileAssignmentInstruction, compilePresenceContext, compileWatch, createAgent, deliverSandboxExecution, defaultPublishingInitiative, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingProgress, ensureCapabilityRequests, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, formXActionIntent, identityLeakageReason, inferExplicitDurableContext, inferPresenceIdentityChange, initialState, isActivityDecisionEvent, isExplicitGhostModeRequest, isExplicitXPostRequest, isTeachProposalConfirmation, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, publicHistoryMatchesPresence, recordPublicFooting, recordSocialDecision, recordStandingIntentNoOp, startPlaygroundSession, stateForContext } from "../lib/runtime";
 import { acknowledgeExecution, claimExecutions, createBridgeWithKey, heartbeatBridge, ingestEvents, removeBridge, revokeBridge } from "../lib/bridge";
 import { readBridgeCredentialMetadata, readState, writeState } from "../lib/db";
 import { nextObservationAt } from "../lib/native-x";
@@ -7,6 +7,16 @@ import { nextObservationAt } from "../lib/native-x";
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
 describe("OpenPresence runtime boundaries", () => {
+  it("keeps completed Assignments out of operational views while retaining their record", () => {
+    const state = createAgent(input);
+    const assignment = compileAssignmentInstruction(state, "Produce one original X post about a useful lesson.", state.presence!.id, "sandbox");
+    expect(assignmentIsOpen(assignment)).toBe(true);
+    expect(assignmentIsOpen({ ...assignment, status: "completed" })).toBe(false);
+    expect(assignmentIsOpen({ ...assignment, status: "completed_with_adaptation" })).toBe(false);
+    expect(assignmentIsOpen({ ...assignment, status: "cancelled" })).toBe(false);
+    expect(assignmentIsOpen({ ...assignment, status: "blocked" })).toBe(true);
+  });
+
   it("persists a bounded Social Decision and links it to the Activity event", () => {
     const state = applyOperation(createAgent(input), { type: "setPresence", patch: { execution: { follow: "auto" } } });
     const next = formXActionIntent(state, {

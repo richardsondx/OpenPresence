@@ -2819,6 +2819,10 @@ export function assignmentIsSatisfied(assignment: Assignment, source?: OpenPrese
   return assignment.progress.verified >= required;
 }
 
+export function assignmentIsOpen(assignment: Assignment) {
+  return !["completed", "completed_with_adaptation", "cancelled"].includes(assignment.status);
+}
+
 function bridgeFor(state: OpenPresenceState, presenceId: string, affordance: string): Bridge | undefined { return state.bridges.find((bridge) => bridge.presenceId === presenceId && bridge.state !== "offline" && bridge.capabilities.affordances.includes(affordance)); }
 function normalizedCapabilities(input: ConnectorCapabilities): ConnectorCapabilities { return { inbound: input.inbound, reconcile: input.reconcile, affordances: [...new Set(input.affordances)], formats: [...new Set(input.formats)], metrics: [...new Set(input.metrics)], assetKinds: input.assetKinds?.length ? [...new Set(input.assetKinds)] : undefined }; }
 
