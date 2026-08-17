@@ -1474,6 +1474,17 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .execution-queue-count-review { border-color: #d9c8ed; color: #7256a6; }
 .execution-queue-summary p { margin: 0; color: var(--ink); font-size: 11px; line-height: 1.45; }
 .execution-queue-summary small { color: var(--muted); font-size: 9px; line-height: 1.45; }
+.execution-queue-failure-summary { display: grid; gap: 7px; padding: 10px 11px; border: 1px solid #e8c5b2; border-left: 3px solid #b95f43; border-radius: 7px; background: #fff9f5; }
+.execution-queue-failure-heading { display: flex; align-items: baseline; justify-content: space-between; gap: 10px; }
+.execution-queue-failure-heading strong { color: #8f4c32; font-size: 11px; }
+.execution-queue-failure-heading span { flex: 0 0 auto; color: #a04e31; font: 9px "DM Mono", monospace; text-transform: uppercase; letter-spacing: .03em; }
+.execution-queue-failure-summary p { color: #6f4938; font-size: 10px; }
+.execution-queue-failure-summary small { color: #7d6254; }
+.execution-queue-failure-summary details { border-top: 1px solid #efd8cb; padding-top: 7px; }
+.execution-queue-failure-summary summary { color: #8f4c32; cursor: pointer; font: 9px "DM Mono", monospace; text-transform: uppercase; letter-spacing: .04em; }
+.execution-queue-failure-summary ul { display: grid; gap: 5px; margin: 8px 0 0; padding: 0; list-style: none; }
+.execution-queue-failure-summary li { display: flex; align-items: baseline; gap: 8px; color: #6f4938; font-size: 10px; }
+.execution-queue-failure-summary li strong { min-width: 18px; color: #8f4c32; font: 10px "DM Mono", monospace; }
 .recent-public-attempts { margin: 0; padding-top: 15px; border-top: 2px solid var(--ink); }
 .recent-public-attempts-heading { display: flex; align-items: end; justify-content: space-between; gap: 14px; margin-bottom: 12px; }
 .recent-public-attempts-heading > div { display: grid; gap: 5px; min-width: 0; }

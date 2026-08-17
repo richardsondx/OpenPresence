@@ -5957,7 +5957,22 @@ function ExecutionQueueSummary({
   const bridgePending = pending.filter((execution) => execution.connector === "bridge").length;
   const connectorlessPending = pending.filter((execution) => !execution.connector).length;
   const reviewPending = pending.filter((execution) => execution.status === "awaiting-review").length;
-  const failed = executions.filter((execution) => ["failed", "blocked", "expired"].includes(execution.status)).length;
+  const failedExecutions = executions.filter((execution) => ["failed", "blocked", "expired"].includes(execution.status));
+  const failed = failedExecutions.length;
+  const failedByStatus = failedExecutions.reduce<Record<string, number>>((counts, execution) => {
+    counts[execution.status] = (counts[execution.status] ?? 0) + 1;
+    return counts;
+  }, {});
+  const failureGroups = failedExecutions.reduce<Record<string, number>>((counts, execution) => {
+    const executionPresence = state.presences.find((item) => item.id === execution.presenceId);
+    const title = deliveryFailureExplanation(execution.failure, executionPresence?.handle).title;
+    counts[title] = (counts[title] ?? 0) + 1;
+    return counts;
+  }, {});
+  const topFailure = Object.entries(failureGroups).sort((left, right) => right[1] - left[1])[0];
+  const latestFailureExecution = [...failedExecutions].sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())[0];
+  const latestFailurePresence = latestFailureExecution ? state.presences.find((item) => item.id === latestFailureExecution.presenceId) : undefined;
+  const latestFailure = latestFailureExecution ? deliveryFailureExplanation(latestFailureExecution.failure, latestFailurePresence?.handle) : undefined;
   const presence = state.presences.find((item) => item.id === presenceId);
   const bridge = state.bridges.find((item) => item.presenceId === presenceId && item.kind === "bridge" && item.state !== "offline");
   const bridgeStatus = bridge ? bridgeAdapterStatus(bridge) : "waiting";
@@ -5980,7 +5995,7 @@ function ExecutionQueueSummary({
     <section className="execution-queue-summary" aria-label="Execution queue" data-testid="execution-queue-summary">
       <div className="execution-queue-heading">
         <div><SectionEyebrow>Queue</SectionEyebrow><strong>{pending.length ? `${pending.length} pending` : "Queue clear"}</strong></div>
-        <span className={failed ? "execution-queue-failed" : "execution-queue-healthy"}>{failed ? `${failed} failed / blocked` : "No failed actions"}</span>
+        <span className={failed ? "execution-queue-failed" : "execution-queue-healthy"}>{failed ? `${failed} need attention` : "No failed actions"}</span>
       </div>
       <div className="execution-queue-counts" aria-label="Queue counts by route">
         <span className="execution-queue-count execution-queue-count-native"><span aria-hidden="true" />Native X · {nativePending}</span>
@@ -5990,6 +6005,22 @@ function ExecutionQueueSummary({
       <p>{queueDetail}</p>
       {bridgePending > 0 && <small>Chrome is reserved for replies to posts that do not mention {presence?.handle ?? "this Presence"}; Native X handles the normal X route.</small>}
       {nativePending > 0 && <small>One queued Native X action is processed per Check now or automatic attention cycle.</small>}
+      {failed > 0 && (
+        <div className="execution-queue-failure-summary" role="status">
+          <div className="execution-queue-failure-heading">
+            <strong>{failed} previous action{failed === 1 ? " was" : "s were"} not delivered</strong>
+            <span>{["failed", "blocked", "expired"].filter((status) => failedByStatus[status]).map((status) => `${failedByStatus[status]} ${status}`).join(" · ")}</span>
+          </div>
+          <p>{topFailure ? `${topFailure[1]} ${topFailure[1] === 1 ? "attempt" : "attempts"} ended with “${topFailure[0]}”.` : "These attempts did not produce a verified public result."} {pending.length ? "They are historical and are separate from the pending queue above." : "Review the breakdown before retrying."}</p>
+          {latestFailure && latestFailureExecution && <small>Latest: {latestFailure.title} · {formatHistoryTimestamp(latestFailureExecution.updatedAt)}. {latestFailure.fix}</small>}
+          <details>
+            <summary>Show failure breakdown</summary>
+            <ul>
+              {Object.entries(failureGroups).sort((left, right) => right[1] - left[1]).map(([title, count]) => <li key={title}><strong>{count}</strong><span>{title}</span></li>)}
+            </ul>
+          </details>
+        </div>
+      )}
     </section>
   );
 }
