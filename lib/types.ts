@@ -1,4 +1,4 @@
-export type View = "teach" | "knowledge" | "chat" | "watching" | "people" | "playground" | "live" | "feed" | "calendar" | "schedule" | "brain" | "presence";
+export type View = "teach" | "knowledge" | "chat" | "watching" | "people" | "playground" | "live" | "feed" | "growth" | "calendar" | "schedule" | "brain" | "presence";
 export type BuiltInChannelId = "x" | "linkedin" | "substack";
 export type ChannelId = string;
 export type ConnectorKind = "simulated" | "native" | "bridge" | "manual";
@@ -66,6 +66,93 @@ export type AssignmentPreflightStatus = "ready" | "ready_with_assumptions" | "ne
 export type AssignmentDelegationPolicy = "keep_moving" | "ask_before_change" | "stop_on_deviation";
 export type AssignmentQuantityMode = "target" | "at_least" | "exact" | "at_most" | "minimum" | "maximum";
 export type AssignmentOrigin = "schedule" | "exploration" | "watchlist" | "publishing_initiative" | "teach" | "manual" | "system";
+export type AssignmentMetricComparator = ">=" | ">" | "=" | "<" | "<=";
+export interface AssignmentMetricThreshold { metric: string; comparator: AssignmentMetricComparator; value: number; label?: string; }
+export interface AssignmentPlan {
+  id: string;
+  assignmentId: string;
+  revision: number;
+  summary: string;
+  dailyTargets: string[];
+  publishingApproach: string[];
+  discoveryDirections: string[];
+  relationshipFocus: string[];
+  hypotheses: string[];
+  nextWeeklyReviewAt?: string;
+  nextStrategicReviewAt?: string;
+  source: "agent" | "operator";
+  createdAt: string;
+  updatedAt: string;
+}
+export type GrowthReviewKind = "weekly" | "strategic";
+export interface GrowthReview {
+  id: string;
+  assignmentId: string;
+  presenceId: string;
+  kind: GrowthReviewKind;
+  periodStart: string;
+  periodEnd: string;
+  summary: string;
+  working: string[];
+  uncertain: string[];
+  weak: string[];
+  changedPlan: boolean;
+  assignmentPlanRevision?: number;
+  growthFileRevision?: number;
+  evidenceIds: string[];
+  createdAt: string;
+}
+export type MetricObservationSource = "native" | "bridge" | "manual" | "sandbox";
+export interface PresenceAudienceSnapshot {
+  id: string;
+  presenceId: string;
+  channel: ChannelId;
+  followers: number;
+  following?: number;
+  source: MetricObservationSource;
+  observationStatus: "observed" | "partial" | "unavailable";
+  observedAt: string;
+  environment?: PresenceEnvironment;
+}
+export interface PublicationMetricSnapshot {
+  id: string;
+  presenceId: string;
+  mirrorObjectId: string;
+  observedAt: string;
+  publicationAgeSeconds: number;
+  impressions?: number;
+  likes?: number;
+  replies?: number;
+  reposts?: number;
+  quotes?: number;
+  source: MetricObservationSource;
+  observationStatus: "observed" | "partial" | "unavailable";
+  baseline?: {
+    comparableCount: number;
+    confidence: "low" | "medium" | "high";
+    relative: Partial<Record<"impressions" | "likes" | "replies" | "reposts" | "quotes", number>>;
+  };
+}
+export type CapabilityAvailability = "available" | "temporarily-unavailable" | "unavailable" | "blocked" | "unknown";
+export interface PresenceCapability {
+  capability: string;
+  label: string;
+  availability: CapabilityAvailability;
+  executionMode?: ExecutionMode;
+  provider?: string;
+  requiresBrowser: boolean;
+  canObserve: boolean;
+  canExecute: boolean;
+  canVerify: boolean;
+  limitation?: string;
+}
+export interface PresenceCapabilityManifest {
+  presenceId: string;
+  channel: ChannelId;
+  generatedAt: string;
+  bodyStatus: "ready" | "degraded" | "unavailable";
+  items: PresenceCapability[];
+}
 export type AssignmentActivation =
   | { type: "scheduled"; startsAt?: string; recurrence?: Assignment["recurrence"]; deadline?: string }
   | { type: "attention_source"; sourceIds: string[]; startsAt?: string; endsAt?: string }
@@ -957,6 +1044,10 @@ export interface Assignment {
   schedule?: { day: string; time: string; executionWindow: string };
   timeframe?: { startsAt?: string; deadline?: string };
   editorialContext?: { topics?: string[]; sources?: string[]; constraints?: string[] };
+  audienceObjective?: string;
+  successEvidence?: { kind: "metric_threshold"; metric: string; comparator: AssignmentMetricComparator; value: number; label?: string };
+  plan?: AssignmentPlan;
+  planHistory?: AssignmentPlan[];
   executionPolicy: { usePresenceEnvelope: boolean; delegationPolicy?: AssignmentDelegationPolicy };
   preflight?: AssignmentPreflight;
   status: AssignmentStatus;
@@ -1243,7 +1334,7 @@ export interface ActionRecord { id: string; intent: "post" | "reply" | "like" | 
 export interface AgentWorkspaceSnapshot {
   onboarded: boolean; agent: Agent | null; presence: Presence | null; presences: Presence[]; activePresenceId: string | null;
   files: AgentFile[]; proposals: FileProposal[]; messages: ChatMessage[]; conversations: Conversation[]; activeConversationId: string | null; presenceChatSessions: PresenceChatSession[];
-  events: LiveEvent[]; calendar: CalendarSlot[]; assignments: Assignment[]; watches: Watch[]; explorations: ExplorationBrief[]; discoveryPlans: DiscoveryPlan[]; explorationSessions: ExplorationSession[]; explorationFindings: ExplorationFinding[]; actions: ActionRecord[]; publishingPlans: PublishingPlan[]; metrics: { qualifiedFollows: number; conversations: number; opportunitiesIgnored: number; audienceHealth: number };
+  events: LiveEvent[]; calendar: CalendarSlot[]; assignments: Assignment[]; growthReviews: GrowthReview[]; audienceSnapshots: PresenceAudienceSnapshot[]; publicationMetricSnapshots: PublicationMetricSnapshot[]; watches: Watch[]; explorations: ExplorationBrief[]; discoveryPlans: DiscoveryPlan[]; explorationSessions: ExplorationSession[]; explorationFindings: ExplorationFinding[]; actions: ActionRecord[]; publishingPlans: PublishingPlan[]; metrics: { qualifiedFollows: number; conversations: number; opportunitiesIgnored: number; audienceHealth: number };
   modelProfiles: AgentModelProfile[]; providerConnections: ProviderConnection[]; assetProviderConnections: AssetProviderConnection[]; toolBindings: AgentToolBinding[]; changeSets: ChangeSet[]; standingIntents: StandingIntent[]; operatorDirectives: OperatorDirective[]; socialIntents: SocialIntent[]; executions: Execution[]; outcomes: Outcome[]; publications: Publication[]; assetUsages: AssetUsage[]; sourceEvidence: SourceEvidence[]; claimGrounding: ClaimGrounding[]; preferenceEvidence: PreferenceEvidence[]; originalPostRehearsals: OriginalPostRehearsalAttempt[]; librarySources: LibrarySource[]; assets: Asset[]; perceptions: AssetPerception[]; assetResearchSessions: AssetResearchSession[]; skills: Skill[]; agentSkills: AgentSkill[]; contentDrops: ContentDrop[]; channelDefinitions: ChannelDefinition[]; nativeConnections: NativeChannelConnection[]; bridges: Bridge[]; mirrorObjects: MirrorObject[]; mirrorEvents: MirrorEvent[]; bridgeSync: BridgeSyncState[]; conversationEpisodes: ConversationEpisode[]; assignmentContributions: AssignmentContribution[]; people: Person[]; personIdentities: PersonIdentity[]; relationships: Relationship[]; relationshipFacts: RelationshipFact[]; relationshipOpenLoops: RelationshipOpenLoop[]; recommendationRecords: RecommendationRecord[]; introductionRecords: IntroductionRecord[]; sandboxEnvironments: SandboxEnvironment[]; playgroundSessions: PlaygroundSession[]; sandboxActors: SandboxActor[]; networkSearches: SandboxNetworkSearch[]; networkIntroductions: SandboxNetworkIntroduction[]; scenarios: Scenario[]; scenarioVersions: ScenarioVersion[]; scenarioRuns: ScenarioRun[]; scenarioRunProvenance: ScenarioRunProvenance[]; scenarioEvaluations: ScenarioRunEvaluation[]; knowledgeCollections: KnowledgeCollection[]; knowledgeItems: KnowledgeItem[]; knowledgeVersions: KnowledgeVersion[]; knowledgeSegments: KnowledgeSegment[]; presenceKnowledgeBindings: PresenceKnowledgeBinding[]; knowledgeRetrievalRuns: KnowledgeRetrievalRun[]; knowledgeCitations: KnowledgeCitation[];
   workspaceRevision?: number;
 }
@@ -1268,6 +1359,7 @@ export interface CreatePresenceInput { channel: ChannelId; name?: string; handle
 export type AssignmentOperation =
   | { type: "createAssignment"; instruction: string; presenceId?: string; sessionId?: string; environment?: PresenceEnvironment; schedule?: { day: string; time: string; executionWindow: string }; delegationPolicy?: AssignmentDelegationPolicy }
   | { type: "activateAssignment"; id: string; delegationPolicy?: AssignmentDelegationPolicy }
+  | { type: "updateAssignmentPlan"; assignmentId: string; plan: Omit<AssignmentPlan, "id" | "assignmentId" | "revision" | "createdAt" | "updatedAt"> }
   | { type: "startAssignment"; id: string; sessionId: string }
   | { type: "workAssignment"; id: string; sessionId: string }
   | { type: "cancelAssignment"; id: string };
@@ -1290,6 +1382,10 @@ export type ScenarioOperation =
   | { type: "evaluateScenarioRun"; runId: string }
   | { type: "recordScenarioReview"; runId: string; disposition: "accepted" | "okay" | "concern"; note?: string };
 export type PublishingPlanOperation = { type: "replanPublishing"; presenceId?: string };
+export type GrowthOperation =
+  | { type: "recordAudienceSnapshot"; presenceId?: string; followers: number; following?: number; source?: MetricObservationSource; observationStatus?: PresenceAudienceSnapshot["observationStatus"]; observedAt?: string }
+  | { type: "recordPublicationMetricSnapshot"; presenceId?: string; mirrorObjectId: string; publicationAgeSeconds?: number; metrics: Partial<Pick<PublicationMetricSnapshot, "impressions" | "likes" | "replies" | "reposts" | "quotes">>; source?: MetricObservationSource; observationStatus?: PublicationMetricSnapshot["observationStatus"] }
+  | { type: "reviewGrowth"; assignmentId?: string; presenceId?: string; kind?: GrowthReviewKind };
 export type ExplorationOperation =
   | { type: "createExploration"; brief: string; presenceId?: string }
   | { type: "updateExploration"; id: string; brief: string }
@@ -1298,7 +1394,7 @@ export type ExplorationOperation =
   | { type: "lookNow"; id: string }
   | { type: "runAttentionWorker" };
 export type BrowserOperation = { type: "setPresenceBrowserAccess"; presenceId?: string; enabled: boolean };
-export type Operation = AssignmentOperation | LanguagePolicyOperation | ScenarioOperation | PublishingPlanOperation | ExplorationOperation
+export type Operation = AssignmentOperation | LanguagePolicyOperation | ScenarioOperation | PublishingPlanOperation | GrowthOperation | ExplorationOperation
   | BrowserOperation
   | KnowledgeOperation
   | { type: "removeSandboxObject"; sessionId: string; objectId: string }

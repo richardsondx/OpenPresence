@@ -12,8 +12,8 @@ export interface XCredentials {
   accessTokenSecret?: string;
 }
 
-export interface XAccount { id: string; username: string; name: string; profileImageUrl?: string; }
-interface XAccountResponse { id: string; username: string; name: string; profile_image_url?: string; }
+export interface XAccount { id: string; username: string; name: string; profileImageUrl?: string; followers?: number; following?: number; }
+interface XAccountResponse { id: string; username: string; name: string; profile_image_url?: string; public_metrics?: { followers_count?: number; following_count?: number; } }
 export interface XReferencedPost { type: "replied_to" | "quoted" | "retweeted"; id: string; }
 export interface XMediaAttachment { mediaKey: string; type: "photo" | "video" | "animated_gif"; url?: string; previewImageUrl?: string; altText?: string; }
 export interface XRecentPost {
@@ -111,8 +111,11 @@ function mockAccount(credentials: XCredentials, handle: string): XAccount | unde
 }
 
 function normalizeAccount(account: XAccountResponse): XAccount {
-  return { id: account.id, username: account.username, name: account.name, profileImageUrl: account.profile_image_url };
+  return { id: account.id, username: account.username, name: account.name, profileImageUrl: account.profile_image_url, followers: account.public_metrics?.followers_count, following: account.public_metrics?.following_count };
 }
+
+export interface XAudienceSnapshot { followers: number; following?: number; observedAt: string; }
+export interface XPublicationMetrics { id: string; createdAt?: string; impressions?: number; likes?: number; replies?: number; reposts?: number; quotes?: number; }
 
 export async function testXCredentials(credentials: XCredentials, presenceHandle: string) {
   const mocked = mockAccount(credentials, presenceHandle);
@@ -120,9 +123,9 @@ export async function testXCredentials(credentials: XCredentials, presenceHandle
 
   if (credentials.accessToken && credentials.accessTokenSecret) {
     const url = `${apiBase()}/2/users/me`;
-    const response = await requestJson<{ data?: XAccountResponse }>("/2/users/me?user.fields=name,username,profile_image_url", {
+    const response = await requestJson<{ data?: XAccountResponse }>("/2/users/me?user.fields=name,username,profile_image_url,public_metrics", {
       method: "GET",
-      headers: { Authorization: oauthHeader("GET", url, credentials, { "user.fields": "name,username,profile_image_url" }) },
+      headers: { Authorization: oauthHeader("GET", url, credentials, { "user.fields": "name,username,profile_image_url,public_metrics" }) },
     });
     if (!response.data) throw new Error("X authenticated-user response did not include an account.");
     return { account: normalizeAccount(response.data), access: "read-write" as const };
@@ -130,12 +133,26 @@ export async function testXCredentials(credentials: XCredentials, presenceHandle
   if (!credentials.bearerToken) throw new Error("Add a Bearer Token for read access, or add User Access Token and User Access Token Secret for read + write access.");
   const username = normalizeHandle(presenceHandle);
   if (!username) throw new Error("This X Presence needs a handle before it can test read access.");
-  const response = await requestJson<{ data?: XAccountResponse }>(`/2/users/by/username/${encode(username)}?user.fields=name,username,profile_image_url`, {
+  const response = await requestJson<{ data?: XAccountResponse }>(`/2/users/by/username/${encode(username)}?user.fields=name,username,profile_image_url,public_metrics`, {
     method: "GET",
     headers: { Authorization: `Bearer ${credentials.bearerToken}` },
   });
   if (!response.data) throw new Error("X public account lookup did not include an account.");
   return { account: normalizeAccount(response.data), access: "read" as const };
+}
+
+export async function readXAudienceSnapshot(credentials: XCredentials, accountId: string): Promise<XAudienceSnapshot | undefined> {
+  if (isXMockEnabled() && credentials.apiKey.startsWith("test_")) return undefined;
+  const query = { "user.fields": "public_metrics" };
+  const queryString = new URLSearchParams(query).toString();
+  const url = `${apiBase()}/2/users/${encode(accountId)}?${queryString}`;
+  const response = await requestJson<{ data?: XAccountResponse }>(`/2/users/${encode(accountId)}?${queryString}`, {
+    method: "GET",
+    headers: { Authorization: readAuthHeader("GET", url, credentials, query) },
+  });
+  const metrics = response.data?.public_metrics;
+  if (typeof metrics?.followers_count !== "number") return undefined;
+  return { followers: metrics.followers_count, following: metrics.following_count, observedAt: new Date().toISOString() };
 }
 
 export async function publishSealedXPost(credentials: XCredentials, expression: PublicExpression, permit: ExecutionPermit, replyTo?: string): Promise<EntityRef> {
@@ -208,6 +225,7 @@ interface XPostRecord {
     conversation_id?: string;
     referenced_tweets?: Array<{ type?: string; id?: string }>;
     attachments?: { media_keys?: string[] };
+    public_metrics?: { impression_count?: number; like_count?: number; reply_count?: number; retweet_count?: number; quote_count?: number };
 }
 
 interface XPostResponse {
@@ -263,6 +281,19 @@ export async function readXPostsByIds(credentials: XCredentials, ids: string[]):
     headers: { Authorization: readAuthHeader("GET", url, credentials, query) },
   });
   return parseXPosts({ data: [...(response.data ?? []), ...((response as XPostResponse).includes as { tweets?: NonNullable<XPostResponse["data"]> } | undefined)?.tweets ?? []], includes: response.includes });
+}
+
+export async function readXPublicationMetrics(credentials: XCredentials, ids: string[]): Promise<XPublicationMetrics[]> {
+  const uniqueIds = [...new Set(ids.filter(Boolean))].slice(0, 100);
+  if (!uniqueIds.length || (isXMockEnabled() && credentials.apiKey.startsWith("test_"))) return [];
+  const query = { ids: uniqueIds.join(","), "tweet.fields": "created_at,public_metrics" };
+  const queryString = new URLSearchParams(query).toString();
+  const url = `${apiBase()}/2/tweets?${queryString}`;
+  const response = await requestJson<{ data?: XPostRecord[] }>(`/2/tweets?${queryString}`, {
+    method: "GET",
+    headers: { Authorization: readAuthHeader("GET", url, credentials, query) },
+  });
+  return (response.data ?? []).flatMap((post) => post.id && post.public_metrics ? [{ id: post.id, createdAt: post.created_at, impressions: post.public_metrics.impression_count, likes: post.public_metrics.like_count, replies: post.public_metrics.reply_count, reposts: post.public_metrics.retweet_count, quotes: post.public_metrics.quote_count }] : []);
 }
 
 export function nativeXFor(state: OpenPresenceState, presenceId: string) {

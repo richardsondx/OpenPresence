@@ -46,6 +46,7 @@ import {
   Settings2,
   ShieldCheck,
   Sparkles,
+  TrendingUp,
   Trash2,
   Users,
   X,
@@ -56,7 +57,7 @@ import { latestPerception } from "@/lib/perception";
 import { conversationStatusLabel } from "@/lib/conversation-episodes";
 import { validateScenarioFidelity } from "@/lib/scenarios";
 import { cleanMirrorText, normalizeMirrorAuthor } from "@/lib/mirror-content";
-import { cleanUserFacingAssignmentInstruction, deriveActivitySummary, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence } from "@/lib/runtime";
+import { audienceDeltas, cleanUserFacingAssignmentInstruction, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence } from "@/lib/runtime";
 import type {
   CalendarSlot,
   Assignment,
@@ -117,13 +118,14 @@ const navItems: { id: View; label: string; icon: typeof MessageCircle }[] = [
   { id: "watching", label: "Watching", icon: Eye },
   { id: "people", label: "People", icon: Users },
   { id: "feed", label: "Feed", icon: Newspaper },
+  { id: "growth", label: "Growth", icon: TrendingUp },
   { id: "schedule", label: "Schedule", icon: Clock3 },
   { id: "presence", label: "Settings", icon: Settings2 },
   { id: "teach", label: "Teach", icon: MessageCircle },
   { id: "knowledge", label: "Knowledge", icon: BookOpen },
   { id: "playground", label: "Playground", icon: FlaskConical },
 ];
-const presenceNavItems = navItems.filter(({ id }) => id === "live" || id === "chat" || id === "watching" || id === "people" || id === "feed" || id === "schedule" || id === "presence" || id === "playground");
+const presenceNavItems = navItems.filter(({ id }) => id === "live" || id === "chat" || id === "watching" || id === "people" || id === "feed" || id === "growth" || id === "schedule" || id === "presence" || id === "playground");
 const agentNavItems = navItems.filter(({ id }) => id === "teach" || id === "knowledge");
 const ACTIVITY_PAGE_SIZE = 20;
 const PUBLIC_HISTORY_PAGE_SIZE = 10;
@@ -551,6 +553,7 @@ export default function Home() {
   const [pendingOperation, setPendingOperation] = useState<string | null>(null);
   const nativeSyncInFlight = useRef<string | null>(null);
   const attentionOperationInFlight = useRef(false);
+  const growthAttentionAt = useRef<Record<string, number>>({});
   const calendarRunInFlight = useRef<string | null>(null);
   const playgroundStartInFlight = useRef<string | null>(null);
   const playgroundClockSyncInFlight = useRef<string | null>(null);
@@ -824,6 +827,26 @@ export default function Home() {
     }, delay);
     return () => clearTimeout(timer);
   }, [state?.assignments, state?.calendar, state?.presence, state?.activePresenceId, state?.bridges, pendingOperation]);
+  useEffect(() => {
+    if (pendingOperation || attentionOperationInFlight.current) return;
+    const presence = state?.presence;
+    if (!presence || presence.status !== "live") return;
+    const growthAssignment = state.assignments.find((item) => item.presenceId === presence.id && item.status === "active" && item.activation?.type === "continuous" && item.successEvidence?.metric === "followers");
+    if (!growthAssignment) return;
+    const bridge = presence.connectionMode === "bridge" ? state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline") : undefined;
+    const bodyReady = presence.connectionMode === "bridge"
+      ? Boolean(bridge && bridgeAdapterStatus(bridge) === "connected")
+      : presence.connectionMode === "native" && state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "connected");
+    if (!bodyReady) return;
+    const lastRun = growthAttentionAt.current[presence.id] ?? 0;
+    const wait = Math.max(0, 5 * 60_000 - (Date.now() - lastRun));
+    const timer = window.setTimeout(() => {
+      if (growthAttentionAt.current[presence.id] && Date.now() - growthAttentionAt.current[presence.id] < 5 * 60_000) return;
+      growthAttentionAt.current[presence.id] = Date.now();
+      void mutate({ type: "runAttentionWorker" });
+    }, wait);
+    return () => window.clearTimeout(timer);
+  }, [state?.assignments, state?.presence, state?.nativeConnections, state?.bridges, pendingOperation]);
   async function manageBridge(operation: unknown) {
     setError(null);
     try {
@@ -1459,8 +1482,10 @@ function AgentWorkspaceShell({
         ? "Presence settings"
       : view === "live"
           ? "Activity"
-          : view === "feed"
-            ? "Feed"
+            : view === "feed"
+              ? "Feed"
+            : view === "growth"
+              ? "Growth"
         : view[0].toUpperCase() + view.slice(1);
   const pendingExecutionCount = state.executions.filter(
     (item) =>
@@ -1584,6 +1609,7 @@ function AgentWorkspaceShell({
           {view === "feed" && (
             <PublicHistoryView state={state} setView={setView} mutate={mutate} />
           )}
+          {view === "growth" && <GrowthView state={state} mutate={mutate} setView={setView} />}
           {view === "schedule" && (
             <ScheduleView state={state} mutate={mutate} setView={setView} />
           )}
@@ -1837,6 +1863,7 @@ function LegacyAppShell({
           {view === "feed" && (
             <PublicHistoryView state={state} setView={setView} mutate={mutate} />
           )}
+          {view === "growth" && <GrowthView state={state} mutate={mutate} setView={setView} />}
           {view === "schedule" && (
             <ScheduleView state={state} mutate={mutate} setView={setView} />
           )}
@@ -4581,6 +4608,8 @@ function LiveView({
     : undefined;
   const bridgeConnected = Boolean(activityBridge && bridgeAdapterStatus(activityBridge) === "connected");
   const bridgeNeedsAttention = selected?.connectionMode === "bridge" && !bridgeConnected;
+  const effectiveCapabilities = selected ? derivePresenceCapabilityManifest(state, selected.id) : undefined;
+  const growthAssignment = selected ? state.assignments.find((item) => item.presenceId === selected.id && item.successEvidence?.metric === "followers" && item.status !== "cancelled") : undefined;
   const nextCheckCountdown = countdownNow === null ? undefined : formatCountdown(nextObservationAt, countdownNow);
   const nextCheckStatus = paused
     ? "Checks paused"
@@ -4801,6 +4830,7 @@ function LiveView({
           )}
         </>}
       />
+      {selected && <section className="activity-autonomy-strip" aria-label="Autonomy status"><div><SectionEyebrow>Autonomy</SectionEyebrow><strong>{growthAssignment ? `Working toward ${growthAssignment.successEvidence?.value.toLocaleString()} followers` : "No continuous growth responsibility"}</strong><span>{effectiveCapabilities?.bodyStatus === "ready" ? "Body ready" : effectiveCapabilities?.bodyStatus === "degraded" ? "Body degraded" : "Body unavailable"} · {selected.connectionMode === "bridge" ? "Browser body" : selected.connectionMode === "native" ? "Native channel" : "Sandbox"} · {effectiveCapabilities?.items.find((item) => item.capability === "follower_measurement")?.availability === "available" ? "Follower observation available" : "Follower observation unavailable"}</span></div><Button variant="ghost" onClick={() => setView(growthAssignment ? "growth" : "schedule")}>{growthAssignment ? "Open Growth" : "Set growth responsibility"}</Button></section>}
       {bridgeNeedsAttention && (
         <div className="activity-connection-notice" role="status" aria-live="polite">
           <CircleAlert size={17} aria-hidden="true" />
@@ -5836,6 +5866,41 @@ function ScheduleLayerToolbar({
   );
 }
 
+function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; mutate: Mutate; setView: (view: View) => void }) {
+  const presence = state.presence;
+  if (!presence) return <div className="page"><PageHeader eyebrow="Growth" title="No Presence selected" description="Select a Presence before reviewing growth evidence." /></div>;
+  const assignment = state.assignments.find((item) => item.presenceId === presence.id && item.successEvidence?.metric === "followers" && item.status !== "cancelled");
+  const deltas = audienceDeltas(state, presence.id);
+  const snapshots = state.audienceSnapshots.filter((item) => item.presenceId === presence.id).sort((left, right) => right.observedAt.localeCompare(left.observedAt));
+  const latest = snapshots[0];
+  const review = state.growthReviews.find((item) => item.presenceId === presence.id);
+  const manifest = derivePresenceCapabilityManifest(state, presence.id);
+  const limitations = manifest.items.filter((item) => item.availability !== "available");
+  const goal = assignment?.successEvidence?.value ?? 100_000;
+  const progress = latest ? Math.min(100, Math.round((latest.followers / goal) * 100)) : 0;
+  const createGrowthResponsibility = async () => {
+    await mutate({ type: "createAssignment", presenceId: presence.id, environment: presence.connectionMode === "sandbox" ? "sandbox" : "live", instruction: `Grow this Presence toward ${goal.toLocaleString()} followers while building an audience of ${presence.brief.audience}.` });
+  };
+  return <div className="page growth-page">
+    <PageHeader eyebrow={`${presence.name} · Growth`} title="Build durable attention" description="Growth is the Agent’s interpretation of verified audience and publication evidence—not a promise of a particular outcome." actions={<Button variant="secondary" onClick={() => setView("schedule")}><Clock3 size={14} /> Open Schedule</Button>} />
+    {!assignment ? <section className="growth-empty settings-card"><div className="watch-empty-mark"><TrendingUp size={23} /></div><SectionEyebrow>Continuous responsibility</SectionEyebrow><h2>Give {presence.name} a 100K growth responsibility.</h2><p>One long-lived Assignment owns the objective. The Agent chooses the day-to-day work, observes the public result, and revises its approach during review.</p><Button variant="primary" onClick={() => void createGrowthResponsibility()}><Plus size={14} /> Create growth responsibility</Button></section> : <>
+      <section className="growth-goal-card settings-card" aria-label="Growth goal">
+        <div className="growth-goal-heading"><div><SectionEyebrow>Current goal</SectionEyebrow><h2>{goal.toLocaleString()} followers</h2><p>{assignment.audienceObjective ?? presence.brief.audience}</p></div><span className={`growth-status growth-status-${assignment.status}`}>{assignment.status.replaceAll("_", " ")}</span></div>
+        <div className="growth-progress-track"><span style={{ width: `${progress}%` }} /></div>
+        <div className="growth-stat-grid"><div><span>Observed now</span><strong>{latest ? latest.followers.toLocaleString() : "Not observed"}</strong><small>{latest ? `${formatHistoryTimestamp(latest.observedAt)} · ${latest.source}` : "Waiting for channel evidence"}</small></div><div><span>7-day change</span><strong>{deltas.sevenDay === undefined ? "Not enough data" : `${deltas.sevenDay >= 0 ? "+" : ""}${deltas.sevenDay.toLocaleString()}`}</strong><small>Compared with the latest prior snapshot</small></div><div><span>28-day change</span><strong>{deltas.twentyEightDay === undefined ? "Not enough data" : `${deltas.twentyEightDay >= 0 ? "+" : ""}${deltas.twentyEightDay.toLocaleString()}`}</strong><small>Strategic review window</small></div></div>
+      </section>
+      <div className="growth-columns">
+        <section className="settings-card"><div className="section-heading compact"><div><SectionEyebrow>Genny&apos;s current read</SectionEyebrow><h2>What the evidence says</h2></div><TrendingUp size={17} /></div>{review ? <><p>{review.summary}</p><div className="growth-read-list"><div><strong>Working</strong>{review.working.length ? <ul>{review.working.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">Nothing strong enough to call yet.</p>}</div><div><strong>Uncertain</strong>{review.uncertain.length ? <ul>{review.uncertain.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">No open uncertainty recorded.</p>}</div><div><strong>Weak</strong>{review.weak.length ? <ul>{review.weak.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">No weak pattern recorded.</p>}</div></div></> : <div className="growth-no-review"><p>The Agent has not completed a Growth review yet. It will review follower movement and publication performance on the operating rhythm.</p><Button variant="secondary" onClick={() => void mutate({ type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind: "weekly" })}>Review available evidence</Button></div>}</section>
+        <section className="settings-card"><div className="section-heading compact"><div><SectionEyebrow>Current approach</SectionEyebrow><h2>How the Agent is working</h2></div><Sparkles size={17} /></div>{assignment.plan ? <><p>{assignment.plan.summary}</p><div className="growth-plan-list"><div><strong>Publishing</strong><ul>{assignment.plan.publishingApproach.map((item) => <li key={item}>{item}</li>)}</ul></div><div><strong>Discovery</strong><ul>{assignment.plan.discoveryDirections.map((item) => <li key={item}>{item}</li>)}</ul></div><div><strong>Relationships</strong><ul>{assignment.plan.relationshipFocus.map((item) => <li key={item}>{item}</li>)}</ul></div></div><small className="muted">Plan revision {assignment.plan.revision} · Next weekly review {assignment.plan.nextWeeklyReviewAt ? formatHistoryTimestamp(assignment.plan.nextWeeklyReviewAt) : "not scheduled"}</small></> : <p className="muted">The Agent is preparing its first operating plan.</p>}</section>
+      </div>
+      <div className="growth-columns">
+        <section className="settings-card"><div className="section-heading compact"><div><SectionEyebrow>Evidence quality</SectionEyebrow><h2>Recent audience observations</h2></div><ShieldCheck size={17} /></div>{snapshots.length ? <div className="growth-evidence-list">{snapshots.slice(0, 5).map((item) => <div key={item.id}><strong>{item.followers.toLocaleString()} followers</strong><span>{formatHistoryTimestamp(item.observedAt)} · {item.source} · {item.observationStatus}</span></div>)}</div> : <p className="muted">No verified audience snapshot has arrived from the selected channel.</p>}</section>
+        <section className="settings-card"><div className="section-heading compact"><div><SectionEyebrow>Body & limitations</SectionEyebrow><h2>{manifest.bodyStatus === "ready" ? "Ready to work" : manifest.bodyStatus === "degraded" ? "Degraded" : "Unavailable"}</h2></div><PlugZap size={17} /></div><p className="muted">The Agent can only claim autonomy where the connected channel body can observe, execute, and verify.</p><div className="capability-list">{manifest.items.filter((item) => ["post", "reply", "follow", "follower_measurement", "post_performance"].includes(item.capability)).map((item) => <div className="capability-row" key={item.capability}><div><strong>{item.label}</strong><small>{item.provider ?? "No provider"}{item.requiresBrowser ? " · browser required" : ""}</small></div><span className={`capability-state capability-state-${item.availability}`}>{item.availability.replaceAll("-", " ")}</span></div>)}</div>{limitations.length > 0 && <p className="settings-warning">{limitations.slice(0, 2).map((item) => item.limitation).filter(Boolean).join(" ")}</p>}<Button variant="ghost" onClick={() => setView("presence")}>Review Settings</Button></section>
+      </div>
+    </>}
+  </div>;
+}
+
 function ScheduleView({
   state,
   mutate,
@@ -6075,7 +6140,7 @@ function ScheduleView({
           </div>
           <p className="assignment-inspector-instruction">{cleanUserFacingAssignmentInstruction(selectedAssignment.instruction)}</p>
           <div className="assignment-inspector-meta">
-            <div><span>Window</span><strong>{selectedAssignment.schedule ? `${selectedAssignment.schedule.day} at ${selectedAssignment.schedule.time}` : "Unscheduled"}</strong><small>{selectedAssignment.schedule?.executionWindow ?? "Ready to start when you choose."}</small></div>
+            <div><span>Window</span><strong>{selectedAssignment.activation?.type === "continuous" ? "Continuous responsibility" : selectedAssignment.schedule ? `${selectedAssignment.schedule.day} at ${selectedAssignment.schedule.time}` : "Unscheduled"}</strong><small>{selectedAssignment.activation?.type === "continuous" ? "Agent-authored plan · weekly and strategic review" : selectedAssignment.schedule?.executionWindow ?? "Ready to start when you choose."}</small></div>
             <div><span>Status</span><strong>{selectedAssignment.status === "draft" ? "Review before activation" : selectedAssignment.status.replaceAll("_", " ")}</strong><small>{selectedAssignment.progress.verified} / {selectedAssignment.progress.required} verified · {selectedAssignment.rejectedCandidates} rejected</small></div>
           </div>
           {selectedAssignment.preflight && <section className={`assignment-preflight assignment-preflight-${selectedAssignment.preflight.status}`} aria-label="Assignment readiness review">
@@ -6093,7 +6158,7 @@ function ScheduleView({
           </div>
         </aside>
       )}
-      {visibleAssignments.length > 0 && viewMode === "list" && <section className="schedule-assignment-list" aria-label="Assignments"><div className="section-heading"><div><SectionEyebrow>Delegated responsibility</SectionEyebrow><h2>Assignments</h2><p className="muted">Assignments delegate an outcome to work toward. Open one to review its window and progress, run a Sandbox rehearsal, or cancel it. A rejected candidate is part of the work history, not a completed Assignment.</p></div></div>{visibleAssignments.map((assignment) => { const timing = assignment.schedule ? `${assignment.schedule.day} at ${assignment.schedule.time} · ${assignment.schedule.executionWindow === `${assignment.schedule.time}–${assignment.schedule.time}` ? "exact time" : assignment.schedule.executionWindow}` : "Unscheduled · ready to start"; const status = assignment.status === "draft" ? "not started" : assignment.status.replaceAll("_", " "); return <article className="schedule-assignment-row" key={assignment.id}><div><strong>{cleanUserFacingAssignmentInstruction(assignment.instruction)}</strong><small>{timing} · {assignment.progress.verified} / {assignment.progress.required} verified · {status} · {assignment.rejectedCandidates} rejected</small></div><div className="schedule-assignment-actions"><Button variant="secondary" onClick={() => openAssignment(assignment)}>Open details</Button></div></article>; })}</section>}
+      {visibleAssignments.length > 0 && viewMode === "list" && <section className="schedule-assignment-list" aria-label="Assignments"><div className="section-heading"><div><SectionEyebrow>Delegated responsibility</SectionEyebrow><h2>Assignments</h2><p className="muted">Assignments delegate an outcome to work toward. Open one to review its window and progress, run a Sandbox rehearsal, or cancel it. A rejected candidate is part of the work history, not a completed Assignment.</p></div></div>{visibleAssignments.map((assignment) => { const timing = assignment.activation?.type === "continuous" ? "Continuous · Agent-authored plan" : assignment.schedule ? `${assignment.schedule.day} at ${assignment.schedule.time} · ${assignment.schedule.executionWindow === `${assignment.schedule.time}–${assignment.schedule.time}` ? "exact time" : assignment.schedule.executionWindow}` : "Unscheduled · ready to start"; const status = assignment.status === "draft" ? "not started" : assignment.status.replaceAll("_", " "); return <article className="schedule-assignment-row" key={assignment.id}><div><strong>{cleanUserFacingAssignmentInstruction(assignment.instruction)}</strong><small>{timing} · {assignment.progress.verified} / {assignment.progress.required} verified · {status} · {assignment.rejectedCandidates} rejected</small></div><div className="schedule-assignment-actions"><Button variant="secondary" onClick={() => openAssignment(assignment)}>Open details</Button></div></article>; })}</section>}
       {viewMode === "week" ? (
         <WeekCalendar slots={visibleSlots} assignments={visibleAssignments} publishingPlan={publishingPlan} layers={calendarLayers} compact={compactSchedule} onToggleCompact={() => setCompactSchedule((current) => !current)} state={state} presenceName={presenceName} onEdit={beginEdit} onAssignment={openAssignment} onAdd={() => setShowForm(true)} onResetLayers={() => setCalendarLayers({ plan: true, intents: true, assignments: true })} />
       ) : (
@@ -7144,6 +7209,11 @@ function PresenceView({
           <p><b>Typical response:</b> answer naturally as this Presence without volunteering AI, platform, provider, model, or tool details. Direct questions still follow the Identity posture above.</p>
         </div>}
         <div className="inline-form-actions"><Button variant="primary" disabled={presence.mode === "ghost" && !ghostRepresentationReady} onClick={savePublicSelf}><Check size={14} /> Save Public Self</Button></div>
+      </section>
+      <section className="settings-card capability-manifest-card" aria-labelledby="presence-capability-title">
+        <div className="section-heading compact"><div><SectionEyebrow>Effective body</SectionEyebrow><h2 id="presence-capability-title">What {presence.name} can actually do</h2></div><PlugZap size={17} /></div>
+        <p className="muted">These capabilities combine channel support, connection health, permissions, execution, observation, and verification. “Auto” is not shown as ready when the body cannot confirm the public result.</p>
+        <div className="capability-list">{derivePresenceCapabilityManifest(state, presence.id).items.map((item) => <div className="capability-row" key={item.capability}><div><strong>{item.label}</strong><small>{item.provider ?? "No connected provider"}{item.requiresBrowser ? " · browser body" : ""}{item.limitation ? ` · ${item.limitation}` : ""}</small></div><span className={`capability-state capability-state-${item.availability}`}>{item.availability.replaceAll("-", " ")}</span></div>)}</div>
       </section>
       <section className="settings-card presence-brief-card">
         <div className="section-heading compact">

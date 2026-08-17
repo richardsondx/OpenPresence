@@ -61,6 +61,7 @@ Authorization: Bearer $OPENPRESENCE_BRIDGE_KEY
 | POST | /api/bridge/v1/executions/{id}/ack | Confirm a verified external result. |
 | POST | /api/bridge/v1/executions/{id}/fail | Report truthful delivery failure and retryability. |
 | POST | /api/bridge/v1/outcomes | Report verified world metrics after delivery. |
+| POST | /api/bridge/v1/metrics | Report observed follower and publication-performance metrics. |
 
 ## Inbound event
 

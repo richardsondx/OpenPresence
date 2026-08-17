@@ -17,6 +17,7 @@ export const heartbeatInput = z.object({ executorId: z.string().min(1).max(160) 
 export const ackInput = z.object({ executorId: z.string().min(1).max(160), externalRef: entityRef, observedAt: z.string().datetime().optional() });
 export const failInput = z.object({ executorId: z.string().min(1).max(160), code: z.string().max(80).optional(), message: z.string().min(1).max(1_000), retryable: z.boolean().default(false) });
 export const outcomeInput = z.object({ executionId: z.string().min(1), status: z.enum(["succeeded", "failed", "unknown"]), metrics: z.record(z.number()).default({}), evidence: z.array(entityRef).default([]) });
+export const metricsInput = z.object({ audience: z.object({ followers: z.number().int().min(0), following: z.number().int().min(0).optional(), observedAt: z.string().datetime().optional() }).optional(), publications: z.array(z.object({ externalRef: entityRef, publicationAgeSeconds: z.number().int().min(0), metrics: z.object({ impressions: z.number().int().min(0).optional(), likes: z.number().int().min(0).optional(), replies: z.number().int().min(0).optional(), reposts: z.number().int().min(0).optional(), quotes: z.number().int().min(0).optional() }) })).max(100).default([]) });
 
 const timestamp = () => new Date().toISOString();
 const localId = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -245,3 +246,17 @@ export function failExecution(bridge: Bridge, executionId: string, input: z.infe
 }
 
 export function reportOutcome(bridge: Bridge, input: z.infer<typeof outcomeInput>) { const state = readStateForBridge(bridge.id); const execution = state.executions.find((item) => item.id === input.executionId && item.bridgeId === bridge.id); if (!execution) throw new Error("Execution not found"); const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, status: input.status, observedAt: timestamp(), metrics: input.metrics, evidence: input.evidence }; state.outcomes.unshift(outcome); touchBridge(state, bridge); writeState(state); return { state, outcome }; }
+
+export function reportMetrics(bridge: Bridge, input: z.infer<typeof metricsInput>) {
+  let state = readStateForBridge(bridge.id);
+  if (input.audience) state = applyOperation(state, { type: "recordAudienceSnapshot", presenceId: bridge.presenceId, followers: input.audience.followers, following: input.audience.following, source: "bridge", observedAt: input.audience.observedAt });
+  for (const publication of input.publications) {
+    const mirror = state.mirrorObjects.find((item) => item.bridgeId === bridge.id && item.presenceId === bridge.presenceId && item.externalRef.type === publication.externalRef.type && item.externalRef.id === publication.externalRef.id && !item.archived);
+    if (!mirror) continue;
+    state = applyOperation(state, { type: "recordPublicationMetricSnapshot", presenceId: bridge.presenceId, mirrorObjectId: mirror.id, publicationAgeSeconds: publication.publicationAgeSeconds, metrics: publication.metrics, source: "bridge" });
+  }
+  const current = state.bridges.find((item) => item.id === bridge.id);
+  if (current) touchBridge(state, current);
+  writeState(state);
+  return state;
+}

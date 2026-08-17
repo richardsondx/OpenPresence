@@ -11,6 +11,7 @@ export const bridgeEndpointPaths = {
   reconcile: "/api/bridge/v1/reconcile",
   claim: "/api/bridge/v1/executions/claim",
   outcomes: "/api/bridge/v1/outcomes",
+  metrics: "/api/bridge/v1/metrics",
 } as const;
 
 export function bridgeAdapterStatus(bridge: Pick<Bridge, "state" | "lastHeartbeatAt" | "lastSeenAt">, now = Date.now()): BridgeAdapterStatus {

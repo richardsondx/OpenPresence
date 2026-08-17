@@ -2278,6 +2278,10 @@ const operation: z.ZodType<RuntimeOperation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("overrideLanguagePolicy"), id: z.string().min(1) }),
   z.object({ type: z.literal("createAssignment"), instruction: z.string().trim().min(1).max(4000), presenceId: z.string().min(1).optional(), sessionId: z.string().min(1).optional(), environment: z.enum(["sandbox", "live"]).optional(), delegationPolicy: z.enum(["keep_moving", "ask_before_change", "stop_on_deviation"]).optional(), schedule: z.object({ day: z.string().min(1).max(20), time: z.string().regex(/^([01]\d|2[0-3]):[0-5]\d$/), executionWindow: z.string().min(1).max(40) }).optional() }),
   z.object({ type: z.literal("activateAssignment"), id: z.string().min(1), delegationPolicy: z.enum(["keep_moving", "ask_before_change", "stop_on_deviation"]).optional() }),
+  z.object({ type: z.literal("updateAssignmentPlan"), assignmentId: z.string().min(1), plan: z.object({ summary: z.string().trim().min(1).max(2000), dailyTargets: z.array(z.string().trim().min(1).max(500)).max(20), publishingApproach: z.array(z.string().trim().min(1).max(500)).max(20), discoveryDirections: z.array(z.string().trim().min(1).max(500)).max(20), relationshipFocus: z.array(z.string().trim().min(1).max(500)).max(20), hypotheses: z.array(z.string().trim().min(1).max(500)).max(20), nextWeeklyReviewAt: z.string().datetime().optional(), nextStrategicReviewAt: z.string().datetime().optional(), source: z.enum(["agent", "operator"]) }) }),
+  z.object({ type: z.literal("recordAudienceSnapshot"), presenceId: z.string().min(1).optional(), followers: z.number().int().min(0), following: z.number().int().min(0).optional(), source: z.enum(["native", "bridge", "manual", "sandbox"]).optional(), observationStatus: z.enum(["observed", "partial", "unavailable"]).optional(), observedAt: z.string().datetime().optional() }),
+  z.object({ type: z.literal("recordPublicationMetricSnapshot"), presenceId: z.string().min(1).optional(), mirrorObjectId: z.string().min(1), publicationAgeSeconds: z.number().int().min(0).optional(), metrics: z.object({ impressions: z.number().int().min(0).optional(), likes: z.number().int().min(0).optional(), replies: z.number().int().min(0).optional(), reposts: z.number().int().min(0).optional(), quotes: z.number().int().min(0).optional() }), source: z.enum(["native", "bridge", "manual", "sandbox"]).optional(), observationStatus: z.enum(["observed", "partial", "unavailable"]).optional() }),
+  z.object({ type: z.literal("reviewGrowth"), presenceId: z.string().min(1).optional(), assignmentId: z.string().min(1).optional(), kind: z.enum(["weekly", "strategic"]).optional() }),
   z.object({ type: z.literal("startAssignment"), id: z.string().min(1), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("workAssignment"), id: z.string().min(1), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("cancelAssignment"), id: z.string().min(1) }),
@@ -2485,12 +2489,20 @@ export async function POST(request: Request) {
             if (!bridge || bridgeAdapterStatus(bridge) !== "connected") continue;
             next = await runScheduledLiveAssignments(next, presence.id);
             next = await runPublishingAssignmentPulse(next, presence.id);
+            for (const assignment of next.assignments.filter((item) => item.presenceId === presence.id && item.status === "active" && item.activation?.type === "continuous" && item.successEvidence?.metric === "followers")) {
+              if (assignment.plan?.nextWeeklyReviewAt && new Date(assignment.plan.nextWeeklyReviewAt).getTime() <= Date.now()) next = applyOperation(next, { type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind: "weekly" });
+              if (assignment.plan?.nextStrategicReviewAt && new Date(assignment.plan.nextStrategicReviewAt).getTime() <= Date.now()) next = applyOperation(next, { type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind: "strategic" });
+            }
             continue;
           }
           const connection = next.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x" && nativeConnectionCanAct(item));
           if (!connection) continue;
           next = await reconcileNativeX(next, presence.id);
           next = await runNativePulse(next, presence.id);
+          for (const assignment of next.assignments.filter((item) => item.presenceId === presence.id && item.status === "active" && item.activation?.type === "continuous" && item.successEvidence?.metric === "followers")) {
+            if (assignment.plan?.nextWeeklyReviewAt && new Date(assignment.plan.nextWeeklyReviewAt).getTime() <= Date.now()) next = applyOperation(next, { type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind: "weekly" });
+            if (assignment.plan?.nextStrategicReviewAt && new Date(assignment.plan.nextStrategicReviewAt).getTime() <= Date.now()) next = applyOperation(next, { type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind: "strategic" });
+          }
         }
         writeState(next);
         return next;

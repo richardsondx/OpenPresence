@@ -1,5 +1,5 @@
-import { readNativeXCredentials, readRecentXMentions, readRecentXPosts, readXPostsByIds, testXCredentials, type XRecentPost } from "./x";
-import { recordNativeMirror, recordNativeMirrorDeletion, recordNativeObservation, recordPublicFooting, recordRuntimeEvent } from "./runtime";
+import { readNativeXCredentials, readRecentXMentions, readRecentXPosts, readXAudienceSnapshot, readXPublicationMetrics, readXPostsByIds, testXCredentials, type XRecentPost } from "./x";
+import { applyOperation, recordNativeMirror, recordNativeMirrorDeletion, recordNativeObservation, recordPublicFooting, recordRuntimeEvent } from "./runtime";
 import type { EntityRef, MirrorObject, OpenPresenceState, Presence, PresenceQuietHours } from "./types";
 import { hydrateThreadContext } from "./thread-context";
 
@@ -154,8 +154,32 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
     const posts = postsResult.value;
     const mentions = mentionsResult.status === "fulfilled" ? mentionsResult.value : [];
     const observedAt = new Date().toISOString();
+    const hasGrowthAssignment = next.assignments.some((assignment) => assignment.presenceId === presenceId && assignment.successEvidence?.metric === "followers" && assignment.status !== "cancelled");
+    if (hasGrowthAssignment) {
+      try {
+        const audience = await readXAudienceSnapshot(credentials, accountId);
+        if (audience) next = applyOperation(next, { type: "recordAudienceSnapshot", presenceId, followers: audience.followers, following: audience.following, source: "native", observedAt: audience.observedAt });
+      } catch (error) {
+        next = recordRuntimeEvent(next, presenceId, "Audience measurement unavailable", error instanceof Error ? error.message : "X did not return follower metrics.", "warning");
+      }
+    }
     for (const post of posts) next = recordNativeMirror(next, { connectionId: connection.id, presenceId, own: true, post });
     for (const post of mentions) next = recordNativeMirror(next, { connectionId: connection.id, presenceId, post });
+    if (hasGrowthAssignment) try {
+      const ownMirrorObjects = next.mirrorObjects.filter((item) => item.presenceId === presenceId && item.actorPresenceId === presenceId && item.environment === "live" && !item.archived && item.externalRef.type === "x.post").slice(0, 100);
+      const metrics = await readXPublicationMetrics(credentials, ownMirrorObjects.map((item) => item.externalRef.id));
+      for (const metric of metrics) {
+        const mirror = ownMirrorObjects.find((item) => item.externalRef.id === metric.id);
+        if (!mirror) continue;
+        const ageSeconds = Math.max(0, Math.round((Date.now() - new Date(mirror.occurredAt ?? mirror.observedAt).getTime()) / 1000));
+        const ageBucket = Math.round(ageSeconds / 3600);
+        const duplicate = next.publicationMetricSnapshots.some((item) => item.mirrorObjectId === mirror.id && Math.round(item.publicationAgeSeconds / 3600) === ageBucket);
+        if (duplicate) continue;
+        next = applyOperation(next, { type: "recordPublicationMetricSnapshot", presenceId, mirrorObjectId: mirror.id, publicationAgeSeconds: ageSeconds, metrics: { impressions: metric.impressions, likes: metric.likes, replies: metric.replies, reposts: metric.reposts, quotes: metric.quotes }, source: "native" });
+      }
+    } catch (error) {
+      next = recordRuntimeEvent(next, presenceId, "Publication measurement unavailable", error instanceof Error ? error.message : "X did not return publication metrics.", "warning");
+    }
     const currentPostIds = new Set(posts.map((post) => post.id));
     const missingOwnPostIds = [...previousOwnPostIds].filter((postId) => !currentPostIds.has(postId));
     let deletedOwnPostIds: string[] = [];
