@@ -39,6 +39,14 @@ function firstStatusId(hrefs, excludedId) {
   return undefined;
 }
 
+function statusIdFromHref(href) {
+  return href?.match(/\/status\/(\d+)/)?.[1];
+}
+
+function isReplyArticleText(text) {
+  return text.split("\n").some((line) => /^\s*Replying to\b/i.test(line));
+}
+
 function parseHumanMetric(raw) {
   const match = String(raw || "").replace(/,/g, "").match(/(\d+(?:\.\d+)?)([KMB])?/i);
   if (!match) return undefined;
@@ -78,14 +86,18 @@ async function observeX(page) {
     for (let index = 0; index < count; index += 1) {
       const article = articles.nth(index);
       const hrefs = await article.locator('a[href*="/status/"]').evaluateAll((links) => links.map((link) => link.getAttribute("href"))).catch(() => []);
-      const id = firstStatusId(hrefs, undefined);
       const text = (await article.innerText().catch(() => "")).trim();
+      const ownStatusHref = await article.locator("time").first().evaluate((time) => time.closest("a")?.getAttribute("href") || undefined).catch(() => undefined);
+      const id = statusIdFromHref(ownStatusHref) ?? firstStatusId(hrefs, undefined);
+      const isReply = isReplyArticleText(text);
+      const parentId = isReply ? firstStatusId(hrefs, id) : undefined;
       if (!id || text.length < 3 || objects.some((item) => item.externalRef.id === id)) continue;
       const authorHandle = await article.locator('[data-testid="User-Name"] a').first().getAttribute("href").catch(() => undefined);
       const handle = authorHandle?.replace(/^\//, "");
       objects.push({
         externalRef: { type: "x.post", id },
-        objectType: "post",
+        ...(parentId ? { parentExternalRef: { type: "x.post", id: parentId } } : {}),
+        objectType: isReply ? "reply" : "post",
         author: { externalRef: handle ? { type: "x.user", id: handle } : undefined, displayName: handle ? `@${handle}` : "X user", handle },
         content: { text },
         occurredAt: new Date().toISOString(),
@@ -95,7 +107,10 @@ async function observeX(page) {
     }
   }
   if (objects.length) {
-    await request("/api/bridge/v1/events", { events: objects.map((object) => ({ sourceEventId: `x-browser:${object.externalRef.id}`, event: "created", object })) });
+    // The v2 key lets the first observation after reply-provenance support
+    // update records created by the older adapter, whose event IDs contained
+    // no classification metadata and would otherwise be deduplicated forever.
+    await request("/api/bridge/v1/events", { events: objects.map((object) => ({ sourceEventId: `x-browser:v2:${object.externalRef.id}`, event: "updated", object })) });
   }
   return objects.length;
 }

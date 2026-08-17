@@ -2107,7 +2107,7 @@ function normalizeAssignment(input: Assignment): Assignment {
   };
 }
 
-/** Repair legacy native X mirrors that lost reply provenance at ingestion. */
+/** Repair legacy X mirrors that lost reply provenance at ingestion. */
 function repairNativeReplyClassifications(state: OpenPresenceState) {
   const executions = new Map(state.executions.map((execution) => [execution.id, execution] as const));
   const presences = new Map(state.presences.map((presence) => [presence.id, presence] as const));

@@ -664,6 +664,17 @@ describe("OpenPresence runtime boundaries", () => {
     expect(history[0]?.text).toBe("Observed from the connected account.");
   });
 
+  it("classifies an authored X reply as a reply when legacy ingestion stored it as a post", () => {
+    const state = createAgent(input);
+    const presenceId = state.presence!.id;
+    const timestamp = new Date().toISOString();
+    state.mirrorObjects.unshift(
+      { id: "reply-parent", bridgeId: "bridge:reply", presenceId, channelId: "x", externalRef: { type: "x.post", id: "parent-1" }, objectType: "post", author: { displayName: "Someone", handle: "someone" }, content: { text: "The conversation starter." }, occurredAt: timestamp, observedAt: timestamp, visibility: "public", shareability: "presence-only" },
+      { id: "legacy-reply", bridgeId: "bridge:reply", presenceId, channelId: "x", externalRef: { type: "x.post", id: "reply-1" }, parentExternalRef: { type: "x.post", id: "parent-1" }, objectType: "post", actorPresenceId: presenceId, author: { displayName: "Jenny", handle: state.presence!.handle }, content: { text: "A contextual answer." }, occurredAt: timestamp, observedAt: timestamp, visibility: "public", shareability: "presence-only" },
+    );
+    expect(derivePublicHistory(state, presenceId)).toEqual(expect.arrayContaining([expect.objectContaining({ externalRef: { type: "x.post", id: "reply-1" }, kind: "reply", parentExternalRef: { type: "x.post", id: "parent-1" } })]));
+  });
+
   it("does not create public history from a successful execution without a Mirror object", () => {
     let state = createAgent(input);
     state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto" } } });
