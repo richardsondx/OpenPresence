@@ -281,7 +281,11 @@ async function finishExecution(session, result) {
       await persistSessions();
     }
   }
-  if (acknowledged) setTimeout(() => void claim(session), 250);
+  // Always resume claiming after a content-script result. A failed or
+  // expired acknowledgement must not leave the local queue idle; the server
+  // remains the source of truth and will either expose the next queued
+  // execution or re-expose this one once its lease expires.
+  setTimeout(() => void claim(session), acknowledged ? 250 : 1000);
 }
 
 chrome.runtime.onMessage.addListener((message, sender) => {

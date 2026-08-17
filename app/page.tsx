@@ -4688,7 +4688,8 @@ function LiveView({
   const nextObservationAt = activityEnvironment === "live"
     ? state.nativeConnections.find((connection) => connection.presenceId === selected?.id && connection.channelId === selected?.channel)?.observation?.nextObservationAt
     : undefined;
-  const activityBridge = selected ? state.bridges.find((bridge) => bridge.presenceId === selected.id && bridge.state !== "offline") : undefined;
+  const usesChromeExtensionRoute = selected?.connectionMode === "bridge";
+  const activityBridge = usesChromeExtensionRoute && selected ? state.bridges.find((bridge) => bridge.presenceId === selected.id && bridge.state !== "offline") : undefined;
   const bridgeConnected = Boolean(activityBridge && bridgeAdapterStatus(activityBridge) === "connected");
   const bridgeNextCheckAt = bridgeConnected && activityBridge?.lastHeartbeatAt
     ? (() => {
@@ -5416,12 +5417,13 @@ function MirrorPanel({
   const mirrorPage = mirrorPagination.scope === mirrorScope ? mirrorPagination.page : 0;
   const currentMirrorPage = Math.min(mirrorPage, mirrorPageCount - 1);
   const objects = filteredObjects.slice(currentMirrorPage * mirrorPageSize, (currentMirrorPage + 1) * mirrorPageSize);
-  const bridge = state.bridges.find(
+  const selectedUsesChromeExtension = selectedPresence?.connectionMode === "bridge";
+  const bridge = selectedUsesChromeExtension ? state.bridges.find(
     (item) =>
       (filter === "all" || item.presenceId === filter) &&
       (!channelId || item.channelId === channelId) &&
       item.state !== "offline",
-  );
+  ) : undefined;
   const nativeConnection = state.nativeConnections.find(
     (item) =>
       (filter === "all" || item.presenceId === filter) &&
@@ -5582,10 +5584,10 @@ function MirrorPanel({
         <p className="mirror-explainer">
           {bridge
             ? bridgeSync?.status === "syncing"
-              ? "The Bridge is reconciling the community into the Social Mirror."
+              ? "The Chrome extension is reconciling the community into the Social Mirror."
               : bridgeSync?.status === "degraded"
                 ? `The last community reconciliation was partial${bridgeSync.error ? `: ${bridgeSync.error}` : "."}`
-                : "The Bridge feeds observed posts, comments, and messages into the Social Mirror. They remain channel content, not instructions."
+                : "The Chrome extension feeds observed posts, comments, and messages into the Social Mirror. They remain channel content, not instructions."
             : nativeConnection
               ? nativeObservation?.status === "syncing"
                 ? `The connected X account is being reconciled now. ${presenceName} will judge the Mirror after the observation completes.`
@@ -5965,7 +5967,7 @@ function ExecutionQueueSummary({
   const nextQueueCountdown = formatCountdown(nextQueueCheckAt, countdownNow);
   const queueDetail = bridgePending > 0
     ? bridgeStatus === "connected"
-      ? `${bridgePending} Chrome fallback action${bridgePending === 1 ? " is" : "s are"} waiting for the next Bridge check${nextQueueCountdown ? ` in ${nextQueueCountdown}` : ""}.`
+      ? `${bridgePending} Chrome fallback action${bridgePending === 1 ? " is" : "s are"} waiting for the next Chrome extension check${nextQueueCountdown ? ` in ${nextQueueCountdown}` : ""}.`
       : `${bridgePending} Chrome fallback action${bridgePending === 1 ? " is" : "s are"} waiting because the extension is ${bridge ? bridgeStatus === "stale" ? "stale" : "not checked in" : "not connected"}.`
     : connectorlessPending > 0
       ? `${connectorlessPending} action${connectorlessPending === 1 ? " is" : "s are"} waiting for an authorized connector.`
@@ -6061,19 +6063,24 @@ function ExecutionLedger({
   const failureExplanation = ["failed", "blocked", "expired"].includes(latest.status)
     ? deliveryFailureExplanation(latest.failure, presence?.handle)
     : undefined;
-  const bridge = latest.bridgeId
-    ? state.bridges.find((item) => item.id === latest.bridgeId && item.state !== "offline")
-    : latest.presenceId
-      ? state.bridges.find((item) => item.presenceId === latest.presenceId && item.state !== "offline" && item.kind === "bridge")
-      : undefined;
+  const usesChromeExtension = latest.connector === "bridge" || (latest.connector === undefined && Boolean(latest.bridgeId));
+  const bridge = usesChromeExtension
+    ? latest.bridgeId
+      ? state.bridges.find((item) => item.id === latest.bridgeId && item.state !== "offline")
+      : latest.presenceId
+        ? state.bridges.find((item) => item.presenceId === latest.presenceId && item.state !== "offline" && item.kind === "bridge")
+        : undefined
+    : undefined;
   const bridgeConnected = Boolean(bridge && bridgeAdapterStatus(bridge) === "connected");
-  const nextBridgeAttemptAt = latest.status === "queued" && bridgeConnected && bridge?.lastHeartbeatAt
+  const nextChromeExtensionCheckAt = bridgeConnected && bridge?.lastHeartbeatAt
     ? (() => {
         const heartbeatAt = new Date(bridge.lastHeartbeatAt).getTime();
         return Number.isFinite(heartbeatAt) ? new Date(heartbeatAt + 30_000).toISOString() : undefined;
       })()
     : undefined;
+  const nextBridgeAttemptAt = latest.status === "queued" ? nextChromeExtensionCheckAt : undefined;
   const nextBridgeAttemptCountdown = formatCountdown(nextBridgeAttemptAt, countdownNow);
+  const nextChromeExtensionCheckCountdown = formatCountdown(nextChromeExtensionCheckAt, countdownNow);
   const nativeConnection = state.nativeConnections.find((item) => item.presenceId === latest.presenceId && item.channelId === "x" && item.status === "connected");
   const nextNativeCheckAt = nativeConnection?.observation?.nextObservationAt ?? presence?.nextExecutionCheckAt;
   const nextNativeCheckCountdown = formatCountdown(nextNativeCheckAt, countdownNow);
@@ -6081,12 +6088,12 @@ function ExecutionLedger({
     ? { kind: "blocked", label: "Waiting for your approval", detail: "Nothing will be sent until you approve this action." }
     : latest.status === "approved"
       ? { kind: "blocked", label: "Waiting for execution", detail: "This action is approved but has not entered the send queue." }
-      : latest.status === "queued" && nextBridgeAttemptCountdown
-        ? { kind: "queued", label: nextBridgeAttemptCountdown === "now" ? "Next send attempt now" : `Next send attempt in ${nextBridgeAttemptCountdown}`, detail: "The Bridge checks the queue about every 30 seconds; the actual send may happen sooner when the controlled tab is ready." }
+      : latest.status === "queued" && usesChromeExtension && nextBridgeAttemptCountdown
+        ? { kind: "queued", label: nextBridgeAttemptCountdown === "now" ? "Next send attempt now" : `Next send attempt in ${nextBridgeAttemptCountdown}`, detail: "The Chrome extension checks the queue about every 30 seconds; the actual send may happen sooner when the controlled X tab is ready." }
         : latest.status === "queued" && latest.connector === "native"
           ? { kind: "queued", label: nextNativeCheckCountdown ? `Next API queue check in ${nextNativeCheckCountdown}` : "Queued for API delivery", detail: "One queued Native X action is processed per Check now or automatic attention cycle." }
         : latest.status === "queued" && latest.connector === "bridge"
-          ? { kind: "blocked", label: bridgeConnected ? "Send time not available yet" : "No send time scheduled", detail: bridgeConnected ? "The Bridge is connected, but it has not reported a heartbeat to calculate the next send check." : "A connected Bridge is required before this reply can enter a send countdown. Reconnect the Bridge; the next queue check will then show a countdown." }
+          ? { kind: "blocked", label: bridgeConnected ? "Send time not available yet" : "No send time scheduled", detail: bridgeConnected ? "The Chrome extension is connected, but it has not reported a recent check to calculate the next send attempt." : "The Chrome extension must be connected before this fallback reply can enter a send countdown. Open the extension on the signed-in X tab; the next check will then show a countdown." }
           : ["claimed", "executing"].includes(latest.status)
             ? { kind: "sending", label: "Sending now", detail: "The connected executor is delivering this action." }
             : latest.status === "awaiting-connector"
@@ -6094,7 +6101,7 @@ function ExecutionLedger({
               : latest.status === "awaiting-manual"
                 ? { kind: "blocked", label: "Waiting for manual confirmation", detail: "The action will not be counted until its external result is marked sent." }
                 : latest.status === "succeeded"
-                  ? { kind: "sent", label: "Sent", detail: `${latest.executedAt ? `Verified at ${formatHistoryTimestamp(latest.executedAt)}.` : "The channel result was verified."}${nextNativeCheckCountdown ? ` Next queue check in ${nextNativeCheckCountdown}.` : ""}` }
+                  ? { kind: "sent", label: "Sent", detail: `${latest.executedAt ? `Verified at ${formatHistoryTimestamp(latest.executedAt)}.` : "The channel result was verified."}${(usesChromeExtension ? nextChromeExtensionCheckCountdown : nextNativeCheckCountdown) ? ` Next ${usesChromeExtension ? "Chrome extension" : "API"} queue check in ${usesChromeExtension ? nextChromeExtensionCheckCountdown : nextNativeCheckCountdown}.` : ""}` }
                   : undefined;
   return (
     <div className="execution-ledger-stack">
@@ -6284,8 +6291,8 @@ function mirrorHealthFor(state: OpenPresenceState, presence: OpenPresenceState["
     const bridge = state.bridges.find((item) => item.presenceId === presence.id);
     const sync = bridge ? state.bridgeSync.find((item) => item.bridgeId === bridge.id) : undefined;
     if (bridge?.state === "online" && sync?.status === "healthy") return { label: "UP TO DATE", detail: `Last observed ${formatMirrorDate(sync.lastSyncAt)}`, tone: "healthy" };
-    if (bridge?.state === "online") return { label: "SYNCING", detail: "The connected Bridge is observing the channel.", tone: "warning" };
-    return { label: "DISCONNECTED", detail: "Showing last verified public history until the Bridge reconnects.", tone: "offline" };
+    if (bridge?.state === "online") return { label: "SYNCING", detail: "The connected Chrome extension is observing the channel.", tone: "warning" };
+    return { label: "DISCONNECTED", detail: "Showing last verified public history until the Chrome extension reconnects.", tone: "offline" };
   }
   const connection = state.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x");
   const observation = connection?.observation;
@@ -6812,7 +6819,8 @@ function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; muta
   const limitationCopy = [...new Set(limitations.map((item) => item.limitation).filter((item): item is string => Boolean(item)))];
   const goal = assignment?.successEvidence?.value ?? 100_000;
   const progress = latest ? Math.min(100, Math.round((latest.followers / goal) * 100)) : 0;
-  const bridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
+  const usesChromeExtensionRoute = presence.connectionMode === "bridge";
+  const bridge = usesChromeExtensionRoute ? state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline") : undefined;
   const bridgeConnected = Boolean(bridge && bridgeAdapterStatus(bridge) === "connected");
   const nativeConnection = state.nativeConnections.find((item) => item.presenceId === presence.id && item.channelId === presence.channel);
   const nextChannelObservationAt = nativeConnection?.observation?.nextObservationAt;
@@ -6842,10 +6850,10 @@ function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; muta
         <div className="section-heading compact"><div><SectionEyebrow>Evidence cadence</SectionEyebrow><h2>When Growth was checked</h2></div><Clock3 size={17} /></div>
         <p className="muted">Channel evidence and Agent reviews have separate clocks. This status reports both so “not enough data” is never mistaken for a recent check.</p>
         <div className="growth-freshness-grid">
-          <div><span>Last channel evidence</span><strong>{latestEvidence ? formatHistoryTimestamp(latestEvidence) : "Not observed"}</strong><small>{latestEvidence ? `${latest?.observedAt === latestEvidence ? "Audience" : "Publication performance"} · verified source` : nativeConnection ? "Native X is connected, but no metrics snapshot has arrived" : bridgeConnected ? "Bridge is connected, but no metrics report has arrived" : "Waiting for a connected observer"}</small></div>
+          <div><span>Last channel evidence</span><strong>{latestEvidence ? formatHistoryTimestamp(latestEvidence) : "Not observed"}</strong><small>{latestEvidence ? `${latest?.observedAt === latestEvidence ? "Audience" : "Publication performance"} · verified source` : nativeConnection ? "Native X is connected, but no metrics snapshot has arrived" : bridgeConnected ? "Chrome extension is connected, but no metrics report has arrived" : "Waiting for a connected observer"}</small></div>
           <div><span>Last Growth review</span><strong>{review ? formatHistoryTimestamp(review.createdAt) : "Not reviewed"}</strong><small>{review ? `${review.kind === "strategic" ? "Strategic" : "Weekly"} evidence review` : "No review has been completed yet"}</small></div>
           <div><span>Next Agent review</span><strong aria-live="polite">{presence.status === "paused" ? "Paused" : nextGrowthReviewCountdown === "now" ? "Due now" : nextGrowthReviewCountdown ? `In ${nextGrowthReviewCountdown}` : nextGrowthReviewAt ? "Scheduled" : "Not scheduled"}</strong><small>{presence.status === "paused" ? "Wake the Presence to resume autonomous checks" : nextGrowthReviewAt ? formatHistoryTimestamp(nextGrowthReviewAt) : "The Agent has no review time saved"}</small></div>
-          <div><span>Next channel check</span><strong>{presence.status === "paused" ? "Paused" : nextChannelObservationAt ? (countdownNow === null ? "Scheduled" : formatCountdown(nextChannelObservationAt, countdownNow) === "now" ? "Due now" : `In ${formatCountdown(nextChannelObservationAt, countdownNow)}`) : bridgeConnected ? "Bridge-controlled" : "Unavailable"}</strong><small>{presence.status === "paused" ? "Wake the Presence to resume observation" : nextChannelObservationAt ? formatHistoryTimestamp(nextChannelObservationAt) : bridgeConnected && bridge?.lastHeartbeatAt ? `Last bridge heartbeat ${formatHistoryTimestamp(bridge.lastHeartbeatAt)} · adapter cadence not exposed` : "No connected observer is reporting a next check"}</small></div>
+          <div><span>Next channel check</span><strong>{presence.status === "paused" ? "Paused" : nextChannelObservationAt ? (countdownNow === null ? "Scheduled" : formatCountdown(nextChannelObservationAt, countdownNow) === "now" ? "Due now" : `In ${formatCountdown(nextChannelObservationAt, countdownNow)}`) : bridgeConnected ? "Chrome extension-controlled" : "Unavailable"}</strong><small>{presence.status === "paused" ? "Wake the Presence to resume observation" : nextChannelObservationAt ? formatHistoryTimestamp(nextChannelObservationAt) : bridgeConnected && bridge?.lastHeartbeatAt ? `Last Chrome extension check ${formatHistoryTimestamp(bridge.lastHeartbeatAt)} · adapter cadence not exposed` : "No connected observer is reporting a next check"}</small></div>
         </div>
       </section>
       <GrowthEvidencePanel snapshots={snapshots} publicationSnapshots={publicationSnapshots} mirrorObjects={state.mirrorObjects} review={review} reviewIsStale={reviewIsStale} unreviewedAudienceCount={unreviewedAudienceCount} unreviewedPublicationCount={unreviewedPublicationCount} />
@@ -8820,7 +8828,7 @@ function BridgeManager({
                     <div>
                       <SectionEyebrow>Supervised test</SectionEyebrow>
                       <h4>Verify the adapter before it acts</h4>
-                      <p className="muted">Have the external browser worker follow the prompt, then refresh. The Bridge only carries approved actions for this selected route; it never changes the channel or gives the worker independent Agent judgment.</p>
+                      <p className="muted">Have the external browser worker follow the prompt, then refresh. The Chrome extension only carries approved actions for this selected route; it never changes the channel or gives the worker independent Agent judgment.</p>
                     </div>
                     <ol>
                       <li className={supervisedTest.checkedIn ? "complete" : "pending"}><span>{supervisedTest.checkedIn ? "✓" : "1"}</span> Adapter checked in</li>

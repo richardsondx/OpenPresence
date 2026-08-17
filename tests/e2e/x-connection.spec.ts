@@ -22,7 +22,7 @@ test("Activity keeps the Chrome connection notice out of the pulse controls", as
   await expect(page.locator(".next-check-countdown")).toHaveCount(0);
 });
 
-test("Activity shows the next-check countdown for a connected Bridge", async ({ page, request }) => {
+test("Activity shows the next-check countdown for a connected Chrome extension", async ({ page, request }) => {
   await createAgent(page);
   const changed = await request.post("/api/state", { data: { type: "setPresence", patch: { connectionMode: "bridge" } } });
   expect(changed.ok()).toBeTruthy();
@@ -45,7 +45,7 @@ test("Activity shows the next-check countdown for a connected Bridge", async ({ 
   await expect(page.locator(".next-check-countdown")).toHaveText(/Next check in 00:\d{2}|Next check due now/);
 });
 
-test("Chrome settings show one current route and collapse disconnected Bridge history", async ({ page, request }) => {
+test("Chrome settings show one current route and collapse disconnected extension history", async ({ page, request }) => {
   await createAgent(page);
   const current = await (await request.get("/api/state")).json();
   const presenceId = current.presence.id;

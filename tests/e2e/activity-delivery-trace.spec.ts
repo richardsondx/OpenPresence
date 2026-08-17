@@ -85,7 +85,7 @@ test("Activity pipeline cards reveal the exact selected and preparing actions", 
   await expect(nextAssignment).toContainText("Surface one grounded founder question about AI agents and identify the most useful next step.");
   await expect(nextAssignment).toContainText("This is not a drafted post or a warning.");
   await expect(page.locator(".execution-send-timing")).toContainText("Next send attempt in");
-  await expect(page.locator(".execution-send-timing")).toContainText("Bridge checks the queue");
+  await expect(page.locator(".execution-send-timing")).toContainText("Chrome extension checks the queue");
   await expect(page.getByRole("button", { name: /2 selected/ }).first()).toBeVisible();
   await page.getByRole("button", { name: /2 selected/ }).first().click();
   await expect(page.getByRole("heading", { name: "Selected decisions" })).toBeVisible();
