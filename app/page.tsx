@@ -4677,6 +4677,7 @@ function LiveView({
   const activity = deriveActivitySummary(state, selected?.id);
   const [selectedContext, setSelectedContext] = useState<MirrorObject | null>(null);
   const [selectedDecisionId, setSelectedDecisionId] = useState<string | null>(null);
+  const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
   const [activityPage, setActivityPage] = useState(1);
   const [countdownNow, setCountdownNow] = useState<number>(() => Date.now());
   const presenceCopy = (text: string) => text.replaceAll("Jenny", presenceName).replaceAll(state.agent?.name ?? "Jenny", presenceName);
@@ -4693,7 +4694,7 @@ function LiveView({
       })()
     : undefined;
   const effectiveCapabilities = selected ? derivePresenceCapabilityManifest(state, selected.id) : undefined;
-  const bridgeNeedsAttention = selected?.connectionMode === "bridge" && !bridgeConnected && Boolean(effectiveCapabilities?.items.some((item) => item.requiresBrowser));
+  const bridgeNeedsAttention = selected?.connectionMode === "bridge" && !bridgeConnected && Boolean(!activityBridge || effectiveCapabilities?.items.some((item) => item.requiresBrowser));
   const growthAssignment = selected ? state.assignments.find((item) => item.presenceId === selected.id && item.successEvidence?.metric === "followers" && item.status !== "cancelled") : undefined;
   const nextCheckAt = nextObservationAt ?? bridgeNextCheckAt;
   const nextCheckCountdown = formatCountdown(nextCheckAt, countdownNow);
@@ -4882,16 +4883,65 @@ function LiveView({
     .filter((item) => !selected?.id || (item.presenceId === selected.id && (activityEnvironment === "sandbox" ? item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && activitySessionIds.has(item.sessionId))) : item.environment !== "sandbox" && !item.sessionId)))
     .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime())
     .find((item) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing"].includes(item.status));
+  const inFlightExecutions = state.executions
+    .filter((item) => !selected?.id || (item.presenceId === selected.id && (activityEnvironment === "sandbox" ? item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && activitySessionIds.has(item.sessionId))) : item.environment !== "sandbox" && !item.sessionId)))
+    .filter((item) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing"].includes(item.status))
+    .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime());
   const relevantIntent = relevantExecution ? state.socialIntents.find((item) => item.id === relevantExecution.socialIntentId) : undefined;
   const actionContext = relevantIntent?.target
     ? state.mirrorObjects.find((item) => isScopedMirror(item) && item.externalRef.id === relevantIntent.target?.id)
     : undefined;
   const actionName = formatActivityAffordance(relevantExecution?.affordance ?? relevantIntent?.affordance);
+  const actionTarget = actionContext?.author?.handle ?? actionContext?.author?.displayName ?? "this post";
+  const actionTargetDisplay = actionContext?.author?.handle && !actionContext.author.handle.startsWith("@") ? `@${actionContext.author.handle}` : actionTarget;
+  const actionDescription = actionName.toLowerCase() === "reply" ? `Reply to ${actionTargetDisplay}` : `${actionName} ${actionTargetDisplay}`;
   const actionSnippet = actionContext?.content?.text?.trim();
+  const latestMirrorUpdate = visibleEvents.find((item) => item.title === "Social Mirror updated");
+  const latestPulse = visibleEvents.find((item) => item.title === "Pulse completed");
+  const observationCounts = latestMirrorUpdate?.detail.match(/Observed\s+(\d+)\s+public posts?\s+and\s+(\d+)\s+inbound mentions?/i);
+  const observedPostCount = observationCounts ? Number(observationCounts[1]) : undefined;
+  const observedMentionCount = observationCounts ? Number(observationCounts[2]) : undefined;
+  const latestFailedExecution = state.executions
+    .filter((item) => !selected?.id || item.presenceId === selected.id)
+    .filter((item) => ["failed", "blocked", "expired"].includes(item.status))
+    .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())[0];
+  const currentFailedExecution = latestFailedExecution && (!latestPulse || new Date(latestFailedExecution.updatedAt).getTime() >= new Date(latestPulse.time).getTime()) ? latestFailedExecution : undefined;
+  const latestFailure = currentFailedExecution ? deliveryFailureExplanation(currentFailedExecution.failure, selected?.handle) : undefined;
+  const nowLabel = checking
+    ? `Checking ${channelLabel(selected?.channel ?? "x", state.channelDefinitions)} now`
+    : relevantExecution && actionContext
+      ? actionDescription
+      : latestFailure
+        ? latestFailure.title
+        : activity.current.label;
+  const nowDetail = checking
+    ? `Refreshing ${channelLabel(selected?.channel ?? "x", state.channelDefinitions)} context, then judging whether zero, one, or several public actions earn their place.`
+    : relevantExecution && actionContext
+      ? `${executionStatusLabel(relevantExecution.status)} · ${actionSnippet ? `“${actionSnippet.slice(0, 130)}${actionSnippet.length > 130 ? "…" : ""}”` : "The selected post is the source context."}`
+      : latestFailure
+        ? `${latestFailure.reason} ${latestFailure.consequence}`
+        : latestPulse?.detail
+          ? presenceCopy(latestPulse.detail)
+        : presenceCopy(activity.current.detail);
+  const judgedCount = relevantExecution ? Math.max(1, inFlightExecutions.length) : latestPulse?.detail && /no public action|kept .* dormant|silence/i.test(latestPulse.detail) ? 0 : undefined;
+  const actLabel = inFlightExecutions.length
+    ? `${inFlightExecutions.length} preparing`
+    : currentFailedExecution
+      ? "Blocked"
+      : state.executions.some((item) => item.presenceId === selected?.id && item.status === "succeeded")
+        ? "Delivered"
+        : "None";
+  const verifyLabel = currentFailedExecution
+    ? "Not verified"
+    : inFlightExecutions.length
+      ? "Pending"
+      : state.outcomes.some((item) => item.presenceId === selected?.id && item.status === "succeeded")
+        ? "Verified"
+        : "None";
   const currentDetail = relevantExecution && actionContext
     ? relevantExecution.status === "awaiting-review"
-      ? `A ${actionName} for ${actionContext.author?.handle ?? actionContext.author?.displayName ?? "this post"} is ready for your review.`
-      : `Preparing a ${actionName} for ${actionContext.author?.handle ?? actionContext.author?.displayName ?? "this post"}.`
+      ? `${actionDescription} is ready for your review.`
+      : `Preparing ${actionDescription.toLowerCase()}.`
     : activity.current.label === "Preparing to act"
       ? `${actionName} is moving toward delivery.`
       : presenceCopy(activity.current.detail).replace("execution envelope", "delivery");
@@ -4952,7 +5002,42 @@ function LiveView({
             </>
           )}
         </>}
-      />
+        />
+      {selected && <section className="activity-now-panel" aria-label={`What ${presenceName} is doing now`}>
+        <div className="activity-now-heading">
+          <div>
+            <SectionEyebrow>What {presenceName} is doing now</SectionEyebrow>
+            <h2>{nowLabel}</h2>
+            <p>{nowDetail}</p>
+          </div>
+          <div className="activity-now-meta">
+            <span className={`live-pill ${paused ? "activity-pill-paused" : ""}`}><span className="status-dot" /> {paused ? "Paused" : checking ? "Running" : "Live"}</span>
+            <small>{activity.lastPulseAt ? `Last check ${formatTime(activity.lastPulseAt)}` : "No check completed yet"}</small>
+          </div>
+        </div>
+        <div className="activity-now-grid">
+          <button type="button" className="activity-now-next" onClick={() => actionContext ? setSelectedContext(actionContext) : document.getElementById("decision-and-action")?.scrollIntoView({ behavior: "smooth", block: "center" })}>
+            <SectionEyebrow>Next public action</SectionEyebrow>
+            <strong>{relevantExecution && actionContext ? actionDescription : currentFailedExecution ? "No action until delivery is fixed" : "No public action queued"}</strong>
+            <span>{relevantExecution && actionContext ? "Open the source post or delivery state." : currentFailedExecution && latestFailure ? latestFailure.fix : "A check can end in silence. Nothing is sent unless the Presence selects an action and the connector can verify it."}</span>
+            <em>{relevantExecution && actionContext ? "View action" : "Open decision & action"} <ArrowUpRight size={13} /></em>
+          </button>
+          <div className="activity-now-scope">
+            <SectionEyebrow>Check scope</SectionEyebrow>
+            <strong>Observe → judge → act → verify</strong>
+            <span>Check now refreshes channel context and makes a judgment. It does not force a post; one check may create zero, one, or several actions.</span>
+          </div>
+        </div>
+        <div className="activity-pipeline" aria-label="Autonomy pipeline">
+          <button type="button" onClick={() => document.getElementById("observed-context")?.scrollIntoView({ behavior: "smooth", block: "start" })}><small>1 · OBSERVE</small><strong>{observedPostCount !== undefined ? `${observedPostCount} posts` : "Context"}</strong><span>{observedMentionCount !== undefined ? `${observedMentionCount} mentions` : "Latest channel read"}</span></button>
+          <span className="activity-pipeline-arrow" aria-hidden="true">→</span>
+          <button type="button" onClick={() => document.getElementById("recent-activity")?.scrollIntoView({ behavior: "smooth", block: "start" })}><small>2 · JUDGE</small><strong>{judgedCount === undefined ? "Reviewing" : `${judgedCount} selected`}</strong><span>{judgedCount === 0 ? "No public action" : "Decision state"}</span></button>
+          <span className="activity-pipeline-arrow" aria-hidden="true">→</span>
+          <button type="button" onClick={() => document.getElementById("decision-and-action")?.scrollIntoView({ behavior: "smooth", block: "start" })}><small>3 · ACT</small><strong>{actLabel}</strong><span>{inFlightExecutions.length > 1 ? `${inFlightExecutions.length} actions can run from this check` : "Execution envelope"}</span></button>
+          <span className="activity-pipeline-arrow" aria-hidden="true">→</span>
+          <button type="button" onClick={() => document.getElementById("decision-and-action")?.scrollIntoView({ behavior: "smooth", block: "start" })}><small>4 · VERIFY</small><strong>{verifyLabel}</strong><span>Only confirmed results count</span></button>
+        </div>
+      </section>}
       {selected && <section className="activity-autonomy-strip" aria-label="Autonomy status"><div><SectionEyebrow>Autonomy</SectionEyebrow><strong>{growthAssignment ? `Working toward ${growthAssignment.successEvidence?.value.toLocaleString()} followers` : "No continuous growth responsibility"}</strong><span>{effectiveCapabilities?.bodyStatus === "ready" ? "Body ready" : effectiveCapabilities?.bodyStatus === "degraded" ? "Body degraded" : "Body unavailable"} · {effectiveCapabilities ? [...new Set(effectiveCapabilities.items.filter((item) => item.availability === "available" && item.provider).map((item) => item.provider))].join(" + ") || (selected.connectionMode === "sandbox" ? "Sandbox" : "No active provider") : "No active provider"} · {effectiveCapabilities?.items.find((item) => item.capability === "follower_measurement")?.availability === "available" ? "Follower observation available" : "Follower observation unavailable"}</span></div><Button variant="ghost" onClick={() => setView(growthAssignment ? "growth" : "schedule")}>{growthAssignment ? "Open Growth" : "Set growth responsibility"}</Button></section>}
       {bridgeNeedsAttention && (
         <div className="activity-connection-notice" role="status" aria-live="polite">
@@ -4979,7 +5064,7 @@ function LiveView({
       <div className="activity-main-grid">
         <div className="activity-left-column">
           <MirrorPanel state={state} mutate={mutate} filter={selected?.id ?? "all"} channelId={selected?.channel} environment={activityEnvironment} sessionIds={activitySessionIds} onContext={setSelectedContext} />
-          <section className="event-stream activity-log">
+          <section className="event-stream activity-log" id="recent-activity">
             <div className="section-heading">
               <div>
                 <SectionEyebrow>Recent activity</SectionEyebrow>
@@ -5007,18 +5092,21 @@ function LiveView({
               <div className="event-list">
                 {paginatedActivityEvents.map((item) => (
                   <div className="event-row-shell" key={item.id}>
-                    <button className="event-row event-row-button" type="button" data-event-id={item.id} onClick={() => { const context = contextForEvent(item); if (context) setSelectedContext(context); }} disabled={!contextForEvent(item)} aria-label={contextForEvent(item) ? `View the post ${presenceName} considered` : undefined}>
+                    <button className="event-row event-row-button" type="button" data-event-id={item.id} onClick={() => setSelectedEventId((current) => current === item.id ? null : item.id)} aria-expanded={selectedEventId === item.id} aria-label={`View details for ${presenceCopy(item.title)}`}>
                       <div className={`event-icon tone-${activityEventTone(item)}`}>
                         {item.type === "execution" ? <ArrowUpRight size={15} /> : item.type === "learning" ? <Sparkles size={15} /> : item.type === "memory" ? <Brain size={15} /> : <Circle size={9} fill="currentColor" />}
                       </div>
                       <div className="event-copy">
                         <div className="event-title">{presenceCopy(item.title)}<span>{formatTime(item.time)}</span></div>
                         <ActivityEventDetail text={presenceCopy(item.detail)} />
-                        <ActivityDecisionTrace trace={decisionTraceForEvent(item)} />
-                        {explorationFindingForEvent(item) && <div className="event-finding-preview" aria-label="Exploration finding"><span>Finding</span><strong>{explorationFindingForEvent(item)!.safeSummary}</strong><small>Why it matters · {explorationFindingForEvent(item)!.whyItMayMatter}</small>{explorationFindingsForEvent(item).length > 1 && <em>{explorationFindingsForEvent(item).length - 1} more finding{explorationFindingsForEvent(item).length === 2 ? "" : "s"} in Watching</em>}</div>}
-                        {contextForEvent(item) && <div className="event-context-preview"><span aria-label={`Reply context from ${contextForEvent(item)!.author?.displayName ?? "this observed post"}`}>↳</span><strong>{(contextForEvent(item)!.content?.text ?? "Open the observed post").slice(0, 112)}{(contextForEvent(item)!.content?.text?.length ?? 0) > 112 ? "…" : ""}</strong><em>View post</em></div>}
+                        <div className="event-row-hint">{selectedEventId === item.id ? "Hide details" : "View details"}</div>
                       </div>
                     </button>
+                    {selectedEventId === item.id && <div className="activity-event-detail-panel" role="region" aria-label={`Details for ${presenceCopy(item.title)}`}>
+                      <ActivityDecisionTrace trace={decisionTraceForEvent(item)} />
+                      {explorationFindingForEvent(item) && <div className="event-finding-preview" aria-label="Exploration finding"><span>Finding</span><strong>{explorationFindingForEvent(item)!.safeSummary}</strong><small>Why it matters · {explorationFindingForEvent(item)!.whyItMayMatter}</small></div>}
+                      {contextForEvent(item) && <button type="button" className="event-context-preview event-context-preview-button" onClick={() => setSelectedContext(contextForEvent(item)!)}><span>Source</span><strong>{(contextForEvent(item)!.content?.text ?? "Open the observed post").slice(0, 112)}{(contextForEvent(item)!.content?.text?.length ?? 0) > 112 ? "…" : ""}</strong><em>View post</em></button>}
+                    </div>}
                     {decisionForEvent(item) && (
                       <>
                         <button
@@ -5148,10 +5236,11 @@ function BringXPost({
     ? visibleState.executions.find((item) => item.operatorDirectiveId === importedDirective.id || (item.source === "operator" && item.presenceId === presenceId && item.target?.id === importedObject?.externalRef.id))
     : undefined;
   const importedRetryable = Boolean(importedExecution && ["failed", "blocked", "expired"].includes(importedExecution.status));
+  const importedFailure = importedExecution && importedRetryable ? deliveryFailureExplanation(importedExecution.failure, visibleState.presences.find((item) => item.id === presenceId)?.handle) : undefined;
   const addressLabel = importedExecution?.status === "succeeded"
     ? "Reply delivered"
     : importedExecution?.status === "failed"
-      ? `Reply not delivered${importedExecution.failure?.message ? ` · ${importedExecution.failure.message}` : ""}`
+      ? "Reply not delivered"
       : importedDirective
         ? "Reply assignment created"
         : "Address this post";
@@ -5209,6 +5298,7 @@ function BringXPost({
           <strong>{importedObject.author?.displayName ?? importedObject.author?.handle ?? "X post"}</strong>
           <p>{importedObject.content?.text ?? "External post imported into the Social Mirror."}</p>
           <small>Observed in the Social Mirror · {importedObject.externalRef.id}</small>
+          {importedFailure && <div className="bring-post-failure" role="alert"><strong>{importedFailure.title}</strong><span>{importedFailure.reason}</span><small>{importedFailure.consequence} Next step: {importedFailure.fix}</small></div>}
         </div>
         <div className="bring-post-address">
           {importedExecution?.status === "failed" ? <div className="bring-post-address-stack"><span className="bring-post-address-failure" role="status">{addressLabel}</span><Button type="button" variant="secondary" onClick={() => void addressPost()} disabled={addressing || !importedRetryable}>{addressing ? <><LoaderCircle size={14} className="spin" /> Retrying…</> : "Retry address"}</Button></div> : importedExecution?.status === "succeeded" ? <span className="bring-post-address-success" role="status">{addressLabel}</span> : <Button type="button" variant="secondary" onClick={() => void addressPost()} disabled={addressing || Boolean(importedDirective)}>{addressing ? <><LoaderCircle size={14} className="spin" /> Creating assignment…</> : importedDirective ? addressLabel : "Address this post"}</Button>}
@@ -5320,7 +5410,7 @@ function MirrorPanel({
             : "Community observations unavailable"
         : "No connected Presence";
   return (
-    <section className="decision-card mirror-panel" aria-label={`${presenceName} observed channel context`}>
+    <section className="decision-card mirror-panel" id="observed-context" aria-label={`${presenceName} observed channel context`}>
       <div className="section-heading compact">
         <div>
           <SectionEyebrow>Observed context</SectionEyebrow>
@@ -5347,9 +5437,9 @@ function MirrorPanel({
       {filteredObjects.length ? (
         <>
           <p className="mirror-explainer">
-            Public posts currently available to {presenceName} on {channelLabel(selectedPresence?.channel ?? objects[0]?.channelId ?? "x", state.channelDefinitions)}.
+            {presenceName} has {filteredObjects.length} {mirrorFilter === "mentions" ? "matching mentions" : "observed posts"} available from {channelLabel(selectedPresence?.channel ?? objects[0]?.channelId ?? "x", state.channelDefinitions)}. Showing {currentMirrorPage * mirrorPageSize + 1}–{Math.min((currentMirrorPage + 1) * mirrorPageSize, filteredObjects.length)} here.
           </p>
-          <p className="mirror-boundary">Observed context only · available for judgment, not an instruction.</p>
+          <p className="mirror-boundary">These are channel observations available for judgment, not a list of posts being acted on. A card is being acted on only when it shows a linked judgment, intent, or delivery state.</p>
           <div className="mirror-list">
             {objects.map((item) => {
               const ignored = isAlreadyIgnored(item);
@@ -5380,7 +5470,7 @@ function MirrorPanel({
                 </div>
                 <p className="mirror-post-content">{observedText ?? "External activity received."}</p>
                 {item.assetRefs?.length ? <MediaPerceptionDisclosure object={item} state={state} mutate={mutate} presenceName={presenceName} /> : null}
-                <div className="mirror-post-lineage" aria-label="Observation lineage"><span>Seen by {presenceName}</span>{isMentionOfPresence(item) && <span>Mentioned {selectedPresence?.handle ?? "this Presence"}</span>}<span>{itemStatus}</span></div>
+                <div className="mirror-post-lineage" aria-label="Observation lineage"><span>Seen by {presenceName}</span>{isMentionOfPresence(item) && <span>Mentioned {selectedPresence?.handle ?? "this Presence"}</span>}<span className={`mirror-status-chip ${itemExecution?.status === "failed" || itemExecution?.status === "blocked" ? "mirror-status-chip-warning" : itemExecution?.status === "succeeded" ? "mirror-status-chip-success" : ""}`}>{itemStatus}</span></div>
                 <div className="mirror-post-footer">
                   <span>Observed</span><span>{item.objectType.replaceAll("-", " ")}</span>
                   {externalUrl && <a className="mirror-open-link" href={externalUrl} target="_blank" rel="noreferrer" aria-label={`${externalLabel}: ${item.externalRef.id}`}><ArrowUpRight size={12} /> {externalLabel}</a>}
@@ -5388,7 +5478,7 @@ function MirrorPanel({
                   {!ignored && item.objectType === "post" && item.actorPresenceId !== selectedPresence?.id && onContext && (
                     <div className="mirror-post-actions">
                       <button type="button" className="mirror-ignore-action" aria-label={`Ask ${selectedPresence?.name ?? "this Presence"} to ignore`} onClick={() => void askToIgnore(item)} disabled={ignoringObjectId === item.id} title={`Ask ${selectedPresence?.name ?? "this Presence"} to leave this post alone`}><EyeOff size={11} /> {ignoringObjectId === item.id ? "Asking…" : "Ignore"}</button>
-                      <button type="button" className="mirror-reply-action" onClick={() => onContext(item)}>Ask {selectedPresence?.name ?? "this Presence"} to reply</button>
+                      <button type="button" className="mirror-reply-action" onClick={() => onContext(item)} title="Create an explicit reply assignment for this observed post">Create reply assignment</button>
                     </div>
                   )}
                 </div>
@@ -5596,7 +5686,7 @@ function ActivityContextInspector({ object, state, mutate, onClose, onOpenSettin
           <p>{replyDirective ? `The social act is set. ${presenceName} owns the wording; the Presence reply setting owns how it is delivered.` : `You choose that this interaction should happen. ${presenceName} still decides what to say, within the Presence's privacy and channel boundaries.`}</p>
           {relatedJudgment && <div className="operator-judgment"><strong>{ignoreDirective ? `${presenceName} was asked to leave this alone` : `${presenceName} chose silence`}</strong><span>{relatedJudgment.detail.replaceAll("Jenny", presenceName)}</span></div>}
           {!replyDirective && !repliesOff && <label className="operator-direction-field">Optional direction for {presenceName}<textarea aria-label={`Optional direction for ${presenceName}`} value={direction} onChange={(event) => setDirection(event.target.value)} placeholder={`Anything you want ${presenceName} to consider?`} rows={3} /></label>}
-          {repliesOff ? <div className="operator-replies-off"><span>Replies are disabled for this Presence.</span><button type="button" onClick={onOpenSettings}>Enable replies →</button></div> : replyWasSent ? <div className="operator-requested-state">{presenceName} sent a verified reply to this post.</div> : replyFailed ? <div className="operator-requested-state operator-requested-failure" role="alert"><strong>{presenceName} did not deliver the requested reply.</strong><span>{replyExecution?.failure?.message ?? "The connector rejected delivery before a public reply could be verified."}</span></div> : replyDirective ? <div className="operator-requested-state">{presenceName} is preparing the expression through the existing reply envelope.</div> : <Button variant="primary" className="full-button" onClick={() => void askToReply()} disabled={requesting}>{requesting ? <><LoaderCircle size={14} className="spin" /> Asking {presenceName}…</> : <><Reply size={14} /> Ask {presenceName} to reply</>}</Button>}
+          {repliesOff ? <div className="operator-replies-off"><span>Replies are disabled for this Presence.</span><button type="button" onClick={onOpenSettings}>Enable replies →</button></div> : replyWasSent ? <div className="operator-requested-state">{presenceName} sent a verified reply to this post.</div> : replyFailed ? (() => { const explanation = deliveryFailureExplanation(replyExecution?.failure, presence?.handle); return <div className="operator-requested-state operator-requested-failure" role="alert"><strong>{presenceName} did not deliver the requested reply.</strong><span>{explanation.title}: {explanation.reason}</span><small>{explanation.consequence} Next step: {explanation.fix}</small>{replyExecution?.failure?.message && <details><summary>Technical details</summary><code>{replyExecution.failure.message}</code></details>}</div>; })() : replyDirective ? <div className="operator-requested-state">{presenceName} is preparing the expression through the existing reply envelope.</div> : <Button variant="primary" className="full-button" onClick={() => void askToReply()} disabled={requesting}>{requesting ? <><LoaderCircle size={14} className="spin" /> Asking {presenceName}…</> : <><Reply size={14} /> Ask {presenceName} to reply</>}</Button>}
         </section>
       </aside>
     </div>
@@ -5616,6 +5706,49 @@ const executionStatusLabel = (status: OpenPresenceState["executions"][number]["s
   if (status === "blocked") return "Delivery blocked";
   if (status === "awaiting-manual") return "Waiting for you to mark sent";
   return status.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+};
+
+type DeliveryFailureExplanation = {
+  title: string;
+  reason: string;
+  consequence: string;
+  fix: string;
+};
+
+const deliveryFailureExplanation = (failure?: { code?: string; message: string }, expectedHandle?: string): DeliveryFailureExplanation => {
+  const message = failure?.message ?? "The connector rejected delivery before a public result could be verified.";
+  const normalized = `${failure?.code ?? ""} ${message}`.toLowerCase();
+  const handle = expectedHandle ? `@${expectedHandle.replace(/^@/, "")}` : "the configured Presence account";
+  if (normalized.includes("account_mismatch") || normalized.includes("account check") || normalized.includes("expected @")) {
+    return {
+      title: "X account identity mismatch",
+      reason: `The connected X session could not be verified as ${handle}.`,
+      consequence: "No public reply was sent, and this attempt does not count as delivered.",
+      fix: `Reconnect X while signed in as ${handle}, then retry the address.`,
+    };
+  }
+  if (normalized.includes("not permitted") || normalized.includes("write access") || normalized.includes("403")) {
+    return {
+      title: "X write access was rejected",
+      reason: "Reading X works, but this connector is not permitted to create the requested public action.",
+      consequence: "No public artifact was created or counted.",
+      fix: `Grant the connected X account write permission for ${handle}, reconnect it, and retry.`,
+    };
+  }
+  if (normalized.includes("language_policy")) {
+    return {
+      title: "English-only policy blocked delivery",
+      reason: "The proposed expression did not satisfy the Presence language policy.",
+      consequence: "Nothing was sent to the channel.",
+      fix: "Change the expression or update the Presence language policy before retrying.",
+    };
+  }
+  return {
+    title: "The channel rejected delivery",
+    reason: message,
+    consequence: "No public artifact was counted until a verified result exists.",
+    fix: "Review the connector and account status, then retry only after the underlying issue is resolved.",
+  };
 };
 
 function ExecutionLedger({
@@ -5673,6 +5806,9 @@ function ExecutionLedger({
   const needsApproval = latest.status === "awaiting-review";
   const needsManualRelay = latest.status === "awaiting-manual";
   const languageBlocked = latest.status === "blocked" && latest.failure?.code === "LANGUAGE_POLICY_VIOLATION";
+  const failureExplanation = ["failed", "blocked", "expired"].includes(latest.status)
+    ? deliveryFailureExplanation(latest.failure, presence?.handle)
+    : undefined;
   return (
     <div className="decision-card execution-ledger">
       <div className="section-heading compact">
@@ -5712,10 +5848,16 @@ function ExecutionLedger({
             ? latest.failure?.message ?? "The final expression contains a prohibited literal. No external artifact was delivered."
             : latest.externalRef
             ? `Sent on ${presence ? channelLabel(presence.channel, state.channelDefinitions) : "the channel"}.`
-            : latest.status === "failed"
-            ? latest.failure?.message ?? "The channel did not accept the action. No external artifact was counted."
+            : failureExplanation
+            ? failureExplanation.reason
             : `${presence?.name ?? "The Presence"}'s decision, your approval, and the channel result are kept separate.`}
       </p>
+      {failureExplanation && <div className="execution-failure-card" role="alert">
+        <strong>{failureExplanation.title}</strong>
+        <span>{failureExplanation.consequence}</span>
+        <small>Next step: {failureExplanation.fix}</small>
+        {latest.failure?.message && <details><summary>Technical details</summary><code>{latest.failure.message}</code></details>}
+      </div>}
       {needsApproval && (
         <Button
           variant="secondary"

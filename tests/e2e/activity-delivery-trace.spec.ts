@@ -31,7 +31,9 @@ test("Activity explains a legacy failed Pulse from its adjacent delivery event",
   await page.reload();
   await page.getByRole("button", { name: "Activity", exact: true }).click();
   const pulse = page.locator(".event-row").filter({ hasText: "Pulse completed" }).first();
-  await expect(pulse).toContainText("Selected Reply");
-  await expect(pulse).toContainText("failed · auto");
+  await expect(pulse).toContainText("View details");
+  await pulse.click();
+  await expect(page.locator(".activity-event-detail-panel").filter({ hasText: "Selected Reply" })).toBeVisible();
+  await expect(page.locator(".activity-event-detail-panel").filter({ hasText: "failed · auto" })).toBeVisible();
   await expect(pulse.locator(".event-icon")).toHaveClass(/tone-warning/);
 });

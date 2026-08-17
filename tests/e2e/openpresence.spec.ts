@@ -1370,7 +1370,7 @@ test("Activity addresses operator-directed replies to the selected Presence", as
 
   await page.reload();
   await expect(page.getByRole("heading", { name: "Genny, right now." })).toBeVisible();
-  await page.getByRole("button", { name: "Ask Genny to reply", exact: true }).first().click();
+  await page.getByRole("button", { name: "Create reply assignment", exact: true }).first().click();
   const dialog = page.getByRole("dialog", { name: "Decision context" });
   await expect(dialog.getByRole("heading", { name: "Ask Genny to reply" })).toBeVisible();
   await expect(dialog.getByLabel("Optional direction for Genny")).toBeVisible();
