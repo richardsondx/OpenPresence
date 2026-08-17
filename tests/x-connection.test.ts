@@ -96,6 +96,34 @@ describe("native X connection", () => {
     expect(body.messages.at(-1).content).not.toContain("I heard you");
   });
 
+  it("does not auto-run a due live Assignment through a stale browser Bridge", async () => {
+    process.env.OPENPRESENCE_AI_MOCK = "1";
+    let state = readState();
+    const presenceId = state.presence!.id;
+    state = applyOperation(state, { type: "setPresence", patch: { connectionMode: "bridge", execution: { ...state.presence!.execution, post: "auto" } } });
+    state.presence!.environment = "live";
+    state.presence!.browserAccess = { enabled: true };
+    state.presences = state.presences.map((item) => item.id === presenceId ? { ...item, environment: "live" as const, browserAccess: { enabled: true } } : item);
+    state = applyOperation(state, { type: "createBridge", input: { presenceId, name: "Signed-in X browser", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["post", "reply"], formats: ["text"], metrics: [], assetKinds: [] } } });
+    const bridge = state.bridges[0]!;
+    bridge.state = "online";
+    bridge.lastSeenAt = new Date(Date.now() - 11 * 60_000).toISOString();
+    const now = new Date();
+    const dueMinutes = Math.max(0, now.getHours() * 60 + now.getMinutes() - 1);
+    const dueTime = `${String(Math.floor(dueMinutes / 60)).padStart(2, "0")}:${String(dueMinutes % 60).padStart(2, "0")}`;
+    state = applyOperation(state, { type: "createAssignment", presenceId, environment: "live", instruction: "Share one useful lesson about persistent agents.", schedule: { day: now.toLocaleDateString("en-US", { weekday: "long" }), time: dueTime, executionWindow: `${dueTime}–23:59` }, delegationPolicy: "keep_moving" });
+    const assignment = state.assignments[0]!;
+    state = applyOperation(state, { type: "activateAssignment", id: assignment.id });
+    writeState(state);
+
+    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "runAttentionWorker" }), headers: { "content-type": "application/json" } }));
+    const body = await response.json();
+    const updated = body.assignments.find((item: { id: string }) => item.id === assignment.id);
+    expect(response.status).toBe(200);
+    expect(updated.lastEvaluatedAt).toBeUndefined();
+    expect(body.events[0]?.title).not.toBe("Assignment attention started");
+  });
+
   it("tests and saves read-write credentials without returning the secret", async () => {
     const request = new Request("http://localhost/api/x/manage", {
       method: "POST",

@@ -15,10 +15,12 @@ export const bridgeEndpointPaths = {
 
 export function bridgeAdapterStatus(bridge: Pick<Bridge, "state" | "lastHeartbeatAt" | "lastSeenAt">, now = Date.now()): BridgeAdapterStatus {
   if (bridge.state === "offline") return "disconnected";
-  const timestamps = [bridge.lastHeartbeatAt, bridge.lastSeenAt].filter(Boolean).map((value) => new Date(value as string).getTime());
-  const lastSeenAt = timestamps.length ? Math.max(...timestamps) : undefined;
-  if (lastSeenAt === undefined) return "waiting";
-  const age = now - lastSeenAt;
+  // `lastSeenAt` can move when a connector reports an observation or mirror
+  // object. It proves channel activity, not that the adapter is still alive.
+  // Connection UI and execution readiness must be grounded in the explicit
+  // heartbeat so stale browser sessions cannot look connected.
+  if (!bridge.lastHeartbeatAt) return "waiting";
+  const age = now - new Date(bridge.lastHeartbeatAt).getTime();
   if (age <= BRIDGE_CONNECTED_WINDOW_MS) return "connected";
   if (age <= BRIDGE_STALE_WINDOW_MS) return "stale";
   return "waiting";

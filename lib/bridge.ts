@@ -230,7 +230,18 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
 }
 
 export function failExecution(bridge: Bridge, executionId: string, input: z.infer<typeof failInput>) {
-  const state = readStateForBridge(bridge.id); const execution = leasedExecution(state, bridge, executionId, input.executorId); execution.failure = { code: input.code, message: input.message, retryable: input.retryable }; execution.lease = undefined; execution.status = input.retryable && execution.attempts < 5 ? "queued" : "failed"; execution.updatedAt = timestamp(); state.events.unshift(bridgeEvent(state, "Bridge execution failed", input.message, input.retryable ? "warning" : "neutral", execution.id)); touchBridge(state, bridge); writeState(state); return { state, execution };
+  const state = readStateForBridge(bridge.id); const execution = leasedExecution(state, bridge, executionId, input.executorId); execution.failure = { code: input.code, message: input.message, retryable: input.retryable }; execution.lease = undefined;
+  const retrying = input.retryable && execution.attempts < 5;
+  if (retrying) {
+    // Claiming seals a live Public Expression. A retryable browser failure is
+    // allowed to try that candidate again, so return it to candidate state and
+    // issue a fresh permit on the next claim instead of permanently blocking
+    // the execution as "not fresh".
+    const publicExpression = execution.publication?.publicExpression;
+    if (publicExpression) execution.publication = { ...execution.publication!, publicExpression: { ...publicExpression, safetyStatus: "candidate", payloadHash: undefined } };
+    execution.permit = undefined;
+  }
+  execution.status = retrying ? "queued" : "failed"; execution.updatedAt = timestamp(); state.events.unshift(bridgeEvent(state, "Bridge execution failed", input.message, input.retryable ? "warning" : "neutral", execution.id)); touchBridge(state, bridge); writeState(state); return { state, execution };
 }
 
 export function reportOutcome(bridge: Bridge, input: z.infer<typeof outcomeInput>) { const state = readStateForBridge(bridge.id); const execution = state.executions.find((item) => item.id === input.executionId && item.bridgeId === bridge.id); if (!execution) throw new Error("Execution not found"); const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, status: input.status, observedAt: timestamp(), metrics: input.metrics, evidence: input.evidence }; state.outcomes.unshift(outcome); touchBridge(state, bridge); writeState(state); return { state, outcome }; }

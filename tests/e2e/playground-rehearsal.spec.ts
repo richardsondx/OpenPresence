@@ -24,7 +24,7 @@ test("Schedule sends post exploration to Playground", async ({ page }) => {
   await expect(page.getByRole("button", { name: /Give an Assignment/ })).toBeVisible();
 });
 
-test("Publishing Plan explains the next consideration in the operator view", async ({ page, request }) => {
+test("Publishing Plan stays in the visual calendar instead of duplicating as a card", async ({ page, request }) => {
   await createAgent(page);
   const initial = await request.get("/api/state").then((response) => response.json());
   const presence = initial.presence;
@@ -35,9 +35,9 @@ test("Publishing Plan explains the next consideration in the operator view", asy
   await page.reload();
   await page.getByRole("button", { name: "Schedule", exact: true }).click();
   await expect(page.getByRole("region", { name: "Calendar layers" })).toContainText("Plan active");
-  await expect(page.getByRole("region", { name: "Agent publishing plan" })).toBeVisible();
-  await expect(page.getByRole("region", { name: "Agent publishing plan" })).toContainText("Replan now");
+  await expect(page.getByRole("region", { name: "Agent publishing plan" })).toHaveCount(0);
   await expect(page.getByText("The publishing plan shows flexible working windows underneath the Assignments", { exact: false })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Calendar layers" }).getByText("Publishing plan", { exact: true })).toBeVisible();
 });
 
 test("switching Presence switches Playground world and rehearsal history", async ({ page, request }) => {
