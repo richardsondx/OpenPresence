@@ -115,6 +115,15 @@ describe("continuous growth responsibility", () => {
     expect(manifest.items.find((item) => item.capability === "image")).toMatchObject({ availability: "available", provider: "Browser Bridge", canExecute: true });
   });
 
+  it("migrates legacy X channel metadata so Follow is not falsely reported unsupported", () => {
+    const state = fixture();
+    const legacyCapabilities = state.presence!.capabilities.filter((item) => item.id !== "follow");
+    const legacyChannelDefinitions = state.channelDefinitions.map((definition) => definition.id === "x" ? { ...definition, affordances: definition.affordances.filter((item) => item.id !== "follow") } : definition);
+    const legacy = { ...state, presence: { ...state.presence!, capabilities: legacyCapabilities }, presences: [{ ...state.presence!, capabilities: legacyCapabilities }], channelDefinitions: legacyChannelDefinitions };
+    const follow = derivePresenceCapabilityManifest(legacy, state.presence!.id).items.find((item) => item.capability === "follow");
+    expect(follow?.limitation).not.toContain("not supported by X");
+  });
+
   it("forms and verifies native X reactions instead of treating them as unavailable", () => {
     const state = fixture();
     state.presence!.execution.like = "auto";
