@@ -114,7 +114,7 @@ export function derivePresenceCapabilityManifest(source: OpenPresenceState, pres
   const presence = state.presences.find((item) => item.id === (presenceId ?? state.activePresenceId)) ?? state.presence;
   if (!presence) return { presenceId: presenceId ?? "", channel: "x", generatedAt: now(), bodyStatus: "unavailable", items: [] };
   const channelIds = new Set(channelCapabilities(state, presence.channel).map((item) => item.id));
-  const native = state.nativeConnections.find((item) => item.presenceId === presence.id && item.channelId === presence.channel && item.status === "connected");
+  const native = presence.connectionMode === "bridge" ? undefined : state.nativeConnections.find((item) => item.presenceId === presence.id && item.channelId === presence.channel && item.status === "connected");
   const bridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
   const bridgeConnected = Boolean(bridge && bridgeAdapterIsConnected(bridge));
   const nativeAction = (action: string) => Boolean(native && ["post", "reply", "like", "repost", "quote", "follow"].includes(action) && native.access === "read-write");

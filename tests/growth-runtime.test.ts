@@ -124,6 +124,14 @@ describe("continuous growth responsibility", () => {
     expect(follow?.limitation).not.toContain("not supported by X");
   });
 
+  it("does not borrow native capabilities when the Presence selected the Browser Bridge route", () => {
+    const state = fixture();
+    const bridgePresence = { ...state.presence!, connectionMode: "bridge" as const };
+    const next = { ...state, presence: bridgePresence, presences: [bridgePresence], nativeConnections: [{ id: "native-x", presenceId: bridgePresence.id, channelId: "x", kind: "x" as const, status: "connected" as const, access: "read-write" as const, account: { id: "account-1", username: "genny", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }] };
+    const post = derivePresenceCapabilityManifest(next, bridgePresence.id).items.find((item) => item.capability === "post");
+    expect(post).toMatchObject({ availability: "unavailable", provider: undefined, canExecute: false });
+  });
+
   it("forms and verifies native X reactions instead of treating them as unavailable", () => {
     const state = fixture();
     state.presence!.execution.like = "auto";
