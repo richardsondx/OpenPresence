@@ -11,6 +11,12 @@ describe("canonical Assignment domain", () => {
     expect(assignment.preflight).toMatchObject({ status: "ready", contract: { successEvidence: expect.stringContaining("confirmed") } });
   });
 
+  it("persists the Schedule objective for List and Week projections", () => {
+    const state = createAgent(input);
+    const next = applyOperation(state, { type: "createAssignment", instruction: "Teach one useful lesson about persistent agents.", presenceId: state.presence!.id, environment: "sandbox", objective: "education", schedule: { day: "Tuesday", time: "08:00", executionWindow: "08:00–11:00" } });
+    expect(next.assignments[0]?.objective).toBe("education");
+  });
+
   it("turns evaluation-only language into a report deliverable", () => {
     const state = createAgent(input);
     const assignment = compileAssignmentInstruction(state, "Evaluate whether we should respond to this controversy Friday morning.", state.presence!.id, "sandbox", undefined, { day: "Friday", time: "09:00", executionWindow: "09:00–12:00" });

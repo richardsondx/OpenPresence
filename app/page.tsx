@@ -5569,6 +5569,15 @@ const calendarWeekDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday"
 const calendarHours = Array.from({ length: 24 }, (_, index) => index);
 const objectiveLabel = (objective: string) => objective.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 const objectiveTone = (objective: string) => objective.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "other";
+const assignmentObjective = (assignment: Assignment) => {
+  if (assignment.objective) return assignment.objective;
+  if (assignment.deliverable.type === "audience_growth") return "audience_growth";
+  const instruction = assignment.instruction.toLowerCase();
+  if (/\bteach|lesson|explain|educat/.test(instruction)) return "education";
+  if (/\brelationship|connection|introduction|person|people|conversation/.test(instruction)) return "relationship";
+  if (/\breflect|review|evidence|hype|uncertain/.test(instruction)) return "reflection";
+  return "other";
+};
 const timeToMinutes = (value: string) => { const [hours, minutes] = value.split(":").map(Number); return (Number.isFinite(hours) ? hours : 8) * 60 + (Number.isFinite(minutes) ? minutes : 0); };
 type TimingMode = "flexible" | "exact" | "custom";
 const defaultConsiderationEnd = (time: string) => {
@@ -5995,6 +6004,16 @@ function ScheduleLayerToolbar({
   );
 }
 
+function ScheduleLegend({ plan, layers }: { plan?: PublishingPlan; layers: ScheduleLayerVisibility }) {
+  return <div className="week-calendar-legend schedule-list-legend" aria-label="Schedule legend">
+    {plan && layers.plan && <span><i className="legend-dot plan-legend-dot" />Publishing plan</span>}
+    {layers.assignments && <>
+      {(["audience_growth", "education", "relationship", "reflection"] as const).map((objective) => <span key={objective}><i className={`legend-dot objective-${objectiveTone(objective)}`} />{objectiveLabel(objective)}</span>)}
+      <span><i className="legend-dot assignment-legend-dot" />Assignment</span>
+    </>}
+  </div>;
+}
+
 function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; mutate: Mutate; setView: (view: View) => void }) {
   const presence = state.presence;
   const [countdownNow, setCountdownNow] = useState<number | null>(null);
@@ -6118,7 +6137,7 @@ function ScheduleView({
   };
   const add = async (event: React.FormEvent) => {
     event.preventDefault();
-    const next = await mutate({ type: "createAssignment", instruction, presenceId, environment: selectedPresence?.connectionMode === "sandbox" ? "sandbox" : "live", schedule: { day, time, executionWindow } });
+    const next = await mutate({ type: "createAssignment", instruction, presenceId, environment: selectedPresence?.connectionMode === "sandbox" ? "sandbox" : "live", objective, schedule: { day, time, executionWindow } });
     const created = next?.assignments.find((item) => item.instruction === instruction.trim() && item.presenceId === presenceId);
     if (next && created) {
       resetForm();
@@ -6186,7 +6205,7 @@ function ScheduleView({
           </Button>
         </>}
       />
-      {viewMode === "week" && <ScheduleLayerToolbar plan={publishingPlan} presenceName={presenceName} layers={calendarLayers} onToggle={toggleCalendarLayer} onReset={() => setCalendarLayers({ plan: true, intents: false, assignments: true })} mutate={mutate} />}
+      <ScheduleLayerToolbar plan={publishingPlan} presenceName={presenceName} layers={calendarLayers} onToggle={toggleCalendarLayer} onReset={() => setCalendarLayers({ plan: true, intents: false, assignments: true })} mutate={mutate} />
       {showForm && (
         <form className="add-slot-form" onSubmit={add}>
           <label className="instruction-field">
@@ -6313,56 +6332,64 @@ function ScheduleView({
           </div>
         </aside>
       )}
-      {visibleAssignments.length > 0 && viewMode === "list" && <section className="schedule-assignment-list" aria-label="Assignments"><div className="section-heading"><div><SectionEyebrow>Delegated responsibility</SectionEyebrow><h2>Assignments</h2><p className="muted">Assignments delegate an outcome to work toward. Open one to review its window and progress, run a Sandbox rehearsal, or cancel it. A rejected candidate is part of the work history, not a completed Assignment.</p></div></div>{visibleAssignments.map((assignment) => { const timing = assignment.activation?.type === "continuous" ? "Continuous · Agent-authored plan" : assignment.schedule ? `${assignment.schedule.day} at ${assignment.schedule.time} · ${assignment.schedule.executionWindow === `${assignment.schedule.time}–${assignment.schedule.time}` ? "exact time" : assignment.schedule.executionWindow}` : "Unscheduled · ready to start"; const status = assignment.status === "draft" ? "not started" : assignment.status.replaceAll("_", " "); return <article className="schedule-assignment-row" key={assignment.id}><div><strong>{cleanUserFacingAssignmentInstruction(assignment.instruction)}</strong><small>{timing} · {assignment.progress.verified} / {assignment.progress.required} verified · {status} · {assignment.rejectedCandidates} rejected</small></div><div className="schedule-assignment-actions"><Button variant="secondary" onClick={() => openAssignment(assignment)}>Open details</Button></div></article>; })}</section>}
       {viewMode === "week" ? (
         <WeekCalendar slots={visibleSlots} assignments={visibleAssignments} publishingPlan={publishingPlan} layers={calendarLayers} compact={compactSchedule} onToggleCompact={() => setCompactSchedule((current) => !current)} state={state} presenceName={presenceName} onEdit={beginEdit} onAssignment={openAssignment} onAdd={() => setShowForm(true)} onResetLayers={() => setCalendarLayers({ plan: true, intents: false, assignments: true })} />
       ) : (
-      <div className="calendar-layout">
-        <section>
-          <div className="section-heading">
-            <div>
-            <SectionEyebrow>Future attention</SectionEyebrow>
-          <h2>Legacy calendar entries</h2>
-            </div>
-            <span className="quiet-label">
-              {visibleSlots.filter((slot) => slot.enabled).length} active
-            </span>
-          </div>
-          {visibleSlots.length === 0 ? (
-            <EmptyState
-              title="No legacy calendar entries"
-              body={`New scheduled work appears as an Assignment after its completion contract is reviewed. ${presenceName} can still notice unsolicited opportunities through its normal Attention Rhythm.`}
-              action={
-                <Button onClick={() => setShowForm(true)} variant="secondary">
-                  <Plus size={14} /> Add assignment
-                </Button>
-              }
-            />
-          ) : (
-            <div className="slot-list">
-              {visibleSlots.map((slot) => (
-                <SlotRow
-                  key={slot.id}
-                  slot={slot}
-                  state={state}
-                  onRun={() => mutate({ type: "runSlot", id: slot.id })}
-                  onEdit={() => beginEdit(slot)}
-                />
-              ))}
-            </div>
-          )}
-        </section>
-        <aside className="calendar-note compact-note">
-          <SectionEyebrow>Assignment model</SectionEyebrow>
-          <h3>Nothing is written months in advance.</h3>
-          <p>
-            At run time, {presenceName} chooses the method, adapts, escalates, or reports a blocker. <strong>NO_OP</strong> remains local judgment over unsolicited opportunities, not Assignment completion.
-          </p>
-        </aside>
-      </div>
+        <ScheduleList assignments={visibleAssignments} publishingPlan={publishingPlan} layers={calendarLayers} presenceName={presenceName} onAssignment={openAssignment} onAdd={() => setShowForm(true)} onResetLayers={() => setCalendarLayers({ plan: true, intents: false, assignments: true })} />
       )}
     </div>
   );
+}
+
+function ScheduleList({
+  assignments,
+  publishingPlan,
+  layers,
+  presenceName,
+  onAssignment,
+  onAdd,
+  onResetLayers,
+}: {
+  assignments: Assignment[];
+  publishingPlan?: PublishingPlan;
+  layers: ScheduleLayerVisibility;
+  presenceName: string;
+  onAssignment: (assignment: Assignment) => void;
+  onAdd: () => void;
+  onResetLayers: () => void;
+}) {
+  const planWindows = (publishingPlan?.windows ?? [])
+    .filter((window) => !["completed", "missed", "superseded"].includes(window.status))
+    .map((window) => ({ window, position: publishingWindowCalendarPosition(window, publishingPlan?.timezone) }));
+  const scheduledAssignments = assignments.filter((assignment) => assignmentIsOpen(assignment));
+  const hasAnyItems = planWindows.length > 0 || scheduledAssignments.length > 0;
+  const hasItems = (layers.plan && planWindows.length > 0) || (layers.assignments && scheduledAssignments.length > 0);
+  return <section className="schedule-list" aria-label="Schedule list">
+    <div className="schedule-list-header">
+      <div>
+        <SectionEyebrow>List schedule</SectionEyebrow>
+        <h2>What {presenceName} may work on</h2>
+        <p>The Publishing Plan shows flexible consideration windows. Assignments delegate outcomes; they do not guarantee publication.</p>
+      </div>
+      <ScheduleLegend plan={publishingPlan} layers={layers} />
+    </div>
+    {!hasItems ? <EmptyState title={hasAnyItems ? "Nothing shown in this list" : "Nothing scheduled for this Presence"} body={hasAnyItems ? "Turn on a layer above to compare the Publishing Plan and Assignments." : `Add an Assignment to give ${presenceName} a specific outcome to work toward.`} action={hasAnyItems ? <Button onClick={onResetLayers} variant="secondary">Show all layers</Button> : <Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add assignment</Button>} /> : <div className="schedule-list-rows">
+      {layers.plan && planWindows.map(({ window, position }) => <article className={`schedule-list-row schedule-list-row-plan schedule-list-row-${window.status}`} key={window.id}>
+        <div className="schedule-list-row-mark" aria-hidden="true" />
+        <div className="schedule-list-row-copy"><div className="schedule-list-row-kicker"><strong>Publishing plan</strong><span>{objectiveLabel(window.purpose)}</span></div><h3>{window.summary}</h3><small>{position.day} · {position.startTime}–{position.endTime} · {window.status === "active" ? "Active window" : objectiveLabel(window.status)}</small></div>
+      </article>)}
+      {layers.assignments && scheduledAssignments.map((assignment) => {
+        const objective = assignmentObjective(assignment);
+        const timing = assignment.activation?.type === "continuous" ? "Continuous responsibility" : assignment.schedule ? `${assignment.schedule.day} · ${assignment.schedule.time}–${splitConsiderationWindow(assignment.schedule.executionWindow, assignment.schedule.time).end}` : "Unscheduled · ready to start";
+        const status = assignment.status === "draft" ? "Not started" : objectiveLabel(assignment.status);
+        return <button type="button" className={`schedule-list-row schedule-list-row-assignment objective-${objectiveTone(objective)}`} key={assignment.id} onClick={() => onAssignment(assignment)} aria-label={`Open Assignment ${assignment.instruction}`}>
+          <div className="schedule-list-row-mark" aria-hidden="true" />
+          <div className="schedule-list-row-copy"><div className="schedule-list-row-kicker"><strong>Assignment</strong><span>{objectiveLabel(objective)}</span></div><h3>{cleanUserFacingAssignmentInstruction(assignment.instruction)}</h3><small>{timing} · {assignment.progress.verified} / {assignment.progress.required} verified · {status}</small></div>
+          <ChevronRight size={16} aria-hidden="true" />
+        </button>;
+      })}
+    </div>}
+  </section>;
 }
 
 function WeekCalendar({
@@ -6483,51 +6510,12 @@ function WeekCalendar({
             <button type="button" aria-pressed={compact} className={compact ? "active" : ""} onClick={() => { if (!compact) onToggleCompact(); }}>Compact</button>
             <button type="button" aria-pressed={!compact} className={!compact ? "active" : ""} onClick={() => { if (compact) onToggleCompact(); }}>Full hours</button>
           </div>
-          <div className="week-calendar-legend" aria-label="Schedule legend">
-          {publishingPlan && layers.plan && <span><i className="legend-dot plan-legend-dot" />Publishing plan</span>}
-          {layers.intents && ["audience_growth", "education", "relationship", "reflection"].map((objective) => <span key={objective}><i className={`legend-dot objective-${objectiveTone(objective)}`} />{objectiveLabel(objective)}</span>)}
-            {layers.assignments && <span><i className="legend-dot assignment-legend-dot" />Assignment</span>}
-          </div>
+          <ScheduleLegend plan={publishingPlan} layers={layers} />
         </div>
       </div>
       {!hasItems ? <EmptyState title={hasAnyItems ? "Nothing shown on this calendar" : "Nothing scheduled for this Presence"} body={hasAnyItems ? "Turn on a calendar layer to compare the Presence plan or Assignments." : `Add an Assignment to see when ${presenceName} is expected to work during the week.`} action={hasAnyItems ? <Button onClick={onResetLayers} variant="secondary">Show all layers</Button> : <Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add assignment</Button>} /> : <div className="week-grid-scroll"><div className="week-grid" style={{ "--week-grid-height": `${gridHeight}px` } as React.CSSProperties}><div className="week-grid-header"><span className="week-time-header">Local time</span>{calendarWeekDays.map((day) => <span key={day}>{day.slice(0, 3)}<small>{day}</small></span>)}</div><div className="week-grid-body"><div className="week-time-rail">{calendarHours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>{calendarWeekDays.map((day) => <div className="week-day-column" key={day}>{calendarHours.map((hour) => <div className="week-hour-cell" key={hour} />)}{layers.plan && (dayPlanWindows.get(day) ?? []).map((window) => { const style = blockStyle(window.startMinutes, window.endMinutes, 42); return <div className={`week-plan-window week-plan-window-${window.status}`} key={window.id} style={style} title={`${window.purpose} window · ${window.summary}`}><span className="week-plan-window-time">{window.startTime}–{window.endTime}</span><strong>Plan · {window.purpose}</strong><small>{window.summary}</small></div>; })}{layers.intents && (daySlots.get(day) ?? []).map((slot) => { const style = blockStyle(timeToMinutes(slot.time), timeToMinutes(splitConsiderationWindow(slot.executionWindow, slot.time).end), 54); const target = state.presences.find((item) => item.id === slot.presence); return <button type="button" key={slot.id} className={`week-intent objective-${objectiveTone(slot.objective)}`} style={style} onClick={() => onEdit(slot)} aria-label={`Edit ${slot.label}, ${slot.day} at ${slot.time}`} title={`${slot.label} · ${slot.day} ${slot.time} · ${considerationSummary(slot.time, slot.executionWindow)}`}><span className="week-intent-time">{slot.time}</span><strong>{slot.label}</strong><small>{target?.name ?? presenceName} · {objectiveLabel(slot.objective)}</small><em>{slot.mode === "auto" ? "Auto" : "Review"}</em></button>; })}{layers.assignments && (dayAssignments.get(day) ?? []).map((assignment) => { const schedule = assignment.schedule!; const style = blockStyle(timeToMinutes(schedule.time), timeToMinutes(splitConsiderationWindow(schedule.executionWindow, schedule.time).end), 58); const status = assignment.status === "draft" ? "Not started" : assignment.status.replaceAll("_", " "); return <button type="button" key={assignment.id} className="week-assignment" style={style} onClick={() => onAssignment(assignment)} aria-label={`Open Assignment ${assignment.instruction}, ${schedule.day} at ${schedule.time}`} title={`Open Assignment details · ${assignment.instruction} · ${schedule.day} ${schedule.time}`}><span className="week-intent-time">{schedule.time}</span><strong>Assignment</strong><small>{assignment.instruction}</small><em>{assignment.progress.verified} / {assignment.progress.required} · {status}</em></button>; })}</div>)}</div></div></div>}
       {hasItems && <div className="week-calendar-compact" aria-label="Compact weekly schedule">{compactDays.map(({ day, items }) => <section className="compact-calendar-day" key={day}><div className="compact-calendar-day-label"><strong>{day.slice(0, 3)}</strong><span>{day}</span></div><div className="compact-calendar-items">{items.map(renderCompactItem)}</div></section>)}</div>}
     </section>
-  );
-}
-
-function SlotRow({
-  slot,
-  state,
-  onRun,
-  onEdit,
-}: {
-  slot: CalendarSlot;
-  state: OpenPresenceState;
-  onRun: () => void;
-  onEdit: () => void;
-}) {
-  const target = state.presences.find((item) => item.id === slot.presence);
-  return (
-    <div className="slot-row">
-      <div className="slot-time">
-        <strong>{slot.time}</strong>
-        <span>{slot.day}</span>
-      </div>
-      <div className="slot-main">
-        <strong>{slot.label}</strong>
-        <p>{slot.instruction}</p>
-        <span>
-          {target
-            ? `${channelLabel(target.channel, state.channelDefinitions)} · ${target.name}`
-            : "No Presence"}{" "}
-          · {slot.objective.replace("_", " ")} ·{" "}
-          {slot.mode} · {considerationSummary(slot.time, slot.executionWindow)}
-        </span>
-      </div>
-      <div className="slot-actions"><button className="slot-edit" onClick={onEdit} aria-label={`Edit ${slot.label}`}><Pencil size={14} /> Edit</button><button className="slot-run" onClick={onRun}><Play size={14} /> Evaluate this intent</button></div>
-      <ChevronRight size={16} className="slot-chevron" />
-    </div>
   );
 }
 
