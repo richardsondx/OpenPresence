@@ -55,6 +55,8 @@ describe("Presence-scoped Explorations", () => {
     const started = startExplorationSession(state, exploration.id, "mirror");
     const completed = finishExplorationSession(started.state, started.session.id, { status: "completed", candidatesSeen: 1, candidatesHydrated: 1, findings: [{ mirrorObjectId: mirrorId, safeSummary: "Alex Builder describes a deployment problem.", whyItMayMatter: "The post is directly related to the Exploration brief." }] });
     expect(completed.explorationFindings[0]).toMatchObject({ explorationId: exploration.id, mirrorObjectId: mirrorId, status: "surfaced" });
+    expect(completed.events[0]).toMatchObject({ title: "Exploration found something worth noticing", sourceObjectId: mirrorId });
+    expect(completed.events[0]?.detail).toContain("Alex Builder describes a deployment problem.");
     expect(completed.socialIntents).toHaveLength(0);
     expect(completed.executions).toHaveLength(0);
   });

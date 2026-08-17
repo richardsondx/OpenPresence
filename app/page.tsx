@@ -4711,10 +4711,28 @@ function LiveView({
             item.externalRef.id === reference.id,
         )
       : undefined;
+  const explorationFindingsForEvent = (item: OpenPresenceState["events"][number]) => {
+    if (item.title !== "Exploration found something worth noticing") return [];
+    const direct = item.sourceObjectId
+      ? state.explorationFindings.filter((finding) => finding.presenceId === item.presenceId && finding.mirrorObjectId === item.sourceObjectId)
+      : [];
+    if (direct.length) return direct;
+    const eventTime = new Date(item.time).getTime();
+    const nearestSession = state.explorationSessions
+      .filter((session) => session.presenceId === item.presenceId && session.status === "completed" && session.findingIds.length > 0 && Boolean(session.completedAt))
+      .map((session) => ({ session, distance: Math.abs(new Date(session.completedAt!).getTime() - eventTime) }))
+      .filter(({ distance }) => Number.isFinite(distance) && distance <= 30_000)
+      .sort((left, right) => left.distance - right.distance)[0]?.session;
+    return nearestSession
+      ? nearestSession.findingIds.flatMap((findingId) => state.explorationFindings.find((finding) => finding.id === findingId) ?? [])
+      : [];
+  };
+  const explorationFindingForEvent = (item: OpenPresenceState["events"][number]) => explorationFindingsForEvent(item)[0];
   const contextForEvent = (event: OpenPresenceState["events"][number]) => {
     const explicit = event.sourceObjectId
       ? state.mirrorObjects.find((item) => item.id === event.sourceObjectId)
       : undefined;
+    const finding = explorationFindingForEvent(event);
     const source = explicit ?? (() => {
       const intent = event.intentId
         ? state.socialIntents.find((item) => item.id === event.intentId)
@@ -4726,10 +4744,11 @@ function LiveView({
               const outcome = state.outcomes.find((item) => item.id === event.outcomeId);
               return outcome?.executionId
                 ? state.executions.find((item) => item.id === outcome.executionId)
-                : undefined;
+              : undefined;
             })()
           : undefined;
-      return objectForReference(intent?.target ?? execution?.target, event.sessionId);
+      return objectForReference(intent?.target ?? execution?.target, event.sessionId)
+        ?? (finding ? state.mirrorObjects.find((item) => item.id === finding.mirrorObjectId) : undefined);
     })();
     if (!source) return undefined;
     if (["like", "reaction", "repost"].includes(source.objectType) && source.parentExternalRef) {
@@ -4775,8 +4794,12 @@ function LiveView({
     const actionRecord = linkedIntent ? state.actions.find((entry) => entry.socialIntentId === linkedIntent.id) : undefined;
     const standingIntent = linkedIntent?.standingIntentId ? state.standingIntents.find((entry) => entry.id === linkedIntent.standingIntentId) : undefined;
     const context = contextForEvent(item);
+    const explorationFindings = explorationFindingsForEvent(item);
+    const explorationFinding = explorationFindings[0];
     const observed = context?.content?.text
       ? `${context.author?.displayName ?? "Someone"} · “${context.content.text.slice(0, 150)}${context.content.text.length > 150 ? "…" : ""}”`
+      : explorationFinding
+        ? `Finding surfaced · ${explorationFinding.safeSummary}`
       : standingIntent
         ? `Standing intention · “${standingIntent.instruction.slice(0, 150)}${standingIntent.instruction.length > 150 ? "…" : ""}”`
         : item.title === "Pulse completed"
@@ -4785,7 +4808,9 @@ function LiveView({
             ? "New channel context became available to the Presence."
             : "No linked world object was recorded for this event.";
     const isSilence = actionRecord?.intent === "no_op" || /held|silence|off/i.test(`${item.title} ${item.detail}`);
-    const judgment = linkedIntent
+    const judgment = explorationFinding
+      ? `Worthwhile because ${explorationFinding.whyItMayMatter}`
+      : linkedIntent
       ? isSilence
         ? "Silence · no worthwhile action was selected"
         : `Selected ${formatActivityAffordance(linkedIntent.affordance)}${standingIntent ? " from the standing intention" : ""}`
@@ -4794,7 +4819,11 @@ function LiveView({
         : item.type === "system"
           ? "Observation recorded; no public action was selected yet."
           : item.detail;
-    const delivery = execution
+    const delivery = explorationFinding
+      ? item.detail.includes("No public action")
+        ? "No public action created"
+        : "No delivery selected"
+      : execution
       ? `${execution.status.replaceAll("-", " ")} · ${execution.mode}${outcome ? ` · outcome ${outcome.status}` : ""}`
       : linkedIntent
         ? "No execution created"
@@ -4937,6 +4966,7 @@ function LiveView({
                         <div className="event-title">{presenceCopy(item.title)}<span>{formatTime(item.time)}</span></div>
                         <ActivityEventDetail text={presenceCopy(item.detail)} />
                         <ActivityDecisionTrace trace={decisionTraceForEvent(item)} />
+                        {explorationFindingForEvent(item) && <div className="event-finding-preview" aria-label="Exploration finding"><span>Finding</span><strong>{explorationFindingForEvent(item)!.safeSummary}</strong><small>Why it matters · {explorationFindingForEvent(item)!.whyItMayMatter}</small>{explorationFindingsForEvent(item).length > 1 && <em>{explorationFindingsForEvent(item).length - 1} more finding{explorationFindingsForEvent(item).length === 2 ? "" : "s"} in Watching</em>}</div>}
                         {contextForEvent(item) && <div className="event-context-preview"><span aria-label={`Reply context from ${contextForEvent(item)!.author?.displayName ?? "this observed post"}`}>↳</span><strong>{(contextForEvent(item)!.content?.text ?? "Open the observed post").slice(0, 112)}{(contextForEvent(item)!.content?.text?.length ?? 0) > 112 ? "…" : ""}</strong><em>View post</em></div>}
                       </div>
                     </button>

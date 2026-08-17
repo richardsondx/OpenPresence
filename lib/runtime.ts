@@ -1607,7 +1607,7 @@ export function finishExplorationSession(source: OpenPresenceState, sessionId: s
   const presence = state.presences.find((item) => item.id === session.presenceId);
   if (exploration && presence) exploration.coverage = explorationCoverage(state, presence);
   const outcomeTitle = findings.length ? "Exploration found something worth noticing" : input.status === "completed" ? "Exploration completed" : input.status === "failed" ? "Exploration failed" : "Exploration degraded";
-  state.events.unshift(event("decision", outcomeTitle, findings.length ? `${presence?.name ?? "The Presence"} found ${findings.length} worthwhile social finding${findings.length === 1 ? "" : "s"}. No public action was created.` : input.failureReason ?? `${presence?.name ?? "The Presence"} looked around and found nothing that earned a finding.`, findings.length ? "positive" : input.status === "completed" ? "quiet" : "warning", { presenceId: session.presenceId }));
+  state.events.unshift(event("decision", outcomeTitle, findings.length ? `${presence?.name ?? "The Presence"} found ${findings.length} worthwhile social finding${findings.length === 1 ? "" : "s"}: ${findings[0]?.safeSummary ?? "Review the linked finding in Watching."}${findings.length > 1 ? ` ${findings.length - 1} more ${findings.length === 2 ? "finding is" : "findings are"} available in Watching.` : ""} No public action was created.` : input.failureReason ?? `${presence?.name ?? "The Presence"} looked around and found nothing that earned a finding.`, findings.length ? "positive" : input.status === "completed" ? "quiet" : "warning", { presenceId: session.presenceId, sourceObjectId: findings[0]?.mirrorObjectId }));
   return state;
 }
 
