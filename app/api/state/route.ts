@@ -8,6 +8,7 @@ import { generateAgentReply, generateAgentSocialDecision, generateAgentSocialEdi
 import type { AgentSocialDecision } from "@/lib/ai";
 import { validateScenarioFidelity } from "@/lib/scenarios";
 import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntroduction, assertRuntimeScope, assignmentIsSatisfied, beginOriginalPostRehearsal, blockExecutionForLanguage, blockExecutionForTargetLanguage, cleanSandboxDraft, completeNativeExecution, completeOriginalPostRehearsal, confirmAutoMode, createRuntimeScope, declineSandboxIntroduction, deleteScenario, deliverSandboxExecution, derivePresenceCapabilityManifest, derivePublishingProgress, duePublishingPlanWindows, ensureCapabilityRequests, expireSandboxIntents, failNativeExecution, finishExplorationSession, finishPulse, formAssignmentPostIntent, formChatPostIntent, formSandboxIntent, formStandingPostIntent, formXReplyIntent, formXActionIntent, createScenarioFromPrompt, generateMissingScenarioEvents, identityLeakageReason, importScenarioDefinition, isExplicitXPostRequest, isLaunchCandidate, isLowInformationCue, languageValidationForExecution, markCalendarSlotEvaluated, markInboundJudged, markNativeConnectionNeedsAttention, markScenarioStimulus, nativeDeliveryFailureIsConnectionScoped, openAgentRequest, publicSelfGuidance, publishingInitiativeGuidance, recordNativeMirror, recordPreferenceEvidence, recordPublishingPlanFailure, recordPublishingPlanWork, recordRuntimeEvent, recordSandboxNetworkSearch, recordStandingIntentNoOp, recordScenarioEvaluation, recordScenarioReview, renameScenario, replacePublishingPlan, resetPlaygroundSession, startExplorationSession, startScenarioRunState, completeScenarioRunState, stopScenarioRunState, stateForContext, structuralScenarioEvaluation, startPlaygroundSession, syncPlaygroundTime, syncPublishingInitiativeAssignment, targetLanguageValidationForExecution, updateScenarioEvents, updateScenarioRequirements } from "@/lib/runtime";
+import { recordSocialDecision } from "@/lib/runtime";
 import { followXUser, likeXPost, publishSealedXPost, readNativeXCredentials, repostXPost, searchRecentXPosts } from "@/lib/x";
 import { hydrateNativeXThreadContext, reconcileNativeX } from "@/lib/native-x";
 import { isAgentCapabilityEnabled, isAgentToolEnabled } from "@/lib/types";
@@ -731,14 +732,23 @@ async function runNativePulse(source: OpenPresenceState, presenceId: string) {
     }
     const replyDraft = decision.action === "reply" ? decision.text.trim() : "";
     if (decision.action !== "reply" && ["like", "repost", "quote", "follow"].includes(decision.action)) {
+      const decisionInput = {
+        decision: decision.action as "like" | "repost" | "quote" | "follow",
+        summary: decision.rationale,
+        focalMirrorObjectIds: [inbound.id],
+        origin: { kind: "inbound_social" as const, refId: inbound.externalRef.id },
+        influences: ["Mission", "Taste", "Current social context"],
+        confidence: "medium" as const,
+      };
       const target = decision.action === "follow" ? inbound.author?.externalRef : inbound.externalRef;
       if (!target) {
         next = markInboundJudged(next, presenceId, inbound.externalRef.id);
-        return finishPulse(recordRuntimeEvent(next, presenceId, "Social action held", "The Presence chose an action, but X did not provide a verifiable target identity.", "warning", { sourceObjectId: inbound.id }), presenceId, "Observed X but could not verify the chosen target.");
+        next = recordSocialDecision(next, decisionInput);
+        return finishPulse(recordRuntimeEvent(next, presenceId, "Social action held", "The Presence chose an action, but X did not provide a verifiable target identity.", "warning", { sourceObjectId: inbound.id, decisionId: next.socialDecisions[0]?.id }), presenceId, "Observed X but could not verify the chosen target.");
       }
       const existingExecutionIds = new Set(next.executions.map((item) => item.id));
       const quoteMedia = decision.action === "quote" ? await materializeLiveDecisionAssets(next, presenceId, decision) : { state: next, assetIds: [] as string[] };
-      next = formXActionIntent(quoteMedia.state, { affordance: `x.${decision.action}` as "x.like" | "x.repost" | "x.quote" | "x.follow", target, text: decision.action === "quote" ? decision.text.trim() : undefined, assetIds: quoteMedia.assetIds });
+      next = formXActionIntent(quoteMedia.state, { affordance: `x.${decision.action}` as "x.like" | "x.repost" | "x.quote" | "x.follow", target, text: decision.action === "quote" ? decision.text.trim() : undefined, assetIds: quoteMedia.assetIds, decision: decisionInput });
       next = markInboundJudged(next, presenceId, inbound.externalRef.id);
       const actionExecutionIds = new Set(next.executions.filter((item) => !existingExecutionIds.has(item.id)).map((item) => item.id));
       next = await deliverNativeExecutions(next, actionExecutionIds);
@@ -748,7 +758,8 @@ async function runNativePulse(source: OpenPresenceState, presenceId: string) {
     }
     if (!replyDraft.trim()) {
       next = markInboundJudged(next, presenceId, inbound.externalRef.id);
-      next = recordRuntimeEvent(next, presenceId, "Conversation left alone", decision.rationale?.trim() || "Jenny considered the new message and found no useful reply worth adding.", "quiet", { sourceObjectId: inbound.id });
+      next = recordSocialDecision(next, { decision: "no_op", summary: decision.rationale, focalMirrorObjectIds: [inbound.id], origin: { kind: "inbound_social", refId: inbound.externalRef.id }, influences: ["Mission", "Taste", "Current social context"], confidence: "medium" });
+      next = recordRuntimeEvent(next, presenceId, "Conversation left alone", decision.rationale?.trim() || "Jenny considered the new message and found no useful reply worth adding.", "quiet", { sourceObjectId: inbound.id, decisionId: next.socialDecisions[0]?.id });
       // A quiet inbound decision must not starve an unrelated unfinished
       // original-publication responsibility. Continue into the publishing
       // branch below after recording the inbound NO_OP.
@@ -756,7 +767,7 @@ async function runNativePulse(source: OpenPresenceState, presenceId: string) {
       next = recordRuntimeEvent(next, presenceId, "Worth responding to", "Jenny judged the new message relevant enough to continue the conversation.", "positive");
       const existingExecutionIds = new Set(next.executions.map((item) => item.id));
       const replyMedia = await materializeLiveDecisionAssets(next, presenceId, decision);
-      next = formXReplyIntent(replyMedia.state, replyDraft, focalPostId, undefined, undefined, replyMedia.assetIds);
+      next = formXReplyIntent(replyMedia.state, replyDraft, focalPostId, undefined, undefined, replyMedia.assetIds, { decision: "reply", summary: decision.rationale, focalMirrorObjectIds: [inbound.id], origin: { kind: "inbound_social", refId: inbound.externalRef.id }, influences: ["Mission", "Taste", "Current social context"], confidence: "medium" });
       next = markInboundJudged(next, presenceId, inbound.externalRef.id);
       const replyExecutionIds = new Set(next.executions.filter((item) => !existingExecutionIds.has(item.id)).map((item) => item.id));
       next = await deliverNativeExecutions(next, replyExecutionIds);
@@ -780,11 +791,14 @@ async function runNativePulse(source: OpenPresenceState, presenceId: string) {
     return finishPulse(recordRuntimeEvent(next, presenceId, "Launch evaluation unavailable", message, "warning"), presenceId, "The Presence observed X but could not complete its first-move evaluation.");
   }
   const draft = launchDecision.action === "post" ? launchDecision.text.trim() : "";
-  if (!draft.trim()) return finishPulse(recordRuntimeEvent(next, presenceId, "Launch held", "Jenny found no first move worth publishing yet and chose silence.", "quiet"), presenceId, "Observed X and chose NO_OP while establishing context.");
+  if (!draft.trim()) {
+    next = recordSocialDecision(next, { decision: "no_op", summary: launchDecision.rationale || "No first move met the Presence standard yet.", origin: { kind: "publishing_initiative" }, influences: ["Mission", "Taste", "Current channel context"], confidence: "medium" });
+    return finishPulse(recordRuntimeEvent(next, presenceId, "Launch held", "Jenny found no first move worth publishing yet and chose silence.", "quiet", { decisionId: next.socialDecisions[0]?.id }), presenceId, "Observed X and chose NO_OP while establishing context.");
+  }
   if (draft.trim().length > 280) return finishPulse(recordRuntimeEvent(next, presenceId, "Launch held", "Jenny's candidate first move exceeded X's single-post limit, so she kept it as silence instead of truncating her meaning.", "warning"), presenceId, "Observed X but did not publish an invalidly sized first move.");
   const existingExecutionIds = new Set(next.executions.map((item) => item.id));
   const launchMedia = await materializeLiveDecisionAssets(next, presenceId, launchDecision);
-  next = formChatPostIntent(launchMedia.state, draft, undefined, "agent", launchMedia.assetIds);
+  next = formChatPostIntent(launchMedia.state, draft, undefined, "agent", launchMedia.assetIds, { decision: "original_post", summary: launchDecision.rationale, origin: { kind: "publishing_initiative" }, influences: ["Mission", "Taste", "Current channel context"], confidence: "medium" });
   const launchExecutionIds = new Set(next.executions.filter((item) => !existingExecutionIds.has(item.id)).map((item) => item.id));
   next = await deliverNativeExecutions(next, launchExecutionIds);
   const launchExecution = next.executions.find((item) => launchExecutionIds.has(item.id));

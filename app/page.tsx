@@ -90,6 +90,7 @@ import type {
   Presence,
   SandboxActor,
   SandboxAssetInput,
+  SocialDecision,
   ScenarioStimulus,
   ScenarioStimulusRequirements,
   SocialAssetKind,
@@ -4631,6 +4632,7 @@ function LiveView({
   const checking = pendingOperation === "runPulse" || pendingOperation === "runAttentionWorker";
   const activity = deriveActivitySummary(state, selected?.id);
   const [selectedContext, setSelectedContext] = useState<MirrorObject | null>(null);
+  const [selectedDecisionId, setSelectedDecisionId] = useState<string | null>(null);
   const [activityPage, setActivityPage] = useState(1);
   const [countdownNow, setCountdownNow] = useState<number | null>(null);
   const presenceCopy = (text: string) => text.replaceAll("Jenny", presenceName).replaceAll(state.agent?.name ?? "Jenny", presenceName);
@@ -4919,17 +4921,41 @@ function LiveView({
               <>
               <div className="event-list">
                 {paginatedActivityEvents.map((item) => (
-                  <button className="event-row event-row-button" type="button" key={item.id} data-event-id={item.id} onClick={() => { const context = contextForEvent(item); if (context) setSelectedContext(context); }} disabled={!contextForEvent(item)} aria-label={contextForEvent(item) ? `View the post ${presenceName} considered` : undefined}>
-                    <div className={`event-icon tone-${activityEventTone(item)}`}>
-                      {item.type === "execution" ? <ArrowUpRight size={15} /> : item.type === "learning" ? <Sparkles size={15} /> : item.type === "memory" ? <Brain size={15} /> : <Circle size={9} fill="currentColor" />}
-                    </div>
-                    <div className="event-copy">
-                      <div className="event-title">{presenceCopy(item.title)}<span>{formatTime(item.time)}</span></div>
-                      <ActivityEventDetail text={presenceCopy(item.detail)} />
-                      <ActivityDecisionTrace trace={decisionTraceForEvent(item)} />
-                      {contextForEvent(item) && <div className="event-context-preview"><span aria-label={`Reply context from ${contextForEvent(item)!.author?.displayName ?? "this observed post"}`}>↳</span><strong>{(contextForEvent(item)!.content?.text ?? "Open the observed post").slice(0, 112)}{(contextForEvent(item)!.content?.text?.length ?? 0) > 112 ? "…" : ""}</strong><em>View post</em></div>}
-                    </div>
-                  </button>
+                  <div className="event-row-shell" key={item.id}>
+                    <button className="event-row event-row-button" type="button" data-event-id={item.id} onClick={() => { const context = contextForEvent(item); if (context) setSelectedContext(context); }} disabled={!contextForEvent(item)} aria-label={contextForEvent(item) ? `View the post ${presenceName} considered` : undefined}>
+                      <div className={`event-icon tone-${activityEventTone(item)}`}>
+                        {item.type === "execution" ? <ArrowUpRight size={15} /> : item.type === "learning" ? <Sparkles size={15} /> : item.type === "memory" ? <Brain size={15} /> : <Circle size={9} fill="currentColor" />}
+                      </div>
+                      <div className="event-copy">
+                        <div className="event-title">{presenceCopy(item.title)}<span>{formatTime(item.time)}</span></div>
+                        <ActivityEventDetail text={presenceCopy(item.detail)} />
+                        <ActivityDecisionTrace trace={decisionTraceForEvent(item)} />
+                        {contextForEvent(item) && <div className="event-context-preview"><span aria-label={`Reply context from ${contextForEvent(item)!.author?.displayName ?? "this observed post"}`}>↳</span><strong>{(contextForEvent(item)!.content?.text ?? "Open the observed post").slice(0, 112)}{(contextForEvent(item)!.content?.text?.length ?? 0) > 112 ? "…" : ""}</strong><em>View post</em></div>}
+                      </div>
+                    </button>
+                    {decisionForEvent(item) && (
+                      <>
+                        <button
+                          type="button"
+                          className="event-why-button"
+                          aria-expanded={selectedDecisionId === decisionForEvent(item)!.id}
+                          onClick={() => setSelectedDecisionId((current) => current === decisionForEvent(item)!.id ? null : decisionForEvent(item)!.id)}
+                        >
+                          {selectedDecisionId === decisionForEvent(item)!.id ? "Hide why" : "Why this action?"}
+                        </button>
+                        {selectedDecisionId === decisionForEvent(item)!.id && (
+                          <ActivityDecisionDisclosure
+                            decision={decisionForEvent(item)!}
+                            evidence={contextForEvent(item)}
+                            intent={item.intentId ? state.socialIntents.find((entry) => entry.id === item.intentId) : undefined}
+                            execution={executionForActivityEvent(item)}
+                            outcome={executionForActivityEvent(item) ? state.outcomes.find((entry) => entry.executionId === executionForActivityEvent(item)!.id) : undefined}
+                            onClose={() => setSelectedDecisionId(null)}
+                          />
+                        )}
+                      </>
+                    )}
+                  </div>
                 ))}
               </div>
               <nav className="activity-pagination" aria-label="Activity pages">
@@ -5246,6 +5272,62 @@ function ActivityDecisionTrace({ trace }: { trace: { observed: string; judgment:
       <div><strong>Observed</strong><span>{trace.observed}</span></div>
       <div><strong>Judgment</strong><span>{trace.judgment}</span></div>
       <div><strong>Delivery</strong><span>{trace.delivery}</span></div>
+    </div>
+  );
+}
+
+function ActivityDecisionDisclosure({
+  decision,
+  evidence,
+  intent,
+  execution,
+  outcome,
+  onClose,
+}: {
+  decision: SocialDecision;
+  evidence?: MirrorObject;
+  intent?: OpenPresenceState["socialIntents"][number];
+  execution?: OpenPresenceState["executions"][number];
+  outcome?: OpenPresenceState["outcomes"][number];
+  onClose: () => void;
+}) {
+  const actionLabel = formatActivityAffordance(decision.decision === "original_post" ? "post" : decision.decision);
+  return (
+    <div className="activity-why-panel" role="region" aria-label="Why this action?">
+      <div className="activity-why-heading">
+        <div>
+          <SectionEyebrow>Why this action?</SectionEyebrow>
+          <strong>{decision.decision === "no_op" ? "Kept the conversation quiet" : `${actionLabel} selected`}</strong>
+        </div>
+        <button type="button" className="activity-why-close" onClick={onClose} aria-label="Close decision explanation">×</button>
+      </div>
+      <p className="activity-why-summary">{decision.summary}</p>
+      {evidence?.content?.text && (
+        <div className="activity-why-evidence">
+          <strong>Evidence considered</strong>
+          <span>{evidence.author?.displayName ?? evidence.author?.handle ?? "Observed post"} · “{evidence.content.text.slice(0, 190)}{evidence.content.text.length > 190 ? "…" : ""}”</span>
+        </div>
+      )}
+      {decision.influences.length > 0 && (
+        <div className="activity-why-influences">
+          <strong>Influenced by</strong>
+          <div>{decision.influences.map((influence) => <span key={influence}>{influence}</span>)}</div>
+        </div>
+      )}
+      <div className="activity-why-meta">
+        <span>Confidence · {decision.confidence ?? "not recorded"}</span>
+        {outcome && <span>Outcome · {outcome.status}</span>}
+      </div>
+      <details className="activity-why-technical">
+        <summary>Technical details</summary>
+        <dl>
+          <div><dt>Social Decision</dt><dd>{decision.id}</dd></div>
+          <div><dt>Mirror evidence</dt><dd>{decision.focalMirrorObjectIds.join(", ") || "None recorded"}</dd></div>
+          <div><dt>Social Intent</dt><dd>{intent?.id ?? decision.socialIntentId ?? "None"}</dd></div>
+          <div><dt>Execution</dt><dd>{execution?.id ?? "None"}{execution ? ` · ${execution.status}` : ""}</dd></div>
+          {decision.origin && <div><dt>Origin</dt><dd>{decision.origin.kind}{decision.origin.refId ? ` · ${decision.origin.refId}` : ""}</dd></div>}
+        </dl>
+      </details>
     </div>
   );
 }

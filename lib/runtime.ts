@@ -1,4 +1,4 @@
-import type { ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, Asset, Assignment, AssignmentDelegationPolicy, AssignmentPlan, AssignmentPreflight, AssignmentQuantityMode, AssignmentReadinessCheck, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, ExplorationBrief, ExplorationFinding, ExplorationSession, ExplorationSessionStatus, FileKind, FileProposal, GhostProfile, GhostRepresentation, JsonValue, LiveEvent, MirrorObject, OpenPresenceState, Operation, OperatorDirective, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, RuntimeScope, SandboxAssetInput, SocialAssetKind, SocialIntent, SocialOrigin, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, LanguagePolicy, Scenario, ScenarioStimulus, ScenarioStimulusRequirements, ScenarioVersion, ScenarioRun, ScenarioRunProvenance, ScenarioRunEvaluation, StructuralFinding, PublishingInitiative, PublishingInitiativeProgress, PublishingPlan, PublishingPlanDraft, PublishingPlanWorkEvent, PresenceCapability, PresenceCapabilityManifest, PublicationMetricSnapshot, PresenceAudienceSnapshot } from "./types";
+import type { ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, Asset, Assignment, AssignmentDelegationPolicy, AssignmentPlan, AssignmentPreflight, AssignmentQuantityMode, AssignmentReadinessCheck, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, ExplorationBrief, ExplorationFinding, ExplorationSession, ExplorationSessionStatus, FileKind, FileProposal, GhostProfile, GhostRepresentation, JsonValue, LiveEvent, MirrorObject, OpenPresenceState, Operation, OperatorDirective, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, RuntimeScope, SandboxAssetInput, SocialAssetKind, SocialDecision, SocialDecisionConfidence, SocialDecisionKind, SocialIntent, SocialOrigin, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, LanguagePolicy, Scenario, ScenarioStimulus, ScenarioStimulusRequirements, ScenarioVersion, ScenarioRun, ScenarioRunProvenance, ScenarioRunEvaluation, StructuralFinding, PublishingInitiative, PublishingInitiativeProgress, PublishingPlan, PublishingPlanDraft, PublishingPlanWorkEvent, PresenceCapability, PresenceCapabilityManifest, PublicationMetricSnapshot, PresenceAudienceSnapshot } from "./types";
 import { AGENT_CAPABILITY_DEFINITIONS, CHANNEL_CAPABILITIES, CHANNEL_EXTENSIONS, simulationForChannel } from "./types";
 import { buildScenarioFromPrompt, builtinScenarioDefinitions, repairScenarioStimuli, scenarioFromImport, stableHash, validateScenarioFidelity } from "./scenarios";
 import { DEFAULT_PRESENCE_LANGUAGE, effectiveLanguagePolicy, EMPTY_LANGUAGE_POLICY, languagesMatch, normalizeLanguagePolicy, normalizePresenceLanguage, normalizedObservedLanguage, validateLanguage } from "./language-policy";
@@ -86,7 +86,7 @@ const fileContent = (kind: FileKind, input: CreateAgentInput, presence?: Presenc
 };
 
 export function initialState(): OpenPresenceState {
-  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], agentRequests: [], capabilityChangeEvents: [], events: [], calendar: [], assignments: [], growthReviews: [], growthFileVersions: [], audienceSnapshots: [], publicationMetricSnapshots: [], watches: [], explorations: [], discoveryPlans: [], explorationSessions: [], explorationFindings: [], actions: [], publishingPlans: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], assetProviderConnections: [], toolBindings: [], changeSets: [], standingIntents: [], operatorDirectives: [], socialIntents: [], executions: [], outcomes: [], publications: [], assetUsages: [], sourceEvidence: [], claimGrounding: [], preferenceEvidence: [], originalPostRehearsals: [], librarySources: [], assets: [], perceptions: [], assetResearchSessions: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], conversationEpisodes: [], assignmentContributions: [], people: [], personIdentities: [], relationships: [], relationshipFacts: [], relationshipOpenLoops: [], recommendationRecords: [], introductionRecords: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], scenarios: [], scenarioVersions: [], scenarioRuns: [], scenarioRunProvenance: [], scenarioEvaluations: [], knowledgeCollections: [], knowledgeItems: [], knowledgeVersions: [], knowledgeSegments: [], presenceKnowledgeBindings: [], knowledgeRetrievalRuns: [], knowledgeCitations: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
+  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], agentRequests: [], capabilityChangeEvents: [], events: [], socialDecisions: [], calendar: [], assignments: [], growthReviews: [], growthFileVersions: [], audienceSnapshots: [], publicationMetricSnapshots: [], watches: [], explorations: [], discoveryPlans: [], explorationSessions: [], explorationFindings: [], actions: [], publishingPlans: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], assetProviderConnections: [], toolBindings: [], changeSets: [], standingIntents: [], operatorDirectives: [], socialIntents: [], executions: [], outcomes: [], publications: [], assetUsages: [], sourceEvidence: [], claimGrounding: [], preferenceEvidence: [], originalPostRehearsals: [], librarySources: [], assets: [], perceptions: [], assetResearchSessions: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], conversationEpisodes: [], assignmentContributions: [], people: [], personIdentities: [], relationships: [], relationshipFacts: [], relationshipOpenLoops: [], recommendationRecords: [], introductionRecords: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], scenarios: [], scenarioVersions: [], scenarioRuns: [], scenarioRunProvenance: [], scenarioEvaluations: [], knowledgeCollections: [], knowledgeItems: [], knowledgeVersions: [], knowledgeSegments: [], presenceKnowledgeBindings: [], knowledgeRetrievalRuns: [], knowledgeCitations: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
 }
 
 const capabilityLabel: Record<string, string> = {
@@ -285,7 +285,51 @@ export function curateRelationshipFromMirror(source: OpenPresenceState, object: 
 }
 
 function makeFiles(input: CreateAgentInput, presence: Presence): AgentFile[] { return (Object.keys(fileMeta) as FileKind[]).map((kind) => ({ kind, ...fileMeta[kind], content: fileContent(kind, input, presence), revision: 1, updatedAt: now() })); }
-function event(type: LiveEvent["type"], title: string, detail: string, tone: LiveEvent["tone"] = "neutral", lineage?: Pick<LiveEvent, "presenceId" | "intentId" | "executionId" | "outcomeId" | "sessionId" | "sourceObjectId">): LiveEvent { return { id: id("evt"), type, title, detail, time: now(), tone, ...lineage }; }
+function event(type: LiveEvent["type"], title: string, detail: string, tone: LiveEvent["tone"] = "neutral", lineage?: Pick<LiveEvent, "presenceId" | "intentId" | "executionId" | "outcomeId" | "decisionId" | "sessionId" | "sourceObjectId">): LiveEvent { return { id: id("evt"), type, title, detail, time: now(), tone, ...lineage }; }
+
+export interface SocialDecisionInput {
+  decision: SocialDecisionKind;
+  focalMirrorObjectIds?: string[];
+  origin?: SocialOrigin;
+  summary?: string;
+  influences?: string[];
+  confidence?: SocialDecisionConfidence;
+  closestAlternative?: SocialDecisionKind;
+  closestAlternativeReason?: string;
+  plannerRunId?: string;
+}
+
+function socialDecisionLabel(decision: SocialDecisionKind) {
+  return decision === "no_op" ? "silence" : decision === "original_post" ? "an original post" : `a ${decision}`;
+}
+
+function createSocialDecision(state: OpenPresenceState, input: SocialDecisionInput, socialIntentId?: string): SocialDecision | undefined {
+  if (!state.agent || !state.presence) return undefined;
+  return {
+    id: id("decision"),
+    agentId: state.agent.id,
+    presenceId: state.presence.id,
+    environment: state.presence.environment ?? "live",
+    focalMirrorObjectIds: [...new Set((input.focalMirrorObjectIds ?? []).filter(Boolean))].slice(0, 6),
+    origin: input.origin,
+    decision: input.decision,
+    summary: input.summary?.trim() || `The Presence selected ${socialDecisionLabel(input.decision)} from the available channel context.`,
+    influences: [...new Set((input.influences ?? ["Mission", "Taste", "Current social context"]).map((value) => value.trim()).filter(Boolean))].slice(0, 5),
+    confidence: input.confidence ?? "medium",
+    closestAlternative: input.closestAlternative,
+    closestAlternativeReason: input.closestAlternativeReason?.trim() || undefined,
+    socialIntentId,
+    plannerRunId: input.plannerRunId,
+    createdAt: now(),
+  };
+}
+
+export function recordSocialDecision(source: OpenPresenceState, input: SocialDecisionInput) {
+  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  const decision = createSocialDecision(state, input);
+  if (decision) state.socialDecisions.unshift(decision);
+  return state;
+}
 
 const activityObservationTitles = new Set(["Pulse completed", "New mention received", "Social Mirror updated", "X observation failed", "Considering first public move", "Reply observed", "Calendar attention started", "Calendar evaluation unavailable", "Publishing plan requested", "Publishing plan unavailable"]);
 export function isActivityDecisionEvent(item: LiveEvent) {
@@ -613,7 +657,7 @@ export function recordNativeMirror(source: OpenPresenceState, input: { connectio
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const receivedAt = now();
   const sourceEventId = `native-x:${input.connectionId}:${input.post.id}`;
-  const existing = state.mirrorObjects.find((item) => item.externalRef.type === "x.post" && item.externalRef.id === input.post.id);
+  const existing = state.mirrorObjects.find((item) => item.presenceId === input.presenceId && item.externalRef.type === "x.post" && item.externalRef.id === input.post.id);
   const mediaRefs = (input.post.media ?? []).flatMap((media) => {
     const sourceUrl = media.url ?? media.previewImageUrl;
     if (!sourceUrl) return [];
@@ -646,7 +690,7 @@ export function recordNativeMirror(source: OpenPresenceState, input: { connectio
       state.events.unshift(event("execution", "Assignment progress verified", `Verified native X publication ${input.post.id} in the Social Mirror. Progress: ${assignment.progress.verified}${assignment.progress.required ? ` / ${assignment.progress.required}` : ""}.`, "positive", { presenceId: input.presenceId, executionId: matchingExecution.id, sourceObjectId: existing?.id }));
     }
   }
-  const mirrored = state.mirrorObjects.find((item) => item.externalRef.type === "x.post" && item.externalRef.id === input.post.id);
+  const mirrored = state.mirrorObjects.find((item) => item.presenceId === input.presenceId && item.externalRef.type === "x.post" && item.externalRef.id === input.post.id);
   if (mirrored) {
     updateConversationEpisodeFromMirror(state, mirrored, input.presenceId);
     if (matchingExecution?.conversationEpisodeId) {
@@ -654,9 +698,25 @@ export function recordNativeMirror(source: OpenPresenceState, input: { connectio
     }
   }
   const curationTarget = mirrored?.actorPresenceId === input.presenceId && mirrored.parentExternalRef
-    ? state.mirrorObjects.find((item) => item.externalRef.type === mirrored.parentExternalRef?.type && item.externalRef.id === mirrored.parentExternalRef?.id)
+    ? state.mirrorObjects.find((item) => item.presenceId === input.presenceId && item.externalRef.type === mirrored.parentExternalRef?.type && item.externalRef.id === mirrored.parentExternalRef?.id)
     : mirrored;
   return curationTarget ? curateRelationshipFromMirror(state, curationTarget, input.presenceId) : state;
+}
+
+/** Record an operator-supplied public post without pretending it arrived from a connected connector. */
+export function recordImportedXMirror(source: OpenPresenceState, input: Parameters<typeof recordNativeMirror>[1]) {
+  const state = recordNativeMirror(source, { ...input, connectionId: `manual-x:${input.post.id}` });
+  const mirror = state.mirrorObjects.find((item) => item.presenceId === input.presenceId && item.externalRef.type === "x.post" && item.externalRef.id === input.post.id);
+  if (!mirror) return state;
+  const bridgeId = `manual-x:${input.post.id}`;
+  const sourceEventId = bridgeId;
+  mirror.bridgeId = bridgeId;
+  mirror.source = "manual";
+  mirror.sourceEventId = sourceEventId;
+  state.mirrorEvents = state.mirrorEvents.map((event) => event.externalRef.type === "x.post" && event.externalRef.id === input.post.id && event.presenceId === input.presenceId
+    ? { ...event, bridgeId, sourceEventId }
+    : event);
+  return state;
 }
 
 /** Mark a previously observed native X post as deleted when X no longer returns it. */
@@ -770,7 +830,7 @@ export function derivePublicHistory(source: OpenPresenceState, presenceId?: stri
   });
 }
 
-export function recordRuntimeEvent(source: OpenPresenceState, presenceId: string, title: string, detail: string, tone: LiveEvent["tone"] = "neutral", lineage?: Pick<LiveEvent, "intentId" | "executionId" | "outcomeId" | "sessionId" | "sourceObjectId">) {
+export function recordRuntimeEvent(source: OpenPresenceState, presenceId: string, title: string, detail: string, tone: LiveEvent["tone"] = "neutral", lineage?: Pick<LiveEvent, "intentId" | "executionId" | "outcomeId" | "decisionId" | "sessionId" | "sourceObjectId">) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   state.events.unshift(event("system", title, detail, tone, { presenceId, ...lineage }));
   return state;
@@ -2156,7 +2216,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
     if (!builtin || definition.id !== "x") return definition;
     return { ...definition, affordances: [...builtin.affordances.filter((item) => !definition.affordances.some((current) => current.id === item.id)), ...definition.affordances], supportedAssetKinds: [...new Set([...(builtin.supportedAssetKinds ?? []), ...(definition.supportedAssetKinds ?? [])])] };
   });
-  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], workspaceRevision: state.workspaceRevision, presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], agentRequests: state.agentRequests ?? [], capabilityChangeEvents: state.capabilityChangeEvents ?? [], calendar, assignments: (state.assignments ?? []).map((assignment) => normalizeAssignment(assignment)), assignmentRuns: state.assignmentRuns ?? [], growthReviews: state.growthReviews ?? [], growthFileVersions: state.growthFileVersions ?? [], audienceSnapshots: state.audienceSnapshots ?? [], publicationMetricSnapshots: state.publicationMetricSnapshots ?? [], watches: state.watches ?? [], explorations: state.explorations ?? [], discoveryPlans: state.discoveryPlans ?? [], explorationSessions: state.explorationSessions ?? [], explorationFindings: state.explorationFindings ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, assetProviderConnections: state.assetProviderConnections ?? [], toolBindings: (state.toolBindings ?? []).map((binding) => ({ ...binding, enabled: binding.enabled !== false })), changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], operatorDirectives: state.operatorDirectives ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], assetUsages: state.assetUsages ?? [], sourceEvidence: state.sourceEvidence ?? [], claimGrounding: state.claimGrounding ?? [], preferenceEvidence: state.preferenceEvidence ?? [], originalPostRehearsals: state.originalPostRehearsals ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], perceptions: state.perceptions ?? [], assetResearchSessions: state.assetResearchSessions ?? [], skills, agentSkills, contentDrops: state.contentDrops ?? [], channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], conversationEpisodes: state.conversationEpisodes ?? [], assignmentContributions: state.assignmentContributions ?? [], people: state.people ?? [], personIdentities: state.personIdentities ?? [], relationships: state.relationships ?? [], relationshipFacts: state.relationshipFacts ?? [], relationshipOpenLoops: state.relationshipOpenLoops ?? [], recommendationRecords: state.recommendationRecords ?? [], introductionRecords: state.introductionRecords ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: (state.playgroundSessions ?? []).map((session) => ({ ...session, virtualTimeMode: session.virtualTimeMode ?? "realtime", worldRevision: session.worldRevision ?? 1 })), sandboxActors: state.sandboxActors ?? [], networkSearches: state.networkSearches ?? [], networkIntroductions: state.networkIntroductions ?? [], scenarios: state.scenarios ?? [], scenarioVersions: state.scenarioVersions ?? [], scenarioRuns: state.scenarioRuns ?? [], scenarioRunProvenance: state.scenarioRunProvenance ?? [], scenarioEvaluations: state.scenarioEvaluations ?? [], knowledgeCollections: state.knowledgeCollections ?? [], knowledgeItems: state.knowledgeItems ?? [], knowledgeVersions: state.knowledgeVersions ?? [], knowledgeSegments: state.knowledgeSegments ?? [], presenceKnowledgeBindings: state.presenceKnowledgeBindings ?? [], knowledgeRetrievalRuns: state.knowledgeRetrievalRuns ?? [], knowledgeCitations: state.knowledgeCitations ?? [] };
+  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], workspaceRevision: state.workspaceRevision, presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], agentRequests: state.agentRequests ?? [], capabilityChangeEvents: state.capabilityChangeEvents ?? [], calendar, assignments: (state.assignments ?? []).map((assignment) => normalizeAssignment(assignment)), assignmentRuns: state.assignmentRuns ?? [], growthReviews: state.growthReviews ?? [], growthFileVersions: state.growthFileVersions ?? [], audienceSnapshots: state.audienceSnapshots ?? [], publicationMetricSnapshots: state.publicationMetricSnapshots ?? [], watches: state.watches ?? [], explorations: state.explorations ?? [], discoveryPlans: state.discoveryPlans ?? [], explorationSessions: state.explorationSessions ?? [], explorationFindings: state.explorationFindings ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, assetProviderConnections: state.assetProviderConnections ?? [], toolBindings: (state.toolBindings ?? []).map((binding) => ({ ...binding, enabled: binding.enabled !== false })), changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], operatorDirectives: state.operatorDirectives ?? [], socialDecisions: state.socialDecisions ?? [], socialIntents: state.socialIntents ?? [], executions: state.executions ?? [], outcomes: state.outcomes ?? [], publications: state.publications ?? [], assetUsages: state.assetUsages ?? [], sourceEvidence: state.sourceEvidence ?? [], claimGrounding: state.claimGrounding ?? [], preferenceEvidence: state.preferenceEvidence ?? [], originalPostRehearsals: state.originalPostRehearsals ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], perceptions: state.perceptions ?? [], assetResearchSessions: state.assetResearchSessions ?? [], skills, agentSkills, contentDrops: state.contentDrops ?? [], channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], conversationEpisodes: state.conversationEpisodes ?? [], assignmentContributions: state.assignmentContributions ?? [], people: state.people ?? [], personIdentities: state.personIdentities ?? [], relationships: state.relationships ?? [], relationshipFacts: state.relationshipFacts ?? [], relationshipOpenLoops: state.relationshipOpenLoops ?? [], recommendationRecords: state.recommendationRecords ?? [], introductionRecords: state.introductionRecords ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: (state.playgroundSessions ?? []).map((session) => ({ ...session, virtualTimeMode: session.virtualTimeMode ?? "realtime", worldRevision: session.worldRevision ?? 1 })), sandboxActors: state.sandboxActors ?? [], networkSearches: state.networkSearches ?? [], networkIntroductions: state.networkIntroductions ?? [], scenarios: state.scenarios ?? [], scenarioVersions: state.scenarioVersions ?? [], scenarioRuns: state.scenarioRuns ?? [], scenarioRunProvenance: state.scenarioRunProvenance ?? [], scenarioEvaluations: state.scenarioEvaluations ?? [], knowledgeCollections: state.knowledgeCollections ?? [], knowledgeItems: state.knowledgeItems ?? [], knowledgeVersions: state.knowledgeVersions ?? [], knowledgeSegments: state.knowledgeSegments ?? [], presenceKnowledgeBindings: state.presenceKnowledgeBindings ?? [], knowledgeRetrievalRuns: state.knowledgeRetrievalRuns ?? [], knowledgeCitations: state.knowledgeCitations ?? [] };
   for (const slot of normalized.calendar) {
     if (!slot.enabled || slot.assignmentId) continue;
     const existing = normalized.assignments.find((assignment) => assignment.origin === "schedule" && assignment.presenceId === slot.presence && assignment.instruction === slot.instruction && assignment.schedule?.day === slot.day && assignment.schedule?.time === slot.time);
@@ -2846,7 +2906,7 @@ export function isExplicitXPostRequest(content: string) {
     (lower.includes("post on x") && (lower.includes("presence") || lower.includes("publish")));
 }
 
-export function formChatPostIntent(source: OpenPresenceState, text: string, standingIntentId?: string, sourceKind: "agent" | "operator" = "agent", assetIds: string[] = []) {
+export function formChatPostIntent(source: OpenPresenceState, text: string, standingIntentId?: string, sourceKind: "agent" | "operator" = "agent", assetIds: string[] = [], decisionInput?: SocialDecisionInput) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presence;
   if (!state.agent || !presence || presence.status !== "live" || presence.channel !== "x" || !text.trim()) return state;
@@ -2859,10 +2919,12 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
   const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: "x.post", publicationId: publication.id, priority: 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, standingIntentId, origin };
   if (publication.publicExpression) publication.publicExpression.socialIntentId = socialIntent.id;
   state.socialIntents.unshift(socialIntent);
+  const socialDecision = decisionInput ? createSocialDecision(state, { ...decisionInput, origin: decisionInput.origin ?? origin }, socialIntent.id) : undefined;
+  if (socialDecision) state.socialDecisions.unshift(socialDecision);
   const mode = presence.execution.post ?? "off";
   if (mode === "off") {
     state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: "skipped", reason: "Posts are off in the Presence execution envelope.", createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id });
-    state.events.unshift(event("decision", "Post intention held", "Jenny formed a social intention, but Posts are off for this Presence.", "quiet", { presenceId: presence.id, intentId: socialIntent.id }));
+    state.events.unshift(event("decision", "Post intention held", "Jenny formed a social intention, but Posts are off for this Presence.", "quiet", { presenceId: presence.id, intentId: socialIntent.id, decisionId: socialDecision?.id }));
     return state;
   }
   const bridge = presence.connectionMode === "bridge" ? bridgeFor(state, presence.id, "post") : undefined;
@@ -2877,7 +2939,7 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
   state.executions.unshift(execution);
   const reason = standingIntentId ? "Jenny evaluated a Calendar standing intention and handed the resulting Social Intent to the Presence execution envelope." : "The operator asked Jenny to introduce this Presence through the native X connector.";
   state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: publicExpressionReason ? "failed" : mode === "review" ? "review" : "queued", reason: publicExpressionReason ?? reason, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
-  state.events.unshift(event("decision", publicExpressionReason ? "Public text boundary blocked" : leakageReason ? "Identity disclosure needs review" : standingIntentId ? "A Calendar post intention was formed" : "A post intention was formed", publicExpressionReason ?? leakageReason ?? (connector ? (standingIntentId ? `${presence.name} judged the standing intention worthwhile and handed it to the native X connector.` : `${presence.name} formed an X post from the conversation and handed it to the Presence execution envelope.`) : `${presence.name} formed an X post, but no write-enabled X connector is available.`), publicExpressionReason || leakageReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id }));
+  state.events.unshift(event("decision", publicExpressionReason ? "Public text boundary blocked" : leakageReason ? "Identity disclosure needs review" : standingIntentId ? "A Calendar post intention was formed" : "A post intention was formed", publicExpressionReason ?? leakageReason ?? (connector ? (standingIntentId ? `${presence.name} judged the standing intention worthwhile and handed it to the native X connector.` : `${presence.name} formed an X post from the conversation and handed it to the Presence execution envelope.`) : `${presence.name} formed an X post, but no write-enabled X connector is available.`), publicExpressionReason || leakageReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, decisionId: socialDecision?.id }));
   return state;
 }
 
@@ -2939,7 +3001,7 @@ export function formAssignmentPostIntent(source: OpenPresenceState, text: string
   return state;
 }
 
-export function formXReplyIntent(source: OpenPresenceState, text: string, parentId: string, operatorDirectiveId?: string, assignmentId?: string, assetIds: string[] = []) {
+export function formXReplyIntent(source: OpenPresenceState, text: string, parentId: string, operatorDirectiveId?: string, assignmentId?: string, assetIds: string[] = [], decisionInput?: SocialDecisionInput) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presence;
   if (!state.agent || !presence || presence.status !== "live" || presence.channel !== "x" || !text.trim() || !parentId.trim()) return state;
@@ -2959,10 +3021,12 @@ export function formXReplyIntent(source: OpenPresenceState, text: string, parent
   const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: "x.reply", target: { type: "x.post", id: parentId }, publicationId: publication.id, priority: 60, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, origin, source: operatorDirectiveId ? "operator" : "agent", operatorDirectiveId, conversationEpisodeId, assignmentId };
   if (publication.publicExpression) publication.publicExpression.socialIntentId = socialIntent.id;
   state.socialIntents.unshift(socialIntent);
+  const socialDecision = decisionInput ? createSocialDecision(state, { ...decisionInput, focalMirrorObjectIds: decisionInput.focalMirrorObjectIds ?? (parentObject ? [parentObject.id] : []), origin: decisionInput.origin ?? origin }, socialIntent.id) : undefined;
+  if (socialDecision) state.socialDecisions.unshift(socialDecision);
   const mode = presence.execution.reply ?? "off";
   if (mode === "off") {
     state.actions.unshift({ id: id("act"), intent: "reply", target: parentId, summary: text.trim(), status: "skipped", reason: "Replies are off in the Presence execution envelope.", createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id });
-    state.events.unshift(event("decision", "Reply intention held", "Jenny formed a social intention, but Replies are off for this Presence.", "quiet", { presenceId: presence.id, intentId: socialIntent.id }));
+    state.events.unshift(event("decision", "Reply intention held", "Jenny formed a social intention, but Replies are off for this Presence.", "quiet", { presenceId: presence.id, intentId: socialIntent.id, decisionId: socialDecision?.id }));
     return state;
   }
   const nativeX = presence.connectionMode !== "bridge" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.status === "connected" && connection.access === "read-write") : undefined;
@@ -2976,12 +3040,12 @@ export function formXReplyIntent(source: OpenPresenceState, text: string, parent
   if (publicExpressionReason) execution.failure = { code: "PUBLIC_TEXT_INTERNAL_MARKER", message: publicExpressionReason, retryable: false };
   state.executions.unshift(execution);
   state.actions.unshift({ id: id("act"), intent: "reply", target: parentId, summary: text.trim(), status: publicExpressionReason ? "failed" : mode === "review" ? "review" : "queued", reason: publicExpressionReason ?? (operatorDirectiveId ? "The operator directed Jenny to enter this conversation; Jenny supplied the expression through the Presence execution envelope." : "Jenny chose to continue a relevant conversation through the Presence execution envelope."), createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
-  state.events.unshift(event("decision", publicExpressionReason ? "Public text boundary blocked" : operatorDirectiveId ? "Jenny expressed the requested reply" : "A reply intention was formed", publicExpressionReason ?? (connector ? (operatorDirectiveId ? "The operator set the social act; Jenny supplied a contextual reply for the Presence execution envelope." : "Jenny found a relevant X conversation and handed a contextual reply to the Presence execution envelope.") : "Jenny found a relevant X conversation, but no write-enabled X connector is available."), publicExpressionReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id }));
+  state.events.unshift(event("decision", publicExpressionReason ? "Public text boundary blocked" : operatorDirectiveId ? "Jenny expressed the requested reply" : "A reply intention was formed", publicExpressionReason ?? (connector ? (operatorDirectiveId ? "The operator set the social act; Jenny supplied a contextual reply for the Presence execution envelope." : "Jenny found a relevant X conversation and handed a contextual reply to the Presence execution envelope.") : "Jenny found a relevant X conversation, but no write-enabled X connector is available."), publicExpressionReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, decisionId: socialDecision?.id }));
   return state;
 }
 
 /** Form a verified live X reaction or follow through the same execution envelope as publishing. */
-export function formXActionIntent(source: OpenPresenceState, input: { affordance: "x.like" | "x.repost" | "x.quote" | "x.follow"; target: EntityRef; text?: string; assignmentId?: string; assetIds?: string[] }) {
+export function formXActionIntent(source: OpenPresenceState, input: { affordance: "x.like" | "x.repost" | "x.quote" | "x.follow"; target: EntityRef; text?: string; assignmentId?: string; assetIds?: string[]; decision?: SocialDecisionInput }) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presence;
   if (!state.agent || !presence || presence.status !== "live" || presence.channel !== "x" || !input.target.id) return state;
@@ -2997,9 +3061,12 @@ export function formXActionIntent(source: OpenPresenceState, input: { affordance
   const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: input.affordance, target: input.target, publicationId: publication?.id, priority: capability === "follow" ? 35 : 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, origin, assignmentId: input.assignmentId, environment: "live" };
   if (publication?.publicExpression) publication.publicExpression.socialIntentId = socialIntent.id;
   state.socialIntents.unshift(socialIntent);
+  const socialDecision = input.decision ? createSocialDecision(state, { ...input.decision, focalMirrorObjectIds: input.decision.focalMirrorObjectIds ?? [] , origin: input.decision.origin ?? origin }, socialIntent.id) : undefined;
+  if (socialDecision) state.socialDecisions.unshift(socialDecision);
   const mode = presence.execution[capability] ?? "off";
   if (mode === "off") {
     state.actions.unshift({ id: id("act"), intent: capability as "like" | "repost" | "quote" | "follow", target: input.target.id, summary: input.text?.trim() ?? capability, status: "skipped", reason: `${capability} is off in the Presence execution envelope.`, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id });
+    state.events.unshift(event("decision", `X ${capability} intention held`, `The Presence selected ${capability}, but that affordance is off in the execution envelope.`, "quiet", { presenceId: presence.id, intentId: socialIntent.id, decisionId: socialDecision?.id }));
     return state;
   }
   const nativeX = presence.connectionMode !== "bridge" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.access === "read-write" && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? "")))) : undefined;
@@ -3012,7 +3079,7 @@ export function formXActionIntent(source: OpenPresenceState, input: { affordance
   if (leakageReason) execution.failure = { code: "PUBLIC_TEXT_INTERNAL_MARKER", message: leakageReason, retryable: false };
   state.executions.unshift(execution);
   state.actions.unshift({ id: id("act"), intent: capability as "like" | "repost" | "quote" | "follow", target: input.target.id, summary: input.text?.trim() ?? capability, status: leakageReason ? "failed" : mode === "review" ? "review" : "queued", reason: leakageReason ?? `The Presence formed a ${capability} action through the live X execution envelope.`, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
-  state.events.unshift(event("decision", leakageReason ? "Public action blocked" : `X ${capability} intention formed`, leakageReason ?? `${capability} is ready for the authorized X connector.`, leakageReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id }));
+  state.events.unshift(event("decision", leakageReason ? "Public action blocked" : `X ${capability} intention formed`, leakageReason ?? `${capability} is ready for the authorized X connector.`, leakageReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, decisionId: socialDecision?.id }));
   return state;
 }
 

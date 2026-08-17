@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addSandboxEvent, applyOperation, assignmentIsSatisfied, cleanSandboxDraft, cleanUserFacingAssignmentInstruction, compileAssignmentInstruction, compilePresenceContext, compileWatch, createAgent, deliverSandboxExecution, defaultPublishingInitiative, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingProgress, ensureCapabilityRequests, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, identityLeakageReason, inferExplicitDurableContext, inferPresenceIdentityChange, initialState, isActivityDecisionEvent, isExplicitGhostModeRequest, isExplicitXPostRequest, isTeachProposalConfirmation, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, publicHistoryMatchesPresence, recordPublicFooting, recordStandingIntentNoOp, startPlaygroundSession, stateForContext } from "../lib/runtime";
+import { addSandboxEvent, applyOperation, assignmentIsSatisfied, cleanSandboxDraft, cleanUserFacingAssignmentInstruction, compileAssignmentInstruction, compilePresenceContext, compileWatch, createAgent, deliverSandboxExecution, defaultPublishingInitiative, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingProgress, ensureCapabilityRequests, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, formXActionIntent, identityLeakageReason, inferExplicitDurableContext, inferPresenceIdentityChange, initialState, isActivityDecisionEvent, isExplicitGhostModeRequest, isExplicitXPostRequest, isTeachProposalConfirmation, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, publicHistoryMatchesPresence, recordPublicFooting, recordSocialDecision, recordStandingIntentNoOp, startPlaygroundSession, stateForContext } from "../lib/runtime";
 import { acknowledgeExecution, claimExecutions, createBridgeWithKey, heartbeatBridge, ingestEvents, removeBridge, revokeBridge } from "../lib/bridge";
 import { readBridgeCredentialMetadata, readState, writeState } from "../lib/db";
 import { nextObservationAt } from "../lib/native-x";
@@ -7,6 +7,33 @@ import { nextObservationAt } from "../lib/native-x";
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
 describe("OpenPresence runtime boundaries", () => {
+  it("persists a bounded Social Decision and links it to the Activity event", () => {
+    const state = applyOperation(createAgent(input), { type: "setPresence", patch: { execution: { follow: "auto" } } });
+    const next = formXActionIntent(state, {
+      affordance: "x.follow",
+      target: { type: "x.user", id: "maya" },
+      decision: {
+        decision: "follow",
+        summary: "Maya is repeatedly contributing useful ideas in this Presence's territory.",
+        focalMirrorObjectIds: ["mirror_post_1"],
+        origin: { kind: "inbound_social", refId: "post_1" },
+        influences: ["Mission", "Taste", "Current social context"],
+        confidence: "medium",
+      },
+    });
+    expect(next.socialDecisions).toHaveLength(1);
+    expect(next.socialDecisions[0]).toMatchObject({ decision: "follow", summary: "Maya is repeatedly contributing useful ideas in this Presence's territory.", focalMirrorObjectIds: ["mirror_post_1"] });
+    expect(next.socialDecisions[0]?.socialIntentId).toBe(next.socialIntents[0]?.id);
+    expect(next.events.some((event) => event.decisionId === next.socialDecisions[0]?.id)).toBe(true);
+  });
+
+  it("records NO_OP decisions without inventing a Social Intent", () => {
+    const state = createAgent(input);
+    const next = recordSocialDecision(state, { decision: "no_op", summary: "The observed cue did not open a useful exchange.", focalMirrorObjectIds: ["mirror_post_2"], origin: { kind: "inbound_social", refId: "post_2" } });
+    expect(next.socialDecisions[0]).toMatchObject({ decision: "no_op", summary: "The observed cue did not open a useful exchange.", socialIntentId: undefined });
+    expect(next.socialIntents).toHaveLength(0);
+  });
+
   it("keeps internal QA identifiers out of Sandbox publications", () => {
     expect(cleanSandboxDraft("A useful point. QA-TEN-RUN-2026-08-14")).toBe("A useful point.");
     expect(cleanSandboxDraft("QA-ONE-2026-08-14")).toBe("");
