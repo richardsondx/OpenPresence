@@ -567,6 +567,19 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.nativeConnections[0]?.healthMessage).toBeUndefined();
   });
 
+  it("does not quarantine every native capability for a generic action rejection", () => {
+    let state = createAgent(input);
+    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "jenny_ai", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    state = markNativeConnectionNeedsAttention(state, state.presence!.id, "X rejected this action: You are not permitted to perform this action.");
+    expect(state.nativeConnections[0]?.status).toBe("connected");
+    expect(state.nativeConnections[0]?.deliveryError).toContain("not permitted");
+    expect(state.nativeConnections[0]?.healthMessage).toBeUndefined();
+    const manifest = derivePresenceCapabilityManifest(state, state.presence!.id);
+    expect(manifest.items.find((item) => item.capability === "post")).toMatchObject({ availability: "available", provider: "Native X" });
+    expect(manifest.items.find((item) => item.capability === "reply")).toMatchObject({ availability: "available", provider: "Native X" });
+    expect(manifest.items.find((item) => item.capability === "follow")).toMatchObject({ availability: "available", provider: "Native X" });
+  });
+
   it("pauses the Presence deterministically", () => {
     const state = createAgent(input);
     const paused = applyOperation(state, { type: "setPresence", patch: { status: "paused" } });

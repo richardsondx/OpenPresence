@@ -146,7 +146,7 @@ describe("continuous growth responsibility", () => {
     expect(post).toMatchObject({ availability: "available", provider: "Native X", canExecute: true, requiresBrowser: false });
   });
 
-  it("keeps API evidence primary when native writes need attention", () => {
+  it("keeps API evidence primary when one native delivery is rejected", () => {
     const state = fixture();
     const presence = { ...state.presence!, connectionMode: "bridge" as const };
     const now = new Date().toISOString();
@@ -154,15 +154,15 @@ describe("continuous growth responsibility", () => {
       ...state,
       presence,
       presences: [presence],
-      nativeConnections: [{ id: "native-x", presenceId: presence.id, channelId: "x" as const, kind: "x" as const, status: "needs-attention" as const, access: "read-write" as const, healthMessage: "X rejected this action: You are not permitted to perform this action.", observation: { status: "up-to-date" as const, lastObservedAt: now }, account: { id: "account-1", username: "genny", name: "Genny" }, createdAt: now, updatedAt: now }],
+      nativeConnections: [{ id: "native-x", presenceId: presence.id, channelId: "x" as const, kind: "x" as const, status: "connected" as const, access: "read-write" as const, deliveryError: "X rejected this action: You are not permitted to perform this action.", observation: { status: "up-to-date" as const, lastObservedAt: now }, account: { id: "account-1", username: "genny", name: "Genny" }, createdAt: now, updatedAt: now }],
       bridges: [{ id: "bridge-x", presenceId: presence.id, channelId: "x" as const, name: "OpenPresence Chrome", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: now, capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: ["followers", "public_metrics"] }, createdAt: now, updatedAt: now }],
     };
     const manifest = derivePresenceCapabilityManifest(next, presence.id);
     expect(manifest.items.find((item) => item.capability === "follower_measurement")).toMatchObject({ availability: "available", provider: "Native X", requiresBrowser: false });
     expect(manifest.items.find((item) => item.capability === "post_performance")).toMatchObject({ availability: "available", provider: "Native X", requiresBrowser: false });
-    expect(manifest.items.find((item) => item.capability === "reply")).toMatchObject({ availability: "available", provider: "Browser Bridge", requiresBrowser: true });
-    expect(manifest.items.find((item) => item.capability === "post")).toMatchObject({ provider: "Native X", limitation: expect.stringContaining("write access needs attention") });
-    expect(capabilityProviderLabel(next, presence.id, manifest.items.find((item) => item.capability === "post")!)).toBe("Native X · write needs attention");
+    expect(manifest.items.find((item) => item.capability === "reply")).toMatchObject({ availability: "available", provider: "Native X", requiresBrowser: false });
+    expect(manifest.items.find((item) => item.capability === "post")).toMatchObject({ availability: "available", provider: "Native X", canExecute: true });
+    expect(capabilityProviderLabel(next, presence.id, manifest.items.find((item) => item.capability === "post")!)).toBe("Native X");
     expect(manifest.items.find((item) => item.capability === "message")).toMatchObject({ provider: "Native X", limitation: expect.stringContaining("does not currently expose") });
     expect(capabilityProviderLabel(next, presence.id, manifest.items.find((item) => item.capability === "message")!)).toBe("Native X · not supported");
   });

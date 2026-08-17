@@ -59,7 +59,7 @@ import { validateScenarioFidelity } from "@/lib/scenarios";
 import { cleanMirrorText, normalizeMirrorAuthor } from "@/lib/mirror-content";
 import { languagesMatch } from "@/lib/language-policy";
 import { isCognitionEligibleMirrorObject } from "@/lib/social-context";
-import { assignmentIsOpen, audienceDeltas, capabilityProviderLabel, cleanUserFacingAssignmentInstruction, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence } from "@/lib/runtime";
+import { assignmentIsOpen, audienceDeltas, capabilityProviderLabel, cleanUserFacingAssignmentInstruction, collapseAudienceSnapshots, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence } from "@/lib/runtime";
 import type {
   CalendarSlot,
   Assignment,
@@ -6712,7 +6712,7 @@ function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; muta
   if (!presence) return <div className="page"><PageHeader eyebrow="Growth" title="No Presence selected" description="Select a Presence before reviewing growth evidence." /></div>;
   const assignment = clockAssignment;
   const deltas = audienceDeltas(state, presence.id);
-  const snapshots = state.audienceSnapshots.filter((item) => item.presenceId === presence.id).sort((left, right) => right.observedAt.localeCompare(left.observedAt));
+  const snapshots = collapseAudienceSnapshots(state.audienceSnapshots.filter((item) => item.presenceId === presence.id));
   const latest = snapshots[0];
   const publicationSnapshots = state.publicationMetricSnapshots.filter((item) => item.presenceId === presence.id).sort((left, right) => right.observedAt.localeCompare(left.observedAt));
   const latestPublicationSnapshot = publicationSnapshots[0];

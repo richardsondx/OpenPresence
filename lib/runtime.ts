@@ -19,6 +19,35 @@ const id = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 
 const channelName = (channel: ChannelId) => channel === "x" ? "X" : channel === "linkedin" ? "LinkedIn" : channel === "substack" ? "Substack" : channel;
 const providerName = (provider: import("./types").ModelProvider) => provider === "openai" ? "OpenAI" : provider === "openrouter" ? "OpenRouter" : provider === "ollama" ? "Ollama" : provider === "anthropic" ? "Anthropic" : provider === "gemini" ? "Gemini" : provider === "custom" ? "Custom" : provider;
 
+/**
+ * Native X can poll more frequently than the meaningful evidence cadence. Keep
+ * one representative for an unchanged reading in a short polling burst, but
+ * preserve the next normal poll and every actual audience change.
+ */
+export const AUDIENCE_SNAPSHOT_DEDUP_WINDOW_MS = 2 * 60_000;
+
+function sameAudienceSnapshotReading(left: PresenceAudienceSnapshot, right: PresenceAudienceSnapshot) {
+  return left.presenceId === right.presenceId
+    && left.channel === right.channel
+    && left.followers === right.followers
+    && left.following === right.following
+    && left.source === right.source
+    && left.observationStatus === right.observationStatus
+    && left.environment === right.environment;
+}
+
+/** Collapse legacy repeated polls for operator-facing evidence lists. */
+export function collapseAudienceSnapshots(snapshots: PresenceAudienceSnapshot[]) {
+  const ordered = [...snapshots].sort((left, right) => new Date(right.observedAt).getTime() - new Date(left.observedAt).getTime());
+  const collapsed: PresenceAudienceSnapshot[] = [];
+  for (const snapshot of ordered) {
+    const newer = collapsed.at(-1);
+    if (newer && sameAudienceSnapshotReading(newer, snapshot) && Math.abs(new Date(newer.observedAt).getTime() - new Date(snapshot.observedAt).getTime()) <= AUDIENCE_SNAPSHOT_DEDUP_WINDOW_MS) continue;
+    collapsed.push(snapshot);
+  }
+  return collapsed;
+}
+
 function builtinChannelDefinitions(): ChannelDefinition[] {
   return (["x", "linkedin", "substack"] as const).map((channel) => ({
     id: channel,
@@ -229,7 +258,7 @@ function bridgeAdapterIsConnected(bridge: Bridge) {
 }
 
 export function latestAudienceSnapshot(source: OpenPresenceState, presenceId: string) {
-  return normalizeState(source).audienceSnapshots.filter((item) => item.presenceId === presenceId).sort((left, right) => new Date(right.observedAt).getTime() - new Date(left.observedAt).getTime())[0];
+  return collapseAudienceSnapshots(normalizeState(source).audienceSnapshots.filter((item) => item.presenceId === presenceId))[0];
 }
 
 export function audienceDeltas(source: OpenPresenceState, presenceId: string) {
@@ -880,10 +909,13 @@ export function markNativeConnectionNeedsAttention(source: OpenPresenceState, pr
 // connection itself is unhealthy. Keep the connector available for unrelated
 // actions such as original posts while retaining the delivery error for review.
 export function nativeDeliveryFailureIsConnectionScoped(message: string) {
-  // A target-policy rejection means the requested interaction is not allowed
-  // for that post. It does not invalidate credentials or original-post
-  // delivery, so keep the native connection healthy for unrelated actions.
-  return /no API credits remaining|temporarily rate-limited|you can only reply to or quote posts where you are mentioned or are the author/i.test(message);
+  // A delivery rejection is evidence about the attempted public act, not
+  // automatically evidence that the authenticated connector is unusable. X
+  // returns the same generic 403 wording for several action-level failures,
+  // including replies that the account is not allowed to make. Keep the
+  // connection available for unrelated actions and retain the failure on the
+  // execution/activity record instead of disabling every write capability.
+  return /no API credits remaining|temporarily rate-limited|you can only reply to or quote posts where you are mentioned or are the author|x rejected this action:.*not permitted/i.test(message);
 }
 
 /**
@@ -1150,7 +1182,8 @@ function createGrowthReview(source: OpenPresenceState, assignment: Assignment, k
   const periodDays = kind === "strategic" ? 28 : 7;
   const periodEnd = nowDate.toISOString();
   const periodStart = new Date(nowDate.getTime() - periodDays * 86_400_000).toISOString();
-  const audienceSnapshotIds = state.audienceSnapshots.filter((snapshot) => snapshot.presenceId === assignment.presenceId).map((snapshot) => snapshot.id);
+  const audienceSnapshots = collapseAudienceSnapshots(state.audienceSnapshots.filter((snapshot) => snapshot.presenceId === assignment.presenceId));
+  const audienceSnapshotIds = audienceSnapshots.map((snapshot) => snapshot.id);
   const recentMetricIds = state.publicationMetricSnapshots.filter((snapshot) => snapshot.presenceId === assignment.presenceId && new Date(snapshot.observedAt).getTime() >= new Date(periodStart).getTime()).map((snapshot) => snapshot.id);
   const currentEvidenceIds = new Set([...audienceSnapshotIds, ...recentMetricIds]);
   const recent = state.growthReviews.find((item) => item.assignmentId === assignment.id && item.kind === kind && Date.now() - new Date(item.createdAt).getTime() < 86_400_000);
@@ -1172,7 +1205,7 @@ function createGrowthReview(source: OpenPresenceState, assignment: Assignment, k
   if (strongMetricCount) working.push(`${strongMetricCount} recent publication${strongMetricCount === 1 ? "" : "s"} showed at least one metric at or above 1.5× its comparable baseline.`);
   if (weakMetricCount) weak.push(`${weakMetricCount} recent publication${weakMetricCount === 1 ? "" : "s"} showed at least one metric at or below 0.75× its comparable baseline.`);
   if (!recentMetrics.length) uncertain.push("No publication-performance snapshots were available for this review.");
-  const summary = modelDecision?.summary ?? `${kind === "strategic" ? "Strategic" : "Weekly"} review completed from ${state.audienceSnapshots.filter((item) => item.presenceId === assignment.presenceId).length} audience snapshot${state.audienceSnapshots.filter((item) => item.presenceId === assignment.presenceId).length === 1 ? "" : "s"} and ${recentMetrics.length} publication-performance snapshot${recentMetrics.length === 1 ? "" : "s"}. The current approach remains active unless repeated evidence justifies a change.`;
+  const summary = modelDecision?.summary ?? `${kind === "strategic" ? "Strategic" : "Weekly"} review completed from ${audienceSnapshots.length} audience snapshot${audienceSnapshots.length === 1 ? "" : "s"} and ${recentMetrics.length} publication-performance snapshot${recentMetrics.length === 1 ? "" : "s"}. The current approach remains active unless repeated evidence justifies a change.`;
   const reviewedWorking = modelDecision?.working?.length ? modelDecision.working : working;
   const reviewedUncertain = modelDecision?.uncertain?.length ? modelDecision.uncertain : uncertain;
   const reviewedWeak = modelDecision?.weak?.length ? modelDecision.weak : weak;
@@ -1192,7 +1225,7 @@ function createGrowthReview(source: OpenPresenceState, assignment: Assignment, k
       planChangeSummary = modelDecision.rationale ?? "The model-backed Growth Review revised the operating approach from observed evidence.";
     }
   }
-  const review: import("./types").GrowthReview = { id: id("growth-review"), assignmentId: assignment.id, presenceId: assignment.presenceId, kind, periodStart, periodEnd, summary, working: reviewedWorking, uncertain: reviewedUncertain, weak: reviewedWeak, changedPlan, planChangeSummary, assignmentPlanRevision: persistedAssignment?.plan?.revision ?? assignment.plan?.revision, evidenceIds: [...state.audienceSnapshots.filter((item) => item.presenceId === assignment.presenceId).map((item) => item.id), ...recentMetrics.map((item) => item.id)], createdAt: periodEnd, reviewSource: modelDecision ? "model" : "deterministic" };
+  const review: import("./types").GrowthReview = { id: id("growth-review"), assignmentId: assignment.id, presenceId: assignment.presenceId, kind, periodStart, periodEnd, summary, working: reviewedWorking, uncertain: reviewedUncertain, weak: reviewedWeak, changedPlan, planChangeSummary, assignmentPlanRevision: persistedAssignment?.plan?.revision ?? assignment.plan?.revision, evidenceIds: [...audienceSnapshotIds, ...recentMetrics.map((item) => item.id)], createdAt: periodEnd, reviewSource: modelDecision ? "model" : "deterministic" };
   applyGrowthInterpretation(state, persistedAssignment ?? assignment, review);
   if (persistedAssignment?.plan && !changedPlan) {
     const nextReviewAt = new Date(nowDate.getTime() + 7 * 86_400_000).toISOString();
@@ -3320,7 +3353,10 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     const presence = state.presences.find((item) => item.id === (operation.presenceId ?? state.activePresenceId)) ?? state.presence;
     if (!presence || !Number.isInteger(operation.followers) || operation.followers < 0) return state;
     const snapshot: PresenceAudienceSnapshot = { id: id("audience-snapshot"), presenceId: presence.id, channel: presence.channel, followers: operation.followers, following: operation.following, source: operation.source ?? (presence.environment === "sandbox" ? "sandbox" : "manual"), observationStatus: operation.observationStatus ?? "observed", observedAt: operation.observedAt ?? now(), environment: presence.environment };
-    if (!state.audienceSnapshots.some((item) => item.presenceId === snapshot.presenceId && item.observedAt === snapshot.observedAt && item.followers === snapshot.followers)) state.audienceSnapshots.unshift(snapshot);
+    const latest = collapseAudienceSnapshots(state.audienceSnapshots.filter((item) => item.presenceId === snapshot.presenceId))[0];
+    const unchangedPollingBurst = latest && sameAudienceSnapshotReading(latest, snapshot) && Math.abs(new Date(latest.observedAt).getTime() - new Date(snapshot.observedAt).getTime()) <= AUDIENCE_SNAPSHOT_DEDUP_WINDOW_MS;
+    if (unchangedPollingBurst) return state;
+    state.audienceSnapshots.unshift(snapshot);
     const growthAssignment = growthAssignmentFor(state, presence.id);
     if (growthAssignment && assignmentIsSatisfied(growthAssignment, state)) {
       growthAssignment.status = "completed";
