@@ -549,6 +549,23 @@ describe("OpenPresence runtime boundaries", () => {
     expect(deriveActivitySummary(state).current.label).toBe("X connection needs attention");
   });
 
+  it("requeues the same failed execution when the operator retries it", () => {
+    let state = createAgent(input);
+    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "jenny_ai", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    state = formChatPostIntent(state, "A useful first point of view.");
+    const execution = state.executions[0]!;
+    const originalIntentId = execution.socialIntentId;
+    const originalIntentCount = state.socialIntents.length;
+    state = failNativeExecution(state, execution.id, "X temporarily rejected this action.");
+
+    state = applyOperation(state, { type: "retryExecution", id: execution.id });
+
+    expect(state.executions[0]).toMatchObject({ id: execution.id, socialIntentId: originalIntentId, status: "queued" });
+    expect(state.executions[0]?.failure).toBeUndefined();
+    expect(state.socialIntents).toHaveLength(originalIntentCount);
+    expect(state.events[0]?.title).toBe("Retry requested");
+  });
+
   it("keeps the Social Mirror connected when delivery is blocked by X billing", () => {
     let state = createAgent(input);
     state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "jenny_ai", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];

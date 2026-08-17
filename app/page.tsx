@@ -5855,12 +5855,15 @@ const isPublicPostExecution = (execution: OpenPresenceState["executions"][number
 function RecentPublicAttempts({
   state,
   executions,
+  mutate,
   onContext,
 }: {
   state: OpenPresenceState;
   executions: OpenPresenceState["executions"];
+  mutate: Mutate;
   onContext?: (object: MirrorObject) => void;
 }) {
+  const [retryingExecutionId, setRetryingExecutionId] = useState<string | null>(null);
   const presenceId = executions[0]?.presenceId ?? state.presence?.id;
   const latestPulse = state.events.find((event) => event.title === "Pulse completed" && event.presenceId === presenceId);
   const completedPublicAttempts = executions.filter((execution) => isPublicPostExecution(execution) && ["succeeded", "failed", "blocked", "expired"].includes(execution.status));
@@ -5903,6 +5906,7 @@ function RecentPublicAttempts({
         const externalUrl = object ? externalUrlForMirrorObject(object, object.author?.handle) : undefined;
         const timestamp = execution.executedAt ?? execution.updatedAt ?? execution.createdAt;
         const failure = !succeeded ? deliveryFailureExplanation(execution.failure, presence?.handle) : undefined;
+        const retryable = ["failed", "blocked", "expired"].includes(execution.status) && execution.failure?.retryable !== false;
         return <article className={`recent-public-attempt recent-public-attempt-${succeeded ? "succeeded" : "failed"}`} key={execution.id}>
           <div className="recent-public-attempt-topline">
             <span className="recent-public-attempt-status"><span aria-hidden="true" /> {succeeded ? "Sent" : "Not sent"}</span>
@@ -5912,8 +5916,22 @@ function RecentPublicAttempts({
           <p>{expressionText(execution, object)}</p>
           <div className="recent-public-attempt-footer">
             <span>{succeeded ? "Verified channel outcome" : failure?.title ?? "Delivery failed"}</span>
-            {object && onContext && <button type="button" onClick={() => onContext(object)}>View post</button>}
-            {externalUrl && <a href={externalUrl} target="_blank" rel="noreferrer">Open on X</a>}
+            <div className="recent-public-attempt-actions">
+              {retryable && <button
+                type="button"
+                className="recent-public-attempt-retry"
+                disabled={retryingExecutionId === execution.id}
+                aria-busy={retryingExecutionId === execution.id}
+                onClick={() => {
+                  setRetryingExecutionId(execution.id);
+                  void mutate({ type: "retryExecution", id: execution.id }).finally(() => setRetryingExecutionId(null));
+                }}
+              >
+                {retryingExecutionId === execution.id ? "Retrying…" : "Retry"}
+              </button>}
+              {object && onContext && <button type="button" onClick={() => onContext(object)}>View post</button>}
+              {externalUrl && <a href={externalUrl} target="_blank" rel="noreferrer">Open on X</a>}
+            </div>
           </div>
         </article>;
       })}</div> : <p className="recent-public-attempts-empty">This check did not trigger a public post or reply. Preparing actions remain in the queue above until a later check attempts them.</p>}
@@ -6066,7 +6084,7 @@ function ExecutionLedger({
             When {presence?.name ?? "this Presence"} decides a response is worth making, you&apos;ll see the source post and what happens next here.
           </p>
         </div>
-        <RecentPublicAttempts state={state} executions={executions} onContext={onContext} />
+        <RecentPublicAttempts state={state} executions={executions} mutate={mutate} onContext={onContext} />
       </div>
     );
   const needsApproval = latest.status === "awaiting-review";
@@ -6228,7 +6246,7 @@ function ExecutionLedger({
         </form>
       )}
       </div>
-      <RecentPublicAttempts state={state} executions={executions} onContext={onContext} />
+      <RecentPublicAttempts state={state} executions={executions} mutate={mutate} onContext={onContext} />
     </div>
   );
 }

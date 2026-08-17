@@ -2487,6 +2487,7 @@ const operation: z.ZodType<RuntimeOperation> = z.discriminatedUnion("type", [
   z.object({ type: z.literal("cancelAssignment"), id: z.string().min(1) }),
   z.object({ type: z.literal("runSlot"), id: z.string().min(1), scheduled: z.boolean().optional() }),
   z.object({ type: z.literal("approveExecution"), id: z.string().min(1) }),
+  z.object({ type: z.literal("retryExecution"), id: z.string().min(1) }),
   z.object({ type: z.literal("executeIntent"), id: z.string().min(1) }),
   z.object({ type: z.literal("confirmAutoMode"), presenceId: z.string().min(1), capabilities: z.array(z.string().trim().min(1).max(80)).min(1).max(20), executionIds: z.array(z.string().min(1)).max(100) }),
   z.object({ type: z.literal("approveSandboxIntroduction"), id: z.string().min(1) }),
@@ -2889,6 +2890,18 @@ export async function POST(request: Request) {
         writeState(next);
         return NextResponse.json(next);
       }
+    }
+    if (parsed.type === "retryExecution") {
+      let next = applyOperation(current, parsed);
+      const execution = next.executions.find((item) => item.id === parsed.id);
+      if (execution?.connector === "native" && ["queued", "approved"].includes(execution.status)) {
+        next = await deliverNativeExecutions(next, new Set([execution.id]));
+      } else if (execution?.connector === "simulated" && execution.status === "queued") {
+        next = deliverSandboxExecution(next, execution.id);
+      }
+      next = recordCapabilityFeedback(current, next, execution?.presenceId);
+      writeState(next);
+      return NextResponse.json(next);
     }
     if (parsed.type === "confirmAutoMode") {
       let next = confirmAutoMode(current, parsed.presenceId, parsed.capabilities, parsed.executionIds);

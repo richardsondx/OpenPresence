@@ -1490,9 +1490,12 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .recent-public-attempt > p { margin: 0; overflow: hidden; color: var(--muted); font-size: 10px; line-height: 1.45; text-overflow: ellipsis; white-space: nowrap; }
 .recent-public-attempt-footer { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; padding-top: 8px; border-top: 1px solid #f0ece7; color: var(--faint); font: 9px "DM Mono", monospace; }
 .recent-public-attempt-footer span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
-.recent-public-attempt-footer button, .recent-public-attempt-footer a { margin-left: auto; border: 0; background: transparent; color: #8c5535; font: inherit; text-decoration: none; cursor: pointer; }
-.recent-public-attempt-footer a { margin-left: 0; }
+.recent-public-attempt-actions { display: inline-flex; align-items: center; flex-wrap: wrap; gap: 10px; margin-left: auto; }
+.recent-public-attempt-footer button, .recent-public-attempt-footer a { border: 0; background: transparent; color: #8c5535; font: inherit; text-decoration: none; cursor: pointer; }
 .recent-public-attempt-footer button:hover, .recent-public-attempt-footer a:hover { color: var(--ink); text-decoration: underline; }
+.recent-public-attempt-footer button:disabled { color: var(--faint); cursor: wait; text-decoration: none; }
+.recent-public-attempt-retry { padding: 3px 7px; border: 1px solid #d88861 !important; border-radius: 999px; background: #fff8f2 !important; color: #9b4e2e !important; }
+.recent-public-attempt-retry:hover { background: #fdf0e7 !important; text-decoration: none !important; }
 .recent-public-attempts-empty { margin: 0; padding: 14px; border: 1px dashed #e1c9b7; border-radius: 8px; color: var(--muted); font-size: 10px; line-height: 1.5; }
 .execution-ledger .section-heading { margin-bottom: 13px; }
 .execution-ledger .section-heading h3 { font-size: 18px; }
