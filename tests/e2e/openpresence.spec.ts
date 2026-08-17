@@ -1,4 +1,6 @@
 import { expect, test } from "@playwright/test";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 
 test.beforeEach(async ({ request }) => {
   const response = await request.post("/api/state", { data: { type: "reset" } });
@@ -211,6 +213,36 @@ test("Presence Chat speaks as the selected public self without teaching the Agen
   await expect(page.getByText("Start the rehearsal.", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Add a post to the scene, or choose Reply on a post to continue its thread. Nothing publishes or changes the Agent during this rehearsal.", { exact: true })).toBeVisible();
   expect(duplicateKeyErrors).toEqual([]);
+});
+
+test("Presence Chat renders video attachments as playable video", async ({ page, request }) => {
+  await createAgent(page);
+  await navigate(page, "Chat");
+  const initialState = await (await request.get("/api/state")).json();
+  const session = initialState.presenceChatSessions[0];
+  expect(session).toBeTruthy();
+  const videoDataUrl = `data:video/mp4;base64,${readFileSync(resolve("scenarios/fixtures/agent-demo.mp4")).toString("base64")}`;
+
+  await page.route("**/api/state", async (route) => {
+    if (route.request().method() !== "POST" || (route.request().postDataJSON() as { type?: string }).type !== "sendPresenceChatMessage") {
+      await route.continue();
+      return;
+    }
+    const body = route.request().postDataJSON() as { content: string };
+    const now = new Date().toISOString();
+    const next = structuredClone(initialState);
+    next.presenceChatSessions[0].messages = [
+      { id: "video-user-message", role: "user", content: body.content, timestamp: now, attachments: [{ id: "video-attachment", name: "agent-demo.mp4", kind: "video", mimeType: "video/mp4", dataUrl: videoDataUrl, perception: { observation: "A short blue-and-white chart animation.", uncertainty: "low" } }] },
+      { id: "video-presence-reply", role: "presence", content: "I can inspect the video and describe what is visible.", timestamp: now },
+    ];
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(next) });
+  });
+
+  await page.getByLabel("Attach asset").locator("input[type=file]").setInputFiles(resolve("scenarios/fixtures/agent-demo.mp4"));
+  await page.getByLabel("Post for Jenny to encounter").fill("Describe exactly what you can see.");
+  await page.getByRole("button", { name: "Send post" }).click();
+  await expect(page.locator("video[aria-label='Attached video']")).toBeVisible();
+  await expect(page.locator("img[alt='Attached video']")).toHaveCount(0);
 });
 
 test("Presence Chat makes a specific, consent-aware introduction judgment", async ({ page }) => {

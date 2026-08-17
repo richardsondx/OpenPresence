@@ -4469,7 +4469,7 @@ function PresenceChatView({
                   <p>{item.content}</p>
                   {item.attachments?.map((attachment) => (
                     <div className="presence-chat-attachment" key={attachment.id}>
-                      {attachment.dataUrl && attachment.kind !== "document" ? <Image unoptimized width={180} height={110} src={attachment.dataUrl} alt={`Attached ${attachment.kind}`} /> : <span className="social-link-asset">{attachment.sourceUrl ?? attachment.name}</span>}
+                      {attachment.dataUrl && attachment.kind === "video" ? <video className="presence-chat-attachment-video" controls playsInline preload="metadata" src={attachment.dataUrl} aria-label="Attached video" /> : attachment.dataUrl && attachment.kind !== "document" ? <Image unoptimized width={180} height={110} src={attachment.dataUrl} alt={`Attached ${attachment.kind}`} /> : <span className="social-link-asset">{attachment.sourceUrl ?? attachment.name}</span>}
                       <details>
                         <summary>What {presence.name} sees</summary>
                         <p>{attachment.perception?.observation ?? "Not inspected. The Presence must not infer this asset's contents."}</p>
