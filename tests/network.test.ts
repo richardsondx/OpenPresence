@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { networkSearchInstruction, searchNetwork, searchSandboxNetwork } from "../lib/network";
-import { relationshipProjection } from "../lib/network-memory";
+import { normalizePersonIdentityScopes, relationshipIdentity, relationshipProjection } from "../lib/network-memory";
 import type { SandboxActor } from "../lib/types";
 import { addSandboxEvent, applyOperation, createAgent, deliverSandboxExecution, formSandboxIntent, recordSandboxNetworkSearch, startPlaygroundSession } from "../lib/runtime";
 
@@ -132,5 +132,37 @@ describe("sandbox network search", () => {
     state = applyOperation(state, { type: "correctRelationshipFact", relationshipId, statement: "Maya prefers product research conversations." });
     expect(relationshipProjection(state, state.people[0]!.id, state.presence!.id)?.facts).toHaveLength(1);
     expect(relationshipProjection(state, state.people[0]!.id, state.presence!.id, true)?.facts).toHaveLength(0);
+  });
+
+  it("keeps Sandbox relationship identities out of the live Presence scope", () => {
+    let state = createAgent({ name: "Jenny", description: "Connect thoughtful builders.", mode: "agent", handle: "@jenny_ai", accent: "#D68754" });
+    state = applyOperation(state, { type: "setPresence", patch: { connectionMode: "native", execution: { reply: "auto" } } });
+    state = startPlaygroundSession(state);
+    const session = state.playgroundSessions[0]!;
+    state = addSandboxEvent(state, { sessionId: session.id, actionId: "post", actorName: "Maya Chen", actorHandle: "@mayachen", content: "A useful simulated contribution worth answering.", language: "en" });
+    const inbound = state.mirrorObjects[0]!;
+    const actorId = inbound.author!.externalRef!.id;
+    state = formSandboxIntent(state, { sessionId: session.id, affordance: "reply", target: inbound.externalRef, text: "That is a useful distinction." });
+    state = deliverSandboxExecution(state, state.executions[0]!.id);
+
+    const sandboxIdentity = relationshipIdentity(state, "x", actorId, state.presence!.id, "sandbox");
+    expect(sandboxIdentity?.sourceEnvironment).toBe("sandbox");
+    expect(relationshipIdentity(state, "x", actorId, state.presence!.id, "live")).toBeUndefined();
+
+    state = applyOperation(state, { type: "rememberPerson", presenceId: state.presence!.id, channel: "x", externalActorId: actorId, displayName: "Maya Chen", handle: "@mayachen" });
+    expect(state.personIdentities.filter((identity) => identity.externalActorId === actorId)).toHaveLength(2);
+    expect(relationshipIdentity(state, "x", actorId, state.presence!.id, "live")?.sourceEnvironment).toBe("live");
+  });
+
+  it("migrates legacy identities when Sandbox Mirror evidence proves their scope", () => {
+    let state = createAgent({ name: "Jenny", description: "Connect thoughtful builders.", mode: "agent", handle: "@jenny_ai", accent: "#D68754" });
+    state = startPlaygroundSession(state);
+    const session = state.playgroundSessions[0]!;
+    state = addSandboxEvent(state, { sessionId: session.id, actionId: "post", actorName: "Maya Chen", content: "A legacy simulated post.", language: "en" });
+    const legacyActorId = state.mirrorObjects[0]!.author!.externalRef!.id;
+    state.personIdentities.push({ id: "legacy-identity", personId: "legacy-person", channel: "x", externalActorId: legacyActorId, sourcePresenceId: session.presenceId, verificationMethod: "connector_verified", createdAt: new Date().toISOString() });
+    state.people.push({ id: "legacy-person", agentId: state.agent!.id, displayName: "Maya Chen", memoryState: "active", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() });
+    const normalized = normalizePersonIdentityScopes(state);
+    expect(normalized.find((identity) => identity.id === "legacy-identity")).toMatchObject({ sourceEnvironment: "sandbox", sourceSessionId: session.id });
   });
 });

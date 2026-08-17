@@ -5,7 +5,7 @@ import { DEFAULT_PRESENCE_LANGUAGE, effectiveLanguagePolicy, EMPTY_LANGUAGE_POLI
 import { createAssetPerception, createUninterpretedPerception, hasUsablePerception, mediaRequiresReview, perceptionRequirement } from "./perception";
 import { epistemicState } from "./asset-intelligence";
 import { isTestRuntime } from "./test-runtime";
-import { createRememberedPerson, evidenceRefFromMirror, factForCorrection, relationshipCurationEligible, relationshipForPerson } from "./network-memory";
+import { createRememberedPerson, evidenceRefFromMirror, factForCorrection, normalizePersonIdentityScopes, relationshipCurationEligible, relationshipForPerson } from "./network-memory";
 import { ensureConversationEpisode, settleConversationClosure, updateConversationEpisodeFromMirror } from "./conversation-episodes";
 import { createPublicExpressionCandidate, PublicationSecurityError, verifyExecutionPermit } from "./publication-security";
 import { publicExpressionLeakageReason } from "./public-expression";
@@ -231,12 +231,13 @@ export function curateRelationshipFromMirror(source: OpenPresenceState, object: 
   const externalActorId = actor?.externalRef?.id;
   const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   if (!presence || !externalActorId || !actor?.externalRef?.type) return state;
-  const existingIdentity = state.personIdentities.find((identity) => identity.channel === object.channelId && identity.externalActorId === externalActorId);
+  const sourceEnvironment = object.environment ?? "live";
+  const existingIdentity = state.personIdentities.find((identity) => identity.channel === object.channelId && identity.externalActorId === externalActorId && identity.sourcePresenceId === presenceId && (identity.sourceEnvironment ?? "live") === sourceEnvironment);
   const existingPerson = existingIdentity ? state.people.find((person) => person.id === existingIdentity.personId) : undefined;
   const existingRelationship = existingPerson ? relationshipForPerson(state, existingPerson.id) : undefined;
   const occurredAt = object.occurredAt ?? object.observedAt;
   if (existingRelationship?.state === "forgotten" && existingRelationship.forgottenAt && new Date(occurredAt).getTime() <= new Date(existingRelationship.forgottenAt).getTime()) return state;
-  const remembered = createRememberedPerson({ agentId: state.agent.id, presenceId, channel: object.channelId, externalActorId, displayName: actor.displayName, handle: actor.handle, avatarUrl: actor.avatarUrl, source: "current-context" }, state.people, state.personIdentities, state.relationships);
+  const remembered = createRememberedPerson({ agentId: state.agent.id, presenceId, channel: object.channelId, externalActorId, displayName: actor.displayName, handle: actor.handle, avatarUrl: actor.avatarUrl, sourceEnvironment, sourceSessionId: object.sessionId, source: "current-context" }, state.people, state.personIdentities, state.relationships);
   const timestamp = now();
   remembered.person.memoryState = "active";
   remembered.person.forgottenAt = undefined;
@@ -247,7 +248,7 @@ export function curateRelationshipFromMirror(source: OpenPresenceState, object: 
   remembered.relationship.lastMeaningfulInteractionAt = occurredAt;
   remembered.relationship.updatedAt = timestamp;
   state.people = [remembered.person, ...state.people.filter((item) => item.id !== remembered.person.id)];
-  state.personIdentities = [remembered.identity, ...state.personIdentities.filter((item) => item.id !== remembered.identity.id && !(item.channel === remembered.identity.channel && item.externalActorId === remembered.identity.externalActorId))];
+  state.personIdentities = [remembered.identity, ...state.personIdentities.filter((item) => item.id !== remembered.identity.id && !(item.channel === remembered.identity.channel && item.externalActorId === remembered.identity.externalActorId && item.sourcePresenceId === remembered.identity.sourcePresenceId && (item.sourceEnvironment ?? "live") === (remembered.identity.sourceEnvironment ?? "live")))];
   state.relationships = [remembered.relationship, ...state.relationships.filter((item) => item.id !== remembered.relationship.id)];
   const statement = actor.displayName + " said: " + (object.content?.text?.trim().slice(0, 360) ?? "[no text]");
   const relationshipId = remembered.relationship.id;
@@ -2230,6 +2231,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   });
   normalized.bridges = (state.bridges ?? []).map(migrateLegacyXBrowserBridge);
   normalized.mirrorObjects = repairNativeReplyClassifications({ ...normalized, mirrorObjects: (state.mirrorObjects ?? []).map(normalizeMirrorObject) });
+  normalized.personIdentities = normalizePersonIdentityScopes(normalized);
   normalized.publishingPlans = state.publishingPlans ?? [];
   if (normalized.agent && normalized.scenarios.length === 0) {
     const builtins = builtinScenarioDefinitions(normalized.agent.id, normalized.presence?.channel ?? "x");
@@ -3148,12 +3150,12 @@ export function recordVerifiedFollow(source: OpenPresenceState, presenceId: stri
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   if (!state.agent || !presence || target.type !== "x.user" || !target.id) return state;
-  const remembered = createRememberedPerson({ agentId: state.agent.id, presenceId, channel: presence.channel, externalActorId: target.id, displayName: target.id.startsWith("@") ? target.id : `@${target.id}`, handle: target.id.replace(/^@/, ""), source: "current-context" }, state.people, state.personIdentities, state.relationships);
+  const remembered = createRememberedPerson({ agentId: state.agent.id, presenceId, channel: presence.channel, externalActorId: target.id, displayName: target.id.startsWith("@") ? target.id : `@${target.id}`, handle: target.id.replace(/^@/, ""), sourceEnvironment: presence.environment ?? "live", source: "current-context" }, state.people, state.personIdentities, state.relationships);
   remembered.relationship.following = true;
   remembered.relationship.state = "active";
   remembered.relationship.updatedAt = now();
   state.people = [remembered.person, ...state.people.filter((item) => item.id !== remembered.person.id)];
-  state.personIdentities = [remembered.identity, ...state.personIdentities.filter((item) => item.id !== remembered.identity.id && !(item.channel === remembered.identity.channel && item.externalActorId === remembered.identity.externalActorId))];
+  state.personIdentities = [remembered.identity, ...state.personIdentities.filter((item) => item.id !== remembered.identity.id && !(item.channel === remembered.identity.channel && item.externalActorId === remembered.identity.externalActorId && item.sourcePresenceId === remembered.identity.sourcePresenceId && (item.sourceEnvironment ?? "live") === (remembered.identity.sourceEnvironment ?? "live")))];
   state.relationships = [remembered.relationship, ...state.relationships.filter((item) => item.id !== remembered.relationship.id)];
   state.events.unshift(event("memory", "Following relationship verified", `${remembered.person.displayName} is now marked as followed from a verified X action.`, "positive", { presenceId }));
   return state;
@@ -3425,9 +3427,9 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
   if (operation.type === "rememberPerson") {
     const presence = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence;
     if (!state.agent || !presence || !operation.externalActorId.trim() || !operation.displayName.trim()) return state;
-    const remembered = createRememberedPerson({ agentId: state.agent.id, presenceId: presence.id, channel: operation.channel ?? presence.channel, externalActorId: operation.externalActorId.trim(), displayName: operation.displayName, handle: operation.handle, profileUrl: operation.profileUrl, personId: operation.personId, source: operation.source ?? "operator" }, state.people, state.personIdentities, state.relationships);
+    const remembered = createRememberedPerson({ agentId: state.agent.id, presenceId: presence.id, channel: operation.channel ?? presence.channel, externalActorId: operation.externalActorId.trim(), displayName: operation.displayName, handle: operation.handle, profileUrl: operation.profileUrl, personId: operation.personId, sourceEnvironment: presence.environment ?? "live", source: operation.source ?? "operator" }, state.people, state.personIdentities, state.relationships);
     state.people = [remembered.person, ...state.people.filter((item) => item.id !== remembered.person.id)];
-    state.personIdentities = [remembered.identity, ...state.personIdentities.filter((item) => item.id !== remembered.identity.id && !(item.channel === remembered.identity.channel && item.externalActorId === remembered.identity.externalActorId))];
+    state.personIdentities = [remembered.identity, ...state.personIdentities.filter((item) => item.id !== remembered.identity.id && !(item.channel === remembered.identity.channel && item.externalActorId === remembered.identity.externalActorId && item.sourcePresenceId === remembered.identity.sourcePresenceId && (item.sourceEnvironment ?? "live") === (remembered.identity.sourceEnvironment ?? "live")))];
     state.relationships = [remembered.relationship, ...state.relationships.filter((item) => item.id !== remembered.relationship.id)];
     state.events.unshift(event("memory", "Person remembered", `${remembered.person.displayName} is now part of this Agent's selective People memory. Remembering does not invent prior interaction history.`, "positive", { presenceId: presence.id }));
     return state;

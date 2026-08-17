@@ -355,6 +355,9 @@ export interface PersonIdentity {
   profileUrl?: string;
   avatarUrl?: string;
   sourcePresenceId: string;
+  /** Environment that established this identity. Legacy records are inferred during normalization. */
+  sourceEnvironment?: PresenceEnvironment;
+  sourceSessionId?: string;
   verificationMethod: PersonIdentityVerificationMethod;
   createdAt: string;
 }

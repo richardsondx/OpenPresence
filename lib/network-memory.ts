@@ -11,6 +11,7 @@ import type {
   RelationshipFact,
   RelationshipVisibility,
   SandboxActor,
+  PresenceEnvironment,
 } from "./types";
 import { languagesMatch } from "./language-policy";
 
@@ -25,8 +26,11 @@ export function relationshipVisibilityForMirror(object: MirrorObject): Relations
   return `presence:${object.presenceId}`;
 }
 
-export function relationshipIdentity(state: OpenPresenceState, channel: string, externalActorId: string) {
-  return state.personIdentities.find((identity) => identity.channel === channel && identity.externalActorId === externalActorId);
+export function relationshipIdentity(state: OpenPresenceState, channel: string, externalActorId: string, sourcePresenceId?: string, sourceEnvironment?: PresenceEnvironment) {
+  return state.personIdentities.find((identity) => identity.channel === channel
+    && identity.externalActorId === externalActorId
+    && (!sourcePresenceId || identity.sourcePresenceId === sourcePresenceId)
+    && (!sourceEnvironment || (identity.sourceEnvironment ?? "live") === sourceEnvironment));
 }
 
 export function relationshipForPerson(state: OpenPresenceState, personId: string) {
@@ -36,8 +40,9 @@ export function relationshipForPerson(state: OpenPresenceState, personId: string
 export function personForMirrorAuthor(state: OpenPresenceState, object: MirrorObject) {
   const externalActorId = object.author?.externalRef?.id;
   if (!externalActorId || !object.author?.externalRef?.type) return undefined;
-  return relationshipIdentity(state, object.channelId, externalActorId)
-    ? state.people.find((person) => person.id === relationshipIdentity(state, object.channelId, externalActorId)?.personId)
+  const identity = relationshipIdentity(state, object.channelId, externalActorId, object.presenceId, object.environment ?? "live");
+  return identity
+    ? state.people.find((person) => person.id === identity.personId)
     : undefined;
 }
 
@@ -64,7 +69,7 @@ export function relationshipCurationEligible(state: OpenPresenceState, object: M
 }
 
 export function relationshipStatus(state: OpenPresenceState, presence: Presence, actorId: string, displayName?: string): NetworkCandidate["relationshipStatus"] {
-  const identity = relationshipIdentity(state, presence.channel, actorId);
+  const identity = relationshipIdentity(state, presence.channel, actorId, presence.id, presence.environment ?? "live");
   const person = identity ? state.people.find((item) => item.id === identity.personId) : undefined;
   const relationship = person ? relationshipForPerson(state, person.id) : undefined;
   if (person?.memoryState === "active" && relationship?.state === "active") return "remembered";
@@ -100,22 +105,43 @@ export function relationshipHistory(state: OpenPresenceState, personId: string, 
     .slice(0, Math.max(1, Math.min(50, limit)));
 }
 
-export function createRememberedPerson(input: { agentId: string; presenceId: string; channel: string; externalActorId: string; displayName: string; handle?: string; profileUrl?: string; avatarUrl?: string; personId?: string; source: "operator" | "current-context" | "watched" }, existingPeople: Person[], existingIdentities: PersonIdentity[], existingRelationships: Relationship[]) {
+export function createRememberedPerson(input: { agentId: string; presenceId: string; channel: string; externalActorId: string; displayName: string; handle?: string; profileUrl?: string; avatarUrl?: string; personId?: string; sourceEnvironment?: PresenceEnvironment; sourceSessionId?: string; source: "operator" | "current-context" | "watched" }, existingPeople: Person[], existingIdentities: PersonIdentity[], existingRelationships: Relationship[]) {
   const timestamp = now();
-  const existingIdentity = existingIdentities.find((identity) => identity.channel === input.channel && identity.externalActorId === input.externalActorId);
+  const sourceEnvironment = input.sourceEnvironment ?? "live";
+  const existingIdentity = existingIdentities.find((identity) => identity.channel === input.channel
+    && identity.externalActorId === input.externalActorId
+    && identity.sourcePresenceId === input.presenceId
+    && (identity.sourceEnvironment ?? "live") === sourceEnvironment);
   const person = existingIdentity ? existingPeople.find((item) => item.id === existingIdentity.personId) : undefined;
   const personId = person?.id ?? input.personId ?? `person_${Math.random().toString(36).slice(2, 10)}`;
   const nextPerson: Person = person ?? { id: personId, agentId: input.agentId, displayName: input.displayName.trim(), memoryState: "active", createdAt: timestamp, updatedAt: timestamp };
   const identity: PersonIdentity = existingIdentity
-    ? { ...existingIdentity, handle: input.handle?.trim() || existingIdentity.handle, profileUrl: input.profileUrl?.trim() || existingIdentity.profileUrl, avatarUrl: input.avatarUrl?.trim() || existingIdentity.avatarUrl }
-    : { id: `person-identity_${Math.random().toString(36).slice(2, 10)}`, personId, channel: input.channel, externalActorId: input.externalActorId, handle: input.handle?.trim() || undefined, profileUrl: input.profileUrl?.trim() || undefined, avatarUrl: input.avatarUrl?.trim() || undefined, sourcePresenceId: input.presenceId, verificationMethod: input.source === "operator" ? "operator_confirmed" : "connector_verified", createdAt: timestamp };
+    ? { ...existingIdentity, handle: input.handle?.trim() || existingIdentity.handle, profileUrl: input.profileUrl?.trim() || existingIdentity.profileUrl, avatarUrl: input.avatarUrl?.trim() || existingIdentity.avatarUrl, sourceEnvironment, sourceSessionId: input.sourceSessionId ?? existingIdentity.sourceSessionId }
+    : { id: `person-identity_${Math.random().toString(36).slice(2, 10)}`, personId, channel: input.channel, externalActorId: input.externalActorId, handle: input.handle?.trim() || undefined, profileUrl: input.profileUrl?.trim() || undefined, avatarUrl: input.avatarUrl?.trim() || undefined, sourcePresenceId: input.presenceId, sourceEnvironment, sourceSessionId: input.sourceSessionId, verificationMethod: input.source === "operator" ? "operator_confirmed" : "connector_verified", createdAt: timestamp };
   const relationship = existingRelationships.find((item) => item.personId === personId) ?? { id: `relationship_${Math.random().toString(36).slice(2, 10)}`, agentId: input.agentId, personId, state: "active" as const, createdAt: timestamp, updatedAt: timestamp };
   return { person: nextPerson, identity, relationship };
 }
 
+/** Backfill legacy identities from authoritative Sandbox Mirror evidence. */
+export function normalizePersonIdentityScopes(state: OpenPresenceState) {
+  const sandboxSources = new Map<string, { sessionId?: string }>();
+  for (const object of state.mirrorObjects ?? []) {
+    const actorId = object.author?.externalRef?.id;
+    if (!actorId || object.environment !== "sandbox") continue;
+    sandboxSources.set(`${object.presenceId}:${object.channelId}:${actorId}`, { sessionId: object.sessionId });
+  }
+  return (state.personIdentities ?? []).map((identity) => {
+    if (identity.sourceEnvironment) return identity;
+    const sandboxSource = sandboxSources.get(`${identity.sourcePresenceId}:${identity.channel}:${identity.externalActorId}`);
+    return sandboxSource
+      ? { ...identity, sourceEnvironment: "sandbox" as const, sourceSessionId: identity.sourceSessionId ?? sandboxSource.sessionId }
+      : { ...identity, sourceEnvironment: "live" as const };
+  });
+}
+
 export function actorToNetworkCandidate(state: OpenPresenceState, presence: Presence, actor: SandboxActor, source: NetworkCandidate["candidateSource"] = "sandbox-directory"): NetworkCandidate {
   const actorId = actor.id;
-  const identity = relationshipIdentity(state, presence.channel, actorId);
+  const identity = relationshipIdentity(state, presence.channel, actorId, presence.id, presence.environment ?? "sandbox");
   const person = identity ? state.people.find((item) => item.id === identity.personId) : undefined;
   const relationship = person ? relationshipForPerson(state, person.id) : undefined;
   const evidence = [actor.profile?.bio, actor.profile?.location, ...(actor.profile?.roles ?? []), ...(actor.profile?.skills ?? [])].filter(Boolean) as string[];

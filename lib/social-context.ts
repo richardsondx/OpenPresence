@@ -238,7 +238,7 @@ export function buildSocialEvidenceContext(input: {
     limitation: input.networkResult.limitation,
     source: "sandbox_network_search" as const,
   } : undefined;
-  const targetIdentity = eligibleInbound?.author?.externalRef?.id ? relationshipIdentity(input.source, input.presence.channel, eligibleInbound.author.externalRef.id) : undefined;
+  const targetIdentity = eligibleInbound?.author?.externalRef?.id ? relationshipIdentity(input.source, input.presence.channel, eligibleInbound.author.externalRef.id, eligibleInbound.presenceId, eligibleInbound.environment ?? "sandbox") : undefined;
   const projection = targetIdentity ? relationshipProjection(input.source, targetIdentity.personId, input.presence.id) : undefined;
   const priorAuditEvents = input.source.events
     .filter((event) => event.sessionId === input.session.id)
