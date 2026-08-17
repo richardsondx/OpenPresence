@@ -6363,6 +6363,49 @@ function ScheduleLegend({ plan, layers }: { plan?: PublishingPlan; layers: Sched
   </div>;
 }
 
+function PublishingPlanScheduleSummary({ plan, presenceName }: { plan: PublishingPlan; presenceName: string }) {
+  const activeWindow = plan.windows.find((window) => window.status === "active") ?? plan.windows.find((window) => window.status === "future");
+  const formatPlanDateTime = (value: string) => new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: plan.timezone }).format(new Date(value));
+  const formatPlanDate = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: plan.timezone }).format(new Date(value));
+  const pace = plan.initiativeMode === "pace" && plan.operatorTarget
+    ? `About ${plan.operatorTarget.quantity} original posts per ${plan.operatorTarget.period}`
+    : plan.expectedOriginals
+      ? plan.expectedOriginals.min === plan.expectedOriginals.max
+        ? `${plan.expectedOriginals.min} possible original${plan.expectedOriginals.max === 1 ? "" : "s"} in this plan`
+        : `${plan.expectedOriginals.min}–${plan.expectedOriginals.max} possible originals in this plan`
+      : "No fixed original count";
+  const paceNote = plan.initiativeMode === "adaptive"
+    ? `${presenceName} chooses whether a window earns a publication.`
+    : "An expectation, not a forced quota; silence remains allowed.";
+  const workStatus = (status: NonNullable<PublishingPlan["currentWork"]>[number]["status"]) => status.replaceAll("_", " ");
+  const visibleWindows = plan.windows.filter((window) => !["completed", "missed", "superseded"].includes(window.status));
+  return <section className="publishing-plan-schedule-summary" aria-label="Agent publishing plan">
+    <div className="publishing-plan-schedule-header">
+      <div>
+        <SectionEyebrow>{presenceName}&apos;s current plan</SectionEyebrow>
+        <h2>{plan.initiativeMode === "adaptive" ? "An adaptive publishing pace" : "A publishing pace to work toward"}</h2>
+        <p>{plan.rationaleSummary ?? `${presenceName} is deciding what deserves to be published from the available evidence.`}</p>
+      </div>
+      <div className="publishing-plan-schedule-badge"><strong>Revision {plan.revision}</strong><span>{plan.status === "active" ? "Active plan" : plan.status}</span></div>
+    </div>
+    <div className="publishing-plan-schedule-facts">
+      <div><span>Chosen pace</span><strong>{pace}</strong><small>{paceNote}</small></div>
+      <div><span>Plan horizon</span><strong>{formatPlanDate(plan.horizonStart)}–{formatPlanDate(plan.horizonEnd)}</strong><small>{plan.timezone}</small></div>
+      <div><span>Next consideration</span><strong>{activeWindow ? `${activeWindow.purpose[0].toUpperCase()}${activeWindow.purpose.slice(1)}` : "No window queued"}</strong><small>{activeWindow ? formatPlanDateTime(activeWindow.startAt) : "The plan needs a replan."}</small></div>
+      <div><span>Reassess</span><strong>{plan.nextReassessmentAt ? formatPlanDateTime(plan.nextReassessmentAt) : "Not scheduled"}</strong><small>{plan.verifiedOriginals} verified original{plan.verifiedOriginals === 1 ? "" : "s"} in this plan</small></div>
+    </div>
+    <div className="publishing-plan-schedule-work">
+      <div className="publishing-plan-schedule-subheading"><SectionEyebrow>Current work</SectionEyebrow><span>{plan.currentWork?.length ?? 0} item{(plan.currentWork?.length ?? 0) === 1 ? "" : "s"}</span></div>
+      {plan.currentWork?.length ? <div className="publishing-plan-schedule-work-list">{plan.currentWork.map((work) => <div key={work.id}><strong>{workStatus(work.status)}</strong><span>{work.summary}</span></div>)}</div> : <p className="muted">No work item is currently recorded.</p>}
+    </div>
+    <details className="publishing-plan-schedule-details" open>
+      <summary><span>Full consideration windows</span><small>{visibleWindows.length} window{visibleWindows.length === 1 ? "" : "s"} · flexible work, not guaranteed posts</small></summary>
+      <div className="publishing-plan-schedule-window-list">{visibleWindows.map((window) => <div key={window.id}><div><strong>{window.purpose}</strong><span>{formatPlanDateTime(window.startAt)} → {formatPlanDateTime(window.endAt)}</span></div><p>{window.summary}</p><small>{window.desiredContribution ? `${window.desiredContribution.min}–${window.desiredContribution.max} possible contribution${window.desiredContribution.max === 1 ? "" : "s"}` : "No contribution count set"} · {window.status === "active" ? "Active now" : "Future"}</small></div>)}</div>
+    </details>
+    <p className="publishing-plan-schedule-note">This is {presenceName}&apos;s current working plan. It explains when the Agent may consider publishing; it does not prewrite posts or turn every window into an obligation.</p>
+  </section>;
+}
+
 function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; mutate: Mutate; setView: (view: View) => void }) {
   const presence = state.presence;
   const [countdownNow, setCountdownNow] = useState<number | null>(null);
@@ -6570,6 +6613,7 @@ function ScheduleView({
         </>}
       />
       <ScheduleLayerToolbar plan={publishingPlan} presenceName={presenceName} layers={calendarLayers} onToggle={toggleCalendarLayer} onReset={() => setCalendarLayers({ plan: true, intents: false, assignments: true })} mutate={mutate} />
+      {publishingPlan && <PublishingPlanScheduleSummary plan={publishingPlan} presenceName={presenceName} />}
       {showForm && (
         <form className="add-slot-form" onSubmit={add}>
           <label className="instruction-field">
