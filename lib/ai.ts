@@ -4,6 +4,7 @@ import { effectiveLanguagePolicy, languagePolicyGuidance, presenceLanguageGuidan
 import { isAiMockEnabled } from "./test-runtime";
 import { marketMockCandidate } from "./market-research";
 import { compileKnowledgeContext } from "./knowledge";
+import { isCognitionEligibleMirrorObject } from "./social-context";
 import type { AssetSemanticKind, Assignment, Conversation, ConversationDisposition, EvidenceNeed, GrowthReviewDecision, GrowthReviewKind, KnowledgeContextPacket, ModelProvider, OpenPresenceState, Presence, PresenceChatMessage, PublishingPlanDraft, SocialAssetKind, StoryCandidate, VisualBrief, VisualNeed } from "./types";
 
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -958,7 +959,7 @@ export async function generatePublishingPlan(state: OpenPresenceState): Promise<
   if (isAiMockEnabled()) return fallbackPublishingPlan(state);
   const presence = state.presence;
   if (!presence || presence.publishingInitiative.mode === "off") throw new AiRuntimeError("Publishing responsibility is off for this Presence.");
-  const recent = state.mirrorObjects.filter((item) => item.presenceId === presence.id && item.objectType === "post").slice(0, 12).map((item) => ({ text: item.content?.text?.slice(0, 180), occurredAt: item.occurredAt, environment: item.environment }));
+  const recent = state.mirrorObjects.filter((item) => item.presenceId === presence.id && item.objectType === "post" && isCognitionEligibleMirrorObject(item, presence.language)).slice(0, 12).map((item) => ({ text: item.content?.text?.slice(0, 180), occurredAt: item.occurredAt, environment: item.environment }));
   const context = JSON.stringify({
     mission: state.files.find((file) => file.kind === "MISSION")?.content,
     taste: state.files.find((file) => file.kind === "TASTE")?.content,

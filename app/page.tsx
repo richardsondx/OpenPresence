@@ -58,6 +58,7 @@ import { conversationStatusLabel } from "@/lib/conversation-episodes";
 import { validateScenarioFidelity } from "@/lib/scenarios";
 import { cleanMirrorText, normalizeMirrorAuthor } from "@/lib/mirror-content";
 import { languagesMatch } from "@/lib/language-policy";
+import { isCognitionEligibleMirrorObject } from "@/lib/social-context";
 import { assignmentIsOpen, audienceDeltas, cleanUserFacingAssignmentInstruction, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence } from "@/lib/runtime";
 import type {
   CalendarSlot,
@@ -2914,7 +2915,7 @@ function ScenarioLibrary({ state, mutate, presence, creating, onCreatingChange }
   const selectedRunScenario = selectedRun ? visibleScenarios.find((scenario) => scenario.id === selectedRun.scenarioId) : undefined;
   const selectedRunVersion = selectedRun ? state.scenarioVersions.find((version) => version.id === selectedRun.scenarioVersionId) : undefined;
   const selectedRunSession = selectedRun ? state.playgroundSessions.find((session) => session.id === selectedRun.playgroundSessionId) : undefined;
-  const runObjects = selectedRunSession ? state.mirrorObjects.filter((object) => object.sessionId === selectedRunSession.id).sort((left, right) => (left.occurredAt ?? left.observedAt).localeCompare(right.occurredAt ?? right.observedAt)) : [];
+  const runObjects = selectedRunSession ? state.mirrorObjects.filter((object) => object.sessionId === selectedRunSession.id && isCognitionEligibleMirrorObject(object, presence.language)).sort((left, right) => (left.occurredAt ?? left.observedAt).localeCompare(right.occurredAt ?? right.observedAt)) : [];
   const runEvents = selectedRunSession ? state.events.filter((event) => event.sessionId === selectedRunSession.id).slice(-12).reverse() : [];
   const evaluation = selectedRun ? state.scenarioEvaluations.find((item) => item.runId === selectedRun.id) : undefined;
   const run = async (operation: unknown) => { setBusy(true); try { return await mutate(operation); } finally { setBusy(false); } };
@@ -3073,7 +3074,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
   const session = state.playgroundSessions.find((item) => item.presenceId === presence?.id && item.status === "active");
   const channelDefinition = state.channelDefinitions.find((item) => item.id === presence?.channel);
   const simulation = simulationForChannel(presence?.channel ?? "x", channelDefinition);
-  const objects = session ? state.mirrorObjects.filter((item) => item.sessionId === session.id && item.channelId === session.channelId).sort((left, right) => (right.occurredAt ?? right.observedAt).localeCompare(left.occurredAt ?? left.observedAt)) : [];
+  const objects = session ? state.mirrorObjects.filter((item) => item.sessionId === session.id && item.channelId === session.channelId && Boolean(presence && isCognitionEligibleMirrorObject(item, presence.language))).sort((left, right) => (right.occurredAt ?? right.observedAt).localeCompare(left.occurredAt ?? left.observedAt)) : [];
   const sessionEvents = session ? state.events.filter((item) => item.sessionId === session.id).slice(0, 8) : [];
   const reviewCount = session ? state.executions.filter((item) => item.sessionId === session.id && item.status === "awaiting-review").length : 0;
   const actors = session ? state.sandboxActors.filter((item) => item.sessionId === session.id) : [];
@@ -3348,7 +3349,7 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
   const relationship = selected ? state.relationships.find((item) => item.personId === selected.id) : undefined;
   const facts = relationship ? state.relationshipFacts.filter((fact) => fact.relationshipId === relationship.id && !fact.validTo && !state.relationshipFacts.some((newer) => newer.supersedesFactId === fact.id)) : [];
   const loops = relationship ? state.relationshipOpenLoops.filter((loop) => loop.relationshipId === relationship.id && loop.status === "open") : [];
-  const recentHistory = selectedIdentity ? state.mirrorObjects.filter((item) => item.presenceId === presence.id && item.author?.externalRef?.id === selectedIdentity.externalActorId).sort((left, right) => (right.occurredAt ?? right.observedAt).localeCompare(left.occurredAt ?? left.observedAt)).slice(0, 8) : [];
+  const recentHistory = selectedIdentity ? state.mirrorObjects.filter((item) => item.presenceId === presence.id && item.author?.externalRef?.id === selectedIdentity.externalActorId && isCognitionEligibleMirrorObject(item, presence.language)).sort((left, right) => (right.occurredAt ?? right.observedAt).localeCompare(left.occurredAt ?? left.observedAt)).slice(0, 8) : [];
   const remember = async () => {
     if (!rememberName.trim() || !rememberExternalId.trim()) return;
     const next = await mutate({ type: "rememberPerson", presenceId: presence.id, channel: presence.channel, externalActorId: rememberExternalId.trim(), displayName: rememberName.trim(), handle: rememberHandle.trim() || undefined, source: "operator" });
@@ -3447,7 +3448,7 @@ function WatchingView({ state, mutate }: { state: OpenPresenceState; mutate: Mut
     } finally { setBusy(false); }
   };
   const selectedExploration = explorations.find((item) => item.id === selectedExplorationId) ?? explorations[0];
-  const findings = selectedExploration ? state.explorationFindings.filter((item) => item.explorationId === selectedExploration.id).slice(0, 5) : [];
+  const findings = selectedExploration ? state.explorationFindings.filter((item) => item.explorationId === selectedExploration.id && state.mirrorObjects.some((object) => object.id === item.mirrorObjectId && isCognitionEligibleMirrorObject(object, presence.language))).slice(0, 5) : [];
   const explorationSessions = selectedExploration ? state.explorationSessions.filter((item) => item.explorationId === selectedExploration.id).sort((a, b) => b.startedAt.localeCompare(a.startedAt)) : [];
   const lastExplorationSession = explorationSessions.find((item) => item.id === selectedExplorationSessionId) ?? explorationSessions[0];
   const assignment = selectedExploration?.engagement?.assignmentId ? state.assignments.find((item) => item.id === selectedExploration.engagement?.assignmentId) : undefined;
@@ -3463,7 +3464,7 @@ function WatchingView({ state, mutate }: { state: OpenPresenceState; mutate: Mut
   const setObjectiveDraft = (value: string) => {
     if (selectedExploration) setObjectiveDrafts((items) => ({ ...items, [selectedExploration.id]: value }));
   };
-  const lastRunObjects = lastExplorationSession ? (lastExplorationSession.artifactIds?.length ? state.mirrorObjects.filter((item) => item.presenceId === presence.id && lastExplorationSession.artifactIds?.includes(item.id)) : ["mirror", "native"].includes(lastExplorationSession.discoverySource) && lastExplorationSession.status !== "completed" ? state.mirrorObjects.filter((item) => item.presenceId === presence.id && item.visibility === "public" && item.objectType === "post").slice(0, 40) : []) : [];
+  const lastRunObjects = lastExplorationSession ? (lastExplorationSession.artifactIds?.length ? state.mirrorObjects.filter((item) => item.presenceId === presence.id && lastExplorationSession.artifactIds?.includes(item.id) && isCognitionEligibleMirrorObject(item, presence.language)) : ["mirror", "native"].includes(lastExplorationSession.discoverySource) && lastExplorationSession.status !== "completed" ? state.mirrorObjects.filter((item) => item.presenceId === presence.id && item.visibility === "public" && item.objectType === "post" && isCognitionEligibleMirrorObject(item, presence.language)).slice(0, 40) : []) : [];
   const lookNow = async (id: string) => { setSelectedExplorationSessionId(null); setBusyExplorationId(id); try { await mutate({ type: "lookNow", id }); } finally { setBusyExplorationId(null); } };
   const setEngagement = async (id: string, mode: "surface" | "opportunistic" | "objective") => {
     setBusyExplorationId(id);
