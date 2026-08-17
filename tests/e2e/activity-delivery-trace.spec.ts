@@ -104,3 +104,39 @@ test("Activity pipeline cards reveal the exact selected and preparing actions", 
   await expect(preparingPanel).toContainText("Preparing");
   await expect(page.getByText("This event should not appear in a scoped pipeline view.", { exact: true })).toHaveCount(0);
 });
+
+test("Activity shows the actual publication metrics behind a performance event", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Agent name").fill("Jenny");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+
+  await page.route("**/api/state**", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    const body = await response.json();
+    const presenceId = body.presence.id;
+    const sourceObjectId = "publication-evidence-source";
+    const now = new Date().toISOString();
+    body.mirrorObjects.push({ id: sourceObjectId, bridgeId: "native:evidence", presenceId, channelId: "x", externalRef: { type: "x.post", id: "evidence-post" }, objectType: "post", author: { displayName: "Boardy", handle: "boardyai" }, content: { text: "A verified publication with measurable performance." }, observedAt: now, visibility: "public", shareability: "presence-only", environment: "live" });
+    body.publicationMetricSnapshots.unshift({ id: "publication-evidence-snapshot", presenceId, mirrorObjectId: sourceObjectId, observedAt: now, publicationAgeSeconds: 7200, impressions: 2400, likes: 37, replies: 8, reposts: 4, quotes: 2, source: "native", observationStatus: "observed", baseline: { comparableCount: 5, confidence: "medium", relative: { impressions: 1.4 } } });
+    body.events.unshift({ id: "publication-evidence-event", type: "learning", title: "Publication performance observed", detail: "Performance evidence for a verified X publication is available for Growth review.", time: now, tone: "positive", presenceId, sourceObjectId });
+    await route.fulfill({ response, json: body });
+  });
+
+  await page.reload();
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  const event = page.locator(".event-row").filter({ hasText: "Publication performance observed" }).first();
+  await event.click();
+  const detail = page.locator(".activity-event-detail-panel").filter({ hasText: "Measured evidence" });
+  await expect(detail).toBeVisible();
+  await expect(detail.locator(".activity-performance-metrics")).toContainText("2,400");
+  await expect(detail.locator(".activity-performance-metrics")).toContainText("37");
+  await expect(detail.locator(".activity-performance-metrics")).toContainText("8");
+  await expect(detail.locator(".activity-performance-metrics")).toContainText("4");
+  await expect(detail.locator(".activity-performance-metrics")).toContainText("2");
+  await expect(detail).toContainText("Native X");
+  await expect(detail).toContainText("2h old");
+  await expect(detail).toContainText("5 similar publications");
+  await expect(detail).toContainText("+40% impressions vs baseline");
+});

@@ -4835,6 +4835,12 @@ function LiveView({
     return state.socialDecisions.find((entry) => linkedIntent && entry.socialIntentId === linkedIntent.id)
       ?? state.socialDecisions.find((entry) => entry.presenceId === item.presenceId && Boolean(item.sourceObjectId && entry.focalMirrorObjectIds.includes(item.sourceObjectId)));
   };
+  const publicationEvidenceForEvent = (item: OpenPresenceState["events"][number]) => {
+    if (item.title !== "Publication performance observed") return undefined;
+    return state.publicationMetricSnapshots
+      .filter((snapshot) => snapshot.presenceId === item.presenceId && (!item.sourceObjectId || snapshot.mirrorObjectId === item.sourceObjectId))
+      .sort((left, right) => new Date(right.observedAt).getTime() - new Date(left.observedAt).getTime())[0];
+  };
   const decisionTraceForEvent = (item: OpenPresenceState["events"][number]) => {
     const intent = item.intentId ? state.socialIntents.find((entry) => entry.id === item.intentId) : undefined;
     const execution = executionForActivityEvent(item);
@@ -4879,7 +4885,7 @@ function LiveView({
       : linkedIntent
         ? "No execution created"
         : "No delivery selected";
-    return { observed, judgment, delivery };
+    return { observed, judgment, delivery, performance: item.title === "Publication performance observed" ? publicationEvidenceForEvent(item) ?? null : undefined };
   };
   const relevantExecution = state.executions
     .filter((item) => !selected?.id || (item.presenceId === selected.id && (activityEnvironment === "sandbox" ? item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && activitySessionIds.has(item.sessionId))) : item.environment !== "sandbox" && !item.sessionId)))
@@ -5667,13 +5673,78 @@ function ActivityEventDetail({ text }: { text: string }) {
   );
 }
 
-function ActivityDecisionTrace({ trace }: { trace: { observed: string; judgment: string; delivery: string } }) {
+const formatPublicationAge = (seconds: number) => {
+  if (seconds < 60) return `${seconds}s old`;
+  const minutes = Math.floor(seconds / 60);
+  if (minutes < 60) return `${minutes}m old`;
+  const hours = Math.floor(minutes / 60);
+  const remainingMinutes = minutes % 60;
+  if (hours < 24) return `${hours}h${remainingMinutes ? ` ${remainingMinutes}m` : ""} old`;
+  const days = Math.floor(hours / 24);
+  return `${days}d${hours % 24 ? ` ${hours % 24}h` : ""} old`;
+};
+
+const publicationMetricSourceLabel = (source: PublicationMetricSnapshot["source"]) => {
+  if (source === "native") return "Native X";
+  if (source === "bridge") return "Browser Bridge";
+  if (source === "sandbox") return "Sandbox";
+  return "Manual observation";
+};
+
+const publicationMetricStatusLabel = (status: PublicationMetricSnapshot["observationStatus"]) => {
+  if (status === "observed") return "Verified";
+  if (status === "partial") return "Partial";
+  return "Unavailable";
+};
+
+function ActivityPerformanceEvidence({ snapshot }: { snapshot?: PublicationMetricSnapshot | null }) {
+  if (!snapshot) {
+    return (
+      <div className="activity-performance-evidence activity-performance-evidence-empty" aria-label="Measured publication evidence">
+        <div className="activity-performance-heading"><strong>Measured evidence</strong><span>Not linked</span></div>
+        <p>This event identifies a publication, but no metric snapshot is linked to it.</p>
+      </div>
+    );
+  }
+  const metrics = [
+    ["Views", snapshot.impressions],
+    ["Likes", snapshot.likes],
+    ["Replies", snapshot.replies],
+    ["Reposts", snapshot.reposts],
+    ["Quotes", snapshot.quotes],
+  ].filter(([, value]) => value !== undefined) as [string, number][];
+  const baselineMetric = snapshot.baseline?.relative.impressions;
   return (
-    <div className="activity-decision-trace" aria-label="Decision path">
-      <div><strong>Observed</strong><span>{trace.observed}</span></div>
+    <div className="activity-performance-evidence" aria-label="Measured publication evidence">
+      <div className="activity-performance-heading">
+        <div><strong>Measured evidence</strong><span>What the channel actually returned</span></div>
+        <span className={`activity-performance-status activity-performance-status-${snapshot.observationStatus}`}>{publicationMetricStatusLabel(snapshot.observationStatus)}</span>
+      </div>
+      {metrics.length ? (
+        <div className="activity-performance-metrics">
+          {metrics.map(([label, value]) => <div className="activity-performance-metric" key={label}><strong>{value.toLocaleString()}</strong><span>{label}</span></div>)}
+        </div>
+      ) : <p className="activity-performance-empty">The snapshot arrived without metric values, so there is no performance number to show.</p>}
+      <div className="activity-performance-meta">
+        <span>Observed {formatHistoryTimestamp(snapshot.observedAt)}</span>
+        <span>Publication {formatPublicationAge(snapshot.publicationAgeSeconds)}</span>
+        <span>Source {publicationMetricSourceLabel(snapshot.source)}</span>
+      </div>
+      {snapshot.baseline && <div className="activity-performance-baseline"><strong>Comparison</strong><span>{snapshot.baseline.comparableCount} similar publication{snapshot.baseline.comparableCount === 1 ? "" : "s"} · {snapshot.baseline.confidence} confidence{baselineMetric !== undefined ? ` · ${baselineMetric >= 1 ? "+" : ""}${Math.round((baselineMetric - 1) * 100)}% impressions vs baseline` : ""}</span></div>}
+    </div>
+  );
+}
+
+function ActivityDecisionTrace({ trace }: { trace: { observed: string; judgment: string; delivery: string; performance?: PublicationMetricSnapshot | null } }) {
+  return (
+    <>
+      <div className="activity-decision-trace" aria-label="Decision path">
+        <div><strong>Context</strong><span>{trace.observed}</span></div>
       <div><strong>Judgment</strong><span>{trace.judgment}</span></div>
       <div><strong>Delivery</strong><span>{trace.delivery}</span></div>
-    </div>
+      </div>
+      {trace.performance !== undefined && <ActivityPerformanceEvidence snapshot={trace.performance} />}
+    </>
   );
 }
 
