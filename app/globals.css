@@ -2160,3 +2160,20 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
   .schedule-list-legend { justify-content: flex-start; max-width: none; }
   .schedule-list-row { padding: 11px 10px 11px 8px; }
 }
+
+/* Assignments share one layer color; the objective is named on the item. */
+.schedule-list-row-assignment.objective-audience-growth,
+.schedule-list-row-assignment.objective-education,
+.schedule-list-row-assignment.objective-relationship,
+.schedule-list-row-assignment.objective-reflection,
+.schedule-list-row-assignment.objective-other { border-color: var(--line); background: #fffdfa; }
+.schedule-list-row-assignment.objective-audience-growth .schedule-list-row-mark,
+.schedule-list-row-assignment.objective-education .schedule-list-row-mark,
+.schedule-list-row-assignment.objective-relationship .schedule-list-row-mark,
+.schedule-list-row-assignment.objective-reflection .schedule-list-row-mark,
+.schedule-list-row-assignment.objective-other .schedule-list-row-mark { background: #d68754; }
+.schedule-objective-badge,
+.week-assignment-objective,
+.compact-calendar-objective { display: inline-flex; align-items: center; width: fit-content; padding: 2px 5px; border: 1px solid #e5b28d; border-radius: 999px; background: #fff0e6; color: #8b5a3c; font: 8px "DM Mono", monospace; letter-spacing: .02em; text-transform: none; }
+.week-assignment-objective { margin-top: 1px; }
+.compact-calendar-objective { justify-self: start; }
