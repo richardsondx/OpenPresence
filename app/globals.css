@@ -1009,6 +1009,22 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .mirror-health small { color: var(--muted); font-size: 10px; line-height: 1.35; }
 .mirror-health-dot { width: 7px; height: 7px; flex: 0 0 auto; border-radius: 50%; background: #8caa8e; }
 .mirror-health-warning .mirror-health-dot { background: #d88b57; }.mirror-health-offline .mirror-health-dot { background: #aaa29b; }.mirror-health-sandbox .mirror-health-dot { background: #87a8c4; }
+.bring-post-panel { display: grid; grid-template-columns: minmax(0, 1fr) minmax(380px, 500px); gap: 12px 28px; align-items: center; margin: 0 0 20px; padding: 14px 16px; border: 1px solid #e3ded7; border-radius: 12px; background: #fffdfa; }
+.sr-only { position: absolute; width: 1px; height: 1px; padding: 0; margin: -1px; overflow: hidden; clip: rect(0, 0, 0, 0); white-space: nowrap; border: 0; }
+.bring-post-copy { display: grid; gap: 4px; min-width: 0; }
+.bring-post-kicker { display: flex; align-items: center; gap: 7px; min-height: 17px; }
+.bring-post-kicker .eyebrow { margin: 0; }
+.bring-post-icon { display: inline-flex; align-items: center; justify-content: center; width: 22px; height: 22px; border-radius: 6px; background: #f7eadf; color: #b86638; }
+.bring-post-boundary-chip { margin-left: 3px; padding: 3px 7px; border: 1px solid #e9ddd3; border-radius: 999px; color: #8d7869; font: 8px "DM Mono", monospace; letter-spacing: .04em; text-transform: uppercase; }
+.bring-post-copy h2 { margin: 0; font-size: 16px; letter-spacing: -.04em; }
+.bring-post-copy p { max-width: 650px; margin: 0; color: var(--muted); font-size: 10px; line-height: 1.45; }
+.bring-post-form { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 8px; min-width: 0; }
+.bring-post-form input { width: 100%; min-height: 38px; padding: 0 10px; border: 1px solid var(--line); border-radius: 6px; background: #fff; color: var(--ink); font: 11px Manrope, sans-serif; text-transform: none; letter-spacing: normal; }
+.bring-post-form input:focus { outline: 2px solid #d88b57; outline-offset: 1px; }
+.bring-post-error { grid-column: 1 / -1; margin: -2px 0 0; color: #9b4f2f; font-size: 10px; }
+.bring-post-boundary { grid-column: 1 / -1; color: var(--faint); font: 8px/1.35 "DM Mono", monospace; }
+@media (max-width: 900px) { .bring-post-panel { grid-template-columns: 1fr; }.bring-post-form { grid-template-columns: minmax(0, 1fr) auto; } }
+@media (max-width: 560px) { .bring-post-form { grid-template-columns: 1fr; }.bring-post-form .button { justify-self: start; } }
 .history-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .history-filter, .history-date-controls { display: flex; align-items: center; gap: 8px; }
 .history-filter label { color: var(--muted); font: 9px "DM Mono", monospace; text-transform: uppercase; }

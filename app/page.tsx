@@ -4927,6 +4927,7 @@ function LiveView({
           <a className="button button-secondary activity-attention-link" href="#decision-and-action">Open review</a>
         </section>
       )}
+      {selected?.channel === "x" && <BringXPost mutate={mutate} presenceId={selected.id} presenceName={presenceName} />}
       <div className="activity-main-grid">
         <div className="activity-left-column">
           <MirrorPanel state={state} mutate={mutate} filter={selected?.id ?? "all"} channelId={selected?.channel} environment={activityEnvironment} sessionIds={activitySessionIds} onContext={setSelectedContext} />
@@ -5070,6 +5071,55 @@ function LiveView({
       </div>
       {selectedContext && <ActivityContextInspector object={selectedContext} state={state} mutate={mutate} onClose={() => setSelectedContext(null)} onOpenSettings={() => { setSelectedContext(null); setView("presence"); }} />}
     </div>
+  );
+}
+
+function BringXPost({
+  mutate,
+  presenceId,
+  presenceName,
+}: {
+  mutate: Mutate;
+  presenceId: string;
+  presenceName: string;
+}) {
+  const [url, setUrl] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!url.trim() || busy) return;
+    setBusy(true);
+    setError(null);
+    try {
+      const next = await mutate({ type: "importXPost", presenceId, url: url.trim() });
+      if (next) setUrl("");
+      else setError("The post could not be brought into view. Check the notice above and try again.");
+    } catch (reason) {
+      setError(reason instanceof Error ? reason.message : "The post could not be brought into view.");
+    } finally {
+      setBusy(false);
+    }
+  };
+  return (
+    <section className="bring-post-panel" aria-label="Bring an X post into view">
+      <div className="bring-post-copy">
+        <div className="bring-post-kicker">
+          <span className="bring-post-icon" aria-hidden="true"><ArrowUpRight size={14} /></span>
+          <SectionEyebrow>Bring into view</SectionEyebrow>
+          <span className="bring-post-boundary-chip">Observation only</span>
+        </div>
+        <h2>Give {presenceName} a post to consider</h2>
+        <p>Paste a public X link. {presenceName} decides whether to reply, act, or leave it alone.</p>
+      </div>
+      <form className="bring-post-form" onSubmit={submit}>
+        <label className="sr-only" htmlFor={`bring-post-url-${presenceId}`}>X post URL</label>
+        <input id={`bring-post-url-${presenceId}`} aria-label="X post URL" type="url" value={url} onChange={(event) => setUrl(event.target.value)} placeholder="https://x.com/boardyai/status/…" disabled={busy} />
+        <Button type="submit" variant="secondary" disabled={busy || !url.trim()}>{busy ? "Reading…" : "Bring into view"}</Button>
+      </form>
+      {error && <p className="bring-post-error" role="alert">{error}</p>}
+      <small className="bring-post-boundary">No post, reply, like, repost, or follow is created.</small>
+    </section>
   );
 }
 function MirrorPanel({
