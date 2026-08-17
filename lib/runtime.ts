@@ -2176,6 +2176,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
       ? assignment
       : { ...assignment, preflight: preflightAssignment(normalized, assignment, assignment.executionPolicy.delegationPolicy) };
   });
+  normalized.bridges = (state.bridges ?? []).map(migrateLegacyXBrowserBridge);
   normalized.mirrorObjects = repairNativeReplyClassifications({ ...normalized, mirrorObjects: (state.mirrorObjects ?? []).map(normalizeMirrorObject) });
   normalized.publishingPlans = state.publishingPlans ?? [];
   if (normalized.agent && normalized.scenarios.length === 0) {
@@ -2760,6 +2761,32 @@ export function assignmentIsSatisfied(assignment: Assignment, source?: OpenPrese
 
 function bridgeFor(state: OpenPresenceState, presenceId: string, affordance: string): Bridge | undefined { return state.bridges.find((bridge) => bridge.presenceId === presenceId && bridge.state !== "offline" && bridge.capabilities.affordances.includes(affordance)); }
 function normalizedCapabilities(input: ConnectorCapabilities): ConnectorCapabilities { return { inbound: input.inbound, reconcile: input.reconcile, affordances: [...new Set(input.affordances)], formats: [...new Set(input.formats)], metrics: [...new Set(input.metrics)], assetKinds: input.assetKinds?.length ? [...new Set(input.assetKinds)] : undefined }; }
+
+/** Upgrade the exact legacy X browser-bridge defaults to the shipped adapter surface. */
+function migrateLegacyXBrowserBridge(bridge: Bridge): Bridge {
+  if (bridge.channelId !== "x" || bridge.kind !== "bridge") return bridge;
+  const capabilities = bridge.capabilities;
+  const legacyAffordances = ["post", "reply", "repost", "quote", "like", "message"];
+  const legacyFormats = ["x.post", "x.media-post", "x.thread"];
+  const legacyMetrics = ["replies", "reactions", "posts"];
+  const sameSet = (left: string[], right: string[]) => left.length === right.length && left.every((item) => right.includes(item));
+  const isLegacyDefault = sameSet(capabilities.affordances, legacyAffordances)
+    && sameSet(capabilities.formats, legacyFormats)
+    && sameSet(capabilities.metrics, legacyMetrics)
+    && !capabilities.assetKinds?.length;
+  if (!isLegacyDefault) return bridge;
+  return {
+    ...bridge,
+    capabilities: normalizedCapabilities({
+      ...capabilities,
+      affordances: [...capabilities.affordances, "follow"],
+      formats: [...capabilities.formats, "x.reply"],
+      metrics: [...capabilities.metrics, "followers", "public_metrics"],
+      assetKinds: ["image", "video"],
+    }),
+  };
+}
+
 function makePublication(state: OpenPresenceState, text: string, format: string, source: "agent_model" | "operator_manual" | "operational" = "operational", assetIds: string[] = []): Publication {
   const presence = state.presence;
   const publication: Publication = { id: id("publication"), format, payload: { text }, assetIds: [...assetIds], links: [], publicExpression: presence ? createPublicExpressionCandidate({ state, presence, affordance: format, text, source, mediaIds: assetIds }) : undefined, createdAt: now(), environment: presence?.environment ?? "live" };

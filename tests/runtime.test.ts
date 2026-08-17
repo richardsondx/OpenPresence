@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addSandboxEvent, applyOperation, assignmentIsSatisfied, cleanSandboxDraft, cleanUserFacingAssignmentInstruction, compileAssignmentInstruction, compilePresenceContext, compileWatch, createAgent, deliverSandboxExecution, defaultPublishingInitiative, deriveActivitySummary, derivePublicHistory, derivePublishingProgress, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, identityLeakageReason, inferExplicitDurableContext, inferPresenceIdentityChange, initialState, isActivityDecisionEvent, isExplicitGhostModeRequest, isExplicitXPostRequest, isTeachProposalConfirmation, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, publicHistoryMatchesPresence, recordPublicFooting, recordStandingIntentNoOp, startPlaygroundSession, stateForContext } from "../lib/runtime";
+import { addSandboxEvent, applyOperation, assignmentIsSatisfied, cleanSandboxDraft, cleanUserFacingAssignmentInstruction, compileAssignmentInstruction, compilePresenceContext, compileWatch, createAgent, deliverSandboxExecution, defaultPublishingInitiative, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingProgress, ensureCapabilityRequests, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, identityLeakageReason, inferExplicitDurableContext, inferPresenceIdentityChange, initialState, isActivityDecisionEvent, isExplicitGhostModeRequest, isExplicitXPostRequest, isTeachProposalConfirmation, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, publicHistoryMatchesPresence, recordPublicFooting, recordStandingIntentNoOp, startPlaygroundSession, stateForContext } from "../lib/runtime";
 import { acknowledgeExecution, claimExecutions, createBridgeWithKey, heartbeatBridge, ingestEvents, removeBridge, revokeBridge } from "../lib/bridge";
 import { readBridgeCredentialMetadata, readState, writeState } from "../lib/db";
 import { nextObservationAt } from "../lib/native-x";
@@ -673,6 +673,24 @@ describe("OpenPresence runtime boundaries", () => {
       { id: "legacy-reply", bridgeId: "bridge:reply", presenceId, channelId: "x", externalRef: { type: "x.post", id: "reply-1" }, parentExternalRef: { type: "x.post", id: "parent-1" }, objectType: "post", actorPresenceId: presenceId, author: { displayName: "Jenny", handle: state.presence!.handle }, content: { text: "A contextual answer." }, occurredAt: timestamp, observedAt: timestamp, visibility: "public", shareability: "presence-only" },
     );
     expect(derivePublicHistory(state, presenceId)).toEqual(expect.arrayContaining([expect.objectContaining({ externalRef: { type: "x.post", id: "reply-1" }, kind: "reply", parentExternalRef: { type: "x.post", id: "parent-1" } })]));
+  });
+
+  it("migrates the legacy X browser Bridge declaration to the shipped adapter capabilities", () => {
+    const state = createAgent(input);
+    const presenceId = state.presence!.id;
+    const heartbeat = new Date(Date.now() - 10_000).toISOString();
+    state.presence = { ...state.presence!, connectionMode: "bridge", status: "live" };
+    state.presences = state.presences.map((presence) => presence.id === presenceId ? { ...presence, connectionMode: "bridge", status: "live" as const } : presence);
+    state.bridges = [{ id: "legacy-x-bridge", presenceId, channelId: "x", name: "OpenPresence Chrome", kind: "bridge", state: "online", adapterStatus: "connected", lastHeartbeatAt: heartbeat, lastSeenAt: heartbeat, capabilities: { inbound: true, reconcile: true, affordances: ["post", "reply", "repost", "quote", "like", "message"], formats: ["x.post", "x.media-post", "x.thread"], metrics: ["replies", "reactions", "posts"] }, createdAt: heartbeat, updatedAt: heartbeat }];
+    const manifest = derivePresenceCapabilityManifest(state, presenceId);
+    expect(manifest.items.find((item) => item.capability === "follow")).toMatchObject({ availability: "available", provider: "Browser Bridge" });
+    expect(manifest.items.find((item) => item.capability === "follower_measurement")).toMatchObject({ availability: "available", provider: "Browser Bridge" });
+    expect(manifest.items.find((item) => item.capability === "post_performance")).toMatchObject({ availability: "available", provider: "Browser Bridge" });
+    expect(manifest.items.find((item) => item.capability === "image")).toMatchObject({ availability: "available", provider: "Browser Bridge" });
+    expect(manifest.items.find((item) => item.capability === "video")).toMatchObject({ availability: "available", provider: "Browser Bridge" });
+    state.agentRequests.push({ id: "follow-request", agentId: state.agent!.id, presenceId, kind: "capability", importance: "important", title: "Follow unavailable", need: "Enable follow.", why: "The old Bridge did not advertise follow.", capability: "follow", dedupeKey: `${presenceId}:follow`, status: "open", createdAt: heartbeat, updatedAt: heartbeat });
+    ensureCapabilityRequests(state, presenceId);
+    expect(state.agentRequests.find((request) => request.id === "follow-request")?.status).toBe("resolved");
   });
 
   it("does not create public history from a successful execution without a Mirror object", () => {

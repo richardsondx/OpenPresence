@@ -7898,7 +7898,7 @@ function BridgeManager({
                     <div><span>Presence</span><strong>{presence.name}</strong><small>{presence.handle}</small></div>
                     <div><span>Channel</span><strong>{channelLabel(presence.channel, state.channelDefinitions)}</strong><small>{channel?.domain ?? "Custom destination"}</small></div>
                     <div><span>Allowed actions</span><strong>{bridge.capabilities.affordances.join(", ") || "None"}</strong><small>Governed by the Execution Envelope</small></div>
-                    <div><span>Media</span><strong>{channel?.supportedAssetKinds?.length ? `Channel: ${channel.supportedAssetKinds.join(", ")}` : "Not declared"}</strong><small>Bridge delivery: Image/GIF transfer is not supported yet</small></div>
+                    <div><span>Media</span><strong>{channel?.supportedAssetKinds?.length ? `Channel: ${channel.supportedAssetKinds.join(", ")}` : "Not declared"}</strong><small>Bridge delivery: supplied image/video assets only</small></div>
                   </div>
                   <div className="adapter-guide-actions">
                     <Button variant="secondary" onClick={() => void copy(prompt, "prompt")}>{copied === "prompt" ? "Prompt copied" : "Copy adapter instructions"}</Button>
