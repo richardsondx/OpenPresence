@@ -39,6 +39,23 @@ function firstStatusId(hrefs, excludedId) {
   return undefined;
 }
 
+function parseHumanMetric(raw) {
+  const match = String(raw || "").replace(/,/g, "").match(/(\d+(?:\.\d+)?)([KMB])?/i);
+  if (!match) return undefined;
+  const multiplier = match[2]?.toUpperCase() === "K" ? 1_000 : match[2]?.toUpperCase() === "M" ? 1_000_000 : match[2]?.toUpperCase() === "B" ? 1_000_000_000 : 1;
+  return Math.round(Number(match[1]) * multiplier);
+}
+
+function metricFromLabels(labels, name) {
+  const pattern = new RegExp(`([\\d,.]+(?:[KMB])?)\\s+${name}`, "i");
+  for (const label of labels) {
+    const match = String(label).match(pattern);
+    const value = parseHumanMetric(match?.[1]);
+    if (value !== undefined) return value;
+  }
+  return undefined;
+}
+
 async function visible(locator) {
   try { return await locator.isVisible(); } catch { return false; }
 }
@@ -51,33 +68,70 @@ async function signedIn(page) {
 }
 
 async function observeX(page) {
-  await page.goto(discoveryUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
-  if (!(await signedIn(page))) throw new Error(`The X browser session is not signed in as @${expectedHandle || "the expected account"}.`);
-  await page.waitForTimeout(1_500);
-  const articles = page.locator('article[data-testid="tweet"], article');
-  const count = Math.min(await articles.count(), 40);
   const objects = [];
-  for (let index = 0; index < count; index += 1) {
-    const article = articles.nth(index);
-    const hrefs = await article.locator('a[href*="/status/"]').evaluateAll((links) => links.map((link) => link.getAttribute("href"))).catch(() => []);
-    const id = firstStatusId(hrefs, undefined);
-    const text = (await article.innerText().catch(() => "")).trim();
-    if (!id || text.length < 3) continue;
-    const authorHandle = await article.locator('[data-testid="User-Name"] a').first().getAttribute("href").catch(() => undefined);
-    objects.push({
-      externalRef: { type: "x.post", id },
-      objectType: "post",
-      author: { displayName: authorHandle ? authorHandle.replace(/^\//, "@") : "X user", handle: authorHandle?.replace(/^\//, "") },
-      content: { text },
-      occurredAt: new Date().toISOString(),
-      visibility: "public",
-      shareability: "presence-only",
-    });
+  for (const url of [discoveryUrl, "https://x.com/notifications/mentions"]) {
+    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
+    if (!(await signedIn(page))) throw new Error(`The X browser session is not signed in as @${expectedHandle || "the expected account"}.`);
+    await page.waitForTimeout(1_500);
+    const articles = page.locator('article[data-testid="tweet"], article');
+    const count = Math.min(await articles.count(), 40);
+    for (let index = 0; index < count; index += 1) {
+      const article = articles.nth(index);
+      const hrefs = await article.locator('a[href*="/status/"]').evaluateAll((links) => links.map((link) => link.getAttribute("href"))).catch(() => []);
+      const id = firstStatusId(hrefs, undefined);
+      const text = (await article.innerText().catch(() => "")).trim();
+      if (!id || text.length < 3 || objects.some((item) => item.externalRef.id === id)) continue;
+      const authorHandle = await article.locator('[data-testid="User-Name"] a').first().getAttribute("href").catch(() => undefined);
+      const handle = authorHandle?.replace(/^\//, "");
+      objects.push({
+        externalRef: { type: "x.post", id },
+        objectType: "post",
+        author: { externalRef: handle ? { type: "x.user", id: handle } : undefined, displayName: handle ? `@${handle}` : "X user", handle },
+        content: { text },
+        occurredAt: new Date().toISOString(),
+        visibility: "public",
+        shareability: "presence-only",
+      });
+    }
   }
   if (objects.length) {
     await request("/api/bridge/v1/events", { events: objects.map((object) => ({ sourceEventId: `x-browser:${object.externalRef.id}`, event: "created", object })) });
   }
   return objects.length;
+}
+
+async function reportXMetrics(page) {
+  if (!expectedHandle) return;
+  await page.goto(`https://x.com/${encodeURIComponent(expectedHandle)}`, { waitUntil: "domcontentloaded", timeout: 45_000 });
+  if (!(await signedIn(page))) throw new Error(`The X browser session is not signed in as @${expectedHandle}.`);
+  await page.waitForTimeout(1_000);
+  const followerText = await page.locator(`a[href*="/${expectedHandle}/followers"]`).first().innerText().catch(() => "");
+  const followingText = await page.locator(`a[href*="/${expectedHandle}/following"]`).first().innerText().catch(() => "");
+  const followers = parseHumanMetric(followerText);
+  const following = parseHumanMetric(followingText);
+  const publications = [];
+  const articles = page.locator('article[data-testid="tweet"], article');
+  const count = Math.min(await articles.count(), 40);
+  for (let index = 0; index < count; index += 1) {
+    const article = articles.nth(index);
+    const hrefs = await article.locator('a[href*="/status/"]').evaluateAll((links) => links.map((link) => link.getAttribute("href"))).catch(() => []);
+    const id = firstStatusId(hrefs, undefined);
+    if (!id) continue;
+    const labels = await article.locator('button,[role="button"]').evaluateAll((buttons) => buttons.flatMap((button) => [button.getAttribute("aria-label"), button.textContent]).filter(Boolean)).catch(() => []);
+    const metrics = {
+      impressions: metricFromLabels(labels, "(?:views|impressions)"),
+      likes: metricFromLabels(labels, "likes?"),
+      replies: metricFromLabels(labels, "(?:reply|replies)"),
+      reposts: metricFromLabels(labels, "(?:reposts?|retweets?)"),
+      quotes: metricFromLabels(labels, "quotes?"),
+    };
+    const observed = Object.fromEntries(Object.entries(metrics).filter(([, value]) => value !== undefined));
+    const time = await article.locator("time").first().getAttribute("datetime").catch(() => undefined);
+    if (!Object.keys(observed).length) continue;
+    publications.push({ externalRef: { type: "x.post", id }, publicationAgeSeconds: time ? Math.max(0, Math.floor((Date.now() - new Date(time).getTime()) / 1000)) : 0, metrics: observed });
+  }
+  if (followers === undefined && following === undefined && !publications.length) return;
+  await request("/api/bridge/v1/metrics", { audience: followers === undefined ? undefined : { followers, following, observedAt: new Date().toISOString() }, publications });
 }
 
 async function publicationText(execution) {
@@ -98,6 +152,13 @@ async function publicationAssets(execution) {
   }));
 }
 
+async function attachAssets(page, assets) {
+  if (!assets.length) return;
+  const fileInput = page.locator('input[type="file"]').first();
+  if (!(await fileInput.count())) throw new Error("X did not expose a media upload control.");
+  await fileInput.setInputFiles(assets);
+}
+
 async function clickFirstVisible(locators) {
   for (const locator of locators) {
     if (await visible(locator)) { await locator.click(); return true; }
@@ -105,7 +166,7 @@ async function clickFirstVisible(locators) {
   return false;
 }
 
-async function fillReply(page, targetId, text) {
+async function fillReply(page, targetId, text, assets = []) {
   await page.goto(`https://x.com/i/web/status/${targetId}`, { waitUntil: "domcontentloaded", timeout: 45_000 });
   if (!(await signedIn(page))) throw new Error(`The X browser session is not signed in as @${expectedHandle || "the expected account"}.`);
   await page.waitForTimeout(1_000);
@@ -119,6 +180,7 @@ async function fillReply(page, targetId, text) {
   const fallbackComposer = page.getByRole("textbox", { name: /post text/i }).last();
   if (!(await clickFirstVisible([composer, fallbackComposer]))) throw new Error("X did not open a reply composer.");
   await (await visible(composer) ? composer : fallbackComposer).fill(text);
+  await attachAssets(page, assets);
   const submitted = await clickFirstVisible([
     page.locator('[data-testid="tweetButtonInline"]').last(),
     page.getByRole("button", { name: "Reply", exact: true }).last(),
@@ -142,11 +204,7 @@ async function fillComposer(page, text, assets = []) {
   const target = await visible(composer) ? composer : fallbackComposer;
   if (!(await visible(target))) throw new Error("X did not expose a post composer.");
   await target.fill(text);
-  if (assets.length) {
-    const fileInput = page.locator('input[type="file"]').first();
-    if (!(await fileInput.count())) throw new Error("X did not expose a media upload control.");
-    await fileInput.setInputFiles(assets);
-  }
+  await attachAssets(page, assets);
   const submitted = await clickFirstVisible([
     page.locator('[data-testid="tweetButtonInline"]').last(),
     page.locator('[data-testid="tweetButton"]').last(),
@@ -222,7 +280,8 @@ async function deliverQuote(page, targetId, text, assets) {
 }
 
 async function deliverFollow(page, targetId) {
-  await page.goto(`https://x.com/i/user/${targetId}`, { waitUntil: "domcontentloaded", timeout: 45_000 });
+  const targetUrl = /^\d+$/.test(targetId) ? `https://x.com/i/user/${targetId}` : `https://x.com/${targetId.replace(/^@/, "")}`;
+  await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
   if (!(await signedIn(page))) throw new Error(`The X browser session is not signed in as @${expectedHandle || "the expected account"}.`);
   await page.waitForTimeout(1_000);
   const follow = page.getByRole("button", { name: /^follow$/i }).first();
@@ -241,7 +300,7 @@ async function deliver(page, execution) {
   }
   if (execution.affordance === "x.reply") {
     if (execution.target?.type !== "x.post") throw new Error("An X reply execution is missing its x.post target.");
-    const id = await fillReply(page, execution.target.id, text);
+    const id = await fillReply(page, execution.target.id, text, assets);
     return { type: "x.post", id };
   }
   if (execution.affordance === "x.like" || execution.affordance === "x.repost" || execution.affordance === "x.quote") {
@@ -273,6 +332,8 @@ async function main() {
     if (now - lastObservation >= observeMs) {
       try { const count = await observeX(page); if (count) console.log(`Observed ${count} X post(s).`); }
       catch (error) { console.warn(error instanceof Error ? error.message : String(error)); }
+      try { await reportXMetrics(page); console.log("Reported X audience and publication metrics."); }
+      catch (error) { console.warn("X metrics unavailable:", error instanceof Error ? error.message : String(error)); }
       lastObservation = Date.now();
     }
     const result = await request("/api/bridge/v1/executions/claim", { executorId, limit: 5 });

@@ -138,11 +138,17 @@ expires, do not act on the old claim; claim the execution again.
 
 ## Media boundary
 
-The current Bridge does not provide uploadable image/GIF bytes or an asset
-retrieval route. Media is therefore not enabled for the current adapter
-contract. If an execution contains unsupported assetIds, report
-UNSUPPORTED_ASSET; never acknowledge a text-only delivery as if media was
-uploaded.
+The Bridge retrieves approved `assetIds` from the authenticated
+`/api/assets/:id` route and uploads those bytes through the channel adapter.
+The included X worker supports image/video media on original posts, replies,
+and quotes when the channel exposes the upload control. If an execution
+contains unsupported assetIds or the channel does not expose media upload,
+report `UNSUPPORTED_ASSET`; never acknowledge a text-only delivery as if
+media was uploaded.
+
+The worker also reports best-effort follower and publication metrics through
+`POST /api/bridge/v1/metrics`. Missing or unreadable metrics remain missing;
+the Bridge must not invent values.
 
 ## Browser-agent rules
 

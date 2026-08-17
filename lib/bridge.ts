@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { applyOperation, blockExecutionForLanguage, blockExecutionForTargetLanguage, curateRelationshipFromMirror, ensureCapabilityRequests, languageValidationForExecution, targetLanguageValidationForExecution } from "./runtime";
+import { applyOperation, blockExecutionForLanguage, blockExecutionForTargetLanguage, curateRelationshipFromMirror, ensureCapabilityRequests, languageValidationForExecution, recordVerifiedFollow, targetLanguageValidationForExecution } from "./runtime";
 import { authenticateBridgeKey, deleteBridgeCredential, issueBridgeKey, readBridgeCredentialMetadata, readStateForBridge, revokeBridgeKey, writeState } from "./db";
 import type { Bridge, Execution, LiveEvent, MirrorObject, OpenPresenceState, Outcome } from "./types";
 import { bridgeAdapterStatus } from "./bridge-contract";
@@ -190,7 +190,7 @@ function leasedExecution(state: OpenPresenceState, bridge: Bridge, executionId: 
 }
 
 export function acknowledgeExecution(bridge: Bridge, executionId: string, input: z.infer<typeof ackInput>) {
-  const state = readStateForBridge(bridge.id); const execution = state.executions.find((item) => item.id === executionId && item.bridgeId === bridge.id);
+  let state = readStateForBridge(bridge.id); const execution = state.executions.find((item) => item.id === executionId && item.bridgeId === bridge.id);
   if (!execution) throw new Error("Execution not found");
   if (execution.status === "succeeded") { if (execution.externalRef?.id !== input.externalRef.id || execution.externalRef?.type !== input.externalRef.type) throw new Error("Execution already acknowledged with a different external reference"); return { state, execution }; }
   leasedExecution(state, bridge, executionId, input.executorId);
@@ -227,7 +227,9 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
     return { state, execution };
   }
   execution.status = "succeeded"; execution.externalRef = input.externalRef; execution.executedAt = input.observedAt ?? timestamp(); execution.updatedAt = timestamp(); execution.lease = undefined;
-  const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, status: "succeeded", observedAt: timestamp(), metrics: {}, evidence: [input.externalRef] }; state.outcomes.unshift(outcome); state.events.unshift(bridgeEvent(state, "Bridge execution completed", "The external executor acknowledged the action.", "positive", execution.id)); touchBridge(state, bridge); writeState(state); return { state, execution };
+  const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, status: "succeeded", observedAt: timestamp(), metrics: {}, evidence: [input.externalRef] }; state.outcomes.unshift(outcome);
+  if (execution.affordance === "x.follow" && execution.target?.type === "x.user") state = recordVerifiedFollow(state, execution.presenceId, execution.target);
+  state.events.unshift(bridgeEvent(state, "Bridge execution completed", "The external executor acknowledged the action.", "positive", execution.id)); touchBridge(state, bridge); writeState(state); return { state, execution };
 }
 
 export function failExecution(bridge: Bridge, executionId: string, input: z.infer<typeof failInput>) {

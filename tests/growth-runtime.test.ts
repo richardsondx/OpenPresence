@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyOperation, audienceDeltas, compileAssignmentInstruction, completeNativeExecution, derivePresenceCapabilityManifest, formChatPostIntent, formXActionIntent, formXReplyIntent, publicationMetricBaseline } from "@/lib/runtime";
+import { applyOperation, audienceDeltas, compileAssignmentInstruction, completeNativeExecution, derivePresenceCapabilityManifest, formChatPostIntent, formXActionIntent, formXReplyIntent, publicationMetricBaseline, recordVerifiedFollow } from "@/lib/runtime";
 import { createAgent } from "@/lib/runtime";
 import type { MirrorObject, OpenPresenceState } from "@/lib/types";
 
@@ -104,6 +104,17 @@ describe("continuous growth responsibility", () => {
     expect(manifest.items.find((item) => item.capability === "follower_measurement")?.canExecute).toBe(false);
   });
 
+  it("projects connected Bridge media and measurement capabilities into runtime truth", () => {
+    const state = fixture();
+    const presenceId = state.presence!.id;
+    const heartbeat = new Date().toISOString();
+    const next = { ...state, bridges: [{ id: "bridge-x", presenceId, channelId: "x", name: "X Browser Bridge", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: heartbeat, capabilities: { inbound: true, reconcile: true, affordances: ["post", "reply", "like", "repost", "quote", "follow"], formats: ["x.post", "x.media-post", "x.reply"], metrics: ["followers", "public_metrics"], assetKinds: ["image", "video"] as ("image" | "video")[] }, createdAt: heartbeat, updatedAt: heartbeat }] };
+    const manifest = derivePresenceCapabilityManifest(next, presenceId);
+    expect(manifest.items.find((item) => item.capability === "follow")).toMatchObject({ availability: "available", provider: "Browser Bridge", canExecute: true, canVerify: true });
+    expect(manifest.items.find((item) => item.capability === "follower_measurement")).toMatchObject({ availability: "available", provider: "Browser Bridge", canObserve: true });
+    expect(manifest.items.find((item) => item.capability === "image")).toMatchObject({ availability: "available", provider: "Browser Bridge", canExecute: true });
+  });
+
   it("forms and verifies native X reactions instead of treating them as unavailable", () => {
     const state = fixture();
     state.presence!.execution.like = "auto";
@@ -115,6 +126,14 @@ describe("continuous growth responsibility", () => {
     const completed = completeNativeExecution(next, next.executions[0]!.id, { type: "x.like", id: "post-1" });
     expect(completed.executions[0]?.status).toBe("succeeded");
     expect(completed.outcomes[0]?.evidence).toEqual([{ type: "x.like", id: "post-1" }]);
+  });
+
+  it("records a verified Follow as following relationship memory", () => {
+    const state = fixture();
+    const next = recordVerifiedFollow(state, state.presence!.id, { type: "x.user", id: "builder-account" });
+    const identity = next.personIdentities.find((item) => item.externalActorId === "builder-account");
+    expect(identity).toBeDefined();
+    expect(next.relationships.find((item) => item.personId === identity?.personId)).toMatchObject({ following: true, state: "active" });
   });
 
   it("carries ready media into an autonomous live publication envelope", () => {
@@ -140,7 +159,7 @@ describe("continuous growth responsibility", () => {
   it("opens deduplicated durable requests for growth capabilities and resolves them on recovery", () => {
     const state = fixture();
     let next = applyOperation(state, { type: "createAssignment", presenceId: state.presence!.id, environment: "live", instruction: "Grow this Presence toward 100,000 followers while building an audience of AI founders." });
-    expect(next.agentRequests.filter((item) => item.kind === "capability").map((item) => item.capability)).toEqual(expect.arrayContaining(["follower_measurement", "post_performance"]));
+    expect(next.agentRequests.filter((item) => item.kind === "capability").map((item) => item.capability)).toEqual(expect.arrayContaining(["follower_measurement", "post_performance", "follow", "image", "video"]));
     const request = next.agentRequests.find((item) => item.capability === "follower_measurement")!;
     next = applyOperation(next, { type: "updateAgentRequest", id: request.id, status: "accepted" });
     expect(next.agentRequests.find((item) => item.id === request.id)?.status).toBe("accepted");

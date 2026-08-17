@@ -130,7 +130,7 @@ export interface GrowthFileVersion {
   changeSummary: string;
   createdAt: string;
 }
-export type AgentRequestKind = "capability" | "growth_review" | "operator_decision" | "connector";
+export type AgentRequestKind = "capability" | "knowledge" | "permission" | "growth_review" | "operator_decision" | "connector";
 export type AgentRequestStatus = "open" | "accepted" | "rejected" | "resolved" | "snoozed";
 export interface AgentRequest {
   id: string;
@@ -363,6 +363,7 @@ export interface Relationship {
   id: string;
   agentId: string;
   personId: string;
+  following?: boolean;
   firstMeaningfulInteractionAt?: string;
   lastMeaningfulInteractionAt?: string;
   state: RelationshipMemoryState;

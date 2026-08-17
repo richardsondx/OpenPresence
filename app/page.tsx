@@ -7093,7 +7093,7 @@ function PresenceView({
                 <label>Channel name<input aria-label="Channel name" value={channelNameDraft} onChange={(event) => setChannelNameDraft(event.target.value)} maxLength={120} /></label>
                 <label>Destination URL<input aria-label="Channel destination" type="url" value={channelDomainDraft} onChange={(event) => setChannelDomainDraft(event.target.value)} placeholder="https://www.skool.com/saaspreneur-academy" /></label>
                 <fieldset className="channel-edit-capabilities"><legend>Channel actions</legend><div>{channelDefinition.affordances.map((item) => <label key={item.id}><input type="checkbox" checked={channelAffordancesDraft.some((current) => current.id === item.id)} onChange={() => toggleChannelAffordance(item.id)} /><span><strong>{item.label}</strong><small>{item.description}</small></span></label>)}</div></fieldset>
-                <fieldset className="channel-edit-capabilities"><legend>Channel media support</legend><div>{(["image", "gif"] as SocialAssetKind[]).map((kind) => <label key={kind}><input type="checkbox" checked={channelAssetsDraft.includes(kind)} onChange={() => toggleChannelAsset(kind)} /><span><strong>{kind === "image" ? "Images" : "GIFs"}</strong><small>Supported by this destination. Bridge uploads are not available yet.</small></span></label>)}</div><p className="form-hint">Image/GIF uploads are not available through the Bridge yet. Media executions will be rejected until asset transfer is implemented.</p></fieldset>
+              <fieldset className="channel-edit-capabilities"><legend>Channel media support</legend><div>{(["image", "gif"] as SocialAssetKind[]).map((kind) => <label key={kind}><input type="checkbox" checked={channelAssetsDraft.includes(kind)} onChange={() => toggleChannelAsset(kind)} /><span><strong>{kind === "image" ? "Images" : "GIFs"}</strong><small>Supported by this destination. The connected adapter must advertise the matching media capability.</small></span></label>)}</div><p className="form-hint">Media delivery uses the common asset route when the active Native or Browser Bridge connector advertises the selected type.</p></fieldset>
                 <div className="inline-form-actions"><Button type="button" variant="primary" disabled={!channelNameDraft.trim()} onClick={saveChannel}><Check size={14} /> Save Channel</Button></div>
               </div>
             )}
@@ -7677,13 +7677,23 @@ function BridgeManager({
     observed: state.mirrorObjects.some((item) => item.bridgeId === bridge.id && item.presenceId === presence.id),
     acknowledged: state.executions.some((item) => item.bridgeId === bridge.id && item.presenceId === presence.id && item.status === "succeeded"),
   } : { checkedIn: false, observed: false, acknowledged: false };
-  const bridgeCapabilities = bridge?.capabilities ?? {
+  const defaultBridgeCapabilities = presence.channel === "x" ? {
+    inbound: true,
+    reconcile: true,
+    affordances: ["post", "reply", "like", "repost", "quote", "follow"],
+    formats: ["x.post", "x.media-post", "x.reply"],
+    metrics: ["followers", "public_metrics"],
+    assetKinds: ["image", "video"] as SocialAssetKind[],
+  } : {
     inbound: true,
     reconcile: true,
     affordances: presence.capabilities.map((item) => item.id),
     formats: channel?.formats.map((item) => item.id) ?? [],
     metrics: ["replies", "reactions"],
-    assetKinds: [],
+    assetKinds: [] as SocialAssetKind[],
+  };
+  const bridgeCapabilities = bridge?.capabilities ?? {
+    ...defaultBridgeCapabilities,
   };
   const prompt = bridgeAdapterPrompt({ baseUrl, presence, channelName: channelLabel(presence.channel, state.channelDefinitions), channelDomain: channel?.domain, capabilities: bridgeCapabilities });
   const environmentExample = bridgeEnvironmentExample(baseUrl);
@@ -7695,12 +7705,7 @@ function BridgeManager({
       name,
       kind,
       capabilities: {
-        inbound: true,
-        reconcile: true,
-        affordances: presence.capabilities.map((item) => item.id),
-        formats: channel?.formats.map((item) => item.id) ?? [],
-        metrics: ["replies", "reactions"],
-        assetKinds: [],
+        ...defaultBridgeCapabilities,
       },
     });
     if (result?.key) setKey(result.key);

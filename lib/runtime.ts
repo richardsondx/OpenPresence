@@ -163,7 +163,7 @@ export function ensureCapabilityRequests(source: OpenPresenceState, presenceId?:
   if (!source.agent || !presence) return source;
   const manifest = derivePresenceCapabilityManifest(source, presence.id);
   const growth = growthAssignmentFor(source, presence.id);
-  const requested = new Set(growth ? ["follower_measurement", "post_performance"] : ["follower_measurement", "post_performance", "image", "video"]);
+  const requested = new Set(growth ? ["follower_measurement", "post_performance", "follow", "image", "video"] : ["follower_measurement", "post_performance", "follow", "image", "video"]);
   const seenRequestKeys = new Set<string>();
   source.agentRequests = source.agentRequests.filter((request) => {
     if (seenRequestKeys.has(request.dedupeKey)) return false;
@@ -189,7 +189,7 @@ export function ensureCapabilityRequests(source: OpenPresenceState, presenceId?:
   return source;
 }
 
-export function openAgentRequest(source: OpenPresenceState, input: { presenceId?: string; assignmentId?: string; kind: "capability" | "growth_review" | "operator_decision" | "connector"; importance: "blocking" | "important" | "informational"; title: string; need: string; why: string; currentWorkaround?: string; capability?: string; dedupeKey: string }) {
+export function openAgentRequest(source: OpenPresenceState, input: { presenceId?: string; assignmentId?: string; kind: "capability" | "knowledge" | "permission" | "growth_review" | "operator_decision" | "connector"; importance: "blocking" | "important" | "informational"; title: string; need: string; why: string; currentWorkaround?: string; capability?: string; dedupeKey: string }) {
   if (!source.agent || source.agentRequests.some((item) => item.dedupeKey === input.dedupeKey && !["rejected", "resolved"].includes(item.status))) return source;
   const createdAt = now();
   source.agentRequests.unshift({ id: id("agent-request"), agentId: source.agent.id, ...input, status: "open", createdAt, updatedAt: createdAt });
@@ -2971,7 +2971,7 @@ export function formXActionIntent(source: OpenPresenceState, input: { affordance
 }
 
 export function completeNativeExecution(source: OpenPresenceState, executionId: string, externalRef: import("./types").EntityRef) {
-  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  let state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const execution = state.executions.find((item) => item.id === executionId && item.connector === "native");
   if (!execution) throw new Error("Native execution not found.");
   const targetLanguageResult = execution.publication ? targetLanguageValidationForExecution(state, execution) : { valid: true as const, reason: undefined };
@@ -3009,6 +3009,9 @@ export function completeNativeExecution(source: OpenPresenceState, executionId: 
   execution.updatedAt = now();
   const outcome: Outcome = { id: id("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, status: "succeeded", observedAt: now(), metrics: {}, evidence: [externalRef] };
   state.outcomes.unshift(outcome);
+  if (execution.affordance === "x.follow" && execution.target?.type === "x.user") {
+    state = recordVerifiedFollow(state, execution.presenceId, execution.target);
+  }
   if (execution.conversationEpisodeId) settleConversationClosure(state, execution.conversationEpisodeId, "verified", "The native X reply was verified by the connector.");
   state.nativeConnections = state.nativeConnections.map((connection) => connection.presenceId === execution.presenceId && connection.kind === "x"
     ? { ...connection, deliveryError: undefined, updatedAt: now() }
@@ -3016,6 +3019,22 @@ export function completeNativeExecution(source: OpenPresenceState, executionId: 
   const action = state.actions.find((item) => item.executionId === execution.id);
   if (action) { action.status = "executed"; action.outcomeId = outcome.id; }
   state.events.unshift(event("execution", "Published on X", "The native X connector delivered the approved action and returned an external reference.", "positive", { presenceId: execution.presenceId, executionId: execution.id, outcomeId: outcome.id }));
+  return state;
+}
+
+/** Persist a verified Follow as selective Network memory; an observed author alone never creates this state. */
+export function recordVerifiedFollow(source: OpenPresenceState, presenceId: string, target: EntityRef) {
+  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
+  if (!state.agent || !presence || target.type !== "x.user" || !target.id) return state;
+  const remembered = createRememberedPerson({ agentId: state.agent.id, presenceId, channel: presence.channel, externalActorId: target.id, displayName: target.id.startsWith("@") ? target.id : `@${target.id}`, handle: target.id.replace(/^@/, ""), source: "current-context" }, state.people, state.personIdentities, state.relationships);
+  remembered.relationship.following = true;
+  remembered.relationship.state = "active";
+  remembered.relationship.updatedAt = now();
+  state.people = [remembered.person, ...state.people.filter((item) => item.id !== remembered.person.id)];
+  state.personIdentities = [remembered.identity, ...state.personIdentities.filter((item) => item.id !== remembered.identity.id && !(item.channel === remembered.identity.channel && item.externalActorId === remembered.identity.externalActorId))];
+  state.relationships = [remembered.relationship, ...state.relationships.filter((item) => item.id !== remembered.relationship.id)];
+  state.events.unshift(event("memory", "Following relationship verified", `${remembered.person.displayName} is now marked as followed from a verified X action.`, "positive", { presenceId }));
   return state;
 }
 
@@ -3152,6 +3171,13 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       if (change.nextAvailability === "available") {
         for (const request of state.agentRequests.filter((item) => item.dedupeKey === dedupeKey && ["open", "accepted", "snoozed"].includes(item.status))) { request.status = "resolved"; request.resolvedAt = now(); request.updatedAt = now(); }
       }
+    }
+    const assignment = growthAssignmentFor(state, presence.id);
+    if (assignment?.plan) {
+      const reviewAt = now();
+      assignment.plan = { ...assignment.plan, nextWeeklyReviewAt: reviewAt, nextStrategicReviewAt: reviewAt, updatedAt: reviewAt };
+      assignment.updatedAt = reviewAt;
+      state.events.unshift(event("learning", "Growth review made eligible", "A capability change changed the evidence or action surface, so the active Growth responsibility is eligible for its next plan review.", "positive", { presenceId: presence.id, sourceObjectId: assignment.id }));
     }
     return state;
   }
