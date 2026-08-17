@@ -4975,7 +4975,7 @@ function LiveView({
           <a className="button button-secondary activity-attention-link" href="#decision-and-action">Open review</a>
         </section>
       )}
-      {selected?.channel === "x" && <BringXPost mutate={mutate} presenceId={selected.id} presenceName={presenceName} />}
+      {selected?.channel === "x" && <BringXPost state={state} mutate={mutate} presenceId={selected.id} presenceName={presenceName} />}
       <div className="activity-main-grid">
         <div className="activity-left-column">
           <MirrorPanel state={state} mutate={mutate} filter={selected?.id ?? "all"} channelId={selected?.channel} environment={activityEnvironment} sessionIds={activitySessionIds} onContext={setSelectedContext} />
@@ -5123,17 +5123,38 @@ function LiveView({
 }
 
 function BringXPost({
+  state,
   mutate,
   presenceId,
   presenceName,
 }: {
+  state: OpenPresenceState;
   mutate: Mutate;
   presenceId: string;
   presenceName: string;
 }) {
   const [url, setUrl] = useState("");
   const [busy, setBusy] = useState(false);
+  const [addressing, setAddressing] = useState(false);
+  const [importedObjectId, setImportedObjectId] = useState<string | null>(null);
+  const [workingState, setWorkingState] = useState<OpenPresenceState | null>(null);
   const [error, setError] = useState<string | null>(null);
+  const visibleState = workingState ?? state;
+  const importedObject = importedObjectId ? visibleState.mirrorObjects.find((item) => item.id === importedObjectId) : undefined;
+  const importedDirective = importedObject
+    ? visibleState.operatorDirectives.find((item) => item.presenceId === presenceId && item.target.id === importedObject.externalRef.id && item.requiredAct === "reply")
+    : undefined;
+  const importedExecution = importedDirective
+    ? visibleState.executions.find((item) => item.operatorDirectiveId === importedDirective.id || (item.source === "operator" && item.presenceId === presenceId && item.target?.id === importedObject?.externalRef.id))
+    : undefined;
+  const importedRetryable = Boolean(importedExecution && ["failed", "blocked", "expired"].includes(importedExecution.status));
+  const addressLabel = importedExecution?.status === "succeeded"
+    ? "Reply delivered"
+    : importedExecution?.status === "failed"
+      ? `Reply not delivered${importedExecution.failure?.message ? ` · ${importedExecution.failure.message}` : ""}`
+      : importedDirective
+        ? "Reply assignment created"
+        : "Address this post";
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!url.trim() || busy) return;
@@ -5141,12 +5162,29 @@ function BringXPost({
     setError(null);
     try {
       const next = await mutate({ type: "importXPost", presenceId, url: url.trim() });
-      if (next) setUrl("");
+      if (next) {
+        const postId = url.match(/\/status\/(\d+)/i)?.[1];
+        const imported = next.mirrorObjects.find((item) => item.presenceId === presenceId && item.externalRef.type === "x.post" && (!postId || item.externalRef.id === postId));
+        setWorkingState(next);
+        setImportedObjectId(imported?.id ?? null);
+        setUrl("");
+      }
       else setError("The post could not be brought into view. Check the notice above and try again.");
     } catch (reason) {
       setError(reason instanceof Error ? reason.message : "The post could not be brought into view.");
     } finally {
       setBusy(false);
+    }
+  };
+  const addressPost = async () => {
+    if (!importedObject || addressing) return;
+    setAddressing(true);
+    setError(null);
+    try {
+      const next = await mutate({ type: "askPresenceToReply", presenceId, objectId: importedObject.id });
+      if (next) setWorkingState(next);
+    } finally {
+      setAddressing(false);
     }
   };
   return (
@@ -5155,10 +5193,10 @@ function BringXPost({
         <div className="bring-post-kicker">
           <span className="bring-post-icon" aria-hidden="true"><ArrowUpRight size={14} /></span>
           <SectionEyebrow>Bring into view</SectionEyebrow>
-          <span className="bring-post-boundary-chip">Observation only</span>
+          <span className="bring-post-boundary-chip">Observation first</span>
         </div>
         <h2>Give {presenceName} a post to consider</h2>
-        <p>Paste a public X link. {presenceName} decides whether to reply, act, or leave it alone.</p>
+        <p>Paste a public X link. {presenceName} can inspect it first, then you can explicitly create a reply assignment.</p>
       </div>
       <form className="bring-post-form" onSubmit={submit}>
         <label className="sr-only" htmlFor={`bring-post-url-${presenceId}`}>X post URL</label>
@@ -5166,7 +5204,17 @@ function BringXPost({
         <Button type="submit" variant="secondary" disabled={busy || !url.trim()}>{busy ? "Reading…" : "Bring into view"}</Button>
       </form>
       {error && <p className="bring-post-error" role="alert">{error}</p>}
-      <small className="bring-post-boundary">No post, reply, like, repost, or follow is created.</small>
+      {importedObject && <article className="bring-post-imported" aria-label="Imported X post">
+        <div>
+          <strong>{importedObject.author?.displayName ?? importedObject.author?.handle ?? "X post"}</strong>
+          <p>{importedObject.content?.text ?? "External post imported into the Social Mirror."}</p>
+          <small>Observed in the Social Mirror · {importedObject.externalRef.id}</small>
+        </div>
+        <div className="bring-post-address">
+          {importedExecution?.status === "failed" ? <div className="bring-post-address-stack"><span className="bring-post-address-failure" role="status">{addressLabel}</span><Button type="button" variant="secondary" onClick={() => void addressPost()} disabled={addressing || !importedRetryable}>{addressing ? <><LoaderCircle size={14} className="spin" /> Retrying…</> : "Retry address"}</Button></div> : importedExecution?.status === "succeeded" ? <span className="bring-post-address-success" role="status">{addressLabel}</span> : <Button type="button" variant="secondary" onClick={() => void addressPost()} disabled={addressing || Boolean(importedDirective)}>{addressing ? <><LoaderCircle size={14} className="spin" /> Creating assignment…</> : importedDirective ? addressLabel : "Address this post"}</Button>}
+        </div>
+      </article>}
+      <small className="bring-post-boundary">Importing is read-only. Reply delivery happens only after you choose “Address this post”; {presenceName} still owns the wording.</small>
     </section>
   );
 }
@@ -5189,11 +5237,17 @@ function MirrorPanel({
 }) {
   const [ignoringObjectId, setIgnoringObjectId] = useState<string | null>(null);
   const [mirrorPagination, setMirrorPagination] = useState({ scope: "", page: 0 });
+  const [mirrorFilter, setMirrorFilter] = useState<"all" | "mentions">("all");
   const selectedPresence =
     filter === "all"
       ? undefined
       : state.presences.find((item) => item.id === filter);
   const presenceName = selectedPresence?.name ?? "this Presence";
+  const isMentionOfPresence = (item: MirrorObject) => {
+    const handle = selectedPresence?.handle?.replace(/^@/, "").toLowerCase();
+    const text = item.content?.text?.toLowerCase() ?? "";
+    return Boolean(handle && text.includes(`@${handle}`));
+  };
   const allObjects = state.mirrorObjects
     .filter((item) => {
       if (filter !== "all" && item.presenceId !== filter) return false;
@@ -5204,12 +5258,14 @@ function MirrorPanel({
       if (environment === "live") return item.environment !== "sandbox" && !item.sessionId;
       return true;
     });
+  const mentionObjects = allObjects.filter(isMentionOfPresence);
+  const filteredObjects = mirrorFilter === "mentions" ? mentionObjects : allObjects;
   const mirrorPageSize = 3;
-  const mirrorPageCount = Math.max(1, Math.ceil(allObjects.length / mirrorPageSize));
-  const mirrorScope = `${filter}|${channelId ?? ""}|${environment ?? ""}`;
+  const mirrorPageCount = Math.max(1, Math.ceil(filteredObjects.length / mirrorPageSize));
+  const mirrorScope = `${filter}|${channelId ?? ""}|${environment ?? ""}|${mirrorFilter}`;
   const mirrorPage = mirrorPagination.scope === mirrorScope ? mirrorPagination.page : 0;
   const currentMirrorPage = Math.min(mirrorPage, mirrorPageCount - 1);
-  const objects = allObjects.slice(currentMirrorPage * mirrorPageSize, (currentMirrorPage + 1) * mirrorPageSize);
+  const objects = filteredObjects.slice(currentMirrorPage * mirrorPageSize, (currentMirrorPage + 1) * mirrorPageSize);
   const bridge = state.bridges.find(
     (item) =>
       (filter === "all" || item.presenceId === filter) &&
@@ -5270,19 +5326,25 @@ function MirrorPanel({
           <SectionEyebrow>Observed context</SectionEyebrow>
           <h3>{objects.length ? `${presenceName}'s view` : heading}</h3>
         </div>
-        <span className="quiet-label">
+        <div className="mirror-panel-meta">
+          {allObjects.length > 0 && <div className="mirror-filter" role="group" aria-label="Observed context filter">
+            <button type="button" className={mirrorFilter === "all" ? "selected" : ""} aria-pressed={mirrorFilter === "all"} onClick={() => setMirrorFilter("all")}>All <span>{allObjects.length}</span></button>
+            <button type="button" className={mirrorFilter === "mentions" ? "selected" : ""} aria-pressed={mirrorFilter === "mentions"} onClick={() => setMirrorFilter("mentions")}>Mentions <span>{mentionObjects.length}</span></button>
+          </div>}
+          <span className="quiet-label">
           {bridge
-            ? `${syncLabel} · ${allObjects.length} observed`
+            ? `${syncLabel} · ${filteredObjects.length} ${mirrorFilter === "mentions" ? "mentions" : "observed"}`
             : nativeConnection
               ? `X · ${nativeConnection.status === "needs-attention" ? "needs attention" : syncLabel}`
             : filter === "all"
               ? "Connect a Presence"
-              : builtIn
-                ? "Local channel"
+                : builtIn
+                  ? "Local channel"
                 : "Bridge required"}
-        </span>
+          </span>
+        </div>
       </div>
-      {allObjects.length ? (
+      {filteredObjects.length ? (
         <>
           <p className="mirror-explainer">
             Public posts currently available to {presenceName} on {channelLabel(selectedPresence?.channel ?? objects[0]?.channelId ?? "x", state.channelDefinitions)}.
@@ -5295,6 +5357,17 @@ function MirrorPanel({
               const observedAuthor = normalizeMirrorAuthor(item.channelId, item.content?.text, item.author);
               const externalUrl = externalUrlForMirrorObject(item, observedAuthor?.handle);
               const externalLabel = `Open original post on ${channelLabel(item.channelId, state.channelDefinitions)}`;
+              const itemDecision = state.socialDecisions.find((decision) => decision.presenceId === item.presenceId && decision.focalMirrorObjectIds.includes(item.id));
+              const itemIntent = itemDecision?.socialIntentId
+                ? state.socialIntents.find((intent) => intent.id === itemDecision.socialIntentId)
+                : state.socialIntents.find((intent) => intent.presenceId === item.presenceId && intent.target?.id === item.externalRef.id && intent.environment === item.environment);
+              const itemExecution = itemIntent ? state.executions.find((execution) => execution.socialIntentId === itemIntent.id) : undefined;
+              const itemOutcome = itemExecution ? state.outcomes.find((outcome) => outcome.executionId === itemExecution.id) : undefined;
+              const itemStatus = itemExecution
+                ? `${executionStatusLabel(itemExecution.status)}${itemOutcome ? ` · ${itemOutcome.status}` : ""}`
+                : itemDecision
+                  ? itemDecision.decision === "no_op" ? "Judged · no action" : `Judged · ${formatActivityAffordance(itemDecision.decision)}`
+                  : "Judgment not recorded";
               return (
               <article className={`mirror-post ${ignored ? "mirror-post-ignored" : ""}`} key={item.id}>
                 <div className="mirror-post-header">
@@ -5307,6 +5380,7 @@ function MirrorPanel({
                 </div>
                 <p className="mirror-post-content">{observedText ?? "External activity received."}</p>
                 {item.assetRefs?.length ? <MediaPerceptionDisclosure object={item} state={state} mutate={mutate} presenceName={presenceName} /> : null}
+                <div className="mirror-post-lineage" aria-label="Observation lineage"><span>Seen by {presenceName}</span>{isMentionOfPresence(item) && <span>Mentioned {selectedPresence?.handle ?? "this Presence"}</span>}<span>{itemStatus}</span></div>
                 <div className="mirror-post-footer">
                   <span>Observed</span><span>{item.objectType.replaceAll("-", " ")}</span>
                   {externalUrl && <a className="mirror-open-link" href={externalUrl} target="_blank" rel="noreferrer" aria-label={`${externalLabel}: ${item.externalRef.id}`}><ArrowUpRight size={12} /> {externalLabel}</a>}
@@ -5334,6 +5408,8 @@ function MirrorPanel({
             </nav>
           )}
         </>
+      ) : mirrorFilter === "mentions" && allObjects.length > 0 ? (
+        <div className="mirror-zero-state"><strong>No mentions of {selectedPresence?.handle ?? presenceName} in this view.</strong><small>Genny has {allObjects.length} observed post{allObjects.length === 1 ? "" : "s"}, but none mention this Presence.</small></div>
       ) : nativeConnection && nativeObservation?.status === "up-to-date" ? (
         <>
           <p className="mirror-explainer">
@@ -5476,10 +5552,11 @@ function ActivityContextInspector({ object, state, mutate, onClose, onOpenSettin
   const presence = state.presences.find((item) => item.id === object.presenceId) ?? state.presence;
   const presenceName = presence?.name ?? "this Presence";
   const replyDirectiveCandidate = state.operatorDirectives.find((item) => item.presenceId === object.presenceId && item.target.id === object.externalRef.id && item.requiredAct === "reply" && (!object.sessionId || item.sessionId === object.sessionId) && item.status !== "failed");
-  const replyExecution = replyDirectiveCandidate ? state.executions.find((item) => (item.operatorDirectiveId === replyDirectiveCandidate.id || (item.source === "operator" && item.presenceId === object.presenceId && item.target?.id === object.externalRef.id)) && item.presenceId === object.presenceId && item.target?.id === object.externalRef.id && (!object.sessionId || item.sessionId === object.sessionId)) : undefined;
+  const replyExecution = state.executions.find((item) => (item.operatorDirectiveId === replyDirectiveCandidate?.id || (item.source === "operator" && item.presenceId === object.presenceId && item.target?.id === object.externalRef.id)) && item.presenceId === object.presenceId && item.target?.id === object.externalRef.id && (!object.sessionId || item.sessionId === object.sessionId));
   const replyDeliveryInFlight = replyExecution && !["failed", "blocked", "expired", "succeeded"].includes(replyExecution.status);
   const replyWasSent = replyExecution?.status === "succeeded" || state.outcomes.some((item) => item.executionId === replyExecution?.id && item.status === "succeeded");
-  const replyDirective = replyDirectiveCandidate && (replyDirectiveCandidate.status === "requested" || replyDeliveryInFlight || replyWasSent) ? replyDirectiveCandidate : undefined;
+  const replyFailed = replyExecution && ["failed", "blocked", "expired"].includes(replyExecution.status);
+  const replyDirective = !replyFailed && replyDirectiveCandidate && (replyDirectiveCandidate.status === "requested" || replyDeliveryInFlight || replyWasSent) ? replyDirectiveCandidate : undefined;
   const ignoreDirective = state.operatorDirectives.find((item) => item.presenceId === object.presenceId && item.target.id === object.externalRef.id && item.requiredAct === "no_op" && (!object.sessionId || item.sessionId === object.sessionId) && item.status !== "failed");
   const repliesOff = (presence?.execution.reply ?? "off") === "off";
   const relatedJudgment = state.events.find((item) => item.sourceObjectId === object.id && (item.title.toLowerCase().includes("silence") || item.title.toLowerCase().includes("left alone") || item.title.toLowerCase().includes("ignore") || item.title.toLowerCase().includes("reply observed")));
@@ -5519,7 +5596,7 @@ function ActivityContextInspector({ object, state, mutate, onClose, onOpenSettin
           <p>{replyDirective ? `The social act is set. ${presenceName} owns the wording; the Presence reply setting owns how it is delivered.` : `You choose that this interaction should happen. ${presenceName} still decides what to say, within the Presence's privacy and channel boundaries.`}</p>
           {relatedJudgment && <div className="operator-judgment"><strong>{ignoreDirective ? `${presenceName} was asked to leave this alone` : `${presenceName} chose silence`}</strong><span>{relatedJudgment.detail.replaceAll("Jenny", presenceName)}</span></div>}
           {!replyDirective && !repliesOff && <label className="operator-direction-field">Optional direction for {presenceName}<textarea aria-label={`Optional direction for ${presenceName}`} value={direction} onChange={(event) => setDirection(event.target.value)} placeholder={`Anything you want ${presenceName} to consider?`} rows={3} /></label>}
-          {repliesOff ? <div className="operator-replies-off"><span>Replies are disabled for this Presence.</span><button type="button" onClick={onOpenSettings}>Enable replies →</button></div> : replyWasSent ? <div className="operator-requested-state">{presenceName} sent a verified reply to this post.</div> : replyDirective ? <div className="operator-requested-state">{presenceName} is preparing the expression through the existing reply envelope.</div> : <Button variant="primary" className="full-button" onClick={() => void askToReply()} disabled={requesting}>{requesting ? <><LoaderCircle size={14} className="spin" /> Asking {presenceName}…</> : <><Reply size={14} /> Ask {presenceName} to reply</>}</Button>}
+          {repliesOff ? <div className="operator-replies-off"><span>Replies are disabled for this Presence.</span><button type="button" onClick={onOpenSettings}>Enable replies →</button></div> : replyWasSent ? <div className="operator-requested-state">{presenceName} sent a verified reply to this post.</div> : replyFailed ? <div className="operator-requested-state operator-requested-failure" role="alert"><strong>{presenceName} did not deliver the requested reply.</strong><span>{replyExecution?.failure?.message ?? "The connector rejected delivery before a public reply could be verified."}</span></div> : replyDirective ? <div className="operator-requested-state">{presenceName} is preparing the expression through the existing reply envelope.</div> : <Button variant="primary" className="full-button" onClick={() => void askToReply()} disabled={requesting}>{requesting ? <><LoaderCircle size={14} className="spin" /> Asking {presenceName}…</> : <><Reply size={14} /> Ask {presenceName} to reply</>}</Button>}
         </section>
       </aside>
     </div>
@@ -6147,6 +6224,7 @@ function ScheduleLegend({ plan, layers }: { plan?: PublishingPlan; layers: Sched
 function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; mutate: Mutate; setView: (view: View) => void }) {
   const presence = state.presence;
   const [countdownNow, setCountdownNow] = useState<number | null>(null);
+  const [reviewingGrowth, setReviewingGrowth] = useState(false);
   const clockAssignment = presence ? state.assignments.find((item) => item.presenceId === presence.id && item.successEvidence?.metric === "followers" && assignmentIsOpen(item)) : undefined;
   const nextGrowthReviewAt = [clockAssignment?.plan?.nextWeeklyReviewAt, clockAssignment?.plan?.nextStrategicReviewAt].filter((value): value is string => Boolean(value)).sort((left, right) => left.localeCompare(right))[0];
   useEffect(() => {
@@ -6180,6 +6258,15 @@ function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; muta
   const createGrowthResponsibility = async () => {
     await mutate({ type: "createAssignment", presenceId: presence.id, environment: presence.connectionMode === "sandbox" ? "sandbox" : "live", instruction: `Grow this Presence toward ${goal.toLocaleString()} followers while building an audience of ${presence.brief.audience}.` });
   };
+  const reviewGrowth = async (kind: "weekly" | "strategic") => {
+    if (reviewingGrowth || !assignment) return;
+    setReviewingGrowth(true);
+    try {
+      await mutate({ type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind });
+    } finally {
+      setReviewingGrowth(false);
+    }
+  };
   return <div className="page growth-page">
     <PageHeader eyebrow={`${presence.name} · Growth`} title="Build durable attention" description="Growth is the Agent’s interpretation of verified audience and publication evidence—not a promise of a particular outcome." actions={<Button variant="secondary" onClick={() => setView("schedule")}><Clock3 size={14} /> Open Schedule</Button>} />
     {!assignment ? <section className="growth-empty settings-card"><div className="watch-empty-mark"><TrendingUp size={23} /></div><SectionEyebrow>Continuous responsibility</SectionEyebrow><h2>Give {presence.name} a 100K growth responsibility.</h2><p>One long-lived Assignment owns the objective. The Agent chooses the day-to-day work, observes the public result, and revises its approach during review.</p><Button variant="primary" onClick={() => void createGrowthResponsibility()}><Plus size={14} /> Create growth responsibility</Button></section> : <>
@@ -6199,7 +6286,7 @@ function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; muta
         </div>
       </section>
       <div className="growth-columns">
-        <section className="settings-card"><div className="section-heading compact"><div><SectionEyebrow>Genny&apos;s current read</SectionEyebrow><h2>What the evidence says</h2></div><TrendingUp size={17} /></div>{review ? <><p>{review.summary}</p><small className="muted">{review.reviewSource === "model" ? "Model-backed review" : "Deterministic evidence review"}{review.planChangeSummary ? ` · ${review.planChangeSummary}` : ""}</small>{reviewIsStale && <div className="growth-review-stale" role="status"><div><strong>New evidence since this review</strong><span>{[unreviewedAudienceCount ? `${unreviewedAudienceCount} audience snapshot${unreviewedAudienceCount === 1 ? "" : "s"}` : "", unreviewedPublicationCount ? `${unreviewedPublicationCount} publication-performance snapshot${unreviewedPublicationCount === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ")} has not been included in this read.</span></div><Button variant="secondary" onClick={() => void mutate({ type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind: review.kind })}>Review new evidence</Button></div>}<div className="growth-read-list"><div><strong>Working</strong>{review.working.length ? <ul>{review.working.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">Nothing strong enough to call yet.</p>}</div><div><strong>Uncertain</strong>{review.uncertain.length ? <ul>{review.uncertain.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">No open uncertainty recorded.</p>}</div><div><strong>Weak</strong>{review.weak.length ? <ul>{review.weak.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">No weak pattern recorded.</p>}</div></div></> : <div className="growth-no-review"><p>The Agent has not completed a Growth review yet. It will review follower movement and publication performance on the operating rhythm.</p><Button variant="secondary" onClick={() => void mutate({ type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind: "weekly" })}>Review available evidence</Button></div>}</section>
+        <section className="settings-card" aria-busy={reviewingGrowth}><div className="section-heading compact"><div><SectionEyebrow>Genny&apos;s current read</SectionEyebrow><h2>What the evidence says</h2></div><TrendingUp size={17} /></div>{review ? <><p>{review.summary}</p><small className="muted">{review.reviewSource === "model" ? "Model-backed review" : "Deterministic evidence review"}{review.planChangeSummary ? ` · ${review.planChangeSummary}` : ""}</small>{reviewIsStale && <div className="growth-review-stale" role="status" aria-live="polite"><div><strong>New evidence since this review</strong><span>{[unreviewedAudienceCount ? `${unreviewedAudienceCount} audience snapshot${unreviewedAudienceCount === 1 ? "" : "s"}` : "", unreviewedPublicationCount ? `${unreviewedPublicationCount} publication-performance snapshot${unreviewedPublicationCount === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ")} has not been included in this read.</span></div><Button variant="secondary" disabled={reviewingGrowth} onClick={() => void reviewGrowth(review.kind)}>{reviewingGrowth ? <><LoaderCircle size={14} className="spin" /> Reviewing evidence…</> : "Review new evidence"}</Button></div>}<div className="growth-read-list"><div><strong>Working</strong>{review.working.length ? <ul>{review.working.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">Nothing strong enough to call yet.</p>}</div><div><strong>Uncertain</strong>{review.uncertain.length ? <ul>{review.uncertain.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">No open uncertainty recorded.</p>}</div><div><strong>Weak</strong>{review.weak.length ? <ul>{review.weak.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">No weak pattern recorded.</p>}</div></div></> : <div className="growth-no-review"><p>The Agent has not completed a Growth review yet. It will review follower movement and publication performance on the operating rhythm.</p><Button variant="secondary" disabled={reviewingGrowth} onClick={() => void reviewGrowth("weekly")}>{reviewingGrowth ? <><LoaderCircle size={14} className="spin" /> Reviewing evidence…</> : "Review available evidence"}</Button></div>}</section>
         <section className="settings-card"><div className="section-heading compact"><div><SectionEyebrow>Current approach</SectionEyebrow><h2>How the Agent is working</h2></div><Sparkles size={17} /></div>{assignment.plan ? <><p>{assignment.plan.summary}</p><div className="growth-plan-list"><div><strong>Publishing</strong><ul>{assignment.plan.publishingApproach.map((item) => <li key={item}>{item}</li>)}</ul></div><div><strong>Discovery</strong><ul>{assignment.plan.discoveryDirections.map((item) => <li key={item}>{item}</li>)}</ul></div><div><strong>Relationships</strong><ul>{assignment.plan.relationshipFocus.map((item) => <li key={item}>{item}</li>)}</ul></div></div><small className="muted">Plan revision {assignment.plan.revision} · Next weekly review {assignment.plan.nextWeeklyReviewAt ? formatHistoryTimestamp(assignment.plan.nextWeeklyReviewAt) : "not scheduled"}</small></> : <p className="muted">The Agent is preparing its first operating plan.</p>}</section>
       </div>
       <div className="growth-columns">
@@ -7852,7 +7939,9 @@ function ChromeConnectionPanel({
   const extensionEnabled = presence.browserAccess?.enabled === true;
   const activeBridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
   const connected = Boolean(activeBridge && bridgeAdapterStatus(activeBridge) === "connected");
-  const status = !extensionEnabled ? "Disabled" : connected ? "Connected" : activeBridge ? "Waiting for extension" : "Not connected";
+  const identityMismatch = activeBridge?.accountIdentity?.status === "mismatch";
+  const identityUnknown = activeBridge?.accountIdentity?.status === "unknown";
+  const status = !extensionEnabled ? "Disabled" : identityMismatch ? "Wrong X account" : identityUnknown ? "Account needs verification" : connected ? "Connected" : activeBridge ? "Waiting for extension" : "Not connected";
   const openControlledChrome = () => window.postMessage({ source: "openpresence", type: "OPENPRESENCE_OPEN_CHROME", presenceId: presence.id }, "*");
   const refresh = async () => {
     setRefreshing(true);
@@ -7873,8 +7962,8 @@ function ChromeConnectionPanel({
         <Button type="button" variant="secondary" disabled={!extensionEnabled} onClick={openControlledChrome}><PlugZap size={14} /> Open controlled Chrome</Button>
       </div>
       <div className="chrome-connection-status" role="status">
-        <span className={`live-pill ${connected ? "" : "paused"}`}><span className="status-dot" /> {status}</span>
-        <span className="chrome-connection-status-copy">{!extensionEnabled ? "Enable Chrome hands for this Presence to make the extension available." : connected ? "The controlled browser is connected and ready for approved work." : "Install or enable the OpenPresence Chrome extension, then open the controlled browser."}</span>
+        <span className={`live-pill ${connected && !identityMismatch && !identityUnknown ? "" : "paused"}`}><span className="status-dot" /> {status}</span>
+        <span className="chrome-connection-status-copy">{!extensionEnabled ? "Enable Chrome hands for this Presence to make the extension available." : identityMismatch ? `${activeBridge?.accountIdentity?.message} No live work can be claimed until the correct account is signed in.` : identityUnknown ? `${activeBridge?.accountIdentity?.message ?? `Expected ${presence.handle}.`} No live work can be claimed until X exposes the signed-in account.` : connected ? `The controlled browser is connected as ${presence.handle} and ready for approved work.` : "Install or enable the OpenPresence Chrome extension, then open the controlled browser."}</span>
         {activeBridge && <Button type="button" variant="ghost" disabled={refreshing} onClick={() => void refresh()}><RotateCcw size={13} /> {refreshing ? "Refreshing…" : "Refresh status"}</Button>}
       </div>
       <small className="chrome-connection-safety"><ShieldCheck size={13} /> No account credentials are stored in OpenPresence or the extension. Before a write, the tab checks the selected account and verifies the resulting post.</small>

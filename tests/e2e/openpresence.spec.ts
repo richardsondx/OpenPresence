@@ -32,9 +32,9 @@ async function navigate(page: import("@playwright/test").Page, label: string) {
     return;
   }
   const navigationLabel = label === "Brain" ? "Manage Agent" : label;
-  const mobile = page.locator(".mobile-nav");
-  if (await mobile.isVisible()) await mobile.getByRole("button", { name: navigationLabel }).click();
-  else if (label === "Brain") await page.getByRole("button", { name: /^Manage Agent/ }).click();
+  if (test.info().project.name === "mobile") {
+    await page.getByRole("navigation", { name: "Mobile navigation" }).last().getByRole("button", { name: navigationLabel }).click({ force: true });
+  } else if (label === "Brain") await page.getByRole("button", { name: /^Manage Agent/ }).click();
   else await desktopSidebar.getByRole("button", { name: navigationLabel, exact: false }).click();
 }
 
@@ -663,6 +663,67 @@ test("Growth exposes evidence freshness and the next Agent review", async ({ pag
   await expect(cadence).toContainText("Next Agent review");
   await expect(cadence).toContainText(/In \d+:\d{2}:\d{2}|Scheduled|Due now/);
   await expect(cadence).toContainText("Next channel check");
+});
+
+test("Growth review shows immediate feedback while new evidence is processing", async ({ page, request }) => {
+  await createAgent(page);
+  const initial = await (await request.get("/api/state")).json();
+  const presenceId = initial.presence.id;
+  const created = await request.post("/api/state", { data: { type: "createAssignment", presenceId, environment: "live", instruction: "Grow this Presence toward 100,000 followers while building an audience of AI founders." } });
+  expect(created.ok()).toBeTruthy();
+
+  await page.reload();
+  await navigate(page, "Growth");
+  const reviewButton = page.getByRole("button", { name: "Review available evidence" });
+  await expect(reviewButton).toBeVisible();
+  await page.route(/\/api\/state(?:\?.*)?$/, async (route) => {
+    if (route.request().method() !== "POST" || !route.request().postData()?.includes('"reviewGrowth"')) return route.continue();
+    await new Promise((resolve) => setTimeout(resolve, 1_000));
+    return route.continue();
+  });
+  await reviewButton.click();
+  await expect(page.getByText("Reviewing evidence…", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reviewing evidence…", exact: true })).toBeDisabled();
+  await expect(page.getByText("Reviewing evidence…", { exact: true })).toBeHidden({ timeout: 10_000 });
+});
+
+test("Activity filters mentions and shows whether each observed post was judged", async ({ page }) => {
+  await createAgent(page);
+  await page.route("**/api/state*", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    const payload = await response.json();
+    const presenceId = payload.presence?.id;
+    if (!presenceId) return route.fulfill({ response, json: payload });
+    const observedAt = new Date().toISOString();
+    const objectId = "mirror-test-mention";
+    payload.mirrorObjects = [{
+      id: objectId,
+      bridgeId: "native:test",
+      presenceId,
+      channelId: "x",
+      externalRef: { type: "x.post", id: "2089273076663955538" },
+      objectType: "post",
+      language: "en",
+      author: { displayName: "InnerClaw", handle: "CGreeneGo" },
+      content: { text: "@jenny_ai we need another opinion here please 🫶" },
+      occurredAt: observedAt,
+      observedAt,
+      visibility: "public",
+      shareability: "presence-only",
+      environment: "sandbox",
+      source: "native",
+      trust: "untrusted_world_content",
+    }, ...payload.mirrorObjects];
+    await route.fulfill({ response, json: payload });
+  });
+  await page.reload();
+  await navigate(page, "Activity");
+  await page.getByRole("button", { name: /Mentions/ }).click();
+  await expect(page.getByText("we need another opinion here please", { exact: false })).toBeVisible();
+  await expect(page.getByText("Seen by Jenny", { exact: true })).toBeVisible();
+  await expect(page.getByText("Mentioned @jenny_ai", { exact: true })).toBeVisible();
+  await expect(page.getByText("Judgment not recorded", { exact: true })).toBeVisible();
 });
 
 test("Activity separates configuration changes from Presence decisions", async ({ page, request }) => {

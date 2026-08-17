@@ -140,6 +140,22 @@ describe("native X connection", () => {
     expect(readChannelSecret(body.state.nativeConnections[0].id)).toMatchObject({ apiKey: "test_api", apiSecret: "test_secret" });
   });
 
+  it("rejects read-write credentials authenticated as a different X account", async () => {
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: { id: "wrong-account", username: "not_genny", name: "Wrong account" } }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    const presenceId = readState().presence?.id;
+    const response = await POST(new Request("http://localhost/api/x/manage", {
+      method: "POST",
+      body: JSON.stringify({ action: "save", presenceId, credentials: { apiKey: "api", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" } }),
+      headers: { "content-type": "application/json" },
+    }));
+    expect(response.status).toBe(400);
+    expect((await response.json()).error).toContain("ACCOUNT_MISMATCH");
+    expect(readState().nativeConnections).toHaveLength(0);
+    vi.unstubAllGlobals();
+  });
+
   it("retains a deleted X post in verified public history after targeted reconciliation", async () => {
     const presenceId = readState().presence!.id;
     const save = await POST(new Request("http://localhost/api/x/manage", {

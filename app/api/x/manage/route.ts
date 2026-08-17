@@ -2,7 +2,7 @@ import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { readState, WorkspaceConflictError, writeState } from "@/lib/db";
-import { disconnectNativeX, saveNativeXCredentials, testXCredentials, upsertNativeXConnection } from "@/lib/x";
+import { disconnectNativeX, normalizeHandle, saveNativeXCredentials, testXCredentials, upsertNativeXConnection } from "@/lib/x";
 import { reconcileNativeX } from "@/lib/native-x";
 import { stateForContext } from "@/lib/runtime";
 
@@ -45,6 +45,9 @@ export async function POST(request: Request) {
     }
     const cleanCredentials = Object.fromEntries(Object.entries(parsed.credentials).filter(([, value]) => value)) as typeof parsed.credentials;
     const result = await testXCredentials(cleanCredentials, presence.handle);
+    if (result.access === "read-write" && normalizeHandle(result.account.username) !== normalizeHandle(presence.handle)) {
+      throw new Error(`ACCOUNT_MISMATCH: X authenticated @${result.account.username}, but this Presence expects @${normalizeHandle(presence.handle)}. Credentials were not saved.`);
+    }
     if (parsed.action === "test") return NextResponse.json({ result });
     const existing = state.nativeConnections.find((item) => item.presenceId === parsed.presenceId && item.kind === "x");
     const connectionId = existing?.id ?? `native_x_${crypto.randomUUID()}`;

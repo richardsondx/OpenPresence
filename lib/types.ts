@@ -287,6 +287,13 @@ export interface Bridge {
   coverage?: string;
   adapterStatus?: BridgeAdapterStatus;
   lastHeartbeatAt?: string;
+  /** Account identity observed by the external adapter in its controlled tab. */
+  accountIdentity?: {
+    username?: string;
+    status: "verified" | "mismatch" | "unknown";
+    message?: string;
+    observedAt: string;
+  };
   createdAt: string;
   updatedAt: string;
 }

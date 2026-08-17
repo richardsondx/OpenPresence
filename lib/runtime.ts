@@ -121,10 +121,11 @@ export function derivePresenceCapabilityManifest(source: OpenPresenceState, pres
   const native = state.nativeConnections.find((item) => item.presenceId === presence.id && item.channelId === presence.channel);
   const bridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
   const bridgeConnected = Boolean(bridge && bridgeAdapterIsConnected(bridge));
-  const nativeWritable = Boolean(native && native.access === "read-write" && (native.status === "connected" || (native.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(native.healthMessage ?? native.deliveryError ?? ""))));
+  const nativeIdentityMatches = Boolean(native?.account?.username && normalizeHandleForComparison(native.account.username) === normalizeHandleForComparison(presence.handle));
+  const nativeWritable = Boolean(native && nativeIdentityMatches && native.access === "read-write" && (native.status === "connected" || (native.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(native.healthMessage ?? native.deliveryError ?? ""))));
   const nativeActionSupported = (action: string) => ["post", "reply", "like", "repost", "quote", "follow"].includes(action);
   const nativeAction = (action: string) => Boolean(nativeWritable && nativeActionSupported(action));
-  const nativeReadable = Boolean(native && nativeConnectionCanObserve(native));
+  const nativeReadable = Boolean(native && nativeConnectionCanObserve(native, presence.handle));
   const bridgeAction = (action: string) => Boolean(bridgeConnected && bridge?.capabilities.affordances.some((item) => item === action || item === `${presence.channel}.${action}`));
   const bridgeMetric = (metric: string) => Boolean(bridgeConnected && bridge?.capabilities.metrics.some((item) => item === metric || item.includes(metric)));
   const actionItem = (action: string, supported = channelIds.has(action)): PresenceCapability => {
@@ -222,7 +223,9 @@ export function openAgentRequest(source: OpenPresenceState, input: { presenceId?
 }
 
 function bridgeAdapterIsConnected(bridge: Bridge) {
-  return bridge.state !== "offline" && Boolean(bridge.lastHeartbeatAt && Date.now() - new Date(bridge.lastHeartbeatAt).getTime() < 90_000);
+  return bridge.state !== "offline"
+    && bridge.accountIdentity?.status !== "mismatch"
+    && Boolean(bridge.lastHeartbeatAt && Date.now() - new Date(bridge.lastHeartbeatAt).getTime() < 90_000);
 }
 
 export function latestAudienceSnapshot(source: OpenPresenceState, presenceId: string) {
@@ -888,9 +891,15 @@ export function nativeDeliveryFailureIsConnectionScoped(message: string) {
  * permission failure must not force follower or publication evidence through
  * the browser Bridge when the API can still read it.
  */
-export function nativeConnectionCanObserve(connection: Pick<OpenPresenceState["nativeConnections"][number], "access" | "status" | "observation">) {
+export function nativeConnectionCanObserve(connection: Pick<OpenPresenceState["nativeConnections"][number], "access" | "status" | "observation" | "account">, expectedHandle?: string) {
+  const identityMatches = !expectedHandle || Boolean(connection.account?.username && connection.account.username.replace(/^@/, "").trim().toLowerCase() === expectedHandle.replace(/^@/, "").trim().toLowerCase());
   return (connection.access === "read" || connection.access === "read-write")
+    && identityMatches
     && (connection.status === "connected" || connection.observation?.status === "up-to-date");
+}
+
+function normalizeHandleForComparison(handle?: string) {
+  return handle?.replace(/^@/, "").trim().toLowerCase();
 }
 
 export function isLaunchCandidate(source: OpenPresenceState, presenceId: string) {
@@ -2987,7 +2996,7 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
     state.events.unshift(event("decision", "Post intention held", "Jenny formed a social intention, but Posts are off for this Presence.", "quiet", { presenceId: presence.id, intentId: socialIntent.id, decisionId: socialDecision?.id }));
     return state;
   }
-  const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? ""))));
+  const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle) && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? ""))));
   const bridge = nativeX ? undefined : bridgeFor(state, presence.id, "post");
   const connector = nativeX ? "native" as const : bridge ? bridge.kind : undefined;
   const leakageReason = identityLeakageReason(state, presence, text);
@@ -3089,7 +3098,7 @@ export function formXReplyIntent(source: OpenPresenceState, text: string, parent
     state.events.unshift(event("decision", "Reply intention held", "Jenny formed a social intention, but Replies are off for this Presence.", "quiet", { presenceId: presence.id, intentId: socialIntent.id, decisionId: socialDecision?.id }));
     return state;
   }
-  const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.status === "connected" && connection.access === "read-write");
+  const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.status === "connected" && connection.access === "read-write" && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle));
   const bridge = nativeX ? undefined : bridgeFor(state, presence.id, "reply");
   const connector = nativeX ? "native" as const : bridge ? bridge.kind : undefined;
   const leakageReason = identityLeakageReason(state, presence, text);
@@ -3129,7 +3138,7 @@ export function formXActionIntent(source: OpenPresenceState, input: { affordance
     state.events.unshift(event("decision", `X ${capability} intention held`, `The Presence selected ${capability}, but that affordance is off in the execution envelope.`, "quiet", { presenceId: presence.id, intentId: socialIntent.id, decisionId: socialDecision?.id }));
     return state;
   }
-  const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? ""))));
+  const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle) && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? ""))));
   const connectedNative = nativeX;
   const bridge = nativeX ? undefined : bridgeFor(state, presence.id, capability);
   const connector = connectedNative ? "native" as const : bridge ? bridge.kind : undefined;

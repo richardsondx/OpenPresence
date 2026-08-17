@@ -374,7 +374,7 @@ describe("OpenPresence runtime boundaries", () => {
 
   it("turns an explicit Chat publication request into a native X execution", () => {
     let state = createAgent(input);
-    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "hourandcode", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "jenny_ai", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
     expect(isExplicitXPostRequest("Introduce this Presence on X and invite conversation.")).toBe(true);
     state = formChatPostIntent(state, "I am Jenny, learning to become a useful presence for thoughtful builders. What are you learning right now?");
     expect(state.socialIntents[0]?.affordance).toBe("x.post");
@@ -537,7 +537,7 @@ describe("OpenPresence runtime boundaries", () => {
 
   it("records a native delivery failure without inventing an external outcome", () => {
     let state = createAgent(input);
-    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "hourandcode", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "jenny_ai", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
     state = formChatPostIntent(state, "A useful first point of view.");
     const executionId = state.executions[0]!.id;
     state = failNativeExecution(state, executionId, "X rejected this action: write permission unavailable.");
@@ -551,7 +551,7 @@ describe("OpenPresence runtime boundaries", () => {
 
   it("keeps the Social Mirror connected when delivery is blocked by X billing", () => {
     let state = createAgent(input);
-    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "hourandcode", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "jenny_ai", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
     state = markNativeConnectionNeedsAttention(state, state.presence!.id, "X has no API credits remaining for this app.");
     expect(state.nativeConnections[0]?.status).toBe("connected");
     expect(state.nativeConnections[0]?.deliveryError).toContain("no API credits");
@@ -560,7 +560,7 @@ describe("OpenPresence runtime boundaries", () => {
 
   it("keeps the native connection healthy when X rejects a reply target", () => {
     let state = createAgent(input);
-    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "hourandcode", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "jenny_ai", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
     state = markNativeConnectionNeedsAttention(state, state.presence!.id, "X rejected this action: You can only reply to or quote posts where you are mentioned or are the author.");
     expect(state.nativeConnections[0]?.status).toBe("connected");
     expect(state.nativeConnections[0]?.deliveryError).toContain("only reply");

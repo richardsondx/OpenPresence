@@ -12,6 +12,7 @@ export const bridgeEndpointPaths = {
   claim: "/api/bridge/v1/executions/claim",
   outcomes: "/api/bridge/v1/outcomes",
   metrics: "/api/bridge/v1/metrics",
+  identity: "/api/bridge/v1/identity",
 } as const;
 
 /**
@@ -82,10 +83,11 @@ export function bridgeAdapterPrompt(input: BridgePromptInput) {
     "",
     "Lifecycle:",
     "1. POST " + input.baseUrl + bridgeEndpointPaths.heartbeat + " every minute with {\"executorId\":\"<stable-adapter-id>\"}.",
-    "2. Send new, changed, and deleted channel objects to POST " + input.baseUrl + bridgeEndpointPaths.events + ". Use stable sourceEventId values. Include externalRef, objectType, author, content, occurredAt, visibility, shareability, and parentExternalRef for replies/comments.",
-    "3. Use POST " + input.baseUrl + bridgeEndpointPaths.reconcile + " for an initial or cursor-based sync.",
-    "4. Poll POST " + input.baseUrl + bridgeEndpointPaths.claim + " to claim approved work, using {\"executorId\":\"<stable-adapter-id>\",\"limit\":10}.",
-    "5. Perform only claimed executions. Use the supplied publication payload and target exactly as returned. This adapter may deliver only the declared actions: " + capabilities + ". Media must be uploaded only from the supplied assetIds through the authenticated OpenPresence asset route.",
+    "2. Report the signed-in channel account to POST " + input.baseUrl + bridgeEndpointPaths.identity + " before claiming work. For X send {\"executorId\":\"<stable-adapter-id>\",\"username\":\"<signed-in-handle>\"}. Stop if it does not match " + input.presence.handle + ".",
+    "3. Send new, changed, and deleted channel objects to POST " + input.baseUrl + bridgeEndpointPaths.events + ". Use stable sourceEventId values. Include externalRef, objectType, author, content, occurredAt, visibility, shareability, and parentExternalRef for replies/comments.",
+    "4. Use POST " + input.baseUrl + bridgeEndpointPaths.reconcile + " for an initial or cursor-based sync.",
+    "5. Poll POST " + input.baseUrl + bridgeEndpointPaths.claim + " to claim approved work, using {\"executorId\":\"<stable-adapter-id>\",\"limit\":10}.",
+    "6. Perform only claimed executions. Use the supplied publication payload and target exactly as returned. This adapter may deliver only the declared actions: " + capabilities + ". Media must be uploaded only from the supplied assetIds through the authenticated OpenPresence asset route.",
     ...(input.presence.channel === "x" ? [
       ...(supports("reply") ? [
         "   For x.reply, open https://x.com/i/web/status/<target.id>, choose Reply, enter exactly the supplied publication text, and submit the direct reply.",
@@ -96,9 +98,9 @@ export function bridgeAdapterPrompt(input: BridgePromptInput) {
       ...(supports("like") || supports("repost") ? ["   For x.like and x.repost, open the target post, use only the declared direct control, and verify the control state before acknowledging with the target post id."] : []),
       ...(supports("follow") ? ["   For x.follow, open https://x.com/i/user/<target.id>, choose Follow, and verify the control changes to Following before acknowledging with the target user id."] : []),
     ] : []),
-    "6. Verify the resulting channel object before POSTing to /api/bridge/v1/executions/{id}/ack with executorId, externalRef, and observedAt.",
-    "7. If delivery fails, POST to /api/bridge/v1/executions/{id}/fail with a truthful message and retryable flag.",
-    "8. Report verified world metrics only through POST " + input.baseUrl + bridgeEndpointPaths.outcomes + ".",
+    "7. Verify the resulting channel object before POSTing to /api/bridge/v1/executions/{id}/ack with executorId, externalRef, and observedAt.",
+    "8. If delivery fails, POST to /api/bridge/v1/executions/{id}/fail with a truthful message and retryable flag.",
+    "9. Report verified world metrics only through POST " + input.baseUrl + bridgeEndpointPaths.outcomes + ".",
     "",
     "Safety and privacy:",
     "- Observe only the configured " + input.channelName + " destination.",

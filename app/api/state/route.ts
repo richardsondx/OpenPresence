@@ -263,7 +263,8 @@ async function runExplorationWorker(source: OpenPresenceState, explorationId: st
 async function deliverNativeExecutions(source: OpenPresenceState, executionIds: Set<string>) {
   let next = source;
   for (const execution of next.executions.filter((item) => executionIds.has(item.id) && item.connector === "native" && ((item.status === "queued" && item.mode === "auto") || item.status === "approved"))) {
-    const connection = next.nativeConnections.find((item) => item.presenceId === execution.presenceId && item.access === "read-write" && nativeConnectionCanAct(item));
+    const expectedHandle = next.presences.find((item) => item.id === execution.presenceId)?.handle ?? next.presence?.handle;
+    const connection = next.nativeConnections.find((item) => item.presenceId === execution.presenceId && item.access === "read-write" && nativeConnectionCanAct(item, expectedHandle));
     // Test and mock runtimes never retrieve live write credentials. The sealed
     // publication gate still runs first so the execution is recorded as a
     // security block rather than degrading into an ordinary connector error.
@@ -372,9 +373,10 @@ async function materializeLiveDecisionAssets(source: OpenPresenceState, presence
   return { state: next, assetIds };
 }
 
-function nativeConnectionCanAct(connection: OpenPresenceState["nativeConnections"][number]) {
-  return connection.status === "connected"
-    || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? ""));
+function nativeConnectionCanAct(connection: OpenPresenceState["nativeConnections"][number], expectedHandle?: string) {
+  const identityMatches = !expectedHandle || Boolean(connection.account?.username && connection.account.username.replace(/^@/, "").trim().toLowerCase() === expectedHandle.replace(/^@/, "").trim().toLowerCase());
+  return identityMatches && (connection.status === "connected"
+    || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? "")));
 }
 
 function recordCapabilityFeedback(before: OpenPresenceState, next: OpenPresenceState, presenceId?: string) {
@@ -473,7 +475,7 @@ async function researchLiveAssignment(source: OpenPresenceState, presenceId: str
 
 async function runLiveExplorationEngagement(source: OpenPresenceState, exploration: NonNullable<OpenPresenceState["explorations"]>[number], presence: NonNullable<OpenPresenceState["presence"]>, assignment: Assignment, findings: Array<{ mirrorObjectId: string; safeSummary: string; whyItMayMatter: string }>) {
   if (presence.channel !== "x" || presence.execution.reply === "off") return source;
-  const connection = source.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x" && item.access === "read-write" && nativeConnectionCanAct(item));
+  const connection = source.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x" && item.access === "read-write" && nativeConnectionCanAct(item, presence.handle));
   const bridge = !connection
     ? source.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline" && (item.capabilities.affordances.includes("reply") || item.capabilities.affordances.includes("comment")))
     : undefined;
@@ -572,7 +574,7 @@ async function runLiveExplorationEngagement(source: OpenPresenceState, explorati
 async function runScheduledLiveAssignments(source: OpenPresenceState, presenceId: string) {
   const presence = source.presences.find((item) => item.id === presenceId) ?? source.presence;
   if (!presence || presence.id !== presenceId || presence.status !== "live" || presence.channel !== "x" || presence.execution.post === "off") return source;
-  const connection = source.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x" && item.access === "read-write" && nativeConnectionCanAct(item));
+  const connection = source.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x" && item.access === "read-write" && nativeConnectionCanAct(item, presence?.handle));
   const bridge = !connection
     ? source.bridges.find((item) => item.presenceId === presenceId && item.state !== "offline" && item.capabilities.affordances.includes("post"))
     : undefined;
@@ -637,7 +639,7 @@ async function runScheduledLiveAssignments(source: OpenPresenceState, presenceId
 async function runPublishingAssignmentPulse(source: OpenPresenceState, presenceId: string) {
   const presence = source.presences.find((item) => item.id === presenceId) ?? source.presence;
   if (!presence || presence.id !== presenceId || presence.status !== "live" || presence.channel !== "x" || presence.publishingInitiative.mode === "off") return source;
-  const connection = source.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x" && nativeConnectionCanAct(item) && item.access === "read-write");
+  const connection = source.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x" && nativeConnectionCanAct(item, presence?.handle) && item.access === "read-write");
   const bridge = !connection
     ? source.bridges.find((item) => item.presenceId === presenceId && item.state !== "offline" && item.capabilities.affordances.includes("post"))
     : undefined;
@@ -2624,7 +2626,7 @@ export async function POST(request: Request) {
           next = await runExplorationWorker(next, exploration.id);
         }
         for (const presence of next.presences.filter((item) => item.status === "live" && item.channel === "x")) {
-          const connection = next.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x" && nativeConnectionCanObserve(item));
+          const connection = next.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x" && nativeConnectionCanObserve(item, presence.handle));
           if (!connection) {
             const bridge = next.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline" && (item.capabilities.affordances.includes("post") || item.capabilities.affordances.includes("reply")));
             if (!bridge || bridgeAdapterStatus(bridge) !== "connected") continue;
@@ -3086,7 +3088,8 @@ export async function POST(request: Request) {
     }
     if ((parsed.type === "wakePresence" || parsed.type === "runPulse") && next.presence?.channel === "x") {
       const presenceId = pulsePresenceId(next, parsed);
-      const hasNativeRead = Boolean(presenceId && next.nativeConnections.some((item) => item.presenceId === presenceId && item.kind === "x" && nativeConnectionCanObserve(item)));
+      const expectedPresence = presenceId ? next.presences.find((item) => item.id === presenceId) ?? next.presence : next.presence;
+      const hasNativeRead = Boolean(presenceId && next.nativeConnections.some((item) => item.presenceId === presenceId && item.kind === "x" && nativeConnectionCanObserve(item, expectedPresence?.handle)));
       if (presenceId && hasNativeRead) {
         next = await reconcileNativeX(next, presenceId);
         next = await runNativePulse(next, presenceId);

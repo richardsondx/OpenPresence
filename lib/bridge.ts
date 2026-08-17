@@ -15,6 +15,7 @@ export const eventsInput = z.object({ events: z.array(inboundEventInput).min(1).
 export const reconcileInput = z.object({ cursor: z.string().max(500).optional(), objects: z.array(mirrorObjectInput).max(2_000) });
 export const claimInput = z.object({ executorId: z.string().min(1).max(160), limit: z.number().int().min(1).max(50).default(10) });
 export const heartbeatInput = z.object({ executorId: z.string().min(1).max(160) });
+export const identityInput = z.object({ executorId: z.string().min(1).max(160), username: z.string().trim().max(160).optional() });
 export const ackInput = z.object({ executorId: z.string().min(1).max(160), externalRef: entityRef, observedAt: z.string().datetime().optional() });
 export const failInput = z.object({ executorId: z.string().min(1).max(160), code: z.string().max(80).optional(), message: z.string().min(1).max(1_000), retryable: z.boolean().default(false) });
 export const outcomeInput = z.object({ executionId: z.string().min(1), status: z.enum(["succeeded", "failed", "unknown"]), metrics: z.record(z.number()).default({}), evidence: z.array(entityRef).default([]) });
@@ -71,6 +72,37 @@ function touchBridge(state: OpenPresenceState, bridge: Bridge, synced = false) {
   const now = timestamp(); bridge.state = "online"; bridge.adapterStatus = "connected"; bridge.lastSeenAt = now; if (synced) bridge.lastSyncAt = now; bridge.updatedAt = now;
   const sync = state.bridgeSync.find((item) => item.bridgeId === bridge.id) ?? ({ bridgeId: bridge.id, status: "idle" } as OpenPresenceState["bridgeSync"][number]);
   sync.status = "healthy"; sync.lastSyncAt = synced ? now : sync.lastSyncAt; sync.error = undefined; if (!state.bridgeSync.some((item) => item.bridgeId === bridge.id)) state.bridgeSync.unshift(sync);
+}
+
+const normalizedHandle = (value: string | undefined) => String(value ?? "").replace(/^@/, "").trim().toLowerCase();
+
+export function reportBridgeIdentity(bridge: Bridge, input: z.infer<typeof identityInput>) {
+  const state = readStateForBridge(bridge.id);
+  const current = state.bridges.find((item) => item.id === bridge.id);
+  if (!current) throw new Error("Bridge not found");
+  const presence = state.presences.find((item) => item.id === current.presenceId) ?? state.presence;
+  const expected = normalizedHandle(presence?.handle);
+  const actual = normalizedHandle(input.username);
+  const status = actual && expected && actual === expected ? "verified" : actual ? "mismatch" : "unknown";
+  const message = status === "mismatch"
+    ? `The controlled X tab is signed in as @${actual}, but this Presence expects @${expected}.`
+    : status === "unknown"
+      ? `The controlled X tab did not expose a verifiable signed-in account. Expected @${expected}.`
+      : undefined;
+  current.accountIdentity = { username: actual || undefined, status, message, observedAt: timestamp() };
+  current.updatedAt = timestamp();
+  if (status === "mismatch") {
+    current.state = "degraded";
+    const sync = state.bridgeSync.find((item) => item.bridgeId === current.id);
+    if (sync) { sync.status = "degraded"; sync.error = message; }
+  } else if (status === "verified") {
+    current.state = "online";
+    const sync = state.bridgeSync.find((item) => item.bridgeId === current.id);
+    if (sync) { sync.status = "healthy"; sync.error = undefined; }
+  }
+  state.events.unshift(bridgeEvent(state, status === "verified" ? "Bridge account verified" : "Bridge account check failed", message ?? `The controlled channel account matches @${expected}.`, status === "verified" ? "positive" : "warning"));
+  writeState(state, { advanceWorkspaceRevision: false, syncNormalized: false });
+  return { state, identity: current.accountIdentity, expectedHandle: presence?.handle };
 }
 
 export function heartbeatBridge(bridge: Bridge, executorId: string) {
@@ -147,6 +179,10 @@ function expireIfNeeded(state: OpenPresenceState, execution: Execution) {
 
 export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput>) {
   const state = readStateForBridge(bridge.id); const current = state.bridges.find((item) => item.id === bridge.id); if (!current) throw new Error("Bridge not found"); const now = Date.now(); const expiresAt = new Date(now + 120_000).toISOString();
+  const liveWork = state.executions.some((execution) => execution.bridgeId === bridge.id && execution.status === "queued" && execution.environment === "live");
+  const identityFresh = current.accountIdentity?.status === "verified"
+    && Date.now() - new Date(current.accountIdentity.observedAt).getTime() <= 30_000;
+  if (liveWork && !identityFresh) return { state, executions: [] };
   for (const execution of state.executions) {
     if (execution.bridgeId !== bridge.id || execution.status !== "claimed" || !execution.lease?.expiresAt) continue;
     if (new Date(execution.lease.expiresAt).getTime() <= now) {
@@ -201,6 +237,18 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
   if (!execution) throw new Error("Execution not found");
   if (execution.status === "succeeded") { if (execution.externalRef?.id !== input.externalRef.id || execution.externalRef?.type !== input.externalRef.type) throw new Error("Execution already acknowledged with a different external reference"); return { state, execution }; }
   leasedExecution(state, bridge, executionId, input.executorId);
+  const accountIdentity = state.bridges.find((item) => item.id === bridge.id)?.accountIdentity;
+  const identityFresh = accountIdentity?.status === "verified"
+    && Date.now() - new Date(accountIdentity.observedAt).getTime() <= 30_000;
+  if (execution.environment === "live" && !identityFresh) {
+    execution.status = "failed";
+    execution.failure = { code: "ACCOUNT_MISMATCH", message: "The Bridge account was not verified against the Presence before delivery.", retryable: false };
+    execution.lease = undefined;
+    execution.updatedAt = timestamp();
+    state.events.unshift(bridgeEvent(state, "Bridge acknowledgement blocked", execution.failure.message, "warning", execution.id));
+    writeState(state);
+    return { state, execution };
+  }
   if (execution.environment === "live" && execution.publication?.publicExpression) {
     try { verifyExecutionPermit(execution); } catch (error) {
       execution.status = "blocked";

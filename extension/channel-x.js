@@ -115,17 +115,25 @@
     const normalized = expectedHandle.replace(/^@/, "").toLowerCase();
     const switcher = document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"], [data-testid*="AccountSwitcher"], [aria-label*="Account"]');
     const visible = text(switcher).toLowerCase();
-    if (visible && visible.includes(normalized)) return { ok: true };
-    // X's route shell often renders the account menu before its accessible
-    // label, while the signed-in profile link is already available. An exact
-    // profile href is stronger evidence than whatever text a loading shell
-    // happens to expose, and works on both the home and direct-status routes.
-    const profileLink = [...document.querySelectorAll('a[href]')].find((node) => {
-      try { return new URL(node.href).pathname.replace(/^\//, "").toLowerCase() === normalized; } catch { return false; }
-    });
-    if (profileLink) return { ok: true };
-    if (!visible || !visible.includes(normalized)) return { ok: false, message: `Account check failed. Expected @${normalized}.` };
-    return { ok: true };
+    const accountLink = document.querySelector('[data-testid="AppTabBar_Profile_Link"], [data-testid="SideNav_AccountSwitcher_Button"] a[href^="/"]');
+    let observed;
+    try { observed = accountLink ? new URL(accountLink.href).pathname.replace(/^\//, "").split("/")[0].toLowerCase() : undefined; } catch { observed = undefined; }
+    const visibleHandle = visible.match(/@([a-z0-9_]{1,30})/i)?.[1]?.toLowerCase();
+    const actual = visibleHandle || observed;
+    if (actual && actual === normalized) return { ok: true, username: actual };
+    if (actual) return { ok: false, username: actual, message: `Account check failed. Expected @${normalized}; the controlled tab is signed in as @${actual}.` };
+    return { ok: false, message: `Account check failed. Expected @${normalized}; X has not exposed a verifiable signed-in account.` };
+  }
+
+  let lastIdentityReport = "";
+  let lastIdentityReportAt = 0;
+  function reportAccountIdentity() {
+    const account = verifyAccount();
+    const identity = account.username || `unknown:${account.message || "unverified"}`;
+    if (identity === lastIdentityReport && Date.now() - lastIdentityReportAt < 15_000) return;
+    lastIdentityReport = identity;
+    lastIdentityReportAt = Date.now();
+    sendMessage({ type: "OPENPRESENCE_ACCOUNT_IDENTITY", username: account.username });
   }
 
   function visiblePosts() {
@@ -159,6 +167,7 @@
     setState("preparing");
     const failure = (result) => { setState("observing"); return result; };
     const account = verifyAccount();
+    reportAccountIdentity();
     if (!account.ok) return failure({ executionId: execution.id, ok: false, code: "ACCOUNT_MISMATCH", message: account.message, retryable: false });
     if (execution.affordance !== "reply" && execution.affordance !== "x.reply") return failure({ executionId: execution.id, ok: false, code: "UNSUPPORTED_AFFORDANCE", message: "This first Chrome route only executes replies.", retryable: false });
     const targetId = execution.target?.id;
@@ -216,6 +225,7 @@
   }
 
   function scan() {
+    reportAccountIdentity();
     const account = verifyAccount();
     if (!account.ok) { setState("waiting"); return; }
     for (const post of visiblePosts().filter(isEnglishPost).slice(0, 12)) sendMessage({ type: "OPENPRESENCE_OBSERVATION", observation: { sourceEventId: `x:${post.id}`, externalRef: { type: "x.post", id: post.id }, object: { externalRef: { type: "x.post", id: post.id }, objectType: "post", language: post.language, author: { displayName: post.displayName, handle: post.handle }, content: post.text ? { text: post.text, language: post.language } : undefined, visibility: "public", shareability: "presence-only" } } });
@@ -236,6 +246,7 @@
       expectedHandle = message.expectedHandle || expectedHandle;
       presenceName = message.presenceName || presenceName;
       stateLabel();
+      reportAccountIdentity();
       // The Bridge may deliver session context after the tab has already
       // finished loading. Start a measurement pass here as well as from the
       // background alarm so recovery does not depend on message ordering.
@@ -266,6 +277,7 @@
     } catch { /* Ignore malformed session state and keep the tab observational. */ }
   }
   setState("observing");
+  window.setTimeout(reportAccountIdentity, 1_000);
   window.setInterval(scan, 6_000);
   window.setTimeout(scan, 2_000);
 })();

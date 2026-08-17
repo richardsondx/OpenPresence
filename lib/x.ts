@@ -106,7 +106,7 @@ export async function readPublicXPostByUrl(value: string): Promise<XRecentPost> 
 const apiBase = () => (process.env.OPENPRESENCE_X_API_BASE_URL ?? "https://api.x.com").replace(/\/$/, "");
 const uploadBase = () => (process.env.OPENPRESENCE_X_UPLOAD_BASE_URL ?? "https://upload.twitter.com").replace(/\/$/, "");
 const encode = (value: string) => encodeURIComponent(value).replace(/[!'()*]/g, (character) => `%${character.charCodeAt(0).toString(16).toUpperCase()}`);
-const normalizeHandle = (handle: string) => handle.trim().replace(/^@/, "");
+export const normalizeHandle = (handle: string) => handle.trim().replace(/^@/, "").toLowerCase();
 
 export function oauthHeader(method: string, url: string, credentials: XCredentials, query: Record<string, string> = {}, bodyParams: Record<string, string> = {}) {
   if (!credentials.accessToken || !credentials.accessTokenSecret) throw new Error("User access token and user access token secret are required for X write access.");

@@ -1024,8 +1024,22 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .bring-post-form input:focus { outline: 2px solid #d88b57; outline-offset: 1px; }
 .bring-post-error { grid-column: 1 / -1; margin: -2px 0 0; color: #9b4f2f; font-size: 10px; }
 .bring-post-boundary { grid-column: 1 / -1; color: var(--faint); font: 8px/1.35 "DM Mono", monospace; }
+.bring-post-imported { grid-column: 1 / -1; display: flex; align-items: center; justify-content: space-between; gap: 16px; padding: 10px 12px; border: 1px solid #ead6c5; border-radius: 8px; background: #fffaf5; }
+.bring-post-imported > div:first-child { min-width: 0; }
+.bring-post-imported strong { font-size: 11px; }
+.bring-post-imported p { margin: 3px 0; color: var(--ink); font-size: 11px; line-height: 1.4; }
+.bring-post-imported small { color: var(--muted); font: 8px "DM Mono", monospace; }
+.bring-post-address, .bring-post-address-stack { display: grid; justify-items: end; gap: 5px; flex: 0 0 auto; }
+.bring-post-address-stack { gap: 7px; }
+.bring-post-address-failure, .bring-post-address-success { font: 9px "DM Mono", monospace; text-align: right; }
+.bring-post-address-failure { max-width: 280px; color: #9b4f2f; }
+.bring-post-address-success { color: #4c8063; }
+.operator-requested-failure { display: grid; gap: 3px; color: #9b4f2f; }
+.operator-requested-failure strong { color: inherit; }
+.operator-requested-failure span { color: inherit; }
 @media (max-width: 900px) { .bring-post-panel { grid-template-columns: 1fr; }.bring-post-form { grid-template-columns: minmax(0, 1fr) auto; } }
 @media (max-width: 560px) { .bring-post-form { grid-template-columns: 1fr; }.bring-post-form .button { justify-self: start; } }
+@media (max-width: 560px) { .bring-post-imported { align-items: stretch; flex-direction: column; }.bring-post-address { justify-items: start; }.bring-post-address-failure, .bring-post-address-success { text-align: left; } }
 .history-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 14px; padding: 12px 0; border-top: 1px solid var(--line); border-bottom: 1px solid var(--line); }
 .history-filter, .history-date-controls { display: flex; align-items: center; gap: 8px; }
 .history-filter label { color: var(--muted); font: 9px "DM Mono", monospace; text-transform: uppercase; }
@@ -1330,6 +1344,16 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .mirror-panel { margin: 0; padding-top: 15px; border-top-width: 2px; }
 .mirror-panel .section-heading { align-items: flex-start; margin-bottom: 10px; }
 .mirror-panel .section-heading h3 { margin-top: 6px; font-size: 24px; letter-spacing: -.06em; }
+.mirror-panel-meta { display: grid; justify-items: end; gap: 8px; }
+.mirror-filter { display: inline-flex; gap: 3px; padding: 3px; border: 1px solid #e3ded7; border-radius: 999px; background: #faf8f5; }
+.mirror-filter button { display: inline-flex; align-items: center; gap: 5px; padding: 4px 7px; border: 0; border-radius: 999px; background: transparent; color: var(--muted); font: 9px "DM Mono", monospace; cursor: pointer; }
+.mirror-filter button.selected { background: #fff; color: var(--ink); box-shadow: 0 1px 3px rgba(55,45,30,.08); }
+.mirror-filter button:focus-visible { outline: 2px solid var(--agent-accent); outline-offset: 1px; }
+.mirror-filter button span { color: var(--faint); }
+.mirror-post-lineage { display: flex; align-items: center; flex-wrap: wrap; gap: 6px 10px; margin: -3px 0 11px; color: var(--muted); font: 9px "DM Mono", monospace; }
+.mirror-post-lineage span + span::before { content: "·"; margin-right: 10px; color: #c4b6aa; }
+.mirror-post-lineage span:nth-child(2) { color: #8c5535; }
+.mirror-post-lineage span:last-child { color: var(--faint); }
 .mirror-explainer { max-width: 640px; margin: 0; font-size: 12px; line-height: 1.55; }
 .mirror-boundary { margin: 7px 0 19px; color: var(--faint); font: 9px/1.4 "DM Mono", monospace; }
 .mirror-list { gap: 13px; }
@@ -1508,6 +1532,7 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
   .activity-attention-link { grid-column: 1 / -1; justify-self: stretch; justify-content: center; }
   .activity-side-column { grid-template-columns: 1fr; gap: 35px; }
   .mirror-panel .section-heading { flex-direction: column; gap: 9px; }
+  .mirror-panel-meta { justify-items: start; }
   .mirror-panel .quiet-label { align-self: flex-start; }
   .mirror-post { padding: 15px; }
   .mirror-post-content { font-size: 13px; }

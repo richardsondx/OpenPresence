@@ -1,5 +1,6 @@
-import { readNativeXCredentials, readRecentXMentions, readRecentXPosts, readXAudienceSnapshot, readXPublicationMetrics, readXPostsByIds, testXCredentials, type XRecentPost } from "./x";
-import { applyOperation, recordNativeMirror, recordNativeMirrorDeletion, recordNativeObservation, recordPublicFooting, recordRuntimeEvent } from "./runtime";
+import { readNativeXCredentials, readRecentXMentions, readRecentXPosts, readXAudienceSnapshot, readXPublicationMetrics, readXPostsByIds, type XRecentPost } from "./x";
+import { applyOperation, markNativeConnectionNeedsAttention, recordNativeMirror, recordNativeMirrorDeletion, recordNativeObservation, recordPublicFooting, recordRuntimeEvent } from "./runtime";
+import { normalizeHandle } from "./x";
 import { languagesMatch } from "./language-policy";
 import type { EntityRef, MirrorObject, OpenPresenceState, Presence, PresenceQuietHours } from "./types";
 import { hydrateThreadContext } from "./thread-context";
@@ -116,20 +117,18 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
   });
   next = recordRuntimeEvent(next, presenceId, "Social Mirror syncing", "Reconciling the connected X account into the Social Mirror.", "positive");
 
-  let connection = next.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x");
+  const connection = next.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x");
   const credentials = connection ? readNativeXCredentials(connection.id) : undefined;
   const targetPresence = next.presences.find((item) => item.id === presenceId) ?? next.presence;
-  const configuredHandle = targetPresence?.handle.replace(/^@/, "").trim().toLowerCase();
-  const connectedHandle = connection?.account?.username.replace(/^@/, "").trim().toLowerCase();
-  if (connection && credentials && configuredHandle && connectedHandle && configuredHandle !== connectedHandle) {
-    try {
-      const refreshed = await testXCredentials(credentials, targetPresence?.handle ?? "");
-      next.nativeConnections = next.nativeConnections.map((item) => item.id === connection?.id ? { ...item, account: refreshed.account, access: refreshed.access, updatedAt: new Date().toISOString() } : item);
-      connection = next.nativeConnections.find((item) => item.id === connection?.id);
-      next = recordRuntimeEvent(next, presenceId, "X identity refreshed", `The connected X account now reports @${refreshed.account.username}; the Presence identity cache was updated before observation.`, "positive");
-    } catch (error) {
-      next = recordRuntimeEvent(next, presenceId, "X identity refresh unavailable", error instanceof Error ? error.message : "The connected X account identity could not be refreshed.", "warning");
-    }
+  const configuredHandle = targetPresence?.handle ? normalizeHandle(targetPresence.handle) : undefined;
+  const connectedHandle = connection?.account?.username ? normalizeHandle(connection.account.username) : undefined;
+  if (connection && credentials && configuredHandle && connectedHandle !== configuredHandle) {
+    const message = connectedHandle
+      ? `ACCOUNT_MISMATCH: X authenticated @${connectedHandle}, but this Presence expects @${configuredHandle}. Native observation and actions are paused until the correct credentials are connected.`
+      : `ACCOUNT_UNVERIFIED: X did not expose the authenticated account for this connection. Native observation and actions are paused until @${configuredHandle} is verified.`;
+    next = markNativeConnectionNeedsAttention(next, presenceId, message);
+    next = recordNativeObservation(next, presenceId, { status: "error", error: message, nextObservationAt: new Date(Date.now() + 60_000).toISOString() });
+    return recordRuntimeEvent(next, presenceId, "X identity mismatch", message, "warning");
   }
   const accountId = connection?.account?.id;
   if (!connection || !credentials || !accountId) {

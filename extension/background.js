@@ -64,6 +64,22 @@ async function requestMetrics(session) {
   }
 }
 
+async function reportIdentity(session, username) {
+  try {
+    const result = await bridgeRequest(session, "/api/bridge/v1/identity", { method: "POST", body: JSON.stringify({ executorId: session.executorId, username }) });
+    if (result.identity?.status === "verified") {
+      sendStatus({ state: "connected", presenceId: session.presence.id, presenceName: session.presence.name, tabId: session.tabId });
+      await claim(session);
+    } else {
+      sendStatus({ state: "error", presenceId: session.presence.id, message: result.identity?.message || `The controlled tab must be signed in as ${session.presence.handle}.` });
+    }
+    return result;
+  } catch (error) {
+    sendStatus({ state: "error", presenceId: session.presence.id, message: error.message || "The controlled tab account could not be verified." });
+    return undefined;
+  }
+}
+
 async function restoreSessions() {
   if (sessions.size) return;
   const stored = await chrome.storage.session.get(sessionStorageKey);
@@ -246,6 +262,7 @@ chrome.runtime.onMessage.addListener((message, sender) => {
     const session = [...sessions.values()].find((item) => item.tabId === sender.tab?.id);
     if (!session) return;
     if (message?.type === "OPENPRESENCE_OBSERVATION") await ingest(session, message.observation);
+    if (message?.type === "OPENPRESENCE_ACCOUNT_IDENTITY") await reportIdentity(session, message.username);
     if (message?.type === "OPENPRESENCE_METRICS") {
       try {
         await reportMetrics(session, message.metrics);
