@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyOperation, audienceDeltas, compileAssignmentInstruction, completeNativeExecution, derivePresenceCapabilityManifest, formChatPostIntent, formXActionIntent, publicationMetricBaseline } from "@/lib/runtime";
+import { applyOperation, audienceDeltas, compileAssignmentInstruction, completeNativeExecution, derivePresenceCapabilityManifest, formChatPostIntent, formXActionIntent, formXReplyIntent, publicationMetricBaseline } from "@/lib/runtime";
 import { createAgent } from "@/lib/runtime";
 import type { MirrorObject, OpenPresenceState } from "@/lib/types";
 
@@ -125,6 +125,16 @@ describe("continuous growth responsibility", () => {
     const published = formChatPostIntent(withAsset, "A grounded media-backed point of view.", undefined, "agent", [asset.id]);
     expect(published.publications[0]).toMatchObject({ format: "x.media-post", assetIds: [asset.id] });
     expect(published.publications[0]?.publicExpression?.mediaIds).toEqual([asset.id]);
+  });
+
+  it("carries ready media through live reply and quote envelopes", () => {
+    const state = fixture();
+    const asset = { id: "asset-reply", agentId: state.agent!.id, presenceId: state.presence!.id, type: "image" as const, mediaKind: "image" as const, status: "ready" as const, storage: { storeKey: "reply.png", mimeType: "image/png", byteSize: 4, exactHash: "hash-reply" }, provenance: { origin: "discovered", sourceUrl: "https://example.com/reply.png", importedAt: new Date().toISOString() }, environment: "live" as const, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const withAsset = { ...state, assets: [asset] };
+    const reply = formXReplyIntent(withAsset, "A grounded reply with evidence.", "post-1", undefined, undefined, [asset.id]);
+    expect(reply.publications[0]).toMatchObject({ format: "x.media-post", assetIds: [asset.id] });
+    const quote = formXActionIntent(withAsset, { affordance: "x.quote", target: { type: "x.post", id: "post-1" }, text: "A grounded quote with evidence.", assetIds: [asset.id] });
+    expect(quote.publications[0]).toMatchObject({ format: "x.media-post", assetIds: [asset.id] });
   });
 
   it("opens deduplicated durable requests for growth capabilities and resolves them on recovery", () => {

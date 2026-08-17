@@ -737,7 +737,8 @@ async function runNativePulse(source: OpenPresenceState, presenceId: string) {
         return finishPulse(recordRuntimeEvent(next, presenceId, "Social action held", "The Presence chose an action, but X did not provide a verifiable target identity.", "warning", { sourceObjectId: inbound.id }), presenceId, "Observed X but could not verify the chosen target.");
       }
       const existingExecutionIds = new Set(next.executions.map((item) => item.id));
-      next = formXActionIntent(next, { affordance: `x.${decision.action}` as "x.like" | "x.repost" | "x.quote" | "x.follow", target, text: decision.action === "quote" ? decision.text.trim() : undefined });
+      const quoteMedia = decision.action === "quote" ? await materializeLiveDecisionAssets(next, presenceId, decision) : { state: next, assetIds: [] as string[] };
+      next = formXActionIntent(quoteMedia.state, { affordance: `x.${decision.action}` as "x.like" | "x.repost" | "x.quote" | "x.follow", target, text: decision.action === "quote" ? decision.text.trim() : undefined, assetIds: quoteMedia.assetIds });
       next = markInboundJudged(next, presenceId, inbound.externalRef.id);
       const actionExecutionIds = new Set(next.executions.filter((item) => !existingExecutionIds.has(item.id)).map((item) => item.id));
       next = await deliverNativeExecutions(next, actionExecutionIds);
@@ -754,7 +755,8 @@ async function runNativePulse(source: OpenPresenceState, presenceId: string) {
     } else {
       next = recordRuntimeEvent(next, presenceId, "Worth responding to", "Jenny judged the new message relevant enough to continue the conversation.", "positive");
       const existingExecutionIds = new Set(next.executions.map((item) => item.id));
-      next = formXReplyIntent(next, replyDraft, focalPostId);
+      const replyMedia = await materializeLiveDecisionAssets(next, presenceId, decision);
+      next = formXReplyIntent(replyMedia.state, replyDraft, focalPostId, undefined, undefined, replyMedia.assetIds);
       next = markInboundJudged(next, presenceId, inbound.externalRef.id);
       const replyExecutionIds = new Set(next.executions.filter((item) => !existingExecutionIds.has(item.id)).map((item) => item.id));
       next = await deliverNativeExecutions(next, replyExecutionIds);

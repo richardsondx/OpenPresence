@@ -2893,13 +2893,14 @@ export function formAssignmentPostIntent(source: OpenPresenceState, text: string
   return state;
 }
 
-export function formXReplyIntent(source: OpenPresenceState, text: string, parentId: string, operatorDirectiveId?: string, assignmentId?: string) {
+export function formXReplyIntent(source: OpenPresenceState, text: string, parentId: string, operatorDirectiveId?: string, assignmentId?: string, assetIds: string[] = []) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presence;
   if (!state.agent || !presence || presence.status !== "live" || presence.channel !== "x" || !text.trim() || !parentId.trim()) return state;
   const formedAt = now();
   const expiresAt = new Date(Date.now() + 45 * 60 * 1000).toISOString();
-  const publication = makePublication(state, text.trim(), "x.reply", operatorDirectiveId ? "operator_manual" : "agent_model");
+  const validAssetIds = assetIds.filter((assetId) => state.assets.some((asset) => asset.id === assetId && asset.status === "ready"));
+  const publication = makePublication(state, text.trim(), validAssetIds.length ? "x.media-post" : "x.reply", operatorDirectiveId ? "operator_manual" : "agent_model", validAssetIds);
   const parentObject = state.mirrorObjects.find((item) => item.externalRef.type === "x.post" && item.externalRef.id === parentId && item.presenceId === presence.id);
   const conversationEpisodeId = parentObject ? ensureConversationEpisode(state, parentObject, presence.id).id : undefined;
   const origin: SocialOrigin = assignmentId
@@ -2944,7 +2945,8 @@ export function formXActionIntent(source: OpenPresenceState, input: { affordance
   const formedAt = now();
   const expiresAt = new Date(Date.now() + 45 * 60 * 1000).toISOString();
   const origin: SocialOrigin = input.assignmentId ? { kind: "assignment", refId: input.assignmentId } : { kind: "inbound_social", refId: input.target.id };
-  const publication = requiresExpression ? makePublication(state, input.text!.trim(), input.affordance, "agent_model", input.assetIds) : undefined;
+  const validAssetIds = (input.assetIds ?? []).filter((assetId) => state.assets.some((asset) => asset.id === assetId && asset.status === "ready"));
+  const publication = requiresExpression ? makePublication(state, input.text!.trim(), validAssetIds.length ? "x.media-post" : input.affordance, "agent_model", validAssetIds) : undefined;
   if (publication) { publication.origin = origin; publication.assignmentId = input.assignmentId; }
   const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: input.affordance, target: input.target, publicationId: publication?.id, priority: capability === "follow" ? 35 : 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, origin, assignmentId: input.assignmentId, environment: "live" };
   if (publication?.publicExpression) publication.publicExpression.socialIntentId = socialIntent.id;
