@@ -54,6 +54,7 @@ test("Activity pipeline cards reveal the exact selected and preparing actions", 
     const listedPresence = body.presences?.find((item: { id: string }) => item.id === presenceId);
     if (listedPresence) listedPresence.environment = "live";
     const now = new Date().toISOString();
+    body.assignments.push({ id: "pipeline-next-assignment", agentId, presenceId, channelId: "x", environment: "live", instruction: "Surface one grounded founder question about AI agents and identify the most useful next step.", deliverable: { type: "original_publication", quantity: 1, quantityMode: "exact" }, schedule: { day: "Tuesday", time: "08:00", executionWindow: "08:00–11:00" }, executionPolicy: { usePresenceEnvelope: true }, status: "accepted", progress: { required: 1, verified: 0 }, rejectedCandidates: 0, systemFailures: 0, createdAt: now, updatedAt: now });
     const heartbeat = new Date(Date.now() - 10_000).toISOString();
     body.bridges.push({ id: "pipeline-bridge", presenceId, channelId: "x", name: "OpenPresence X Bridge", kind: "bridge", state: "online", adapterStatus: "connected", lastHeartbeatAt: heartbeat, lastSeenAt: heartbeat, capabilities: { inbound: true, reconcile: true, affordances: ["reply", "follow"], formats: ["x.reply", "x.post"], metrics: [] }, createdAt: now, updatedAt: now });
     const records = [
@@ -77,6 +78,12 @@ test("Activity pipeline cards reveal the exact selected and preparing actions", 
 
   await page.reload();
   await page.getByRole("button", { name: "Activity", exact: true }).click();
+  const nextAssignment = page.locator(".activity-status-block").filter({ hasText: "Next assignment" });
+  await expect(nextAssignment).toContainText("Assignment");
+  await expect(nextAssignment).toContainText("Tuesday at 08:00");
+  await expect(nextAssignment).toContainText("Instruction");
+  await expect(nextAssignment).toContainText("Surface one grounded founder question about AI agents and identify the most useful next step.");
+  await expect(nextAssignment).toContainText("This is not a drafted post or a warning.");
   await expect(page.locator(".execution-send-timing")).toContainText("Next send attempt in");
   await expect(page.locator(".execution-send-timing")).toContainText("Bridge checks the queue");
   await expect(page.getByRole("button", { name: /2 selected/ }).first()).toBeVisible();

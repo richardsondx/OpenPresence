@@ -4715,6 +4715,10 @@ function LiveView({
           : nextCheckAt
             ? "Next check scheduled"
             : "Next check not scheduled";
+  const nextAssignmentCard = activity.nextAttention.label === "Next Assignment";
+  const nextAssignmentTimingParts = activity.nextIntent.detail.split(" · ");
+  const nextAssignmentTime = nextAssignmentTimingParts[0] || "Scheduled";
+  const nextAssignmentWindow = nextAssignmentTimingParts.slice(1).join(" · ") || "Flexible consideration";
   useEffect(() => {
     const timer = window.setInterval(() => setCountdownNow(Date.now()), 1_000);
     return () => window.clearInterval(timer);
@@ -5248,9 +5252,27 @@ function LiveView({
             </div>
             <div className="activity-status-block">
               <SectionEyebrow>Next</SectionEyebrow>
-              <h3>{activity.nextAttention.label}</h3>
-              <p>{presenceCopy(activity.nextAttention.detail)}</p>
-              <small>{activity.nextIntent.label} · {presenceCopy(activity.nextIntent.detail)}</small>
+              {nextAssignmentCard ? <div className="activity-next-assignment-card">
+                <div className="activity-next-assignment-topline">
+                  <span className="activity-next-assignment-kind"><BriefcaseBusiness size={12} /> Assignment</span>
+                  <span className="activity-next-time-badge"><Clock3 size={12} /> {presenceCopy(nextAssignmentTime)}</span>
+                </div>
+                <h3>Next assignment</h3>
+                <p className="activity-next-assignment-explainer">A scheduled instruction for Genny to consider. This is not a drafted post or a warning.</p>
+                <div className="activity-next-instruction">
+                  <SectionEyebrow>Instruction</SectionEyebrow>
+                  <strong>{presenceCopy(activity.nextIntent.label)}</strong>
+                </div>
+                <div className="activity-next-window">
+                  <span>Consideration window</span>
+                  <strong>{presenceCopy(nextAssignmentWindow)}</strong>
+                </div>
+                <small>At that time, Genny decides whether the instruction earns action. It does not force publication.</small>
+              </div> : <>
+                <h3>{activity.nextAttention.label}</h3>
+                <p>{presenceCopy(activity.nextAttention.detail)}</p>
+                <small>{activity.nextIntent.label} · {presenceCopy(activity.nextIntent.detail)}</small>
+              </>}
             </div>
             {latestConversationEpisode && latestConversationEpisode.status !== "closed" && (
               <div className="activity-status-block" aria-label="Conversation status">
