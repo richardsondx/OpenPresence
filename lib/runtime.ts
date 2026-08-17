@@ -2793,13 +2793,14 @@ export function isExplicitXPostRequest(content: string) {
     (lower.includes("post on x") && (lower.includes("presence") || lower.includes("publish")));
 }
 
-export function formChatPostIntent(source: OpenPresenceState, text: string, standingIntentId?: string, sourceKind: "agent" | "operator" = "agent") {
+export function formChatPostIntent(source: OpenPresenceState, text: string, standingIntentId?: string, sourceKind: "agent" | "operator" = "agent", assetIds: string[] = []) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presence;
   if (!state.agent || !presence || presence.status !== "live" || presence.channel !== "x" || !text.trim()) return state;
   const formedAt = now();
   const expiresAt = new Date(Date.now() + 45 * 60 * 1000).toISOString();
-  const publication = makePublication(state, text.trim(), "x.post", sourceKind === "operator" ? "operator_manual" : "agent_model");
+  const validAssetIds = assetIds.filter((assetId) => state.assets.some((asset) => asset.id === assetId && asset.status === "ready"));
+  const publication = makePublication(state, text.trim(), validAssetIds.length ? "x.media-post" : "x.post", sourceKind === "operator" ? "operator_manual" : "agent_model", validAssetIds);
   const origin: SocialOrigin = standingIntentId ? { kind: "standing_intent", refId: standingIntentId } : sourceKind === "operator" ? { kind: "operator" } : { kind: "other" };
   publication.origin = origin;
   const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: "x.post", publicationId: publication.id, priority: 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, standingIntentId, origin };
@@ -2866,8 +2867,8 @@ export function formStandingPostIntent(source: OpenPresenceState, text: string, 
 }
 
 /** Form an original publication through the same execution envelope, with canonical Assignment lineage. */
-export function formAssignmentPostIntent(source: OpenPresenceState, text: string, assignmentId: string) {
-  const state = formChatPostIntent(source, text, undefined, "agent");
+export function formAssignmentPostIntent(source: OpenPresenceState, text: string, assignmentId: string, assetIds: string[] = []) {
+  const state = formChatPostIntent(source, text, undefined, "agent", assetIds);
   const intent = state.socialIntents[0];
   const execution = intent ? state.executions.find((item) => item.socialIntentId === intent.id) : undefined;
   const assignment = state.assignments.find((item) => item.id === assignmentId);

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyOperation, audienceDeltas, compileAssignmentInstruction, completeNativeExecution, derivePresenceCapabilityManifest, formXActionIntent, publicationMetricBaseline } from "@/lib/runtime";
+import { applyOperation, audienceDeltas, compileAssignmentInstruction, completeNativeExecution, derivePresenceCapabilityManifest, formChatPostIntent, formXActionIntent, publicationMetricBaseline } from "@/lib/runtime";
 import { createAgent } from "@/lib/runtime";
 import type { MirrorObject, OpenPresenceState } from "@/lib/types";
 
@@ -113,6 +113,16 @@ describe("continuous growth responsibility", () => {
     const completed = completeNativeExecution(next, next.executions[0]!.id, { type: "x.like", id: "post-1" });
     expect(completed.executions[0]?.status).toBe("succeeded");
     expect(completed.outcomes[0]?.evidence).toEqual([{ type: "x.like", id: "post-1" }]);
+  });
+
+  it("carries ready media into an autonomous live publication envelope", () => {
+    const state = fixture();
+    state.presence!.execution.post = "auto";
+    const asset = { id: "asset-chart", agentId: state.agent!.id, presenceId: state.presence!.id, type: "image" as const, mediaKind: "image" as const, status: "ready" as const, storage: { storeKey: "chart.png", mimeType: "image/png", byteSize: 4, exactHash: "hash" }, provenance: { origin: "discovered", sourceUrl: "https://example.com/chart.png", importedAt: new Date().toISOString() }, environment: "live" as const, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
+    const withAsset = { ...state, assets: [asset] };
+    const published = formChatPostIntent(withAsset, "A grounded media-backed point of view.", undefined, "agent", [asset.id]);
+    expect(published.publications[0]).toMatchObject({ format: "x.media-post", assetIds: [asset.id] });
+    expect(published.publications[0]?.publicExpression?.mediaIds).toEqual([asset.id]);
   });
 
   it("opens deduplicated durable requests for growth capabilities and resolves them on recovery", () => {

@@ -11,7 +11,7 @@ import { addSandboxEvent, advanceSandboxTime, applyOperation, approveSandboxIntr
 import { followXUser, likeXPost, publishSealedXPost, readNativeXCredentials, repostXPost, searchRecentXPosts } from "@/lib/x";
 import { hydrateNativeXThreadContext, reconcileNativeX } from "@/lib/native-x";
 import { isAgentCapabilityEnabled, isAgentToolEnabled } from "@/lib/types";
-import type { Asset, AssetResearchOutcome, AssetResearchSession, Assignment, AssignmentOutcomeClass, AssignmentRun, AssignmentRunStatus, JsonValue, MirrorObject, OpenPresenceState, Operation, RuntimeOperation, SandboxAssetInput, ScenarioStimulus, VisualNeed } from "@/lib/types";
+import type { Asset, AssetCandidate, AssetResearchOutcome, AssetResearchSession, Assignment, AssignmentOutcomeClass, AssignmentRun, AssignmentRunStatus, JsonValue, MirrorObject, OpenPresenceState, Operation, RuntimeOperation, SandboxAssetInput, ScenarioStimulus, VisualNeed } from "@/lib/types";
 import { isAiMockEnabled, isTestRuntime } from "@/lib/test-runtime";
 import { cognitionSafeAssetSummary, hasUsablePerception } from "@/lib/perception";
 import { compareDiscoveredAssets, inspectDiscoveredAsset, inspectSandboxObject } from "@/lib/perception-runtime";
@@ -281,6 +281,10 @@ async function deliverNativeExecutions(source: OpenPresenceState, executionIds: 
         const quoteTweetId = execution.affordance === "x.quote" && execution.target?.type === "x.post" ? execution.target.id : undefined;
         const externalRef = await publishSealedXPost(credentials, sealed.expression, sealed.permit, replyTo, next.assets, quoteTweetId);
         next = completeNativeExecution(next, execution.id, externalRef);
+        const publication = execution.publication;
+        if (publication?.assetIds?.length) {
+          next.assetUsages = [...publication.assetIds.map((assetId) => ({ id: `asset-usage:${randomUUID()}`, assetId, agentId: next.agent?.id ?? "", presenceId: execution.presenceId, publicationId: publication.id, socialIntentId: execution.socialIntentId, assignmentId: execution.assignmentId, channelId: "x" as const, environment: "live" as const, usageType: "new" as const, publishedAt: new Date().toISOString() })), ...next.assetUsages];
+        }
       } catch (error) {
         const message = error instanceof Error ? error.message : "X rejected the post.";
         if (error instanceof PublicationSecurityError) {
@@ -326,6 +330,41 @@ async function deliverNativeExecutions(source: OpenPresenceState, executionIds: 
     }
   }
   return next;
+}
+
+async function materializeLiveDecisionAssets(source: OpenPresenceState, presenceId: string, decision: AgentSocialDecision) {
+  let next = source;
+  const presence = next.presences.find((item) => item.id === presenceId) ?? next.presence;
+  const agentId = next.agent?.id;
+  if (!presence || !agentId || !decision.assets?.length) return { state: next, assetIds: [] as string[] };
+  const assetIds: string[] = [];
+  for (const selected of decision.assets.filter((item) => ["image", "video", "gif", "chart"].includes(item.kind) && item.sourceUrl).slice(0, 4)) {
+    const existing = next.assets.find((asset) => asset.presenceId === presence.id && asset.environment === "live" && asset.status === "ready" && asset.provenance.sourceUrl === selected.sourceUrl);
+    if (existing) {
+      assetIds.push(existing.id);
+      continue;
+    }
+    const candidate: AssetCandidate = {
+      id: `live-decision-asset:${randomUUID()}`,
+      query: selected.name ?? selected.kind,
+      name: selected.name ?? `Agent-selected ${selected.kind}`,
+      mediaUrl: selected.sourceUrl,
+      sourcePageUrl: selected.sourcePageUrl,
+      publisher: selected.publisher,
+      provider: "agent_decision",
+      semanticKind: selected.kind === "chart" ? "chart" : selected.kind === "video" ? "clip" : selected.kind === "gif" ? "meme" : "other",
+    };
+    try {
+      const result = await materializeCandidate(candidate, { agentId, presenceId: presence.id, environment: "live", origin: "discovered", semanticKind: candidate.semanticKind });
+      next.assets.unshift(result.asset);
+      if (result.sourceEvidence) next.sourceEvidence.unshift(result.sourceEvidence);
+      assetIds.push(result.asset.id);
+      next = recordRuntimeEvent(next, presence.id, "Live media selected", `${result.asset.description ?? selected.kind} was downloaded and attached to the autonomous publication candidate.`, "positive");
+    } catch (error) {
+      next = recordRuntimeEvent(next, presence.id, "Live media unavailable", error instanceof Error ? error.message : "The selected media could not be downloaded for live publication.", "warning");
+    }
+  }
+  return { state: next, assetIds };
 }
 
 function nativeConnectionCanAct(connection: OpenPresenceState["nativeConnections"][number]) {
@@ -578,7 +617,8 @@ async function runScheduledLiveAssignments(source: OpenPresenceState, presenceId
     return recordRuntimeEvent(next, presenceId, "Assignment candidate rejected", currentAssignment.lastOutcome.message, "warning");
   }
   const before = new Set(next.executions.map((item) => item.id));
-  next = formAssignmentPostIntent(next, draft, currentAssignment.id);
+  const media = await materializeLiveDecisionAssets(next, presenceId, decision);
+  next = formAssignmentPostIntent(media.state, draft, currentAssignment.id, media.assetIds);
   const executionIds = new Set(next.executions.filter((item) => !before.has(item.id)).map((item) => item.id));
   next = await deliverNativeExecutions(next, executionIds);
   const execution = next.executions.find((item) => executionIds.has(item.id));
@@ -642,7 +682,8 @@ async function runPublishingAssignmentPulse(source: OpenPresenceState, presenceI
   const draft = decision.text.trim();
   if (draft.length > 280) return recordRuntimeEvent(next, presenceId, "Publishing Assignment held", `${presence.name} rejected a candidate that exceeded X's 280-character limit.`, "warning");
   const before = new Set(next.executions.map((item) => item.id));
-  next = formAssignmentPostIntent(next, draft, currentAssignment.id);
+  const media = await materializeLiveDecisionAssets(next, presenceId, decision);
+  next = formAssignmentPostIntent(media.state, draft, currentAssignment.id, media.assetIds);
   const executionIds = new Set(next.executions.filter((item) => !before.has(item.id)).map((item) => item.id));
   next = await deliverNativeExecutions(next, executionIds);
   const execution = next.executions.find((item) => executionIds.has(item.id));
@@ -740,7 +781,8 @@ async function runNativePulse(source: OpenPresenceState, presenceId: string) {
   if (!draft.trim()) return finishPulse(recordRuntimeEvent(next, presenceId, "Launch held", "Jenny found no first move worth publishing yet and chose silence.", "quiet"), presenceId, "Observed X and chose NO_OP while establishing context.");
   if (draft.trim().length > 280) return finishPulse(recordRuntimeEvent(next, presenceId, "Launch held", "Jenny's candidate first move exceeded X's single-post limit, so she kept it as silence instead of truncating her meaning.", "warning"), presenceId, "Observed X but did not publish an invalidly sized first move.");
   const existingExecutionIds = new Set(next.executions.map((item) => item.id));
-  next = formChatPostIntent(next, draft);
+  const launchMedia = await materializeLiveDecisionAssets(next, presenceId, launchDecision);
+  next = formChatPostIntent(launchMedia.state, draft, undefined, "agent", launchMedia.assetIds);
   const launchExecutionIds = new Set(next.executions.filter((item) => !existingExecutionIds.has(item.id)).map((item) => item.id));
   next = await deliverNativeExecutions(next, launchExecutionIds);
   const launchExecution = next.executions.find((item) => launchExecutionIds.has(item.id));
