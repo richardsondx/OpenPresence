@@ -2821,7 +2821,12 @@ function migrateLegacyXBrowserBridge(bridge: Bridge): Bridge {
     && sameSet(capabilities.formats, legacyFormats)
     && sameSet(capabilities.metrics, legacyMetrics)
     && !capabilities.assetKinds?.length;
-  if (!isLegacyDefault) return bridge;
+  const isPreviouslyShippedChromeDefault = bridge.name.startsWith("OpenPresence Chrome")
+    && sameSet(capabilities.affordances, [...legacyAffordances, "follow"])
+    && sameSet(capabilities.formats, [...legacyFormats, "x.reply"])
+    && sameSet(capabilities.metrics, [...legacyMetrics, "followers", "public_metrics"])
+    && sameSet(capabilities.assetKinds ?? [], ["image", "video"]);
+  if (!isLegacyDefault && !isPreviouslyShippedChromeDefault) return bridge;
   return { ...bridge, capabilities: chromeBrowserBridgeCapabilities() };
 }
 

@@ -743,6 +743,10 @@ describe("OpenPresence runtime boundaries", () => {
     expect(manifest.items.find((item) => item.capability === "post_performance")).toMatchObject({ availability: "available", provider: "Browser Bridge" });
     expect(manifest.items.find((item) => item.capability === "image")).toMatchObject({ availability: "unavailable", canExecute: false });
     expect(manifest.items.find((item) => item.capability === "video")).toMatchObject({ availability: "unavailable", canExecute: false });
+    const previouslyShipped = { ...state, bridges: [{ ...state.bridges[0], id: "previously-shipped-chrome", presenceId, channelId: "x" as const, name: "OpenPresence Chrome · Jenny", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: heartbeat, capabilities: { inbound: true, reconcile: true, affordances: ["post", "reply", "repost", "quote", "like", "message", "follow"], formats: ["x.post", "x.media-post", "x.thread", "x.reply"], metrics: ["replies", "reactions", "posts", "followers", "public_metrics"], assetKinds: ["image", "video"] as ("image" | "video")[] } }] };
+    const migrated = derivePresenceCapabilityManifest(previouslyShipped, presenceId);
+    expect(migrated.items.find((item) => item.capability === "follow")).toMatchObject({ availability: "unavailable", canExecute: false });
+    expect(migrated.items.find((item) => item.capability === "reply")).toMatchObject({ availability: "available", provider: "Browser Bridge", canExecute: true });
     const created = applyOperation(state, { type: "createAssignment", presenceId, environment: "live", instruction: "Grow this Presence toward 100,000 followers." });
     expect(created.agentRequests.filter((request) => request.kind === "capability")).toHaveLength(0);
   });
