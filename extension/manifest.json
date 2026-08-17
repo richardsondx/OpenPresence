@@ -17,6 +17,6 @@
   "action": { "default_title": "OpenPresence", "default_popup": "popup.html" },
   "content_scripts": [
     { "matches": ["http://localhost:3015/*", "http://127.0.0.1:3015/*"], "js": ["app-bridge.js"], "run_at": "document_idle" },
-    { "matches": ["https://x.com/*", "https://*.x.com/*"], "js": ["channel-x.js"], "run_at": "document_idle" }
+    { "matches": ["https://x.com/*", "https://*.x.com/*"], "js": ["execution.js", "composer.js", "channel-x.js"], "run_at": "document_idle" }
   ]
 }

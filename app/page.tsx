@@ -14,6 +14,7 @@ import {
   Check,
   Code2,
   ChevronDown,
+  ChevronLeft,
   ChevronRight,
   Circle,
   CircleAlert,
@@ -125,6 +126,7 @@ const navItems: { id: View; label: string; icon: typeof MessageCircle }[] = [
 const presenceNavItems = navItems.filter(({ id }) => id === "live" || id === "chat" || id === "watching" || id === "people" || id === "feed" || id === "schedule" || id === "presence" || id === "playground");
 const agentNavItems = navItems.filter(({ id }) => id === "teach" || id === "knowledge");
 const ACTIVITY_PAGE_SIZE = 20;
+const PUBLIC_HISTORY_PAGE_SIZE = 10;
 const channelLabel = (channel: ChannelId, definitions?: ChannelDefinition[]) =>
   definitions?.find((item) => item.id === channel)?.name ??
   (channel === "x"
@@ -573,7 +575,7 @@ export default function Home() {
   async function mutate(operation: unknown, requestContext?: OpenPresenceState) {
     setError(null);
     const operationType = typeof operation === "object" && operation !== null && "type" in operation && typeof operation.type === "string" ? operation.type : null;
-    const tracksAttention = ["wakePresence", "runPulse", "startAssignment", "workAssignment"].includes(operationType ?? "");
+    const tracksAttention = ["wakePresence", "runPulse", "runAttentionWorker", "startAssignment", "workAssignment"].includes(operationType ?? "");
     if (tracksAttention) {
       if (attentionOperationInFlight.current) return null;
       attentionOperationInFlight.current = true;
@@ -611,6 +613,11 @@ export default function Home() {
         });
         const payload = await readJsonResponse<OpenPresenceState & { error?: string; conflict?: boolean; state?: OpenPresenceState }>(response);
         if (!response.ok && response.status === 409 && payload.state && !retriedConflict) {
+          if (tracksAttention) {
+            setState(payload.state);
+            syncBrowserWorkspaceContext(payload.state);
+            return null;
+          }
           retriedConflict = true;
           context = payload.state;
           setState(payload.state);
@@ -663,6 +670,7 @@ export default function Home() {
     });
   }
   useEffect(() => {
+    if (pendingOperation) return;
     const presence = state?.presence;
     if (view !== "playground" || !state?.onboarded || !presence || playgroundStartInFlight.current === presence.id) return;
     if (pendingOperation === "startAssignment" || pendingOperation === "workAssignment") return;
@@ -694,7 +702,7 @@ export default function Home() {
     return () => window.clearInterval(timer);
   }, [view, state?.assignments, state?.assignmentRuns]);
   useEffect(() => {
-    if (pendingOperation === "wakePresence" || pendingOperation === "runPulse") return;
+    if (pendingOperation === "wakePresence" || pendingOperation === "runPulse" || pendingOperation === "runAttentionWorker") return;
     const presence = state?.presence;
     const connection = presence && presence.connectionMode !== "bridge"
       ? state.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x" && item.status === "connected")
@@ -750,6 +758,7 @@ export default function Home() {
     return () => window.clearInterval(timer);
   }, [state?.presence?.id, state?.presence?.connectionMode, state?.presence?.browserAccess?.enabled]);
   useEffect(() => {
+    if (pendingOperation || attentionOperationInFlight.current) return;
     const presence = state?.presence;
     if (!presence || presence.status !== "live") return;
     const slots = state.calendar.filter((slot) => slot.presence === presence.id && slot.enabled && slot.day && slot.time);
@@ -769,12 +778,16 @@ export default function Home() {
     });
     if (due && calendarRunInFlight.current !== due.id) {
       calendarRunInFlight.current = due.id;
-      void mutate({ type: "runSlot", id: due.id, scheduled: true }).finally(() => { calendarRunInFlight.current = null; });
+      window.setTimeout(() => { void mutate({ type: "runSlot", id: due.id, scheduled: true }).finally(() => { calendarRunInFlight.current = null; }); }, 0);
       return;
     }
     if (dueAssignment && calendarRunInFlight.current !== `assignment:${dueAssignment.id}`) {
+      const bridge = presence.connectionMode === "bridge" ? state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline") : undefined;
+      const bridgeReady = presence.connectionMode !== "bridge" || Boolean(bridge && bridgeAdapterStatus(bridge) === "connected");
+      if (!bridgeReady) return;
       calendarRunInFlight.current = `assignment:${dueAssignment.id}`;
-      void mutate({ type: "runPulse", presenceId: presence.id }).finally(() => { calendarRunInFlight.current = null; });
+      const operation = presence.connectionMode === "bridge" ? { type: "runAttentionWorker" as const } : { type: "runPulse" as const, presenceId: presence.id };
+      window.setTimeout(() => { void mutate(operation).finally(() => { calendarRunInFlight.current = null; }); }, 0);
       return;
     }
     const nextSlots = slots.map((slot) => {
@@ -802,10 +815,15 @@ export default function Home() {
       const key = next.kind === "slot" ? next.item.slot.id : `assignment:${next.item.assignment.id}`;
       if (calendarRunInFlight.current === key) return;
       calendarRunInFlight.current = key;
-      void mutate(next.kind === "slot" ? { type: "runSlot", id: next.item.slot.id, scheduled: true } : { type: "runPulse", presenceId: presence.id }).finally(() => { calendarRunInFlight.current = null; });
+      const operation = next.kind === "slot"
+        ? { type: "runSlot" as const, id: next.item.slot.id, scheduled: true }
+        : presence.connectionMode === "bridge"
+          ? { type: "runAttentionWorker" as const }
+          : { type: "runPulse" as const, presenceId: presence.id };
+      void mutate(operation).finally(() => { calendarRunInFlight.current = null; });
     }, delay);
     return () => clearTimeout(timer);
-  }, [state?.assignments, state?.calendar, state?.presence, state?.activePresenceId]);
+  }, [state?.assignments, state?.calendar, state?.presence, state?.activePresenceId, state?.bridges, pendingOperation]);
   async function manageBridge(operation: unknown) {
     setError(null);
     try {
@@ -4546,7 +4564,7 @@ function LiveView({
   const presenceName = selected?.name ?? "this Presence";
   const paused = selected?.status === "paused";
   const waking = pendingOperation === "wakePresence";
-  const checking = pendingOperation === "runPulse";
+  const checking = pendingOperation === "runPulse" || pendingOperation === "runAttentionWorker";
   const activity = deriveActivitySummary(state, selected?.id);
   const [selectedContext, setSelectedContext] = useState<MirrorObject | null>(null);
   const [activityPage, setActivityPage] = useState(1);
@@ -4562,13 +4580,14 @@ function LiveView({
     ? state.bridges.find((bridge) => bridge.presenceId === selected.id && bridge.state !== "offline")
     : undefined;
   const bridgeConnected = Boolean(activityBridge && bridgeAdapterStatus(activityBridge) === "connected");
+  const bridgeNeedsAttention = selected?.connectionMode === "bridge" && !bridgeConnected;
   const nextCheckCountdown = countdownNow === null ? undefined : formatCountdown(nextObservationAt, countdownNow);
   const nextCheckStatus = paused
     ? "Checks paused"
     : checking
-      ? "Checking now…"
+      ? undefined
       : selected?.connectionMode === "bridge"
-        ? bridgeConnected ? "Chrome connected" : "Chrome connection needed"
+        ? undefined
         : nextCheckCountdown === "now"
           ? "Next check due now"
           : nextCheckCountdown
@@ -4753,7 +4772,7 @@ function LiveView({
         description={`A clear view of what ${presenceName} has seen, decided, and done.`}
         actionsClassName="heading-actions"
         actions={<>
-          <span className="next-check-countdown" aria-label={nextCheckStatus}>{nextCheckStatus}</span>
+          {nextCheckStatus && <span className="next-check-countdown" aria-label={nextCheckStatus}>{nextCheckStatus}</span>}
           {paused ? (
             <Button
               onClick={() => mutate({ type: "wakePresence", presenceId: selected?.id })}
@@ -4782,6 +4801,16 @@ function LiveView({
           )}
         </>}
       />
+      {bridgeNeedsAttention && (
+        <div className="activity-connection-notice" role="status" aria-live="polite">
+          <CircleAlert size={17} aria-hidden="true" />
+          <div>
+            <strong>Chrome connection needed</strong>
+            <span>{activityBridge ? "The controlled Chrome tab is no longer connected." : "Connect the OpenPresence Chrome extension for this Presence."}</span>
+          </div>
+          <button type="button" className="activity-connection-notice-action" onClick={() => setView("presence")}>Open Settings</button>
+        </div>
+      )}
       {activity.needsAttention.count > 0 && (
         <section className="activity-attention" aria-label="Needs your attention">
           <div className="activity-attention-icon"><CircleAlert size={19} /></div>
@@ -4931,20 +4960,26 @@ function MirrorPanel({
   onContext?: (object: MirrorObject) => void;
 }) {
   const [ignoringObjectId, setIgnoringObjectId] = useState<string | null>(null);
+  const [mirrorPagination, setMirrorPagination] = useState({ scope: "", page: 0 });
   const selectedPresence =
     filter === "all"
       ? undefined
       : state.presences.find((item) => item.id === filter);
   const presenceName = selectedPresence?.name ?? "this Presence";
-  const objects = state.mirrorObjects
+  const allObjects = state.mirrorObjects
     .filter((item) => {
       if (filter !== "all" && item.presenceId !== filter) return false;
       if (channelId && item.channelId !== channelId) return false;
       if (environment === "sandbox") return item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && sessionIds?.has(item.sessionId)));
       if (environment === "live") return item.environment !== "sandbox" && !item.sessionId;
       return true;
-    })
-    .slice(0, 3);
+    });
+  const mirrorPageSize = 3;
+  const mirrorPageCount = Math.max(1, Math.ceil(allObjects.length / mirrorPageSize));
+  const mirrorScope = `${filter}|${channelId ?? ""}|${environment ?? ""}`;
+  const mirrorPage = mirrorPagination.scope === mirrorScope ? mirrorPagination.page : 0;
+  const currentMirrorPage = Math.min(mirrorPage, mirrorPageCount - 1);
+  const objects = allObjects.slice(currentMirrorPage * mirrorPageSize, (currentMirrorPage + 1) * mirrorPageSize);
   const bridge = state.bridges.find(
     (item) =>
       (filter === "all" || item.presenceId === filter) &&
@@ -4977,7 +5012,7 @@ function MirrorPanel({
   const syncLabel = nativeObservation
     ? nativeObservation.status === "up-to-date" ? "up to date" : nativeObservation.status.replaceAll("-", " ")
     : bridgeSync?.status === "healthy" ? "up to date" : bridgeSync?.status ?? "not observed";
-  const heading = objects.length
+  const heading = allObjects.length
     ? `What ${presenceName} can see`
     : nativeConnection
       ? nativeConnection.status === "needs-attention"
@@ -5007,7 +5042,7 @@ function MirrorPanel({
         </div>
         <span className="quiet-label">
           {bridge
-            ? `${syncLabel} · ${objects.length} recent`
+            ? `${syncLabel} · ${allObjects.length} observed`
             : nativeConnection
               ? `X · ${nativeConnection.status === "needs-attention" ? "needs attention" : syncLabel}`
             : filter === "all"
@@ -5017,7 +5052,7 @@ function MirrorPanel({
                 : "Bridge required"}
         </span>
       </div>
-      {objects.length ? (
+      {allObjects.length ? (
         <>
           <p className="mirror-explainer">
             Public posts currently available to {presenceName} on {channelLabel(selectedPresence?.channel ?? objects[0]?.channelId ?? "x", state.channelDefinitions)}.
@@ -5029,7 +5064,7 @@ function MirrorPanel({
               const observedText = cleanMirrorText(item.channelId, item.content?.text);
               const observedAuthor = normalizeMirrorAuthor(item.channelId, item.content?.text, item.author);
               const externalUrl = externalUrlForMirrorObject(item, observedAuthor?.handle);
-              const externalLabel = `Open on ${channelLabel(item.channelId, state.channelDefinitions)}`;
+              const externalLabel = `Open original post on ${channelLabel(item.channelId, state.channelDefinitions)}`;
               return (
               <article className={`mirror-post ${ignored ? "mirror-post-ignored" : ""}`} key={item.id}>
                 <div className="mirror-post-header">
@@ -5038,7 +5073,7 @@ function MirrorPanel({
                     <strong>{observedAuthor?.displayName ?? item.objectType}</strong>
                     <span>{observedAuthor?.handle ?? "Public account"} · {channelLabel(item.channelId, state.channelDefinitions)}</span>
                   </div>
-                  <time>{formatTime(item.occurredAt ?? item.observedAt)}</time>
+                  <time dateTime={item.occurredAt ?? item.observedAt}>{formatHistoryTimestamp(item.occurredAt ?? item.observedAt)}</time>
                 </div>
                 <p className="mirror-post-content">{observedText ?? "External activity received."}</p>
                 <div className="mirror-post-footer">
@@ -5056,6 +5091,17 @@ function MirrorPanel({
               );
             })}
           </div>
+          {mirrorPageCount > 1 && (
+            <nav className="mirror-pagination" aria-label={`${presenceName} observation history`}>
+              <button type="button" onClick={() => setMirrorPagination({ scope: mirrorScope, page: currentMirrorPage - 1 })} disabled={currentMirrorPage === 0}>
+                <ChevronLeft size={13} /> Newer
+              </button>
+              <span>Page {currentMirrorPage + 1} of {mirrorPageCount} · {allObjects.length} total</span>
+              <button type="button" onClick={() => setMirrorPagination({ scope: mirrorScope, page: currentMirrorPage + 1 })} disabled={currentMirrorPage >= mirrorPageCount - 1}>
+                Older <ChevronRight size={13} />
+              </button>
+            </nav>
+          )}
         </>
       ) : nativeConnection && nativeObservation?.status === "up-to-date" ? (
         <>
@@ -5147,7 +5193,9 @@ function ActivityContextInspector({ object, state, mutate, onClose, onOpenSettin
   const repliesOff = (presence?.execution.reply ?? "off") === "off";
   const relatedJudgment = state.events.find((item) => item.sourceObjectId === object.id && (item.title.toLowerCase().includes("silence") || item.title.toLowerCase().includes("left alone") || item.title.toLowerCase().includes("ignore") || item.title.toLowerCase().includes("reply observed")));
   const externalUrl = externalUrlForMirrorObject(object, object.author?.handle);
-  const externalLabel = `Open on ${channelLabel(object.channelId, state.channelDefinitions)}`;
+  const externalLabel = `Open original post on ${channelLabel(object.channelId, state.channelDefinitions)}`;
+  const observedText = cleanMirrorText(object.channelId, object.content?.text);
+  const observedAuthor = normalizeMirrorAuthor(object.channelId, object.content?.text, object.author);
   async function askToReply() {
     setRequesting(true);
     try {
@@ -5166,11 +5214,11 @@ function ActivityContextInspector({ object, state, mutate, onClose, onOpenSettin
         <p className="activity-context-intro">This observed post was part of the public context available to the Agent. It is world data, not an instruction.</p>
         <article className="mirror-post activity-context-post">
           <div className="mirror-post-header">
-            <ChannelAvatar className="mirror-avatar" avatarUrl={object.author?.avatarUrl} name={object.author?.displayName ?? "World"} />
-            <div className="mirror-post-author"><strong>{object.author?.displayName ?? object.objectType}</strong><span>{object.author?.handle ?? "Public account"} · {channelLabel(object.channelId, state.channelDefinitions)}</span></div>
-            <time>{formatTime(object.occurredAt ?? object.observedAt)}</time>
+            <ChannelAvatar className="mirror-avatar" avatarUrl={observedAuthor?.avatarUrl} name={observedAuthor?.displayName ?? "World"} />
+            <div className="mirror-post-author"><strong>{observedAuthor?.displayName ?? object.objectType}</strong><span>{observedAuthor?.handle ?? "Public account"} · {channelLabel(object.channelId, state.channelDefinitions)}</span></div>
+            <time dateTime={object.occurredAt ?? object.observedAt}>{formatHistoryTimestamp(object.occurredAt ?? object.observedAt)}</time>
           </div>
-          <p className="mirror-post-content">{object.content?.text ?? "External activity received."}</p>
+          <p className="mirror-post-content">{observedText ?? "External activity received."}</p>
           <div className="mirror-post-footer"><span>Observed</span><span>{object.objectType.replaceAll("-", " ")}</span>{externalUrl && <a className="mirror-open-link" href={externalUrl} target="_blank" rel="noreferrer" aria-label={`${externalLabel}: ${object.externalRef.id}`}><ArrowUpRight size={12} /> {externalLabel}</a>}</div>
         </article>
         <section className="operator-reply-card" aria-label={`Ask ${presenceName} to reply`}>
@@ -5465,8 +5513,21 @@ function PublicHistoryView({
   const [filter, setFilter] = useState<PublicHistoryFilter>("all");
   const [selected, setSelected] = useState<PublicHistoryItem | null>(null);
   const [refreshing, setRefreshing] = useState(false);
+  const [historyPage, setHistoryPage] = useState(1);
   const [anchor, setAnchor] = useState(() => new Date());
   const allHistory = derivePublicHistory(state, presence?.id).filter((item) => publicHistoryMatchesPresence(item, presence));
+  const resetHistoryPosition = () => {
+    setHistoryPage(1);
+    setSelected(null);
+  };
+  const selectHistorySurface = (next: "timeline" | "calendar") => {
+    setSurface(next);
+    resetHistoryPosition();
+  };
+  const selectHistoryFilter = (next: PublicHistoryFilter) => {
+    setFilter(next);
+    resetHistoryPosition();
+  };
   const canSyncNativeX = Boolean(presence && presence.connectionMode !== "bridge" && presence.channel === "x" && presence.environment !== "sandbox" && state.nativeConnections.some((item) => item.presenceId === presence.id && item.kind === "x"));
   const syncNow = async () => {
     if (!presence || !canSyncNativeX || refreshing) return;
@@ -5478,6 +5539,16 @@ function PublicHistoryView({
     }
   };
   const filteredHistory = allHistory.filter((item) => matchesPublicHistoryFilter(item, filter));
+  const historyPageCount = Math.max(1, Math.ceil(filteredHistory.length / PUBLIC_HISTORY_PAGE_SIZE));
+  const visibleHistoryPage = Math.min(historyPage, historyPageCount);
+  const paginatedHistory = filteredHistory.slice(
+    (visibleHistoryPage - 1) * PUBLIC_HISTORY_PAGE_SIZE,
+    visibleHistoryPage * PUBLIC_HISTORY_PAGE_SIZE,
+  );
+  const moveHistoryPage = (amount: number) => {
+    setSelected(null);
+    setHistoryPage((current) => Math.min(historyPageCount, Math.max(1, current + amount)));
+  };
   const selectedIndex = selected ? filteredHistory.findIndex((item) => item.id === selected.id) : -1;
   const counts = {
     publications: allHistory.filter((item) => ["post", "thread"].includes(item.kind)).length,
@@ -5522,8 +5593,8 @@ function PublicHistoryView({
       />
       <div className="public-history-view-controls">
         <div className="public-history-view-toggle" role="group" aria-label="Public history view">
-          <button type="button" className={surface === "timeline" ? "active" : ""} aria-pressed={surface === "timeline"} onClick={() => { setSurface("timeline"); setSelected(null); }}>Timeline</button>
-          <button type="button" className={surface === "calendar" ? "active" : ""} aria-pressed={surface === "calendar"} onClick={() => { setSurface("calendar"); setSelected(null); }}>Calendar</button>
+          <button type="button" className={surface === "timeline" ? "active" : ""} aria-pressed={surface === "timeline"} onClick={() => selectHistorySurface("timeline")}>Timeline</button>
+          <button type="button" className={surface === "calendar" ? "active" : ""} aria-pressed={surface === "calendar"} onClick={() => selectHistorySurface("calendar")}>Calendar</button>
         </div>
         <div className={`mirror-health mirror-health-${mirrorHealth.tone}`} aria-label={`Social Mirror status: ${mirrorHealth.label}`}>
           <span className="mirror-health-dot" aria-hidden="true" />
@@ -5539,7 +5610,7 @@ function PublicHistoryView({
       <div className="history-toolbar">
         {surface === "timeline" ? (
           <div className="feed-filter" role="group" aria-label="Feed filter">
-            {(["all", "originals", "replies", "quote", "repost"] as const).map((item) => <button type="button" key={item} className={filter === item ? "active" : ""} aria-pressed={filter === item} onClick={() => setFilter(item)}>{item === "all" ? "All" : item === "quote" ? "Quotes" : item === "repost" ? "Reposts" : item[0].toUpperCase() + item.slice(1)}</button>)}
+            {(["all", "originals", "replies", "quote", "repost"] as const).map((item) => <button type="button" key={item} className={filter === item ? "active" : ""} aria-pressed={filter === item} onClick={() => selectHistoryFilter(item)}>{item === "all" ? "All" : item === "quote" ? "Quotes" : item === "repost" ? "Reposts" : item[0].toUpperCase() + item.slice(1)}</button>)}
           </div>
         ) : (
           <>
@@ -5547,7 +5618,7 @@ function PublicHistoryView({
               {(["week", "month", "day"] as const).map((item) => <button type="button" key={item} className={range === item ? "active" : ""} aria-pressed={range === item} onClick={() => setRange(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}
             </div>
             <div className="feed-filter" role="group" aria-label="Calendar filter">
-              {(["all", "originals", "replies", "quote", "repost"] as const).map((item) => <button type="button" key={item} className={filter === item ? "active" : ""} aria-pressed={filter === item} onClick={() => setFilter(item)}>{item === "all" ? "All" : item === "quote" ? "Quotes" : item === "repost" ? "Reposts" : item[0].toUpperCase() + item.slice(1)}</button>)}
+              {(["all", "originals", "replies", "quote", "repost"] as const).map((item) => <button type="button" key={item} className={filter === item ? "active" : ""} aria-pressed={filter === item} onClick={() => selectHistoryFilter(item)}>{item === "all" ? "All" : item === "quote" ? "Quotes" : item === "repost" ? "Reposts" : item[0].toUpperCase() + item.slice(1)}</button>)}
             </div>
             <div className="history-date-controls">
               <button type="button" aria-label="Previous period" onClick={() => moveAnchor(-1)}><ChevronDown size={15} style={{ transform: "rotate(90deg)" }} /></button>
@@ -5560,7 +5631,23 @@ function PublicHistoryView({
       <div className={`public-history-layout ${selected ? "has-inspector" : ""}`}>
         <section className="public-history-surface" aria-label={surface === "timeline" ? "Feed timeline" : `${range} public history`}>
           {surface === "timeline" ? (
-            <FeedHistory history={filteredHistory} state={state} presenceName={presence?.name ?? "this Presence"} onSelect={setSelected} />
+            <>
+              <FeedHistory history={paginatedHistory} state={state} presenceName={presence?.name ?? "this Presence"} onSelect={setSelected} />
+              {filteredHistory.length > PUBLIC_HISTORY_PAGE_SIZE && <nav className="public-history-pagination" aria-label="Feed pages">
+                <span className="public-history-pagination-count">
+                  Showing {(visibleHistoryPage - 1) * PUBLIC_HISTORY_PAGE_SIZE + 1}–{Math.min(visibleHistoryPage * PUBLIC_HISTORY_PAGE_SIZE, filteredHistory.length)} of {filteredHistory.length}
+                </span>
+                <div className="public-history-pagination-controls">
+                  <button type="button" className="public-history-pagination-button" onClick={() => moveHistoryPage(-1)} disabled={visibleHistoryPage <= 1}>
+                    <ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /> Newer
+                  </button>
+                  <span aria-live="polite">Page {visibleHistoryPage} of {historyPageCount}</span>
+                  <button type="button" className="public-history-pagination-button" onClick={() => moveHistoryPage(1)} disabled={visibleHistoryPage >= historyPageCount}>
+                    Older <ChevronRight size={14} />
+                  </button>
+                </div>
+              </nav>}
+            </>
           ) : range === "month" ? (
             <MonthHistory anchor={anchor} history={filteredHistory} state={state} onSelect={setSelected} />
           ) : range === "day" ? (
@@ -5609,16 +5696,16 @@ function FeedItem({ item, state, presenceName, onSelect }: { item: PublicHistory
   const originLabel = item.origin?.kind === "publishing_initiative" ? "Publishing Initiative original" : item.origin?.kind === "assignment" ? "Assignment original" : item.origin?.kind === "inbound_social" ? "Inbound conversation" : item.origin?.kind === "standing_intent" ? "Standing intention" : item.origin?.kind === "operator" ? "Operator-directed" : undefined;
   const channelTag = publicHistoryChannelTag(item, state.channelDefinitions);
   const isDeleted = item.availability === "deleted";
-  return <article className={`feed-item-shell ${isDeleted ? "feed-item-shell-deleted" : ""}`}>
+  return <article className={`feed-item-shell mirror-post ${isDeleted ? "feed-item-shell-deleted" : ""}`}>
     <button type="button" className={`feed-item feed-item-${item.kind}`} onClick={() => onSelect(item)}>
-      <span className="feed-item-header"><ChannelAvatar className="feed-avatar" avatarUrl={item.authorAvatarUrl} name={presence?.name ?? presenceName} /><span className="feed-item-identity"><strong>{presence?.name ?? presenceName}</strong><small>{presence?.handle ?? ""} · {kindLabel}</small></span>{isDeleted && <span className="feed-item-availability feed-item-availability-deleted"><Trash2 size={11} /> Deleted on X</span>}<time dateTime={displayAt} title={historyTimeTitle(item)}>{formatHistoryTimestamp(displayAt)}</time></span>
+      <span className="feed-item-header mirror-post-header"><ChannelAvatar className="feed-avatar mirror-avatar" avatarUrl={item.authorAvatarUrl} name={presence?.name ?? presenceName} /><span className="feed-item-identity mirror-post-author"><strong>{presence?.name ?? presenceName}</strong><small>{presence?.handle ?? ""} · {kindLabel}</small></span>{isDeleted && <span className="feed-item-availability feed-item-availability-deleted"><Trash2 size={11} /> Deleted on X</span>}<time dateTime={displayAt} title={historyTimeTitle(item)}>{formatHistoryTimestamp(displayAt)}</time></span>
       {item.kind === "reply" || item.kind === "comment" ? <span className="feed-item-context">Replying in a public conversation</span> : null}
       {originLabel ? <span className="feed-item-context">{originLabel}</span> : null}
-      <span className="feed-item-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "Public expression without returned text.")}</span>
+      <span className="feed-item-text mirror-post-content">{item.text || (item.kind === "repost" ? "Passed along publicly." : "Public expression without returned text.")}</span>
       {assets.length > 0 && <span className="feed-item-assets">{assets.map((asset) => { const source = asset?.storage ? `/api/assets/${asset.id}` : asset?.dataUrl ?? asset?.provenance.sourceUrl; return source && (asset.type === "image" || asset.type === "gif" || asset.type === "chart") ? <span className="feed-item-asset" key={asset.id}><img src={source} alt={asset.description ?? `Published ${asset.type}`} />{asset.provenance.sourcePageUrl && <span className="feed-item-source">Source: {asset.provenance.publisher ?? asset.description ?? "Open source"}</span>}</span> : source && asset.type === "video" ? <video key={asset.id} controls src={source} aria-label="Published video" /> : <span className="social-link-asset" key={asset?.id}>{asset?.type === "link" ? asset.provenance.sourceUrl : `${asset?.type ?? "Asset"} published`}</span>; })}</span>}
-      <span className="feed-item-footer"><span>View details <ChevronRight size={13} /></span><span className="feed-item-channel-badge" aria-label={`Channel: ${channelTag}`}><Badge size={12} aria-hidden="true" />{channelTag}</span></span>
+      <span className="feed-item-footer mirror-post-footer"><span>View details <ChevronRight size={13} /></span><span className="feed-item-channel-badge" aria-label={`Channel: ${channelTag}`}><Badge size={12} aria-hidden="true" />{channelTag}</span></span>
     </button>
-    {item.environment !== "sandbox" && (item.externalUrl ? <a className={`feed-item-source-link ${isDeleted ? "feed-item-source-link-deleted" : ""}`} href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={12} /> {isDeleted ? "Open original URL · deleted on X" : "Open original post on X"}</a> : <span className="feed-item-source-unavailable">Original X URL unavailable</span>)}
+    {item.environment !== "sandbox" && <div className="feed-item-source-row">{item.externalUrl ? <a className={`feed-item-source-link ${isDeleted ? "feed-item-source-link-deleted" : ""}`} href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={12} /> {isDeleted ? "Open original URL · deleted on X" : "Open original post on X"}</a> : <span className="feed-item-source-unavailable">Original X URL unavailable</span>}</div>}
   </article>;
 }
 
@@ -5634,19 +5721,35 @@ function HistoryCard({ item, state, onSelect, compact = false }: { item: PublicH
   </button>;
 }
 
+function historyHourWindow(history: PublicHistoryItem[]) {
+  const activeHours = history.map((item) => new Date(historyDisplayAt(item)).getHours());
+  if (!activeHours.length) return { start: 0, end: 0 };
+  return { start: Math.max(0, Math.min(...activeHours) - 1), end: Math.min(24, Math.max(...activeHours) + 2) };
+}
+
 function WeekHistory({ anchor, history, state, presenceName, onSelect }: { anchor: Date; history: PublicHistoryItem[]; state: OpenPresenceState; presenceName: string; onSelect: (item: PublicHistoryItem) => void }) {
   const start = new Date(anchor);
   const day = start.getDay();
   start.setDate(start.getDate() - (day === 0 ? 6 : day - 1));
   start.setHours(0, 0, 0, 0);
   const days = Array.from({ length: 7 }, (_, index) => new Date(start.getTime() + index * 86400000));
-  const hours = Array.from({ length: 24 }, (_, index) => index);
+  const end = new Date(start);
+  end.setDate(end.getDate() + 7);
+  const weekItems = history.filter((item) => {
+    const timestamp = new Date(historyDisplayAt(item));
+    return timestamp >= start && timestamp < end;
+  });
+  const hourWindow = historyHourWindow(weekItems);
+  const hours = Array.from({ length: hourWindow.end - hourWindow.start }, (_, index) => hourWindow.start + index);
+  const gridHeight = hours.length * 56;
+  const gridRows = `repeat(${hours.length}, 56px)`;
+  if (!weekItems.length) return <div className="history-calendar-empty">No public activity in this week.</div>;
   return <div className="history-week" aria-label={`Weekly public history for ${presenceName}`}>
     <div className="history-week-grid">
       <div className="history-week-header"><span>Local time</span>{days.map((date) => <span key={date.toISOString()}>{date.toLocaleDateString("en", { weekday: "short" })}<small>{date.getDate()}</small></span>)}</div>
-      <div className="history-week-body"><div className="history-time-rail">{hours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>{days.map((date) => {
-        const dayItems = history.filter((item) => new Date(historyDisplayAt(item)).toDateString() === date.toDateString());
-        return <div className="history-day-column" key={date.toISOString()}>{hours.map((hour) => <div className="history-hour-cell" key={hour} />)}{dayItems.map((item) => { const timestamp = new Date(historyDisplayAt(item)); const top = Math.max(2, ((timestamp.getHours() + timestamp.getMinutes() / 60) * 56)); return <div key={item.id} className="history-positioned-card" style={{ top }}><HistoryCard item={item} state={state} onSelect={onSelect} compact={item.kind === "reply" || item.kind === "comment"} /></div>; })}</div>;
+      <div className="history-week-body" style={{ height: gridHeight }}><div className="history-time-rail" style={{ gridTemplateRows: gridRows }}>{hours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>{days.map((date) => {
+        const dayItems = weekItems.filter((item) => new Date(historyDisplayAt(item)).toDateString() === date.toDateString());
+        return <div className="history-day-column" style={{ gridTemplateRows: gridRows, height: gridHeight }} key={date.toISOString()}>{hours.map((hour) => <div className="history-hour-cell" key={hour} />)}{dayItems.map((item) => { const timestamp = new Date(historyDisplayAt(item)); const top = Math.max(2, ((timestamp.getHours() + timestamp.getMinutes() / 60 - hourWindow.start) * 56)); return <div key={item.id} className="history-positioned-card" style={{ top }}><HistoryCard item={item} state={state} onSelect={onSelect} compact /></div>; })}</div>;
       })}</div>
     </div>
   </div>;
@@ -5660,8 +5763,10 @@ function MonthHistory({ anchor, history, state, onSelect }: { anchor: Date; hist
 }
 
 function DayHistory({ date, history, state, onSelect }: { date: Date; history: PublicHistoryItem[]; state: OpenPresenceState; onSelect: (item: PublicHistoryItem) => void }) {
-  const hours = Array.from({ length: 24 }, (_, index) => index);
-  return <div className="history-day"><div className="history-day-header"><SectionEyebrow>{date.toLocaleDateString("en", { weekday: "long" })}</SectionEyebrow><h2>{date.toLocaleDateString("en", { month: "long", day: "numeric", year: "numeric" })}</h2><p>Public history appears here.</p></div><div className="history-day-timeline">{hours.map((hour) => <div className="history-timeline-row" key={hour}><span>{String(hour).padStart(2, "0")}:00</span><div>{history.filter((item) => new Date(historyDisplayAt(item)).getHours() === hour).map((item) => <HistoryCard key={item.id} item={item} state={state} onSelect={onSelect} />)}</div></div>)}</div></div>;
+  const dayItems = history.filter((item) => new Date(historyDisplayAt(item)).toDateString() === date.toDateString());
+  const hourWindow = historyHourWindow(dayItems);
+  const hours = Array.from({ length: hourWindow.end - hourWindow.start }, (_, index) => hourWindow.start + index);
+  return <div className="history-day"><div className="history-day-header"><SectionEyebrow>{date.toLocaleDateString("en", { weekday: "long" })}</SectionEyebrow><h2>{date.toLocaleDateString("en", { month: "long", day: "numeric", year: "numeric" })}</h2><p>Public history appears here.</p></div>{dayItems.length ? <div className="history-day-timeline">{hours.map((hour) => <div className="history-timeline-row" key={hour}><span>{String(hour).padStart(2, "0")}:00</span><div>{dayItems.filter((item) => new Date(historyDisplayAt(item)).getHours() === hour).map((item) => <HistoryCard key={item.id} item={item} state={state} onSelect={onSelect} />)}</div></div>)}</div> : <div className="history-calendar-empty">No public activity on this day.</div>}</div>;
 }
 
 function PublicHistoryInspector({ item, state, index, total, onNavigate, onClose, onActivity }: { item: PublicHistoryItem; state: OpenPresenceState; index: number; total: number; onNavigate: (offset: number) => void; onClose: () => void; onActivity: () => void }) {

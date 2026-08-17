@@ -25,10 +25,12 @@ import { applyConversationDisposition, conversationDispositionForAction, convers
 import { PublicationSecurityError, sealExecutionForDelivery } from "@/lib/publication-security";
 import { compileKnowledgeContext } from "@/lib/knowledge";
 import { putDataUrl } from "@/lib/asset-store";
+import { bridgeAdapterStatus } from "@/lib/bridge-contract";
 
 export const dynamic = "force-dynamic";
 
 const assignmentWorkers = new Map<string, Promise<void>>();
+const attentionWorkerRuns = new Map<string, Promise<OpenPresenceState>>();
 const assignmentWorkerLeaseMs = 120_000;
 const terminalAssignmentRunStatuses = new Set<AssignmentRunStatus>(["published", "blocked", "failed", "cancelled"]);
 
@@ -2469,25 +2471,36 @@ export async function POST(request: Request) {
       return NextResponse.json(next);
     }
     if (parsed.type === "runAttentionWorker") {
-      let next = current;
-      for (const exploration of current.explorations.filter((item) => item.status === "active" && (!item.nextEligibleAt || new Date(item.nextEligibleAt).getTime() <= Date.now()))) {
-        next = await runExplorationWorker(next, exploration.id);
-      }
-      for (const presence of next.presences.filter((item) => item.status === "live" && item.channel === "x")) {
-        if (presence.connectionMode === "bridge") {
-          const bridge = next.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline" && (item.capabilities.affordances.includes("post") || item.capabilities.affordances.includes("reply")));
-          if (!bridge) continue;
-          next = await runScheduledLiveAssignments(next, presence.id);
-          next = await runPublishingAssignmentPulse(next, presence.id);
-          continue;
+      const workerKey = `${current.activeAgentId ?? current.agent?.id ?? ""}:${current.activePresenceId ?? current.presence?.id ?? ""}`;
+      const existingWorker = attentionWorkerRuns.get(workerKey);
+      if (existingWorker) return NextResponse.json(await existingWorker);
+      const worker = (async () => {
+        let next = current;
+        for (const exploration of current.explorations.filter((item) => item.status === "active" && (!item.nextEligibleAt || new Date(item.nextEligibleAt).getTime() <= Date.now()))) {
+          next = await runExplorationWorker(next, exploration.id);
         }
-        const connection = next.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x" && nativeConnectionCanAct(item));
-        if (!connection) continue;
-        next = await reconcileNativeX(next, presence.id);
-        next = await runNativePulse(next, presence.id);
+        for (const presence of next.presences.filter((item) => item.status === "live" && item.channel === "x")) {
+          if (presence.connectionMode === "bridge") {
+            const bridge = next.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline" && (item.capabilities.affordances.includes("post") || item.capabilities.affordances.includes("reply")));
+            if (!bridge || bridgeAdapterStatus(bridge) !== "connected") continue;
+            next = await runScheduledLiveAssignments(next, presence.id);
+            next = await runPublishingAssignmentPulse(next, presence.id);
+            continue;
+          }
+          const connection = next.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x" && nativeConnectionCanAct(item));
+          if (!connection) continue;
+          next = await reconcileNativeX(next, presence.id);
+          next = await runNativePulse(next, presence.id);
+        }
+        writeState(next);
+        return next;
+      })();
+      attentionWorkerRuns.set(workerKey, worker);
+      try {
+        return NextResponse.json(await worker);
+      } finally {
+        if (attentionWorkerRuns.get(workerKey) === worker) attentionWorkerRuns.delete(workerKey);
       }
-      writeState(next);
-      return NextResponse.json(next);
     }
     if (parsed.type === "lookNow") {
       const exploration = current.explorations.find((item) => item.id === parsed.id);

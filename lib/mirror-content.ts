@@ -7,6 +7,7 @@ const xDate = "(?:Jan(?:uary)?|Feb(?:ruary)?|Mar(?:ch)?|Apr(?:il)?|May|Jun(?:e)?
 const xRenderedHeader = new RegExp(`^(.+?)\\s+@([A-Za-z0-9_]{1,30})\\s+·\\s+(?:${xTime}|${xDate})\\s+`, "i");
 const xMetric = "(?:\\d[\\d,.]*|\\d+(?:\\.\\d+)?[KMB])";
 const xMetricSuffix = new RegExp(`(?:\\s+${xMetric}){1,5}$`, "i");
+const xRenderedFooter = new RegExp(`\\s+\\d{1,2}:\\d{2}\\s*(?:AM|PM)\\s+·\\s+${xDate}\\s+·\\s+${xMetric}\\s+Views?$`, "i");
 
 export function parseRenderedXHeader(text: string | undefined) {
   if (!text) return undefined;
@@ -25,9 +26,10 @@ export function cleanMirrorText(channelId: ChannelId, text: string | undefined) 
   const normalized = text.replace(/\s+/g, " ").trim();
   if (channelId !== "x") return normalized;
   const header = parseRenderedXHeader(normalized);
-  if (!header) return normalized;
-  const body = normalized.slice(header.bodyStart).trim();
-  return body.replace(xMetricSuffix, "").trim() || body;
+  const body = header ? normalized.slice(header.bodyStart).trim() : normalized;
+  const withoutRenderedFooter = body.replace(xRenderedFooter, "").trim();
+  const cleaned = header ? withoutRenderedFooter.replace(xMetricSuffix, "").trim() : withoutRenderedFooter;
+  return cleaned || body;
 }
 
 export function normalizeMirrorAuthor(channelId: ChannelId, text: string | undefined, author: MirrorAuthor): MirrorAuthor {

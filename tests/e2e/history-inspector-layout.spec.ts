@@ -19,6 +19,13 @@ test("Feed details keep long social expressions inside the mobile viewport", asy
   await page.locator(".feed-item").first().click();
   await expect(page.getByText("Post details", { exact: true })).toBeVisible();
 
+  const feedCard = await page.locator(".feed-item-shell").first().evaluate((element) => {
+    const style = getComputedStyle(element);
+    return { borderRadius: style.borderRadius, border: style.border, background: style.backgroundColor };
+  });
+  expect(feedCard.borderRadius).toBe("12px");
+  expect(feedCard.background).toBe("rgb(255, 255, 255)");
+
   const geometry = await page.evaluate(() => {
     const inspector = document.querySelector<HTMLElement>(".history-inspector");
     if (!inspector) throw new Error("History inspector is missing");

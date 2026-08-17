@@ -1,5 +1,67 @@
 # Regression rules
 
+## Rule: Controlled social composers must synchronize before submission
+
+**Defect class:** Browser-controlled input false success / retry provenance race
+
+**General principle:** Visible text in a social composer is not proof that the provider accepted the value. A browser adapter must wait for the controlled submit state, verify the correct account, and return to observation on failure. Retryable browser failures must clear the sealed delivery state before another Bridge claim.
+
+**Project enforcement:** `extension/execution.js` reads approved text from the Bridge publication envelope, `extension/composer.js` dispatches the input event and requires X's Reply button to be enabled before success, and the X channel resets its overlay on recoverable failure. `extension/background.js` serializes claims per Presence and only reclaims after a retryable failure has been persisted. `failExecution` returns the Public Expression to candidate state and clears its permit before retry.
+
+**Executable protection:** `tests/e2e/extension-composer.spec.ts` runs the production composer helper against a controlled contenteditable that enables its submit button only after input state is received. `tests/runtime.test.ts` verifies a retryable Bridge failure can be claimed again with a fresh sealed expression instead of becoming `INVALID_PROVENANCE`.
+
+**Apply when:** Changing the Chrome extension composer, social contenteditable selectors, Bridge claim/fail/ack lifecycle, retry scheduling, or live publication sealing.
+
+**Added:** 2026-08-16
+
+## Rule: Social Mirror cards must exclude platform chrome from post text
+
+**Defect class:** Scraped UI metadata leaking into world evidence
+
+**General principle:** A Social Mirror card should show the social object's content and OpenPresence's own observation time. Platform-rendered timestamps, view counters, and engagement chrome are not post text and should not become app-owned data or imply metrics OpenPresence maintains.
+
+**Project enforcement:** X normalization removes rendered author headers, trailing engagement counts, and the rendered `time · date · view count` footer before Mirror content is displayed or persisted. Activity's context inspector uses the same normalization path.
+
+**Executable protection:** `tests/mirror-content.test.ts` covers the full `2:44 PM · Aug 16, 2026 · 1 View` footer, while Activity renders the normalized content through `cleanMirrorText`.
+
+**Apply when:** Changing browser observation, Bridge ingestion, X content normalization, Social Mirror cards, Activity context, or channel-specific metadata parsing.
+
+**Added:** 2026-08-16
+
+## Rule: Activity evidence must not create horizontal scroll
+
+**Defect class:** Responsive min-content overflow / sidebar and evidence-row layout drift
+
+**General principle:** A dense evidence view should preserve readable content and controls without allowing a secondary panel, long social text, or source links to widen the page beyond the viewport. Responsive grids must be shrinkable, and repeated evidence actions must wrap intentionally.
+
+**Project enforcement:** Activity's `.activity-main-grid` and `.activity-side-column` use zero-minimum grid tracks below the desktop breakpoint; Activity panels and columns declare `min-width: 0`; observed post content and source/action footers can wrap long text and links instead of preserving min-content width.
+
+**Executable protection:** `tests/e2e/activity-overflow.spec.ts` opens Activity and asserts document width stays within the viewport at desktop, tablet, and mobile widths; `tests/e2e/small-desktop.spec.ts` preserves the compact-workspace overflow check.
+
+**Apply when:** Changing Activity's observed context, operating status sidebar, source links, evidence actions, responsive breakpoints, or shared workspace width rules.
+
+**Added:** 2026-08-16
+
+## Rule: Attention scheduling must be single-flight across tabs
+
+**Defect class:** Cross-tab scheduler loop / duplicate attention execution
+
+**General principle:** A scheduled attention trigger must settle or be suppressed before another observer can retrigger it; browser tabs must not independently execute the same due work without server-side coordination.
+
+**Project-specific risk:** Activity's calendar effect can repeatedly call attention for a due live Assignment. Bridge-backed attention must settle the Assignment through the Attention Worker, and multiple open tabs can share one workspace revision. Without both protections, repeated Pulse events can make the UI flicker between checking and connection-required states.
+
+**Learned from:** Human-found browser defect in Activity with two OpenPresence tabs open.
+
+**Why QA missed it:** Existing tests covered single request behavior and Bridge health, but not repeated due scheduling, stale Bridge suppression, or concurrent browser tabs.
+
+**Project enforcement:** The Activity calendar effect, `runAttentionWorker` in `app/api/state/route.ts`, `bridgeAdapterStatus`, conflict handling, and the `attentionWorkerRuns` single-flight map must be reviewed together. Bridge scheduled work requires a fresh connected adapter; stale adapters do not auto-trigger.
+
+**Executable protection:** `tests/x-connection.test.ts` covers stale Bridge worker suppression; scoped Chrome QA covers two local tabs with a due Assignment and verifies the state remains stable over time.
+
+**Apply when:** Changing Activity scheduling, Bridge health, Attention Worker, scheduled Assignments, or workspace conflict retry behavior.
+
+**Added:** 2026-08-16
+
 ## Rule: Repeated finding actions must share a stable action column
 
 **Defect class:** Inconsistent row alignment / cramped responsive action control
@@ -1735,6 +1797,18 @@ The Publishing Plan also rejects any public-history item with a parent reference
 **Executable protection:** `tests/publishing-plan.test.ts` covers persistence, scoping, revision supersession, and the absence of publications/executions. Browser acceptance verifies Settings activation, Schedule windows, Activity projection, and explicit replanning in an isolated Sandbox database.
 
 **Apply when:** Changing Publishing Initiative settings, plan generation/replanning, Schedule or Activity projections, publication pacing, or any path that could imply a plan guarantees public expression.
+
+## Rule: Schedule must not duplicate the Publishing Plan surface
+
+**Incident:** Schedule rendered a full “Genny’s publishing plan” card above the visual calendar after Publishing Plan windows had already been incorporated into the calendar layer, creating two competing plan surfaces.
+
+**General principle:** When a schedule has a canonical spatial/calendar projection, do not reintroduce a parallel summary surface that duplicates the same future work. Keep the calendar as the operator’s plan view and preserve controls/details only where they add distinct value.
+
+**Project enforcement:** `ScheduleView` renders Publishing Plan windows through `WeekCalendar` and its `Publishing plan` layer; it must not render an `Agent publishing plan` card or duplicate plan-window diagnostics in Schedule.
+
+**Executable protection:** `tests/e2e/playground-rehearsal.spec.ts` activates and replans a Publishing Initiative, verifies the Calendar layers and visual schedule remain present, and asserts the `Agent publishing plan` region is absent on Chromium and mobile.
+
+**Apply when:** Changing Schedule layout, Publishing Plan projections, calendar layers, or any summary card that could duplicate future attention.
 
 ## Rule: Publishing Plan progress requires original Social Mirror lineage
 
