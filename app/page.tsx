@@ -5889,10 +5889,16 @@ function RecentPublicAttempts({
   executions: OpenPresenceState["executions"];
   onContext?: (object: MirrorObject) => void;
 }) {
-  const attempts = executions
-    .filter((execution) => isPublicPostExecution(execution) && ["succeeded", "failed", "blocked", "expired"].includes(execution.status))
-    .sort((left, right) => new Date(right.updatedAt ?? right.createdAt).getTime() - new Date(left.updatedAt ?? left.createdAt).getTime())
-    .slice(0, 3);
+  const presenceId = executions[0]?.presenceId ?? state.presence?.id;
+  const latestPulse = state.events.find((event) => event.title === "Pulse completed" && event.presenceId === presenceId);
+  const completedPublicAttempts = executions.filter((execution) => isPublicPostExecution(execution) && ["succeeded", "failed", "blocked", "expired"].includes(execution.status));
+  const attempts = completedPublicAttempts
+    .filter((execution) => latestPulse?.invocationId
+      ? execution.invocationId === latestPulse.invocationId
+      : latestPulse
+        ? new Date(execution.updatedAt ?? execution.createdAt).getTime() >= new Date(latestPulse.time).getTime()
+        : false)
+    .sort((left, right) => new Date(right.updatedAt ?? right.createdAt).getTime() - new Date(left.updatedAt ?? left.createdAt).getTime());
   const mirrorForExecution = (execution: OpenPresenceState["executions"][number]) => state.mirrorObjects.find((object) => {
     if (object.presenceId !== execution.presenceId) return false;
     if (execution.environment === "sandbox") return object.environment === "sandbox" && (!execution.sessionId || object.sessionId === execution.sessionId);
@@ -5907,10 +5913,13 @@ function RecentPublicAttempts({
     <section className="recent-public-attempts" aria-label="Recent public posts and replies">
       <div className="recent-public-attempts-heading">
         <div>
-          <SectionEyebrow>Recent public attempts</SectionEyebrow>
-          <h3>What happened to the last 3 posts or replies</h3>
+          <SectionEyebrow>Latest check result</SectionEyebrow>
+          <h3>What this check triggered</h3>
+          <p className="recent-public-attempts-subtitle">
+            {latestPulse ? `Pulse completed ${formatHistoryTimestamp(latestPulse.time)} · every public post or reply attempted by this check is shown here.` : "Waiting for the first completed pulse to establish a check result."}
+          </p>
         </div>
-        <span>{attempts.length} of 3</span>
+        <span>{attempts.length} action{attempts.length === 1 ? "" : "s"}</span>
       </div>
       {attempts.length ? <div className="recent-public-attempts-list">{attempts.map((execution) => {
         const object = mirrorForExecution(execution);
@@ -5935,7 +5944,7 @@ function RecentPublicAttempts({
             {externalUrl && <a href={externalUrl} target="_blank" rel="noreferrer">Open on X</a>}
           </div>
         </article>;
-      })}</div> : <p className="recent-public-attempts-empty">No sent or failed posts/replies yet. A preparing action appears above until the channel returns a result.</p>}
+      })}</div> : <p className="recent-public-attempts-empty">This check did not trigger a public post or reply. Preparing actions remain in the queue above until a later check attempts them.</p>}
     </section>
   );
 }

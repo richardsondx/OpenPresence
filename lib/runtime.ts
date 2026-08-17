@@ -888,7 +888,7 @@ export function derivePublicHistory(source: OpenPresenceState, presenceId?: stri
   });
 }
 
-export function recordRuntimeEvent(source: OpenPresenceState, presenceId: string, title: string, detail: string, tone: LiveEvent["tone"] = "neutral", lineage?: Pick<LiveEvent, "intentId" | "executionId" | "outcomeId" | "decisionId" | "sessionId" | "sourceObjectId">) {
+export function recordRuntimeEvent(source: OpenPresenceState, presenceId: string, title: string, detail: string, tone: LiveEvent["tone"] = "neutral", lineage?: Pick<LiveEvent, "intentId" | "executionId" | "outcomeId" | "decisionId" | "sessionId" | "invocationId" | "sourceObjectId">) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   state.events.unshift(event("system", title, detail, tone, { presenceId, ...lineage }));
   return state;
@@ -943,7 +943,7 @@ export function isLaunchCandidate(source: OpenPresenceState, presenceId: string)
   return !successfulPost && (footing?.postsPublished ?? 0) === 0;
 }
 
-export function finishPulse(source: OpenPresenceState, presenceId: string, detail: string, lineage?: Pick<LiveEvent, "intentId" | "executionId" | "outcomeId" | "sessionId" | "sourceObjectId">) {
+export function finishPulse(source: OpenPresenceState, presenceId: string, detail: string, lineage?: Pick<LiveEvent, "intentId" | "executionId" | "outcomeId" | "sessionId" | "invocationId" | "sourceObjectId">) {
   const tone: LiveEvent["tone"] = /delivery failed|rejected delivery|could not complete|invalidly sized/i.test(detail) ? "warning" : "positive";
   return recordRuntimeEvent(source, presenceId, "Pulse completed", detail, tone, lineage);
 }

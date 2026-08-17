@@ -45,6 +45,47 @@ test("Activity explains a legacy failed Pulse from its adjacent delivery event",
   await expect(pulse.locator(".event-icon")).toHaveClass(/tone-warning/);
 });
 
+test("Activity shows every public attempt triggered by the latest Pulse", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Agent name").fill("Jenny");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+
+  await page.route("**/api/state**", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    const body = await response.json();
+    const presenceId = body.presence.id;
+    const agentId = body.agent.id;
+    const now = new Date().toISOString();
+    const latestInvocationId = "pulse:latest-check";
+    const priorInvocationId = "pulse:prior-check";
+    body.presence.environment = "live";
+    const listedPresence = body.presences?.find((item: { id: string }) => item.id === presenceId);
+    if (listedPresence) listedPresence.environment = "live";
+    const addAttempt = (suffix: string, invocationId: string, text: string, status: "succeeded" | "failed") => {
+      const intentId = `attempt-intent-${suffix}`;
+      const executionId = `attempt-execution-${suffix}`;
+      body.socialIntents.push({ id: intentId, agentId, presenceId, affordance: "x.reply", target: { type: "x.post", id: `source-${suffix}` }, priority: 1, validity: {}, state: "active", formedAt: now, updatedAt: now, environment: "live" });
+      body.executions.push({ id: executionId, socialIntentId: intentId, presenceId, affordance: "x.reply", mode: "auto", status, attempts: 1, connector: "native", idempotencyKey: executionId, target: { type: "x.post", id: `source-${suffix}` }, publication: { id: `publication-${suffix}`, format: "x.reply", payload: { text }, assetIds: [], links: [], publicExpression: { text }, createdAt: now, environment: "live", invocationId }, failure: status === "failed" ? { message: "X rejected this action.", retryable: false } : undefined, createdAt: now, updatedAt: now, executedAt: now, environment: "live", invocationId });
+    };
+    addAttempt("old", priorInvocationId, "Older check reply that must stay out of this result.", "succeeded");
+    addAttempt("one", latestInvocationId, "Latest check reply one.", "succeeded");
+    addAttempt("two", latestInvocationId, "Latest check reply two.", "failed");
+    body.events.unshift({ id: "latest-pulse-event", type: "system", title: "Pulse completed", detail: "The latest check attempted two public replies.", time: now, tone: "warning", presenceId, invocationId: latestInvocationId });
+    await route.fulfill({ response, json: body });
+  });
+
+  await page.reload();
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  const attempts = page.locator('section[aria-label="Recent public posts and replies"]');
+  await expect(attempts).toContainText("What this check triggered");
+  await expect(attempts).toContainText("2 actions");
+  await expect(attempts).toContainText("Latest check reply one.");
+  await expect(attempts).toContainText("Latest check reply two.");
+  await expect(attempts).not.toContainText("Older check reply that must stay out of this result.");
+});
+
 test("Activity pipeline cards reveal the exact selected and preparing actions", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
