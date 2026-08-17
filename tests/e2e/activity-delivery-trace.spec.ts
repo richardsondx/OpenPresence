@@ -54,6 +54,8 @@ test("Activity pipeline cards reveal the exact selected and preparing actions", 
     const listedPresence = body.presences?.find((item: { id: string }) => item.id === presenceId);
     if (listedPresence) listedPresence.environment = "live";
     const now = new Date().toISOString();
+    const heartbeat = new Date(Date.now() - 10_000).toISOString();
+    body.bridges.push({ id: "pipeline-bridge", presenceId, channelId: "x", name: "OpenPresence X Bridge", kind: "bridge", state: "online", adapterStatus: "connected", lastHeartbeatAt: heartbeat, lastSeenAt: heartbeat, capabilities: { inbound: true, reconcile: true, affordances: ["reply", "follow"], formats: ["x.reply", "x.post"], metrics: [] }, createdAt: now, updatedAt: now });
     const records = [
       { suffix: "one", author: "@boardyai", text: "A post about reliable agents.", action: "reply" },
       { suffix: "two", author: "@builder", text: "A post about durable workflows.", action: "follow" },
@@ -65,7 +67,7 @@ test("Activity pipeline cards reveal the exact selected and preparing actions", 
       const objectId = `pipeline-object-${record.suffix}`;
       body.socialIntents.push({ id: intentId, agentId, presenceId, affordance: `x.${record.action}`, target: { type: "x.post", id: objectId }, priority: 1, validity: {}, state: "active", formedAt: now, updatedAt: now, environment: "live" });
       body.socialDecisions.push({ id: decisionId, agentId, presenceId, environment: "live", focalMirrorObjectIds: [objectId], decision: record.action, summary: `Selected ${record.action} because it adds useful context.`, influences: ["Mission", "Current social context"], confidence: "high", socialIntentId: intentId, createdAt: now });
-      body.executions.push({ id: executionId, socialIntentId: intentId, presenceId, affordance: `x.${record.action}`, mode: "auto", status: "queued", attempts: 0, connector: "native", idempotencyKey: executionId, target: { type: "x.post", id: objectId }, createdAt: now, updatedAt: now, environment: "live" });
+      body.executions.push({ id: executionId, socialIntentId: intentId, presenceId, affordance: `x.${record.action}`, mode: "auto", status: "queued", attempts: 0, connector: "bridge", bridgeId: "pipeline-bridge", idempotencyKey: executionId, target: { type: "x.post", id: objectId }, createdAt: now, updatedAt: now, environment: "live" });
       body.mirrorObjects.push({ id: objectId, bridgeId: "native:pipeline", presenceId, channelId: "x", externalRef: { type: "x.post", id: objectId }, objectType: "post", author: { displayName: record.author.slice(1), handle: record.author }, content: { text: record.text }, observedAt: now, visibility: "public", shareability: "presence-only", environment: "live" });
       body.events.unshift({ id: `pipeline-event-${record.suffix}`, type: "decision", title: "Action selected", detail: `Genny selected a ${record.action} for ${record.author}.`, time: now, tone: "positive", presenceId, intentId, executionId, decisionId, sourceObjectId: objectId });
     }
@@ -75,6 +77,8 @@ test("Activity pipeline cards reveal the exact selected and preparing actions", 
 
   await page.reload();
   await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await expect(page.locator(".execution-send-timing")).toContainText("Next send attempt in");
+  await expect(page.locator(".execution-send-timing")).toContainText("Bridge checks the queue");
   await expect(page.getByRole("button", { name: /2 selected/ }).first()).toBeVisible();
   await page.getByRole("button", { name: /2 selected/ }).first().click();
   await expect(page.getByRole("heading", { name: "Selected decisions" })).toBeVisible();

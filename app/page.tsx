@@ -5843,6 +5843,11 @@ function ExecutionLedger({
 }) {
   const [externalType, setExternalType] = useState("post");
   const [externalId, setExternalId] = useState("");
+  const [countdownNow, setCountdownNow] = useState<number>(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setCountdownNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const executions = state.executions
     .filter((item) => {
       if (presenceId && item.presenceId !== presenceId) return false;
@@ -5884,6 +5889,38 @@ function ExecutionLedger({
   const failureExplanation = ["failed", "blocked", "expired"].includes(latest.status)
     ? deliveryFailureExplanation(latest.failure, presence?.handle)
     : undefined;
+  const bridge = latest.bridgeId
+    ? state.bridges.find((item) => item.id === latest.bridgeId && item.state !== "offline")
+    : latest.presenceId
+      ? state.bridges.find((item) => item.presenceId === latest.presenceId && item.state !== "offline" && item.kind === "bridge")
+      : undefined;
+  const bridgeConnected = Boolean(bridge && bridgeAdapterStatus(bridge) === "connected");
+  const nextBridgeAttemptAt = latest.status === "queued" && bridgeConnected && bridge?.lastHeartbeatAt
+    ? (() => {
+        const heartbeatAt = new Date(bridge.lastHeartbeatAt).getTime();
+        return Number.isFinite(heartbeatAt) ? new Date(heartbeatAt + 30_000).toISOString() : undefined;
+      })()
+    : undefined;
+  const nextBridgeAttemptCountdown = formatCountdown(nextBridgeAttemptAt, countdownNow);
+  const sendTiming = latest.status === "awaiting-review"
+    ? { kind: "blocked", label: "Waiting for your approval", detail: "Nothing will be sent until you approve this action." }
+    : latest.status === "approved"
+      ? { kind: "blocked", label: "Waiting for execution", detail: "This action is approved but has not entered the send queue." }
+      : latest.status === "queued" && nextBridgeAttemptCountdown
+        ? { kind: "queued", label: nextBridgeAttemptCountdown === "now" ? "Next send attempt now" : `Next send attempt in ${nextBridgeAttemptCountdown}`, detail: "The Bridge checks the queue about every 30 seconds; the actual send may happen sooner when the controlled tab is ready." }
+        : latest.status === "queued" && latest.connector === "native"
+          ? { kind: "queued", label: "Queued for immediate API delivery", detail: "Native X delivery is not scheduled for a future time; it runs as soon as the API worker accepts it." }
+        : latest.status === "queued" && latest.connector === "bridge"
+          ? { kind: "blocked", label: bridgeConnected ? "Waiting for Bridge check" : "Waiting for connected Bridge", detail: bridgeConnected ? "The Bridge has not reported its next queue check yet." : "No connected Bridge is available to send this action." }
+          : ["claimed", "executing"].includes(latest.status)
+            ? { kind: "sending", label: "Sending now", detail: "The connected executor is delivering this action." }
+            : latest.status === "awaiting-connector"
+              ? { kind: "blocked", label: "Waiting for connector", detail: "A connected channel writer is required before this action can be sent." }
+              : latest.status === "awaiting-manual"
+                ? { kind: "blocked", label: "Waiting for manual confirmation", detail: "The action will not be counted until its external result is marked sent." }
+                : latest.status === "succeeded"
+                  ? { kind: "sent", label: "Sent", detail: latest.executedAt ? `Verified at ${formatHistoryTimestamp(latest.executedAt)}.` : "The channel result was verified." }
+                  : undefined;
   return (
     <div className="decision-card execution-ledger">
       <div className="section-heading compact">
@@ -5916,6 +5953,13 @@ function ExecutionLedger({
         <span><small>Channel</small><strong>{presence ? channelLabel(presence.channel, state.channelDefinitions) : "Selected Presence"}</strong></span>
         <span><small>Approval</small><strong>{latest.mode === "review" ? "Review" : latest.mode === "manual" ? "Manual" : "Automatic"}</strong></span>
       </div>
+      {sendTiming && <div className={`execution-send-timing execution-send-timing-${sendTiming.kind}`} role="status" aria-live="polite">
+        <div>
+          <SectionEyebrow>Send timing</SectionEyebrow>
+          <strong>{sendTiming.label}</strong>
+        </div>
+        <small>{sendTiming.detail}</small>
+      </div>}
       <p className="execution-explanation">
         {needsApproval
           ? `${presence?.name ?? "The Presence"} has chosen this action. Your review decides whether it is sent.`

@@ -1441,6 +1441,21 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .execution-detail-grid span { display: grid; gap: 5px; min-width: 0; }
 .execution-detail-grid small { color: var(--faint); font: 8px "DM Mono", monospace; text-transform: uppercase; }
 .execution-detail-grid strong { overflow: hidden; color: var(--ink); font-size: 10px; text-overflow: ellipsis; white-space: nowrap; }
+.execution-send-timing { display: grid; gap: 6px; margin-top: 15px; padding: 11px 12px; border: 1px solid #dbe3f1; border-left: 3px solid #6687c8; border-radius: 7px; background: #f5f8ff; }
+.execution-send-timing > div { display: grid; gap: 4px; }
+.execution-send-timing .eyebrow { color: #5e76ac; }
+.execution-send-timing strong { color: #304d89; font-size: 13px; letter-spacing: -.02em; }
+.execution-send-timing small { color: #63718d; font-size: 10px; line-height: 1.45; }
+.execution-send-timing-sending { border-color: #d6e7db; border-left-color: var(--green); background: #f5fbf6; }
+.execution-send-timing-sending .eyebrow, .execution-send-timing-sending strong { color: var(--green); }
+.execution-send-timing-sending small { color: #5f8068; }
+.execution-send-timing-sent { border-color: #d6e7db; border-left-color: var(--green); background: #f5fbf6; }
+.execution-send-timing-sent .eyebrow, .execution-send-timing-sent strong { color: var(--green); }
+.execution-send-timing-sent small { color: #5f8068; }
+.execution-send-timing-blocked { border-color: #eadfd5; border-left-color: #b9a493; background: #fffaf5; }
+.execution-send-timing-blocked .eyebrow { color: #8e8177; }
+.execution-send-timing-blocked strong { color: var(--ink); }
+.execution-send-timing-blocked small { color: var(--muted); }
 .execution-explanation { margin: 16px 0 18px !important; color: var(--muted); font-size: 10px; line-height: 1.55; }
 .execution-failure-card, .bring-post-failure { display: grid; gap: 6px; margin: -3px 0 16px; padding: 11px 12px; border: 1px solid #e7b9a5; border-left: 3px solid #b95f43; border-radius: 7px; background: #fff5ef; color: #8e4939; font-size: 10px; line-height: 1.45; }
 .execution-failure-card strong, .bring-post-failure strong { color: var(--ink); font-size: 11px; }
