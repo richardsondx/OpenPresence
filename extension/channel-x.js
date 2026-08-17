@@ -3,6 +3,7 @@
   let expectedHandle = "";
   let presenceName = "Waiting for Presence";
   let activeExecutionId = null;
+  let metricsInFlight = false;
   const overlay = document.createElement("div");
   overlay.id = "openpresence-browser-overlay";
   overlay.attachShadow({ mode: "open" }).innerHTML = `<style>:host{all:initial}.wrap{position:fixed;z-index:2147483647;right:16px;bottom:16px;display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid rgba(213,146,103,.65);border-radius:999px;background:rgba(255,250,246,.96);box-shadow:0 5px 24px rgba(39,25,17,.14);color:#332a25;font:12px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.mark{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#c77d50;color:#fff;font-weight:700}.dot{width:7px;height:7px;border-radius:50%;background:#73a879}.text{max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.label{display:block;color:#766b63;font-size:10px;margin-top:2px}</style><div class="wrap"><span class="mark">◉</span><span class="text"><b id="name">OpenPresence</b><span class="label" id="state">Observing · browser hands ready</span></span><span class="dot"></span></div>`;
@@ -11,6 +12,84 @@
   const setState = (value) => { sessionState = value; stateLabel(); };
   const sendMessage = (message) => window.OpenPresenceRuntime?.sendMessage(message) || Promise.resolve(false);
   const text = (node) => node?.innerText?.trim().replace(/\s+/g, " ") || "";
+
+  function parseHumanMetric(raw) {
+    const match = String(raw || "").replace(/,/g, "").match(/(\d+(?:\.\d+)?)([KMB])?/i);
+    if (!match) return undefined;
+    const multiplier = match[2]?.toUpperCase() === "K" ? 1_000 : match[2]?.toUpperCase() === "M" ? 1_000_000 : match[2]?.toUpperCase() === "B" ? 1_000_000_000 : 1;
+    return Math.round(Number(match[1]) * multiplier);
+  }
+
+  function metricFromLabels(labels, name) {
+    const pattern = new RegExp(`([\\d,.]+(?:[KMB])?)\\s+${name}`, "i");
+    for (const label of labels) {
+      const match = String(label).match(pattern);
+      const value = parseHumanMetric(match?.[1]);
+      if (value !== undefined) return value;
+    }
+    return undefined;
+  }
+
+  function profilePath() {
+    return `/${expectedHandle.replace(/^@/, "")}`.toLowerCase();
+  }
+
+  function isOwnProfile() {
+    return window.location.pathname.replace(/\/$/, "").toLowerCase() === profilePath();
+  }
+
+  function profileMetric(name) {
+    const normalized = expectedHandle.replace(/^@/, "");
+    const links = [...document.querySelectorAll(`a[href*="/${normalized}/${name}"], a[href$="/${name}"]`)];
+    const labels = links.flatMap((link) => [link.getAttribute("aria-label"), text(link)]).filter(Boolean);
+    return metricFromLabels(labels, name);
+  }
+
+  function publicationMetrics() {
+    return visiblePosts().flatMap((post) => {
+      const article = post.element;
+      const labels = [...article.querySelectorAll("button,[role=button]")].flatMap((button) => [button.getAttribute("aria-label"), text(button)]).filter(Boolean);
+      const metrics = {
+        impressions: metricFromLabels(labels, "(?:views|impressions)"),
+        likes: metricFromLabels(labels, "likes?"),
+        replies: metricFromLabels(labels, "(?:reply|replies)"),
+        reposts: metricFromLabels(labels, "(?:reposts?|retweets?)"),
+        quotes: metricFromLabels(labels, "quotes?"),
+      };
+      const observed = Object.fromEntries(Object.entries(metrics).filter(([, value]) => value !== undefined));
+      if (!Object.keys(observed).length) return [];
+      const time = article.querySelector("time")?.getAttribute("datetime");
+      return [{ externalRef: { type: "x.post", id: post.id }, publicationAgeSeconds: time ? Math.max(0, Math.floor((Date.now() - new Date(time).getTime()) / 1000)) : 0, metrics: observed }];
+    });
+  }
+
+  async function collectMetrics() {
+    if (metricsInFlight || activeExecutionId || !expectedHandle) return;
+    metricsInFlight = true;
+    const pending = sessionStorage.getItem("openpresence-pending-metrics");
+    try {
+      if (!isOwnProfile()) {
+        sessionStorage.setItem("openpresence-pending-metrics", JSON.stringify({ returnUrl: window.location.href, expectedHandle, presenceName }));
+        window.location.href = `https://x.com/${encodeURIComponent(expectedHandle.replace(/^@/, ""))}`;
+        return;
+      }
+      const account = await waitFor(() => verifyAccount().ok, 12_000);
+      if (!account) return;
+      await waitFor(() => profileMetric("followers") !== undefined, 12_000);
+      const followers = profileMetric("followers");
+      const following = profileMetric("following");
+      const publications = publicationMetrics();
+      if (followers !== undefined || publications.length) {
+        await sendMessage({ type: "OPENPRESENCE_METRICS", metrics: { ...(followers === undefined ? {} : { audience: { followers, following, observedAt: new Date().toISOString() } }), publications } });
+      }
+    } finally {
+      metricsInFlight = false;
+      if (pending && isOwnProfile()) {
+        sessionStorage.removeItem("openpresence-pending-metrics");
+        if (pending.returnUrl && pending.returnUrl !== window.location.href) window.location.href = pending.returnUrl;
+      }
+    }
+  }
 
   function readAuthor(article) {
     const container = article.querySelector('[data-testid="User-Name"]');
@@ -146,7 +225,16 @@
       presenceName = message.presenceName || presenceName;
       stateLabel();
     }
+    if (message?.type === "OPENPRESENCE_REQUEST_METRICS") void collectMetrics();
   });
+  const pendingMetrics = sessionStorage.getItem("openpresence-pending-metrics");
+  if (pendingMetrics) {
+    try {
+      const restoredMetrics = JSON.parse(pendingMetrics);
+      expectedHandle = restoredMetrics.expectedHandle || expectedHandle;
+      presenceName = restoredMetrics.presenceName || presenceName;
+    } catch { sessionStorage.removeItem("openpresence-pending-metrics"); }
+  }
   const pending = sessionStorage.getItem("openpresence-pending-execution");
   if (pending) {
     sessionStorage.removeItem("openpresence-pending-execution");

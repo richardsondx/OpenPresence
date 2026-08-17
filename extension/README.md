@@ -10,7 +10,7 @@ This is the local browser embodiment for an OpenPresence Presence. It intentiona
 4. Open the OpenPresence app, choose a Presence, open **Settings → Channel & environment**, and enable **Chrome hands**.
 5. Choose **Open controlled Chrome**. OpenPresence creates a dedicated normal Chrome window and tab group named for the Presence.
 
-The extension never stores the website account or credential. The controlled page shows a small OpenPresence overlay while it is observing, preparing, acting, or verifying. The first implementation supports X reply execution and read-only visible-post observation; additional channel adapters should follow the same Bridge contract and account-verification boundary.
+The extension never stores the website account or credential. The controlled page shows a small OpenPresence overlay while it is observing, preparing, acting, or verifying. The X route supports reply execution, read-only visible-post observation, and periodic verified audience/publication metric collection for Growth; additional channel adapters should follow the same Bridge contract and account-verification boundary.
 
 ## Safety boundary
 

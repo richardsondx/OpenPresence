@@ -30,7 +30,10 @@ export async function POST(request: Request) {
       reconcile: true,
       affordances: presence.capabilities.map((capability) => capability.id),
       formats: state.channelDefinitions.find((definition) => definition.id === presence.channel)?.formats.map((format) => format.id) ?? [],
-      metrics: ["replies", "reactions", "posts"],
+      // The Chrome route observes the signed-in account profile and its own
+      // publications, so Growth can consume verified audience and performance
+      // evidence from the same browser body as social activity.
+      metrics: ["followers", "public_metrics"],
     };
     const existing = state.bridges.find((bridge) => bridge.presenceId === presence.id && bridge.kind === "bridge" && bridge.state !== "offline");
     const result = existing

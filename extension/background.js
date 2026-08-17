@@ -48,6 +48,22 @@ async function persistSessions() {
   await chrome.storage.session.set({ [sessionStorageKey]: [...sessions.values()] });
 }
 
+async function reportMetrics(session, metrics) {
+  const result = await bridgeRequest(session, "/api/bridge/v1/metrics", { method: "POST", body: JSON.stringify(metrics) });
+  session.lastMetricsAt = Date.now();
+  await persistSessions();
+  return result;
+}
+
+async function requestMetrics(session) {
+  if (session.activeExecutionId) return;
+  try {
+    await chrome.tabs.sendMessage(session.tabId, { type: "OPENPRESENCE_REQUEST_METRICS" });
+  } catch (error) {
+    sendStatus({ state: "error", presenceId: session.presence.id, message: error.message || "The controlled tab could not collect channel metrics." });
+  }
+}
+
 async function restoreSessions() {
   if (sessions.size) return;
   const stored = await chrome.storage.session.get(sessionStorageKey);
@@ -57,7 +73,7 @@ async function restoreSessions() {
     try {
       await chrome.tabs.get(session.tabId);
       sessions.set(session.presence.id, session);
-      sendSessionContext(session);
+      await sendSessionContext(session);
     } catch {
       // The controlled tab was closed while the service worker was asleep.
     }
@@ -71,6 +87,7 @@ async function restoreSessions() {
     // A service worker can wake after work was queued. Reconcile the queue
     // immediately instead of waiting for the next alarm tick.
     await claim(session);
+    await requestMetrics(session);
   }));
 }
 
@@ -133,6 +150,7 @@ async function startSession(presenceId) {
   await updateBadge();
   sendStatus({ state: "connected", presenceId, presenceName: presence.name, tabId: tab.id });
   await claim(session);
+  await requestMetrics(session);
   return session;
 }
 
@@ -228,6 +246,14 @@ chrome.runtime.onMessage.addListener((message, sender) => {
     const session = [...sessions.values()].find((item) => item.tabId === sender.tab?.id);
     if (!session) return;
     if (message?.type === "OPENPRESENCE_OBSERVATION") await ingest(session, message.observation);
+    if (message?.type === "OPENPRESENCE_METRICS") {
+      try {
+        await reportMetrics(session, message.metrics);
+        sendStatus({ state: "connected", presenceId: session.presence.id, presenceName: session.presence.name, tabId: session.tabId });
+      } catch (error) {
+        sendStatus({ state: "error", presenceId: session.presence.id, message: error.message || "The channel metrics could not be saved." });
+      }
+    }
     if (message?.type === "OPENPRESENCE_EXECUTION_RESULT") await finishExecution(session, message.result);
   })();
 });
@@ -257,6 +283,7 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   void restoreSessions().then(() => Promise.all([...sessions.values()].map(async (session) => {
     await heartbeat(session);
     await claim(session);
+    if (!session.lastMetricsAt || Date.now() - session.lastMetricsAt >= 15 * 60_000) await requestMetrics(session);
   })));
 });
 chrome.runtime.onInstalled.addListener(() => { void ensureHeartbeatAlarm(); });
