@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyOperation, audienceDeltas, compileAssignmentInstruction, completeNativeExecution, derivePresenceCapabilityManifest, formChatPostIntent, formXActionIntent, formXReplyIntent, publicationMetricBaseline, recordVerifiedFollow } from "@/lib/runtime";
+import { applyOperation, audienceDeltas, capabilityProviderLabel, compileAssignmentInstruction, completeNativeExecution, derivePresenceCapabilityManifest, formChatPostIntent, formXActionIntent, formXReplyIntent, publicationMetricBaseline, recordVerifiedFollow } from "@/lib/runtime";
 import { createAgent } from "@/lib/runtime";
 import type { MirrorObject, OpenPresenceState } from "@/lib/types";
 
@@ -161,6 +161,10 @@ describe("continuous growth responsibility", () => {
     expect(manifest.items.find((item) => item.capability === "follower_measurement")).toMatchObject({ availability: "available", provider: "Native X", requiresBrowser: false });
     expect(manifest.items.find((item) => item.capability === "post_performance")).toMatchObject({ availability: "available", provider: "Native X", requiresBrowser: false });
     expect(manifest.items.find((item) => item.capability === "reply")).toMatchObject({ availability: "available", provider: "Browser Bridge", requiresBrowser: true });
+    expect(manifest.items.find((item) => item.capability === "post")).toMatchObject({ provider: "Native X", limitation: expect.stringContaining("write access needs attention") });
+    expect(capabilityProviderLabel(next, presence.id, manifest.items.find((item) => item.capability === "post")!)).toBe("Native X · write needs attention");
+    expect(manifest.items.find((item) => item.capability === "message")).toMatchObject({ provider: "Native X", limitation: expect.stringContaining("does not currently expose") });
+    expect(capabilityProviderLabel(next, presence.id, manifest.items.find((item) => item.capability === "message")!)).toBe("Native X · not supported");
   });
 
   it("routes an X reply through the API when the Presence also has a Bridge", () => {

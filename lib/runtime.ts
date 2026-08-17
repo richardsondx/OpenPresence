@@ -122,7 +122,8 @@ export function derivePresenceCapabilityManifest(source: OpenPresenceState, pres
   const bridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
   const bridgeConnected = Boolean(bridge && bridgeAdapterIsConnected(bridge));
   const nativeWritable = Boolean(native && native.access === "read-write" && (native.status === "connected" || (native.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(native.healthMessage ?? native.deliveryError ?? ""))));
-  const nativeAction = (action: string) => Boolean(nativeWritable && ["post", "reply", "like", "repost", "quote", "follow"].includes(action));
+  const nativeActionSupported = (action: string) => ["post", "reply", "like", "repost", "quote", "follow"].includes(action);
+  const nativeAction = (action: string) => Boolean(nativeWritable && nativeActionSupported(action));
   const nativeReadable = Boolean(native && nativeConnectionCanObserve(native));
   const bridgeAction = (action: string) => Boolean(bridgeConnected && bridge?.capabilities.affordances.some((item) => item === action || item === `${presence.channel}.${action}`));
   const bridgeMetric = (metric: string) => Boolean(bridgeConnected && bridge?.capabilities.metrics.some((item) => item === metric || item.includes(metric)));
@@ -133,8 +134,24 @@ export function derivePresenceCapabilityManifest(source: OpenPresenceState, pres
     const requiresBrowser = !nativeCan && bridgeCan;
     const canVerify = nativeCan ? true : bridgeCan ? Boolean(bridge?.capabilities.reconcile) : false;
     const configuredMode = presence.execution[action];
-    const limitation = canExecute ? undefined : !supported ? `${capabilityLabel[action] ?? action} is not supported by ${channelName(presence.channel)}.` : bridge && !bridgeConnected ? `${capabilityLabel[action] ?? action} requires the connected browser body.` : `No connected ${channelName(presence.channel)} body can perform this action.`;
-    return { capability: action, label: capabilityLabel[action] ?? action, availability: canExecute && canVerify ? "available" : bridge && !bridgeConnected && supported ? "temporarily-unavailable" : "unavailable", executionMode: configuredMode, provider: nativeCan ? "Native X" : bridgeCan ? "Browser Bridge" : undefined, requiresBrowser, canObserve: nativeCan || bridgeCan, canExecute, canVerify, limitation };
+    const nativeWriteLimitation = native && native.access !== "read-write"
+      ? "Native X is connected for reading, but write access is not configured."
+      : native?.status === "needs-attention"
+        ? `Native X write access needs attention${native.healthMessage ? `: ${native.healthMessage}` : "."}`
+        : undefined;
+    const limitation = canExecute
+      ? undefined
+      : !supported
+        ? `${capabilityLabel[action] ?? action} is not supported by ${channelName(presence.channel)}.`
+        : native && !nativeActionSupported(action)
+          ? `Native X does not currently expose ${capabilityLabel[action] ?? action} through this API.`
+        : nativeWriteLimitation
+          ? nativeWriteLimitation
+          : bridge && !bridgeConnected
+            ? `${capabilityLabel[action] ?? action} requires the connected browser body.`
+            : `No connected ${channelName(presence.channel)} body can perform this action.`;
+    const provider = nativeCan ? "Native X" : bridgeCan ? "Browser Bridge" : native ? "Native X" : undefined;
+    return { capability: action, label: capabilityLabel[action] ?? action, availability: canExecute && canVerify ? "available" : bridge && !bridgeConnected && supported ? "temporarily-unavailable" : "unavailable", executionMode: configuredMode, provider, requiresBrowser, canObserve: nativeCan || bridgeCan, canExecute, canVerify, limitation };
   };
   const measurement = (capability: "follower_measurement" | "post_performance", supported: boolean, metric: string): PresenceCapability => {
     const nativeCan = supported && nativeReadable && presence.channel === "x";
@@ -153,13 +170,41 @@ export function derivePresenceCapabilityManifest(source: OpenPresenceState, pres
     const bridgeCan = Boolean(bridgeConnected && bridge?.capabilities.assetKinds?.includes(kind));
     const canExecute = nativeCan || bridgeCan;
     const canVerify = canExecute && (nativeCan || Boolean(bridge?.capabilities.reconcile));
-    return { capability: kind, label: capabilityLabel[kind], availability: canExecute && canVerify ? "available" : bridge && !bridgeConnected ? "temporarily-unavailable" : "unavailable", provider: nativeCan ? "Native X" : bridgeCan ? "Browser Bridge" : undefined, requiresBrowser: !nativeCan && bridgeCan, canObserve: canExecute, canExecute, canVerify, limitation: canExecute ? undefined : "The connected channel does not currently support this media type." };
+    const limitation = canExecute
+      ? undefined
+      : native && native.access !== "read-write"
+        ? "Native X is connected for reading, but write access is not configured."
+        : native?.status === "needs-attention"
+          ? `Native X write access needs attention${native.healthMessage ? `: ${native.healthMessage}` : "."}`
+          : bridge && !bridgeConnected
+            ? "Image and video publication require the connected browser body."
+            : "The connected channel does not currently support this media type.";
+    return { capability: kind, label: capabilityLabel[kind], availability: canExecute && canVerify ? "available" : bridge && !bridgeConnected ? "temporarily-unavailable" : "unavailable", provider: nativeCan ? "Native X" : bridgeCan ? "Browser Bridge" : native ? "Native X" : undefined, requiresBrowser: !nativeCan && bridgeCan, canObserve: canExecute, canExecute, canVerify, limitation };
   };
   items.push(mediaItem("image"));
   items.push(mediaItem("video"));
   const requiredBody = items.some((item) => item.requiresBrowser && item.availability === "available");
   const bodyStatus = presence.status === "paused" ? "unavailable" : requiredBody && !bridgeConnected ? "degraded" : native || bridgeConnected ? "ready" : "unavailable";
   return { presenceId: presence.id, channel: presence.channel, generatedAt: now(), bodyStatus, items };
+}
+
+/**
+ * Explain which connector is responsible for a capability in operator-facing
+ * surfaces. A configured native connection is still useful context when its
+ * writer is unhealthy; hiding it as "no provider" makes the API-first route
+ * look like a Bridge requirement.
+ */
+export function capabilityProviderLabel(source: OpenPresenceState, presenceId: string, item: PresenceCapability) {
+  if (item.provider === "Browser Bridge") return "Browser Bridge · browser required";
+  const presence = source.presences.find((candidate) => candidate.id === presenceId) ?? source.presence;
+  const native = source.nativeConnections.find((connection) => connection.presenceId === presenceId && connection.channelId === presence?.channel);
+  if (item.provider === "Native X" && item.limitation?.includes("does not currently expose")) return "Native X · not supported";
+  if (item.provider === "Native X" && item.availability === "available") return "Native X";
+  if (native?.status === "needs-attention" && !item.canExecute) return "Native X · write needs attention";
+  if (native?.access === "read" && !item.canExecute) return "Native X · read only";
+  if (item.provider === "Native X") return "Native X · unavailable";
+  if (native) return "Native X · unavailable";
+  return "No connected provider";
 }
 
 /** Capability availability remains a Presence Settings status, not an Agent Request. */

@@ -59,7 +59,7 @@ import { validateScenarioFidelity } from "@/lib/scenarios";
 import { cleanMirrorText, normalizeMirrorAuthor } from "@/lib/mirror-content";
 import { languagesMatch } from "@/lib/language-policy";
 import { isCognitionEligibleMirrorObject } from "@/lib/social-context";
-import { assignmentIsOpen, audienceDeltas, cleanUserFacingAssignmentInstruction, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence } from "@/lib/runtime";
+import { assignmentIsOpen, audienceDeltas, capabilityProviderLabel, cleanUserFacingAssignmentInstruction, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence } from "@/lib/runtime";
 import type {
   CalendarSlot,
   Assignment,
@@ -4682,13 +4682,9 @@ function LiveView({
   const presenceCopy = (text: string) => text.replaceAll("Jenny", presenceName).replaceAll(state.agent?.name ?? "Jenny", presenceName);
   const activityEnvironment: PresenceEnvironment = selected?.environment ?? "live";
   const nextObservationAt = activityEnvironment === "live"
-    ? selected?.connectionMode === "bridge"
-      ? undefined
-      : state.nativeConnections.find((connection) => connection.presenceId === selected?.id && connection.channelId === selected?.channel)?.observation?.nextObservationAt
+    ? state.nativeConnections.find((connection) => connection.presenceId === selected?.id && connection.channelId === selected?.channel)?.observation?.nextObservationAt
     : undefined;
-  const activityBridge = selected?.connectionMode === "bridge"
-    ? state.bridges.find((bridge) => bridge.presenceId === selected.id && bridge.state !== "offline")
-    : undefined;
+  const activityBridge = selected ? state.bridges.find((bridge) => bridge.presenceId === selected.id && bridge.state !== "offline") : undefined;
   const bridgeConnected = Boolean(activityBridge && bridgeAdapterStatus(activityBridge) === "connected");
   const bridgeNextCheckAt = bridgeConnected && activityBridge?.lastHeartbeatAt
     ? (() => {
@@ -4696,8 +4692,8 @@ function LiveView({
         return Number.isFinite(heartbeatAt) ? new Date(heartbeatAt + 30_000).toISOString() : undefined;
       })()
     : undefined;
-  const bridgeNeedsAttention = selected?.connectionMode === "bridge" && !bridgeConnected;
   const effectiveCapabilities = selected ? derivePresenceCapabilityManifest(state, selected.id) : undefined;
+  const bridgeNeedsAttention = selected?.connectionMode === "bridge" && !bridgeConnected && Boolean(effectiveCapabilities?.items.some((item) => item.requiresBrowser));
   const growthAssignment = selected ? state.assignments.find((item) => item.presenceId === selected.id && item.successEvidence?.metric === "followers" && item.status !== "cancelled") : undefined;
   const nextCheckAt = nextObservationAt ?? bridgeNextCheckAt;
   const nextCheckCountdown = formatCountdown(nextCheckAt, countdownNow);
@@ -4705,7 +4701,7 @@ function LiveView({
     ? "Checks paused"
     : checking
       ? undefined
-      : selected?.connectionMode === "bridge" && !bridgeConnected
+      : !nextObservationAt && selected?.connectionMode === "bridge" && !bridgeConnected
         ? undefined
       : nextCheckCountdown === "now"
         ? "Next check due now"
@@ -4957,7 +4953,7 @@ function LiveView({
           )}
         </>}
       />
-      {selected && <section className="activity-autonomy-strip" aria-label="Autonomy status"><div><SectionEyebrow>Autonomy</SectionEyebrow><strong>{growthAssignment ? `Working toward ${growthAssignment.successEvidence?.value.toLocaleString()} followers` : "No continuous growth responsibility"}</strong><span>{effectiveCapabilities?.bodyStatus === "ready" ? "Body ready" : effectiveCapabilities?.bodyStatus === "degraded" ? "Body degraded" : "Body unavailable"} · {selected.connectionMode === "bridge" ? "Browser body" : selected.connectionMode === "native" ? "Native channel" : "Sandbox"} · {effectiveCapabilities?.items.find((item) => item.capability === "follower_measurement")?.availability === "available" ? "Follower observation available" : "Follower observation unavailable"}</span></div><Button variant="ghost" onClick={() => setView(growthAssignment ? "growth" : "schedule")}>{growthAssignment ? "Open Growth" : "Set growth responsibility"}</Button></section>}
+      {selected && <section className="activity-autonomy-strip" aria-label="Autonomy status"><div><SectionEyebrow>Autonomy</SectionEyebrow><strong>{growthAssignment ? `Working toward ${growthAssignment.successEvidence?.value.toLocaleString()} followers` : "No continuous growth responsibility"}</strong><span>{effectiveCapabilities?.bodyStatus === "ready" ? "Body ready" : effectiveCapabilities?.bodyStatus === "degraded" ? "Body degraded" : "Body unavailable"} · {effectiveCapabilities ? [...new Set(effectiveCapabilities.items.filter((item) => item.availability === "available" && item.provider).map((item) => item.provider))].join(" + ") || (selected.connectionMode === "sandbox" ? "Sandbox" : "No active provider") : "No active provider"} · {effectiveCapabilities?.items.find((item) => item.capability === "follower_measurement")?.availability === "available" ? "Follower observation available" : "Follower observation unavailable"}</span></div><Button variant="ghost" onClick={() => setView(growthAssignment ? "growth" : "schedule")}>{growthAssignment ? "Open Growth" : "Set growth responsibility"}</Button></section>}
       {bridgeNeedsAttention && (
         <div className="activity-connection-notice" role="status" aria-live="polite">
           <CircleAlert size={17} aria-hidden="true" />
@@ -6171,9 +6167,9 @@ function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; muta
   const limitationCopy = [...new Set(limitations.map((item) => item.limitation).filter((item): item is string => Boolean(item)))];
   const goal = assignment?.successEvidence?.value ?? 100_000;
   const progress = latest ? Math.min(100, Math.round((latest.followers / goal) * 100)) : 0;
-  const bridge = presence.connectionMode === "bridge" ? state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline") : undefined;
+  const bridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
   const bridgeConnected = Boolean(bridge && bridgeAdapterStatus(bridge) === "connected");
-  const nativeConnection = presence.connectionMode === "native" ? state.nativeConnections.find((item) => item.presenceId === presence.id && item.channelId === presence.channel) : undefined;
+  const nativeConnection = state.nativeConnections.find((item) => item.presenceId === presence.id && item.channelId === presence.channel);
   const nextChannelObservationAt = nativeConnection?.observation?.nextObservationAt;
   const nextGrowthReviewCountdown = countdownNow === null ? undefined : formatCountdown(nextGrowthReviewAt, countdownNow);
   const bodyHeading = manifest.bodyStatus === "degraded" ? "Degraded" : manifest.bodyStatus === "ready" ? limitations.length ? "Ready with limits" : "Ready to work" : "Unavailable";
@@ -6192,7 +6188,7 @@ function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; muta
         <div className="section-heading compact"><div><SectionEyebrow>Evidence cadence</SectionEyebrow><h2>When Growth was checked</h2></div><Clock3 size={17} /></div>
         <p className="muted">Channel evidence and Agent reviews have separate clocks. This status reports both so “not enough data” is never mistaken for a recent check.</p>
         <div className="growth-freshness-grid">
-          <div><span>Last channel evidence</span><strong>{latestEvidence ? formatHistoryTimestamp(latestEvidence) : "Not observed"}</strong><small>{latestEvidence ? `${latest?.observedAt === latestEvidence ? "Audience" : "Publication performance"} · verified source` : bridgeConnected ? "Bridge is connected, but no metrics report has arrived" : "Waiting for a connected observer"}</small></div>
+          <div><span>Last channel evidence</span><strong>{latestEvidence ? formatHistoryTimestamp(latestEvidence) : "Not observed"}</strong><small>{latestEvidence ? `${latest?.observedAt === latestEvidence ? "Audience" : "Publication performance"} · verified source` : nativeConnection ? "Native X is connected, but no metrics snapshot has arrived" : bridgeConnected ? "Bridge is connected, but no metrics report has arrived" : "Waiting for a connected observer"}</small></div>
           <div><span>Last Growth review</span><strong>{review ? formatHistoryTimestamp(review.createdAt) : "Not reviewed"}</strong><small>{review ? `${review.kind === "strategic" ? "Strategic" : "Weekly"} evidence review` : "No review has been completed yet"}</small></div>
           <div><span>Next Agent review</span><strong aria-live="polite">{presence.status === "paused" ? "Paused" : nextGrowthReviewCountdown === "now" ? "Due now" : nextGrowthReviewCountdown ? `In ${nextGrowthReviewCountdown}` : nextGrowthReviewAt ? "Scheduled" : "Not scheduled"}</strong><small>{presence.status === "paused" ? "Wake the Presence to resume autonomous checks" : nextGrowthReviewAt ? formatHistoryTimestamp(nextGrowthReviewAt) : "The Agent has no review time saved"}</small></div>
           <div><span>Next channel check</span><strong>{presence.status === "paused" ? "Paused" : nextChannelObservationAt ? (countdownNow === null ? "Scheduled" : formatCountdown(nextChannelObservationAt, countdownNow) === "now" ? "Due now" : `In ${formatCountdown(nextChannelObservationAt, countdownNow)}`) : bridgeConnected ? "Bridge-controlled" : "Unavailable"}</strong><small>{presence.status === "paused" ? "Wake the Presence to resume observation" : nextChannelObservationAt ? formatHistoryTimestamp(nextChannelObservationAt) : bridgeConnected && bridge?.lastHeartbeatAt ? `Last bridge heartbeat ${formatHistoryTimestamp(bridge.lastHeartbeatAt)} · adapter cadence not exposed` : "No connected observer is reporting a next check"}</small></div>
@@ -6204,7 +6200,7 @@ function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; muta
       </div>
       <div className="growth-columns">
         <section className="settings-card"><div className="section-heading compact"><div><SectionEyebrow>Evidence quality</SectionEyebrow><h2>Recent audience observations</h2></div><ShieldCheck size={17} /></div>{snapshots.length ? <div className="growth-evidence-list">{snapshots.slice(0, 5).map((item) => <div key={item.id}><strong>{item.followers.toLocaleString()} followers</strong><span>{formatHistoryTimestamp(item.observedAt)} · {item.source} · {item.observationStatus}</span></div>)}</div> : <p className="muted">No verified audience snapshot has arrived from the selected channel.</p>}</section>
-        <section className="settings-card"><div className="section-heading compact"><div><SectionEyebrow>Body & limitations</SectionEyebrow><h2>{bodyHeading}</h2></div><PlugZap size={17} /></div><p className="muted">The Agent can only claim autonomy where the connected channel body can observe, execute, and verify.</p><div className="capability-list">{manifest.items.filter((item) => ["post", "reply", "follow", "follower_measurement", "post_performance"].includes(item.capability)).map((item) => <div className="capability-row" key={item.capability}><div><strong>{item.label}</strong><small>{item.provider ?? "No provider"}{item.requiresBrowser ? " · browser required" : ""}</small></div><span className={`capability-state capability-state-${item.availability}`}>{item.availability.replaceAll("-", " ")}</span></div>)}</div>{limitationCopy.length > 0 && <p className="settings-warning">Some channel capabilities are unavailable: {limitationCopy.slice(0, 2).join(" ")}</p>}<Button variant="ghost" onClick={() => setView("presence")}>Review Settings</Button></section>
+        <section className="settings-card"><div className="section-heading compact"><div><SectionEyebrow>Body & limitations</SectionEyebrow><h2>{bodyHeading}</h2></div><PlugZap size={17} /></div><p className="muted">The Agent can only claim autonomy where the connected channel body can observe, execute, and verify.</p><div className="capability-list">{manifest.items.filter((item) => ["post", "reply", "follow", "follower_measurement", "post_performance"].includes(item.capability)).map((item) => <div className="capability-row" key={item.capability}><div><strong>{item.label}</strong><small>{capabilityProviderLabel(state, presence.id, item)}{item.limitation ? ` · ${item.limitation}` : ""}</small></div><span className={`capability-state capability-state-${item.availability}`}>{item.availability.replaceAll("-", " ")}</span></div>)}</div>{limitationCopy.length > 0 && <p className="settings-warning">Some channel capabilities are unavailable: {[...new Set(limitationCopy)].slice(0, 2).join(" ")}</p>}<Button variant="ghost" onClick={() => setView("presence")}>Review Settings</Button></section>
       </div>
     </>}
   </div>;
@@ -7492,7 +7488,7 @@ function PresenceView({
       <section className="settings-card capability-manifest-card" aria-labelledby="presence-capability-title">
         <div className="section-heading compact"><div><SectionEyebrow>Effective body</SectionEyebrow><h2 id="presence-capability-title">What {presence.name} can actually do</h2></div><PlugZap size={17} /></div>
         <p className="muted">These capabilities combine channel support, connection health, permissions, execution, observation, and verification. “Auto” is not shown as ready when the body cannot confirm the public result.</p>
-        <div className="capability-list">{derivePresenceCapabilityManifest(state, presence.id).items.map((item) => <div className="capability-row" key={item.capability}><div><strong>{item.label}</strong><small>{item.provider ?? "No connected provider"}{item.requiresBrowser ? " · browser body" : ""}{item.limitation ? ` · ${item.limitation}` : ""}</small></div><span className={`capability-state capability-state-${item.availability}`}>{item.availability.replaceAll("-", " ")}</span></div>)}</div>
+        <div className="capability-list">{derivePresenceCapabilityManifest(state, presence.id).items.map((item) => <div className="capability-row" key={item.capability}><div><strong>{item.label}</strong><small>{capabilityProviderLabel(state, presence.id, item)}{item.limitation ? ` · ${item.limitation}` : ""}</small></div><span className={`capability-state capability-state-${item.availability}`}>{item.availability.replaceAll("-", " ")}</span></div>)}</div>
       </section>
       <section className="settings-card presence-brief-card">
         <div className="section-heading compact">
