@@ -163,7 +163,7 @@ export function ensureCapabilityRequests(source: OpenPresenceState, presenceId?:
   if (!source.agent || !presence) return source;
   const manifest = derivePresenceCapabilityManifest(source, presence.id);
   const growth = growthAssignmentFor(source, presence.id);
-  const requested = new Set(growth ? ["follower_measurement", "post_performance", "follow", "image", "video"] : ["follower_measurement", "post_performance", "follow", "image", "video"]);
+  const requested = new Set(["follower_measurement", "post_performance", "follow", "image", "video"]);
   const seenRequestKeys = new Set<string>();
   source.agentRequests = source.agentRequests.filter((request) => {
     if (seenRequestKeys.has(request.dedupeKey)) return false;
@@ -172,7 +172,8 @@ export function ensureCapabilityRequests(source: OpenPresenceState, presenceId?:
   });
   for (const item of manifest.items.filter((candidate) => requested.has(candidate.capability))) {
     const dedupeKey = `${presence.id}:${item.capability}`;
-    const existing = source.agentRequests.find((request) => request.dedupeKey === dedupeKey && request.status !== "rejected");
+    const growthBlocking = Boolean(growth && ["follower_measurement", "post_performance"].includes(item.capability));
+    const existing = source.agentRequests.find((request) => request.dedupeKey === dedupeKey && ["open", "accepted", "snoozed"].includes(request.status));
     if (item.availability === "available") {
       for (const request of source.agentRequests.filter((candidate) => candidate.dedupeKey === dedupeKey && ["open", "accepted", "snoozed"].includes(candidate.status))) {
         request.status = "resolved";
@@ -181,8 +182,13 @@ export function ensureCapabilityRequests(source: OpenPresenceState, presenceId?:
       }
       continue;
     }
-    if (existing) continue;
-    const growthBlocking = Boolean(growth && ["follower_measurement", "post_performance"].includes(item.capability));
+    if (existing) {
+      existing.title = `${item.label} unavailable`;
+      existing.need = growthBlocking ? `Connect a verified ${item.label.toLowerCase()} source so the 100K responsibility can measure progress.` : `Enable ${item.label.toLowerCase()} so the Presence can use the full X growth playbook.`;
+      existing.why = item.limitation ?? "The current connector cannot perform or observe this capability.";
+      existing.updatedAt = now();
+      continue;
+    }
     source.agentRequests.unshift({ id: id("agent-request"), agentId: source.agent.id, presenceId: presence.id, assignmentId: growth?.id, kind: "capability", importance: growthBlocking ? "blocking" : "important", title: `${item.label} unavailable`, need: growthBlocking ? `Connect a verified ${item.label.toLowerCase()} source so the 100K responsibility can measure progress.` : `Enable ${item.label.toLowerCase()} so the Presence can use the full X growth playbook.`, why: item.limitation ?? "The current connector cannot perform or observe this capability.", currentWorkaround: item.capability === "follower_measurement" ? "No workaround is counted as success; manual counts remain non-verifying." : item.capability === "post_performance" ? "Growth review can use only the evidence currently returned by the channel." : undefined, capability: item.capability, dedupeKey, status: "open", createdAt: now(), updatedAt: now() });
     source.events.unshift(event("system", "Agent request opened", `${item.label} is unavailable for ${presence.name}; the limitation is now visible in Operator Inbox.`, "warning", { presenceId: presence.id }));
   }

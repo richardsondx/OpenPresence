@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyOperation, audienceDeltas, compileAssignmentInstruction, completeNativeExecution, derivePresenceCapabilityManifest, formChatPostIntent, formXActionIntent, formXReplyIntent, publicationMetricBaseline, recordVerifiedFollow } from "@/lib/runtime";
+import { applyOperation, audienceDeltas, compileAssignmentInstruction, completeNativeExecution, derivePresenceCapabilityManifest, ensureCapabilityRequests, formChatPostIntent, formXActionIntent, formXReplyIntent, publicationMetricBaseline, recordVerifiedFollow } from "@/lib/runtime";
 import { createAgent } from "@/lib/runtime";
 import type { MirrorObject, OpenPresenceState } from "@/lib/types";
 
@@ -175,5 +175,7 @@ describe("continuous growth responsibility", () => {
     next = applyOperation(next, { type: "recordCapabilityChange", presenceId: state.presence!.id, changes: [{ capability: "follower_measurement", previousAvailability: "unavailable", nextAvailability: "available", provider: "Native X", detail: "Native X returned authenticated audience metrics." }] });
     expect(next.agentRequests.find((item) => item.id === request.id)?.status).toBe("resolved");
     expect(next.capabilityChangeEvents[0]).toMatchObject({ capability: "follower_measurement", nextAvailability: "available" });
+    next = ensureCapabilityRequests(next, state.presence!.id);
+    expect(next.agentRequests.filter((item) => item.capability === "post_performance" && item.status === "open")).toHaveLength(1);
   });
 });
