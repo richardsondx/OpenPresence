@@ -1,12 +1,13 @@
 "use client";
 
-import { Fragment, useEffect, useRef, useState } from "react";
+import { Fragment, useCallback, useEffect, useRef, useState } from "react";
 import { createPortal } from "react-dom";
 import Image from "next/image";
 import {
   Activity,
   ArrowUpRight,
   Badge,
+  BarChart3,
   BookOpen,
   Bot,
   Brain,
@@ -16,6 +17,7 @@ import {
   ChevronDown,
   ChevronLeft,
   ChevronRight,
+  ChevronUp,
   Circle,
   CircleAlert,
   Clock3,
@@ -24,6 +26,7 @@ import {
   EyeOff,
   FileText,
   FlaskConical,
+  Globe,
   Globe2,
   Ghost,
   Heart,
@@ -40,6 +43,7 @@ import {
   Plus,
   PlugZap,
   Radio,
+  Repeat,
   Reply,
   RotateCcw,
   Send,
@@ -58,10 +62,15 @@ import { validateScenarioFidelity } from "@/lib/scenarios";
 import { cleanMirrorText, normalizeMirrorAuthor } from "@/lib/mirror-content";
 import { languagesMatch } from "@/lib/language-policy";
 import { isCognitionEligibleMirrorObject } from "@/lib/social-context";
-import { assignmentIsOpen, audienceDeltas, capabilityProviderLabel, cleanUserFacingAssignmentInstruction, collapseAudienceSnapshots, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence } from "@/lib/runtime";
+import { resolveCanonicalPerson, isPlaceholderIdentity } from "@/lib/network-memory";
+import { assignmentIsOpen, audienceDeltas, capabilityProviderLabel, cleanUserFacingAssignmentInstruction, collapseAudienceSnapshots, compileAgendaWork, defaultSelfDirectedAttentionPolicy, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, intervalForPresence, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence, publishingPlanNeedsReassessment } from "@/lib/runtime";
 import type {
   CalendarSlot,
+  CapabilityTrialCapability,
+  AttentionTest,
+  AttentionTestMode,
   Assignment,
+  AgendaWorkItem,
   ChannelDefinition,
   ChannelId,
   ChannelSimulationDefinition,
@@ -88,6 +97,8 @@ import type {
   ModelProvider,
   KnowledgeUse,
   PreferenceReason,
+  Person,
+  PersonIdentity,
   Presence,
   PresenceAudienceSnapshot,
   PublicationMetricSnapshot,
@@ -99,7 +110,9 @@ import type {
   SocialAssetKind,
   Watch,
   View,
+  OperationalHealthSnapshot,
 } from "@/lib/types";
+import { publicExpressionText } from "@/lib/public-expression";
 
 const PUBLIC_TECHNICAL_FACTS: { id: PublicTechnicalFact; label: string; detail: string }[] = [
   { id: "ai-presence", label: "This is an AI presence", detail: "Say so when the question makes it relevant." },
@@ -128,12 +141,15 @@ const navItems: { id: View; label: string; icon: typeof MessageCircle }[] = [
   { id: "presence", label: "Settings", icon: Settings2 },
   { id: "teach", label: "Teach", icon: MessageCircle },
   { id: "knowledge", label: "Knowledge", icon: BookOpen },
+  { id: "usage", label: "Usage", icon: BarChart3 },
   { id: "playground", label: "Playground", icon: FlaskConical },
 ];
 const presenceNavItems = navItems.filter(({ id }) => id === "live" || id === "chat" || id === "watching" || id === "people" || id === "feed" || id === "growth" || id === "schedule" || id === "presence" || id === "playground");
-const agentNavItems = navItems.filter(({ id }) => id === "teach" || id === "knowledge");
+const agentNavItems = navItems.filter(({ id }) => id === "teach" || id === "knowledge" || id === "usage");
 const ACTIVITY_PAGE_SIZE = 20;
 const PUBLIC_HISTORY_PAGE_SIZE = 10;
+const FAILURE_REVIEW_PAGE_SIZE = 10;
+const PERSON_FACT_PAGE_SIZE = 8;
 const channelLabel = (channel: ChannelId, definitions?: ChannelDefinition[]) =>
   definitions?.find((item) => item.id === channel)?.name ??
   (channel === "x"
@@ -151,6 +167,31 @@ const formatTime = (value: string) => {
         hour: "numeric",
         minute: "2-digit",
       }).format(date);
+};
+const formatRelativeTime = (value: string, now = Date.now()) => {
+  const date = new Date(value);
+  const timestamp = date.getTime();
+  if (Number.isNaN(timestamp)) return "time unknown";
+  const elapsed = Math.max(0, now - timestamp);
+  const minute = 60_000;
+  const hour = 60 * minute;
+  const day = 24 * hour;
+  const week = 7 * day;
+  if (elapsed < minute) return "just now";
+  if (elapsed < hour) {
+    const minutes = Math.floor(elapsed / minute);
+    return `${minutes}m ago`;
+  }
+  if (elapsed < day) {
+    const hours = Math.floor(elapsed / hour);
+    return `${hours}h ago`;
+  }
+  if (elapsed < week) {
+    const days = Math.floor(elapsed / day);
+    return `${days} ${days === 1 ? "day" : "days"} ago`;
+  }
+  const weeks = Math.floor(elapsed / week);
+  return `${weeks} ${weeks === 1 ? "week" : "weeks"} ago`;
 };
 const formatHistoryTimestamp = (value: string) => {
   const date = new Date(value);
@@ -171,6 +212,38 @@ const formatCountdown = (value: string | undefined, now = Date.now()) => {
     ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
     : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 };
+
+function useOperationalHealth(presenceId?: string) {
+  const [health, setHealth] = useState<OperationalHealthSnapshot | null>(null);
+  useEffect(() => {
+    if (!presenceId) return;
+    let cancelled = false;
+    const load = async () => {
+      try {
+        const response = await fetch(`/api/runtime/health?presenceId=${encodeURIComponent(presenceId)}`, { cache: "no-store" });
+        if (!response.ok) return;
+        const payload = await response.json() as OperationalHealthSnapshot;
+        if (!cancelled) setHealth(payload);
+      } catch { /* Health is advisory; Activity remains usable when the probe is down. */ }
+    };
+    void load();
+    const timer = window.setInterval(() => void load(), 10_000);
+    return () => { cancelled = true; window.clearInterval(timer); };
+  }, [presenceId]);
+  return health;
+}
+
+function OperationalHealthIndicator({ health, onOpen }: { health: OperationalHealthSnapshot | null; onOpen: () => void }) {
+  const copy = health?.status === "needs_you"
+    ? "Needs You"
+    : health?.status === "recovering"
+      ? "Recovering body · no action needed"
+      : health?.status === "waiting"
+        ? "Waiting · resumes automatically"
+        : "Healthy";
+  const symbol = health?.status === "needs_you" ? "⚠" : health?.status === "recovering" ? "◐" : health?.status === "waiting" ? "◷" : "●";
+  return <button type="button" className={`global-health-indicator global-health-${health?.status ?? "healthy"}`} onClick={onOpen} aria-label={`Operating health: ${copy}`}><span aria-hidden="true">{symbol}</span> {copy}</button>;
+}
 const historyDisplayAt = (item: Pick<PublicHistoryItem, "occurredAt" | "observedAt" | "environment">) => item.environment === "sandbox" ? item.observedAt : item.occurredAt;
 const historyTimeTitle = (item: Pick<PublicHistoryItem, "occurredAt" | "observedAt" | "environment">) => item.environment === "sandbox"
   ? `Observed in Sandbox at ${new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.observedAt))}. Simulated world time: ${new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.occurredAt))}.`
@@ -256,8 +329,20 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
+const runtimeRequestTimeoutMs = 20_000;
+
+async function fetchRuntime(input: RequestInfo | URL, init: RequestInit = {}) {
+  const controller = new AbortController();
+  const timeout = window.setTimeout(() => controller.abort(), runtimeRequestTimeoutMs);
+  try {
+    return await fetch(input, { ...init, signal: controller.signal });
+  } finally {
+    window.clearTimeout(timeout);
+  }
+}
+
 function clientErrorMessage(reason: unknown, fallback: string) {
-  if (reason instanceof TypeError && /fetch/i.test(reason.message)) {
+  if ((reason instanceof TypeError && /fetch/i.test(reason.message)) || (reason instanceof DOMException && reason.name === "AbortError")) {
     return "The OpenPresence runtime could not be reached. Try again; if it persists, restart the local app server.";
   }
   return reason instanceof Error ? reason.message : fallback;
@@ -345,13 +430,25 @@ function PresenceGlyph({
     </div>
   );
 }
+
+const agentAccentPalette = [
+  { name: "Apricot", value: "#D68754" },
+  { name: "Cornflower", value: "#7A8FD8" },
+  { name: "Terracotta", value: "#C96B45" },
+  { name: "Sage", value: "#5B9A75" },
+  { name: "Plum", value: "#A878B5" },
+  { name: "Ocean", value: "#4F7CAC" },
+  { name: "Marigold", value: "#D5A84C" },
+  { name: "Teal", value: "#5E9C9C" },
+  { name: "Cocoa", value: "#8B6F5A" },
+] as const;
 function Button({
   children,
   variant = "secondary",
   className = "",
   ...props
 }: React.ButtonHTMLAttributes<HTMLButtonElement> & {
-  variant?: "primary" | "secondary" | "ghost" | "danger";
+  variant?: "primary" | "secondary" | "ghost" | "danger" | "danger-solid";
 }) {
   return (
     <button className={`button button-${variant} ${className}`} {...props}>
@@ -407,7 +504,7 @@ type BridgeManage = (
 ) => Promise<{ state: OpenPresenceState; key?: string } | null>;
 type XManage = (
   operation: unknown,
-) => Promise<{ state?: OpenPresenceState; result?: { account: { id: string; username: string; name: string }; access: "read" | "read-write" } } | null>;
+) => Promise<{ state?: OpenPresenceState; result?: { account: { id: string; username: string; name: string }; access: "read" | "read-write" }; error?: string } | null>;
 
 function SandboxEventForm({
   sessionId,
@@ -435,12 +532,14 @@ function SandboxEventForm({
   const [assets, setAssets] = useState<SandboxAssetInput[]>([]);
   const [sourceUrl, setSourceUrl] = useState("");
   const [busy, setBusy] = useState(false);
+
   const selectedAction = simulation.actions.find((item) => item.id === actionId) ?? simulation.actions[0];
   const selectedActor = actors.find((item) => item.id === actorId);
   const targetObject = targetId ? targetObjects.find((item) => item.id === targetId) : undefined;
   const actorNameForSubmit = selectedActor?.displayName ?? actorName.trim();
   const requiresContent = selectedAction?.contentRequired !== false;
   const canSubmit = Boolean(selectedAction && actorNameForSubmit && (!requiresContent || content.trim()) && (!selectedAction.target || targetObject));
+
   const addFile = (file: File) => {
     if (assets.length >= 4 || file.size > 1_500_000) return;
     const kind: SocialAssetKind = file.type === "image/gif" ? "gif" : file.type.startsWith("video/") ? "video" : "image";
@@ -470,6 +569,20 @@ function SandboxEventForm({
       setBusy(false);
     }
   };
+
+  const submitAndCheck = async () => {
+    if (!selectedAction || !canSubmit) return;
+    setBusy(true);
+    try {
+      await mutate({ type: "addSandboxEvent", sessionId, actionId: selectedAction.id, actorId: selectedActor?.id, actorName: actorNameForSubmit, actorHandle: selectedActor?.handle ?? actorHandle, content, assets, targetExternalRef: targetObject?.externalRef, observeOnly: true });
+      await mutate({ type: "runSandboxPulse", sessionId });
+      setContent("");
+      setAssets([]);
+    } finally {
+      setBusy(false);
+    }
+  };
+
   return (
     <form className="sandbox-event-form" onSubmit={submitEvent}>
       <label>What should happen<select aria-label="What should happen" value={actionId} onChange={(event) => { setActionId(event.target.value); setTargetId(""); setContent(""); }}>{simulation.actions.map((action) => <option key={action.id} value={action.id}>{action.label.replaceAll("Jenny", presenceName)}</option>)}</select></label>
@@ -478,7 +591,10 @@ function SandboxEventForm({
       {selectedAction?.target && <label>{selectedAction.target.label}<select aria-label={selectedAction.target.label} value={targetId} onChange={(event) => setTargetId(event.target.value)}><option value="">Choose a simulated post</option>{targetObjects.map((item) => <option key={item.id} value={item.id}>{item.author?.displayName ?? "Someone"}: {(item.content?.text ?? "").slice(0, 42)}</option>)}</select></label>}
       {selectedAction?.contentLabel && <label>{selectedAction.contentLabel}<textarea aria-label={selectedAction.contentLabel} value={content} onChange={(event) => setContent(event.target.value)} placeholder={selectedAction.contentPlaceholder?.replaceAll("Jenny", presenceName)} rows={4} /></label>}
       {assetKinds.length > 0 && <div className="sandbox-media-input"><span className="form-label">Media or link</span><div className="sandbox-media-actions">{assetKinds.some((kind) => ["image", "video", "gif"].includes(kind)) && <label className="button button-secondary sandbox-file-button"><Plus size={14} /> Add media<input className="sandbox-file-input" aria-label="Add media" type="file" accept="image/*,video/*" onChange={(event) => { const file = event.target.files?.[0]; if (file) addFile(file); event.target.value = ""; }} /></label>}{assetKinds.includes("link") && <div className="sandbox-link-input"><input aria-label="Media URL" placeholder="Paste a link" value={sourceUrl} onChange={(event) => setSourceUrl(event.target.value)} /><button type="button" onClick={addLink} disabled={!sourceUrl.trim()}>Add link</button></div>}</div>{assets.length > 0 && <div className="sandbox-asset-list">{assets.map((asset, index) => <span className="sandbox-asset-chip" key={`${asset.name}-${index}`}>{asset.kind === "link" ? asset.sourceUrl : asset.name}<button type="button" aria-label={`Remove ${asset.name}`} onClick={() => setAssets((items) => items.filter((_, itemIndex) => itemIndex !== index))}>×</button></span>)}</div>}<small className="form-hint">{presenceName} will not infer media contents until a capable perception provider has inspected them.</small></div>}
-      <Button type="submit" variant="secondary" disabled={busy || !canSubmit}><Plus size={14} /> {selectedAction?.submitLabel ?? "Add event"}</Button>
+      <div className="sandbox-submit-row">
+        <Button type="submit" variant="secondary" disabled={busy || !canSubmit}><Plus size={14} /> {selectedAction?.submitLabel ?? "Add event"}</Button>
+        <Button type="button" variant="primary" disabled={busy || !canSubmit} onClick={() => void submitAndCheck()}><Sparkles size={14} /> Inject & Check</Button>
+      </div>
     </form>
   );
 }
@@ -551,39 +667,58 @@ function ModeOption({
 
 export default function Home() {
   const [state, setState] = useState<OpenPresenceState | null>(null);
-  const [view, setView] = useState<View>("live");
+  const [view, setView] = useState<View>(() => {
+    const requested = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("view") : null;
+    return requested && navItems.some((item) => item.id === requested) ? requested as View : "live";
+  });
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [selectedFile, setSelectedFile] = useState<FileKind>("BRAIN");
   const [pendingOperation, setPendingOperation] = useState<string | null>(null);
+  const [isSyncingNative, setIsSyncingNative] = useState(false);
+  const stateEtag = useRef<string | null>(null);
   const nativeSyncInFlight = useRef<string | null>(null);
   const attentionOperationInFlight = useRef(false);
+  // A scheduled attention request can race another tab, the bridge, or a
+  // worker. Keep the conflict visible without immediately re-triggering the
+  // same due check against the same stale workspace revision.
+  const attentionConflictRevision = useRef<number | null>(null);
   const growthAttentionAt = useRef<Record<string, number>>({});
   const calendarRunInFlight = useRef<string | null>(null);
   const playgroundStartInFlight = useRef<string | null>(null);
   const playgroundClockSyncInFlight = useRef<string | null>(null);
+  const rememberStateResponse = useCallback((response: Response) => {
+    const etag = response.headers.get("etag");
+    if (etag) stateEtag.current = etag;
+  }, []);
+  const fetchState = useCallback(async function fetchState<T>(input: RequestInfo | URL, init: RequestInit = {}): Promise<T | null> {
+    const headers = new Headers(init.headers);
+    if ((init.method ?? "GET").toString().toUpperCase() === "GET" && stateEtag.current) headers.set("If-None-Match", stateEtag.current);
+    const response = await fetchRuntime(input, { ...init, headers, cache: "no-store" });
+    if (response.status === 304) return null;
+    rememberStateResponse(response);
+    return readJsonResponse<T>(response);
+  }, [rememberStateResponse]);
   useEffect(() => {
     const query = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
     query.set("read", Date.now().toString());
-    fetch(`/api/state?${query.toString()}`, { cache: "no-store" })
-      .then(async (response) => {
-        if (!response.ok) throw new Error("Unable to load local state");
-        return readJsonResponse<OpenPresenceState>(response);
-      })
+    fetchState<OpenPresenceState>(`/api/state?${query.toString()}`)
       .then((payload) => {
+        if (!payload) return;
+        setError(null);
         setState(payload);
         syncBrowserWorkspaceContext(payload);
       })
       .catch((reason: unknown) => setError(clientErrorMessage(reason, "Unable to load local state")))
       .finally(() => setLoading(false));
-  }, []);
+  }, [fetchState]);
   useEffect(() => {
     if (state?.onboarded) window.scrollTo({ top: 0, left: 0 });
   }, [state?.onboarded]);
   async function mutate(operation: unknown, requestContext?: OpenPresenceState) {
     setError(null);
     const operationType = typeof operation === "object" && operation !== null && "type" in operation && typeof operation.type === "string" ? operation.type : null;
-    const tracksAttention = ["wakePresence", "runPulse", "runAttentionWorker", "startAssignment", "workAssignment"].includes(operationType ?? "");
+    const tracksAttention = ["wakePresence", "runPulse", "runAttentionWorker", "runLiveAssignment", "startAssignment", "workAssignment"].includes(operationType ?? "");
     if (tracksAttention) {
       if (attentionOperationInFlight.current) return null;
       attentionOperationInFlight.current = true;
@@ -598,9 +733,9 @@ export default function Home() {
           try {
             const query = new URLSearchParams(window.location.search);
             query.set("read", Date.now().toString());
-            const pollResponse = await fetch(`/api/state?${query.toString()}`, { cache: "no-store" });
-            if (!pollResponse.ok) return;
-            const pollPayload = await readJsonResponse<OpenPresenceState>(pollResponse);
+            const pollPayload = await fetchState<OpenPresenceState>(`/api/state?${query.toString()}`);
+            if (!pollPayload) return;
+            setError(null);
             setState(pollPayload);
             syncBrowserWorkspaceContext(pollPayload);
           } catch {
@@ -609,7 +744,7 @@ export default function Home() {
         }, 750);
       }
       while (true) {
-        const response = await fetch("/api/state", {
+        const response = await fetchRuntime("/api/state", {
           method: "POST",
           headers: {
             "Content-Type": "application/json",
@@ -619,22 +754,26 @@ export default function Home() {
           },
           body: JSON.stringify(operation),
         });
+        rememberStateResponse(response);
         const payload = await readJsonResponse<OpenPresenceState & { error?: string; conflict?: boolean; state?: OpenPresenceState }>(response);
         if (!response.ok && response.status === 409 && payload.state && !retriedConflict) {
-          if (tracksAttention) {
-            setState(payload.state);
-            syncBrowserWorkspaceContext(payload.state);
-            return null;
-          }
           retriedConflict = true;
           context = payload.state;
           setState(payload.state);
           syncBrowserWorkspaceContext(payload.state);
           continue;
         }
+        if (!response.ok && response.status === 409 && tracksAttention && payload.state) {
+          attentionConflictRevision.current = typeof payload.state.workspaceRevision === "number" ? payload.state.workspaceRevision : null;
+          setState(payload.state);
+          syncBrowserWorkspaceContext(payload.state);
+          return null;
+        }
         if (!response.ok)
           throw new Error(payload.error ?? "That change could not be saved.");
+        if (tracksAttention) attentionConflictRevision.current = null;
         setState(payload);
+        setError(null);
         syncBrowserWorkspaceContext(payload);
         return payload as OpenPresenceState;
       }
@@ -649,13 +788,16 @@ export default function Home() {
       }
     }
   }
-  async function refreshState() {
+  async function refreshState(): Promise<OpenPresenceState> {
     const query = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
     query.set("read", Date.now().toString());
-    const response = await fetch(`/api/state?${query.toString()}`, { cache: "no-store" });
-    const payload = await readJsonResponse<OpenPresenceState>(response);
-    if (!response.ok) throw new Error("Unable to refresh local state.");
+    const payload = await fetchState<OpenPresenceState>(`/api/state?${query.toString()}`);
+    if (!payload) {
+      if (!state) throw new Error("The workspace state is not available.");
+      return state;
+    }
     setState(payload);
+    setError(null);
     syncBrowserWorkspaceContext(payload);
     return payload;
   }
@@ -726,22 +868,26 @@ export default function Home() {
     const observe = async () => {
       if (nativeSyncInFlight.current === presence.id) return;
       nativeSyncInFlight.current = presence.id;
+      setIsSyncingNative(true);
       try {
-        const response = await fetch("/api/state", { method: "POST", headers: { "Content-Type": "application/json", ...(state?.activeAgentId ? { "x-openpresence-agent-id": state.activeAgentId } : {}), ...(state?.activePresenceId ? { "x-openpresence-presence-id": state.activePresenceId } : {}), ...(state?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(state.workspaceRevision) } : {}) }, body: JSON.stringify({ type: "syncNativeX", presenceId: presence.id }) });
+        const response = await fetchRuntime("/api/state", { method: "POST", headers: { "Content-Type": "application/json", ...(state?.activeAgentId ? { "x-openpresence-agent-id": state.activeAgentId } : {}), ...(state?.activePresenceId ? { "x-openpresence-presence-id": state.activePresenceId } : {}), ...(state?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(state.workspaceRevision) } : {}) }, body: JSON.stringify({ type: "syncNativeX", presenceId: presence.id }) });
+        rememberStateResponse(response);
         const payload = await readJsonResponse<OpenPresenceState & { error?: string }>(response);
         if (!response.ok) throw new Error(payload.error ?? "The X observer could not run.");
         setState(payload);
+        setError(null);
         schedule(payload.nativeConnections.find((item) => item.presenceId === presence.id)?.observation?.nextObservationAt);
       } catch (reason) {
         setError(clientErrorMessage(reason, "The X observer could not run."));
       } finally {
         nativeSyncInFlight.current = null;
+        setIsSyncingNative(false);
       }
     };
     if (due) void observe();
     else schedule(observation.nextObservationAt);
     return () => { if (timer) clearTimeout(timer); };
-  }, [state?.presence, state?.nativeConnections, pendingOperation]);
+  }, [state?.presence?.id, state?.presence?.connectionMode, state?.nativeConnections, state?.activeAgentId, state?.activePresenceId, state?.workspaceRevision, rememberStateResponse]);
   useEffect(() => {
     const presenceId = state?.presence?.id;
     const connectionMode = state?.presence?.connectionMode;
@@ -749,24 +895,26 @@ export default function Home() {
     if (!presenceId || connectionMode !== "bridge" || !browserAccessEnabled) return;
     const refreshBridgeHealth = async () => {
       try {
-        const query = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
-        query.set("read", Date.now().toString());
-        const response = await fetch(`/api/state?${query.toString()}`, { cache: "no-store" });
+        const response = await fetch(`/api/bridge/status?presenceId=${encodeURIComponent(presenceId)}`, { cache: "no-store" });
         if (!response.ok) return;
-        const payload = await readJsonResponse<OpenPresenceState>(response);
-        setState(payload);
-        syncBrowserWorkspaceContext(payload);
+        const payload = await response.json() as { bridges?: Array<OpenPresenceState["bridges"][number]> };
+        if (!payload.bridges) return;
+        setState((current) => current ? {
+          ...current,
+          bridges: current.bridges.map((bridge) => payload.bridges!.find((candidate) => candidate.id === bridge.id) ?? bridge),
+        } : current);
       } catch {
         // Bridge health is advisory and must not interrupt the current action.
       }
     };
     const timer = window.setInterval(() => {
       void refreshBridgeHealth();
-    }, 5_000);
+    }, 10_000);
     return () => window.clearInterval(timer);
   }, [state?.presence?.id, state?.presence?.connectionMode, state?.presence?.browserAccess?.enabled]);
   useEffect(() => {
     if (pendingOperation || attentionOperationInFlight.current) return;
+    if (attentionConflictRevision.current !== null && attentionConflictRevision.current === state?.workspaceRevision) return;
     const presence = state?.presence;
     if (!presence || presence.status !== "live") return;
     const slots = state.calendar.filter((slot) => slot.presence === presence.id && slot.enabled && slot.day && slot.time);
@@ -831,27 +979,31 @@ export default function Home() {
       void mutate(operation).finally(() => { calendarRunInFlight.current = null; });
     }, delay);
     return () => clearTimeout(timer);
-  }, [state?.assignments, state?.calendar, state?.presence, state?.activePresenceId, state?.bridges, pendingOperation]);
+  }, [state?.assignments, state?.calendar, state?.presence, state?.activePresenceId, state?.workspaceRevision, state?.bridges, pendingOperation]);
   useEffect(() => {
     if (pendingOperation || attentionOperationInFlight.current) return;
     const presence = state?.presence;
     if (!presence || presence.status !== "live") return;
+    const needsReassessment = state ? publishingPlanNeedsReassessment(state, presence.id).kind !== "none" : false;
     const growthAssignment = state.assignments.find((item) => item.presenceId === presence.id && item.status === "active" && item.activation?.type === "continuous" && item.successEvidence?.metric === "followers");
-    if (!growthAssignment) return;
+    if (!growthAssignment && !needsReassessment) return;
     const bridge = presence.connectionMode === "bridge" ? state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline") : undefined;
     const bodyReady = presence.connectionMode === "bridge"
       ? Boolean(bridge && bridgeAdapterStatus(bridge) === "connected")
       : presence.connectionMode === "native" && state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "connected");
-    if (!bodyReady) return;
+    if (!bodyReady && presence.connectionMode !== "simulated") return;
     const lastRun = growthAttentionAt.current[presence.id] ?? 0;
-    const wait = Math.max(0, 5 * 60_000 - (Date.now() - lastRun));
+    const wait = needsReassessment ? 1_000 : Math.max(0, 5 * 60_000 - (Date.now() - lastRun));
     const timer = window.setTimeout(() => {
-      if (growthAttentionAt.current[presence.id] && Date.now() - growthAttentionAt.current[presence.id] < 5 * 60_000) return;
+      if (!needsReassessment && growthAttentionAt.current[presence.id] && Date.now() - growthAttentionAt.current[presence.id] < 5 * 60_000) return;
       growthAttentionAt.current[presence.id] = Date.now();
-      void mutate({ type: "runAttentionWorker" });
+      const operation = presence.connectionMode === "bridge"
+        ? { type: "runAttentionWorker" as const }
+        : { type: "runPulse" as const, presenceId: presence.id };
+      void mutate(operation);
     }, wait);
     return () => window.clearTimeout(timer);
-  }, [state?.assignments, state?.presence, state?.nativeConnections, state?.bridges, pendingOperation]);
+  }, [state?.assignments, state?.publishingPlans, state?.presence, state?.nativeConnections, state?.bridges, pendingOperation]);
   async function manageBridge(operation: unknown) {
     setError(null);
     try {
@@ -887,32 +1039,40 @@ export default function Home() {
   }
   async function manageX(operation: unknown) {
     setError(null);
+    let context = state;
+    let retriedConflict = false;
     try {
-      const response = await fetch("/api/x/manage", {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(state?.activeAgentId ? { "x-openpresence-agent-id": state.activeAgentId } : {}),
-          ...(state?.activePresenceId ? { "x-openpresence-presence-id": state.activePresenceId } : {}),
-          ...(state?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(state.workspaceRevision) } : {}),
-        },
-        body: JSON.stringify(operation),
-      });
-      const payload = await readJsonResponse<{ state?: OpenPresenceState; result?: { account: { id: string; username: string; name: string }; access: "read" | "read-write" }; error?: string }>(response);
-      if (!response.ok && response.status === 409 && payload.state) {
-        setState(payload.state);
-        syncBrowserWorkspaceContext(payload.state);
-        throw new Error("This tab was refreshed because the Agent workspace changed elsewhere. Please retry the X action.");
+      while (true) {
+        const response = await fetchRuntime("/api/x/manage", {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json",
+            ...(context?.activeAgentId ? { "x-openpresence-agent-id": context.activeAgentId } : {}),
+            ...(context?.activePresenceId ? { "x-openpresence-presence-id": context.activePresenceId } : {}),
+            ...(context?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(context.workspaceRevision) } : {}),
+          },
+          body: JSON.stringify(operation),
+        });
+        const payload = await readJsonResponse<{ state?: OpenPresenceState; result?: { account: { id: string; username: string; name: string }; access: "read" | "read-write" }; error?: string }>(response);
+        if (!response.ok && response.status === 409 && payload.state && !retriedConflict) {
+          retriedConflict = true;
+          context = payload.state;
+          setState(payload.state);
+          syncBrowserWorkspaceContext(payload.state);
+          continue;
+        }
+        if (!response.ok) throw new Error(payload.error ?? "The X connection could not be completed.");
+        if (payload.state) {
+          setState(payload.state);
+          setError(null);
+          syncBrowserWorkspaceContext(payload.state);
+        }
+        return payload;
       }
-      if (!response.ok) throw new Error(payload.error ?? "The X connection could not be completed.");
-      if (payload.state) {
-        setState(payload.state);
-        syncBrowserWorkspaceContext(payload.state);
-      }
-      return payload;
     } catch (reason) {
-      setError(clientErrorMessage(reason, "The X connection could not be completed."));
-      return null;
+      const message = clientErrorMessage(reason, "The X connection could not be completed.");
+      setError(message);
+      return { error: message };
     }
   }
   if (loading)
@@ -948,6 +1108,7 @@ export default function Home() {
       mutate={mutate}
       refreshState={refreshState}
       pendingOperation={pendingOperation}
+      isSyncingNative={isSyncingNative}
       manageBridge={manageBridge}
       manageX={manageX}
       error={error}
@@ -1138,6 +1299,7 @@ function AgentSwitcher({
 }) {
   const [open, setOpen] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
+  const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<React.CSSProperties | null>(null);
   const switcherRef = useRef<HTMLButtonElement>(null);
   const agent = state.agent!;
@@ -1148,7 +1310,7 @@ function AgentSwitcher({
       const anchor = switcherRef.current?.getBoundingClientRect();
       if (!anchor) return;
       const menuWidth = Math.min(250, window.innerWidth - 24);
-      const estimatedHeight = Math.min(360, 88 + agents.length * 52);
+      const estimatedHeight = Math.min(520, 88 + agents.length * 52 + (editingAgentId ? 142 : 0));
       const below = window.innerHeight - anchor.bottom;
       const top = below >= estimatedHeight + 8
         ? anchor.bottom + 8
@@ -1172,7 +1334,7 @@ function AgentSwitcher({
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
     };
-  }, [agents.length, open]);
+  }, [agents.length, editingAgentId, open]);
   return (
     <div className="agent-switcher-wrap">
       <button
@@ -1197,21 +1359,56 @@ function AgentSwitcher({
         >
           <div className="agent-menu-label">Your Agents</div>
           {agents.map((item) => (
-            <button
-              key={item.id}
-              role="menuitem"
-              className={`agent-menu-item ${item.id === state.activeAgentId ? "active" : ""}`}
-              onClick={async () => {
-                await mutate({ type: "selectAgent", id: item.id });
-                setOpen(false);
-              }}
-            >
-              <PresenceGlyph accent={item.accent} />
-              <span>
-                <strong>{item.name}</strong>
-                {item.id === agent.id && <small>Current</small>}
-              </span>
-            </button>
+            <div className="agent-menu-agent" key={item.id}>
+              <div className="agent-menu-agent-row">
+                <button
+                  type="button"
+                  className={`agent-menu-color-button ${editingAgentId === item.id ? "editing" : ""}`}
+                  aria-label={`Change ${item.name} color`}
+                  aria-expanded={editingAgentId === item.id}
+                  title="Change Agent color"
+                  onClick={() => setEditingAgentId((current) => current === item.id ? null : item.id)}
+                >
+                  <PresenceGlyph accent={item.accent} />
+                </button>
+                <button
+                  type="button"
+                  role="menuitem"
+                  className={`agent-menu-item ${item.id === state.activeAgentId ? "active" : ""}`}
+                  onClick={async () => {
+                    await mutate({ type: "selectAgent", id: item.id });
+                    setEditingAgentId(null);
+                    setOpen(false);
+                  }}
+                >
+                  <span>
+                    <strong>{item.name}</strong>
+                    {item.id === agent.id && <small>Current</small>}
+                  </span>
+                </button>
+              </div>
+              {editingAgentId === item.id && (
+                <div className="agent-color-picker" role="group" aria-label={`Choose ${item.name} color`}>
+                  {agentAccentPalette.map((option) => (
+                    <button
+                      type="button"
+                      key={option.value}
+                      className={`agent-color-swatch ${item.accent.toLowerCase() === option.value.toLowerCase() ? "selected" : ""}`}
+                      aria-label={`${option.name} color`}
+                      title={`${option.name} · ${option.value}`}
+                      style={{ "--agent-swatch": option.value } as React.CSSProperties}
+                      onClick={async () => {
+                        await mutate({ type: "setAgentAccent", agentId: item.id, accent: option.value });
+                        setEditingAgentId(null);
+                      }}
+                    >
+                      <span aria-hidden="true" />
+                      {item.accent.toLowerCase() === option.value.toLowerCase() && <b aria-hidden="true">✓</b>}
+                    </button>
+                  ))}
+                </div>
+              )}
+            </div>
           ))}
           {agents.length === 1 && (
             <p className="agent-menu-empty">No other Agents yet.</p>
@@ -1459,6 +1656,7 @@ function AgentWorkspaceShell({
   mutate,
   refreshState,
   pendingOperation,
+  isSyncingNative,
   manageBridge,
   manageX,
   error,
@@ -1471,12 +1669,14 @@ function AgentWorkspaceShell({
   mutate: Mutate;
   refreshState: () => Promise<OpenPresenceState>;
   pendingOperation: string | null;
+  isSyncingNative?: boolean;
   manageBridge: BridgeManage;
   manageX: XManage;
   error: string | null;
 }) {
   const agent = state.agent!;
   const presence = state.presence ?? state.presences[0]!;
+  const operationalHealth = useOperationalHealth(presence?.id);
   const presenceBridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
   const presenceBridgeStatus = presenceBridge ? bridgeAdapterStatus(presenceBridge) : undefined;
   const [showPresenceModal, setShowPresenceModal] = useState(false);
@@ -1485,6 +1685,8 @@ function AgentWorkspaceShell({
       ? "Manage Agent"
       : view === "presence"
         ? "Presence settings"
+      : view === "usage"
+        ? "Usage"
       : view === "live"
           ? "Activity"
             : view === "feed"
@@ -1577,6 +1779,9 @@ function AgentWorkspaceShell({
             <ChevronRight size={14} />
             <strong>{pageLabel}</strong>
           </div>
+          <div className="topbar-actions">
+            <OperationalHealthIndicator health={operationalHealth} onOpen={() => setView("live")} />
+          </div>
           {view === "presence" && <div className="topbar-actions">
             <span className={`connection-label ${presence.status === "paused" ? "paused" : ""}`}>
               <span className="status-dot" />{" "}
@@ -1593,6 +1798,14 @@ function AgentWorkspaceShell({
                         : "Not connected"}
             </span>
           </div>}
+          {view === "chat" && <div className="topbar-actions">
+            <Button
+              variant="secondary"
+              onClick={() => void mutate({ type: "newPresenceChatSession", presenceId: presence.id })}
+            >
+              <Plus size={14} /> New rehearsal
+            </Button>
+          </div>}
         </header>
         {error && (
           <div className="toast-error" role="alert">
@@ -1602,14 +1815,15 @@ function AgentWorkspaceShell({
         <div className="workspace-content">
           {view === "teach" && <TeachView state={state} mutate={mutate} setView={setView} />}
           {view === "knowledge" && <KnowledgeView state={state} mutate={mutate} refreshState={refreshState} />}
-          {view === "chat" && <PresenceChatView state={state} mutate={mutate} />}
-          {view === "watching" && <WatchingView state={state} mutate={mutate} />}
+          {view === "usage" && <UsageView state={state} setView={setView} />}
+          {view === "chat" && <PresenceChatView key={`${presence.id}-${state.files.find((item) => item.kind === "TASTE")?.revision ?? 0}`} state={state} mutate={mutate} />}
+          {view === "watching" && <WatchingView state={state} mutate={mutate} refreshState={refreshState} />}
           {view === "people" && <PeopleView state={state} mutate={mutate} />}
           {view === "playground" && (
             <PlaygroundView state={state} mutate={mutate} />
           )}
           {view === "live" && (
-            <LiveView key={`${state.presence?.id ?? "none"}-${state.presence?.channel ?? "none"}-${state.presence?.environment ?? "live"}`} state={state} mutate={mutate} pendingOperation={pendingOperation} setView={setView} />
+            <LiveView key={`${state.presence?.id ?? "none"}-${state.presence?.channel ?? "none"}-${state.presence?.environment ?? "live"}`} state={state} mutate={mutate} pendingOperation={pendingOperation} isSyncingNative={isSyncingNative} runtimeError={Boolean(error && /OpenPresence runtime could not be reached/i.test(error))} setView={setView} />
           )}
           {view === "feed" && (
             <PublicHistoryView state={state} setView={setView} mutate={mutate} />
@@ -1713,12 +1927,15 @@ function LegacyAppShell({
 }) {
   const agent = state.agent!;
   const presence = state.presence!;
+  const operationalHealth = useOperationalHealth(presence.id);
   const [showPresenceModal, setShowPresenceModal] = useState(false);
   const pageLabel =
     view === "brain"
       ? "Brain"
       : view === "presence"
         ? `${channelLabel(presence.channel, state.channelDefinitions)} · Settings`
+        : view === "usage"
+          ? "Usage"
         : view === "live"
           ? "Activity"
           : view === "feed"
@@ -1828,6 +2045,7 @@ function LegacyAppShell({
             <strong>{pageLabel}</strong>
           </div>
           <div className="topbar-actions">
+            <OperationalHealthIndicator health={operationalHealth} onOpen={() => setView("live")} />
             <span
               className={`connection-label ${presence.status === "paused" ? "paused" : ""}`}
             >
@@ -1860,10 +2078,11 @@ function LegacyAppShell({
             <TeachView state={state} mutate={mutate} setView={setView} />
           )}
           {view === "knowledge" && <KnowledgeView state={state} mutate={mutate} refreshState={refreshState} />}
+          {view === "usage" && <UsageView state={state} setView={setView} />}
           {view === "live" && (
-            <LiveView key={`${state.presence?.id ?? "none"}-${state.presence?.channel ?? "none"}-${state.presence?.environment ?? "live"}`} state={state} mutate={mutate} setView={setView} />
+            <LiveView key={`${state.presence?.id ?? "none"}-${state.presence?.channel ?? "none"}-${state.presence?.environment ?? "live"}`} state={state} mutate={mutate} runtimeError={Boolean(error && /OpenPresence runtime could not be reached/i.test(error))} setView={setView} />
           )}
-          {view === "watching" && <WatchingView state={state} mutate={mutate} />}
+          {view === "watching" && <WatchingView state={state} mutate={mutate} refreshState={refreshState} />}
           {view === "people" && <PeopleView state={state} mutate={mutate} />}
           {view === "feed" && (
             <PublicHistoryView state={state} setView={setView} mutate={mutate} />
@@ -2355,7 +2574,16 @@ function ContextSidebar({
               <div className="context-change" key={change.id}>
                 <div>
                   <strong>{changeLabel(change.summary)}</strong>
-                  <small>{change.summary}</small>
+                  <small>
+                    {change.summary} ·{" "}
+                    <time
+                      className="context-change-time"
+                      dateTime={change.createdAt}
+                      title={formatHistoryTimestamp(change.createdAt)}
+                    >
+                      {formatRelativeTime(change.createdAt)}
+                    </time>
+                  </small>
                 </div>
                 <ContextStatus tone={changeTone(change.id)}>
                   {changeStatus(change.id)}
@@ -3110,6 +3338,34 @@ function AssignmentResearchReview({ research, assets }: { research: OpenPresence
   })}</div>}{evidenceSummary && <p className="assignment-evidence-summary"><strong>Selected evidence</strong>{evidenceSummary}</p>}</div></details>;
 }
 
+function CapabilityTrialPanel({ state, mutate, presence }: { state: OpenPresenceState; mutate: Mutate; presence: NonNullable<OpenPresenceState["presence"]> }) {
+  const trialCapabilities: Array<{ id: CapabilityTrialCapability; label: string; description: string }> = [
+    { id: "like", label: "Like", description: "Appreciate a post when a private signal is enough." },
+    { id: "repost", label: "Repost", description: "Amplify a post that should stand on its own." },
+    { id: "quote", label: "Quote", description: "Add a concrete contribution before sharing it." },
+  ];
+  const [capability, setCapability] = useState<CapabilityTrialCapability>("repost");
+  const [environment, setEnvironment] = useState<"sandbox" | "live">("live");
+  const [executionMode, setExecutionMode] = useState<"auto" | "review">("auto");
+  const [busy, setBusy] = useState(false);
+  const selectedCapability = trialCapabilities.find((item) => item.id === capability) ?? trialCapabilities[1]!;
+  const trials = state.capabilityTrials.filter((trial) => trial.presenceId === presence.id);
+  const create = async () => {
+    setBusy(true);
+    try { await mutate({ type: "createCapabilityTrial", presenceId: presence.id, capability, environment, executionMode }); } finally { setBusy(false); }
+  };
+  const start = async (trial: OpenPresenceState["capabilityTrials"][number]) => {
+    const label = trial.capability === "original_post" ? "original post" : trial.capability.replaceAll("_", " ");
+    if (trial.environment === "live" && !window.confirm(`Start one bounded live X trial? Genny will choose the public candidate and may create exactly one public ${label} if its normal judgment selects ${label}. Other judged acts will be suppressed.`)) return;
+    setBusy(true);
+    try {
+      const started = await mutate({ type: "startCapabilityTrial", id: trial.id, ...(trial.environment === "live" ? { confirmLive: true as const } : {}) });
+      if (started) await mutate({ type: "runCapabilityTrial", id: trial.id });
+    } finally { setBusy(false); }
+  };
+  return <div className="playground-page" aria-label="Capability trials"><section className="scenario-action-bar"><div className="scenario-context-copy"><div className="eyebrow">Capability trial</div><h2>Test {selectedCapability.label} through real Agent judgment</h2><p>Genny chooses where to look and what to do. This trial isolates which act may execute; it does not teach the expected answer or change the Presence-wide envelope.</p></div><Button variant="primary" disabled={busy || presence.channel !== "x"} onClick={() => void create()}>New {selectedCapability.label} trial</Button></section><section className="attention-test-form" aria-label="Capability trial setup"><div><span className="form-label">Capability under test</span><div className="attention-test-mode-options">{trialCapabilities.map((item) => <button key={item.id} type="button" className={capability === item.id ? "selected" : ""} onClick={() => setCapability(item.id)}><strong>{item.label}</strong><small>{item.description}</small></button>)}</div></div><div><span className="form-label">Environment</span><div className="attention-test-mode-options"><button type="button" className={environment === "live" ? "selected" : ""} onClick={() => setEnvironment("live")}><strong>Live X</strong><small>Agent-directed public discovery; one verified {selectedCapability.label} maximum.</small></button><button type="button" className={environment === "sandbox" ? "selected" : ""} onClick={() => setEnvironment("sandbox")}><strong>Sandbox</strong><small>Keep the trial record without a public write.</small></button></div></div><div><span className="form-label">Tested execution</span><p>{selectedCapability.label} only · other social decisions remain visible but are suppressed for this trial.</p><div className="playground-mode-switch"><Button type="button" variant={executionMode === "auto" ? "primary" : "ghost"} onClick={() => setExecutionMode("auto")}>Auto for this trial</Button><Button type="button" variant={executionMode === "review" ? "primary" : "ghost"} onClick={() => setExecutionMode("review")}>Review</Button></div></div></section><div className="scenario-history" aria-label="Capability trial history">{trials.length ? trials.map((trial) => <article className="scenario-history-row" key={trial.id}><span><strong>{trial.capability}</strong><small>{trial.environment} · {trial.executionIsolation.mode} · {trial.status.replaceAll("_", " ")}</small></span><strong>{trial.result ?? "in progress"}</strong>{["preflight", "draft", "active", "discovering", "judging"].includes(trial.status) && <Button variant="secondary" disabled={busy} onClick={() => void start(trial)}>{trial.status === "preflight" ? "Start trial" : "Continue"}</Button>}<small>{trial.why ?? trial.lastError ?? `${trial.candidateAudits.length} candidate decision${trial.candidateAudits.length === 1 ? "" : "s"}`}</small></article>) : <p>No capability trials yet. Choose Like, Repost, or Quote when you want Genny to find a genuine opportunity.</p>}</div></div>;
+}
+
 function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: Mutate }) {
   const presence = state.presence ?? state.presences[0];
   const session = state.playgroundSessions.find((item) => item.presenceId === presence?.id && item.status === "active");
@@ -3121,6 +3377,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
   const actors = session ? state.sandboxActors.filter((item) => item.sessionId === session.id) : [];
   const [busy, setBusy] = useState(false);
   const [scenarioMode, setScenarioMode] = useState(false);
+  const [trialMode, setTrialMode] = useState(false);
   const [scenarioComposerOpen, setScenarioComposerOpen] = useState(false);
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [rehearsalOpen, setRehearsalOpen] = useState(false);
@@ -3129,6 +3386,10 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
   const [assignmentInstruction, setAssignmentInstruction] = useState("");
   const [assignmentDraftId, setAssignmentDraftId] = useState<string | null>(null);
   const [assignmentPanelDismissed, setAssignmentPanelDismissed] = useState(false);
+  const [assignmentExpanded, setAssignmentExpanded] = useState(false);
+  const [assignmentHovered, setAssignmentHovered] = useState(false);
+  const [liveAssignmentHovered, setLiveAssignmentHovered] = useState(false);
+  const [liveAssignmentMenuOpen, setLiveAssignmentMenuOpen] = useState(false);
   const [dismissedLiveAssignmentId, setDismissedLiveAssignmentId] = useState<string | null>(null);
   const [assignmentCancellationNotice, setAssignmentCancellationNotice] = useState(false);
   const [expandedRehearsalId, setExpandedRehearsalId] = useState<string | null>(null);
@@ -3189,6 +3450,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
     setAssignmentDraftId(null);
     setAssignmentPanelDismissed(false);
     setAssignmentCancellationNotice(false);
+    setAssignmentExpanded(false);
     setExpandedRehearsalId(null);
     setFeedbackAttemptId(null);
     setFeedbackReasons([]);
@@ -3196,6 +3458,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
   };
   const runAssignment = async (assignmentId: string, start = false) => {
     if (!sessionId) return;
+    setAssignmentExpanded(true);
     setBusy(true);
     try {
       let next = state;
@@ -3228,6 +3491,7 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
       setAssignmentDraftId(created.id);
       setAssignmentPanelDismissed(false);
       setAssignmentCancellationNotice(false);
+      setAssignmentExpanded(true);
     }
   };
   const cancelDisplayedAssignment = async () => {
@@ -3238,12 +3502,14 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
     setAssignmentDraftId(null);
     setAssignmentPanelDismissed(true);
     setAssignmentCancellationNotice(true);
+    setAssignmentExpanded(false);
   };
   const rehearseAssignment = (assignment: typeof latestLiveAssignment) => {
     if (!assignment) return;
     setAssignmentInstruction(assignment.instruction);
     setAssignmentDraftId(null);
     setAssignmentPanelDismissed(false);
+    setAssignmentExpanded(true);
     setRehearsalMode("assign");
     setRehearsalOpen(true);
   };
@@ -3271,12 +3537,13 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
         <div className="playground-mode-controls">
           {session && <Button variant="ghost" disabled={busy} onClick={() => void resetPlayground()}><RotateCcw size={14} /> Reset</Button>}
           <div className="playground-mode-switch" role="tablist" aria-label="Playground mode">
-            <Button role="tab" aria-selected={!scenarioMode} variant={!scenarioMode ? "primary" : "ghost"} onClick={() => setScenarioMode(false)}>Free play</Button>
-            <Button role="tab" aria-selected={scenarioMode} variant={scenarioMode ? "primary" : "ghost"} onClick={() => setScenarioMode(true)}>Scenarios</Button>
+            <Button role="tab" aria-selected={!scenarioMode && !trialMode} variant={!scenarioMode && !trialMode ? "primary" : "ghost"} onClick={() => { setScenarioMode(false); setTrialMode(false); }}>Free play</Button>
+            <Button role="tab" aria-selected={trialMode} variant={trialMode ? "primary" : "ghost"} onClick={() => { setScenarioMode(false); setTrialMode(true); }}>Trials</Button>
+            <Button role="tab" aria-selected={scenarioMode} variant={scenarioMode ? "primary" : "ghost"} onClick={() => { setScenarioMode(true); setTrialMode(false); }}>Scenarios</Button>
           </div>
         </div>
       </div>
-      {scenarioMode ? <ScenarioLibrary state={state} mutate={mutate} presence={presence} creating={scenarioComposerOpen} onCreatingChange={setScenarioComposerOpen} /> : !session ? <div className="playground-loading" role="status">Opening a fresh simulated account…</div> : <>
+      {trialMode ? <CapabilityTrialPanel state={state} mutate={mutate} presence={presence} /> : scenarioMode ? <ScenarioLibrary state={state} mutate={mutate} presence={presence} creating={scenarioComposerOpen} onCreatingChange={setScenarioComposerOpen} /> : !session ? <div className="playground-loading" role="status">Opening a fresh simulated account…</div> : <>
       {rehearsalOpen && <section className="original-rehearsal-panel" aria-label="Posting rehearsal controls">
         <div className="rehearsal-panel-header"><div className="eyebrow">Rehearsal controls</div><Button variant="ghost" type="button" onClick={() => setRehearsalOpen(false)}><X size={14} /> Close</Button></div>
         <div className="rehearsal-mode-menu" role="group" aria-label="Posting rehearsal mode">
@@ -3294,9 +3561,97 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
           {!assignmentDraft ? <><label>Assignment instruction<textarea aria-label="Assignment instruction" value={assignmentInstruction} onChange={(event) => setAssignmentInstruction(event.target.value)} placeholder="Produce 3 original X posts about offers, pricing, sales, or execution. Choose your own angles and do not repeat yourself." rows={4} /></label><div className="original-rehearsal-actions"><small>The original instruction stays attached to the Assignment.</small><Button variant="primary" disabled={busy || !assignmentInstruction.trim()} onClick={() => void reviewAssignment()}><Check size={14} /> Review assignment</Button></div></> : <div className="assignment-review" aria-label="Assignment review"><div><span>Deliverable</span><strong>{assignmentDraft.progress.required} original {channelLabel(assignmentDraft.channelId, state.channelDefinitions)} publications</strong></div><div><span>Completion</span><strong>{assignmentDraft.progress.required} verified publications</strong></div><div><span>Agent decides how</span><strong>Topics · thesis · evidence · format · wording · timing strategy</strong></div><p>{cleanUserFacingAssignmentInstruction(assignmentDraft.instruction)}</p><div className="original-rehearsal-actions"><Button variant="ghost" onClick={() => setAssignmentDraftId(null)}>Adjust</Button><Button variant="primary" disabled={busy} onClick={() => void runAssignment(assignmentDraft.id, true)}><Play size={14} /> Start rehearsal</Button></div></div>}
         </>}
       </section>}
-      {assignmentCancellationNotice && <section className="assignment-cancelled-notice" role="status" aria-live="polite"><strong>Assignment cancelled</strong><span>It will not continue. Its history remains available for review.</span></section>}
-      {latestLiveAssignment && dismissedLiveAssignmentId !== latestLiveAssignment.id && <section className="assignment-scope-notice" aria-label="Live Assignment status"><div><div className="eyebrow">Live Activity Assignment</div><h2>{cleanUserFacingAssignmentInstruction(latestLiveAssignment.instruction)}</h2><p>This Assignment is still a live draft waiting for Activity to activate it. Pausing the Presence keeps it from running live; it is not stuck. Playground is independent.</p></div><div className="assignment-scope-notice-actions"><Button variant="secondary" disabled={busy} onClick={() => rehearseAssignment(latestLiveAssignment)}><FlaskConical size={14} /> Rehearse in Sandbox</Button><button type="button" className="assignment-scope-notice-close" aria-label="Dismiss live Assignment notice" title="Dismiss" onClick={() => setDismissedLiveAssignmentId(latestLiveAssignment.id)}><X size={16} /></button></div></section>}
-      {displayedAssignment && (
+      <div className="playground-notices-bar">
+        {assignmentCancellationNotice && <section className="assignment-cancelled-notice" role="status" aria-live="polite"><strong>Assignment cancelled</strong><span>It will not continue. Its history remains available for review.</span></section>}
+        {latestLiveAssignment && dismissedLiveAssignmentId !== latestLiveAssignment.id && (
+          <div className="playground-live-mention-wrapper">
+            <button
+              type="button"
+              className="playground-live-mention"
+              onClick={() => setLiveAssignmentMenuOpen((open) => !open)}
+              onMouseEnter={() => setLiveAssignmentHovered(true)}
+              onMouseLeave={() => setLiveAssignmentHovered(false)}
+              onFocus={() => setLiveAssignmentHovered(true)}
+              onBlur={() => setLiveAssignmentHovered(false)}
+              aria-expanded={liveAssignmentMenuOpen}
+              aria-label="Live Activity Assignment draft waiting. Click for options."
+            >
+              <span className="live-mention-dot" />
+              <span className="live-mention-eyebrow">Live Assignment</span>
+              <span className="live-mention-label">Draft waiting for Activity</span>
+            </button>
+            {liveAssignmentHovered && !liveAssignmentMenuOpen && (
+              <div className="playground-mention-popover" role="tooltip">
+                <div className="popover-header">
+                  <span className="eyebrow">Live Activity Assignment</span>
+                  <span className="popover-badge">Draft</span>
+                </div>
+                <p className="popover-instruction">{cleanUserFacingAssignmentInstruction(latestLiveAssignment.instruction)}</p>
+                <p className="popover-note">This Assignment is still a live draft waiting for Activity to activate it. Pausing the Presence keeps it from running live; it is not stuck. Playground is independent.</p>
+                <div className="popover-action-hint">Click for options</div>
+              </div>
+            )}
+            {liveAssignmentMenuOpen && (
+              <div className="playground-live-menu" role="dialog" aria-label="Live Assignment options">
+                <div className="live-menu-header">
+                  <div>
+                    <div className="eyebrow">Live Activity Assignment</div>
+                    <h4>{cleanUserFacingAssignmentInstruction(latestLiveAssignment.instruction)}</h4>
+                    <p>This Assignment is a live draft waiting for Activity to activate it. You can rehearse it safely in Sandbox.</p>
+                  </div>
+                  <button type="button" className="assignment-scope-notice-close" onClick={() => setLiveAssignmentMenuOpen(false)} aria-label="Close menu">
+                    <X size={14} />
+                  </button>
+                </div>
+                <div className="live-menu-actions">
+                  <Button variant="secondary" disabled={busy} onClick={() => { setLiveAssignmentMenuOpen(false); rehearseAssignment(latestLiveAssignment); }}>
+                    <FlaskConical size={14} /> Rehearse in Sandbox
+                  </Button>
+                  <Button variant="ghost" onClick={() => { setLiveAssignmentMenuOpen(false); setDismissedLiveAssignmentId(latestLiveAssignment.id); }}>
+                    Dismiss
+                  </Button>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+        {displayedAssignment && !assignmentExpanded && !assignmentIsWorking && (
+          <div className="playground-assignment-mention-wrapper">
+            <button
+              type="button"
+              className={`playground-assignment-mention ${displayedAssignment.status === "blocked" ? "is-blocked" : assignmentIsComplete ? "is-complete" : ""}`}
+              onClick={() => setAssignmentExpanded(true)}
+              onMouseEnter={() => setAssignmentHovered(true)}
+              onMouseLeave={() => setAssignmentHovered(false)}
+              onFocus={() => setAssignmentHovered(true)}
+              onBlur={() => setAssignmentHovered(false)}
+              aria-label={`${assignmentIsComplete ? "Completed Assignment" : "Posting Assignment"}: ${assignmentVerified}/${assignmentRequired} published. Status: ${assignmentPhase}. Click to view details.`}
+            >
+              <span className={`mention-dot ${displayedAssignment.status === "blocked" ? "is-blocked" : assignmentIsComplete ? "is-complete" : ""}`} />
+              <span className="mention-eyebrow">{assignmentIsComplete ? "Completed Assignment" : "Posting Assignment"}</span>
+              <span className="mention-progress"><strong>{assignmentVerified}/{assignmentRequired}</strong> published</span>
+              <span className="mention-phase">{assignmentPhase}</span>
+              <span className="mention-hint">Click for details</span>
+            </button>
+            {assignmentHovered && (
+              <div className="playground-mention-popover" role="tooltip">
+                <div className="popover-header">
+                  <span className="eyebrow">{assignmentIsComplete ? "Completed Assignment" : "Posting Assignment"}</span>
+                  <span className="popover-badge">{assignmentPhase}</span>
+                </div>
+                <p className="popover-instruction">{displayedAssignmentInstruction}</p>
+                <div className="popover-meta">
+                  <span><strong>{assignmentVerified} / {assignmentRequired}</strong> published</span>
+                  {displayedAssignment.rejectedCandidates > 0 && <span><strong>{displayedAssignment.rejectedCandidates}</strong> rejected</span>}
+                  {assignmentResearch && <span><strong>{assignmentResearch.candidates.length}</strong> inspected</span>}
+                </div>
+                <div className="popover-action-hint">Click to open controls, continue, or cancel</div>
+              </div>
+            )}
+          </div>
+        )}
+      </div>
+      {displayedAssignment && (assignmentExpanded || assignmentIsWorking) && (
         <section className="assignment-progress-panel" aria-label="Assignment progress">
           <div className="assignment-progress-heading">
             <div>
@@ -3304,6 +3659,17 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
               {displayedAssignment.environment === "sandbox" && !displayedAssignment.sessionId && <small className="assignment-scope-label">Durable Sandbox draft · not tied to this session</small>}
               <h2>{displayedAssignmentInstruction}</h2>
             </div>
+            {!assignmentIsWorking && (
+              <button
+                type="button"
+                className="assignment-panel-minimize-btn"
+                onClick={() => setAssignmentExpanded(false)}
+                title="Minimize assignment to discreet notice"
+                aria-label="Minimize assignment details"
+              >
+                <ChevronUp size={13} /> Minimize
+              </button>
+            )}
           </div>
           {assignmentIsWorking && <aside className="assignment-live-card" role="status" aria-live="polite" aria-label={`Assignment ${assignmentPhase}. ${assignmentVerified} of ${assignmentRequired} published. ${displayedAssignment.rejectedCandidates} candidates rejected.`}><span className="assignment-progress-ring" style={{ background: `conic-gradient(#6f927d ${assignmentProgress}%, #e7eee8 0)` }}><span><strong>{assignmentVerified}/{assignmentRequired}</strong><small>published</small></span></span><span className="assignment-live-copy"><strong>{assignmentPhase}</strong><small>{displayedAssignment.rejectedCandidates} rejected · {assignmentResearch?.candidates.length ?? 0} inspected</small></span></aside>}
           <div className="assignment-progress-bar"><span style={{ width: `${assignmentProgress}%` }} /></div>
@@ -3387,23 +3753,58 @@ function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: M
 function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutate }) {
   const presence = state.presence ?? state.presences[0];
   const [query, setQuery] = useState("");
+  const [filterMode, setFilterMode] = useState<"all" | "following" | "watched">("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [remembering, setRemembering] = useState(false);
   const [rememberName, setRememberName] = useState("");
   const [rememberHandle, setRememberHandle] = useState("");
   const [rememberExternalId, setRememberExternalId] = useState("");
   const [correction, setCorrection] = useState("");
+  const [factPage, setFactPage] = useState(1);
   if (!presence) return null;
+
   const visibleIdentityIds = new Set(state.personIdentities.filter((identity) => identity.sourcePresenceId === presence.id && (identity.sourceEnvironment ?? "live") === (presence.environment ?? "live")).map((identity) => identity.personId));
+  const isPersonFollowed = (personId: string) => {
+    const identity = state.personIdentities.find((item) => item.personId === personId && item.sourcePresenceId === presence.id && (item.sourceEnvironment ?? "live") === (presence.environment ?? "live"));
+    if (!identity) return false;
+    const hasFollowExecution = state.executions.some((e) => e.presenceId === presence.id && e.affordance === "x.follow" && e.target?.id === identity.externalActorId && e.status === "succeeded");
+    const hasFollowOutcome = state.outcomes.some((o) => o.presenceId === presence.id && o.status === "succeeded" && state.socialIntents.some((i) => i.id === o.socialIntentId && i.affordance === "x.follow" && i.target?.id === identity.externalActorId));
+    return Boolean(hasFollowExecution || hasFollowOutcome);
+  };
+  const isPersonWatched = (personId: string) => {
+    const identity = state.personIdentities.find((item) => item.personId === personId);
+    return state.watches.some((w) => w.presenceId === presence.id && (Boolean(identity?.handle && w.query.includes(identity.handle)) || Boolean(identity?.externalActorId && w.query.includes(identity.externalActorId))));
+  };
+
   const people = state.people
     .filter((person) => person.memoryState === "active" && visibleIdentityIds.has(person.id))
-    .filter((person) => !query.trim() || `${person.displayName} ${state.personIdentities.find((identity) => identity.personId === person.id && identity.sourcePresenceId === presence.id && (identity.sourceEnvironment ?? "live") === (presence.environment ?? "live"))?.handle ?? ""}`.toLowerCase().includes(query.trim().toLowerCase()));
+    .filter((person) => filterMode === "all" ? true : filterMode === "following" ? isPersonFollowed(person.id) : isPersonWatched(person.id))
+    .filter((person) => {
+      if (!query.trim()) return true;
+      const display = resolveCanonicalPerson(state, person.id, presence.id);
+      return `${display.displayName} ${display.rawHandle ?? ""} ${display.handleLabel}`.toLowerCase().includes(query.trim().toLowerCase());
+    });
   const selected = state.people.find((person) => person.id === selectedId) ?? people[0];
   const selectedIdentity = selected ? state.personIdentities.find((identity) => identity.personId === selected.id && identity.sourcePresenceId === presence.id && (identity.sourceEnvironment ?? "live") === (presence.environment ?? "live")) : undefined;
+  const selectedIsFollowed = selected ? isPersonFollowed(selected.id) : false;
+  const selectedIsWatched = selected ? isPersonWatched(selected.id) : false;
+  const selectedDisplayInfo = selected ? resolveCanonicalPerson(state, selected.id, presence.id) : { displayName: "Unknown account", handleLabel: "Profile details pending", rawHandle: undefined, avatarUrl: undefined, hydrationState: "unhydrated" as const, isPlaceholder: true };
+
   const relationship = selected ? state.relationships.find((item) => item.personId === selected.id) : undefined;
   const facts = relationship ? state.relationshipFacts.filter((fact) => fact.relationshipId === relationship.id && !fact.validTo && !state.relationshipFacts.some((newer) => newer.supersedesFactId === fact.id)) : [];
+  const factPageCount = Math.max(1, Math.ceil(facts.length / PERSON_FACT_PAGE_SIZE));
+  const visibleFactPage = Math.min(factPage, factPageCount);
+  const visibleFacts = facts.slice(
+    (visibleFactPage - 1) * PERSON_FACT_PAGE_SIZE,
+    visibleFactPage * PERSON_FACT_PAGE_SIZE,
+  );
   const loops = relationship ? state.relationshipOpenLoops.filter((loop) => loop.relationshipId === relationship.id && loop.status === "open") : [];
   const recentHistory = selectedIdentity ? state.mirrorObjects.filter((item) => item.presenceId === presence.id && (item.environment ?? "live") === (presence.environment ?? "live") && item.author?.externalRef?.id === selectedIdentity.externalActorId && isCognitionEligibleMirrorObject(item, presence.language)).sort((left, right) => (right.occurredAt ?? right.observedAt).localeCompare(left.occurredAt ?? left.observedAt)).slice(0, 8) : [];
+  
+  // Find contemporaneous follow decision reason if available
+  const followDecision = selectedIdentity ? state.socialDecisions.find((d) => d.presenceId === presence.id && d.acts?.some((a) => a.decision === "follow") && (d.focalMirrorObjectIds.some((mId) => state.mirrorObjects.find((m) => m.id === mId)?.author?.externalRef?.id === selectedIdentity.externalActorId))) : undefined;
+  const followDecisionSummary = followDecision?.acts?.find((a) => a.decision === "follow")?.rationale || followDecision?.summary;
+
   const remember = async () => {
     if (!rememberName.trim() || !rememberExternalId.trim()) return;
     const next = await mutate({ type: "rememberPerson", presenceId: presence.id, channel: presence.channel, externalActorId: rememberExternalId.trim(), displayName: rememberName.trim(), handle: rememberHandle.trim() || undefined, source: "operator" });
@@ -3414,12 +3815,13 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
     const next = await mutate({ type: "correctRelationshipFact", relationshipId: relationship.id, factId: facts[0]?.id, statement: correction.trim(), visibility: `presence:${presence.id}` });
     if (next) setCorrection("");
   };
+
   return <div className="people-page">
     <PageHeader
       className="people-header"
       eyebrow="Presence relationships"
       title="People"
-      description={<>Who {presence.name} remembers here. Seeing someone in the world does not automatically create a relationship.</>}
+      description={<>Who {presence.name} remembers and follows. Seeing someone in the world does not automatically create a relationship.</>}
       actionsClassName="heading-actions"
       actions={<Button variant="primary" onClick={() => setRemembering((value) => !value)}><Plus size={14} /> Remember a person</Button>}
     />
@@ -3428,8 +3830,89 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
       <div className="people-form-grid"><label>Name<input aria-label="Person name" value={rememberName} onChange={(event) => setRememberName(event.target.value)} placeholder="Maya Chen" /></label><label>Handle <span className="optional-label">Optional</span><input aria-label="Person handle" value={rememberHandle} onChange={(event) => setRememberHandle(event.target.value)} placeholder="@maya" /></label><label>Channel actor ID<input aria-label="Channel actor ID" value={rememberExternalId} onChange={(event) => setRememberExternalId(event.target.value)} placeholder="maya" /></label></div>
       <div className="people-form-actions"><Button variant="ghost" onClick={() => setRemembering(false)}>Cancel</Button><Button variant="primary" disabled={!rememberName.trim() || !rememberExternalId.trim()} onClick={() => void remember()}>Remember</Button></div>
     </section>}
-    <div className="people-toolbar"><label className="people-search"><span>Search people</span><input aria-label="Search people" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by name or handle" /></label><span className="people-count">{people.length} remembered</span></div>
-    {!people.length ? <section className="people-empty"><div className="watch-empty-mark"><Users size={23} /></div><SectionEyebrow>People</SectionEyebrow><h2>No one remembered yet.</h2><p>People will appear as meaningful relationships develop here. A Watch or a feed appearance alone is not a relationship.</p></section> : <div className="people-layout"><section className="people-list" aria-label="Remembered people">{people.map((person) => { const identity = state.personIdentities.find((item) => item.personId === person.id && item.sourcePresenceId === presence.id && (item.sourceEnvironment ?? "live") === (presence.environment ?? "live")); const avatarUrl = identity?.avatarUrl ?? state.mirrorObjects.find((item) => item.presenceId === presence.id && (item.environment ?? "live") === (presence.environment ?? "live") && item.author?.externalRef?.id === identity?.externalActorId)?.author?.avatarUrl; const rel = state.relationships.find((item) => item.personId === person.id); return <button type="button" className={`people-row ${selected?.id === person.id ? "active" : ""}`} key={person.id} onClick={() => setSelectedId(person.id)}><ChannelAvatar className="people-avatar" avatarUrl={avatarUrl} name={person.displayName} /><span className="people-row-copy"><strong>{person.displayName}</strong><small>{identity?.handle ?? identity?.externalActorId} · {rel?.lastMeaningfulInteractionAt ? `Last interacted ${formatTime(rel.lastMeaningfulInteractionAt)}` : "Remembered explicitly"}</small><span>{factsForPerson(state, person.id)[0] ?? "Selective relationship context is available here."}</span></span><ChevronRight size={16} /></button>; })}</section>{selected && <section className="person-inspector" aria-label={`${selected.displayName} relationship`}><div className="person-inspector-heading"><div><SectionEyebrow>Person</SectionEyebrow><h2>{selected.displayName}</h2><p>{selectedIdentity?.handle ?? selectedIdentity?.externalActorId} · {channelLabel(presence.channel, state.channelDefinitions)}</p></div><span className="people-status">{relationship?.lastMeaningfulInteractionAt ? "Remembered relationship" : "Remembered identity"}</span></div><div className="person-inspector-section"><SectionEyebrow>How {presence.name} knows them</SectionEyebrow><p>{relationship?.lastMeaningfulInteractionAt ? "You've interacted meaningfully here. The details below remain linked to actual evidence." : "The operator explicitly asked the Agent to remember this person. No prior interaction is being implied."}</p></div><div className="person-inspector-section"><SectionEyebrow>What {presence.name} remembers</SectionEyebrow>{facts.length ? <ul>{facts.map((fact) => <li key={fact.id}><span>{fact.statement}</span><small>{fact.epistemicKind.replaceAll("_", " ")} · {fact.provenanceRefs.map((ref) => ref.kind).join(", ")}</small></li>)}</ul> : <p>No curated facts yet.</p>}</div><div className="person-inspector-section"><SectionEyebrow>Open threads</SectionEyebrow>{loops.length ? <ul>{loops.map((loop) => <li key={loop.id}>{loop.description}</li>)}</ul> : <p>No open loops.</p>}</div><div className="person-inspector-section"><SectionEyebrow>Recent interactions</SectionEyebrow>{recentHistory.length ? <div className="person-history">{recentHistory.map((item) => <article key={item.id}><small>{formatTime(item.occurredAt ?? item.observedAt)}</small><p>{item.content?.text ?? "[no text]"}</p></article>)}</div> : <p>No Mirror-backed interactions yet.</p>}</div><div className="person-inspector-actions"><Button variant="ghost" onClick={() => void mutate({ type: "forgetRelationship", relationshipId: relationship?.id })} disabled={!relationship}>Forget relationship</Button><Button variant="ghost" onClick={() => void mutate({ type: "createWatch", presenceId: presence.id, query: selectedIdentity?.handle ?? selected.displayName, purpose: "Keep this person in attention without treating Watching as relationship memory." })}>Watch</Button></div>{relationship && <div className="person-correction"><label>Correct memory<textarea aria-label="Correct relationship memory" value={correction} onChange={(event) => setCorrection(event.target.value)} placeholder="What should the Agent remember instead?" rows={3} /></label><Button variant="secondary" disabled={!correction.trim()} onClick={() => void correct()}><Pencil size={14} /> Save correction</Button></div>}</section>}</div>}
+    <div className="people-toolbar" style={{ display: "flex", gap: "12px", alignItems: "center", flexWrap: "wrap" }}>
+      <div style={{ display: "flex", gap: "4px" }}>
+        <button type="button" className={`button button-small ${filterMode === "all" ? "button-secondary" : "button-ghost"}`} onClick={() => setFilterMode("all")}>All Remembered</button>
+        <button type="button" className={`button button-small ${filterMode === "following" ? "button-secondary" : "button-ghost"}`} onClick={() => setFilterMode("following")}>Following · Verified</button>
+        <button type="button" className={`button button-small ${filterMode === "watched" ? "button-secondary" : "button-ghost"}`} onClick={() => setFilterMode("watched")}>Watched</button>
+      </div>
+      <label className="people-search" style={{ flex: 1 }}><span>Search people</span><input aria-label="Search people" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by name or handle" /></label>
+      <span className="people-count">{people.length} {filterMode === "following" ? "following" : filterMode === "watched" ? "watched" : "remembered"}</span>
+    </div>
+    {!people.length ? <section className="people-empty"><div className="watch-empty-mark"><Users size={23} /></div><SectionEyebrow>People</SectionEyebrow><h2>{filterMode === "following" ? "Not following anyone yet." : "No one remembered yet."}</h2><p>People appear as meaningful relationships develop and Genny chooses to maintain ongoing awareness.</p></section> : <div className="people-layout"><section className="people-list" aria-label="Remembered people">{people.map((person) => {
+      const identity = state.personIdentities.find((item) => item.personId === person.id && item.sourcePresenceId === presence.id && (item.sourceEnvironment ?? "live") === (presence.environment ?? "live"));
+      const rel = state.relationships.find((item) => item.personId === person.id);
+      const followed = isPersonFollowed(person.id);
+      const displayInfo = resolveCanonicalPerson(state, person.id, presence.id);
+      const avatarUrl = displayInfo.avatarUrl ?? identity?.avatarUrl ?? state.mirrorObjects.find((item) => item.presenceId === presence.id && (item.environment ?? "live") === (presence.environment ?? "live") && item.author?.externalRef?.id === identity?.externalActorId)?.author?.avatarUrl;
+
+      return <button type="button" className={`people-row ${selected?.id === person.id ? "active" : ""}`} key={person.id} onClick={() => { setSelectedId(person.id); setFactPage(1); }}>
+        <ChannelAvatar className="people-avatar" avatarUrl={avatarUrl} name={displayInfo.displayName} />
+        <span className="people-row-copy">
+          <strong>{displayInfo.displayName}</strong>
+          <small>
+            {displayInfo.handleLabel}
+            {" · "}
+            {rel?.lastMeaningfulInteractionAt ? `Last interacted ${formatTime(rel.lastMeaningfulInteractionAt)}` : "Remembered explicitly"}
+            {followed ? " · Following · Verified" : ""}
+          </small>
+          <span>{factsForPerson(state, person.id)[0] ?? (followed ? "Autonomously followed for continued awareness." : "Selective relationship context is available here.")}</span>
+        </span>
+        <ChevronRight size={16} />
+      </button>;
+    })}</section>
+    {selected && <section className="person-inspector" aria-label={`${selectedDisplayInfo.displayName} relationship`}>
+      <div className="person-inspector-heading">
+        <div>
+          <SectionEyebrow>Person</SectionEyebrow>
+          <h2>{selectedDisplayInfo.displayName}</h2>
+          <p>
+            {selectedDisplayInfo.handleLabel}
+            {" · "}
+            {channelLabel(presence.channel, state.channelDefinitions)}
+          </p>
+        </div>
+        <span className="people-status" style={{ background: selectedIsFollowed ? "var(--accent-subtle, #fef3eb)" : undefined, color: selectedIsFollowed ? "var(--accent, #d68754)" : undefined, fontWeight: selectedIsFollowed ? 600 : undefined }}>
+          {selectedIsFollowed ? "Following · Verified" : selectedIsWatched ? "Watched" : relationship?.lastMeaningfulInteractionAt ? "Remembered relationship" : "Remembered identity"}
+        </span>
+      </div>
+
+      <div className="person-inspector-section">
+        <SectionEyebrow>Why this person is remembered</SectionEyebrow>
+        <p>
+          {selectedIsFollowed
+            ? `${presence.name} autonomously chose to follow this person to maintain continued awareness of their contributions in ${presence.brief?.purpose || "core territory"}.`
+            : relationship?.lastMeaningfulInteractionAt
+              ? `${presence.name} interacted with this person on ${channelLabel(presence.channel, state.channelDefinitions)}. Prior evidence remains linked below.`
+              : "The operator explicitly asked the Agent to remember this person. No prior interaction is being implied."}
+        </p>
+      </div>
+
+      <div className="person-inspector-section">
+        <SectionEyebrow>Current relationship</SectionEyebrow>
+        <div style={{ display: "grid", gap: "6px", fontSize: "13px", marginTop: "6px" }}>
+          <div><strong>Status:</strong> {selectedIsFollowed ? "Following · Verified on X" : "Not followed"}</div>
+          {selectedIsWatched && <div><strong>Watch:</strong> Active watchlist target</div>}
+          <div><strong>Interactions:</strong> {recentHistory.length} recorded interaction{recentHistory.length === 1 ? "" : "s"}</div>
+          {relationship?.lastMeaningfulInteractionAt && <div><strong>Last interaction:</strong> {formatTime(relationship.lastMeaningfulInteractionAt)}</div>}
+          {followDecisionSummary && (
+            <div style={{ background: "var(--bg-subtle, #fafafa)", padding: "8px 10px", borderRadius: "6px", border: "1px solid var(--border, #eee)", marginTop: "4px" }}>
+              <strong style={{ fontSize: "11px", textTransform: "uppercase", color: "var(--text-muted, #777)", display: "block" }}>Why Genny followed</strong>
+              <p style={{ margin: 0, marginTop: "2px", lineHeight: 1.4 }}>{followDecisionSummary}</p>
+            </div>
+          )}
+        </div>
+      </div>
+
+      <div className="person-inspector-section">
+        <SectionEyebrow>What {presence.name} remembers</SectionEyebrow>
+        {facts.length ? <><div className="person-facts-summary"><span>{facts.length} remembered fact{facts.length === 1 ? "" : "s"}</span><span>Showing {(visibleFactPage - 1) * PERSON_FACT_PAGE_SIZE + 1}–{Math.min(visibleFactPage * PERSON_FACT_PAGE_SIZE, facts.length)}</span></div><ul>{visibleFacts.map((fact) => <li key={fact.id}><span>{fact.statement}</span><small>{fact.epistemicKind.replaceAll("_", " ")} · {fact.provenanceRefs.map((ref) => ref.kind).join(", ")}</small></li>)}</ul>{factPageCount > 1 && <nav className="person-facts-pagination" aria-label={`${selected.displayName} remembered facts pages`}><button type="button" onClick={() => setFactPage((current) => Math.max(1, current - 1))} disabled={visibleFactPage <= 1}><ChevronLeft size={13} /> Newer</button><span aria-live="polite">Page {visibleFactPage} of {factPageCount}</span><button type="button" onClick={() => setFactPage((current) => Math.min(factPageCount, current + 1))} disabled={visibleFactPage >= factPageCount}>Older <ChevronRight size={13} /></button></nav>}</> : <p>No curated facts yet.</p>}
+      </div>
+      <div className="person-inspector-section"><SectionEyebrow>Open threads</SectionEyebrow>{loops.length ? <ul>{loops.map((loop) => <li key={loop.id}>{loop.description}</li>)}</ul> : <p>No open loops.</p>}</div>
+      <div className="person-inspector-section"><SectionEyebrow>Recent interactions</SectionEyebrow>{recentHistory.length ? <div className="person-history">{recentHistory.map((item) => <article key={item.id}><small>{formatTime(item.occurredAt ?? item.observedAt)}</small><p>{item.content?.text ?? "[no text]"}</p></article>)}</div> : <p>No Mirror-backed interactions yet.</p>}</div>
+      <div className="person-inspector-actions"><Button variant="ghost" onClick={() => void mutate({ type: "forgetRelationship", relationshipId: relationship?.id })} disabled={!relationship}>Forget relationship</Button><Button variant="ghost" onClick={() => void mutate({ type: "createWatch", presenceId: presence.id, query: selectedIdentity?.handle ?? selected.displayName, purpose: "Keep this person in attention without treating Watching as relationship memory." })}>Watch</Button></div>
+      {relationship && <div className="person-correction"><label>Correct memory<textarea aria-label="Correct relationship memory" value={correction} onChange={(event) => setCorrection(event.target.value)} placeholder="What should the Agent remember instead?" rows={3} /></label><Button variant="secondary" disabled={!correction.trim()} onClick={() => void correct()}><Pencil size={14} /> Save correction</Button></div>}
+    </section>}</div>}
   </div>;
 }
 
@@ -3437,6 +3920,64 @@ function factsForPerson(state: OpenPresenceState, personId: string) {
   const relationship = state.relationships.find((item) => item.personId === personId);
   if (!relationship) return [];
   return state.relationshipFacts.filter((fact) => fact.relationshipId === relationship.id && !fact.validTo && !state.relationshipFacts.some((newer) => newer.supersedesFactId === fact.id)).slice(0, 1).map((fact) => fact.statement);
+}
+
+const ATTENTION_TEST_STAGES: Array<{ stage: "queued" | "decided" | "claimed" | "executed" | "verified" | "recorded" | "visible"; label: string }> = [
+  { stage: "queued", label: "Queued" },
+  { stage: "decided", label: "Agent chose action" },
+  { stage: "claimed", label: "Claimed by Chrome Bridge" },
+  { stage: "executed", label: "Executed" },
+  { stage: "verified", label: "Verified on X" },
+  { stage: "recorded", label: "Recorded in Social Mirror" },
+  { stage: "visible", label: "Visible in Feed and Calendar" },
+];
+
+function attentionHistoryHref(test: AttentionTest, surface: "timeline" | "calendar") {
+  const params = new URLSearchParams({ view: "feed", surface, ...(test.action ? { filter: test.action } : {}) });
+  const recordId = surface === "calendar" ? test.calendarRecordId : test.feedRecordId;
+  if (recordId) params.set("historyId", recordId);
+  return `?${params.toString()}`;
+}
+
+function AttentionTestDialog({ presence, mutate, refreshState, selectedTest, onSelectTest, onClose }: { presence: Presence; mutate: Mutate; refreshState: () => Promise<OpenPresenceState>; selectedTest?: AttentionTest; onSelectTest: (id: string | null) => void; onClose: () => void }) {
+  const [mode, setMode] = useState<AttentionTestMode>(selectedTest?.mode ?? "sandbox");
+  const [confirmed, setConfirmed] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const submit = async () => {
+    if (!confirmed) return;
+    setBusy(true);
+    try {
+      const next = await mutate({ type: "runAttentionTest", presenceId: presence.id, mode, confirmed: true });
+      const test = next?.attentionTests.find((item) => item.presenceId === presence.id && item.status === "queued") ?? next?.attentionTests[0];
+      if (test) onSelectTest(test.id);
+      setConfirmed(false);
+    } finally { setBusy(false); }
+  };
+  const retry = async () => {
+    if (!selectedTest?.executionId) return;
+    setBusy(true);
+    try { await mutate({ type: "retryExecution", id: selectedTest.executionId }); await refreshState(); }
+    finally { setBusy(false); }
+  };
+  return <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}><section className="attention-test-modal" role="dialog" aria-modal="true" aria-labelledby="attention-test-title">
+    <div className="dialog-header"><div><SectionEyebrow>Agent-authored attention</SectionEyebrow><h2 id="attention-test-title">Run attention test</h2></div><button type="button" className="icon-button" aria-label="Close attention test" onClick={onClose}><X size={17} /></button></div>
+    {!selectedTest && <>
+      <p className="attention-test-intro">Wake Genny&apos;s own attention now. Genny will inspect the available X context and decide whether to Like, Repost, Quote, or stay silent. You choose only whether this run is a Sandbox rehearsal or a real public action.</p>
+      <div className="attention-test-form">
+        <div><span className="form-label">Execution mode</span><div className="attention-test-mode-options" role="group" aria-label="Execution mode"><button type="button" className={mode === "sandbox" ? "selected" : ""} aria-pressed={mode === "sandbox"} onClick={() => setMode("sandbox")}><strong>Dry run / Sandbox</strong><small>No public X action. Uses the real envelope and records simulated proof.</small></button><button type="button" className={mode === "live" ? "selected" : ""} aria-pressed={mode === "live"} onClick={() => setMode("live")}><strong>Real public X action</strong><small>Uses the connected Native X or Chrome Bridge and writes publicly.</small></button></div></div>
+        <div className={`attention-test-warning ${mode === "live" ? "is-live" : ""}`} role="note"><strong>{mode === "live" ? "This permits a real public action." : "This is a dry run."}</strong><span>{mode === "live" ? "Genny will choose the target and act only if its judgment earns a Like, Repost, or Quote. Confirm only when you intend to let Genny act publicly now." : "Genny still chooses the candidate, action, and quote text. No public write is sent; the result records whether its own attention produced a verified Sandbox outcome."}</span></div>
+        <label className="attention-test-confirm"><input type="checkbox" checked={confirmed} onChange={(event) => setConfirmed(event.target.checked)} /> <span>I understand the selected execution mode and want to run this test.</span></label>
+        <div className="dialog-actions"><Button variant="ghost" onClick={onClose}>Cancel</Button><Button variant="primary" disabled={busy || !confirmed} onClick={() => void submit()}>{busy ? "Waking Genny…" : mode === "live" ? "Confirm public action" : "Wake Genny in Sandbox"}</Button></div>
+      </div>
+    </>}
+    {selectedTest && <AttentionTestTimeline test={selectedTest} onRetry={selectedTest.failure?.retryable ? () => void retry() : undefined} busy={busy} />}
+  </section></div>;
+}
+
+function AttentionTestTimeline({ test, onRetry, busy }: { test: AttentionTest; onRetry?: () => void; busy: boolean }) {
+  const telemetry = new Map(test.telemetry.map((item) => [item.stage, item]));
+  const chosenAction = test.action ? test.action[0]!.toUpperCase() + test.action.slice(1) : "Agent judgment";
+  return <div className="attention-test-result"><div className="attention-test-result-heading"><div><SectionEyebrow>{test.mode === "live" ? "Real public X action" : "Dry run / Sandbox"}</SectionEyebrow><h3>{chosenAction} {test.status === "visible" ? "verified" : test.status === "held" ? "held" : test.status === "failed" ? "needs attention" : "in progress"}</h3></div><span className={`status-tag ${test.status === "visible" ? "status-ready" : test.status === "failed" ? "status-incomplete" : ""}`}>{test.status}</span></div>{test.decision && <div className="attention-test-decision"><strong>{test.decision.action === "no_op" ? "Genny chose not to act" : `Genny chose ${chosenAction}`}</strong><span>{test.decision.rationale}</span></div>}<div className="attention-test-target"><span>Agent-selected target</span>{test.externalUrl ? <a href={test.externalUrl} target="_blank" rel="noreferrer">{test.externalUrl}<ArrowUpRight size={13} /></a> : test.targetUrl ? <code>{test.targetUrl}</code> : test.target ? <code>{test.target.type} · {test.target.id}</code> : <span>Not selected</span>}</div>{test.quoteText && <div className="attention-test-decision"><strong>Agent-authored quote</strong><span>{test.quoteText}</span></div>}<div className="attention-test-timeline" aria-label="Attention test status timeline">{ATTENTION_TEST_STAGES.map((item) => { const entry = telemetry.get(item.stage); const complete = Boolean(entry) || test.status === "visible"; const label = item.stage === "claimed" && test.mode === "sandbox" ? "Claimed by Sandbox executor" : item.label; return <div className={`attention-test-step ${complete ? "is-complete" : ""}`} key={item.stage}><span>{complete ? <Check size={13} /> : <Circle size={11} />}</span><div><strong>{label}</strong><small>{entry?.detail ?? (test.status === "failed" && item.stage === "visible" ? "Not reached." : "Waiting for the previous verified transition.")}</small></div></div>; })}</div>{test.failure && <div className="attention-test-failure" role="alert"><strong>{test.failure.code.replaceAll("_", " ")}</strong><span>{test.failure.message}</span>{onRetry && <Button variant="secondary" disabled={busy} onClick={onRetry}><RotateCcw size={14} /> {busy ? "Retrying…" : "Retry safely"}</Button>}</div>}<div className="attention-test-links"><span>Open evidence</span>{test.feedRecordId && <a href={attentionHistoryHref(test, "timeline")}>Feed record <ArrowUpRight size={13} /></a>}{test.calendarRecordId && <a href={attentionHistoryHref(test, "calendar")}>Calendar record <ArrowUpRight size={13} /></a>}{test.externalUrl && <a href={test.externalUrl} target="_blank" rel="noreferrer">X target <ArrowUpRight size={13} /></a>}</div></div>;
 }
 
 function watchPreview(query: string) {
@@ -3466,14 +4007,14 @@ function watchObservationCopy(watch: Watch) {
   };
 }
 
-function WatchingView({ state, mutate }: { state: OpenPresenceState; mutate: Mutate }) {
+function WatchingView({ state, mutate, refreshState }: { state: OpenPresenceState; mutate: Mutate; refreshState: () => Promise<OpenPresenceState> }) {
   const presence = state.presence ?? state.presences[0];
   const watches = state.watches.filter((item) => item.presenceId === presence?.id);
   const explorations = state.explorations.filter((item) => item.presenceId === presence?.id);
   const [query, setQuery] = useState("");
   const [purpose, setPurpose] = useState("");
   const [explorationBrief, setExplorationBrief] = useState("");
-  const [tab, setTab] = useState<"watchlist" | "explorations">("explorations");
+  const [tab, setTab] = useState<"watchlist" | "explorations" | "tests">("explorations");
   const [selectedExplorationId, setSelectedExplorationId] = useState<string | null>(null);
   const [editingExplorationId, setEditingExplorationId] = useState<string | null>(null);
   const [editingBrief, setEditingBrief] = useState("");
@@ -3482,6 +4023,15 @@ function WatchingView({ state, mutate }: { state: OpenPresenceState; mutate: Mut
   const [busyExplorationId, setBusyExplorationId] = useState<string | null>(null);
   const [objectiveDrafts, setObjectiveDrafts] = useState<Record<string, string>>({});
   const [selectedExplorationSessionId, setSelectedExplorationSessionId] = useState<string | null>(null);
+  const [attentionTestOpen, setAttentionTestOpen] = useState(false);
+  const [selectedAttentionTestId, setSelectedAttentionTestId] = useState<string | null>(null);
+  const attentionTests = (presence ? state.attentionTests.filter((item) => item.presenceId === presence.id) : []).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  const selectedAttentionTest = attentionTests.find((item) => item.id === selectedAttentionTestId);
+  useEffect(() => {
+    if (!selectedAttentionTest || ["visible", "failed"].includes(selectedAttentionTest.status)) return;
+    const timer = window.setInterval(() => { void refreshState().catch(() => undefined); }, 1000);
+    return () => window.clearInterval(timer);
+  }, [selectedAttentionTest, refreshState]);
   if (!presence) return null;
   const preview = watchPreview(query);
   const kindLabel = preview.kind === "creator" ? "Creator" : preview.kind === "opportunity" ? "Opportunity" : "Topic or conversation";
@@ -3506,6 +4056,12 @@ function WatchingView({ state, mutate }: { state: OpenPresenceState; mutate: Mut
   const explorationSessions = selectedExploration ? state.explorationSessions.filter((item) => item.explorationId === selectedExploration.id).sort((a, b) => b.startedAt.localeCompare(a.startedAt)) : [];
   const lastExplorationSession = explorationSessions.find((item) => item.id === selectedExplorationSessionId) ?? explorationSessions[0];
   const assignment = selectedExploration?.engagement?.assignmentId ? state.assignments.find((item) => item.id === selectedExploration.engagement?.assignmentId) : undefined;
+  const selfDirected = presence.selfDirectedAttention ?? defaultSelfDirectedAttentionPolicy();
+  const selfPlan = state.discoveryPlans.find((item) => item.presenceId === presence.id && item.origin === "self_directed_discovery");
+  const selfUsage = state.resourceUsageEvents.filter((item) => item.presenceId === presence.id && item.attentionSource === "self_directed_discovery" && new Date(item.createdAt).toDateString() === new Date().toDateString());
+  const selfReads = selfUsage.filter((item) => item.category === "channel_read").reduce((total, item) => total + (item.usage.requests ?? 1), 0);
+  const selfModels = selfUsage.filter((item) => item.category === "model").reduce((total, item) => total + (item.usage.requests ?? 1), 0);
+  const selfHydrations = selfUsage.filter((item) => item.category === "hydration").reduce((total, item) => total + (item.usage.requests ?? 1), 0);
   const chromeBridge = state.bridges.find((item) => item.presenceId === presence.id && item.kind === "bridge" && item.state !== "offline");
   const chromeStatus = presence.connectionMode === "bridge"
     ? chromeBridge && bridgeAdapterStatus(chromeBridge) === "connected"
@@ -3542,7 +4098,109 @@ function WatchingView({ state, mutate }: { state: OpenPresenceState; mutate: Mut
       actionsClassName="heading-actions"
       actions={<Button variant="primary" onClick={() => { setReviewing((value) => !value); setTab("explorations"); }}><Plus size={14} /> New exploration</Button>}
     />
-    <div className="watch-tabs" role="tablist" aria-label="Watching categories"><button type="button" role="tab" aria-selected={tab === "explorations"} className={tab === "explorations" ? "active" : ""} onClick={() => setTab("explorations")}>Explorations <span>{explorations.filter((item) => item.status !== "archived").length}</span></button><button type="button" role="tab" aria-selected={tab === "watchlist"} className={tab === "watchlist" ? "active" : ""} onClick={() => { setTab("watchlist"); setReviewing(false); }}>Watchlist <span>{watches.length}</span></button></div>
+    <section className="self-directed-attention-card is-expanded" aria-label={`${presence.name}'s own attention`}>
+      <div className="self-directed-attention-heading">
+        <div>
+          <SectionEyebrow>Agent-authored attention</SectionEyebrow>
+          <h2>{presence.name}&apos;s own attention</h2>
+          <p>{presence.name} can look beyond your explicit Watches when its current interests, responsibilities, and experience suggest something is worth investigating.</p>
+        </div>
+        <div className="self-directed-attention-header-actions">
+          <span className={`status-tag ${selfDirected.enabled ? "status-ready" : "status-incomplete"}`}>{selfDirected.enabled ? "On" : "Off"}</span>
+        </div>
+      </div>
+      <div className="self-directed-attention-controls">
+            <label className="toggle-row">
+              <input
+                type="checkbox"
+                aria-label={`Enable ${presence.name}'s own attention`}
+                checked={selfDirected.enabled}
+                onChange={(event) => void mutate({ type: "setPresence", patch: { selfDirectedAttention: { ...selfDirected, enabled: event.target.checked } } })}
+              />
+              <span className="toggle-track" aria-hidden="true"><span /></span>
+              <span>{selfDirected.enabled ? "Enabled" : "Disabled"}</span>
+            </label>
+            <div className="self-directed-intensity" role="group" aria-label="Self-directed attention intensity">
+              {(["quiet", "balanced", "curious"] as const).map((intensity) => (
+                <button
+                  type="button"
+                  key={intensity}
+                  className={selfDirected.intensity === intensity ? "selected" : ""}
+                  onClick={() => void mutate({ type: "setPresence", patch: { selfDirectedAttention: { ...selfDirected, intensity } } })}
+                  aria-pressed={selfDirected.intensity === intensity}
+                >
+                  {intensity[0]!.toUpperCase() + intensity.slice(1)}
+                </button>
+              ))}
+            </div>
+            <Button variant="secondary" onClick={() => { setSelectedAttentionTestId(null); setAttentionTestOpen(true); }}>
+              <FlaskConical size={14} /> Run attention test
+            </Button>
+          </div>
+      <div className="self-directed-attention-summary">
+            <div>
+              <span>Current directions</span>
+              <strong>{selfPlan?.directions.slice(0, 3).join(" · ") || `Derived when ${presence.name} next looks`}</strong>
+            </div>
+            <div>
+              <span>Last looked</span>
+              <strong>{selfDirected.lastRunAt ? formatHistoryTimestamp(selfDirected.lastRunAt) : "Not yet"}</strong>
+            </div>
+            <div>
+              <span>Resource use today</span>
+              <strong>{selfReads} X reads · {selfModels} model calls · {selfHydrations} hydrations</strong>
+              <small>Counts are operational usage, not a claim about provider billing.</small>
+            </div>
+          </div>
+      {selfPlan?.safeRationale && (
+        <details className="self-directed-attention-details">
+          <summary>How {presence.name} is looking</summary>
+          <p>{selfPlan.safeRationale}</p>
+          <p><strong>Search surfaces:</strong> {selfPlan.surfaces.join(" · ")}</p>
+          <p><strong>Media:</strong> {selfDirected.mediaUnderstanding === "off" ? "Disabled; media-dependent candidates may be deferred." : "Allowed when it materially changes meaning."}</p>
+        </details>
+      )}
+    </section>
+    <div className="watch-tabs" role="tablist" aria-label="Watching categories">
+      <button type="button" role="tab" aria-selected={tab === "explorations"} className={tab === "explorations" ? "active" : ""} onClick={() => setTab("explorations")}>Explorations <span>{explorations.filter((item) => item.status !== "archived").length}</span></button>
+      <button type="button" role="tab" aria-selected={tab === "watchlist"} className={tab === "watchlist" ? "active" : ""} onClick={() => { setTab("watchlist"); setReviewing(false); }}>Watchlist <span>{watches.length}</span></button>
+      <button type="button" role="tab" aria-selected={tab === "tests"} className={tab === "tests" ? "active" : ""} onClick={() => { setTab("tests"); setReviewing(false); }}>Tests <span>{attentionTests.length}</span></button>
+    </div>
+    {tab === "tests" && (attentionTests.length > 0 ? (
+      <section className="attention-test-history" aria-label="Attention test history">
+        <div className="section-heading">
+          <div>
+            <SectionEyebrow>Proof of attention</SectionEyebrow>
+            <h2>Recent attention tests</h2>
+          </div>
+          <div style={{ display: "flex", alignItems: "center", gap: 12 }}>
+            <span>{attentionTests.length} recorded</span>
+            <Button variant="secondary" onClick={() => { setSelectedAttentionTestId(null); setAttentionTestOpen(true); }}><FlaskConical size={14} /> Run attention test</Button>
+          </div>
+        </div>
+        <div className="attention-test-history-list">
+          {attentionTests.map((test) => {
+            const testAction = test.action ?? "no_op";
+            return <button type="button" key={test.id} className="attention-test-history-row" onClick={() => { setSelectedAttentionTestId(test.id); setAttentionTestOpen(true); }}>
+              <span className={`attention-test-status-dot attention-test-status-${test.status}`} />
+              <span>
+                <strong>{testAction[0]!.toUpperCase() + testAction.slice(1)} · {test.mode === "live" ? "Real X" : "Sandbox"}</strong>
+                <small>{test.status === "visible" ? "Verified and visible in Feed and Calendar" : test.failure?.message ?? test.telemetry.at(-1)?.detail ?? test.status}</small>
+              </span>
+              <ChevronRight size={15} />
+            </button>;
+          })}
+        </div>
+      </section>
+    ) : (
+      <section className="watching-empty">
+        <div className="watch-empty-mark"><FlaskConical size={23} /></div>
+        <SectionEyebrow>Proof of attention</SectionEyebrow>
+        <h2>No attention tests recorded yet.</h2>
+        <p>Run an attention test to verify how {presence.name} discovers, validates, and acts on social evidence.</p>
+        <Button variant="primary" onClick={() => { setSelectedAttentionTestId(null); setAttentionTestOpen(true); }}><FlaskConical size={14} /> Run attention test</Button>
+      </section>
+    ))}
     {tab === "watchlist" && <>
       <div className="watchlist-toolbar"><div><SectionEyebrow>Known things</SectionEyebrow><h2>People and sources this Presence intentionally follows.</h2></div><Button variant="secondary" onClick={() => setReviewing((value) => !value)}>Add watch</Button></div>
       {reviewing && <section className="watch-composer" aria-label="Add a watch"><div><SectionEyebrow>New watch</SectionEyebrow><h2>What should {presence.name} notice?</h2><p>Describe a creator, source, or known conversation. This stays a Watchlist item, not a relationship memory.</p></div><label>Keep an eye on<textarea aria-label="What should this Presence watch?" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="@AlexHormozi or a known community" rows={3} /></label><label>Why should {presence.name} watch this? <span className="optional-label">Optional</span><input aria-label="Why should this Presence watch this?" value={purpose} onChange={(event) => setPurpose(event.target.value)} placeholder="Learn from strong offers without imitating the voice" /></label>{query.trim() && <div className="watch-review" aria-label="Watch review"><div><SectionEyebrow>Here&apos;s what {presence.name} will watch</SectionEyebrow><strong>{kindLabel}</strong><p>{preview.clean}</p></div><div><span>Use</span><strong>Notice relevant material</strong></div><div><span>Boundary</span><strong>Watching does not imitate identity or voice</strong></div><div><span>Source</span><strong>{preview.kind === "creator" && presence.channel === "x" ? "Automatic where available" : "Manual material or connected source"}</strong></div></div>}<div className="watch-form-actions"><Button variant="ghost" onClick={() => { setReviewing(false); setQuery(""); setPurpose(""); }}>Cancel</Button><Button variant="primary" disabled={busy || !preview.clean} onClick={() => void startWatching()}>{busy ? "Starting…" : "Start watching"}</Button></div></section>}
@@ -3550,8 +4208,9 @@ function WatchingView({ state, mutate }: { state: OpenPresenceState; mutate: Mut
     </>}
     {tab === "explorations" && <>
       {reviewing && <section className="exploration-composer" aria-label="Create an Exploration"><div><SectionEyebrow>New Exploration</SectionEyebrow><h2>What should {presence.name} keep an eye on?</h2><p>Describe the conversations, problems, people, or developments that would be useful for {presence.name} to notice.</p></div><textarea aria-label="What should this Presence keep an eye on?" value={explorationBrief} onChange={(event) => setExplorationBrief(event.target.value)} placeholder="People struggling with agent infrastructure or asking how to deploy persistent agents." rows={4} />{explorationBrief.trim() && <div className="watch-review" aria-label="Exploration review"><div><SectionEyebrow>Genny understands this as</SectionEyebrow><p>{explorationInterpretation(explorationBrief)}</p></div><div><span>Use</span><strong>Discover social evidence</strong></div><div><span>Boundary</span><strong>Looking does not authorize speaking</strong></div><div><span>Scope</span><strong>{presence.name} · {channelLabel(presence.channel, state.channelDefinitions)}</strong></div></div>}<div className="watch-form-actions"><Button variant="ghost" onClick={() => { setReviewing(false); setExplorationBrief(""); }}>Cancel</Button><Button variant="primary" disabled={busy || explorationBrief.trim().length < 8} onClick={() => void startExploration()}>{busy ? "Starting…" : "Start exploring"}</Button></div></section>}
-      {!explorations.length ? <section className="watching-empty"><div className="watch-empty-mark"><Eye size={23} /></div><SectionEyebrow>Explorations</SectionEyebrow><h2>Give {presence.name} a reason to look around.</h2><p>Explorations are durable areas of attention. They discover evidence first; {presence.name} still decides whether anything deserves a Social Intent, memory, or silence.</p><Button variant="primary" onClick={() => setReviewing(true)}><Plus size={14} /> New exploration</Button></section> : <div className="exploration-layout"><section className="exploration-list" aria-label="Explorations">{explorations.filter((item) => item.status !== "archived").map((item) => <button type="button" key={item.id} className={`exploration-row ${selectedExploration?.id === item.id ? "active" : ""}`} onClick={() => setSelectedExplorationId(item.id)}><span className={`exploration-state exploration-state-${item.status}`} /> <span><strong>{item.title}</strong><small>{item.status === "active" ? "Active" : "Paused"} · {item.coverage.label}</small><em>{item.brief}</em></span><ChevronRight size={15} /></button>)}</section>{selectedExploration && <section className="exploration-detail" aria-label={`${selectedExploration.title} Exploration`}><div className="exploration-detail-header"><div><SectionEyebrow>Exploration · {channelLabel(selectedExploration.channel, state.channelDefinitions)}</SectionEyebrow><h2>{selectedExploration.title}</h2><p>{selectedExploration.brief}</p></div><span className={`watch-status ${selectedExploration.status === "active" ? "" : "watch-status-manual"}`}><span className="status-dot" /> {selectedExploration.status}</span></div>{editingExplorationId === selectedExploration.id ? <div className="exploration-edit"><label>What should {presence.name} keep an eye on?<textarea aria-label="Edit Exploration brief" value={editingBrief} onChange={(event) => setEditingBrief(event.target.value)} rows={4} /></label><div className="watch-form-actions"><Button variant="ghost" onClick={() => setEditingExplorationId(null)}>Cancel</Button><Button variant="primary" disabled={busyExplorationId === selectedExploration.id || editingBrief.trim().length < 8} onClick={() => void saveExploration()}>Save refinement</Button></div></div> : <><div className="exploration-interpretation"><SectionEyebrow>How {presence.name} is looking</SectionEyebrow><p>{selectedExploration.interpretation}</p></div><div className="exploration-coverage"><strong>{selectedExploration.coverage.label}</strong><span>{selectedExploration.coverage.detail}</span></div><ExplorationResponsibility exploration={selectedExploration} assignment={assignment} presence={presence} objectiveDraft={objectiveDraft} setObjectiveDraft={setObjectiveDraft} busy={busyExplorationId === selectedExploration.id} setEngagement={setEngagement} chromeStatus={chromeStatus} /><ExplorationRunMonitor exploration={selectedExploration} presence={presence} sessions={explorationSessions} lastSession={lastExplorationSession} artifacts={lastRunObjects} state={state} mutate={mutate} /><div className="exploration-meta"><span>Last looked {selectedExploration.lastLookedAt ? formatTime(selectedExploration.lastLookedAt) : "not yet"}</span><span>Brief revision {selectedExploration.revision}</span>{lastExplorationSession && <span className={lastExplorationSession.status === "completed" ? "" : "exploration-meta-warning"}>Last look {lastExplorationSession.status}{lastExplorationSession.failureReason ? ` · ${lastExplorationSession.failureReason}` : ""}</span>}</div><div className="exploration-actions"><Button variant="primary" disabled={busyExplorationId === selectedExploration.id || selectedExploration.status !== "active"} onClick={() => void lookNow(selectedExploration.id)}>{busyExplorationId === selectedExploration.id ? "Looking…" : "Look now"}</Button><Button variant="secondary" onClick={() => { setEditingExplorationId(selectedExploration.id); setEditingBrief(selectedExploration.brief); }}><Pencil size={14} /> Refine</Button><Button variant="ghost" onClick={() => void mutate({ type: "setExplorationStatus", id: selectedExploration.id, status: selectedExploration.status === "active" ? "paused" : "active" })}>{selectedExploration.status === "active" ? <><Pause size={14} /> Pause</> : <><Play size={14} /> Resume</>}</Button><Button variant="ghost" onClick={() => void mutate({ type: "setExplorationStatus", id: selectedExploration.id, status: "archived" })}>Archive</Button></div><div className="exploration-findings"><SectionEyebrow>Recent worthwhile findings</SectionEyebrow>{findings.length ? findings.map((finding) => { const object = state.mirrorObjects.find((item) => item.id === finding.mirrorObjectId); return <article className="exploration-finding" key={finding.id}><div><strong>{object?.author?.handle ? `@${object.author.handle}` : object?.author?.displayName ?? "Social object"}</strong><p>{finding.safeSummary}</p><small>{finding.whyItMayMatter}</small></div>{object && <Button variant="secondary" onClick={() => void mutate({ type: "askPresenceToReply", presenceId: presence.id, objectId: object.id })}>Ask {presence.name} to respond</Button>}</article>; }) : <p className="muted">No worthwhile findings yet. A look can complete successfully with silence.</p>}</div></>}</section>}</div>}
+      {!explorations.length ? <section className="watching-empty"><div className="watch-empty-mark"><Eye size={23} /></div><SectionEyebrow>Explorations</SectionEyebrow><h2>Give {presence.name} a reason to look around.</h2><p>Explorations are durable areas of attention. They discover evidence first; {presence.name} still decides whether anything deserves a Social Intent, memory, or silence.</p><Button variant="primary" onClick={() => setReviewing(true)}><Plus size={14} /> New exploration</Button></section> : <div className="exploration-layout"><section className="exploration-list" aria-label="Explorations">{explorations.filter((item) => item.status !== "archived").map((item) => <button type="button" key={item.id} className={`exploration-row ${selectedExploration?.id === item.id ? "active" : ""}`} onClick={() => setSelectedExplorationId(item.id)}><span className={`exploration-state exploration-state-${item.status}`} /> <span><strong>{item.title}</strong><small>{item.status === "active" ? "Active" : "Paused"} · {item.coverage.label}</small><em>{item.brief}</em></span><ChevronRight size={15} /></button>)}</section>{selectedExploration && <section className="exploration-detail" aria-label={`${selectedExploration.title} Exploration`}><div className="exploration-detail-header"><div><SectionEyebrow>Exploration · {channelLabel(selectedExploration.channel, state.channelDefinitions)}</SectionEyebrow><h2>{selectedExploration.title}</h2><p>{selectedExploration.brief}</p></div><span className={`watch-status ${selectedExploration.status === "active" ? "" : "watch-status-manual"}`}><span className="status-dot" /> {selectedExploration.status}</span></div>{editingExplorationId === selectedExploration.id ? <div className="exploration-edit"><label>What should {presence.name} keep an eye on?<textarea aria-label="Edit Exploration brief" value={editingBrief} onChange={(event) => setEditingBrief(event.target.value)} rows={4} /></label><div className="watch-form-actions"><Button variant="ghost" onClick={() => setEditingExplorationId(null)}>Cancel</Button><Button variant="primary" disabled={busyExplorationId === selectedExploration.id || editingBrief.trim().length < 8} onClick={() => void saveExploration()}>Save refinement</Button></div></div> : <><div className="exploration-interpretation"><SectionEyebrow>How {presence.name} is looking</SectionEyebrow><p>{selectedExploration.interpretation}</p></div><div className="exploration-coverage"><strong>{selectedExploration.coverage.label}</strong><span>{selectedExploration.coverage.detail}</span></div><ExplorationResponsibility exploration={selectedExploration} assignment={assignment} presence={presence} objectiveDraft={objectiveDraft} setObjectiveDraft={setObjectiveDraft} busy={busyExplorationId === selectedExploration.id} setEngagement={setEngagement} chromeStatus={chromeStatus} /><ExplorationRunMonitor exploration={selectedExploration} presence={presence} sessions={explorationSessions} lastSession={lastExplorationSession} artifacts={lastRunObjects} state={state} mutate={mutate} /><div className="exploration-meta"><span>Last looked {selectedExploration.lastLookedAt ? formatTime(selectedExploration.lastLookedAt) : "not yet"}</span><span>Brief revision {selectedExploration.revision}</span>{lastExplorationSession && <span className={lastExplorationSession.status === "completed" ? "" : "exploration-meta-warning"}>Last look {lastExplorationSession.status}{lastExplorationSession.failureReason ? ` · ${lastExplorationSession.failureReason}` : ""}</span>}</div><div className="exploration-actions"><Button variant="primary" disabled={busyExplorationId === selectedExploration.id || selectedExploration.status !== "active"} onClick={() => void lookNow(selectedExploration.id)}>{busyExplorationId === selectedExploration.id ? "Looking…" : "Look now"}</Button><Button variant="secondary" onClick={() => { setEditingExplorationId(selectedExploration.id); setEditingBrief(selectedExploration.brief); }}><Pencil size={14} /> Refine</Button><Button variant="ghost" onClick={() => void mutate({ type: "setExplorationStatus", id: selectedExploration.id, status: selectedExploration.status === "active" ? "paused" : "active" })}>{selectedExploration.status === "active" ? <><Pause size={14} /> Pause</> : <><Play size={14} /> Resume</>}</Button><Button variant="ghost" onClick={() => void mutate({ type: "setExplorationStatus", id: selectedExploration.id, status: "archived" })}>Archive</Button></div><div className="exploration-findings"><SectionEyebrow>Recent worthwhile findings</SectionEyebrow>{findings.length ? findings.map((finding) => { const object = state.mirrorObjects.find((item) => item.id === finding.mirrorObjectId); return <article className="exploration-finding" key={finding.id}><div><strong>{object?.author?.handle ? `@${object.author.handle}` : object?.author?.displayName ?? "Social object"}</strong><p>{finding.safeSummary}</p><small>{finding.whyItMayMatter}</small></div>{object && <Button variant="secondary" onClick={() => void mutate({ type: "askPresenceToEvaluate", presenceId: presence.id, objectId: object.id })}>Ask {presence.name} to evaluate</Button>}</article>; }) : <p className="muted">No worthwhile findings yet. A look can complete successfully with silence.</p>}</div></>}</section>}</div>}
     </>}
+    {attentionTestOpen && <AttentionTestDialog presence={presence} mutate={mutate} refreshState={refreshState} selectedTest={selectedAttentionTest} onSelectTest={setSelectedAttentionTestId} onClose={() => { setAttentionTestOpen(false); setSelectedAttentionTestId(null); }} />}
   </div>;
 }
 
@@ -3626,7 +4285,7 @@ function ExplorationRunMonitorLegacy({
         {lastSession.discoverySource === "native" && <p className="exploration-monitor-note">The search artifact is the Social Mirror record below. The query was sent to the connected X discovery source; credentials and raw provider responses stay out of the Agent view.</p>}
       </> : <p className="muted">Use Look now to create a durable run record. The monitor will show the source, query, counts, and outcome here.</p>}
     </section>
-            <section className="exploration-artifacts" aria-label="Search artifacts"><div className="exploration-artifacts-heading"><div><SectionEyebrow>Search artifacts</SectionEyebrow><h3>{artifacts.length || findings.length ? `${artifacts.length || findings.length} observed object${(artifacts.length || findings.length) === 1 ? "" : "s"}` : "No artifacts yet"}</h3></div><span>Social Mirror</span></div>{artifacts.length ? <div className="exploration-artifact-list">{artifacts.map((object) => { const externalUrl = externalUrlForMirrorObject(object, object.author?.handle); return <article className="exploration-artifact" key={object.id}><div><strong>{object.author?.handle ? `@${object.author.handle}` : object.author?.displayName ?? "X account"}</strong><p>{object.content?.text || "[No text returned]"}</p><small>{channelLabel(object.channelId)} post · {object.externalRef.id} · observed {formatTime(object.observedAt)}</small></div>{externalUrl && <a href={externalUrl} target="_blank" rel="noreferrer" aria-label={`Open ${channelLabel(object.channelId)} artifact ${object.externalRef.id}`}><ArrowUpRight size={14} /></a>}</article>; })}</div> : findings.length ? <div className="exploration-artifact-list">{findings.map((finding) => { const object = state.mirrorObjects.find((item) => item.id === finding.mirrorObjectId); return <article className="exploration-artifact" key={finding.id}><div><strong>{object?.author?.handle ? `@${object.author.handle}` : object?.author?.displayName ?? "Social object"}</strong><p>{finding.safeSummary}</p><small>{finding.whyItMayMatter}</small></div>{object && <Button variant="secondary" onClick={() => void mutate({ type: "askPresenceToReply", presenceId: presence.id, objectId: object.id })}>Ask {presence.name} to respond</Button>}</article>; })}</div> : <p className="muted">No search objects were retained for this run. A completed search with no worthwhile finding is still recorded.</p>}</section>
+            <section className="exploration-artifacts" aria-label="Search artifacts"><div className="exploration-artifacts-heading"><div><SectionEyebrow>Search artifacts</SectionEyebrow><h3>{artifacts.length || findings.length ? `${artifacts.length || findings.length} observed object${(artifacts.length || findings.length) === 1 ? "" : "s"}` : "No artifacts yet"}</h3></div><span>Social Mirror</span></div>{artifacts.length ? <div className="exploration-artifact-list">{artifacts.map((object) => { const externalUrl = externalUrlForMirrorObject(object, object.author?.handle); return <article className="exploration-artifact" key={object.id}><div><strong>{object.author?.handle ? `@${object.author.handle}` : object.author?.displayName ?? "X account"}</strong><p>{object.content?.text || "[No text returned]"}</p><small>{channelLabel(object.channelId)} post · {object.externalRef.id} · observed {formatTime(object.observedAt)}</small></div>{externalUrl && <a href={externalUrl} target="_blank" rel="noreferrer" aria-label={`Open ${channelLabel(object.channelId)} artifact ${object.externalRef.id}`}><ArrowUpRight size={14} /></a>}</article>; })}</div> : findings.length ? <div className="exploration-artifact-list">{findings.map((finding) => { const object = state.mirrorObjects.find((item) => item.id === finding.mirrorObjectId); return <article className="exploration-artifact" key={finding.id}><div><strong>{object?.author?.handle ? `@${object.author.handle}` : object?.author?.displayName ?? "Social object"}</strong><p>{finding.safeSummary}</p><small>{finding.whyItMayMatter}</small></div>{object && <Button variant="secondary" onClick={() => void mutate({ type: "askPresenceToEvaluate", presenceId: presence.id, objectId: object.id })}>Ask {presence.name} to evaluate</Button>}</article>; })}</div> : <p className="muted">No search objects were retained for this run. A completed search with no worthwhile finding is still recorded.</p>}</section>
     <section className="exploration-history" aria-label="Exploration history"><div className="exploration-artifacts-heading"><div><SectionEyebrow>Run history</SectionEyebrow><h3>{sessions.length} recorded run{sessions.length === 1 ? "" : "s"}</h3></div><span>Auditable attempts</span></div>{sessions.slice(0, 5).map((session) => <div className="exploration-history-row" key={session.id}><span className={`exploration-history-dot exploration-history-${session.status}`} /><span><strong>{session.id.slice(-8)} · {session.discoverySource === "native" ? "X search" : "Mirror review"}</strong><small>{formatTime(session.startedAt)} · {session.candidatesSeen} observed · {session.findingsCreated} worthwhile</small></span><ChevronRight size={14} /></div>)}</section>
   </>;
 }
@@ -3766,10 +4425,111 @@ function KnowledgeChoiceNotice({ role, use, useLabel = "Default use" }: { role: 
   </div>;
 }
 
-function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceState; mutate: Mutate; refreshState: () => Promise<OpenPresenceState> }) {
+type UsageSummary = { xRequests: number; xReads: number; xWrites: number; modelCalls: number; visionCalls: number; inputTokens: number; outputTokens: number; reasoningTokens: number; totalTokens: number; reportedTokenEvents: number; estimatedCost: number; reportedCost: number; eventCount: number };
+type UsageAgent = { id: string; name: string; accent: string; summary: UsageSummary; lastActivityAt?: string; origins: Array<{ name: string } & UsageSummary>; presences: Array<{ id: string; name: string; handle: string; channel: string; accent: string; summary: UsageSummary }> };
+type UsagePayload = { range: string; since?: string; coverage: { x: { status: string; detail: string }; model: { status: string; detail: string } }; totals: UsageSummary; daily: Array<{ date: string } & UsageSummary>; agents: UsageAgent[] };
+
+function usageNumber(value: number) {
+  if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
+  if (value >= 1_000) return `${(value / 1_000).toFixed(value >= 10_000 ? 0 : 1)}K`;
+  return value.toLocaleString();
+}
+
+function usageDate(value?: string) {
+  if (!value) return "No recorded activity";
+  const date = new Date(value);
+  return Number.isNaN(date.getTime()) ? "Unknown" : new Intl.DateTimeFormat("en", { month: "short", day: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
+}
+
+function usagePeriodLabel(daily: Array<{ date: string }>) {
+  if (!daily.length) return "No calendar days in period";
+  const format = (value: string) => {
+    const date = new Date(`${value}T00:00:00Z`);
+    return Number.isNaN(date.getTime()) ? value : new Intl.DateTimeFormat("en", { month: "short", day: "numeric", timeZone: "UTC" }).format(date);
+  };
+  return `${format(daily[0].date)} – ${format(daily[daily.length - 1].date)} · ${daily.length} ${daily.length === 1 ? "day" : "days"}`;
+}
+
+function UsageView({ state, setView }: { state: OpenPresenceState; setView: (view: View) => void }) {
+  const [range, setRange] = useState("30d");
+  const [agentId, setAgentId] = useState("all");
+  const [payload, setPayload] = useState<UsagePayload | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const [series, setSeries] = useState<"tokens" | "x">("tokens");
+  useEffect(() => {
+    let cancelled = false;
+    fetch(`/api/usage?range=${encodeURIComponent(range)}&agentId=${encodeURIComponent(agentId)}`, { cache: "no-store" })
+      .then(async (response) => {
+        if (!response.ok) throw new Error("Usage is unavailable.");
+        return response.json() as Promise<UsagePayload>;
+      })
+      .then((next) => { if (!cancelled) setPayload(next); })
+      .catch(() => { if (!cancelled) setPayload(null); })
+      .finally(() => { if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; };
+  }, [range, agentId]);
+  const totals = payload?.totals;
+  const daily = payload?.daily ?? [];
+  const maxSeries = Math.max(1, ...daily.map((item) => series === "tokens" ? item.totalTokens : item.xRequests));
+  const agents = payload?.agents ?? [];
+  const maxAgentSpend = Math.max(1, ...agents.map((item) => series === "tokens" ? item.summary.totalTokens : item.summary.xRequests));
+  const agentOptions = state.agents.length ? state.agents : agents.map((item) => ({ id: item.id, name: item.name }));
+  return <div className="page usage-page">
+    <PageHeader eyebrow="Agent-wide · Usage" title="What the Agents are spending" description="A quiet ledger of recorded provider activity and model usage, grouped by Agent and Presence. It shows where attention becomes expensive so you can tune the system without confusing infrastructure limits with judgment." actions={<div className="usage-controls"><div className="usage-range" role="group" aria-label="Usage period">{[["24h", "24 hours"], ["7d", "7 days"], ["30d", "30 days"], ["all", "All time"]].map(([value, label]) => <button type="button" key={value} className={range === value ? "active" : ""} onClick={() => setRange(value)}>{label}</button>)}</div><div className="usage-agent-select"><select aria-label="Usage Agent scope" value={agentId} onChange={(event) => setAgentId(event.target.value)}><option value="all">All Agents</option>{agentOptions.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select><ChevronDown aria-hidden="true" size={14} /></div></div>} />
+    <div className="usage-provenance"><span className="usage-provenance-mark">Recorded usage</span><span>X reads and writes are local connector observations; X does not expose a reliable remaining-credit balance here.</span><span>Model tokens are provider-reported when returned; some local or provider calls may be request-only.</span></div>
+    {loading && <div className="usage-loading" role="status">Reading the usage ledger…</div>}
+    {!loading && payload && <>
+      <section className="usage-metric-grid" aria-label="Usage summary">
+        <article className="usage-metric-card"><span>X API activity</span><strong>{usageNumber(totals?.xRequests ?? 0)} <small>requests</small></strong><p>{usageNumber(totals?.xReads ?? 0)} reads · {usageNumber(totals?.xWrites ?? 0)} writes</p><em>{payload.coverage.x.status === "unavailable" ? "No X activity recorded" : "Recorded connector activity"}</em></article>
+        <article className="usage-metric-card usage-metric-card-accent"><span>Reasoning tokens</span><strong>{usageNumber(totals?.reasoningTokens ?? 0)}</strong><p>{usageNumber(totals?.inputTokens ?? 0)} input · {usageNumber(totals?.outputTokens ?? 0)} output</p><em>{payload.coverage.model.status === "reported" ? "Provider-reported" : payload.coverage.model.status.replaceAll("-", " ")}</em></article>
+        <article className="usage-metric-card"><span>Model calls</span><strong>{usageNumber(totals?.modelCalls ?? 0)}</strong><p>{usageNumber(totals?.totalTokens ?? 0)} total tokens · {usageNumber(totals?.visionCalls ?? 0)} vision</p><em>{totals?.eventCount ?? 0} ledger events in period</em></article>
+        <article className="usage-metric-card"><span>Attention footprint</span><strong>{agents.length} <small>Agents</small></strong><p>{agents.reduce((count, agent) => count + agent.presences.length, 0)} Presences with ledger scope</p><em>{usageDate(agents[0]?.lastActivityAt)} most recent</em></article>
+      </section>
+      <section className="usage-panel usage-trend-panel" aria-labelledby="usage-trend-title"><div className="usage-panel-heading"><div><SectionEyebrow>Usage over time</SectionEyebrow><h2 id="usage-trend-title">How usage changes</h2><p>Compare model tokens and X requests across the selected period.</p><span className="usage-period-label">{usagePeriodLabel(daily)}</span></div><div className="usage-series-toggle" role="group" aria-label="Usage chart series"><button type="button" className={series === "tokens" ? "active" : ""} onClick={() => setSeries("tokens")}>Model tokens</button><button type="button" className={series === "x" ? "active" : ""} onClick={() => setSeries("x")}>X requests</button></div></div>{daily.length ? <div className="usage-chart" role="img" aria-label={`${series === "tokens" ? "Model tokens" : "X requests"} by day for ${usagePeriodLabel(daily)}`}>{daily.map((item) => { const value = series === "tokens" ? item.totalTokens : item.xRequests; return <div className="usage-bar-column" key={item.date} title={`${item.date}: ${value.toLocaleString()} ${series === "tokens" ? "tokens" : "requests"}`}><div className={`usage-bar usage-bar-${series}${value === 0 ? " usage-bar-empty" : ""}`} style={{ height: `${value === 0 ? 0 : Math.max(3, value / maxSeries * 100)}%` }} /><small>{item.date.slice(5)}</small></div>; })}</div> : <div className="usage-empty-inline">No recorded usage in this period. The first real provider call will create the first ledger entry.</div>}</section>
+      <section className="usage-panel" aria-labelledby="usage-agents-title"><div className="usage-panel-heading"><div><SectionEyebrow>Grouped by Agent</SectionEyebrow><h2 id="usage-agents-title">Which Agent is consuming attention?</h2><p>The Agent owns model usage. Expand one to see which Presence and attention source supplied the context.</p></div><span className="usage-scope-chip">{agentId === "all" ? "See all Agents" : "One Agent"}</span></div>{agents.length ? <div className="usage-agent-ledger">{agents.map((agent) => { const active = expanded === agent.id; const share = Math.max(3, (series === "tokens" ? agent.summary.totalTokens : agent.summary.xRequests) / maxAgentSpend * 100); return <article className={`usage-agent-row ${active ? "is-expanded" : ""}`} key={agent.id}><button type="button" className="usage-agent-summary" onClick={() => setExpanded(active ? null : agent.id)} aria-expanded={active}><span className="usage-agent-identity"><PresenceGlyph accent={agent.accent} /><span><strong>{agent.name}</strong><small>Agent · {usageDate(agent.lastActivityAt)}</small></span></span><span className="usage-share"><i style={{ width: `${share}%` }} /><small>{usageNumber(series === "tokens" ? agent.summary.totalTokens : agent.summary.xRequests)} {series === "tokens" ? "tokens" : "X requests"}</small></span><span className="usage-agent-stat"><strong>{usageNumber(agent.summary.xReads)}</strong><small>X reads</small></span><span className="usage-agent-stat"><strong>{usageNumber(agent.summary.reasoningTokens)}</strong><small>reasoning</small></span><ChevronDown size={16} className={active ? "usage-chevron open" : "usage-chevron"} /></button>{active && <div className="usage-agent-detail"><div className="usage-detail-facts"><div><span>Model calls</span><strong>{usageNumber(agent.summary.modelCalls)}</strong></div><div><span>Total tokens</span><strong>{usageNumber(agent.summary.totalTokens)}</strong></div><div><span>X reads / writes</span><strong>{usageNumber(agent.summary.xReads)} / {usageNumber(agent.summary.xWrites)}</strong></div><div><span>Coverage</span><strong>{agent.summary.reportedTokenEvents ? "Provider-reported" : "Request-only"}</strong></div></div><div className="usage-presence-list">{agent.presences.map((presence) => <div className="usage-presence-row" key={presence.id}><span><b style={{ background: presence.accent }} /> <strong>Presence · {presence.name}</strong><small>{presence.handle} · {channelLabel(presence.channel)}</small></span><span>{usageNumber(presence.summary.xReads)} reads · {usageNumber(presence.summary.xWrites)} writes</span><span>{usageNumber(presence.summary.reasoningTokens)} reasoning</span></div>)}</div><div className="usage-origin-list"><span className="usage-origin-heading">Attention sources</span>{agent.origins.slice(0, 5).map((origin) => <div key={origin.name}><strong>{origin.name.replaceAll("_", " ")}</strong><span>{usageNumber(origin.totalTokens)} tokens · {usageNumber(origin.xRequests)} X requests</span></div>)}</div></div>}</article>; })}</div> : <div className="usage-empty"><BarChart3 size={22} /><h3>No usage has been recorded yet</h3><p>This page does not invent sample spend. It will fill as Agents observe, reason, inspect media, and act through connected providers.</p></div>}</section>
+      <section className="usage-panel usage-notes-panel" aria-labelledby="usage-notes-title"><div className="usage-panel-heading"><div><SectionEyebrow>Operator read</SectionEyebrow><h2 id="usage-notes-title">What you can change</h2></div></div><div className="usage-note-grid"><div><strong>Self-directed reads are an envelope, not a verdict.</strong><p>Adjust Presence attention intensity and daily ceilings when exploration is consuming more X activity than its evidence justifies.</p><Button variant="ghost" onClick={() => setView("presence")}>Open Presence attention</Button></div><div><strong>Reasoning cost follows context.</strong><p>Compare Agents and origins before changing models. Large input totals often mean the Agent is carrying a wide social or Knowledge context into each judgment.</p><Button variant="ghost" onClick={() => setView("brain")}>Open Agent model</Button></div><div><strong>Infrastructure can defer a run.</strong><p>Provider quota, rate limits, and missing usage metadata remain external facts. A deferred or request-only record is not the Agent deciding that nothing mattered.</p></div></div><details className="usage-disclosure"><summary>Data coverage and limits</summary><p>{payload.coverage.x.detail} {payload.coverage.model.detail}</p></details></section>
+    </>}
+    {!loading && !payload && <div className="usage-empty usage-page-error"><BarChart3 size={22} /><h3>Usage could not be read</h3><p>The ledger endpoint did not return a usable snapshot. Try refreshing the page.</p></div>}
+  </div>;
+}
+
+function knowledgeCollectionConsumers(state: OpenPresenceState, collectionId: string, agentId?: string): Presence[] {
+  const consumerIds = new Set<string>();
+  return (state.presenceKnowledgeBindings ?? [])
+    .filter((binding) => binding.agentId === agentId && binding.collectionId === collectionId && binding.enabled && binding.maximumUse !== "none")
+    .map((binding) => state.presences.find((presence) => presence.id === binding.presenceId))
+    .filter((presence): presence is Presence => {
+      if (!presence || consumerIds.has(presence.id)) return false;
+      consumerIds.add(presence.id);
+      return true;
+    });
+}
+
+function knowledgeCollectionUsageLabel(consumers: Presence[]): string {
+  if (consumers.length === 0) return "Not used by a Presence";
+  const names = consumers.slice(0, 2).map((consumer) => consumer.name);
+  const remaining = consumers.length - names.length;
+  return `Used by ${names.join(", ")}${remaining > 0 ? ` +${remaining} more` : ""}`;
+}
+
+function knowledgeCollectionMentionedByFiles(state: OpenPresenceState, collectionId: string, agentId?: string): string[] {
+  const collection = (state.knowledgeCollections ?? []).find((item) => item.id === collectionId && item.agentId === agentId && item.status === "active");
+  if (!collection) return [];
+  const itemTitles = (state.knowledgeItems ?? [])
+    .filter((item) => item.collectionId === collectionId && item.status === "active")
+    .map((item) => item.title.trim())
+    .filter(Boolean);
+  const searchableTerms = [collection.name.trim(), ...itemTitles];
+  return state.files
+    .filter((file) => searchableTerms.some((term) => file.content.includes(term)))
+    .map((file) => `${file.kind}.md`);
+}
+
+function KnowledgeCollectionLegacyView({ state, mutate, refreshState }: { state: OpenPresenceState; mutate: Mutate; refreshState: () => Promise<OpenPresenceState> }) {
   const agent = state.agent;
   const presence = state.presence;
-  const collections = state.knowledgeCollections.filter((collection) => collection.agentId === agent?.id && collection.status === "active");
+  const collections = (state.knowledgeCollections ?? []).filter((collection) => collection.agentId === agent?.id && collection.status === "active");
   const [collectionMode, setCollectionMode] = useState<"list" | "new" | "detail">("list");
   const [selectedCollectionId, setSelectedCollectionId] = useState<string | null>(null);
   const [newCollectionName, setNewCollectionName] = useState("");
@@ -3788,14 +4548,32 @@ function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceSta
   const [itemSourceType, setItemSourceType] = useState<"pasted_text" | "markdown">("pasted_text");
   const [originalDataUrl, setOriginalDataUrl] = useState<string | undefined>();
   const [originalFileName, setOriginalFileName] = useState<string | undefined>();
-  const [versionItemId, setVersionItemId] = useState<string | null>(null);
-  const [versionContent, setVersionContent] = useState("");
+  const [expandedItemId, setExpandedItemId] = useState<string | null>(null);
+  const [draftContentByItem, setDraftContentByItem] = useState<Record<string, string>>({});
+  const [savedItemId, setSavedItemId] = useState<string | null>(null);
+  const [selectedVersionIdByItem, setSelectedVersionIdByItem] = useState<Record<string, string>>({});
+  const [copiedItemId, setCopiedItemId] = useState<string | null>(null);
   const [query, setQuery] = useState("");
+
+  const copyContent = async (itemId: string, content: string) => {
+    try {
+      await navigator.clipboard.writeText(content);
+      setCopiedItemId(itemId);
+      setTimeout(() => setCopiedItemId((current) => (current === itemId ? null : current)), 2000);
+    } catch {
+      // fallback
+    }
+  };
   const [retrieval, setRetrieval] = useState<{ results: Array<{ itemTitle: string; excerpt: string; effectiveUse: KnowledgeUse; headingPath?: string[]; pageNumber?: number; textRange?: { start: number; end: number }; collectionName: string; versionNumber: number; segmentId: string }>; missingEvidence?: string[]; staleWarnings?: string[]; unresolvedConflicts?: string[] } | null>(null);
   const [busy, setBusy] = useState<string | null>(null);
   const selectedCollection = collections.find((collection) => collection.id === selectedCollectionId);
-  const selectedItems = state.knowledgeItems.filter((item) => item.collectionId === selectedCollection?.id && item.status === "active");
+  const selectedItems = (state.knowledgeItems ?? []).filter((item) => item.collectionId === selectedCollection?.id && item.status === "active");
   const retrievalRuns = state.knowledgeRetrievalRuns.filter((run) => run.agentId === agent?.id).slice(0, 8);
+  const documentMimeType = (title: string, sourceType: "pasted_text" | "markdown" = "pasted_text") => {
+    if (/\.json$/i.test(title)) return "application/json";
+    if (sourceType === "markdown" || /\.(md|markdown)$/i.test(title)) return "text/markdown";
+    return "text/plain";
+  };
 
   const openCollection = (collectionId: string) => {
     const collection = collections.find((candidate) => candidate.id === collectionId);
@@ -3805,7 +4583,6 @@ function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceSta
     setEditCollectionDescription(collection.description ?? "");
     setEditCollectionRole(collection.defaultRole);
     setEditCollectionUse(collection.defaultUse);
-    setVersionItemId(null);
     setItemFormOpen(false);
     setCollectionMode("detail");
   };
@@ -3820,7 +4597,6 @@ function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceSta
   const closeCollectionWorkspace = () => {
     setSelectedCollectionId(null);
     setItemFormOpen(false);
-    setVersionItemId(null);
     setCollectionMode("list");
   };
 
@@ -3830,7 +4606,7 @@ function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceSta
     setBusy("collection");
     const next = await mutate({ type: "createKnowledgeCollection", name: newCollectionName, description: newCollectionDescription, defaultRole: newCollectionRole, defaultUse: newCollectionUse });
     if (next) {
-      const created = next.knowledgeCollections.find((collection) => !collections.some((existing) => existing.id === collection.id));
+      const created = (next.knowledgeCollections ?? []).find((collection) => !collections.some((existing) => existing.id === collection.id));
       if (created) {
         setSelectedCollectionId(created.id);
         setEditCollectionName(created.name);
@@ -3855,7 +4631,7 @@ function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceSta
     event.preventDefault();
     if (!selectedCollection || !itemTitle.trim() || !itemContent.trim()) return;
     setBusy("item");
-    const next = await mutate({ type: "addKnowledgeItem", collectionId: selectedCollection.id, title: itemTitle, role: itemRole === "inherit" ? undefined : itemRole, useOverride: itemUse === "inherit" ? undefined : itemUse, sourceType: itemSourceType, content: itemContent, mimeType: itemSourceType === "markdown" ? "text/markdown" : "text/plain", originalDataUrl, originalFileName });
+    const next = await mutate({ type: "addKnowledgeItem", collectionId: selectedCollection.id, title: itemTitle, role: itemRole === "inherit" ? undefined : itemRole, useOverride: itemUse === "inherit" ? undefined : itemUse, sourceType: itemSourceType, content: itemContent, mimeType: documentMimeType(itemTitle, itemSourceType), originalDataUrl, originalFileName });
     if (next) {
       setItemTitle("");
       setItemContent("");
@@ -3865,14 +4641,18 @@ function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceSta
     }
     setBusy(null);
   };
-  const addVersion = async (event: React.FormEvent) => {
-    event.preventDefault();
-    if (!versionItemId || !versionContent.trim()) return;
-    setBusy("version");
-    const next = await mutate({ type: "uploadKnowledgeVersion", itemId: versionItemId, content: versionContent, mimeType: "text/markdown" });
+  const openDocumentEditor = (itemId: string, content: string) => {
+    setDraftContentByItem((current) => ({ ...current, [itemId]: current[itemId] ?? content }));
+    setExpandedItemId(itemId);
+  };
+  const saveDocument = async (itemId: string, fallbackContent: string, mimeType: string) => {
+    const content = draftContentByItem[itemId] ?? fallbackContent;
+    if (!content.trim()) return;
+    setBusy("document");
+    const next = await mutate({ type: "uploadKnowledgeVersion", itemId, content, mimeType });
     if (next) {
-      setVersionItemId(null);
-      setVersionContent("");
+      setSavedItemId(itemId);
+      setTimeout(() => setSavedItemId((current) => (current === itemId ? null : current)), 2200);
     }
     setBusy(null);
   };
@@ -3896,10 +4676,40 @@ function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceSta
     if (!query.trim() || !presence) return;
     setBusy("retrieval");
     try {
-      const response = await fetch("/api/knowledge", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ mode: "search", query, purpose: "operator_chat" }) });
-      const payload = await response.json() as { packet?: typeof retrieval; error?: string };
+      const response = await fetch("/api/knowledge", {
+        method: "POST",
+        headers: {
+          "content-type": "application/json",
+          "x-openpresence-agent-id": agent?.id ?? "",
+          "x-openpresence-presence-id": presence?.id ?? "",
+        },
+        body: JSON.stringify({ mode: "search", query, purpose: "operator_chat" }),
+      });
+      const payload = await response.json() as {
+        packet?: {
+          retrievalRunId: string;
+          publicEvidence?: Array<{ itemTitle: string; excerpt: string; effectiveUse: KnowledgeUse; headingPath?: string[]; pageNumber?: number; textRange?: { start: number; end: number }; collectionName: string; versionNumber: number; segmentId: string }>;
+          restrictedEvidence?: Array<{ itemTitle: string; excerpt: string; effectiveUse: KnowledgeUse; headingPath?: string[]; pageNumber?: number; textRange?: { start: number; end: number }; collectionName: string; versionNumber: number; segmentId: string }>;
+          missingEvidence?: string[];
+          unresolvedConflicts?: string[];
+          staleWarnings?: string[];
+        };
+        result?: {
+          results: Array<{ itemTitle: string; excerpt: string; effectiveUse: KnowledgeUse; headingPath?: string[]; pageNumber?: number; textRange?: { start: number; end: number }; collectionName: string; versionNumber: number; segmentId: string }>;
+          missingEvidence?: string[];
+          unresolvedConflicts?: string[];
+          staleWarnings?: string[];
+        };
+        error?: string;
+      };
       if (!response.ok) throw new Error(payload.error ?? "Knowledge retrieval failed.");
-      setRetrieval(payload.packet ?? null);
+      const resolved = payload.result ?? (payload.packet ? {
+        results: [...(payload.packet.publicEvidence ?? []), ...(payload.packet.restrictedEvidence ?? [])],
+        missingEvidence: payload.packet.missingEvidence,
+        unresolvedConflicts: payload.packet.unresolvedConflicts,
+        staleWarnings: payload.packet.staleWarnings,
+      } : null);
+      setRetrieval(resolved);
       await refreshState();
     } catch (error) {
       setRetrieval({ results: [], missingEvidence: [error instanceof Error ? error.message : "Knowledge retrieval failed."] });
@@ -3913,10 +4723,10 @@ function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceSta
       className="knowledge-page-heading"
       eyebrow="Agent-owned source material"
       title="Knowledge"
-      description="Keep durable reference and procedure material versioned, scoped, and inspectable before it reaches cognition."
+      description="Write and maintain the documents your Agent can use."
       actionsClassName="knowledge-heading-actions"
       actions={<>
-        <div className="knowledge-page-meta"><span>{collections.length} collections</span><span>{state.knowledgeItems.filter((item) => item.status === "active").length} active items</span></div>
+        <div className="knowledge-page-meta"><span>{collections.length} collections</span><span>{(state.knowledgeItems ?? []).filter((item) => item.status === "active").length} active items</span></div>
         <Button type="button" variant="primary" onClick={startNewCollection}><Plus size={14} /> New collection</Button>
       </>}
     />
@@ -3925,7 +4735,11 @@ function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceSta
         {collectionMode === "list" && <section className="knowledge-collection-browser" aria-labelledby="knowledge-collections-title">
           <div className="knowledge-section-heading"><div><SectionEyebrow>Agent-owned</SectionEyebrow><h2 id="knowledge-collections-title">Collections</h2><p className="muted">Choose a collection to inspect its source material and defaults.</p></div><BookOpen size={18} /></div>
           <div className="knowledge-collection-list">
-            {collections.map((collection) => <button type="button" className="knowledge-collection-row" key={collection.id} onClick={() => openCollection(collection.id)}><span><strong>{collection.name}</strong><small>{collection.description || "No description yet"}</small><em>{collection.defaultRole === "procedure" ? "Procedure" : "Reference"} · {collection.defaultUse} · {state.knowledgeItems.filter((item) => item.collectionId === collection.id && item.status === "active").length} items</em></span><ChevronRight size={17} /></button>)}
+            {collections.map((collection) => {
+              const consumers = knowledgeCollectionConsumers(state, collection.id, agent?.id);
+              const mentionedByFiles = knowledgeCollectionMentionedByFiles(state, collection.id, agent?.id);
+              return <button type="button" className="knowledge-collection-row" key={collection.id} onClick={() => openCollection(collection.id)}><span><strong>{collection.name}</strong><small>{collection.description || "No description yet"}</small><em>{collection.defaultRole === "procedure" ? "Procedure" : "Reference"} · {collection.defaultUse} · {(state.knowledgeItems ?? []).filter((item) => item.collectionId === collection.id && item.status === "active").length} items</em><small className={`knowledge-collection-usage${consumers.length ? " is-used" : ""}`}>{knowledgeCollectionUsageLabel(consumers)}</small>{mentionedByFiles.length > 0 && <small className="knowledge-collection-mention">Mentioned in {mentionedByFiles.join(", ")}</small>}</span><ChevronRight size={17} /></button>;
+            })}
             {!collections.length && <div className="knowledge-empty-state"><FileText size={22} /><strong>No collections yet</strong><p>Create one to give durable source material a clear home.</p><Button type="button" variant="primary" onClick={startNewCollection}><Plus size={14} /> New collection</Button></div>}
           </div>
         </section>}
@@ -3935,7 +4749,7 @@ function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceSta
           <div className="knowledge-focused-heading"><div><SectionEyebrow>New collection</SectionEyebrow><h2 id="knowledge-new-title">Give source material a home</h2><p className="muted">Set the defaults once. You can adjust them later from the collection.</p></div><BookOpen size={20} /></div>
           <form className="knowledge-collection-form" onSubmit={(event) => void createCollection(event)}>
             <label>Name<input aria-label="Collection name" value={newCollectionName} onChange={(event) => setNewCollectionName(event.target.value)} placeholder="Operating principles" autoFocus /></label>
-            <label>Description<span className="form-hint">A short note helps you recognize the collection later.</span><textarea aria-label="Collection description" value={newCollectionDescription} onChange={(event) => setNewCollectionDescription(event.target.value)} rows={4} placeholder="What belongs here?" /></label>
+            <label>Description<span className="form-hint">Use this for a note or structured descriptor. Full source text can also live in versioned items.</span><textarea aria-label="Collection description" value={newCollectionDescription} onChange={(event) => setNewCollectionDescription(event.target.value)} rows={4} maxLength={20_000} placeholder="What belongs here?" /></label>
             <div className="knowledge-form-grid"><label>Role<select value={newCollectionRole} onChange={(event) => setNewCollectionRole(event.target.value as "reference" | "procedure")}><option value="reference">Reference</option><option value="procedure">Procedure</option></select></label><label>Default use<select value={newCollectionUse} onChange={(event) => setNewCollectionUse(event.target.value as KnowledgeUse)}><option value="none">Not available</option><option value="internal">Internal</option><option value="public">Public</option></select></label></div>
             <KnowledgeChoiceNotice role={newCollectionRole} use={newCollectionUse} />
             <div className="knowledge-form-actions"><Button type="button" variant="secondary" onClick={closeCollectionWorkspace}>Cancel</Button><Button type="submit" variant="primary" disabled={busy === "collection" || !newCollectionName.trim()}><Plus size={14} /> {busy === "collection" ? "Creating…" : "Create collection"}</Button></div>
@@ -3945,42 +4759,246 @@ function KnowledgeView({ state, mutate, refreshState }: { state: OpenPresenceSta
         {collectionMode === "detail" && selectedCollection && <section className="knowledge-focused-panel" aria-labelledby="knowledge-detail-title">
           <div className="knowledge-detail-toolbar"><Button type="button" variant="ghost" onClick={closeCollectionWorkspace}><X size={15} /> All collections</Button><span>Collection details</span></div>
           <div className="knowledge-focused-heading"><div><SectionEyebrow>Collection</SectionEyebrow><h2 id="knowledge-detail-title">{selectedCollection.name}</h2><p className="muted">{selectedCollection.description || "No description added yet."}</p></div><BookOpen size={20} /></div>
-          <form className="knowledge-collection-form knowledge-collection-edit-form" onSubmit={(event) => void saveCollection(event)}>
+          <details className="knowledge-collection-settings">
+            <summary><span>Collection settings</span><ChevronDown size={15} /></summary>
+            <form className="knowledge-collection-form knowledge-collection-edit-form" onSubmit={(event) => void saveCollection(event)}>
             <div className="knowledge-form-heading"><div><h3>Collection details</h3><p className="form-hint">These defaults apply to new items. Existing items keep their own version history.</p></div><Button type="submit" variant="secondary" disabled={busy === "collection-edit" || !editCollectionName.trim()}>{busy === "collection-edit" ? "Saving…" : "Save changes"}</Button></div>
             <label>Name<input aria-label="Collection name" value={editCollectionName} onChange={(event) => setEditCollectionName(event.target.value)} /></label>
-            <label>Description<textarea aria-label="Collection description" value={editCollectionDescription} onChange={(event) => setEditCollectionDescription(event.target.value)} rows={3} placeholder="What belongs here?" /></label>
+            <label>Description<span className="form-hint">Up to 20,000 characters for imported descriptors and structured reference metadata.</span><textarea aria-label="Collection description" value={editCollectionDescription} onChange={(event) => setEditCollectionDescription(event.target.value)} rows={3} maxLength={20_000} placeholder="What belongs here?" /></label>
             <div className="knowledge-form-grid"><label>Role<select value={editCollectionRole} onChange={(event) => setEditCollectionRole(event.target.value as "reference" | "procedure")}><option value="reference">Reference</option><option value="procedure">Procedure</option></select></label><label>Default use<select value={editCollectionUse} onChange={(event) => setEditCollectionUse(event.target.value as KnowledgeUse)}><option value="none">Not available</option><option value="internal">Internal</option><option value="public">Public</option></select></label></div>
-            <KnowledgeChoiceNotice role={editCollectionRole} use={editCollectionUse} />
-          </form>
+              <KnowledgeChoiceNotice role={editCollectionRole} use={editCollectionUse} />
+            </form>
+          </details>
           <section className="knowledge-source-section" aria-labelledby="knowledge-items-title">
-            <div className="knowledge-form-heading"><div><SectionEyebrow>Source material</SectionEyebrow><h3 id="knowledge-items-title">Items and versions</h3><p className="form-hint">Keep each source inspectable and versioned.</p></div><Button type="button" variant="secondary" onClick={() => setItemFormOpen(!itemFormOpen)}>{itemFormOpen ? <><X size={14} /> Close</> : <><Plus size={14} /> Add source</>}</Button></div>
+            <div className="knowledge-form-heading"><div><SectionEyebrow>Source material</SectionEyebrow><h3 id="knowledge-items-title">Documents</h3><p className="form-hint">Open a document to edit its Markdown, JSON, or plain text.</p></div><Button type="button" variant="secondary" onClick={() => setItemFormOpen(!itemFormOpen)}>{itemFormOpen ? <><X size={14} /> Close</> : <><Plus size={14} /> Add document</>}</Button></div>
             <div className="knowledge-item-list">
               {selectedItems.map((item) => {
                 const versions = state.knowledgeVersions.filter((version) => version.itemId === item.id).sort((a, b) => b.versionNumber - a.versionNumber);
-                const current = versions.find((version) => version.id === item.currentVersionId);
-                return <article className="knowledge-item" key={item.id}><div className="knowledge-item-heading"><div><strong>{item.title}</strong><small>{item.role === "procedure" ? "Procedure" : "Reference"} · {item.useOverride ? `item override: ${item.useOverride}` : "inherits collection use"}</small></div><Button type="button" variant="ghost" onClick={() => setVersionItemId(versionItemId === item.id ? null : item.id)}><Plus size={13} /> New version</Button></div><p>{current?.normalizedContent.slice(0, 220)}{(current?.normalizedContent.length ?? 0) > 220 ? "…" : ""}</p><div className="knowledge-version-history"><span>Current v{current?.versionNumber ?? "—"} · {versions.length} immutable {versions.length === 1 ? "version" : "versions"}</span><details><summary>Version history</summary>{versions.map((version) => <small key={version.id}>v{version.versionNumber} · {version.parseStatus} · {version.contentHash}</small>)}</details></div>{versionItemId === item.id && <form className="knowledge-version-form" onSubmit={(event) => void addVersion(event)}><textarea aria-label={`New version content for ${item.title}`} value={versionContent} onChange={(event) => setVersionContent(event.target.value)} rows={4} placeholder="Paste the revised source material…" /><Button type="submit" variant="secondary" disabled={busy === "version" || !versionContent.trim()}>{busy === "version" ? "Saving…" : "Save immutable version"}</Button></form>}</article>;
+                const selectedVersionId = selectedVersionIdByItem[item.id];
+                const activeVersion = (selectedVersionId ? versions.find((v) => v.id === selectedVersionId) : null) ?? versions.find((version) => version.id === item.currentVersionId) ?? versions[0];
+                const isExpanded = expandedItemId === item.id;
+                const itemSegments = activeVersion ? state.knowledgeSegments.filter((s) => s.knowledgeVersionId === activeVersion.id) : [];
+                const contentText = activeVersion?.normalizedContent ?? "";
+                const draftContent = draftContentByItem[item.id] ?? contentText;
+                const wordCount = contentText.trim() ? contentText.trim().split(/\s+/).length : 0;
+
+                return (
+                  <article className="knowledge-item" key={item.id}>
+                    <div className="knowledge-item-heading">
+                      <div>
+                        <strong>{item.title}</strong>
+                        <small>{activeVersion?.mimeType ?? "text/plain"} · v{activeVersion?.versionNumber ?? 1} · {contentText.length.toLocaleString()} characters</small>
+                      </div>
+                      <div className="knowledge-item-actions">
+                        <Button type="button" variant={isExpanded ? "secondary" : "ghost"} onClick={() => isExpanded ? setExpandedItemId(null) : openDocumentEditor(item.id, contentText)}>
+                          {isExpanded ? <><EyeOff size={13} /> Close</> : <><Pencil size={13} /> Edit</>}
+                        </Button>
+                      </div>
+                    </div>
+
+                    {!isExpanded ? (
+                      <div className="knowledge-item-preview" onClick={() => openDocumentEditor(item.id, contentText)} onKeyDown={(event) => { if (event.key === "Enter" || event.key === " ") { event.preventDefault(); openDocumentEditor(item.id, contentText); } }} role="button" tabIndex={0} title="Click to edit document">
+                        <p>{contentText.slice(0, 240)}{contentText.length > 240 ? "…" : ""}</p>
+                      </div>
+                    ) : (
+                      <div className="knowledge-item-reader">
+                        <div className="knowledge-reader-toolbar">
+                          <div className="knowledge-reader-stats">
+                            {versions.length > 1 ? (
+                              <select
+                                value={activeVersion?.id}
+                                onChange={(e) => setSelectedVersionIdByItem((prev) => ({ ...prev, [item.id]: e.target.value }))}
+                                aria-label="Select version to inspect"
+                              >
+                                {versions.map((v) => (
+                                  <option key={v.id} value={v.id}>
+                                    v{v.versionNumber} {v.id === item.currentVersionId ? "(Current)" : ""} · {v.contentHash.slice(0, 8)}
+                                  </option>
+                                ))}
+                              </select>
+                            ) : (
+                              <span><strong>v{activeVersion?.versionNumber ?? 1} (Current)</strong> · {activeVersion?.mimeType ?? "markdown"}</span>
+                            )}
+                            <span>·</span>
+                            <span>{wordCount} words</span>
+                            <span>·</span>
+                            <span>{contentText.length} chars</span>
+                            <span>·</span>
+                            <span>{itemSegments.length} indexed segments</span>
+                          </div>
+                          <div className="knowledge-reader-actions">
+                            <button type="button" className="knowledge-reader-btn" onClick={() => void copyContent(item.id, draftContentByItem[item.id] ?? contentText)}>
+                              {copiedItemId === item.id ? <><Check size={12} /> Copied</> : <><Copy size={12} /> Copy</>}
+                            </button>
+                            <Button type="button" variant="primary" className="knowledge-save-document" onClick={() => void saveDocument(item.id, contentText, activeVersion?.mimeType ?? "text/plain")} disabled={busy === "document" || !draftContent.trim() || draftContent === contentText}>
+                              {busy === "document" ? "Saving…" : savedItemId === item.id ? <><Check size={13} /> Saved</> : "Save"}
+                            </Button>
+                          </div>
+                        </div>
+
+                        <textarea
+                          className="knowledge-document-editor"
+                          aria-label={`Edit ${item.title}`}
+                          value={draftContent}
+                          onChange={(event) => setDraftContentByItem((current) => ({ ...current, [item.id]: event.target.value }))}
+                          spellCheck={false}
+                          placeholder="Start writing…"
+                        />
+                      </div>
+                    )}
+
+                    <div className="knowledge-version-history">
+                      {(() => {
+                        const currentVersion = versions.find((v) => v.id === item.currentVersionId);
+                        return <span>Current v{currentVersion?.versionNumber ?? "—"} · {versions.length} immutable {versions.length === 1 ? "version" : "versions"}</span>;
+                      })()}
+                      <details>
+                        <summary>Version history</summary>
+                        {versions.map((version) => (
+                          <small
+                            key={version.id}
+                            style={{ cursor: "pointer", textDecoration: activeVersion?.id === version.id ? "underline" : "none" }}
+                            onClick={() => {
+                              setSelectedVersionIdByItem((prev) => ({ ...prev, [item.id]: version.id }));
+                              setExpandedItemId(item.id);
+                            }}
+                          >
+                            v{version.versionNumber} {version.id === item.currentVersionId ? "(current)" : ""} · {version.parseStatus} · hash: {version.contentHash} · {new Date(version.createdAt).toLocaleDateString()}
+                          </small>
+                        ))}
+                      </details>
+                    </div>
+
+                  </article>
+                );
               })}
               {!selectedItems.length && <div className="knowledge-empty-state knowledge-empty-items"><FileText size={20} /><strong>No source items yet</strong><p>Add a file or paste text to begin building this collection.</p></div>}
             </div>
             {itemFormOpen && <form className="knowledge-form knowledge-add-form" onSubmit={(event) => void addItem(event)}>
-              <div className="knowledge-form-heading"><div><SectionEyebrow>Manual ingestion</SectionEyebrow><h3>Add source material</h3></div></div>
-              <div className="knowledge-form-grid"><label>Title<input aria-label="Knowledge item title" value={itemTitle} onChange={(event) => setItemTitle(event.target.value)} placeholder="Audience principles" /></label><label>Source file<input type="file" accept=".txt,.md,.markdown,text/plain,text/markdown" onChange={(event) => void handleFile(event.target.files?.[0])} /></label></div>
-              <div className="knowledge-form-grid"><label>Role<select value={itemRole} onChange={(event) => setItemRole(event.target.value as "reference" | "procedure" | "inherit")}><option value="inherit">Inherit collection</option><option value="reference">Reference</option><option value="procedure">Procedure</option></select></label><label>Use override<select value={itemUse} onChange={(event) => setItemUse(event.target.value as KnowledgeUse | "inherit")}><option value="inherit">Inherit collection</option><option value="none">Not available</option><option value="internal">Internal</option><option value="public">Public</option></select></label></div>
-              <KnowledgeChoiceNotice role={itemRole} use={itemUse} useLabel="Use override" />
-              <label>Paste text or Markdown<textarea aria-label="Knowledge content" value={itemContent} onChange={(event) => setItemContent(event.target.value)} rows={7} placeholder="# Heading\n\nPaste the source material here. Headings and semantic blocks are preserved for retrieval." /></label>
+              <div className="knowledge-form-heading"><div><SectionEyebrow>New document</SectionEyebrow><h3>Add a document</h3><p className="form-hint">Paste anything readable. The filename is optional and helps identify the format.</p></div></div>
+              <label>Title<input aria-label="Knowledge item title" value={itemTitle} onChange={(event) => setItemTitle(event.target.value)} placeholder="conversation-style.md or settings.json" autoFocus /></label>
+              <label>Document<textarea aria-label="Knowledge content" className="knowledge-document-editor knowledge-new-document-editor" value={itemContent} onChange={(event) => setItemContent(event.target.value)} rows={12} placeholder="# Start writing\n\nMarkdown, JSON, or plain text all work here." spellCheck={false} /></label>
+              <details className="knowledge-advanced-options"><summary>Advanced</summary><div className="knowledge-form-grid"><label>Source file<input type="file" accept=".txt,.md,.markdown,.json,text/plain,text/markdown,application/json" onChange={(event) => void handleFile(event.target.files?.[0])} /></label><label>Role<select value={itemRole} onChange={(event) => setItemRole(event.target.value as "reference" | "procedure" | "inherit")}><option value="inherit">Inherit collection</option><option value="reference">Reference</option><option value="procedure">Procedure</option></select></label><label>Use override<select value={itemUse} onChange={(event) => setItemUse(event.target.value as KnowledgeUse | "inherit")}><option value="inherit">Inherit collection</option><option value="none">Not available</option><option value="internal">Internal</option><option value="public">Public</option></select></label></div></details>
               {originalFileName && <small className="form-hint">Original file preserved: {originalFileName}</small>}
-              <div className="knowledge-form-actions"><Button type="button" variant="secondary" onClick={() => setItemFormOpen(false)}>Cancel</Button><Button type="submit" variant="primary" disabled={busy === "item" || !itemTitle.trim() || !itemContent.trim()}><Plus size={14} /> {busy === "item" ? "Indexing…" : "Add Knowledge item"}</Button></div>
+              <div className="knowledge-form-actions"><Button type="button" variant="secondary" onClick={() => setItemFormOpen(false)}>Cancel</Button><Button type="submit" variant="primary" disabled={busy === "item" || !itemTitle.trim() || !itemContent.trim()}><Plus size={14} /> {busy === "item" ? "Saving…" : "Add document"}</Button></div>
             </form>}
           </section>
         </section>}
       </main>
       <aside className="knowledge-tools-sidebar" aria-label="Knowledge tools">
+        <details className="knowledge-tools-disclosure">
+          <summary><span><Settings2 size={15} /> Access &amp; audit</span><ChevronDown size={15} /></summary>
+          <div className="knowledge-tools-disclosure-body">
         <section className="knowledge-tool-card" aria-labelledby="knowledge-retrieval-title">
           <div className="knowledge-section-heading"><div><SectionEyebrow>Operator-visible</SectionEyebrow><h2 id="knowledge-retrieval-title">Check access</h2><p className="muted">See what the active Presence can retrieve.</p></div><Activity size={18} /></div>
           <form className="knowledge-retrieval-form" onSubmit={(event) => void runRetrieval(event)}><input aria-label="Knowledge retrieval query" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Ask what it can know…" /><Button type="submit" variant="secondary" disabled={busy === "retrieval" || !query.trim()}>{busy === "retrieval" ? "Searching…" : "Search"}</Button></form>
           {retrieval && <div className="knowledge-results" role="status"><div className="knowledge-result-summary">{retrieval.results.length ? `${retrieval.results.length} passage${retrieval.results.length === 1 ? "" : "s"} retrieved` : "No matching accessible passage"}</div>{retrieval.results.map((result) => <article className="knowledge-result" key={result.segmentId}><div><strong>{result.itemTitle}</strong><small>{result.collectionName} · v{result.versionNumber} · {result.effectiveUse} · {result.headingPath?.join(" / ") ?? "Source passage"}</small></div><p>{result.excerpt}</p><small>Provenance: segment {result.segmentId} · characters {result.textRange?.start ?? "—"}–{result.textRange?.end ?? "—"}{result.pageNumber ? ` · page ${result.pageNumber}` : ""}</small></article>)}{[...(retrieval.missingEvidence ?? []), ...(retrieval.unresolvedConflicts ?? []), ...(retrieval.staleWarnings ?? [])].map((warning) => <p className="form-hint" key={warning}>{warning}</p>)}</div>}
         </section>
         <section className="knowledge-tool-card knowledge-audit-sidebar" aria-labelledby="knowledge-history-title"><div className="knowledge-section-heading"><div><SectionEyebrow>Audit trail</SectionEyebrow><h2 id="knowledge-history-title">Recent retrievals</h2><p className="muted">A quiet record of what was actually made available.</p></div><ShieldCheck size={18} /></div>{retrievalRuns.map((run) => <div className="knowledge-history-row" key={run.id}><span><strong>{run.purpose}</strong><small>{run.query}</small></span><span>{run.selectedSegmentIds.length} selected · {new Date(run.createdAt).toLocaleString()}</span></div>)}{!retrievalRuns.length && <p className="muted">Retrieval history will appear here after a Knowledge check or Agent read.</p>}</section>
+          </div>
+        </details>
+      </aside>
+    </div>
+  </div>;
+}
+
+function KnowledgeView({ state, mutate }: { state: OpenPresenceState; mutate: Mutate; refreshState: () => Promise<OpenPresenceState> }) {
+  const agent = state.agent;
+  const presence = state.presence;
+  const documents = (state.knowledgeDocuments ?? []).filter((document) => document.agentId === agent?.id && document.status === "active");
+  const [drafts, setDrafts] = useState<Record<string, { name: string; content: string }>>({});
+  const [addOpen, setAddOpen] = useState(false);
+  const [newName, setNewName] = useState("");
+  const [newContent, setNewContent] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [saved, setSaved] = useState<string | null>(null);
+  const [query, setQuery] = useState("");
+  const [retrieval, setRetrieval] = useState<{ results: Array<{ documentName?: string; itemTitle?: string; excerpt: string; effectiveUse: KnowledgeUse; versionNumber: number; segmentId: string }>; missingEvidence?: string[]; staleWarnings?: string[]; unresolvedConflicts?: string[] } | null>(null);
+  const retrievalRuns = state.knowledgeRetrievalRuns.filter((run) => run.agentId === agent?.id).slice(0, 8);
+  const versionFor = (document: typeof documents[number]) => state.knowledgeVersions.find((version) => version.id === document.currentVersionId) ?? state.knowledgeVersions.find((version) => version.itemId === document.id);
+  const draftFor = (document: typeof documents[number]) => drafts[document.id] ?? { name: document.name, content: versionFor(document)?.normalizedContent ?? "" };
+  const mimeFor = (name: string) => /\.json$/i.test(name) ? "application/json" : /\.(md|markdown)$/i.test(name) ? "text/markdown" : "text/plain";
+
+  const save = async (document: typeof documents[number]) => {
+    const draft = draftFor(document);
+    if (!draft.name.trim() || !draft.content.trim()) return;
+    setBusy(document.id);
+    const next = await mutate({ type: "saveKnowledgeDocument", documentId: document.id, name: draft.name, content: draft.content, mimeType: mimeFor(draft.name) });
+    if (next) {
+      setSaved(document.id);
+      setDrafts((current) => { const copy = { ...current }; delete copy[document.id]; return copy; });
+      window.setTimeout(() => setSaved((current) => current === document.id ? null : current), 1800);
+    }
+    setBusy(null);
+  };
+  const archive = async (document: typeof documents[number]) => {
+    setBusy(`archive-${document.id}`);
+    await mutate({ type: "archiveKnowledgeDocument", documentId: document.id });
+    setBusy(null);
+  };
+
+  const addDocument = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!newName.trim() || !newContent.trim()) return;
+    setBusy("new");
+    const next = await mutate({ type: "createKnowledgeDocument", name: newName, content: newContent, sourceType: /\.(md|markdown)$/i.test(newName) ? "markdown" : "pasted_text", mimeType: mimeFor(newName) });
+    if (next) {
+      setNewName("");
+      setNewContent("");
+      setAddOpen(false);
+    }
+    setBusy(null);
+  };
+
+  const runRetrieval = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!query.trim() || !presence) return;
+    setBusy("retrieval");
+    try {
+      const response = await fetch("/api/knowledge", { method: "POST", headers: { "content-type": "application/json", "x-openpresence-agent-id": agent?.id ?? "", "x-openpresence-presence-id": presence.id }, body: JSON.stringify({ mode: "search", query, purpose: "operator_chat" }) });
+      if (response.ok) {
+        const payload = await response.json() as { result?: typeof retrieval };
+        setRetrieval(payload.result ?? null);
+      }
+    } finally {
+      setBusy(null);
+    }
+  };
+
+  return <div className="page knowledge-page">
+    <PageHeader eyebrow="Agent Knowledge" title="Knowledge" description="Write and maintain the documents your Agent can use." actions={<Button type="button" variant="primary" onClick={() => setAddOpen((open) => !open)}>{addOpen ? <><X size={14} /> Close</> : <><Plus size={14} /> Add document</>}</Button>} />
+    <div className="knowledge-layout">
+      <main className="knowledge-main">
+        {addOpen && <form className="knowledge-focused-panel knowledge-add-document-panel" onSubmit={(event) => void addDocument(event)}>
+          <div className="knowledge-focused-heading"><div><SectionEyebrow>New document</SectionEyebrow><h2>Add a document</h2><p className="muted">Markdown, JSON, and plain text all work here.</p></div><FileText size={20} /></div>
+          <label>Name<input aria-label="Knowledge document name" value={newName} onChange={(event) => setNewName(event.target.value)} placeholder="conversation-style.md" autoFocus /></label>
+          <label>Content<textarea aria-label="Knowledge document content" className="knowledge-document-editor" value={newContent} onChange={(event) => setNewContent(event.target.value)} rows={12} placeholder="# Start writing" spellCheck={false} /></label>
+          <div className="knowledge-form-actions"><Button type="button" variant="secondary" onClick={() => setAddOpen(false)}>Cancel</Button><Button type="submit" variant="primary" disabled={busy === "new" || !newName.trim() || !newContent.trim()}>{busy === "new" ? "Adding…" : "Add document"}</Button></div>
+        </form>}
+        <section className="knowledge-focused-panel knowledge-document-library" aria-labelledby="knowledge-documents-title">
+          <div className="knowledge-form-heading"><div><SectionEyebrow>Document library</SectionEyebrow><h2 id="knowledge-documents-title">{documents.length} {documents.length === 1 ? "document" : "documents"}</h2><p className="muted">Each document has one simple editor. History stays available when you need it.</p></div></div>
+          <div className="knowledge-item-list">
+            {documents.map((document) => {
+              const version = versionFor(document);
+              const draft = draftFor(document);
+              const changed = draft.name !== document.name || draft.content !== (version?.normalizedContent ?? "");
+              const versions = state.knowledgeVersions.filter((item) => item.itemId === document.id).sort((left, right) => right.versionNumber - left.versionNumber);
+              return <article className="knowledge-item knowledge-document-row" key={document.id}>
+                <label className="knowledge-document-name">Name<input aria-label={`Name for ${document.name}`} value={draft.name} onChange={(event) => setDrafts((current) => ({ ...current, [document.id]: { ...draft, name: event.target.value } }))} /></label>
+                <label>Content<textarea aria-label={`Content for ${document.name}`} className="knowledge-document-editor" value={draft.content} onChange={(event) => setDrafts((current) => ({ ...current, [document.id]: { ...draft, content: event.target.value } }))} rows={12} spellCheck={false} /></label>
+                <div className="knowledge-document-footer"><small>{version?.mimeType ?? mimeFor(document.name)} · v{version?.versionNumber ?? 1} · {draft.content.length.toLocaleString()} characters</small><span><Button type="button" variant="ghost" onClick={() => void archive(document)} disabled={busy === `archive-${document.id}`}>{busy === `archive-${document.id}` ? "Archiving…" : "Archive"}</Button><Button type="button" variant="primary" onClick={() => void save(document)} disabled={busy === document.id || !changed || !draft.name.trim() || !draft.content.trim()}>{busy === document.id ? "Saving…" : saved === document.id ? <><Check size={13} /> Saved</> : "Save"}</Button></span></div>
+                <details className="knowledge-version-history"><summary>History · {versions.length} {versions.length === 1 ? "version" : "versions"}</summary>{versions.map((item) => <small key={item.id}>v{item.versionNumber}{item.id === document.currentVersionId ? " · current" : ""} · {new Date(item.createdAt).toLocaleString()} · {item.contentHash}</small>)}</details>
+              </article>;
+            })}
+            {!documents.length && <div className="knowledge-empty-state"><FileText size={22} /><strong>No documents yet</strong><p>Add a named document to start your Agent’s Knowledge library.</p><Button type="button" variant="primary" onClick={() => setAddOpen(true)}><Plus size={14} /> Add document</Button></div>}
+          </div>
+        </section>
+      </main>
+      <aside className="knowledge-tools-sidebar" aria-label="Knowledge tools">
+        <details className="knowledge-tools-disclosure"><summary><span><Settings2 size={15} /> Access &amp; audit</span><ChevronDown size={15} /></summary><div className="knowledge-tools-disclosure-body">
+          <section className="knowledge-tool-card"><div className="knowledge-section-heading"><div><SectionEyebrow>Operator-visible</SectionEyebrow><h2>Check access</h2><p className="muted">See what the active Presence can retrieve.</p></div><Activity size={18} /></div><form className="knowledge-retrieval-form" onSubmit={(event) => void runRetrieval(event)}><input aria-label="Knowledge retrieval query" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Ask what it can know…" /><Button type="submit" variant="secondary" disabled={busy === "retrieval" || !query.trim()}>{busy === "retrieval" ? "Searching…" : "Search"}</Button></form>{retrieval && <div className="knowledge-results" role="status"><div className="knowledge-result-summary">{retrieval.results?.length ? `${retrieval.results.length} passage${retrieval.results.length === 1 ? "" : "s"} retrieved` : "No matching accessible passage"}</div>{(retrieval.results ?? []).map((result) => <article className="knowledge-result" key={result.segmentId}><strong>{result.documentName ?? result.itemTitle ?? "Document"}</strong><p>{result.excerpt}</p><small>v{result.versionNumber} · {result.effectiveUse} · segment {result.segmentId}</small></article>)}{[...(retrieval.missingEvidence ?? []), ...(retrieval.unresolvedConflicts ?? []), ...(retrieval.staleWarnings ?? [])].map((warning) => <p className="form-hint" key={warning}>{warning}</p>)}</div>}</section>
+          <section className="knowledge-tool-card knowledge-audit-sidebar"><div className="knowledge-section-heading"><div><SectionEyebrow>Audit trail</SectionEyebrow><h2>Recent retrievals</h2><p className="muted">A quiet record of what was actually available.</p></div><ShieldCheck size={18} /></div>{retrievalRuns.map((run) => <div className="knowledge-history-row" key={run.id}><span><strong>{run.purpose}</strong><small>{run.query}</small></span><span>{run.selectedSegmentIds.length} selected · {new Date(run.createdAt).toLocaleString()}</span></div>)}{!retrievalRuns.length && <p className="muted">Retrieval history appears after a Knowledge check or Agent read.</p>}</section>
+        </div></details>
       </aside>
     </div>
   </div>;
@@ -4000,6 +5018,7 @@ function TeachView({
   const [contextOpen, setContextOpen] = useState(true);
   const [sending, setSending] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  const [askingToReplyFor, setAskingToReplyFor] = useState<string | null>(null);
   const sendingRef = useRef(false);
   const historyEndRef = useRef<HTMLDivElement>(null);
   const agent = state.agent!;
@@ -4440,21 +5459,77 @@ function PresenceChatView({
   const [link, setLink] = useState("");
   const [sending, setSending] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
+  const [askingToReplyFor, setAskingToReplyFor] = useState<string | null>(null);
   const [composerMode, setComposerMode] = useState<"post" | "reply">("post");
+  const [pendingAgentReply, setPendingAgentReply] = useState(false);
   const [replyToMessageId, setReplyToMessageId] = useState<string | null>(null);
   const sendingRef = useRef(false);
   const historyEndRef = useRef<HTMLDivElement>(null);
   const presence = state.presence ?? state.presences[0]!;
   const session = state.presenceChatSessions.find((item) => item.presenceId === presence.id);
-  const messages = session?.messages ?? [];
+  const messages = (session?.messages ?? []).filter((item) => item.role !== "presence" || item.operatorFeedback || publicExpressionText(item.content).trim());
   const replyTarget = messages.find((item) => item.id === replyToMessageId);
-  const canReply = messages.some((item) => item.role === "user");
+  const canReply = messages.length > 0;
+  const hasAgentResponse = (messageId: string) => {
+    const targetIndex = messages.findIndex((item) => item.id === messageId);
+    if (targetIndex < 0) return false;
+    const nextUserIndex = messages.findIndex((item, index) => index > targetIndex && item.role === "user");
+    return messages.slice(targetIndex + 1, nextUserIndex < 0 ? undefined : nextUserIndex).some((item) => item.role === "presence");
+  };
+
+  const [briefPreviewDraft, setBriefPreviewDraft] = useState<PresenceBrief | null>(null);
+  const [briefModalDraft, setBriefModalDraft] = useState<PresenceBrief>(presence.brief);
+  const [briefTerritoryText, setBriefTerritoryText] = useState({
+    primaryTerritory: presence.brief.primaryTerritory?.join(", ") ?? "",
+    adjacentTerritory: presence.brief.adjacentTerritory?.join(", ") ?? "",
+    boundaries: presence.brief.boundaries?.join(", ") ?? "",
+  });
+  const [briefModalOpen, setBriefModalOpen] = useState(false);
+  const [confirmSaveModal, setConfirmSaveModal] = useState(false);
+
+  const territoryValues = (value: string) => value.split(/[\n,]+/).map((item) => item.trim()).filter(Boolean);
+  const activeBrief = briefPreviewDraft ?? presence.brief;
+  const briefPreviewActive = briefPreviewDraft !== null;
+
+  const openBriefModal = () => {
+    const current = briefPreviewDraft ?? presence.brief;
+    setBriefModalDraft(current);
+    setBriefTerritoryText({
+      primaryTerritory: current.primaryTerritory?.join(", ") ?? "",
+      adjacentTerritory: current.adjacentTerritory?.join(", ") ?? "",
+      boundaries: current.boundaries?.join(", ") ?? "",
+    });
+    setConfirmSaveModal(false);
+    setBriefModalOpen(true);
+  };
+
   useEffect(() => {
     if (!session) void mutate({ type: "newPresenceChatSession", presenceId: presence.id });
   }, [mutate, presence.id, session]);
   useEffect(() => {
     historyEndRef.current?.scrollIntoView({ behavior: "auto", block: "end" });
-  }, [session?.id, messages.length, pendingMessage, sending]);
+  }, [session?.id, messages.length, pendingMessage, sending, askingToReplyFor]);
+  const askAgentToReply = async (targetMessageId: string) => {
+    if (!session || sending || askingToReplyFor) return;
+    setAskingToReplyFor(targetMessageId);
+    try {
+      await mutate({
+        type: "askPresenceChatToReply",
+        presenceId: presence.id,
+        sessionId: session.id,
+        targetMessageId,
+        briefOverride: briefPreviewDraft ? {
+          purpose: briefPreviewDraft.purpose.trim(),
+          audience: briefPreviewDraft.audience.trim(),
+          primaryTerritory: briefPreviewDraft.primaryTerritory?.map((item) => item.trim()).filter(Boolean) ?? [],
+          adjacentTerritory: briefPreviewDraft.adjacentTerritory?.map((item) => item.trim()).filter(Boolean) ?? [],
+          boundaries: briefPreviewDraft.boundaries?.map((item) => item.trim()).filter(Boolean) ?? [],
+        } : undefined,
+      });
+    } finally {
+      setAskingToReplyFor(null);
+    }
+  };
   const addFile = (file: File) => {
     if (attachments.length >= 4 || file.size > 1_500_000) return;
     const kind = file.type === "image/gif" ? "gif" : file.type.startsWith("video/") ? "video" : file.type.startsWith("image/") ? "image" : "document";
@@ -4474,16 +5549,37 @@ function PresenceChatView({
     if (!message.trim() || !session || sending || sendingRef.current) return;
     sendingRef.current = true;
     const outgoing = message.trim();
+    const handleToken = presence.handle.replace(/^@/, "").toLowerCase();
+    const isDirectMention = handleToken.length > 0 && outgoing.toLowerCase().includes("@" + handleToken);
+    const isReplyingDirectly = composerMode === "reply" && Boolean(replyToMessageId);
+    const shouldAutoReply = isDirectMention || isReplyingDirectly;
     setMessage("");
     setAttachments([]);
     setPendingMessage(outgoing);
+    setPendingAgentReply(shouldAutoReply);
     setSending(true);
     try {
-      const next = await mutate({ type: "sendPresenceChatMessage", presenceId: presence.id, sessionId: session.id, content: outgoing, attachments, replyToMessageId: composerMode === "reply" ? replyToMessageId ?? undefined : undefined });
+      const next = await mutate({
+        type: "sendPresenceChatMessage",
+        presenceId: presence.id,
+        sessionId: session.id,
+        content: outgoing,
+        attachments,
+        replyToMessageId: composerMode === "reply" ? replyToMessageId ?? undefined : undefined,
+        respond: shouldAutoReply ? undefined : false,
+        briefOverride: briefPreviewDraft ? {
+          purpose: briefPreviewDraft.purpose.trim(),
+          audience: briefPreviewDraft.audience.trim(),
+          primaryTerritory: briefPreviewDraft.primaryTerritory?.map((item) => item.trim()).filter(Boolean) ?? [],
+          adjacentTerritory: briefPreviewDraft.adjacentTerritory?.map((item) => item.trim()).filter(Boolean) ?? [],
+          boundaries: briefPreviewDraft.boundaries?.map((item) => item.trim()).filter(Boolean) ?? [],
+        } : undefined,
+      });
       if (!next) setPendingMessage(null);
     } finally {
       setSending(false);
       setPendingMessage(null);
+      setPendingAgentReply(false);
       setComposerMode("post");
       setReplyToMessageId(null);
       sendingRef.current = false;
@@ -4491,12 +5587,6 @@ function PresenceChatView({
   };
   return (
     <div className="page page-chat">
-      <PageHeader
-        className="chat-heading"
-        eyebrow={<>Chat · {channelLabel(presence.channel, state.channelDefinitions)}</>}
-        title={<>See {presence.name} in the feed.</>}
-        description="Add a post to the scene, or choose Reply on a post to continue its thread. Nothing publishes or changes the Agent during this rehearsal."
-      />
       <div className="chat-layout">
         <section className="chat-thread">
           <div className="chat-history">
@@ -4511,18 +5601,18 @@ function PresenceChatView({
             ) : (
               messages.map((item) => {
                 const target = item.replyToMessageId ? messages.find((message) => message.id === item.replyToMessageId) : undefined;
-                return <article key={item.id} className={`social-card presence-chat-card ${item.role === "presence" ? "agent-authored thread-reply-card" : ""}`}>
+                return <article key={item.id} className={`social-card presence-chat-card ${item.role === "presence" ? `agent-authored thread-reply-card${item.operatorFeedback ? " operator-feedback-card" : ""}` : ""}`}>
                   <div className="social-card-meta">
                     {item.role === "presence" ? <PresenceGlyph accent={presence.accent} /> : <span className="actor-avatar">{initials("You")}</span>}
                     <span>
                       <strong>{item.role === "presence" ? presence.name : "You"}</strong>
-                      <small>{item.role === "presence" ? `${presence.handle} · Reply` : `@you · ${item.replyToMessageId ? "Reply" : "Post"}`}</small>
+                      <small>{item.role === "presence" ? item.operatorFeedback ? "Operator feedback" : "Genny · Reply" : item.replyToMessageId ? "@you · Reply as you" : "@you · Post"}</small>
                     </span>
                     <time>{formatTime(item.timestamp)}</time>
                   </div>
-                  <small className="thread-context">{item.role === "presence" ? `↳ Replying to the post above` : target ? "↳ Replying to a post" : `Posted to ${channelLabel(presence.channel, state.channelDefinitions)}`}</small>
+                  <small className="thread-context">{item.role === "presence" ? item.operatorFeedback ? "↳ Private operator feedback · not a public reply" : `↳ Replying to the post above` : target ? "↳ Replying to a post" : `Posted to ${channelLabel(presence.channel, state.channelDefinitions)}`}</small>
                   {target && <div className="presence-chat-reply-context"><span>Replying to</span><p>{target.content}</p></div>}
-                  <p>{item.content}</p>
+                  <p>{item.role === "presence" && !item.operatorFeedback ? publicExpressionText(item.content) : item.content}</p>
                   {item.attachments?.map((attachment) => (
                     <div className="presence-chat-attachment" key={attachment.id}>
                       {attachment.dataUrl && attachment.kind === "video" ? <video className="presence-chat-attachment-video" controls playsInline preload="metadata" src={attachment.dataUrl} aria-label="Attached video" /> : attachment.dataUrl && attachment.kind !== "document" ? <Image unoptimized width={180} height={110} src={attachment.dataUrl} alt={`Attached ${attachment.kind}`} /> : <span className="social-link-asset">{attachment.sourceUrl ?? attachment.name}</span>}
@@ -4533,7 +5623,12 @@ function PresenceChatView({
                       </details>
                     </div>
                   ))}
-                  {item.role === "user" && <button type="button" className="presence-chat-reply-action" onClick={() => { setComposerMode("reply"); setReplyToMessageId(item.id); }} disabled={sending} aria-label="Reply to this post" title={`Reply to: ${item.content}`}><Reply size={13} /> Reply to this post</button>}
+                  {item.role === "user" && <button type="button" className="presence-chat-reply-action" onClick={() => { setComposerMode("reply"); setReplyToMessageId(item.id); }} disabled={sending || askingToReplyFor !== null} aria-label="Write a reply as you" title={`Write a reply as you to: ${item.content}`}><Reply size={13} /> Write reply as you</button>}
+                  {item.role === "presence" && !item.operatorFeedback && <button type="button" className="presence-chat-reply-action" onClick={() => { setComposerMode("reply"); setReplyToMessageId(item.id); }} disabled={sending || askingToReplyFor !== null} aria-label={`Reply to ${presence.name}`} title={`Reply to ${presence.name}: ${publicExpressionText(item.content)}`}><Reply size={13} /> Reply to {presence.name}</button>}
+                  {item.role === "user" && !hasAgentResponse(item.id) && <button type="button" className="presence-chat-agent-action" onClick={() => void askAgentToReply(item.id)} disabled={sending || askingToReplyFor !== null} aria-label={"Ask " + presence.name + " to reply"} title={"Ask " + presence.name + " to evaluate and reply to this post"}>
+                    {askingToReplyFor === item.id ? <><LoaderCircle size={13} className="spin" /> Asking {presence.name}…</> : <><Sparkles size={13} /> Ask {presence.name} to reply</>}
+                  </button>}
+                  {item.role === "user" && hasAgentResponse(item.id) && <span className="presence-chat-response-status"><Check size={12} /> Genny responded</span>}
                 </article>;
               })
             )}
@@ -4542,14 +5637,14 @@ function PresenceChatView({
                 <article className="social-card presence-chat-card optimistic-message">
                   <div className="social-card-meta">
                     <span className="actor-avatar">{initials("You")}</span>
-                    <span><strong>You</strong><small>@you · {composerMode === "reply" ? "Reply" : "Post"}</small></span>
+                    <span><strong>You</strong><small>@you · {composerMode === "reply" ? "Reply as you" : "Post"}</small></span>
                     <time>{formatTime(new Date().toISOString())}</time>
                   </div>
-                  <small className="thread-context">{composerMode === "reply" && replyTarget ? "↳ Replying to a post" : `Posted to ${channelLabel(presence.channel, state.channelDefinitions)}`}</small>
+                  <small className="thread-context">{composerMode === "reply" && replyTarget ? `↳ Replying to ${replyTarget.role === "presence" ? presence.name : "the post"} as you` : `Posted to ${channelLabel(presence.channel, state.channelDefinitions)}`}</small>
                   {composerMode === "reply" && replyTarget && <div className="presence-chat-reply-context"><span>Replying to</span><p>{replyTarget.content}</p></div>}
                   <p>{pendingMessage}</p>
                 </article>
-                {sending && <ChatThinkingMessage name={presence.name} accent={presence.accent} feed />}
+                {sending && pendingAgentReply && <ChatThinkingMessage name={presence.name} accent={presence.accent} feed />}
               </>
             )}
             <div ref={historyEndRef} aria-hidden="true" className="chat-history-end" />
@@ -4557,9 +5652,9 @@ function PresenceChatView({
           <div className="presence-chat-compose-tools">
             <div className="presence-chat-mode" role="group" aria-label="Choose what to add to the rehearsal">
               <button type="button" className={composerMode === "post" ? "active" : ""} aria-pressed={composerMode === "post"} onClick={() => { setComposerMode("post"); setReplyToMessageId(null); }}>Post</button>
-              <button type="button" className={composerMode === "reply" ? "active" : ""} aria-pressed={composerMode === "reply"} disabled={!canReply && composerMode !== "reply"} onClick={() => { if (canReply) setComposerMode("reply"); }}>Reply</button>
+              <button type="button" className={composerMode === "reply" ? "active" : ""} aria-pressed={composerMode === "reply"} disabled={!canReply && composerMode !== "reply"} onClick={() => { if (canReply) setComposerMode("reply"); }}>Reply to message</button>
             </div>
-            {composerMode === "reply" && replyTarget ? <div className="presence-chat-selected-reply"><div><span>Replying to</span><button type="button" aria-label="Clear reply target" onClick={() => { setComposerMode("post"); setReplyToMessageId(null); }}><X size={13} /></button></div><p>{replyTarget.content}</p></div> : composerMode === "reply" ? <div className="presence-chat-selected-reply empty"><span>Choose “Reply to this post” on a message above.</span></div> : null}
+            {composerMode === "reply" && replyTarget ? <div className="presence-chat-selected-reply"><div><span>Replying to {replyTarget.role === "presence" ? presence.name : "the post"} · as you</span><button type="button" aria-label="Clear reply target" onClick={() => { setComposerMode("post"); setReplyToMessageId(null); }}><X size={13} /></button></div><p>{replyTarget.content}</p></div> : composerMode === "reply" ? <div className="presence-chat-selected-reply empty"><span>Choose a message above to reply to.</span></div> : <div className="presence-chat-test-note"><Sparkles size={13} /><span>Two separate actions: write a reply as you, or ask {presence.name} to reply.</span></div>}
           </div>
           <div className="attachment-list">
             {attachments.map((attachment) => (
@@ -4585,7 +5680,7 @@ function PresenceChatView({
               />
             </label>
             <textarea
-              aria-label={composerMode === "reply" ? `Reply for ${presence.name} to encounter` : `Post for ${presence.name} to encounter`}
+              aria-label={composerMode === "reply" ? `Reply to ${replyTarget?.role === "presence" ? presence.name : "message"} as you` : `Post for ${presence.name} to encounter`}
               value={message}
               onChange={(event) => setMessage(event.target.value)}
               disabled={sending || !session}
@@ -4595,12 +5690,12 @@ function PresenceChatView({
                   void send();
                 }
               }}
-              placeholder={sending ? `${presence.name} is considering the ${composerMode}…` : composerMode === "reply" ? `Write a reply for ${presence.name} to encounter…` : `Write a post for ${presence.name} to encounter…`}
+              placeholder={sending ? `Adding ${composerMode === "reply" ? "your reply" : "the post"}…` : composerMode === "reply" ? `Write your reply to ${replyTarget?.role === "presence" ? presence.name : "this message"}…` : `Write a post for ${presence.name} to encounter…`}
               rows={3}
             />
             <button
               className="send-button"
-              aria-label={composerMode === "reply" ? "Send reply" : "Send post"}
+              aria-label={composerMode === "reply" ? "Add reply as you" : "Add post"}
               type="submit"
             >
               {sending ? <LoaderCircle size={17} className="spin" /> : <Send size={17} />}
@@ -4608,18 +5703,269 @@ function PresenceChatView({
           </form>
           <div className="presence-chat-link-row"><input aria-label="Link to inspect" placeholder="Paste a link to inspect" value={link} onChange={(event) => setLink(event.target.value)} /><button type="button" onClick={addLink} disabled={!link.trim() || attachments.length >= 4}>Add link</button></div>
           <div className="composer-hint">
-            {composerMode === "reply" ? "Enter to reply" : "Enter to post"} <span>·</span> Shift + Enter for a new line <span>·</span> Choose Reply on a post above to continue its thread <span>·</span> Private rehearsal · nothing publishes or teaches the Agent
+            {composerMode === "reply" ? "Enter to add your reply" : "Enter to add the post"} <span>·</span> Shift + Enter for a new line <span>·</span> Mention {presence.handle} for an immediate reply <span>·</span> Ask {presence.name} to reply on a message above <span>·</span> Private rehearsal · nothing publishes or teaches the Agent
           </div>
         </section>
         <aside className="chat-aside context-panel presence-chat-aside">
-          <SectionEyebrow>Feed context</SectionEyebrow>
+          <div className="presence-context-heading">
+            <SectionEyebrow>Feed context</SectionEyebrow>
+            <span className="presence-context-scope">{channelLabel(presence.channel, state.channelDefinitions)} · {presence.handle}</span>
+          </div>
           <h3>{presence.name} as encountered in public</h3>
-          <p className="muted">{presence.brief.purpose}</p>
-          <div className="presence-chat-boundary"><span className="status-dot" /> Private thread · not published</div>
-          <small>{presence.name} is responding from the selected channel context, relationships, and perception when needed. Use Teach for durable changes.</small>
-          <Button variant="secondary" onClick={() => void mutate({ type: "newPresenceChatSession", presenceId: presence.id })}><Plus size={14} /> New rehearsal</Button>
+          <div className="presence-chat-boundary"><span className="status-dot" /><span>Private thread · not published</span></div>
+          <div className="presence-context-note"><Info size={14} /><p>{presence.name} is responding from the selected channel context, relationships, and perception when needed. Use Teach for durable changes.</p></div>
+
+          {false && <section className="presence-chat-brief-section" aria-label="Presence brief rehearsal">
+            <div className="presence-chat-brief-header">
+              <div>
+                <SectionEyebrow>Presence brief</SectionEyebrow>
+                <h4>Brief rehearsal</h4>
+              </div>
+              <span className={briefPreviewActive ? "brief-preview-badge active" : "brief-preview-badge"}>
+                {briefPreviewActive ? "Preview active" : "Durable"}
+              </span>
+            </div>
+
+            <div className="presence-brief-compact-summary">
+              <div className="brief-compact-row">
+                <span className="brief-compact-label">Purpose</span>
+                <p>{activeBrief.purpose}</p>
+              </div>
+              <div className="brief-compact-row">
+                <span className="brief-compact-label">Audience</span>
+                <p>{activeBrief.audience}</p>
+              </div>
+              <div className="brief-compact-row">
+                <span className="brief-compact-label">Known for</span>
+                <div className="brief-compact-chips">
+                  {activeBrief.primaryTerritory?.length ? (
+                    activeBrief.primaryTerritory.map((item) => <span key={item} className="brief-chip">{item}</span>)
+                  ) : (
+                    <em>Not narrowed yet</em>
+                  )}
+                </div>
+              </div>
+              {activeBrief.adjacentTerritory?.length ? (
+                <div className="brief-compact-row">
+                  <span className="brief-compact-label">Adjacent</span>
+                  <div className="brief-compact-chips">
+                    {activeBrief.adjacentTerritory.map((item) => <span key={item} className="brief-chip adjacent">{item}</span>)}
+                  </div>
+                </div>
+              ) : null}
+              {activeBrief.boundaries?.length ? (
+                <div className="brief-compact-row">
+                  <span className="brief-compact-label">Keep out</span>
+                  <div className="brief-compact-chips">
+                    {activeBrief.boundaries.map((item) => <span key={item} className="brief-chip boundary">{item}</span>)}
+                  </div>
+                </div>
+              ) : null}
+            </div>
+
+            <div className="presence-brief-sidebar-actions">
+              <Button type="button" variant="secondary" onClick={openBriefModal}>
+                <Pencil size={13} /> {briefPreviewActive ? "Edit preview" : "Edit brief"}
+              </Button>
+              {briefPreviewActive && (
+                <>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    onClick={async () => {
+                      if (!briefPreviewDraft) return;
+                      await mutate({
+                        type: "setPresence",
+                        patch: {
+                          brief: {
+                            purpose: briefPreviewDraft.purpose.trim(),
+                            audience: briefPreviewDraft.audience.trim(),
+                            primaryTerritory: briefPreviewDraft.primaryTerritory?.map((item) => item.trim()).filter(Boolean) ?? [],
+                            adjacentTerritory: briefPreviewDraft.adjacentTerritory?.map((item) => item.trim()).filter(Boolean) ?? [],
+                            boundaries: briefPreviewDraft.boundaries?.map((item) => item.trim()).filter(Boolean) ?? [],
+                          },
+                        },
+                      });
+                      setBriefPreviewDraft(null);
+                    }}
+                  >
+                    <Check size={13} /> Save to Presence
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => {
+                      setBriefPreviewDraft(null);
+                    }}
+                  >
+                    Reset
+                  </Button>
+                </>
+              )}
+            </div>
+            {briefPreviewActive && (
+              <small className="brief-preview-note">Previewing temporary brief in chat. Click &ldquo;Save to Presence&rdquo; to persist to {presence.name}.</small>
+            )}
+          </section>}
         </aside>
       </div>
+
+      {briefModalOpen && (
+        <div className="modal-backdrop" role="dialog" aria-modal="true" aria-labelledby="brief-dialog-title" onClick={() => setBriefModalOpen(false)}>
+          <div className="presence-dialog presence-brief-rehearsal-dialog" onClick={(event) => event.stopPropagation()}>
+            <div className="dialog-header">
+              <div>
+                <SectionEyebrow>Presence brief · Rehearsal</SectionEyebrow>
+                <h2 id="brief-dialog-title">Rehearse brief for {presence.name}</h2>
+              </div>
+              <button type="button" className="icon-button" aria-label="Close brief editor" onClick={() => setBriefModalOpen(false)}>
+                <X size={18} />
+              </button>
+            </div>
+            <p className="muted">Update the brief settings to preview during this rehearsal, or save changes directly to {presence.name}.</p>
+            <div className="dialog-fields">
+              <label>
+                Purpose
+                <textarea
+                  aria-label="Presence Brief purpose"
+                  value={briefModalDraft.purpose}
+                  onChange={(event) => setBriefModalDraft({ ...briefModalDraft, purpose: event.target.value })}
+                  rows={2}
+                />
+              </label>
+              <label>
+                Audience
+                <input
+                  aria-label="Presence Brief audience"
+                  value={briefModalDraft.audience}
+                  onChange={(event) => setBriefModalDraft({ ...briefModalDraft, audience: event.target.value })}
+                />
+              </label>
+              <label>
+                Primary territory <small>Topics, ideas, communities, or problems this Presence wants to be known for.</small>
+                <textarea
+                  aria-label="Primary territory"
+                  value={briefTerritoryText.primaryTerritory}
+                  onChange={(event) => {
+                    const text = event.target.value;
+                    setBriefTerritoryText((current) => ({ ...current, primaryTerritory: text }));
+                    setBriefModalDraft((current) => ({ ...current, primaryTerritory: territoryValues(text) }));
+                  }}
+                  rows={2}
+                />
+              </label>
+              <label>
+                Adjacent territory <small>Things this Presence can join without making them its main identity.</small>
+                <textarea
+                  aria-label="Adjacent territory"
+                  value={briefTerritoryText.adjacentTerritory}
+                  onChange={(event) => {
+                    const text = event.target.value;
+                    setBriefTerritoryText((current) => ({ ...current, adjacentTerritory: text }));
+                    setBriefModalDraft((current) => ({ ...current, adjacentTerritory: territoryValues(text) }));
+                  }}
+                  rows={2}
+                />
+              </label>
+              <label>
+                Keep out / Boundaries <small>Public areas this Presence generally does not express or amplify.</small>
+                <textarea
+                  aria-label="Presence Brief boundaries"
+                  value={briefTerritoryText.boundaries}
+                  onChange={(event) => {
+                    const text = event.target.value;
+                    setBriefTerritoryText((current) => ({ ...current, boundaries: text }));
+                    setBriefModalDraft((current) => ({ ...current, boundaries: territoryValues(text) }));
+                  }}
+                  rows={2}
+                />
+              </label>
+            </div>
+            <div className="dialog-actions">
+              <Button type="button" variant="ghost" onClick={() => { setBriefModalOpen(false); setConfirmSaveModal(false); }}>
+                Cancel
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setBriefModalDraft(presence.brief);
+                  setBriefTerritoryText({
+                    primaryTerritory: presence.brief.primaryTerritory?.join(", ") ?? "",
+                    adjacentTerritory: presence.brief.adjacentTerritory?.join(", ") ?? "",
+                    boundaries: presence.brief.boundaries?.join(", ") ?? "",
+                  });
+                  setConfirmSaveModal(false);
+                }}
+              >
+                Reset to current
+              </Button>
+              <Button
+                type="button"
+                variant="primary"
+                disabled={!briefModalDraft.purpose.trim() || !briefModalDraft.audience.trim()}
+                onClick={() => {
+                  setBriefPreviewDraft({
+                    purpose: briefModalDraft.purpose.trim(),
+                    audience: briefModalDraft.audience.trim(),
+                    primaryTerritory: territoryValues(briefTerritoryText.primaryTerritory),
+                    adjacentTerritory: territoryValues(briefTerritoryText.adjacentTerritory),
+                    boundaries: territoryValues(briefTerritoryText.boundaries),
+                  });
+                  setBriefModalOpen(false);
+                  setConfirmSaveModal(false);
+                }}
+              >
+                <Sparkles size={14} /> Preview in rehearsal
+              </Button>
+              {!confirmSaveModal ? (
+                <Button
+                  type="button"
+                  variant="danger-solid"
+                  disabled={!briefModalDraft.purpose.trim() || !briefModalDraft.audience.trim()}
+                  onClick={() => setConfirmSaveModal(true)}
+                >
+                  <CircleAlert size={14} /> Save to Presence
+                </Button>
+              ) : (
+                <div style={{ display: "inline-flex", gap: "8px", alignItems: "center" }}>
+                  <Button
+                    type="button"
+                    variant="danger-solid"
+                    disabled={!briefModalDraft.purpose.trim() || !briefModalDraft.audience.trim()}
+                    onClick={async () => {
+                      await mutate({
+                        type: "setPresence",
+                        patch: {
+                          brief: {
+                            purpose: briefModalDraft.purpose.trim(),
+                            audience: briefModalDraft.audience.trim(),
+                            primaryTerritory: territoryValues(briefTerritoryText.primaryTerritory),
+                            adjacentTerritory: territoryValues(briefTerritoryText.adjacentTerritory),
+                            boundaries: territoryValues(briefTerritoryText.boundaries),
+                          },
+                        },
+                      });
+                      setBriefPreviewDraft(null);
+                      setBriefModalOpen(false);
+                      setConfirmSaveModal(false);
+                    }}
+                  >
+                    <Check size={14} /> Confirm Save to {presence.name}
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="ghost"
+                    onClick={() => setConfirmSaveModal(false)}
+                  >
+                    Cancel
+                  </Button>
+                </div>
+              )}
+            </div>
+          </div>
+        </div>
+      )}
     </div>
   );
 }
@@ -4660,26 +6006,52 @@ void LegacyAppShell;
 void OldChatView;
 void TeachView;
 
+function scheduledAssignmentIsDue(assignment: Assignment, now = new Date()) {
+  if (!["accepted", "planning", "active"].includes(assignment.status) || !assignment.schedule?.day || !assignment.schedule?.time) return false;
+  const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
+  const currentDay = days[now.getUTCDay()];
+  if (assignment.schedule.day !== "Daily" && assignment.schedule.day !== currentDay) return false;
+  const [targetHour, targetMinute] = assignment.schedule.time.split(":").map((v) => Number.parseInt(v, 10));
+  if (Number.isNaN(targetHour) || Number.isNaN(targetMinute)) return false;
+  const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const targetMinutes = targetHour * 60 + targetMinute;
+  return currentMinutes >= targetMinutes && currentMinutes <= targetMinutes + 120;
+}
+
 function LiveView({
   state,
   mutate,
   pendingOperation,
+  isSyncingNative,
+  runtimeError,
   setView,
 }: {
   state: OpenPresenceState;
   mutate: Mutate;
   pendingOperation?: string | null;
+  isSyncingNative?: boolean;
+  runtimeError?: boolean;
   setView: (view: View) => void;
 }) {
   const selected = state.presence;
   const presenceName = selected?.name ?? "this Presence";
   const paused = selected?.status === "paused";
   const waking = pendingOperation === "wakePresence";
-  const checking = pendingOperation === "runPulse" || pendingOperation === "runAttentionWorker";
+  const runtimeUnavailable = runtimeError === true;
+  const operationalHealth = useOperationalHealth(selected?.id);
+  const runtimeRecovering = operationalHealth?.status === "recovering";
+  const runtimeWaiting = operationalHealth?.status === "waiting";
+  const truthfullyPaused = paused || runtimeRecovering;
+  const nativeObservationStatus = selected ? state.nativeConnections.find((c) => c.presenceId === selected.id && c.channelId === selected.channel)?.observation?.status : undefined;
+  const isNativeSyncing = nativeObservationStatus === "syncing";
+  const checking = !runtimeUnavailable && (pendingOperation === "runPulse" || pendingOperation === "runAttentionWorker" || pendingOperation === "syncNativeX" || Boolean(isSyncingNative) || isNativeSyncing);
+  const runningAssignment = !runtimeUnavailable && pendingOperation === "runLiveAssignment";
   const activity = deriveActivitySummary(state, selected?.id);
+  const attentionPlan = compileAgendaWork(state, selected?.id);
   const [selectedContext, setSelectedContext] = useState<MirrorObject | null>(null);
   const [selectedDecisionId, setSelectedDecisionId] = useState<string | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
+  const [stoppingExecutionId, setStoppingExecutionId] = useState<string | null>(null);
   const [activityFocus, setActivityFocus] = useState<"selected" | "preparing" | null>(null);
   const [activityPage, setActivityPage] = useState(1);
   const [countdownNow, setCountdownNow] = useState<number>(() => Date.now());
@@ -4694,7 +6066,8 @@ function LiveView({
   const bridgeNextCheckAt = bridgeConnected && activityBridge?.lastHeartbeatAt
     ? (() => {
         const heartbeatAt = new Date(activityBridge.lastHeartbeatAt).getTime();
-        return Number.isFinite(heartbeatAt) ? new Date(heartbeatAt + 30_000).toISOString() : undefined;
+        const interval = intervalForPresence(selected ?? undefined);
+        return Number.isFinite(heartbeatAt) ? new Date(heartbeatAt + interval).toISOString() : undefined;
       })()
     : undefined;
   const effectiveCapabilities = selected ? derivePresenceCapabilityManifest(state, selected.id) : undefined;
@@ -4702,10 +6075,12 @@ function LiveView({
   const growthAssignment = selected ? state.assignments.find((item) => item.presenceId === selected.id && item.successEvidence?.metric === "followers" && item.status !== "cancelled") : undefined;
   const nextCheckAt = nextObservationAt ?? bridgeNextCheckAt;
   const nextCheckCountdown = formatCountdown(nextCheckAt, countdownNow);
-  const nextCheckStatus = paused
+  const nextCheckStatus = runtimeUnavailable
+    ? "Runtime unavailable"
+    : paused
     ? "Checks paused"
     : checking
-      ? undefined
+      ? "Checking now…"
       : !nextObservationAt && selected?.connectionMode === "bridge" && !bridgeConnected
         ? undefined
       : nextCheckCountdown === "now"
@@ -4732,7 +6107,7 @@ function LiveView({
   const visibleEvents = state.events.filter(
     (item) => item.presenceId === selected?.id && (activityEnvironment === "sandbox" ? (!item.sessionId || activitySessionIds.has(item.sessionId)) : !item.sessionId),
   );
-  const activityEvents = visibleEvents.filter(isActivityDecisionEvent).filter((item, index, events) => {
+  const dedupedActivityEvents = visibleEvents.filter(isActivityDecisionEvent).filter((item, index, events) => {
     const itemTime = new Date(item.time).getTime();
     return !events.slice(0, index).some((previous) => {
       const previousTime = new Date(previous.time).getTime();
@@ -4746,6 +6121,13 @@ function LiveView({
         Math.abs(previousTime - itemTime) <= 10_000;
     });
   });
+  const performanceEvidenceEvents = dedupedActivityEvents.filter((item) => item.type === "learning" && item.title === "Publication performance observed");
+  const activityEvents = performanceEvidenceEvents.length > 1
+    ? [
+        ...dedupedActivityEvents.filter((item) => !(item.type === "learning" && item.title === "Publication performance observed")),
+        { ...performanceEvidenceEvents[0], title: "Publication performance updated", detail: `${performanceEvidenceEvents.length} verified publications received new performance evidence for Growth review.` },
+      ].sort((left, right) => right.time.localeCompare(left.time))
+    : dedupedActivityEvents;
   const objectForReference = (reference?: { type: string; id: string }, sessionId?: string) =>
     reference
       ? state.mirrorObjects.find(
@@ -4822,6 +6204,14 @@ function LiveView({
     const execution = executionForActivityEvent(item);
     return item.title === "Pulse completed" && (execution?.status === "failed" || execution?.status === "blocked") ? "warning" : item.tone;
   };
+  const activityEventCategory = (item: OpenPresenceState["events"][number]) => {
+    if (/^The operator asked .+ to reply$/.test(item.title)) return "Operator request";
+    if (item.type === "decision") return "Decision";
+    if (item.type === "execution") return "Delivery";
+    if (item.type === "learning") return "Learning";
+    if (item.type === "memory") return "Relationship";
+    return "Observation";
+  };
   const decisionForEvent = (item: OpenPresenceState["events"][number]) => {
     const direct = item.decisionId ? state.socialDecisions.find((entry) => entry.id === item.decisionId) : undefined;
     if (direct) return direct;
@@ -4886,10 +6276,10 @@ function LiveView({
   const relevantExecution = state.executions
     .filter((item) => !selected?.id || (item.presenceId === selected.id && (activityEnvironment === "sandbox" ? item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && activitySessionIds.has(item.sessionId))) : item.environment !== "sandbox" && !item.sessionId)))
     .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())
-    .find((item) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing"].includes(item.status));
+    .find((item) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"].includes(item.status));
   const inFlightExecutions = state.executions
     .filter((item) => !selected?.id || (item.presenceId === selected.id && (activityEnvironment === "sandbox" ? item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && activitySessionIds.has(item.sessionId))) : item.environment !== "sandbox" && !item.sessionId)))
-    .filter((item) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing"].includes(item.status))
+    .filter((item) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"].includes(item.status))
     .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime());
   const activityActionRecords = inFlightExecutions.map((execution) => {
     const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
@@ -4902,8 +6292,20 @@ function LiveView({
       event.sourceObjectId === context?.id,
     );
     const action = formatActivityAffordance(execution.affordance ?? intent?.affordance);
-    const target = context?.author?.handle ?? context?.author?.displayName ?? (execution.target ? "the selected post" : "the selected context");
-    const targetDisplay = context?.author?.handle && !context.author.handle.startsWith("@") ? `@${context.author.handle}` : target;
+    const isSnowflake = (str?: string) => !str || /^@?\d{8,}$/.test(str.trim()) || str.startsWith("sandbox-object_");
+    const authorHandle = context?.author?.handle && !isSnowflake(context.author.handle)
+      ? (context.author.handle.startsWith("@") ? context.author.handle : `@${context.author.handle}`)
+      : undefined;
+    const authorName = context?.author?.displayName && !isSnowflake(context.author.displayName)
+      ? context.author.displayName
+      : undefined;
+    const targetDisplay = authorHandle
+      ? `to ${authorHandle}`
+      : authorName
+      ? `to ${authorName}`
+      : context?.content?.text
+      ? `to “${context.content.text.slice(0, 36)}…”`
+      : "to public post";
     return {
       execution,
       intent,
@@ -4950,25 +6352,19 @@ function LiveView({
   const latestFailedExecution = state.executions
     .filter((item) => !selected?.id || item.presenceId === selected.id)
     .filter((item) => ["failed", "blocked", "expired"].includes(item.status))
+    .filter((item) => !item.failure?.reviewedAt)
     .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())[0];
   const currentFailedExecution = latestFailedExecution && (!latestPulse || new Date(latestFailedExecution.updatedAt).getTime() >= new Date(latestPulse.time).getTime()) ? latestFailedExecution : undefined;
   const latestFailure = currentFailedExecution ? deliveryFailureExplanation(currentFailedExecution.failure, selected?.handle) : undefined;
-  const nowLabel = checking
-    ? `Checking ${channelLabel(selected?.channel ?? "x", state.channelDefinitions)} now`
+  const currentDetail = paused
+    ? `${presenceName} is asleep. Wake this Presence to resume attention.`
     : relevantExecution && actionContext
-      ? actionDescription
-      : latestFailure
-        ? latestFailure.title
-        : activity.current.label;
-  const nowDetail = checking
-    ? `Refreshing ${channelLabel(selected?.channel ?? "x", state.channelDefinitions)} context, then judging whether zero, one, or several public actions earn their place.`
-    : relevantExecution && actionContext
-      ? `${executionStatusLabel(relevantExecution.status)} · ${actionSnippet ? `“${actionSnippet.slice(0, 130)}${actionSnippet.length > 130 ? "…" : ""}”` : "The selected post is the source context."}`
-      : latestFailure
-        ? `${latestFailure.reason} ${latestFailure.consequence}`
-        : latestPulse?.detail
-          ? presenceCopy(latestPulse.detail)
-        : presenceCopy(activity.current.detail);
+    ? relevantExecution.status === "awaiting-review"
+      ? `${actionDescription} is ready for your review.`
+      : `Preparing ${actionDescription.toLowerCase()}.`
+    : activity.current.label === "Preparing to act"
+      ? `${actionName} is moving toward delivery.`
+      : presenceCopy(activity.current.detail).replace("execution envelope", "delivery");
   const judgedCount = selectedActionRecords.length || (latestPulse?.detail && /no public action|kept .* dormant|silence/i.test(latestPulse.detail) ? 0 : undefined);
   const actLabel = inFlightExecutions.length
     ? `${inFlightExecutions.length} preparing`
@@ -4984,13 +6380,85 @@ function LiveView({
       : state.outcomes.some((item) => item.presenceId === selected?.id && item.status === "succeeded")
         ? "Verified"
         : "None";
-  const currentDetail = relevantExecution && actionContext
-    ? relevantExecution.status === "awaiting-review"
-      ? `${actionDescription} is ready for your review.`
-      : `Preparing ${actionDescription.toLowerCase()}.`
-    : activity.current.label === "Preparing to act"
-      ? `${actionName} is moving toward delivery.`
-      : presenceCopy(activity.current.detail).replace("execution envelope", "delivery");
+  const [activeSubtab, setActiveSubtab] = useState<"activity" | "queue" | "assignments" | "failures">("activity");
+  const scopedAssignments = state.assignments.filter(
+    (item) =>
+      (!selected?.id || item.presenceId === selected.id) &&
+      (activityEnvironment === "sandbox"
+        ? item.environment === "sandbox" && (!item.sessionId || activitySessionIds.has(item.sessionId))
+        : item.environment !== "sandbox" && !item.sessionId)
+  );
+  const openAssignments = scopedAssignments.filter((item) => !["completed", "completed_with_adaptation", "cancelled"].includes(item.status));
+  const activeOrInProgressAssignment = openAssignments.find((item) => ["working", "active", "awaiting_execution"].includes(item.status))
+    ?? openAssignments.find((item) => scheduledAssignmentIsDue(item))
+    ?? openAssignments[0];
+  const stopActiveTrial = async (trial: OpenPresenceState["capabilityTrials"][number]) => {
+    if (!window.confirm("Stop this capability trial? This stops future discovery, candidate evaluation, and new trial actions. Any action already sent will continue to be verified.")) return;
+    await mutate({ type: "cancelCapabilityTrial", id: trial.id });
+  };
+  const stopActiveAssignment = async () => {
+    if (!activeOrInProgressAssignment) return;
+    if (!window.confirm("Cancel this assignment? This removes future responsibility while retaining history. Any action already sent will continue to be verified.")) return;
+    await mutate({ type: "cancelAssignment", id: activeOrInProgressAssignment.id });
+  };
+  const [cancellingAll, setCancellingAll] = useState(false);
+  const cancelPreDispatchExecution = async (execution: OpenPresenceState["executions"][number]) => {
+    if (stoppingExecutionId === execution.id) return;
+    if (!window.confirm("Cancel this action before it is sent? No delivery will be attempted.")) return;
+    setStoppingExecutionId(execution.id);
+    try { await mutate({ type: "cancelExecution", id: execution.id }); } finally { setStoppingExecutionId(null); }
+  };
+  const cancelAllPreDispatchExecutions = async () => {
+    const preDispatch = activityActionRecords
+      .map((r) => r.execution)
+      .filter((e) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued"].includes(e.status));
+    if (!preDispatch.length || cancellingAll) return;
+    if (!window.confirm(`Cancel all ${preDispatch.length} pending actions at once? None of them will be sent.`)) return;
+    setCancellingAll(true);
+    try {
+      for (const exec of preDispatch) {
+        await mutate({ type: "cancelExecution", id: exec.id });
+      }
+    } finally {
+      setCancellingAll(false);
+    }
+  };
+  const stopExecution = async (execution: OpenPresenceState["executions"][number]) => {
+    if (!executionCanBeStopped(execution.status) || stoppingExecutionId === execution.id) return;
+    const unresolved = execution.status === "verification-pending" || execution.status === "claimed" || execution.status === "executing";
+    const message = unresolved
+      ? "Stop this action and close its unresolved delivery state? No retry will be attempted, but this cannot undo an action X may already have accepted. Check X before trying again."
+      : "Cancel this action before it is sent? No new delivery will be attempted.";
+    if (!window.confirm(message)) return;
+    setStoppingExecutionId(execution.id);
+    try { await mutate({ type: "cancelExecution", id: execution.id }); } finally { setStoppingExecutionId(null); }
+  };
+
+  const scopedExecutions = state.executions.filter(
+    (item) =>
+      (!selected?.id || item.presenceId === selected.id) &&
+      (activityEnvironment === "sandbox"
+        ? item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && activitySessionIds.has(item.sessionId)))
+        : item.environment !== "sandbox" && !item.sessionId)
+  );
+  const unresolvedFailures = scopedExecutions.filter(
+    (item) => ["failed", "blocked", "expired"].includes(item.status) && !item.failure?.reviewedAt
+  );
+  const pendingExecutionsList = scopedExecutions.filter(
+    (item) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"].includes(item.status)
+  );
+
+  const activeCapabilityTrial = (state.capabilityTrials ?? []).find((trial) =>
+    (!selected?.id || trial.presenceId === selected.id) &&
+    ["draft", "preflight", "active", "discovering", "judging", "awaiting_execution", "awaiting_verification"].includes(trial.status) &&
+    (!trial.expiresAt || new Date(trial.expiresAt).getTime() > Date.now()) &&
+    (activityEnvironment === "sandbox" ? trial.environment === "sandbox" : trial.environment !== "sandbox")
+  );
+  const activeTrialAssignment = activeCapabilityTrial?.assignmentId
+    ? state.assignments.find((item) => item.id === activeCapabilityTrial.assignmentId)
+    : undefined;
+  const currentFocusAssignment = activeTrialAssignment ?? activeOrInProgressAssignment;
+
   return (
     <div className="page activity-page">
       <PageHeader
@@ -5014,10 +6482,10 @@ function LiveView({
               <Button
                 onClick={() => mutate({ type: "runPulse", presenceId: selected?.id })}
                 variant="primary"
-                disabled={checking}
+                disabled={checking || runningAssignment}
                 title="Look at the channel now and decide whether anything is worth doing."
               >
-                <Play size={15} /> {checking ? "Checking now…" : "Check now"}
+                <Play size={15} /> {runningAssignment ? "Working on assignment…" : checking ? "Checking now…" : "Check now"}
               </Button>
               <Button
                 onClick={() => mutate({ type: "setPresence", patch: { status: "paused" } })}
@@ -5029,215 +6497,872 @@ function LiveView({
           )}
         </>}
         />
-      {selected && <section className="activity-now-panel" aria-label={`What ${presenceName} is doing now`}>
-        <div className="activity-now-heading">
-          <div>
-            <SectionEyebrow>What {presenceName} is doing now</SectionEyebrow>
-            <h2>{nowLabel}</h2>
-            <p>{nowDetail}</p>
-          </div>
-          <div className="activity-now-meta">
-            <span className={`live-pill ${paused ? "activity-pill-paused" : ""}`}><span className="status-dot" /> {paused ? "Paused" : checking ? "Running" : "Live"}</span>
-            <small>{activity.lastPulseAt ? `Last check ${formatTime(activity.lastPulseAt)}` : "No check completed yet"}</small>
-          </div>
-        </div>
-        <div className="activity-now-grid">
-          <button type="button" className="activity-now-next" onClick={() => actionContext ? setSelectedContext(actionContext) : document.getElementById("decision-and-action")?.scrollIntoView({ behavior: "smooth", block: "center" })}>
-            <SectionEyebrow>Next public action</SectionEyebrow>
-            <strong>{relevantExecution && actionContext ? actionDescription : currentFailedExecution ? "No action until delivery is fixed" : "No public action queued"}</strong>
-            <span>{relevantExecution && actionContext ? "Open the source post or delivery state." : currentFailedExecution && latestFailure ? latestFailure.fix : "A check can end in silence. Nothing is sent unless the Presence selects an action and the connector can verify it."}</span>
-            <em>{relevantExecution && actionContext ? "View action" : "Open decision & action"} <ArrowUpRight size={13} /></em>
-          </button>
-          <div className="activity-now-scope">
-            <SectionEyebrow>Check scope</SectionEyebrow>
-            <strong>Observe → judge → act → verify</strong>
-            <span>Check now refreshes channel context and makes a judgment. It does not force a post; one check may create zero, one, or several actions.</span>
-          </div>
-        </div>
-        <div className="activity-pipeline" aria-label="Autonomy pipeline">
-          <button type="button" onClick={() => document.getElementById("observed-context")?.scrollIntoView({ behavior: "smooth", block: "start" })}><small>1 · OBSERVE</small><strong>{observedPostCount !== undefined ? `${observedPostCount} posts` : "Context"}</strong><span>{observedMentionCount !== undefined ? `${observedMentionCount} mentions` : "Latest channel read"}</span></button>
-          <span className="activity-pipeline-arrow" aria-hidden="true">→</span>
-          <button type="button" className={activityFocus === "selected" ? "activity-pipeline-focus" : undefined} aria-pressed={activityFocus === "selected"} onClick={() => openActivityFocus("selected")}><small>2 · JUDGE</small><strong>{judgedCount === undefined ? "Reviewing" : `${judgedCount} selected`}</strong><span>{judgedCount === 0 ? "No public action" : "See selected decisions"}</span></button>
-          <span className="activity-pipeline-arrow" aria-hidden="true">→</span>
-          <button type="button" className={activityFocus === "preparing" ? "activity-pipeline-focus" : undefined} aria-pressed={activityFocus === "preparing"} onClick={() => openActivityFocus("preparing")}><small>3 · ACT</small><strong>{actLabel}</strong><span>{inFlightExecutions.length > 1 ? "See the actions being prepared" : "See execution state"}</span></button>
-          <span className="activity-pipeline-arrow" aria-hidden="true">→</span>
-          <button type="button" onClick={() => document.getElementById("decision-and-action")?.scrollIntoView({ behavior: "smooth", block: "start" })}><small>4 · VERIFY</small><strong>{verifyLabel}</strong><span>Only confirmed results count</span></button>
-        </div>
-      </section>}
-      {selected && <section className="activity-autonomy-strip" aria-label="Autonomy status"><div><SectionEyebrow>Autonomy</SectionEyebrow><strong>{growthAssignment ? `Working toward ${growthAssignment.successEvidence?.value.toLocaleString()} followers` : "No continuous growth responsibility"}</strong><span>{effectiveCapabilities?.bodyStatus === "ready" ? "Body ready" : effectiveCapabilities?.bodyStatus === "degraded" ? "Body degraded" : "Body unavailable"} · {effectiveCapabilities ? [...new Set(effectiveCapabilities.items.filter((item) => item.availability === "available" && item.provider).map((item) => item.provider))].join(" + ") || (selected.connectionMode === "sandbox" ? "Sandbox" : "No active provider") : "No active provider"} · {effectiveCapabilities?.items.find((item) => item.capability === "follower_measurement")?.availability === "available" ? "Follower observation available" : "Follower observation unavailable"}</span></div><Button variant="ghost" onClick={() => setView(growthAssignment ? "growth" : "schedule")}>{growthAssignment ? "Open Growth" : "Set growth responsibility"}</Button></section>}
-      {bridgeNeedsAttention && (
-        <div className="activity-connection-notice" role="status" aria-live="polite">
-          <CircleAlert size={17} aria-hidden="true" />
-          <div>
-            <strong>Chrome connection needed</strong>
-            <span>{activityBridge ? "The controlled Chrome tab is no longer connected." : "Connect the OpenPresence Chrome extension for this Presence."}</span>
-          </div>
-          <button type="button" className="activity-connection-notice-action" onClick={() => setView("presence")}>Open Settings</button>
-        </div>
-      )}
-      {activity.needsAttention.count > 0 && (
-        <section className="activity-attention" aria-label="Needs your attention">
-          <div className="activity-attention-icon"><CircleAlert size={19} /></div>
-          <div className="activity-attention-copy">
-            <SectionEyebrow>Needs your attention</SectionEyebrow>
-            <h2>{activity.needsAttention.count} action{activity.needsAttention.count === 1 ? "" : "s"} waiting for you.</h2>
-            <p>Review the latest decision before it is delivered. Your approval changes execution, not {presenceName}&apos;s judgment.</p>
-          </div>
-          <a className="button button-secondary activity-attention-link" href="#decision-and-action">Open review</a>
-        </section>
-      )}
-      {selected?.channel === "x" && <BringXPost state={state} mutate={mutate} presenceId={selected.id} presenceName={presenceName} />}
-      <div className="activity-main-grid">
-        <div className="activity-left-column">
-          <MirrorPanel state={state} mutate={mutate} filter={selected?.id ?? "all"} channelId={selected?.channel} environment={activityEnvironment} sessionIds={activitySessionIds} onContext={setSelectedContext} />
-          <section className="event-stream activity-log" id="recent-activity">
-            <div className="section-heading">
-              <div>
-                <SectionEyebrow>Recent activity</SectionEyebrow>
-                <h2>{activityFocus ? (activityFocus === "selected" ? "Selected decisions" : "Actions being prepared") : `What ${presenceName} decided`}</h2>
-              </div>
-              <span className="quiet-label">{paused ? "Presence asleep" : activityFocus ? `${focusedActionRecords.length} linked action${focusedActionRecords.length === 1 ? "" : "s"}` : `${activityEvents.length} recorded event${activityEvents.length === 1 ? "" : "s"}`}</span>
-            </div>
-            {activityFocus && (
-              <section className={`activity-focus-panel activity-focus-${activityFocus}`} aria-live="polite" aria-label={activityFocus === "selected" ? "Selected decisions from the latest check" : "Actions being prepared from the latest check"}>
-                <div className="activity-focus-heading">
-                  <div>
-                    <span className="activity-focus-kicker">{activityFocus === "selected" ? "JUDGE · SELECTED" : "ACT · PREPARING"}</span>
-                    <strong>{focusedActionRecords.length} {activityFocus === "selected" ? "decision" : "action"}{focusedActionRecords.length === 1 ? "" : "s"} from this check</strong>
-                    <p>{activityFocus === "selected" ? "These are the actions Genny selected after reviewing the observed context." : "These are the selected actions currently moving through the delivery envelope. Preparing does not mean delivered."}</p>
-                  </div>
-                  <button type="button" className="activity-focus-clear" onClick={() => { setActivityFocus(null); setActivityPage(1); }}>Show all activity</button>
-                </div>
-                {focusedActionRecords.length > 0 ? (
-                  <div className="activity-focus-list">
-                    {focusedActionRecords.map((record) => (
-                      <article className="activity-focus-card" key={record.execution.id}>
-                        <span className="activity-focus-marker" aria-hidden="true" />
-                        <div className="activity-focus-card-copy">
-                          <div className="activity-focus-card-meta">
-                            <span className="activity-state-chip">{activityFocus === "selected" ? "Selected" : "Preparing"}</span>
-                            <span>{record.action}</span>
-                            <span>{activityFocus === "selected" ? executionStatusLabel(record.execution.status) : executionStatusLabel(record.execution.status)}</span>
-                          </div>
-                          <h3>{record.action} {record.targetDisplay}</h3>
-                          {record.snippet && <p>“{record.snippet.slice(0, 180)}{record.snippet.length > 180 ? "…" : ""}”</p>}
-                          <small>{record.decision?.summary ?? "The selected intent is linked to this delivery."}</small>
+
+      {/* Unified Right-Now: Current Focus (Mind) + In Flight (Body) */}
+      {selected && (
+        <div className="activity-right-now-container">
+          {/* 1. Single Current Focus for Cognition */}
+          {(() => {
+            if (activeCapabilityTrial) {
+              const trialExecutions = state.executions.filter((item) => item.capabilityTrialId === activeCapabilityTrial.id || (activeCapabilityTrial.assignmentId && item.assignmentId === activeCapabilityTrial.assignmentId));
+              const inFlightTrialExecution = trialExecutions.find((item) =>
+                ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"].includes(item.status)
+              );
+              const totalRequired = 1;
+              const verifiedCount = state.outcomes.filter((item) => item.presenceId === selected.id && trialExecutions.some((e) => e.id === item.executionId) && item.status === "succeeded").length;
+              const isExclusive = Boolean(activeCapabilityTrial.executionIsolation?.suppressOtherTrialActs);
+
+              const currentStageIndex = (() => {
+                if (verifiedCount >= totalRequired || activeCapabilityTrial.status === "completed") return 4;
+                if (inFlightTrialExecution?.status === "verification-pending") return 4;
+                if (inFlightTrialExecution) return 3;
+                if (activeCapabilityTrial.status === "judging" || activeCapabilityTrial.candidateAudits.length > 0) return 2;
+                return 1;
+              })();
+
+              const mindSummary = paused
+                ? `${presenceName} was evaluating candidate opportunities against its editorial taste. It will resume when attention wakes.`
+                : checking
+                ? `Checking ${channelLabel(selected.channel, state.channelDefinitions)} context and evaluating ${activeCapabilityTrial.capability} opportunities…`
+                : inFlightTrialExecution
+                ? inFlightTrialExecution.status === "awaiting-review"
+                  ? `Trial candidate drafted and ready for your review before delivery.`
+                  : inFlightTrialExecution.status === "verification-pending"
+                  ? `Delivered to ${channelLabel(selected.channel, state.channelDefinitions)} · Awaiting confirmation in Social Mirror…`
+                  : `Preparing ${activeCapabilityTrial.capability} execution…`
+                : activeCapabilityTrial.status === "judging"
+                ? `Evaluating candidate opportunities against editorial taste…`
+                : `Discovering candidate ${activeCapabilityTrial.capability} opportunities in the Social Mirror…`;
+
+              const assignmentStages = [
+                {
+                  id: "observe",
+                  num: 1,
+                  name: "1 · OBSERVE & SOURCE",
+                  state: currentStageIndex > 1 ? "completed" : currentStageIndex === 1 ? (paused ? "paused" : "active") : "upcoming",
+                  detail: observedPostCount !== undefined ? `${observedPostCount} posts · ${observedMentionCount || 0} mentions` : "Channel read & leads",
+                },
+                {
+                  id: "judge",
+                  num: 2,
+                  name: "2 · JUDGE & SELECT",
+                  state: currentStageIndex > 2 ? "completed" : currentStageIndex === 2 ? (paused ? "paused" : "active") : "upcoming",
+                  detail: paused && currentStageIndex === 2 ? "Paused while judging" : currentStageIndex === 2 ? "Evaluating candidates" : "Filter against taste",
+                },
+                {
+                  id: "act",
+                  num: 3,
+                  name: "3 · DRAFT & DELIVER",
+                  state: currentStageIndex > 3 ? "completed" : currentStageIndex === 3 ? (paused ? "paused" : "active") : "upcoming",
+                  detail: inFlightTrialExecution ? executionStatusLabel(inFlightTrialExecution.status) : currentStageIndex === 3 ? "Preparing expression" : "Compose & route",
+                },
+                {
+                  id: "verify",
+                  num: 4,
+                  name: "4 · VERIFY OUTCOME",
+                  state: verifiedCount >= totalRequired || activeCapabilityTrial.status === "completed" ? "completed" : currentStageIndex === 4 ? (paused ? "paused" : "active") : "upcoming",
+                  detail: `${verifiedCount} / ${totalRequired} verified in Mirror`,
+                },
+              ];
+
+              return (
+                 <section className={`now-assignment-banner is-trial ${truthfullyPaused ? "is-paused" : ""}`} aria-label="Current cognitive focus: Capability trial">
+                  <div className="now-assignment-header">
+                    <div className="now-assignment-header-left">
+                      <div className="now-assignment-icon" aria-hidden="true">
+                        <FlaskConical size={16} />
+                      </div>
+                      <div className="now-assignment-header-meta">
+                        <div className="now-assignment-topline">
+                          <span className="now-assignment-tag">Current Focus · Capability trial · {activeCapabilityTrial.capability}</span>
+                           <span className="now-assignment-status">{runtimeRecovering ? "PAUSED · RUNTIME RECOVERING" : paused ? "Paused" : activeCapabilityTrial.status.replaceAll("_", " ")}</span>
+                          <span className="now-assignment-deliverable-badge">
+                            <Check size={11} /> {verifiedCount} / {totalRequired} verified
+                          </span>
                         </div>
-                        {record.context && <button type="button" className="activity-focus-context" onClick={() => setSelectedContext(record.context!)}>View source</button>}
-                      </article>
+                        <strong className="now-assignment-title">Capability trial · {activeCapabilityTrial.capability.replace("_", " ")}</strong>
+                      </div>
+                    </div>
+                    <div className="now-assignment-actions">
+                      {activeTrialAssignment && (
+                        <button type="button" className="now-assignment-btn" onClick={() => setActiveSubtab("assignments")}>
+                          View in Assignments →
+                        </button>
+                      )}
+                      {paused ? (
+                        <span className="now-assignment-action-note">Paused · wake {presenceName} above to resume</span>
+                      ) : null}
+                      <Button
+                        variant="danger"
+                        onClick={() => void stopActiveTrial(activeCapabilityTrial)}
+                        title="Stop this trial and prevent further candidate discovery."
+                      >
+                        <X size={13} /> Stop trial
+                      </Button>
+                    </div>
+                  </div>
+
+                  <div className="activity-trial-isolation" role="note">
+                    <ShieldCheck size={16} aria-hidden="true" style={{ flex: "0 0 16px", marginTop: "1px" }} />
+                    <div>
+                      <strong>Trial isolation · {isExclusive ? "Exclusive" : "Concurrent"}</strong>
+                      <p>
+                        {isExclusive
+                          ? `Only ${activeCapabilityTrial.capability.replace("_", " ")} actions originating from this trial may execute. Other ordinary responsibilities remain visible in Agenda, but new public actions are deferred until the trial ends.`
+                          : `${activeCapabilityTrial.capability.replace("_", " ")} is the capability under test. Normal ${presenceName} work may continue concurrently.`}
+                      </p>
+                    </div>
+                  </div>
+
+                  <div className="now-assignment-activity-row">
+                    <div className="now-assignment-current-action">
+                         <span className={truthfullyPaused ? "now-assignment-paused-dot" : "now-assignment-pulse-dot"} aria-hidden="true" />
+                      <div className="now-assignment-action-text">
+                           <span className="now-assignment-action-label">{runtimeRecovering ? "PAUSED · RUNTIME RECOVERING" : paused ? "Mind state · Paused" : "Agent is currently"}</span>
+                        <p><strong>{mindSummary}</strong></p>
+                      </div>
+                    </div>
+
+                    <div className="now-assignment-active-item">
+                      <span className="now-assignment-item-badge">Deliverable Goal</span>
+                      <div className="now-assignment-item-content">
+                        <span className="now-assignment-item-author">Item 1 of 1</span>
+                        <p className="now-assignment-item-snippet">Capability trial: discover the opportunity and judge it naturally before deciding.</p>
+                      </div>
+                    </div>
+                  </div>
+
+                  <div className="now-assignment-stepper" aria-label="Trial progression stages">
+                    {assignmentStages.map((stage) => (
+                      <div
+                        key={stage.id}
+                        className={`now-assignment-step ${stage.state === "completed" ? "is-completed" : stage.state === "active" ? "is-active" : stage.state === "paused" ? "is-paused" : "is-upcoming"}`}
+                      >
+                        <div className="now-assignment-step-indicator">
+                          {stage.state === "completed" ? (
+                            <span className="step-badge step-badge-completed"><Check size={10} /></span>
+                          ) : stage.state === "active" ? (
+                            <span className="step-badge step-badge-active"><span className="step-active-dot" /></span>
+                          ) : stage.state === "paused" ? (
+                            <span className="step-badge step-badge-active"><Pause size={8} /></span>
+                          ) : (
+                            <span className="step-badge step-badge-upcoming">{stage.num}</span>
+                          )}
+                          <span className="step-name">{stage.state === "paused" ? `${stage.num} · ${stage.id.toUpperCase()} · PAUSED` : stage.name}</span>
+                        </div>
+                        <div className="step-detail">{stage.detail}</div>
+                      </div>
                     ))}
                   </div>
-                ) : (
-                  <div className="activity-focus-empty">No public action was selected in the latest check.</div>
-                )}
-              </section>
-            )}
-            {activityFocus && displayedActivityEvents.length > 0 && <div className="activity-related-heading"><span>Linked activity</span><small>Only events tied to the selected actions are shown.</small></div>}
-            {displayedActivityEvents.length === 0 ? (
-              <EmptyState
-                title={activityFocus ? "No linked activity event yet" : "No Presence decisions yet"}
-                body={paused ? `${presenceName} is asleep. Wake this Presence to begin a first attention cycle.` : activityFocus ? "The action record above is the source of truth; its event will appear here when the runtime records the next decision or delivery update." : "Activity will show what this Presence observed, chose, and delivered. Settings changes stay in Settings."}
-                action={
-                  <Button
-                    onClick={() => mutate(paused ? { type: "wakePresence", presenceId: selected?.id } : { type: "runPulse", presenceId: selected?.id })}
-                    variant="secondary"
-                    disabled={waking || checking}
-                    title={paused ? `Wake up ${presenceName} and begin a first attention cycle.` : "Look at the channel now."}
-                  >
-                    <Play size={14} /> {paused ? (waking ? `Waking ${presenceName}…` : `Wake up ${presenceName}`) : (checking ? "Checking now…" : "Check now")}
-                  </Button>
-                }
-              />
-            ) : (
-              <>
-              <div className="event-list">
-                  {paginatedActivityEvents.map((item) => (
-                  <div className="event-row-shell" key={item.id}>
-                    <button className="event-row event-row-button" type="button" data-event-id={item.id} onClick={() => setSelectedEventId((current) => current === item.id ? null : item.id)} aria-expanded={selectedEventId === item.id} aria-label={`View details for ${presenceCopy(item.title)}`}>
-                      <div className={`event-icon tone-${activityEventTone(item)}`}>
-                        {item.type === "execution" ? <ArrowUpRight size={15} /> : item.type === "learning" ? <Sparkles size={15} /> : item.type === "memory" ? <Brain size={15} /> : <Circle size={9} fill="currentColor" />}
+                </section>
+              );
+            }
+
+            if (currentFocusAssignment) {
+              const assignmentExecutions = state.executions.filter((item) => item.assignmentId === currentFocusAssignment.id);
+              const assignmentIntents = state.socialIntents.filter((item) => item.assignmentId === currentFocusAssignment.id);
+              const inFlightAssignmentExecution = assignmentExecutions.find((item) =>
+                ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"].includes(item.status)
+              );
+              const assignmentNeedsReview = ["awaiting_review", "needs_operator"].includes(currentFocusAssignment.status);
+              const assignmentIsWorking = runningAssignment || checking || currentFocusAssignment.status === "working" || Boolean(inFlightAssignmentExecution) || ["researching", "visual_research", "publishing"].includes(currentFocusAssignment.work?.phase ?? "");
+              const activeAssignmentIntent = assignmentIntents.find((item) => item.state === "active") ?? assignmentIntents[assignmentIntents.length - 1];
+              const targetEntity = inFlightAssignmentExecution?.target ?? activeAssignmentIntent?.target;
+              const targetMirrorObject = targetEntity
+                ? state.mirrorObjects.find((item) => item.externalRef.type === targetEntity.type && item.externalRef.id === targetEntity.id)
+                : undefined;
+              const targetHandle = targetMirrorObject?.author?.handle
+                ? (targetMirrorObject.author.handle.startsWith("@") ? targetMirrorObject.author.handle : `@${targetMirrorObject.author.handle}`)
+                : targetMirrorObject?.author?.displayName;
+              const targetSnippet = targetMirrorObject?.content?.text?.trim();
+              const activeIntentPub = activeAssignmentIntent?.publicationId ? state.publications.find((item) => item.id === activeAssignmentIntent.publicationId) : undefined;
+              const draftContent = (inFlightAssignmentExecution?.publication?.payload && typeof inFlightAssignmentExecution.publication.payload === "object" && "text" in inFlightAssignmentExecution.publication.payload)
+                ? String(inFlightAssignmentExecution.publication.payload.text)
+                : (activeIntentPub?.payload && typeof activeIntentPub.payload === "object" && "text" in activeIntentPub.payload)
+                  ? String(activeIntentPub.payload.text)
+                  : activeIntentPub?.publicExpression?.text;
+              const totalRequired = Math.max(currentFocusAssignment.progress?.required || 1, 1);
+              const verifiedCount = currentFocusAssignment.progress?.verified || 0;
+              const latestStory = currentFocusAssignment.storyResearch?.[currentFocusAssignment.storyResearch.length - 1];
+              const primaryTopic = currentFocusAssignment.editorialContext?.topics?.[0] ?? currentFocusAssignment.plan?.dailyTargets?.[0];
+              const deliverableKind = currentFocusAssignment.deliverable?.type ?? (currentFocusAssignment.instruction.toLowerCase().includes("reply") ? "reply" : "post");
+
+              const currentStageIndex = (() => {
+                if (verifiedCount >= totalRequired || ["completed", "completed_with_adaptation"].includes(currentFocusAssignment.status)) return 4;
+                if (inFlightAssignmentExecution?.status === "verification-pending") return 4;
+                if (inFlightAssignmentExecution || draftContent) return 3;
+                if (targetMirrorObject || activeAssignmentIntent || currentFocusAssignment.work?.phase === "candidate_review") return 2;
+                return 1;
+              })();
+
+              const mindSummary = paused
+                ? `${presenceName} was working on this responsibility. It will resume when attention wakes.`
+                : checking
+                ? `Checking channel context and evaluating opportunities for this assignment…`
+                : inFlightAssignmentExecution
+                ? inFlightAssignmentExecution.status === "awaiting-review"
+                  ? `Draft authored and ready for review before delivery.`
+                  : inFlightAssignmentExecution.status === "verification-pending"
+                  ? `Delivered to ${channelLabel(selected.channel, state.channelDefinitions)} · Awaiting confirmation in Social Mirror…`
+                  : ["claimed", "executing"].includes(inFlightAssignmentExecution.status)
+                  ? `Delivering ${inFlightAssignmentExecution.affordance.replace(/^x\./, "")} through connector…`
+                  : `Preparing ${inFlightAssignmentExecution.affordance.replace(/^x\./, "")} for execution…`
+                : currentFocusAssignment.work?.phase === "visual_research"
+                ? `Researching visual evidence and verifying asset provenance…`
+                : currentFocusAssignment.work?.phase === "candidate_review"
+                ? `Evaluating candidate opportunities against editorial taste…`
+                : currentFocusAssignment.work?.phase === "researching"
+                ? `Researching topics and discovering relevant channel leads…`
+                : targetMirrorObject
+                ? `Evaluating social response to ${targetHandle ?? "observed post"}…`
+                : currentFocusAssignment.lastOutcome?.message ?? `Actively prioritized by ${presenceName} during attention checks.`;
+
+              const activeItemDetails = targetMirrorObject
+                ? { badge: "Target Post", headline: `Reply to ${targetHandle ?? "observed post"}`, snippet: targetSnippet ? `“${targetSnippet.slice(0, 130)}${targetSnippet.length > 130 ? "…" : ""}”` : "Channel post selected as context.", hasContext: true, object: targetMirrorObject }
+                : draftContent
+                ? { badge: "Draft in Progress", headline: `${deliverableKind === "reply" ? "Reply" : "Post"} draft`, snippet: `“${draftContent.slice(0, 130)}${draftContent.length > 130 ? "…" : ""}”`, hasContext: false, object: undefined }
+                : latestStory
+                ? { badge: "Topic Research", headline: `Query: “${latestStory.query}”`, snippet: `${latestStory.resultCount} source${latestStory.resultCount === 1 ? "" : "s"} found${latestStory.sources?.[0]?.title ? ` · ${latestStory.sources[0].title}` : ""}`, hasContext: false, object: undefined }
+                : primaryTopic
+                ? { badge: "Editorial Focus", headline: `Focus topic`, snippet: `“${primaryTopic}”`, hasContext: false, object: undefined }
+                : { badge: "Deliverable Goal", headline: `Item ${Math.min(verifiedCount + 1, totalRequired)} of ${totalRequired}`, snippet: currentFocusAssignment.objective ?? cleanUserFacingAssignmentInstruction(currentFocusAssignment.instruction), hasContext: false, object: undefined };
+
+              const assignmentStages = [
+                {
+                  id: "observe",
+                  num: 1,
+                  name: "1 · OBSERVE & SOURCE",
+                  state: currentStageIndex > 1 ? "completed" : currentStageIndex === 1 ? (paused ? "paused" : "active") : "upcoming",
+                  detail: observedPostCount !== undefined ? `${observedPostCount} posts · ${observedMentionCount || 0} mentions` : latestStory ? `Researched “${latestStory.query.slice(0, 18)}…”` : "Channel read & leads",
+                },
+                {
+                  id: "judge",
+                  num: 2,
+                  name: "2 · JUDGE & SELECT",
+                  state: currentStageIndex > 2 ? "completed" : currentStageIndex === 2 ? (paused ? "paused" : "active") : "upcoming",
+                  detail: targetHandle ? `Target: ${targetHandle}` : activeAssignmentIntent ? `Intent: ${activeAssignmentIntent.affordance.replace(/^x\./, "")}` : paused && currentStageIndex === 2 ? "Paused while judging" : currentStageIndex === 2 ? "Evaluating candidates" : "Filter against taste",
+                },
+                {
+                  id: "act",
+                  num: 3,
+                  name: "3 · DRAFT & DELIVER",
+                  state: currentStageIndex > 3 ? "completed" : currentStageIndex === 3 ? (paused ? "paused" : "active") : "upcoming",
+                  detail: inFlightAssignmentExecution ? executionStatusLabel(inFlightAssignmentExecution.status) : draftContent ? "Draft ready" : currentStageIndex === 3 ? "Preparing expression" : "Compose & route",
+                },
+                {
+                  id: "verify",
+                  num: 4,
+                  name: "4 · VERIFY OUTCOME",
+                  state: verifiedCount >= totalRequired || currentFocusAssignment.status === "completed" ? "completed" : currentStageIndex === 4 ? (paused ? "paused" : "active") : "upcoming",
+                  detail: `${verifiedCount} / ${totalRequired} verified in Mirror`,
+                },
+              ];
+
+              return (
+                 <section className={`now-assignment-banner ${truthfullyPaused ? "is-paused" : ""}`} aria-label="Current active responsibility">
+                  <div className="now-assignment-header">
+                    <div className="now-assignment-header-left">
+                      <div className="now-assignment-icon" aria-hidden="true">
+                        <BriefcaseBusiness size={16} />
                       </div>
-                      <div className="event-copy">
-                        <div className="event-title">{presenceCopy(item.title)}<span>{formatTime(item.time)}</span></div>
-                        <ActivityEventDetail text={presenceCopy(item.detail)} />
-                        <div className="event-row-hint">{selectedEventId === item.id ? "Hide details" : "View details"}</div>
+                      <div className="now-assignment-header-meta">
+                        <div className="now-assignment-topline">
+                          <span className="now-assignment-tag">Current Focus · Assignment in progress</span>
+                           <span className="now-assignment-status">{runtimeRecovering ? "PAUSED · RUNTIME RECOVERING" : paused ? "Paused" : currentFocusAssignment.status.replaceAll("_", " ")}</span>
+                          <span className="now-assignment-deliverable-badge">
+                            <Check size={11} /> {verifiedCount} / {totalRequired} verified
+                          </span>
+                          {currentFocusAssignment.schedule && (
+                            <span className="quiet-label">{currentFocusAssignment.schedule.day} at {currentFocusAssignment.schedule.time}</span>
+                          )}
+                        </div>
+                        <strong className="now-assignment-title">{currentFocusAssignment.title ?? cleanUserFacingAssignmentInstruction(currentFocusAssignment.instruction)}</strong>
                       </div>
-                    </button>
-                    {selectedEventId === item.id && <div className="activity-event-detail-panel" role="region" aria-label={`Details for ${presenceCopy(item.title)}`}>
-                      <ActivityDecisionTrace trace={decisionTraceForEvent(item)} />
-                      {explorationFindingForEvent(item) && <div className="event-finding-preview" aria-label="Exploration finding"><span>Finding</span><strong>{explorationFindingForEvent(item)!.safeSummary}</strong><small>Why it matters · {explorationFindingForEvent(item)!.whyItMayMatter}</small></div>}
-                      {contextForEvent(item) && <button type="button" className="event-context-preview event-context-preview-button" onClick={() => setSelectedContext(contextForEvent(item)!)}><span>Source</span><strong>{(contextForEvent(item)!.content?.text ?? "Open the observed post").slice(0, 112)}{(contextForEvent(item)!.content?.text?.length ?? 0) > 112 ? "…" : ""}</strong><em>View post</em></button>}
-                    </div>}
-                    {decisionForEvent(item) && (
-                      <>
-                        <button
-                          type="button"
-                          className="event-why-button"
-                          aria-expanded={selectedDecisionId === decisionForEvent(item)!.id}
-                          onClick={() => setSelectedDecisionId((current) => current === decisionForEvent(item)!.id ? null : decisionForEvent(item)!.id)}
+                    </div>
+                    <div className="now-assignment-actions">
+                      <button type="button" className="now-assignment-btn" onClick={() => setActiveSubtab("assignments")}>
+                        View in Assignments →
+                      </button>
+                      {assignmentNeedsReview ? (
+                        <span className="now-assignment-action-note">Needs your review · open Assignments</span>
+                      ) : paused ? (
+                        <span className="now-assignment-action-note">Paused · wake {presenceName} above to continue</span>
+                      ) : (
+                        <Button
+                          variant="danger"
+                          onClick={() => void stopActiveAssignment()}
+                          title="Cancel this Assignment and prevent future delivery attempts."
                         >
-                          {selectedDecisionId === decisionForEvent(item)!.id ? "Hide why" : "Why this action?"}
-                        </button>
-                        {selectedDecisionId === decisionForEvent(item)!.id && (
-                          <ActivityDecisionDisclosure
-                            decision={decisionForEvent(item)!}
-                            evidence={contextForEvent(item)}
-                            intent={item.intentId ? state.socialIntents.find((entry) => entry.id === item.intentId) : undefined}
-                            execution={executionForActivityEvent(item)}
-                            outcome={executionForActivityEvent(item) ? state.outcomes.find((entry) => entry.executionId === executionForActivityEvent(item)!.id) : undefined}
-                            onClose={() => setSelectedDecisionId(null)}
-                          />
-                        )}
-                      </>
+                          <X size={13} /> Cancel assignment
+                        </Button>
+                      )}
+                    </div>
+                  </div>
+
+                  <div className="now-assignment-activity-row">
+                    <div className="now-assignment-current-action">
+                       <span className={truthfullyPaused ? "now-assignment-paused-dot" : "now-assignment-pulse-dot"} aria-hidden="true" />
+                      <div className="now-assignment-action-text">
+                         <span className="now-assignment-action-label">{runtimeRecovering ? "PAUSED · RUNTIME RECOVERING" : paused ? "Mind state · Paused" : "Agent is currently"}</span>
+                        <p><strong>{mindSummary}</strong></p>
+                      </div>
+                    </div>
+
+                    {activeItemDetails && (
+                      <div
+                        className={`now-assignment-active-item ${activeItemDetails.hasContext ? "now-assignment-item-clickable" : ""}`}
+                        onClick={activeItemDetails.hasContext && activeItemDetails.object ? () => setSelectedContext(activeItemDetails.object!) : undefined}
+                        role={activeItemDetails.hasContext ? "button" : undefined}
+                        tabIndex={activeItemDetails.hasContext ? 0 : undefined}
+                        title={activeItemDetails.hasContext ? "Click to view target post in Social Mirror" : undefined}
+                      >
+                        <span className="now-assignment-item-badge">{activeItemDetails.badge}</span>
+                        <div className="now-assignment-item-content">
+                          <span className="now-assignment-item-author">{activeItemDetails.headline}</span>
+                          <p className="now-assignment-item-snippet">{activeItemDetails.snippet}</p>
+                        </div>
+                        {activeItemDetails.hasContext && <ArrowUpRight size={13} className="now-assignment-item-arrow" />}
+                      </div>
                     )}
                   </div>
-                ))}
-              </div>
-              <nav className="activity-pagination" aria-label="Activity pages">
-                <span className="activity-pagination-count">
-                  Showing {(visibleActivityPage - 1) * ACTIVITY_PAGE_SIZE + 1}–{Math.min(visibleActivityPage * ACTIVITY_PAGE_SIZE, displayedActivityEvents.length)} of {displayedActivityEvents.length}
-                </span>
-                <div className="activity-pagination-controls">
-                  <button type="button" className="activity-pagination-button" onClick={() => setActivityPage((current) => Math.max(1, current - 1))} disabled={visibleActivityPage <= 1}>
-                    <ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /> Newer
-                  </button>
-                  <span aria-live="polite">Page {visibleActivityPage} of {activityPageCount}</span>
-                  <button type="button" className="activity-pagination-button" onClick={() => setActivityPage((current) => Math.min(activityPageCount, current + 1))} disabled={visibleActivityPage >= activityPageCount}>
-                    Older <ChevronRight size={14} />
-                  </button>
+
+                  <div className="now-assignment-stepper" aria-label="Assignment progression stages">
+                    {assignmentStages.map((stage) => (
+                      <div
+                        key={stage.id}
+                        className={`now-assignment-step ${stage.state === "completed" ? "is-completed" : stage.state === "active" ? "is-active" : stage.state === "paused" ? "is-paused" : "is-upcoming"}`}
+                      >
+                        <div className="now-assignment-step-indicator">
+                          {stage.state === "completed" ? (
+                            <span className="step-badge step-badge-completed"><Check size={10} /></span>
+                          ) : stage.state === "active" ? (
+                            <span className="step-badge step-badge-active"><span className="step-active-dot" /></span>
+                          ) : stage.state === "paused" ? (
+                            <span className="step-badge step-badge-active"><Pause size={8} /></span>
+                          ) : (
+                            <span className="step-badge step-badge-upcoming">{stage.num}</span>
+                          )}
+                          <span className="step-name">{stage.state === "paused" ? `${stage.num} · ${stage.id.toUpperCase()} · PAUSED` : stage.name}</span>
+                        </div>
+                        <div className="step-detail">{stage.detail}</div>
+                      </div>
+                    ))}
+                  </div>
+                </section>
+              );
+            }
+
+            return (
+               <section className={`now-assignment-banner ${truthfullyPaused ? "is-paused" : ""}`} aria-label="Current focus">
+                <div className="now-assignment-header">
+                  <div className="now-assignment-header-left">
+                    <div className="now-assignment-icon" aria-hidden="true">
+                      <Radio size={16} />
+                    </div>
+                    <div className="now-assignment-header-meta">
+                      <div className="now-assignment-topline">
+                        <span className="now-assignment-tag">Current Focus · General attention</span>
+                         <span className="now-assignment-status">{runtimeRecovering ? "PAUSED · RUNTIME RECOVERING" : paused ? "Paused" : runtimeWaiting ? "WAITING · RESUMES AUTOMATICALLY" : checking ? "Checking" : "Live"}</span>
+                      </div>
+                       <strong className="now-assignment-title">{runtimeRecovering ? "Required body is recovering automatically" : runtimeWaiting ? "Waiting for a known unblock time" : paused ? `${presenceName} is asleep` : "Waiting for the next meaningful opportunity"}</strong>
+                    </div>
+                  </div>
+                  <div className="now-assignment-actions">
+                    {paused ? (
+                      <span className="now-assignment-action-note">Paused · wake {presenceName} above to begin attention cycle</span>
+                    ) : (
+                      <Button
+                        variant="secondary"
+                        onClick={() => mutate({ type: "runPulse", presenceId: selected.id })}
+                        disabled={checking}
+                      >
+                        <Play size={13} /> {checking ? "Checking now…" : "Check now"}
+                      </Button>
+                    )}
+                  </div>
                 </div>
-              </nav>
-              </>
-            )}
-          </section>
-        </div>
-        <aside className="activity-side-column">
-          <section className="activity-status-panel" aria-label="Operating status">
-            <div className="activity-status-heading">
-              <div>
-                <SectionEyebrow>Operating status</SectionEyebrow>
-                <h2>{paused ? "Asleep" : "On watch"}</h2>
+              </section>
+            );
+          })()}
+
+          {/* 2. In-Flight Actions (0..N Executions being prepared, sent, or verified) */}
+          {inFlightExecutions.length > 0 && (
+            <section className="activity-in-flight-panel" aria-label="In-flight actions">
+              <div className="activity-in-flight-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
+                <div>
+                  <SectionEyebrow>In flight · {inFlightExecutions.length}</SectionEyebrow>
+                  <span className="quiet-label">
+                    {inFlightExecutions.length === 1
+                      ? "1 action already decided; the body is delivering or verifying."
+                      : `${inFlightExecutions.length} actions already decided; the body is delivering or verifying.`}
+                  </span>
+                </div>
+                {activityActionRecords.some((r) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued"].includes(r.execution.status)) && (
+                  <Button
+                    variant="secondary"
+                    disabled={cancellingAll}
+                    onClick={() => void cancelAllPreDispatchExecutions()}
+                    title="Cancel all unsent actions at once"
+                    style={{ fontSize: "12px", padding: "4px 10px" }}
+                  >
+                    <X size={13} /> {cancellingAll ? "Cancelling…" : "Cancel all unsent"}
+                  </Button>
+                )}
               </div>
-              <span className={`live-pill ${paused ? "activity-pill-paused" : ""}`}><span className="status-dot" /> {paused ? "Asleep" : "Live"}</span>
-            </div>
-            <div className={`activity-status-block activity-status-${activity.current.tone}`}>
-              <SectionEyebrow>Now</SectionEyebrow>
-              <h3>{activity.current.label}</h3>
-              <p>{currentDetail}</p>
-              {actionContext && (
-                <button type="button" className="status-context-button" onClick={() => setSelectedContext(actionContext)}>
-                  <span>{actionSnippet ? `“${actionSnippet.slice(0, 86)}${actionSnippet.length > 86 ? "…" : ""}”` : "View the observed post"}</span>
-                  <strong>View post</strong>
-                </button>
-              )}
-              <small>Last pulse: {activity.lastPulseAt ? formatTime(activity.lastPulseAt) : "Never"}</small>
-            </div>
-          </section>
-          <div id="decision-and-action">
-            <ExecutionLedger state={state} mutate={mutate} presenceId={selected?.id} environment={activityEnvironment} sessionIds={activitySessionIds} onContext={setSelectedContext} />
-          </div>
-        </aside>
+              <div className="activity-in-flight-list">
+                {activityActionRecords.map((record) => {
+                  const isPostDispatch = ["claimed", "executing", "verification-pending", "working"].includes(record.execution.status);
+                  const isPreDispatch = ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued"].includes(record.execution.status);
+                  const isExclusiveTrialRunning = Boolean(activeCapabilityTrial?.executionIsolation?.suppressOtherTrialActs);
+                  const isBeforeCurrentTrial = activeCapabilityTrial && new Date(record.execution.createdAt).getTime() < new Date(activeCapabilityTrial.startedAt || activeCapabilityTrial.createdAt).getTime();
+                  const isDeferredByTrial = isPreDispatch && isExclusiveTrialRunning && isBeforeCurrentTrial;
+
+                  const statusChipText = isDeferredByTrial
+                    ? "Held · Deferred by trial"
+                    : executionStatusLabel(record.execution.status);
+
+                  const provenanceText = isDeferredByTrial
+                    ? `Decided earlier. Waiting until the exclusive ${activeCapabilityTrial.capability.replace("_", " ")} trial finishes.`
+                    : isBeforeCurrentTrial
+                      ? `This decision was made before the current ${activeCapabilityTrial.capability} trial.`
+                      : record.intent?.source === "operator" || record.execution.source === "operator"
+                        ? "Origin: Operator Assignment / Directive."
+                        : "Earlier action · awaiting verification";
+
+                  return (
+                    <article className="activity-in-flight-card" key={record.execution.id}>
+                      <div className="activity-in-flight-card-main">
+                        <div className="activity-in-flight-card-topline">
+                          <span className={`activity-state-chip ${isPostDispatch ? "chip-sent" : isDeferredByTrial ? "chip-held" : "chip-preparing"}`}>
+                            {statusChipText}
+                          </span>
+                          <span className="activity-in-flight-time">
+                            {record.execution.executedAt
+                              ? `Sent at ${formatTime(record.execution.executedAt)}`
+                              : `Decided at ${formatTime(record.execution.createdAt)}`}
+                          </span>
+                          {isPostDispatch && (
+                            <span className="activity-in-flight-noncancelable-badge">
+                              Already sent · Cannot be cancelled
+                            </span>
+                          )}
+                        </div>
+                        <h3 className="activity-in-flight-title">
+                          {record.action} {record.targetDisplay}
+                        </h3>
+                        {record.snippet && (
+                          <p className="activity-in-flight-snippet">
+                            “{record.snippet.slice(0, 160)}{record.snippet.length > 160 ? "…" : ""}”
+                          </p>
+                        )}
+                        <div className="activity-in-flight-detail">
+                          <span>
+                            {isPostDispatch
+                              ? "The public action has already been submitted. OpenPresence is waiting to observe the result in Social Mirror."
+                              : isDeferredByTrial
+                                ? `This unsent action is temporarily held to keep the exclusive ${activeCapabilityTrial.capability} trial unpolluted.`
+                                : "The action has not been sent yet. Moving through the execution envelope."}
+                          </span>
+                          <small className="activity-in-flight-provenance">{provenanceText}</small>
+                        </div>
+                      </div>
+                      <div className="activity-in-flight-actions">
+                        {isPreDispatch && (
+                          <Button
+                            variant="secondary"
+                            disabled={stoppingExecutionId === record.execution.id}
+                            onClick={() => void cancelPreDispatchExecution(record.execution)}
+                          >
+                            {stoppingExecutionId === record.execution.id ? "Cancelling…" : "Cancel action"}
+                          </Button>
+                        )}
+                        {record.context && (
+                          <button
+                            type="button"
+                            className="now-assignment-btn"
+                            onClick={() => setSelectedContext(record.context!)}
+                          >
+                            View source
+                          </button>
+                        )}
+                        {record.decision && (
+                          <button
+                            type="button"
+                            className="now-assignment-btn"
+                            onClick={() => openActivityFocus("selected")}
+                          >
+                            View decision
+                          </button>
+                        )}
+                      </div>
+                    </article>
+                  );
+                })}
+              </div>
+            </section>
+          )}
+        </div>
+      )}
+
+      <div className="activity-subtabs watch-tabs" role="tablist" aria-label="Activity views">
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSubtab === "activity"}
+          className={activeSubtab === "activity" ? "active" : ""}
+          onClick={() => setActiveSubtab("activity")}
+        >
+          <Radio size={14} /> Stream <span>{displayedActivityEvents.length}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSubtab === "queue"}
+          className={activeSubtab === "queue" ? "active" : ""}
+          onClick={() => setActiveSubtab("queue")}
+        >
+          <Clock3 size={14} /> Agenda <span>{openAssignments.length + pendingExecutionsList.length}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSubtab === "assignments"}
+          className={activeSubtab === "assignments" ? "active" : ""}
+          onClick={() => setActiveSubtab("assignments")}
+        >
+          <BriefcaseBusiness size={14} /> Assignments <span>{openAssignments.length}</span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSubtab === "failures"}
+          className={activeSubtab === "failures" ? "active" : ""}
+          onClick={() => setActiveSubtab("failures")}
+        >
+          <Activity size={14} /> Operating Health <span className={unresolvedFailures.length > 0 ? "badge-warning" : ""}>{unresolvedFailures.length > 0 ? `${unresolvedFailures.length} auto-recovering` : "healthy"}</span>
+        </button>
       </div>
+
+      {activeSubtab === "activity" && (
+        <div className="activity-tab-content">
+          {selected && (
+            <div className="activity-pipeline" aria-label="Autonomy pipeline" style={{ marginBottom: "22px" }}>
+              <button type="button" onClick={() => document.getElementById("observed-context")?.scrollIntoView({ behavior: "smooth", block: "start" })}>
+                <small>1 · OBSERVE</small>
+                <strong>{observedPostCount !== undefined ? `${observedPostCount} posts` : "Context"}</strong>
+                <span>{observedMentionCount !== undefined ? `${observedMentionCount} mentions` : "Latest channel read"}</span>
+              </button>
+              <span className="activity-pipeline-arrow" aria-hidden="true">→</span>
+              <button type="button" className={activityFocus === "selected" ? "activity-pipeline-focus" : undefined} aria-pressed={activityFocus === "selected"} onClick={() => openActivityFocus("selected")}>
+                <small>2 · JUDGE</small>
+                <strong>{judgedCount === undefined ? "Reviewing" : `${judgedCount} selected`}</strong>
+                <span>{judgedCount === 0 ? "No public action" : "See selected decisions"}</span>
+              </button>
+              <span className="activity-pipeline-arrow" aria-hidden="true">→</span>
+              <button type="button" className={activityFocus === "preparing" ? "activity-pipeline-focus" : undefined} aria-pressed={activityFocus === "preparing"} onClick={() => openActivityFocus("preparing")}>
+                <small>3 · ACT</small>
+                <strong>{actLabel}</strong>
+                <span>{inFlightExecutions.length > 1 ? "See the actions being prepared" : "See execution state"}</span>
+              </button>
+              <span className="activity-pipeline-arrow" aria-hidden="true">→</span>
+              <button type="button" onClick={() => setActiveSubtab("queue")}>
+                <small>4 · VERIFY</small>
+                <strong>{verifyLabel}</strong>
+                <span>Only confirmed results count</span>
+              </button>
+            </div>
+          )}
+          {bridgeNeedsAttention && (
+            <div className="activity-connection-notice" role="status" aria-live="polite">
+              <CircleAlert size={17} aria-hidden="true" />
+              <div>
+                <strong>Chrome connection needed</strong>
+                <span>{activityBridge ? "The controlled Chrome tab is no longer connected." : "Connect the OpenPresence Chrome extension for this Presence."}</span>
+              </div>
+              <button type="button" className="activity-connection-notice-action" onClick={() => setView("presence")}>Open Settings</button>
+            </div>
+          )}
+          {activity.needsAttention.count > 0 && (
+            <section className="activity-attention" aria-label="Needs your attention">
+              <div className="activity-attention-icon"><CircleAlert size={19} /></div>
+              <div className="activity-attention-copy">
+                <SectionEyebrow>Needs your attention</SectionEyebrow>
+                <h2>{activity.needsAttention.count} action{activity.needsAttention.count === 1 ? "" : "s"} waiting for you.</h2>
+                <p>Review the latest decision before it is delivered. Your approval changes execution, not {presenceName}&apos;s judgment.</p>
+              </div>
+              <button type="button" className="button button-secondary activity-attention-link" onClick={() => setActiveSubtab("queue")}>Open Agenda & Review</button>
+            </section>
+          )}
+          {selected?.channel === "x" && <BringXPost state={state} mutate={mutate} presenceId={selected.id} presenceName={presenceName} />}
+          <div className="activity-main-grid">
+            <div className="activity-left-column">
+              <MirrorPanel state={state} mutate={mutate} filter={selected?.id ?? "all"} channelId={selected?.channel} environment={activityEnvironment} sessionIds={activitySessionIds} onContext={setSelectedContext} />
+              <section className="event-stream activity-log" id="recent-activity">
+                <div className="section-heading">
+                  <div>
+                    <SectionEyebrow>Recent activity</SectionEyebrow>
+                    <h2>{activityFocus ? (activityFocus === "selected" ? "Selected decisions" : "Actions being prepared") : "Recent activity"}</h2>
+                    {!activityFocus && <p className="activity-log-explainer">This is the historical record of what the Presence observed, decided, delivered, and learned. Open Assignments above are the source of truth for work that is still planned or in progress.</p>}
+                  </div>
+                  <span className="quiet-label">{paused ? "Presence asleep" : activityFocus ? `${focusedActionRecords.length} linked action${focusedActionRecords.length === 1 ? "" : "s"}` : `${activityEvents.length.toLocaleString()} history entr${activityEvents.length === 1 ? "y" : "ies"}`}</span>
+                </div>
+                {activityFocus && (
+                  <section className={`activity-focus-panel activity-focus-${activityFocus}`} aria-live="polite" aria-label={activityFocus === "selected" ? "Selected decisions from the latest check" : "Actions being prepared from the latest check"}>
+                    <div className="activity-focus-heading">
+                      <div>
+                        <span className="activity-focus-kicker">{activityFocus === "selected" ? "JUDGE · SELECTED" : "ACT · PREPARING"}</span>
+                        <strong>{focusedActionRecords.length} {activityFocus === "selected" ? "decision" : "action"}{focusedActionRecords.length === 1 ? "" : "s"} from this check</strong>
+                        <p>{activityFocus === "selected" ? "These are the actions Genny selected after reviewing the observed context." : "These are the selected actions currently moving through the delivery envelope. Preparing does not mean delivered."}</p>
+                      </div>
+                      <button type="button" className="activity-focus-clear" onClick={() => { setActivityFocus(null); setActivityPage(1); }}>Show all activity</button>
+                    </div>
+                    {focusedActionRecords.length > 0 ? (
+                      <div className="activity-focus-list">
+                        {focusedActionRecords.map((record) => (
+                          <article className="activity-focus-card" key={record.execution.id}>
+                            <span className="activity-focus-marker" aria-hidden="true" />
+                            <div className="activity-focus-card-copy">
+                              <div className="activity-focus-card-meta">
+                                <span className="activity-state-chip">{activityFocus === "selected" ? "Selected" : "Preparing"}</span>
+                                <span>{record.action}</span>
+                                <span>{activityFocus === "selected" ? executionStatusLabel(record.execution.status) : executionStatusLabel(record.execution.status)}</span>
+                              </div>
+                              <h3>{record.action} {record.targetDisplay}</h3>
+                              {record.snippet && <p>“{record.snippet.slice(0, 180)}{record.snippet.length > 180 ? "…" : ""}”</p>}
+                            <small>{record.decision?.summary ?? "The selected intent is linked to this delivery."}</small>
+                            </div>
+                            {record.context && <button type="button" className="activity-focus-context" onClick={() => setSelectedContext(record.context!)}>View source</button>}
+                            {executionCanBeStopped(record.execution.status) && <button type="button" className="activity-focus-stop" disabled={stoppingExecutionId === record.execution.id} onClick={() => void stopExecution(record.execution)}>{stoppingExecutionId === record.execution.id ? "Stopping…" : record.execution.status === "verification-pending" ? "Stop & close" : "Cancel send"}</button>}
+                          </article>
+                        ))}
+                      </div>
+                    ) : (
+                      <div className="activity-focus-empty">No public action was selected in the latest check.</div>
+                    )}
+                  </section>
+                )}
+                {activityFocus && displayedActivityEvents.length > 0 && <div className="activity-related-heading"><span>Linked activity</span><small>Only events tied to the selected actions are shown.</small></div>}
+                {displayedActivityEvents.length === 0 ? (
+                  <EmptyState
+                    title={activityFocus ? "No linked activity event yet" : "No Presence decisions yet"}
+                    body={paused ? `${presenceName} is asleep. Wake this Presence to begin a first attention cycle.` : activityFocus ? "The action record above is the source of truth; its event will appear here when the runtime records the next decision or delivery update." : "Activity will show what this Presence observed, chose, and delivered. Settings changes stay in Settings."}
+                    action={
+                      <Button
+                        onClick={() => mutate(paused ? { type: "wakePresence", presenceId: selected?.id } : { type: "runPulse", presenceId: selected?.id })}
+                        variant="secondary"
+                        disabled={waking || checking}
+                        title={paused ? `Wake up ${presenceName} and begin a first attention cycle.` : "Look at the channel now."}
+                      >
+                        <Play size={14} /> {paused ? (waking ? `Waking ${presenceName}…` : `Wake up ${presenceName}`) : (checking ? "Checking now…" : "Check now")}
+                      </Button>
+                    }
+                  />
+                ) : (
+                  <>
+                  <div className="event-list">
+                      {paginatedActivityEvents.map((item) => {
+                        const eventDecision = decisionForEvent(item);
+                        const eventExec = executionForActivityEvent(item);
+                        const eventContext = contextForEvent(item);
+                        const authorRaw = eventContext?.author?.handle ?? eventContext?.author?.displayName;
+                        const isSnowflake = authorRaw && /^@?\d{8,}$/.test(authorRaw);
+                        const authorHandle = authorRaw ? (isSnowflake ? "an X author" : authorRaw.startsWith("@") ? authorRaw : `@${authorRaw}`) : undefined;
+                        
+                        const headline = (() => {
+                          if (item.title === "Published on X" || item.title.includes("intention formed") || item.title.includes("delivered")) {
+                            if (eventDecision && eventDecision.acts && eventDecision.acts.length > 1) {
+                              return authorHandle ? `Genny engaged with ${authorHandle}` : `Genny executed multi-act engagement`;
+                            }
+                            if (eventExec) {
+                              const affordanceName = eventExec.affordance.replace(/^x\./, "");
+                              const pastVerb = affordanceName === "quote" ? "quoted" : affordanceName === "reply" ? "replied to" : affordanceName === "repost" ? "reposted" : affordanceName === "like" ? "liked" : affordanceName === "follow" ? "followed" : `${affordanceName}ed`;
+                              return authorHandle ? `Genny ${pastVerb} ${authorHandle}` : `Genny ${pastVerb} post`;
+                            }
+                          }
+                          if (item.title.includes("Following relationship verified")) {
+                            return authorHandle ? `Following verified for ${authorHandle}` : "Following relationship verified";
+                          }
+                          return presenceCopy(item.title);
+                        })();
+
+                        return (
+                          <div className="event-row-shell" key={item.id}>
+                            <button className="event-row event-row-button" type="button" data-event-id={item.id} onClick={() => setSelectedEventId((current) => current === item.id ? null : item.id)} aria-expanded={selectedEventId === item.id} aria-label={`View details for ${headline}`}>
+                              <div className={`event-icon tone-${activityEventTone(item)}`}>
+                                {item.type === "execution" ? <ArrowUpRight size={15} /> : item.type === "learning" ? <Sparkles size={15} /> : item.type === "memory" ? <Brain size={15} /> : <Circle size={9} fill="currentColor" />}
+                              </div>
+                              <div className="event-copy">
+                                <div className="event-kind">{activityEventCategory(item)}</div>
+                                <div className="event-title">
+                                  {headline}
+                                  <span>{formatTime(item.time)}</span>
+                                </div>
+                                {eventDecision && eventDecision.acts && eventDecision.acts.length > 1 && (
+                                  <div style={{ display: "flex", gap: "6px", margin: "4px 0" }}>
+                                    {eventDecision.acts.map((act) => (
+                                      <span key={act.decision} className="activity-state-chip chip-sent" style={{ fontSize: "10px", padding: "2px 6px" }}>
+                                        ✓ {act.decision.toUpperCase()}
+                                      </span>
+                                    ))}
+                                  </div>
+                                )}
+                                <ActivityEventDetail text={presenceCopy(item.detail)} />
+                                <div className="event-row-hint">{selectedEventId === item.id ? "Hide technical history" : "View technical history"}</div>
+                              </div>
+                            </button>
+                            {selectedEventId === item.id && <div className="activity-event-detail-panel" role="region" aria-label={`Technical details for ${headline}`}>
+                              <ActivityDecisionTrace trace={decisionTraceForEvent(item)} />
+                              {explorationFindingForEvent(item) && <div className="event-finding-preview" aria-label="Exploration finding"><span>Finding</span><strong>{explorationFindingForEvent(item)!.safeSummary}</strong><small>Why it matters · {explorationFindingForEvent(item)!.whyItMayMatter}</small></div>}
+                              {contextForEvent(item) && <button type="button" className="event-context-preview event-context-preview-button" onClick={() => setSelectedContext(contextForEvent(item)!)}><span>Source</span><strong>{(contextForEvent(item)!.content?.text ?? "Open the observed post").slice(0, 112)}{(contextForEvent(item)!.content?.text?.length ?? 0) > 112 ? "…" : ""}</strong><em>View post</em></button>}
+                            </div>}
+                            {decisionForEvent(item) && (
+                              <>
+                                <button
+                                  type="button"
+                                  className="event-why-button"
+                                  aria-expanded={selectedDecisionId === decisionForEvent(item)!.id}
+                                  onClick={() => setSelectedDecisionId((current) => current === decisionForEvent(item)!.id ? null : decisionForEvent(item)!.id)}
+                                >
+                                  {selectedDecisionId === decisionForEvent(item)!.id ? "Hide why" : "Why this action?"}
+                                </button>
+                                {selectedDecisionId === decisionForEvent(item)!.id && (
+                                  <ActivityDecisionDisclosure
+                                    decision={decisionForEvent(item)!}
+                                    evidence={contextForEvent(item)}
+                                    intent={item.intentId ? state.socialIntents.find((entry) => entry.id === item.intentId) : undefined}
+                                    execution={executionForActivityEvent(item)}
+                                    outcome={executionForActivityEvent(item) ? state.outcomes.find((entry) => entry.executionId === executionForActivityEvent(item)!.id) : undefined}
+                                    onClose={() => setSelectedDecisionId(null)}
+                                  />
+                                )}
+                              </>
+                            )}
+                          </div>
+                        );
+                      })}
+                  </div>
+                  <nav className="activity-pagination" aria-label="Activity pages">
+                    <span className="activity-pagination-count">
+                      Showing {(visibleActivityPage - 1) * ACTIVITY_PAGE_SIZE + 1}–{Math.min(visibleActivityPage * ACTIVITY_PAGE_SIZE, displayedActivityEvents.length)} of {displayedActivityEvents.length}
+                    </span>
+                    <div className="activity-pagination-controls">
+                      <button type="button" className="activity-pagination-button" onClick={() => setActivityPage((current) => Math.max(1, current - 1))} disabled={visibleActivityPage <= 1}>
+                        <ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /> Newer
+                      </button>
+                      <span aria-live="polite">Page {visibleActivityPage} of {activityPageCount}</span>
+                      <button type="button" className="activity-pagination-button" onClick={() => setActivityPage((current) => Math.min(activityPageCount, current + 1))} disabled={visibleActivityPage >= activityPageCount}>
+                        Older <ChevronRight size={14} />
+                      </button>
+                    </div>
+                  </nav>
+                  </>
+                )}
+              </section>
+            </div>
+            <aside className="activity-side-column">
+              <section className="activity-status-panel" aria-label="Operating status">
+                <div className="activity-status-heading">
+                  <div>
+                    <SectionEyebrow>Operating status</SectionEyebrow>
+                    <h2>{paused ? "Asleep" : "On watch"}</h2>
+                  </div>
+                  <span className={`live-pill ${paused ? "activity-pill-paused" : ""}`}><span className="status-dot" /> {paused ? "Asleep" : "Live"}</span>
+                </div>
+                <div className="activity-status-subline" style={{ padding: "0 0 10px 0", fontSize: "12px", color: "var(--text-muted, #777)" }}>
+                  Last pulse: {activity.lastPulseAt ? formatTime(activity.lastPulseAt) : "Never"}
+                </div>
+              </section>
+
+              <AttentionRail state={state} agenda={attentionPlan} onOpenAgenda={() => setActiveSubtab("queue")} />
+
+              <section className="queue-info-card" aria-label="Assignments preview">
+                <SectionEyebrow>Assignments</SectionEyebrow>
+                <h3>{openAssignments.length ? `${openAssignments.length} open responsibilit${openAssignments.length === 1 ? "y" : "ies"}` : "No open assignments"}</h3>
+                <p>A durable view of what you asked Genny to accomplish.</p>
+                <button type="button" className="button button-secondary" onClick={() => setActiveSubtab("assignments")}>
+                  Open Assignments tab →
+                </button>
+              </section>
+            </aside>
+          </div>
+        </div>
+      )}
+
+      {activeSubtab === "queue" && (
+        <div className="activity-tab-content queue-tab-layout">
+          <div className="queue-tab-main">
+            <AgentPriorityAgenda
+              state={state}
+              presenceId={selected?.id}
+              mutate={mutate}
+              onContext={setSelectedContext}
+              onSwitchTab={setActiveSubtab}
+            />
+            <div id="decision-and-action">
+              <ExecutionLedger
+                state={state}
+                mutate={mutate}
+                presenceId={selected?.id}
+                environment={activityEnvironment}
+                sessionIds={activitySessionIds}
+                onContext={setSelectedContext}
+                showAssignments={false}
+                onSwitchTab={setActiveSubtab}
+              />
+            </div>
+          </div>
+          <aside className="queue-tab-sidebar">
+            <section className="queue-info-card" aria-label="How prioritization works">
+              <SectionEyebrow>How prioritization works</SectionEyebrow>
+              <h3>The current order is a snapshot</h3>
+              <p>At every Pulse check, the Agenda Compiler evaluates concrete work from responsibilities, conversations, mentions, publishing, Watchlist, Explorations, growth review, and self-directed attention.</p>
+              <ul style={{ margin: "6px 0 0", paddingLeft: "16px", fontSize: "11px", color: "var(--muted)", lineHeight: "1.6" }}>
+                <li><strong>Responsibility & Continuity:</strong> Active commitments & ongoing conversations where someone is waiting.</li>
+                <li><strong>Urgency & Deadlines:</strong> Time-sensitive moments & scheduled calendar windows.</li>
+                <li><strong>Strategic Value & Growth:</strong> Direct alignment with identity, mission, and growth learning.</li>
+                <li><strong>Opportunity Freshness:</strong> Fast-decaying social contexts and topic resonance.</li>
+                <li><strong>Resource & Body Health:</strong> Available budget, provider quotas, and connector state.</li>
+              </ul>
+              <small style={{ marginTop: "10px", display: "block", color: "var(--faint)", font: "9px 'DM Mono', monospace", lineHeight: "1.4" }}>
+                The Social Planner selects 0..N compatible acts (Like, Reply, Quote, Follow) or an intentional local NO_OP.
+              </small>
+            </section>
+          </aside>
+        </div>
+      )}
+
+      {activeSubtab === "assignments" && (
+        <div className="activity-tab-content assignments-tab-layout">
+          <AssignmentQueue
+            state={state}
+            presenceId={selected?.id}
+            environment={activityEnvironment}
+            sessionIds={activitySessionIds}
+            onContext={setSelectedContext}
+            mutate={mutate}
+            fullWidth={true}
+          />
+        </div>
+      )}
+
+      {activeSubtab === "failures" && (
+        <div className="activity-tab-content failures-tab-layout">
+          <section className="queue-info-card" aria-label="Operating Health">
+            <SectionEyebrow>Operating Health</SectionEyebrow>
+            <h3>Operational Autonomy & Self-Recovery</h3>
+            <p>Genny maintains operational self-healing automatically. Routine recovery (browser restarts, bridge reconnections, rate limit pauses) requires no operator triage. Only genuine human boundaries appear in Needs You.</p>
+          </section>
+
+           <FailedAttemptsReview
+             state={state}
+             executions={scopedExecutions}
+             health={operationalHealth}
+             mutate={mutate}
+            onContext={setSelectedContext}
+          />
+        </div>
+      )}
+
       {selectedContext && <ActivityContextInspector object={selectedContext} state={state} mutate={mutate} onClose={() => setSelectedContext(null)} onOpenSettings={() => { setSelectedContext(null); setView("presence"); }} />}
     </div>
   );
@@ -5263,7 +7388,7 @@ function BringXPost({
   const visibleState = workingState ?? state;
   const importedObject = importedObjectId ? visibleState.mirrorObjects.find((item) => item.id === importedObjectId) : undefined;
   const importedDirective = importedObject
-    ? visibleState.operatorDirectives.find((item) => item.presenceId === presenceId && item.target.id === importedObject.externalRef.id && item.requiredAct === "reply")
+    ? visibleState.operatorDirectives.find((item) => item.presenceId === presenceId && item.target.id === importedObject.externalRef.id && item.requiredAct === "reply" && item.status !== "failed")
     : undefined;
   const importedExecution = importedDirective
     ? visibleState.executions.find((item) => item.operatorDirectiveId === importedDirective.id || (item.source === "operator" && item.presenceId === presenceId && item.target?.id === importedObject?.externalRef.id))
@@ -5361,6 +7486,7 @@ function MirrorPanel({
   const [ignoringObjectId, setIgnoringObjectId] = useState<string | null>(null);
   const [mirrorPagination, setMirrorPagination] = useState({ scope: "", page: 0 });
   const [mirrorFilter, setMirrorFilter] = useState<"all" | "mentions">("all");
+  const [mirrorJudgmentFilter, setMirrorJudgmentFilter] = useState<"all" | "unjudged" | "judged">("all");
   const selectedPresence =
     filter === "all"
       ? undefined
@@ -5382,10 +7508,28 @@ function MirrorPanel({
       return true;
     });
   const mentionObjects = allObjects.filter(isMentionOfPresence);
-  const filteredObjects = mirrorFilter === "mentions" ? mentionObjects : allObjects;
+  const getObjectJudgment = (item: MirrorObject) => {
+    const decision = state.socialDecisions.find((candidate) => candidate.presenceId === item.presenceId && candidate.focalMirrorObjectIds.includes(item.id));
+    const intent = decision?.socialIntentId
+      ? state.socialIntents.find((candidate) => candidate.id === decision.socialIntentId)
+      : state.socialIntents.find((candidate) => candidate.presenceId === item.presenceId && candidate.target?.id === item.externalRef.id && candidate.environment === item.environment);
+    return { decision, intent };
+  };
+  const judgedObjects = allObjects.filter((item) => {
+    const { decision, intent } = getObjectJudgment(item);
+    return Boolean(decision || intent);
+  });
+  const judgedObjectIds = new Set(judgedObjects.map((item) => item.id));
+  const unjudgedObjects = allObjects.filter((item) => !judgedObjectIds.has(item.id));
+  const sourceFilteredObjects = mirrorFilter === "mentions" ? mentionObjects : allObjects;
+  const filteredObjects = mirrorJudgmentFilter === "judged"
+    ? sourceFilteredObjects.filter((item) => judgedObjectIds.has(item.id))
+    : mirrorJudgmentFilter === "unjudged"
+      ? sourceFilteredObjects.filter((item) => !judgedObjectIds.has(item.id))
+      : sourceFilteredObjects;
   const mirrorPageSize = 3;
   const mirrorPageCount = Math.max(1, Math.ceil(filteredObjects.length / mirrorPageSize));
-  const mirrorScope = `${filter}|${channelId ?? ""}|${environment ?? ""}|${mirrorFilter}`;
+  const mirrorScope = `${filter}|${channelId ?? ""}|${environment ?? ""}|${mirrorFilter}|${mirrorJudgmentFilter}`;
   const mirrorPage = mirrorPagination.scope === mirrorScope ? mirrorPagination.page : 0;
   const currentMirrorPage = Math.min(mirrorPage, mirrorPageCount - 1);
   const objects = filteredObjects.slice(currentMirrorPage * mirrorPageSize, (currentMirrorPage + 1) * mirrorPageSize);
@@ -5448,12 +7592,20 @@ function MirrorPanel({
       <div className="section-heading compact">
         <div>
           <SectionEyebrow>Observed context</SectionEyebrow>
-          <h3>{objects.length ? `${presenceName}'s view` : heading}</h3>
+          <h3>{allObjects.length ? `${presenceName}'s view` : heading}</h3>
         </div>
         <div className="mirror-panel-meta">
           {allObjects.length > 0 && <div className="mirror-filter" role="group" aria-label="Observed context filter">
             <button type="button" className={mirrorFilter === "all" ? "selected" : ""} aria-pressed={mirrorFilter === "all"} onClick={() => setMirrorFilter("all")}>All <span>{allObjects.length}</span></button>
             <button type="button" className={mirrorFilter === "mentions" ? "selected" : ""} aria-pressed={mirrorFilter === "mentions"} onClick={() => setMirrorFilter("mentions")}>Mentions <span>{mentionObjects.length}</span></button>
+          </div>}
+          {allObjects.length > 0 && <div className="mirror-filter-stack">
+            <span className="mirror-filter-caption">Attention view</span>
+            <div className="mirror-filter" role="group" aria-label="Attention selection filter">
+              <button type="button" className={mirrorJudgmentFilter === "all" ? "selected" : ""} aria-pressed={mirrorJudgmentFilter === "all"} onClick={() => setMirrorJudgmentFilter("all")}>All recent <span>{allObjects.length}</span></button>
+              <button type="button" className={mirrorJudgmentFilter === "unjudged" ? "selected" : ""} aria-pressed={mirrorJudgmentFilter === "unjudged"} onClick={() => setMirrorJudgmentFilter("unjudged")}>Ambient background <span>{unjudgedObjects.length}</span></button>
+              <button type="button" className={mirrorJudgmentFilter === "judged" ? "selected" : ""} aria-pressed={mirrorJudgmentFilter === "judged"} onClick={() => setMirrorJudgmentFilter("judged")}>Evaluated / Acted <span>{judgedObjects.length}</span></button>
+            </div>
           </div>}
           <span className="quiet-label">
           {bridge
@@ -5481,17 +7633,15 @@ function MirrorPanel({
               const observedAuthor = normalizeMirrorAuthor(item.channelId, item.content?.text, item.author);
               const externalUrl = externalUrlForMirrorObject(item, observedAuthor?.handle);
               const externalLabel = `Open original post on ${channelLabel(item.channelId, state.channelDefinitions)}`;
-              const itemDecision = state.socialDecisions.find((decision) => decision.presenceId === item.presenceId && decision.focalMirrorObjectIds.includes(item.id));
-              const itemIntent = itemDecision?.socialIntentId
-                ? state.socialIntents.find((intent) => intent.id === itemDecision.socialIntentId)
-                : state.socialIntents.find((intent) => intent.presenceId === item.presenceId && intent.target?.id === item.externalRef.id && intent.environment === item.environment);
+              const { decision: itemDecision, intent: itemIntent } = getObjectJudgment(item);
               const itemExecution = itemIntent ? state.executions.find((execution) => execution.socialIntentId === itemIntent.id) : undefined;
               const itemOutcome = itemExecution ? state.outcomes.find((outcome) => outcome.executionId === itemExecution.id) : undefined;
               const itemStatus = itemExecution
                 ? `${executionStatusLabel(itemExecution.status)}${itemOutcome ? ` · ${itemOutcome.status}` : ""}`
                 : itemDecision
                   ? itemDecision.decision === "no_op" ? "Judged · no action" : `Judged · ${formatActivityAffordance(itemDecision.decision)}`
-                  : "Judgment not recorded";
+                  : itemIntent ? "Judged · action prepared"
+                  : "Observed · not selected";
               return (
               <article className={`mirror-post ${ignored ? "mirror-post-ignored" : ""}`} key={item.id}>
                 <div className="mirror-post-header">
@@ -5510,9 +7660,26 @@ function MirrorPanel({
                   {externalUrl && <a className="mirror-open-link" href={externalUrl} target="_blank" rel="noreferrer" aria-label={`${externalLabel}: ${item.externalRef.id}`}><ArrowUpRight size={12} /> {externalLabel}</a>}
                   {ignored && <span className="mirror-post-ignored-status" title={`${selectedPresence?.name ?? "This Presence"} was asked to leave this post alone. No public action or delivery was created.`}><EyeOff size={11} /> Ignored</span>}
                   {!ignored && item.objectType === "post" && item.actorPresenceId !== selectedPresence?.id && onContext && (
-                    <div className="mirror-post-actions">
+                    <div className="mirror-post-actions" style={{ display: "flex", gap: "8px", alignItems: "center" }}>
                       <button type="button" className="mirror-ignore-action" aria-label={`Ask ${selectedPresence?.name ?? "this Presence"} to ignore`} onClick={() => void askToIgnore(item)} disabled={ignoringObjectId === item.id} title={`Ask ${selectedPresence?.name ?? "this Presence"} to leave this post alone`}><EyeOff size={11} /> {ignoringObjectId === item.id ? "Asking…" : "Ignore"}</button>
-                      <button type="button" className="mirror-reply-action" onClick={() => onContext(item)} title="Create an explicit reply assignment for this observed post">Create reply assignment</button>
+                      <button
+                        type="button"
+                        className="mirror-eval-action"
+                        onClick={() => void mutate({ type: "askPresenceToEvaluate", presenceId: item.presenceId, objectId: item.id, sessionId: item.sessionId })}
+                        title="Ask Genny to evaluate this post and choose the appropriate social act (like, quote, repost, reply, follow, or silence)"
+                        style={{ background: "var(--accent, #d68754)", color: "#fff", border: "none", padding: "4px 10px", borderRadius: "4px", fontSize: "12px", cursor: "pointer", fontWeight: 500 }}
+                      >
+                        Ask Genny to evaluate
+                      </button>
+                      <button
+                        type="button"
+                        className="mirror-reply-action"
+                        onClick={() => onContext(item)}
+                        title="Create an explicit operator assignment for this observed post"
+                        style={{ fontSize: "11px", color: "var(--text-muted, #777)", background: "transparent", border: "none", cursor: "pointer" }}
+                      >
+                        Assignment…
+                      </button>
                     </div>
                   )}
                 </div>
@@ -5525,15 +7692,18 @@ function MirrorPanel({
               <button type="button" onClick={() => setMirrorPagination({ scope: mirrorScope, page: currentMirrorPage - 1 })} disabled={currentMirrorPage === 0}>
                 <ChevronLeft size={13} /> Newer
               </button>
-              <span>Page {currentMirrorPage + 1} of {mirrorPageCount} · {allObjects.length} total</span>
+              <span>Page {currentMirrorPage + 1} of {mirrorPageCount} · {filteredObjects.length} total</span>
               <button type="button" onClick={() => setMirrorPagination({ scope: mirrorScope, page: currentMirrorPage + 1 })} disabled={currentMirrorPage >= mirrorPageCount - 1}>
                 Older <ChevronRight size={13} />
               </button>
             </nav>
           )}
         </>
-      ) : mirrorFilter === "mentions" && allObjects.length > 0 ? (
-        <div className="mirror-zero-state"><strong>No mentions of {selectedPresence?.handle ?? presenceName} in this view.</strong><small>Genny has {allObjects.length} observed post{allObjects.length === 1 ? "" : "s"}, but none mention this Presence.</small></div>
+      ) : allObjects.length > 0 ? (
+        <div className="mirror-zero-state">
+          <strong>{mirrorJudgmentFilter === "judged" ? "No judged posts in this view." : mirrorJudgmentFilter === "unjudged" ? "No unjudged posts in this view." : `No mentions of ${selectedPresence?.handle ?? presenceName} in this view.`}</strong>
+          <small>{mirrorJudgmentFilter === "all" && mirrorFilter === "mentions" ? `Genny has ${allObjects.length} observed post${allObjects.length === 1 ? "" : "s"}, but none mention this Presence.` : "Try another judgment status or return to All."}</small>
+        </div>
       ) : nativeConnection && nativeObservation?.status === "up-to-date" ? (
         <>
           <p className="mirror-explainer">
@@ -5694,35 +7864,90 @@ function ActivityDecisionDisclosure({
   outcome?: OpenPresenceState["outcomes"][number];
   onClose: () => void;
 }) {
-  const actionLabel = formatActivityAffordance(decision.decision === "original_post" ? "post" : decision.decision);
+  const acts: Array<{ decision: string; text?: string; rationale?: string }> = decision.acts && decision.acts.length > 0
+    ? decision.acts
+    : decision.decision !== "no_op"
+      ? [{ decision: decision.decision, text: "", rationale: decision.summary }]
+      : [];
+  const isInformedSilence = decision.decision === "no_op" || acts.length === 0;
+  const isOperationalDeferral = execution?.status === "blocked";
+  const executionStatusLabel = !execution
+    ? "No outbound dispatch required"
+    : execution.status === "succeeded" || outcome?.status === "succeeded"
+      ? "Verified on X"
+     : execution.status === "queued" || execution.status === "awaiting-review"
+        ? "Waiting to send"
+       : execution.status === "claimed" || execution.status === "executing"
+          ? "Sending"
+          : execution.status === "failed"
+            ? "Delivery failed"
+            : execution.status === "blocked"
+              ? "Held · operational constraint"
+              : "Verifying with Social Mirror";
+  const canCancel = execution && ["queued", "awaiting-review"].includes(execution.status);
+  const alreadyDispatched = execution && ["claimed", "executing", "succeeded", "verification-pending"].includes(execution.status);
+
   return (
     <div className="activity-why-panel" role="region" aria-label="Why this action?">
       <div className="activity-why-heading">
         <div>
-          <SectionEyebrow>Why this action?</SectionEyebrow>
-          <strong>{decision.decision === "no_op" ? "Kept the conversation quiet" : `${actionLabel} selected`}</strong>
+          <SectionEyebrow>Social Decision</SectionEyebrow>
+          <div style={{ display: "flex", gap: "6px", alignItems: "center", marginTop: "4px", flexWrap: "wrap" }}>
+            {isInformedSilence ? (
+              <span className="attention-work-status" style={{ background: "var(--bg-subtle, #f0f0f0)", color: "var(--text-muted, #666)" }}>Informed silence (no outward act)</span>
+            ) : (
+              acts.map((act, idx) => (
+                <span key={idx} className="attention-work-status" style={{ background: "var(--accent-subtle, #fef3eb)", color: "var(--accent, #d68754)", fontWeight: 600 }}>
+                  {formatActivityAffordance(act.decision)}
+                </span>
+              ))
+            )}
+            {decision.conversationDisposition && (
+              <span className="quiet-label" style={{ fontSize: "11px" }}>Disposition: {decision.conversationDisposition.replaceAll("_", " ")}</span>
+            )}
+          </div>
         </div>
         <button type="button" className="activity-why-close" onClick={onClose} aria-label="Close decision explanation">×</button>
       </div>
-      <p className="activity-why-summary">{decision.summary}</p>
+
+      <div style={{ marginTop: "12px", display: "grid", gap: "10px", fontSize: "13px" }}>
+        <div style={{ background: "var(--bg-surface, #fafafa)", padding: "10px", borderRadius: "6px", border: "1px solid var(--border, #e5e5e5)" }}>
+          <strong style={{ display: "block", fontSize: "11px", textTransform: "uppercase", color: "var(--text-muted, #777)", marginBottom: "4px" }}>1. What did Genny decide?</strong>
+          <p style={{ margin: 0, lineHeight: 1.4 }}>{decision.summary || (isInformedSilence ? "Genny had sufficient context and judged that no outward social expression earned its place." : "Selected compatible social acts.")}</p>
+        </div>
+
+        <div style={{ background: "var(--bg-surface, #fafafa)", padding: "10px", borderRadius: "6px", border: "1px solid var(--border, #e5e5e5)" }}>
+          <strong style={{ display: "block", fontSize: "11px", textTransform: "uppercase", color: "var(--text-muted, #777)", marginBottom: "4px" }}>2. Has it reached X?</strong>
+          <p style={{ margin: 0, fontWeight: 500 }}>{executionStatusLabel}</p>
+        </div>
+
+        <div style={{ background: "var(--bg-surface, #fafafa)", padding: "10px", borderRadius: "6px", border: "1px solid var(--border, #e5e5e5)" }}>
+          <strong style={{ display: "block", fontSize: "11px", textTransform: "uppercase", color: "var(--text-muted, #777)", marginBottom: "4px" }}>3. Has X verified it?</strong>
+          <p style={{ margin: 0 }}>{outcome?.status === "succeeded" ? "Verified · Social Mirror observed public external confirmation." : execution?.status === "succeeded" ? "Delivery confirmed · awaiting Social Mirror verification cycle." : isInformedSilence ? "No external action to verify." : "Pending external verification."}</p>
+        </div>
+
+        <div style={{ background: "var(--bg-surface, #fafafa)", padding: "10px", borderRadius: "6px", border: "1px solid var(--border, #e5e5e5)" }}>
+          <strong style={{ display: "block", fontSize: "11px", textTransform: "uppercase", color: "var(--text-muted, #777)", marginBottom: "4px" }}>4. Can I still stop it?</strong>
+          <p style={{ margin: 0 }}>
+            {canCancel ? "Yes · this action is waiting in the queue and can be cancelled." : alreadyDispatched ? "No · already submitted to channel route. Verification continues." : "No active dispatch in flight."}
+          </p>
+        </div>
+      </div>
+
       {evidence?.content?.text && (
-        <div className="activity-why-evidence">
+        <div className="activity-why-evidence" style={{ marginTop: "12px" }}>
           <strong>Evidence considered</strong>
           <span>{evidence.author?.displayName ?? evidence.author?.handle ?? "Observed post"} · “{evidence.content.text.slice(0, 190)}{evidence.content.text.length > 190 ? "…" : ""}”</span>
         </div>
       )}
       {decision.influences.length > 0 && (
-        <div className="activity-why-influences">
+        <div className="activity-why-influences" style={{ marginTop: "8px" }}>
           <strong>Influenced by</strong>
           <div>{decision.influences.map((influence) => <span key={influence}>{influence}</span>)}</div>
         </div>
       )}
-      <div className="activity-why-meta">
-        <span>Confidence · {decision.confidence ?? "not recorded"}</span>
-        {outcome && <span>Outcome · {outcome.status}</span>}
-      </div>
-      <details className="activity-why-technical">
-        <summary>Technical details</summary>
+      <details className="activity-why-technical" style={{ marginTop: "12px" }}>
+        <summary>Lineage & Technical Trace</summary>
         <dl>
           <div><dt>Social Decision</dt><dd>{decision.id}</dd></div>
           <div><dt>Mirror evidence</dt><dd>{decision.focalMirrorObjectIds.join(", ") || "None recorded"}</dd></div>
@@ -5738,6 +7963,7 @@ function ActivityDecisionDisclosure({
 function ActivityContextInspector({ object, state, mutate, onClose, onOpenSettings }: { object: MirrorObject; state: OpenPresenceState; mutate: Mutate; onClose: () => void; onOpenSettings: () => void }) {
   const [direction, setDirection] = useState("");
   const [requesting, setRequesting] = useState(false);
+  const [retrying, setRetrying] = useState(false);
   const presence = state.presences.find((item) => item.id === object.presenceId) ?? state.presence;
   const presenceName = presence?.name ?? "this Presence";
   const replyDirectiveCandidate = state.operatorDirectives.find((item) => item.presenceId === object.presenceId && item.target.id === object.externalRef.id && item.requiredAct === "reply" && (!object.sessionId || item.sessionId === object.sessionId) && item.status !== "failed");
@@ -5761,6 +7987,15 @@ function ActivityContextInspector({ object, state, mutate, onClose, onOpenSettin
       setRequesting(false);
     }
   }
+  async function retryDelivery() {
+    if (!replyExecution) return;
+    setRetrying(true);
+    try {
+      await mutate({ type: "retryExecution", id: replyExecution.id });
+    } finally {
+      setRetrying(false);
+    }
+  }
   return (
     <div className="activity-context-scrim" role="presentation" onMouseDown={(event) => { if (event.currentTarget === event.target) onClose(); }}>
       <aside className="activity-context-dialog" role="dialog" aria-modal="true" aria-label="Decision context">
@@ -5781,11 +8016,52 @@ function ActivityContextInspector({ object, state, mutate, onClose, onOpenSettin
         </article>
         <section className="operator-reply-card" aria-label={`Ask ${presenceName} to reply`}>
           <SectionEyebrow>Operator direction</SectionEyebrow>
-          <h3>{replyDirective ? "Reply requested" : `Ask ${presenceName} to reply`}</h3>
+          <h3>{replyDirective ? "Reply requested" : replyFailed ? `Try replying again with ${presenceName}` : `Ask ${presenceName} to reply`}</h3>
           <p>{replyDirective ? `The social act is set. ${presenceName} owns the wording; the Presence reply setting owns how it is delivered.` : `You choose that this interaction should happen. ${presenceName} still decides what to say, within the Presence's privacy and channel boundaries.`}</p>
           {relatedJudgment && <div className="operator-judgment"><strong>{ignoreDirective ? `${presenceName} was asked to leave this alone` : `${presenceName} chose silence`}</strong><span>{relatedJudgment.detail.replaceAll("Jenny", presenceName)}</span></div>}
           {!replyDirective && !repliesOff && <label className="operator-direction-field">Optional direction for {presenceName}<textarea aria-label={`Optional direction for ${presenceName}`} value={direction} onChange={(event) => setDirection(event.target.value)} placeholder={`Anything you want ${presenceName} to consider?`} rows={3} /></label>}
-          {repliesOff ? <div className="operator-replies-off"><span>Replies are disabled for this Presence.</span><button type="button" onClick={onOpenSettings}>Enable replies →</button></div> : replyWasSent ? <div className="operator-requested-state">{presenceName} sent a verified reply to this post.</div> : replyFailed ? (() => { const explanation = deliveryFailureExplanation(replyExecution?.failure, presence?.handle); return <div className="operator-requested-state operator-requested-failure" role="alert"><strong>{presenceName} did not deliver the requested reply.</strong><span>{explanation.title}: {explanation.reason}</span><small>{explanation.consequence} Next step: {explanation.fix}</small>{replyExecution?.failure?.message && <details><summary>Technical details</summary><code>{replyExecution.failure.message}</code></details>}</div>; })() : replyDirective ? <div className="operator-requested-state">{presenceName} is preparing the expression through the existing reply envelope.</div> : <Button variant="primary" className="full-button" onClick={() => void askToReply()} disabled={requesting}>{requesting ? <><LoaderCircle size={14} className="spin" /> Asking {presenceName}…</> : <><Reply size={14} /> Ask {presenceName} to reply</>}</Button>}
+          {repliesOff ? (
+            <div className="operator-replies-off">
+              <span>Replies are disabled for this Presence.</span>
+              <button type="button" onClick={onOpenSettings}>Enable replies →</button>
+            </div>
+          ) : replyWasSent ? (
+            <div className="operator-requested-state">{presenceName} sent a verified reply to this post.</div>
+          ) : replyDirective ? (
+            <div className="operator-requested-state">{presenceName} is preparing the expression through the existing reply envelope.</div>
+          ) : replyFailed ? (() => {
+            const explanation = deliveryFailureExplanation(replyExecution?.failure, presence?.handle);
+            const canRetryExact = replyExecution?.failure?.retryable !== false;
+            return (
+              <div className="operator-failed-actions-wrap" style={{ display: "grid", gap: "0.75rem" }}>
+                <div className="operator-requested-state operator-requested-failure" role="alert">
+                  <strong>{presenceName} did not deliver the requested reply.</strong>
+                  <span>{explanation.title}: {explanation.reason}</span>
+                  <small>{explanation.consequence} Next step: {explanation.fix}</small>
+                  {replyExecution?.failure?.message && (
+                    <details>
+                      <summary>Technical details</summary>
+                      <code>{replyExecution.failure.message}</code>
+                    </details>
+                  )}
+                </div>
+                <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+                  <Button variant="primary" className="full-button" onClick={() => void askToReply()} disabled={requesting || retrying}>
+                    {requesting ? <><LoaderCircle size={14} className="spin" /> Asking {presenceName}…</> : <><Reply size={14} /> Ask {presenceName} to try again</>}
+                  </Button>
+                  {canRetryExact && (
+                    <Button variant="secondary" onClick={() => void retryDelivery()} disabled={requesting || retrying}>
+                      {retrying ? <><LoaderCircle size={14} className="spin" /> Retrying…</> : "Retry delivery"}
+                    </Button>
+                  )}
+                </div>
+              </div>
+            );
+          })() : (
+            <Button variant="primary" className="full-button" onClick={() => void askToReply()} disabled={requesting}>
+              {requesting ? <><LoaderCircle size={14} className="spin" /> Asking {presenceName}…</> : <><Reply size={14} /> Ask {presenceName} to reply</>}
+            </Button>
+          )}
         </section>
       </aside>
     </div>
@@ -5797,15 +8073,22 @@ const formatActivityAffordance = (value?: string) => {
   return affordance.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 };
 
-const executionStatusLabel = (status: OpenPresenceState["executions"][number]["status"]) => {
+function executionCanBeStopped(status: OpenPresenceState["executions"][number]["status"]) {
+  return ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"].includes(status);
+}
+
+function executionStatusLabel(status: OpenPresenceState["executions"][number]["status"]) {
   if (status === "awaiting-review") return "Needs your review";
-  if (["approved", "queued", "claimed", "executing", "awaiting-connector"].includes(status)) return "Preparing to send";
-  if (status === "succeeded") return "Sent";
+  if (status === "verification-pending") return "Sent · verifying on X";
+  if (status === "verification-closed") return "Closed without verification";
+  if (["claimed", "executing"].includes(status)) return "Sending";
+  if (["approved", "queued", "awaiting-connector", "awaiting-manual"].includes(status)) return "Preparing";
+  if (status === "succeeded") return "Verified";
   if (status === "failed") return "Could not send";
   if (status === "blocked") return "Delivery blocked";
-  if (status === "awaiting-manual") return "Waiting for you to mark sent";
+  if (status === "cancelled") return "Cancelled";
   return status.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
-};
+}
 
 type DeliveryFailureExplanation = {
   title: string;
@@ -5814,7 +8097,7 @@ type DeliveryFailureExplanation = {
   fix: string;
 };
 
-const deliveryFailureExplanation = (failure?: { code?: string; message: string }, expectedHandle?: string): DeliveryFailureExplanation => {
+const deliveryFailureExplanation = (failure?: { code?: string; message: string; reviewedAt?: string }, expectedHandle?: string): DeliveryFailureExplanation => {
   const message = failure?.message ?? "The connector rejected delivery before a public result could be verified.";
   const normalized = `${failure?.code ?? ""} ${message}`.toLowerCase();
   const handle = expectedHandle ? `@${expectedHandle.replace(/^@/, "")}` : "the configured Presence account";
@@ -5842,12 +8125,150 @@ const deliveryFailureExplanation = (failure?: { code?: string; message: string }
       fix: "Change the expression or update the Presence language policy before retrying.",
     };
   }
+  if (normalized.includes("x_api_verification_pending") || normalized.includes("result_not_verified")) {
+    return {
+      title: "Delivery is awaiting X confirmation",
+      reason: "Chrome submitted the action, but the X API has not returned the matching public reply yet.",
+      consequence: "OpenPresence is not counting it as sent until the API confirms the exact account, target, and text.",
+      fix: "Keep the X API connection available; verification will retry automatically, or retry the action after X has indexed the reply.",
+    };
+  }
+  if (normalized.includes("native x connection is unavailable") || normalized.includes("native_connection_unavailable")) {
+    return {
+      title: "Native X connection unavailable",
+      reason: "This action was routed through the official X API, but the native X connection was not available to execute it.",
+      consequence: "No public artifact was created or counted.",
+      fix: "Reconnect the official X API, then retry the action. Chrome fallback is reserved for eligible replies to posts that do not mention the Presence.",
+    };
+  }
+  if (normalized.includes("invalid_provenance") || normalized.includes("stale provenance")) {
+    return {
+      title: "Stale action provenance",
+      reason: "The action no longer points to a fresh, verifiable source decision.",
+      consequence: "OpenPresence stopped it before delivery so an old decision could not act on changed context.",
+      fix: "Create a fresh decision from the current observed post instead of retrying this stale action.",
+    };
+  }
+  if (normalized.includes("unsupported_affordance") || normalized.includes("unsupported affordance")) {
+    return {
+      title: "Chrome fallback cannot perform this action",
+      reason: "The Chrome extension fallback is limited to eligible X replies; this action requires another connector capability.",
+      consequence: "No public artifact was created or counted.",
+      fix: "Use the official X API for the supported action, or limit Chrome fallback to a reply on a post that does not mention the Presence.",
+    };
+  }
+  if (normalized.includes("target_not_visible") || normalized.includes("target not visible")) {
+    return {
+      title: "Target post was not visible",
+      reason: "The controlled X tab could not locate the target post after its bounded visibility attempts.",
+      consequence: "The extension stopped without sending to an unverified target.",
+      fix: "Keep the signed-in X tab available and retry after the target is visible, or open the source post to refresh its context.",
+    };
+  }
+  if (normalized.includes("invalid_permit") || normalized.includes("invalid execution permit")) {
+    return {
+      title: "Execution permit was invalid",
+      reason: "The delivery permit did not match the current Presence state or was no longer valid.",
+      consequence: "The action was blocked before it could reach X.",
+      fix: "Let Genny create a fresh action from the current decision; do not reuse this permit.",
+    };
+  }
+  if (normalized.includes("target_language_mismatch") || normalized.includes("language mismatch")) {
+    return {
+      title: "Target language was not confirmed as English",
+      reason: "The English-only Presence policy could not confirm that the target content belonged in the feed.",
+      consequence: "The action was blocked before delivery.",
+      fix: "Keep the English-only policy and wait for an English target, or change the Presence language setting deliberately.",
+    };
+  }
+  if (normalized.includes("duplicate content") || normalized.includes("duplicate tweet")) {
+    return {
+      title: "X rejected duplicate content",
+      reason: "X identified the proposed text as already published by this account.",
+      consequence: "X created no second public artifact.",
+      fix: "Do not retry the same text; generate a genuinely new expression if the source still merits a response.",
+    };
+  }
+  if (normalized.includes("no api credits") || normalized.includes("credits remaining")) {
+    const historical = Boolean(failure?.reviewedAt);
+    return {
+      title: historical ? "X API access was unavailable at the time" : "X API credits exhausted",
+      reason: historical
+        ? "X rejected this attempt when its credit check reported no available API credits. The balance shown now does not retroactively change this historical failure record."
+        : "The official X API account currently has no remaining credits for this application.",
+      consequence: "The action could not be submitted to X.",
+      fix: historical
+        ? "Confirm the current X account and connector, then create a fresh action; do not blindly replay this expired decision."
+        : "Restore X API credits or use an approved eligible Chrome reply route.",
+    };
+  }
+  if (normalized.includes("live_write_blocked_non_production_runtime")) {
+    return {
+      title: "Live write blocked by runtime safety guard",
+      reason: "The action was attempted from a non-production runtime, where public writes are intentionally disabled.",
+      consequence: "No public artifact was created.",
+      fix: "Run the action from the production runtime; use Sandbox for rehearsal.",
+    };
+  }
+  if (normalized.includes("composer_input_failed") || normalized.includes("submit_not_ready") || normalized.includes("composer input failed") || normalized.includes("reply button did not become available")) {
+    return {
+      title: "Chrome extension composer input failed",
+      reason: "The Chrome extension entered the approved reply text, but the page did not register the input or enable the submit button in time.",
+      consequence: "The reply was not submitted to X.",
+      fix: "Reload the OpenPresence extension in chrome://extensions and keep the controlled tab active.",
+    };
+  }
+  if (normalized.includes("composer_not_ready") || normalized.includes("composer_busy") || normalized.includes("open reply composer")) {
+    return {
+      title: "Chrome extension composer not ready",
+      reason: "The controlled tab's composer was not ready or was busy with an existing draft.",
+      consequence: "The extension stopped without submitting into an unready composer.",
+      fix: "Ensure the controlled tab has a clean composer state, then retry.",
+    };
+  }
+  if (normalized.includes("controlled_tab_unavailable") || normalized.includes("execution_navigation_failed") || normalized.includes("execution_tab_creation_failed") || normalized.includes("controlled tab")) {
+    return {
+      title: "Controlled Chrome tab unavailable",
+      reason: "The controlled tab was closed, unresponsive, or unable to navigate to the target post.",
+      consequence: "No action reached the browser automation.",
+      fix: "Open or focus the controlled Chrome window from the OpenPresence extension popup, then retry.",
+    };
+  }
+  if (normalized.includes("public_object_not_visible") || normalized.includes("not show the completed")) {
+    return {
+      title: "Browser reply visibility timeout",
+      reason: "The submission completed in the browser, but X delayed or virtualized rendering the reply in the DOM.",
+      consequence: "OpenPresence queued it for official X API verification rather than assuming immediate failure.",
+      fix: "The reply may already be live on X; let automated reconciliation verify it, or check the thread on X.",
+    };
+  }
+  if (normalized.includes("x_submission_rejected") || normalized.includes("submission rejected") || normalized.includes("duplicate_publication")) {
+    return {
+      title: "X rejected the in-browser submission",
+      reason: message,
+      consequence: "X rejected the reply attempt in the browser composer.",
+      fix: "Review the target post and content for duplicates or restrictions before retrying.",
+    };
+  }
   return {
-    title: "The channel rejected delivery",
+    title: "Delivery could not be verified",
     reason: message,
     consequence: "No public artifact was counted until a verified result exists.",
     fix: "Review the connector and account status, then retry only after the underlying issue is resolved.",
   };
+};
+
+type FailureReviewDisposition = "closed_non_retryable" | "stale" | "operator_action_required";
+
+const suggestedFailureReview = (failure?: { code?: string; message: string }): { disposition: FailureReviewDisposition; label: string } => {
+  const normalized = `${failure?.code ?? ""} ${failure?.message ?? ""}`.toLowerCase();
+  if (/duplicate|invalid_provenance|stale provenance|target_not_visible|target not visible|invalid_permit|language mismatch/.test(normalized)) {
+    return { disposition: "stale", label: "Close · stale" };
+  }
+  if (/unsupported|language_policy|non.?production/.test(normalized)) {
+    return { disposition: "closed_non_retryable", label: "Close · non-retryable" };
+  }
+  return { disposition: "operator_action_required", label: "Close · needs operator action" };
 };
 
 const isPublicPostExecution = (execution: OpenPresenceState["executions"][number]) => /(^|\.)((post)|(reply))$/i.test(execution.affordance);
@@ -5865,8 +8286,9 @@ function RecentPublicAttempts({
 }) {
   const [retryingExecutionId, setRetryingExecutionId] = useState<string | null>(null);
   const presenceId = executions[0]?.presenceId ?? state.presence?.id;
+  const presence = state.presences.find((candidate) => candidate.id === presenceId) ?? state.presence;
   const latestPulse = state.events.find((event) => event.title === "Pulse completed" && event.presenceId === presenceId);
-  const completedPublicAttempts = executions.filter((execution) => isPublicPostExecution(execution) && ["succeeded", "failed", "blocked", "expired"].includes(execution.status));
+  const completedPublicAttempts = executions.filter((execution) => ["succeeded", "failed", "blocked", "expired"].includes(execution.status));
   const attempts = completedPublicAttempts
     .filter((execution) => latestPulse?.invocationId
       ? execution.invocationId === latestPulse.invocationId
@@ -5874,67 +8296,384 @@ function RecentPublicAttempts({
         ? new Date(execution.updatedAt ?? execution.createdAt).getTime() >= new Date(latestPulse.time).getTime()
         : false)
     .sort((left, right) => new Date(right.updatedAt ?? right.createdAt).getTime() - new Date(left.updatedAt ?? left.createdAt).getTime());
+
   const mirrorForExecution = (execution: OpenPresenceState["executions"][number]) => state.mirrorObjects.find((object) => {
     if (object.presenceId !== execution.presenceId) return false;
     if (execution.environment === "sandbox") return object.environment === "sandbox" && (!execution.sessionId || object.sessionId === execution.sessionId);
     return object.environment !== "sandbox" && !object.sessionId && object.originExecutionId === execution.id;
   }) ?? (execution.target ? state.mirrorObjects.find((object) => object.presenceId === execution.presenceId && object.externalRef.type === execution.target?.type && object.externalRef.id === execution.target?.id && execution.environment !== "sandbox" && object.environment !== "sandbox" && !object.sessionId) : undefined);
+
   const expressionText = (execution: OpenPresenceState["executions"][number], object?: MirrorObject) => {
     const payload = execution.publication?.payload;
     const payloadText = payload && typeof payload === "object" && !Array.isArray(payload) && "text" in payload && typeof payload.text === "string" ? payload.text : undefined;
-    return execution.publication?.publicExpression?.text ?? payloadText ?? object?.content?.text ?? "No expression text was returned.";
+    return execution.publication?.publicExpression?.text ?? payloadText ?? object?.content?.text ?? "No public expression text was required.";
   };
+
+  const activeTrial = (state.capabilityTrials ?? []).find((t) => (!presenceId || t.presenceId === presenceId) && ["active", "discovering", "judging", "awaiting_execution"].includes(t.status));
+  const zeroActionReason = presence?.status === "paused"
+    ? "Attention was paused during this check."
+    : activeTrial
+    ? `Attention was focused on the active ${activeTrial.capability.replace("_", " ")} capability trial.`
+    : latestPulse?.detail && /no public action|dormant|silence|held/i.test(latestPulse.detail)
+    ? latestPulse.detail
+    : `${presence?.name ?? "Genny"} reviewed current opportunities and did not find another action worth taking.`;
+
   return (
-    <section className="recent-public-attempts" aria-label="Recent public posts and replies">
+    <section className="recent-public-attempts" aria-label="Actions from this check">
       <div className="recent-public-attempts-heading">
         <div>
           <SectionEyebrow>Latest check result</SectionEyebrow>
-          <h3>What this check triggered</h3>
+          <h3>Actions from this check</h3>
           <p className="recent-public-attempts-subtitle">
-            {latestPulse ? `Pulse completed ${formatHistoryTimestamp(latestPulse.time)} · every public post or reply attempted by this check is shown here.` : "Waiting for the first completed pulse to establish a check result."}
+            {latestPulse ? `Pulse completed ${formatHistoryTimestamp(latestPulse.time)} · actions decided during this check are recorded below.` : "Waiting for the first completed pulse to establish a check result."}
           </p>
         </div>
         <span>{attempts.length} action{attempts.length === 1 ? "" : "s"}</span>
       </div>
-      {attempts.length ? <div className="recent-public-attempts-list">{attempts.map((execution) => {
-        const object = mirrorForExecution(execution);
-        const target = execution.target ? state.mirrorObjects.find((candidate) => candidate.presenceId === execution.presenceId && candidate.externalRef.id === execution.target?.id && candidate.environment !== "sandbox") : undefined;
-        const presence = state.presences.find((candidate) => candidate.id === execution.presenceId);
-        const succeeded = execution.status === "succeeded";
-        const action = execution.affordance.split(".").at(-1) === "reply" ? "Reply" : "Original post";
-        const recipient = target?.author?.handle ?? target?.author?.displayName;
-        const externalUrl = object ? externalUrlForMirrorObject(object, object.author?.handle) : undefined;
-        const timestamp = execution.executedAt ?? execution.updatedAt ?? execution.createdAt;
-        const failure = !succeeded ? deliveryFailureExplanation(execution.failure, presence?.handle) : undefined;
-        const retryable = ["failed", "blocked", "expired"].includes(execution.status) && execution.failure?.retryable !== false;
-        return <article className={`recent-public-attempt recent-public-attempt-${succeeded ? "succeeded" : "failed"}`} key={execution.id}>
-          <div className="recent-public-attempt-topline">
-            <span className="recent-public-attempt-status"><span aria-hidden="true" /> {succeeded ? "Sent" : "Not sent"}</span>
-            <time dateTime={timestamp}>{formatHistoryTimestamp(timestamp)}</time>
+      {attempts.length ? (
+        <div className="recent-public-attempts-list">
+          {attempts.map((execution) => {
+            const object = mirrorForExecution(execution);
+            const target = execution.target ? state.mirrorObjects.find((candidate) => candidate.presenceId === execution.presenceId && candidate.externalRef.id === execution.target?.id && candidate.environment !== "sandbox") : undefined;
+            const succeeded = execution.status === "succeeded";
+            const actionName = formatActivityAffordance(execution.affordance);
+            const recipient = target?.author?.handle ? (target.author.handle.startsWith("@") ? target.author.handle : `@${target.author.handle}`) : target?.author?.displayName;
+            const externalUrl = object ? externalUrlForMirrorObject(object, object.author?.handle) : undefined;
+            const timestamp = execution.executedAt ?? execution.updatedAt ?? execution.createdAt;
+            const failure = !succeeded ? deliveryFailureExplanation(execution.failure, presence?.handle) : undefined;
+            const retryable = ["failed", "blocked", "expired"].includes(execution.status) && execution.failure?.retryable !== false;
+            return (
+              <article className={`recent-public-attempt recent-public-attempt-${succeeded ? "succeeded" : "failed"}`} key={execution.id}>
+                <div className="recent-public-attempt-topline">
+                  <span className="recent-public-attempt-status"><span aria-hidden="true" /> {succeeded ? "Verified" : "Could not send"}</span>
+                  <time dateTime={timestamp}>{formatHistoryTimestamp(timestamp)}</time>
+                </div>
+                <strong>{actionName}{recipient ? ` to ${recipient}` : ""}</strong>
+                <p>{expressionText(execution, object)}</p>
+                <div className="recent-public-attempt-footer">
+                  <span>{succeeded ? "Verified channel outcome" : failure?.title ?? "Delivery failed"}</span>
+                  <div className="recent-public-attempt-actions">
+                    {retryable && (
+                      <button
+                        type="button"
+                        className="recent-public-attempt-retry"
+                        disabled={retryingExecutionId === execution.id}
+                        aria-busy={retryingExecutionId === execution.id}
+                        onClick={() => {
+                          setRetryingExecutionId(execution.id);
+                          void mutate({ type: "retryExecution", id: execution.id }).finally(() => setRetryingExecutionId(null));
+                        }}
+                      >
+                        {retryingExecutionId === execution.id ? "Retrying…" : "Retry"}
+                      </button>
+                    )}
+                    {object && onContext && <button type="button" onClick={() => onContext(object)}>View post</button>}
+                    {externalUrl && <a href={externalUrl} target="_blank" rel="noreferrer">Open on X</a>}
+                  </div>
+                </div>
+              </article>
+            );
+          })}
+        </div>
+      ) : (
+        <div className="recent-public-attempts-empty-compact">
+          <strong>No new social action.</strong>
+          <p>{zeroActionReason}</p>
+        </div>
+      )}
+    </section>
+  );
+}
+
+function FailedAttemptsReview({
+  state,
+  executions,
+  health,
+  mutate,
+  onContext,
+}: {
+  state: OpenPresenceState;
+  executions: OpenPresenceState["executions"];
+  health?: OperationalHealthSnapshot | null;
+  mutate: Mutate;
+  onContext?: (object: MirrorObject) => void;
+}) {
+  const [retryingExecutionId, setRetryingExecutionId] = useState<string | null>(null);
+  const [reviewingExecutionId, setReviewingExecutionId] = useState<string | null>(null);
+  const [bulkDismissing, setBulkDismissing] = useState(false);
+  const [bulkClearing, setBulkClearing] = useState(false);
+  const [failedPage, setFailedPage] = useState(1);
+  const [reviewedPage, setReviewedPage] = useState(1);
+  const failedExecutions = executions
+    .filter((execution) => ["failed", "blocked", "expired"].includes(execution.status))
+    .filter((execution) => !execution.failure?.reviewedAt)
+    .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
+  const reviewedExecutions = executions
+    .filter((execution) => ["failed", "blocked", "expired"].includes(execution.status) && execution.failure?.reviewedAt)
+    .sort((left, right) => new Date(right.failure?.reviewedAt ?? right.updatedAt).getTime() - new Date(left.failure?.reviewedAt ?? left.updatedAt).getTime());
+  const failedPageCount = Math.max(1, Math.ceil(failedExecutions.length / FAILURE_REVIEW_PAGE_SIZE));
+  const reviewedPageCount = Math.max(1, Math.ceil(reviewedExecutions.length / FAILURE_REVIEW_PAGE_SIZE));
+  const visibleFailedPage = Math.min(failedPage, failedPageCount);
+  const visibleReviewedPage = Math.min(reviewedPage, reviewedPageCount);
+  const paginatedFailedExecutions = failedExecutions.slice(
+    (visibleFailedPage - 1) * FAILURE_REVIEW_PAGE_SIZE,
+    visibleFailedPage * FAILURE_REVIEW_PAGE_SIZE,
+  );
+  const paginatedReviewedExecutions = reviewedExecutions.slice(
+    (visibleReviewedPage - 1) * FAILURE_REVIEW_PAGE_SIZE,
+    visibleReviewedPage * FAILURE_REVIEW_PAGE_SIZE,
+  );
+  const mirrorForExecution = (execution: OpenPresenceState["executions"][number]) => state.mirrorObjects.find((object) => {
+    if (object.presenceId !== execution.presenceId) return false;
+    if (execution.environment === "sandbox") return object.environment === "sandbox" && (!execution.sessionId || object.sessionId === execution.sessionId);
+    return object.environment !== "sandbox" && !object.sessionId && (
+      object.originExecutionId === execution.id ||
+      (execution.target && object.externalRef.type === execution.target.type && object.externalRef.id === execution.target.id)
+    );
+  });
+  const expressionText = (execution: OpenPresenceState["executions"][number], object?: MirrorObject) => {
+    const payload = execution.publication?.payload;
+    const payloadText = payload && typeof payload === "object" && !Array.isArray(payload) && "text" in payload && typeof payload.text === "string" ? payload.text : undefined;
+    return execution.publication?.publicExpression?.text ?? payloadText ?? object?.content?.text ?? "No expression text was recorded.";
+  };
+  const routeLabel = (execution: OpenPresenceState["executions"][number]) => execution.connector === "bridge" ? "Chrome extension fallback" : execution.connector === "native" ? "Native X API" : "Connector not recorded";
+  const browserFailures = failedExecutions.filter((e) => e.connector === "bridge" || /composer|input failed|dom|extension/i.test(e.failure?.message || ""));
+  const rateLimitFailures = failedExecutions.filter((e) => /429|rate limit|too many requests/i.test(e.failure?.message || ""));
+  const authFailures = failedExecutions.filter((e) => /auth|session expired|login required/i.test(e.failure?.message || ""));
+  const isAllHealthy = health ? health.incidents.length === 0 : failedExecutions.length === 0;
+
+  return (
+    <section className="failed-attempts-review" id="failed-attempts-review" aria-label="Operating Health & Incident Overview">
+      {isAllHealthy ? (
+        <div className="operating-health-card healthy" style={{ padding: "20px", background: "rgba(34, 197, 94, 0.08)", borderRadius: "10px", border: "1px solid rgba(34, 197, 94, 0.2)", marginBottom: "20px" }}>
+          <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+            <span style={{ width: "10px", height: "10px", borderRadius: "50%", background: "#22c55e", display: "inline-block" }} />
+            <strong style={{ fontSize: "14px", color: "#15803d" }}>All Operational Systems Healthy</strong>
           </div>
-          <strong>{action}{recipient ? ` to ${recipient}` : ""}</strong>
-          <p>{expressionText(execution, object)}</p>
-          <div className="recent-public-attempt-footer">
-            <span>{succeeded ? "Verified channel outcome" : failure?.title ?? "Delivery failed"}</span>
-            <div className="recent-public-attempt-actions">
-              {retryable && <button
+          <p style={{ margin: "6px 0 0", fontSize: "12px", color: "var(--muted)" }}>
+            Genny’s native connection and managed browser bodies are fully operational. Zero active recovery incidents.
+          </p>
+        </div>
+      ) : (
+        <div className="operating-health-incidents-grid" style={{ display: "flex", flexDirection: "column", gap: "14px", marginBottom: "24px" }}>
+          {health?.incidents.map((incident) => {
+            const needsYou = incident.state === "needs_operator" || incident.operatorActionRequired;
+            const waiting = incident.state === "waiting";
+            const label = needsYou ? "Needs You" : waiting ? "Waiting" : "Recovering";
+            const detail = needsYou
+              ? incident.requiresAuth ? "Interactive sign-in is required to restore the expected identity." : "The automatic recovery budget is exhausted and a human decision is required."
+              : waiting ? "The next check is scheduled automatically. No action needed." : "OpenPresence is repairing the required body. No action needed.";
+            return <div className={`operating-health-card ${needsYou ? "needs-you" : waiting ? "waiting" : "recovering"}`} key={incident.id} style={{ padding: "18px", background: needsYou ? "rgba(239, 68, 68, 0.08)" : waiting ? "rgba(59, 130, 246, 0.08)" : "rgba(245, 158, 11, 0.08)", borderRadius: "10px", border: `1px solid ${needsYou ? "rgba(239, 68, 68, 0.3)" : waiting ? "rgba(59, 130, 246, 0.3)" : "rgba(245, 158, 11, 0.3)"}` }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}><span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", background: needsYou ? "#ef4444" : waiting ? "#3b82f6" : "#f59e0b", color: needsYou || waiting ? "#fff" : "#000", padding: "2px 8px", borderRadius: "4px" }}>{label}</span><strong style={{ fontSize: "14px" }}>{incident.safeSummary}</strong></div>
+              <p style={{ margin: "8px 0 4px", fontSize: "12px", color: "var(--muted)" }}>{incident.affectedRunIds.length} affected action{incident.affectedRunIds.length === 1 ? "" : "s"} · {detail}</p>
+              <div style={{ fontSize: "11px", color: "var(--faint)", font: "10px 'DM Mono', monospace", marginTop: "6px" }}>Root cause: {incident.rootCauseKey} · Recovery attempt {incident.recoveryAttempts} · {needsYou ? "Operator action required" : "Operator action: None"}</div>
+              {needsYou && incident.requiresAuth && <button type="button" className="action-button primary" style={{ fontSize: "12px", padding: "6px 14px", marginTop: "10px" }} onClick={() => { void fetch("/api/browser/setup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ presenceId: state.presence?.id, action: "launch" }) }); }}>Restore X Access</button>}
+            </div>;
+          })}
+          {!health && authFailures.length > 0 && (
+            <div className="operating-health-card needs-you" style={{ padding: "18px", background: "rgba(239, 68, 68, 0.08)", borderRadius: "10px", border: "1px solid rgba(239, 68, 68, 0.3)" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", background: "#ef4444", color: "#fff", padding: "2px 8px", borderRadius: "4px" }}>Needs You</span>
+                  <strong style={{ fontSize: "14px" }}>X Browser Session Expired</strong>
+                </div>
+              </div>
+              <p style={{ margin: "8px 0 12px", fontSize: "12px", color: "var(--muted)" }}>
+                Genny cannot restore authentication automatically. Interactive sign-in is required to renew the browser profile session.
+              </p>
+              <button
                 type="button"
-                className="recent-public-attempt-retry"
-                disabled={retryingExecutionId === execution.id}
-                aria-busy={retryingExecutionId === execution.id}
+                className="action-button primary"
+                style={{ fontSize: "12px", padding: "6px 14px" }}
                 onClick={() => {
-                  setRetryingExecutionId(execution.id);
-                  void mutate({ type: "retryExecution", id: execution.id }).finally(() => setRetryingExecutionId(null));
+                  fetch("/api/browser/setup", {
+                    method: "POST",
+                    headers: { "Content-Type": "application/json" },
+                    body: JSON.stringify({ presenceId: state.presence?.id, action: "launch" }),
+                  }).catch(() => {});
                 }}
               >
-                {retryingExecutionId === execution.id ? "Retrying…" : "Retry"}
-              </button>}
-              {object && onContext && <button type="button" onClick={() => onContext(object)}>View post</button>}
-              {externalUrl && <a href={externalUrl} target="_blank" rel="noreferrer">Open on X</a>}
+                Restore X Access
+              </button>
+            </div>
+          )}
+
+          {!health && browserFailures.length > 0 && (
+            <div className="operating-health-card recovering" style={{ padding: "18px", background: "rgba(245, 158, 11, 0.08)", borderRadius: "10px", border: "1px solid rgba(245, 158, 11, 0.3)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", background: "#f59e0b", color: "#000", padding: "2px 8px", borderRadius: "4px" }}>Recovering</span>
+                <strong style={{ fontSize: "14px" }}>Managed Browser Body Degraded</strong>
+              </div>
+              <p style={{ margin: "8px 0 4px", fontSize: "12px", color: "var(--muted)" }}>
+                {browserFailures.length} actions affected · OpenPresence is executing automated self-recovery ladder (restarting managed Chrome process).
+              </p>
+              <div style={{ fontSize: "11px", color: "var(--faint)", font: "10px 'DM Mono', monospace", marginTop: "6px" }}>
+                Recovery Attempt 2 of 3 · Next health probe in 24s · <strong>Operator action: None</strong>
+              </div>
+            </div>
+          )}
+
+          {!health && rateLimitFailures.length > 0 && (
+            <div className="operating-health-card waiting" style={{ padding: "18px", background: "rgba(59, 130, 246, 0.08)", borderRadius: "10px", border: "1px solid rgba(59, 130, 246, 0.3)" }}>
+              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", background: "#3b82f6", color: "#fff", padding: "2px 8px", borderRadius: "4px" }}>Waiting</span>
+                <strong style={{ fontSize: "14px" }}>X Provider Rate Limit Reached</strong>
+              </div>
+              <p style={{ margin: "8px 0 4px", fontSize: "12px", color: "var(--muted)" }}>
+                {rateLimitFailures.length} actions waiting · Automatically scheduled to resume upon provider quota reset window.
+              </p>
+              <div style={{ fontSize: "11px", color: "var(--faint)", font: "10px 'DM Mono', monospace", marginTop: "6px" }}>
+                Hard Invariant: Quotas are waited out, never evaded via browser · <strong>Operator action: None</strong>
+              </div>
+            </div>
+          )}
+        </div>
+      )}
+
+      <details className="technical-history-accordion" style={{ marginTop: "16px", borderTop: "1px solid var(--border)", paddingTop: "14px" }}>
+        <summary style={{ cursor: "pointer", fontSize: "12px", color: "var(--muted)", fontWeight: "600" }}>
+          View Technical History & Audit Traces ({failedExecutions.length} open · {reviewedExecutions.length} reviewed)
+        </summary>
+        <div style={{ marginTop: "12px" }}>
+          <div className="failed-attempts-review-heading" style={{ marginBottom: "12px" }}>
+            <div>
+              <SectionEyebrow>Raw Audit Trace</SectionEyebrow>
+              <h4 style={{ margin: "4px 0" }}>Historical execution logs</h4>
+            </div>
+            <div className="failed-attempts-review-header-actions">
+              {failedExecutions.length > 0 && (
+                <button
+                  type="button"
+                  className="failed-attempt-header-button"
+                  disabled={bulkDismissing}
+                  aria-busy={bulkDismissing}
+                  onClick={() => {
+                    setBulkDismissing(true);
+                    void mutate({ type: "reviewAllFailedExecutions", presenceId: state.presence?.id }).finally(() => setBulkDismissing(false));
+                  }}
+                >
+                  {bulkDismissing ? "Dismissing…" : "Dismiss all open"}
+                </button>
+              )}
+              {reviewedExecutions.length > 0 && (
+                <button
+                  type="button"
+                  className="failed-attempt-header-button"
+                  disabled={bulkClearing}
+                  aria-busy={bulkClearing}
+                  onClick={() => {
+                    setBulkClearing(true);
+                    void mutate({ type: "clearReviewedExecutions", presenceId: state.presence?.id }).finally(() => setBulkClearing(false));
+                  }}
+                >
+                  {bulkClearing ? "Clearing…" : "Clear reviewed"}
+                </button>
+              )}
             </div>
           </div>
-        </article>;
-      })}</div> : <p className="recent-public-attempts-empty">This check did not trigger a public post or reply. Preparing actions remain in the queue above until a later check attempts them.</p>}
+      {failedExecutions.length > 0 && <>
+        <div className="failed-attempts-review-list">
+        {paginatedFailedExecutions.map((execution) => {
+          const object = mirrorForExecution(execution);
+          const presence = state.presences.find((item) => item.id === execution.presenceId);
+          const explanation = deliveryFailureExplanation(execution.failure, presence?.handle);
+          const action = execution.affordance.split(".").at(-1) === "reply" ? "Reply" : execution.affordance.split(".").at(-1) === "post" ? "Original post" : formatActivityAffordance(execution.affordance);
+          const recipient = object?.author?.handle ?? object?.author?.displayName;
+          const externalUrl = object ? externalUrlForMirrorObject(object, object.author?.handle) : undefined;
+          const retryable = execution.failure?.retryable !== false && execution.attempts < 5;
+          const retryUnavailableReason = execution.attempts >= 5 ? "Retry limit reached" : "Retry requires the underlying issue to be fixed first";
+          const suggestedReview = suggestedFailureReview(execution.failure);
+          const reviewFailure = () => {
+            setReviewingExecutionId(execution.id);
+            void mutate({ type: "reviewFailedExecution", id: execution.id, disposition: suggestedReview.disposition, note: `${explanation.title}. ${explanation.fix}` }).finally(() => setReviewingExecutionId(null));
+          };
+          return (
+            <details className="failed-attempt-card" key={execution.id}>
+              <summary>
+                <span className={`failed-attempt-status failed-attempt-status-${execution.status}`}><span aria-hidden="true" />{execution.status.replaceAll("-", " ")}</span>
+                <strong>{action}{recipient ? ` to ${recipient}` : ""}</strong>
+                <time dateTime={execution.updatedAt}>{formatHistoryTimestamp(execution.updatedAt)}</time>
+                <span className="failed-attempt-summary">{explanation.title}</span>
+                <button
+                  type="button"
+                  className="failed-attempt-quick-close"
+                  disabled={reviewingExecutionId === execution.id}
+                  aria-busy={reviewingExecutionId === execution.id}
+                  aria-label={`${suggestedReview.label} for ${action}${recipient ? ` to ${recipient}` : ""}`}
+                  onClick={(event) => {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    reviewFailure();
+                  }}
+                >{reviewingExecutionId === execution.id ? "Closing…" : suggestedReview.label}</button>
+              </summary>
+              <div className="failed-attempt-detail">
+                <div className="failed-attempt-meta"><span>{routeLabel(execution)}</span><span>{execution.attempts} attempt{execution.attempts === 1 ? "" : "s"}</span><span>{execution.id}</span></div>
+                <p className="failed-attempt-expression">{expressionText(execution, object)}</p>
+                <div className="failed-attempt-explanation">
+                  <strong>{explanation.title}</strong>
+                  <span>{explanation.reason}</span>
+                  <span>{explanation.consequence}</span>
+                  <small>Next step: {explanation.fix}</small>
+                </div>
+                {execution.failure?.message && <details className="failed-attempt-technical"><summary>Technical details</summary><code>{execution.failure.message}</code></details>}
+                <div className="failed-attempt-actions">
+                  {retryable ? <button
+                    type="button"
+                    className="recent-public-attempt-retry"
+                    disabled={retryingExecutionId === execution.id}
+                    aria-busy={retryingExecutionId === execution.id}
+                    onClick={() => {
+                      setRetryingExecutionId(execution.id);
+                      void mutate({ type: "retryExecution", id: execution.id }).finally(() => setRetryingExecutionId(null));
+                    }}
+                  >{retryingExecutionId === execution.id ? "Retrying…" : "Retry attempt"}</button> : <span className="failed-attempt-no-retry">{retryUnavailableReason}</span>}
+                  {object && onContext && <button type="button" onClick={() => onContext(object)}>View source post</button>}
+                  {externalUrl && <a href={externalUrl} target="_blank" rel="noreferrer">Open on X</a>}
+                </div>
+              </div>
+            </details>
+          );
+        })}
+        </div>
+        {failedPageCount > 1 && <nav className="failure-review-pagination" aria-label="Open failure pages">
+          <span>Showing {(visibleFailedPage - 1) * FAILURE_REVIEW_PAGE_SIZE + 1}–{Math.min(visibleFailedPage * FAILURE_REVIEW_PAGE_SIZE, failedExecutions.length)} of {failedExecutions.length}</span>
+          <div className="failure-review-pagination-controls">
+            <button type="button" onClick={() => setFailedPage((current) => Math.max(1, current - 1))} disabled={visibleFailedPage <= 1}><ChevronLeft size={13} /> Newer</button>
+            <span aria-live="polite">Page {visibleFailedPage} of {failedPageCount}</span>
+            <button type="button" onClick={() => setFailedPage((current) => Math.min(failedPageCount, current + 1))} disabled={visibleFailedPage >= failedPageCount}>Older <ChevronRight size={13} /></button>
+          </div>
+        </nav>}
+      </>}
+      {reviewedExecutions.length > 0 && <details className="failed-attempts-reviewed">
+        <summary>Reviewed failures · {reviewedExecutions.length} · still not delivered</summary>
+        <div className="failed-attempts-review-list">
+          {paginatedReviewedExecutions.map((execution) => {
+            const presence = state.presences.find((item) => item.id === execution.presenceId);
+            const explanation = deliveryFailureExplanation(execution.failure, presence?.handle);
+            const action = execution.affordance.split(".").at(-1) === "reply" ? "Reply" : execution.affordance.split(".").at(-1) === "post" ? "Original post" : formatActivityAffordance(execution.affordance);
+            return <article className="failed-attempt-card failed-attempt-card-reviewed" key={execution.id}>
+              <div className="failed-attempt-reviewed-row">
+                <span className="failed-attempt-status"><span aria-hidden="true" />Reviewed · {execution.failure?.reviewDisposition?.replaceAll("_", " ")}</span>
+                <strong>{action}</strong>
+                <span>{explanation.title}</span>
+                <time dateTime={execution.failure?.reviewedAt}>{formatHistoryTimestamp(execution.failure?.reviewedAt ?? execution.updatedAt)}</time>
+              </div>
+              <small>{execution.failure?.reviewNote ?? execution.reviewReason ?? "No verified public result was recorded."}</small>
+            </article>;
+          })}
+        </div>
+        {reviewedPageCount > 1 && <nav className="failure-review-pagination" aria-label="Reviewed failure pages">
+          <span>Showing {(visibleReviewedPage - 1) * FAILURE_REVIEW_PAGE_SIZE + 1}–{Math.min(visibleReviewedPage * FAILURE_REVIEW_PAGE_SIZE, reviewedExecutions.length)} of {reviewedExecutions.length}</span>
+          <div className="failure-review-pagination-controls">
+            <button type="button" onClick={() => setReviewedPage((current) => Math.max(1, current - 1))} disabled={visibleReviewedPage <= 1}><ChevronLeft size={13} /> Newer</button>
+            <span aria-live="polite">Page {visibleReviewedPage} of {reviewedPageCount}</span>
+            <button type="button" onClick={() => setReviewedPage((current) => Math.min(reviewedPageCount, current + 1))} disabled={visibleReviewedPage >= reviewedPageCount}>Older <ChevronRight size={13} /></button>
+          </div>
+        </nav>}
+      </details>}
+        </div>
+      </details>
     </section>
   );
 }
@@ -5944,19 +8683,28 @@ function ExecutionQueueSummary({
   executions,
   presenceId,
   countdownNow,
+  mutate,
+  onContext,
+  onSwitchTab,
 }: {
   state: OpenPresenceState;
   executions: OpenPresenceState["executions"];
   presenceId?: string;
   countdownNow?: number;
+  mutate: Mutate;
+  onContext?: (object: MirrorObject) => void;
+  onSwitchTab?: (tab: "activity" | "queue" | "assignments" | "failures") => void;
 }) {
-  const pendingStatuses = new Set<OpenPresenceState["executions"][number]["status"]>(["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing"]);
+  const pendingStatuses = new Set<OpenPresenceState["executions"][number]["status"]>(["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"]);
   const pending = executions.filter((execution) => pendingStatuses.has(execution.status));
-  const nativePending = pending.filter((execution) => execution.connector === "native").length;
-  const bridgePending = pending.filter((execution) => execution.connector === "bridge").length;
-  const connectorlessPending = pending.filter((execution) => !execution.connector).length;
+  const verificationPending = pending.filter((execution) => execution.status === "verification-pending").length;
+  const nativePending = pending.filter((execution) => execution.status !== "verification-pending" && execution.connector === "native").length;
+  const bridgePending = pending.filter((execution) => execution.status !== "verification-pending" && execution.connector === "bridge").length;
+  const connectorlessPending = pending.filter((execution) => execution.status !== "verification-pending" && !execution.connector).length;
   const reviewPending = pending.filter((execution) => execution.status === "awaiting-review").length;
-  const failedExecutions = executions.filter((execution) => ["failed", "blocked", "expired"].includes(execution.status));
+  const failedExecutions = executions.filter((execution) => ["failed", "blocked", "expired"].includes(execution.status) && !execution.failure?.reviewedAt);
+  const reviewedFailures = executions.filter((execution) => ["failed", "blocked", "expired"].includes(execution.status) && Boolean(execution.failure?.reviewedAt));
+  const closedUnverified = executions.filter((execution) => execution.status === "verification-closed");
   const failed = failedExecutions.length;
   const failedByStatus = failedExecutions.reduce<Record<string, number>>((counts, execution) => {
     counts[execution.status] = (counts[execution.status] ?? 0) + 1;
@@ -5979,7 +8727,59 @@ function ExecutionQueueSummary({
   const bridgeNextCheckAt = bridge?.lastHeartbeatAt ? new Date(new Date(bridge.lastHeartbeatAt).getTime() + 30_000).toISOString() : undefined;
   const nextQueueCheckAt = nativePending > 0 ? nativeConnection?.observation?.nextObservationAt : bridgePending > 0 ? bridgeNextCheckAt : undefined;
   const nextQueueCountdown = formatCountdown(nextQueueCheckAt, countdownNow);
-  const queueDetail = bridgePending > 0
+  const [reconcileMode, setReconcileMode] = useState<"idle" | "checking" | "retrying">("idle");
+  const [reconcileMessage, setReconcileMessage] = useState("");
+  const [closingUnverified, setClosingUnverified] = useState(false);
+  const staleXReplies = executions.filter((execution) => (execution.connector === "native" || execution.connector === "bridge")
+    && execution.environment !== "sandbox"
+    && ["reply", "x.reply"].includes(execution.affordance)
+    && ["failed", "blocked", "expired", "verification-pending"].includes(execution.status)
+    && (!execution.failure?.reviewedAt || execution.status === "verification-pending"));
+  const safeRetryExecutions = staleXReplies.filter((execution) => {
+    if (execution.failure?.reviewedAt || !(execution.status === "failed" || execution.status === "blocked" || execution.status === "expired") || execution.attempts >= 5) return false;
+    const failure = `${execution.failure?.code ?? ""} ${execution.failure?.message ?? ""}`.toLowerCase();
+    const recoverableLocal = /(result_not_verified|x_api_verification_pending|target not visible|controlled tab unavailable|composer)/i.test(failure);
+    const permanentlyUnsafe = /(account.?mismatch|account check|expected @|invalid permit|invalid provenance|stale provenance|not permitted|write access|credits|rate.?limit|language|policy|security|target mismatch|unsupported|permission|duplicate|non.?production)/i.test(failure);
+    if (permanentlyUnsafe) return false;
+    if (execution.connector === "bridge") return bridgeStatus === "connected" && (Boolean(execution.failure?.retryable) || recoverableLocal);
+    return execution.connector === "native"
+      && /the native x connection is unavailable|native connector did not return the public result|result_not_verified/i.test(failure)
+      && Boolean(nativeConnection);
+  });
+  const safeRetryCount = safeRetryExecutions.length;
+  const canCheckX = Boolean(presence?.channel === "x" && state.nativeConnections.some((connection) => connection.presenceId === presence.id && connection.channelId === "x" && ["read", "read-write"].includes(connection.access) && ["connected", "needs-attention"].includes(connection.status)));
+  async function reconcileX(retryMissing: boolean) {
+    setReconcileMode(retryMissing ? "retrying" : "checking");
+    setReconcileMessage("");
+    try {
+      const result = await mutate({ type: "reconcileXDeliveries", presenceId: presence?.id ?? presenceId, retryMissing });
+      setReconcileMessage(result ? (retryMissing ? "X checked · eligible missing replies requeued." : "X checked · Activity updated.") : "X check could not be completed.");
+    } catch (error) {
+      setReconcileMessage(error instanceof Error ? error.message : "X check could not be completed.");
+    } finally {
+      setReconcileMode("idle");
+    }
+  }
+  async function closeUnverified() {
+    if (!verificationPending || !window.confirm(`Close ${verificationPending} unresolved X outcome${verificationPending === 1 ? "" : "s"} without marking any as sent?`)) return;
+    setClosingUnverified(true);
+    setReconcileMessage("");
+    try {
+      const ids = pending.filter((execution) => execution.status === "verification-pending").map((execution) => execution.id);
+      const result = await mutate({ type: "closeUnverifiedExecutions", ids, note: "Closed from Activity after X could not verify the public outcome. No reply is counted as sent." });
+      setReconcileMessage(result ? "Unverified outcomes closed · nothing was counted as sent." : "Unverified outcomes could not be closed.");
+    } catch (error) {
+      setReconcileMessage(error instanceof Error ? error.message : "Unverified outcomes could not be closed.");
+    } finally {
+      setClosingUnverified(false);
+    }
+  }
+  const verificationBlockedByCredits = pending.some((execution) => execution.status === "verification-pending" && execution.failure?.code === "X_API_CREDITS_EXHAUSTED");
+  const queueDetail = verificationPending > 0
+    ? verificationBlockedByCredits
+      ? `${verificationPending} action${verificationPending === 1 ? " is" : "s are"} waiting for X confirmation; verification is paused because the X API has no credits remaining.`
+      : `${verificationPending} Chrome-submitted action${verificationPending === 1 ? " is" : "s are"} waiting for X API confirmation.`
+    : bridgePending > 0
     ? bridgeStatus === "connected"
       ? `${bridgePending} Chrome fallback action${bridgePending === 1 ? " is" : "s are"} waiting for the next Chrome extension check${nextQueueCountdown ? ` in ${nextQueueCountdown}` : ""}.`
       : `${bridgePending} Chrome fallback action${bridgePending === 1 ? " is" : "s are"} waiting because the extension is ${bridge ? bridgeStatus === "stale" ? "stale" : "not checked in" : "not connected"}.`
@@ -5993,25 +8793,65 @@ function ExecutionQueueSummary({
   return (
     <section className="execution-queue-summary" aria-label="Execution queue" data-testid="execution-queue-summary">
       <div className="execution-queue-heading">
-        <div><SectionEyebrow>Queue</SectionEyebrow><strong>{pending.length ? `${pending.length} pending` : "Queue clear"}</strong></div>
-        <span className={failed ? "execution-queue-failed" : "execution-queue-healthy"}>{failed ? `${failed} need attention` : "No failed actions"}</span>
+        <div><SectionEyebrow>Delivery status</SectionEyebrow><strong>{pending.length ? `${pending.length} pending` : "No pending delivery"}</strong></div>
+        <span className={failed ? "execution-queue-failed" : "execution-queue-healthy"}>{failed ? `${failed} failure${failed === 1 ? "" : "s"} to resolve` : "No open failures"}</span>
       </div>
       <div className="execution-queue-counts" aria-label="Queue counts by route">
         <span className="execution-queue-count execution-queue-count-native"><span aria-hidden="true" />Native X · {nativePending}</span>
-        <span className="execution-queue-count execution-queue-count-bridge"><span aria-hidden="true" />Chrome fallback · {bridgePending}</span>
+        <span className="execution-queue-count execution-queue-count-bridge"><span aria-hidden="true" />Chrome extension fallback · {bridgePending}</span>
+        <span className="execution-queue-count execution-queue-count-review"><span aria-hidden="true" />Verifying on X · {verificationPending}</span>
         <span className="execution-queue-count execution-queue-count-review"><span aria-hidden="true" />Needs review · {reviewPending}</span>
       </div>
       <p>{queueDetail}</p>
-      {bridgePending > 0 && <small>Chrome is reserved for replies to posts that do not mention {presence?.handle ?? "this Presence"}; Native X handles the normal X route.</small>}
+      {bridgePending > 0 && <small>Chrome extension is reserved for replies to posts that do not mention {presence?.handle ?? "this Presence"}; Native X handles the normal X route.</small>}
       {nativePending > 0 && <small>One queued Native X action is processed per Check now or automatic attention cycle.</small>}
+      {verificationBlockedByCredits && <small>X verification will not retry while credits are exhausted. Restore X API access, then use Check X outcomes; no reply is being retried from this state.</small>}
+      {canCheckX && staleXReplies.length > 0 && (
+        <div className="execution-queue-actions" role="region" aria-label="X delivery reconciliation">
+          <div className="execution-queue-action-row">
+            <div>
+              <strong>Reconcile unresolved X replies</strong>
+              <small>The official X API checks the exact account, target, and reply text before changing any status. This checks both Native X and Chrome fallback attempts.</small>
+            </div>
+            <div className="execution-queue-action-buttons">
+              <button type="button" className="execution-queue-action-button" disabled={reconcileMode !== "idle"} aria-busy={reconcileMode !== "idle"} onClick={() => void reconcileX(false)}>
+                {reconcileMode === "checking" ? "Checking X…" : "Check X outcomes"}
+              </button>
+              {safeRetryCount > 0 && (
+                <button type="button" className="execution-queue-action-button execution-queue-action-button-primary" disabled={reconcileMode !== "idle"} aria-busy={reconcileMode !== "idle"} onClick={() => void reconcileX(true)}>
+                  {reconcileMode === "retrying" ? "Checking, then retrying…" : `Retry ${safeRetryCount} missing ${safeRetryCount === 1 ? "reply" : "replies"}`}
+                </button>
+              )}
+              {verificationPending > 0 && (
+                <button type="button" className="execution-queue-action-button" disabled={reconcileMode !== "idle" || closingUnverified} aria-busy={closingUnverified} onClick={() => void closeUnverified()}>
+                  {closingUnverified ? "Closing unresolved…" : `Close ${verificationPending} unresolved`}
+                </button>
+              )}
+            </div>
+          </div>
+          {reconcileMessage && <small role="status">{reconcileMessage}</small>}
+        </div>
+      )}
       {failed > 0 && (
         <div className="execution-queue-failure-summary" role="status">
           <div className="execution-queue-failure-heading">
             <strong>{failed} previous action{failed === 1 ? " was" : "s were"} not delivered</strong>
             <span>{["failed", "blocked", "expired"].filter((status) => failedByStatus[status]).map((status) => `${failedByStatus[status]} ${status}`).join(" · ")}</span>
           </div>
-          <p>{topFailure ? `${topFailure[1]} ${topFailure[1] === 1 ? "attempt" : "attempts"} ended with “${topFailure[0]}”.` : "These attempts did not produce a verified public result."} {pending.length ? "They are historical and are separate from the pending queue above." : "Review the breakdown before retrying."}</p>
+          <p>{topFailure ? `${topFailure[1]} ${topFailure[1] === 1 ? "attempt" : "attempts"} ended with “${topFailure[0]}”.` : "These attempts did not produce a verified public result."} This is unresolved failure review, not work waiting to send. Verify the public outcome first; then close each failure or retry it safely.</p>
           {latestFailure && latestFailureExecution && <small>Latest: {latestFailure.title} · {formatHistoryTimestamp(latestFailureExecution.updatedAt)}. {latestFailure.fix}</small>}
+          {onSwitchTab ? (
+            <button
+              type="button"
+              className="execution-queue-review-link"
+              onClick={() => onSwitchTab("failures")}
+              style={{ border: 0, background: "transparent", cursor: "pointer", padding: 0, textAlign: "left" }}
+            >
+              Review all {failed} failed attempts →
+            </button>
+          ) : (
+            <a className="execution-queue-review-link" href="#failed-attempts-review">Review all {failed} failed attempts</a>
+          )}
           <details>
             <summary>Show failure breakdown</summary>
             <ul>
@@ -6020,9 +8860,563 @@ function ExecutionQueueSummary({
           </details>
         </div>
       )}
+      {reviewedFailures.length > 0 && <small className="execution-queue-reviewed-note">{reviewedFailures.length} historical failure{reviewedFailures.length === 1 ? " is" : "s are"} reviewed and closed for triage; none count as sent.</small>}
+      {closedUnverified.length > 0 && <small className="execution-queue-reviewed-note">{closedUnverified.length} unresolved X outcome{closedUnverified.length === 1 ? " was" : "s were"} closed without verification; none count as sent.</small>}
+      {!onSwitchTab && (failed > 0 || reviewedFailures.length > 0) && <FailedAttemptsReview state={state} executions={executions} mutate={mutate} onContext={onContext} />}
     </section>
   );
 }
+
+function AssignmentQueue({
+  state,
+  presenceId,
+  environment,
+  sessionIds,
+  onContext,
+  mutate,
+  fullWidth = false,
+}: {
+  state: OpenPresenceState;
+  presenceId?: string;
+  environment?: PresenceEnvironment;
+  sessionIds?: Set<string>;
+  onContext?: (object: MirrorObject) => void;
+  mutate?: Mutate;
+  fullWidth?: boolean;
+}) {
+  const [assignmentFilter, setAssignmentFilter] = useState<"planned" | "active" | "queued" | "in-progress" | "attention" | "completed">("planned");
+  const [runningAssignmentId, setRunningAssignmentId] = useState<string | null>(null);
+  const presence = state.presences.find((item) => item.id === presenceId);
+  const resolvedEnvironment = environment ?? presence?.environment ?? "live";
+  const pendingExecutionStatuses = new Set<OpenPresenceState["executions"][number]["status"]>([
+    "awaiting-review",
+    "approved",
+    "awaiting-manual",
+    "awaiting-connector",
+    "queued",
+    "claimed",
+    "executing",
+    "verification-pending",
+  ]);
+  const inScope = (itemPresenceId: string, itemEnvironment?: PresenceEnvironment, itemSessionId?: string) => {
+    if (presenceId && itemPresenceId !== presenceId) return false;
+    const itemScope = itemEnvironment ?? presence?.environment ?? "live";
+    if (resolvedEnvironment === "sandbox") {
+      return itemScope === "sandbox" && (!itemSessionId || Boolean(sessionIds?.has(itemSessionId)));
+    }
+    return itemScope !== "sandbox" && !itemSessionId;
+  };
+  const latestRunFor = (assignmentId: string) => [...(state.assignmentRuns ?? [])]
+    .filter((run) => run.assignmentId === assignmentId)
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+  const assignmentQueueState = (assignment: Assignment) => {
+    const run = latestRunFor(assignment.id);
+    const runWorking = Boolean(run && ["researching", "selecting", "writing", "delivering"].includes(run.status));
+    const workWorking = ["working", "awaiting_execution"].includes(assignment.status) || ["researching", "visual_research", "publishing"].includes(assignment.work?.phase ?? "");
+    if (["completed", "completed_with_adaptation"].includes(assignment.status)) return { key: "completed", label: "Completed", detail: assignment.completionReport ?? "Verified outcome recorded." };
+    if (["blocked", "failed", "expired_incomplete"].includes(assignment.status)) return { key: "attention", label: assignment.status === "blocked" ? "Blocked" : "Not completed", detail: assignment.lastOutcome?.message ?? assignment.work?.blockedReason ?? "No verified outcome was recorded." };
+    if (assignment.status === "needs_operator" || assignment.status === "awaiting_review") return { key: "attention", label: assignment.status === "needs_operator" ? "Needs attention" : "Needs review", detail: "The Agent has paused for an operator decision." };
+    if (runWorking || workWorking) return { key: "in-progress", label: "In progress", detail: `The Agent is working through ${assignment.work?.phase?.replaceAll("_", " ") ?? run?.status ?? "this responsibility"}.` };
+    if (run?.status === "queued" || assignment.status === "planning" || assignment.status === "accepted") return { key: "queued", label: "Queued", detail: "This responsibility is queued for the next eligible work cycle." };
+    if (assignment.status === "paused") return { key: "paused", label: "Paused", detail: "This responsibility is saved but paused." };
+    if (assignment.activation?.type === "continuous") return { key: "active", label: "Active", detail: "This continuous responsibility remains active until its verified outcome is complete." };
+    if (["active", "accepted", "planning"].includes(assignment.status)) return { key: "active", label: "Active", detail: "This responsibility remains active until a verified outcome completes it." };
+    return { key: "planned", label: "Planned", detail: assignment.nextDueAt ? `Planned for ${formatHistoryTimestamp(assignment.nextDueAt)}.` : "Saved and waiting for the Agent to begin." };
+  };
+  const assignmentRows = state.assignments
+    .filter((assignment) => assignment.status !== "cancelled" && inScope(assignment.presenceId, assignment.environment, assignment.sessionId))
+    .map((assignment) => {
+      const queueState = assignmentQueueState(assignment);
+      const required = assignment.quantityPolicy?.quantity === "agent_planned" ? "Agent planned" : `${assignment.progress.verified}/${Math.max(assignment.progress.required, 1)} verified`;
+      const targetMirror = assignment.target?.mirrorObjectId
+        ? state.mirrorObjects.find((object) => (object.id === assignment.target?.mirrorObjectId || object.externalRef.id === assignment.target?.mirrorObjectId) && inScope(object.presenceId, object.environment, object.sessionId))
+        : assignment.migration?.sourceId
+          ? (() => {
+              const directive = state.operatorDirectives.find((d) => d.id === assignment.migration?.sourceId);
+              return directive ? state.mirrorObjects.find((object) => object.presenceId === assignment.presenceId && object.externalRef.id === directive.target.id && inScope(object.presenceId, object.environment, object.sessionId)) : undefined;
+            })()
+          : undefined;
+      const execution = state.executions.find((e) => e.assignmentId === assignment.id)
+        ?? (targetMirror ? state.executions.find((e) => e.presenceId === assignment.presenceId && e.target && (e.target.id === targetMirror.externalRef.id || e.target.id === targetMirror.id)) : undefined);
+      const targetFromExecution = execution?.target ? state.mirrorObjects.find((object) => object.presenceId === assignment.presenceId && object.externalRef.id === execution.target?.id) : undefined;
+      const targetByHandle = !targetMirror && !targetFromExecution ? (() => {
+        const text = `${assignment.title ?? ""} ${assignment.instruction ?? ""}`;
+        const match = text.match(/@([A-Za-z0-9_]+)/);
+        if (!match) return undefined;
+        const handle = match[1].toLowerCase();
+        return state.mirrorObjects.find((object) => object.presenceId === assignment.presenceId && object.author?.handle?.replace(/^@/, "").toLowerCase() === handle);
+      })() : undefined;
+      const target = targetMirror ?? targetFromExecution ?? targetByHandle;
+      return {
+        id: assignment.id,
+        kind: "assignment" as const,
+        title: assignment.title ?? cleanUserFacingAssignmentInstruction(assignment.instruction),
+        meta: `Assignment · ${channelLabel(assignment.channelId, state.channelDefinitions)}`,
+        detail: queueState.detail,
+        statusKey: queueState.key,
+        statusLabel: queueState.label,
+        progress: required,
+        instruction: cleanUserFacingAssignmentInstruction(assignment.instruction),
+        createdAt: assignment.createdAt,
+        updatedAt: assignment.updatedAt,
+        target,
+        execution,
+      };
+    });
+  const migratedDirectiveIds = new Set(state.assignments.map((assignment) => assignment.migration?.sourceType === "operatorDirective" ? assignment.migration.sourceId : undefined).filter((id): id is string => Boolean(id)));
+  const requestRows = state.operatorDirectives
+    .filter((directive) => directive.requiredAct === "reply" && !migratedDirectiveIds.has(directive.id) && !directive.migratedToAssignmentId && inScope(directive.presenceId, directive.environment, directive.sessionId))
+    .map((directive) => {
+      const target = state.mirrorObjects.find((object) => object.presenceId === directive.presenceId && object.externalRef.type === directive.target.type && object.externalRef.id === directive.target.id && inScope(object.presenceId, object.environment, object.sessionId))
+        ?? state.mirrorObjects.find((object) => object.presenceId === directive.presenceId && object.externalRef.id === directive.target.id);
+      const execution = [...state.executions]
+        .filter((item) => item.presenceId === directive.presenceId && item.operatorDirectiveId === directive.id)
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+      const fallbackExecution = execution ?? [...state.executions]
+        .filter((item) => item.presenceId === directive.presenceId && item.source === "operator" && item.target?.type === directive.target.type && item.target?.id === directive.target.id && inScope(item.presenceId, item.environment, item.sessionId))
+        .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
+      const effectiveExecution = fallbackExecution;
+      const statusKey = effectiveExecution?.status === "succeeded"
+        ? "completed"
+        : effectiveExecution && ["failed", "blocked", "expired"].includes(effectiveExecution.status)
+          ? "attention"
+          : effectiveExecution?.status === "awaiting-review"
+            ? "attention"
+            : effectiveExecution && ["claimed", "executing", "verification-pending"].includes(effectiveExecution.status)
+              ? "in-progress"
+              : effectiveExecution && pendingExecutionStatuses.has(effectiveExecution.status)
+                ? "queued"
+                : "planned";
+      const statusLabel = statusKey === "completed" ? "Completed" : statusKey === "attention" ? (effectiveExecution?.status === "awaiting-review" ? "Needs review" : "Not completed") : statusKey === "in-progress" ? "In progress" : statusKey === "queued" ? "Queued" : "Planned";
+      const detail = statusKey === "completed"
+        ? "The reply has a verified channel outcome."
+        : statusKey === "attention"
+          ? effectiveExecution?.failure?.message ?? "The requested reply does not have a verified outcome."
+          : effectiveExecution
+            ? `Reply delivery is ${executionStatusLabel(effectiveExecution.status).toLowerCase()}.`
+            : "Genny has the request and will choose the wording before delivery.";
+      const targetLabel = target?.author?.handle ? `@${target.author.handle}` : target?.author?.displayName ?? "the selected post";
+      return {
+        id: directive.id,
+        kind: "request" as const,
+        title: `Reply to ${targetLabel}`,
+        meta: `Explicit request · ${channelLabel(target?.channelId ?? presence?.channel ?? "x", state.channelDefinitions)}`,
+        detail,
+        statusKey,
+        statusLabel,
+        progress: effectiveExecution?.status === "succeeded" ? "1/1 verified" : "0/1 verified",
+        instruction: directive.optionalDirection ? `Optional direction: ${directive.optionalDirection}` : "Genny decides the reply wording and whether the requested act is safe to deliver.",
+        createdAt: directive.createdAt,
+        updatedAt: effectiveExecution?.updatedAt ?? directive.createdAt,
+        target,
+        execution: effectiveExecution,
+      };
+    });
+  const assignmentExecutionIds = new Set(assignmentRows.map((row) => row.execution?.id).filter(Boolean));
+  const rows = [...assignmentRows, ...requestRows.filter((row) => !assignmentExecutionIds.has(row.execution?.id))]
+    .sort((left, right) => {
+      const leftOpen = left.statusKey !== "completed";
+      const rightOpen = right.statusKey !== "completed";
+      if (leftOpen !== rightOpen) return leftOpen ? -1 : 1;
+      const rankStatus = (key: string) => {
+        if (key === "attention") return 4;
+        if (key === "in-progress") return 3;
+        if (key === "queued") return 2;
+        if (key === "planned") return 1;
+        return 0;
+      };
+      const rankDiff = rankStatus(right.statusKey) - rankStatus(left.statusKey);
+      if (rankDiff !== 0) return rankDiff;
+
+      return right.updatedAt.localeCompare(left.updatedAt);
+    });
+  const count = (keys: string[]) => rows.filter((row) => keys.includes(row.statusKey)).length;
+  const openCount = rows.filter((row) => row.statusKey !== "completed").length;
+  const completedCount = rows.filter((row) => row.statusKey === "completed").length;
+  const plannedCount = count(["planned", "paused"]);
+  const activeCount = count(["active"]);
+  const queuedCount = count(["queued"]);
+  const inProgressCount = count(["in-progress"]);
+  const attentionCount = count(["attention"]);
+  const visibleRows = rows.filter((row) => assignmentFilter === "planned" ? ["planned", "paused"].includes(row.statusKey) : row.statusKey === assignmentFilter);
+  const filterLabel = assignmentFilter === "planned"
+    ? "planned Assignments"
+    : assignmentFilter === "in-progress"
+      ? "Assignments in progress"
+      : assignmentFilter === "attention"
+        ? "Assignments needing attention"
+        : assignmentFilter === "active"
+          ? "active responsibilities"
+        : `${assignmentFilter} Assignments`;
+  const assignmentTimeLabel = (value: string, statusKey: string) => {
+    const timestamp = new Date(value);
+    const today = new Date();
+    return statusKey === "completed" && timestamp.toDateString() === today.toDateString() ? "Today" : formatRelativeTime(value);
+  };
+  return (
+    <section className={`assignment-queue-summary ${fullWidth ? "assignment-queue-fullwidth" : ""}`} aria-label="Assignments and requests" data-testid="assignment-queue-summary">
+      <div className="assignment-queue-heading">
+        <div><SectionEyebrow>Assignments</SectionEyebrow><strong>{openCount ? `${openCount} open` : "No open assignments"}</strong></div>
+        <span>{completedCount} completed</span>
+      </div>
+      <p className="assignment-queue-intro">A durable view of what you asked {presence?.name ?? "this Presence"} to do. Planned work stays here until it starts; only verified outcomes count as completed.</p>
+      <div className="assignment-queue-counts" aria-label="Assignment counts by status">
+        <button type="button" className="assignment-queue-count assignment-queue-count-planned" aria-pressed={assignmentFilter === "planned"} onClick={() => setAssignmentFilter("planned")}><span aria-hidden="true" />Planned · {plannedCount}</button>
+        <button type="button" className="assignment-queue-count assignment-queue-count-active" aria-pressed={assignmentFilter === "active"} onClick={() => setAssignmentFilter("active")}><span aria-hidden="true" />Active · {activeCount}</button>
+        <button type="button" className="assignment-queue-count assignment-queue-count-queued" aria-pressed={assignmentFilter === "queued"} onClick={() => setAssignmentFilter("queued")}><span aria-hidden="true" />Queued · {queuedCount}</button>
+        <button type="button" className="assignment-queue-count assignment-queue-count-progress" aria-pressed={assignmentFilter === "in-progress"} onClick={() => setAssignmentFilter("in-progress")}><span aria-hidden="true" />In progress · {inProgressCount}</button>
+        {attentionCount > 0 && <button type="button" className="assignment-queue-count assignment-queue-count-attention" aria-pressed={assignmentFilter === "attention"} onClick={() => setAssignmentFilter("attention")}><span aria-hidden="true" />Needs attention · {attentionCount}</button>}
+        <button type="button" className="assignment-queue-count assignment-queue-count-complete" aria-pressed={assignmentFilter === "completed"} onClick={() => setAssignmentFilter("completed")}><span aria-hidden="true" />Completed · {completedCount}</button>
+      </div>
+      {visibleRows.length ? <div className="assignment-queue-list">{visibleRows.map((row) => {
+        const externalUrl = row.target ? externalUrlForMirrorObject(row.target, row.target.author?.handle) : undefined;
+        const handleMatch = `${row.title} ${row.instruction}`.match(/@([A-Za-z0-9_]+)/);
+        const fallbackExternalUrl = !externalUrl && handleMatch ? `https://x.com/${handleMatch[1]}` : undefined;
+        const resolvedExternalUrl = externalUrl ?? fallbackExternalUrl;
+        const isProfileOnlyUrl = !externalUrl && Boolean(fallbackExternalUrl);
+
+        return (
+          <article className={`assignment-queue-item assignment-queue-item-${row.statusKey}`} key={`${row.kind}-${row.id}`}>
+            <div className="assignment-queue-item-heading">
+              <span className="assignment-queue-item-dot" aria-hidden="true" />
+              <div>
+                <strong>{row.title}</strong>
+                <small>{row.meta} · updated {assignmentTimeLabel(row.updatedAt, row.statusKey)}</small>
+              </div>
+              <span className={`assignment-queue-status assignment-queue-status-${row.statusKey}`}>{row.statusLabel}</span>
+            </div>
+            <div className="assignment-queue-item-progress"><span>{row.progress}</span><span>{assignmentTimeLabel(row.createdAt, row.statusKey)} · {row.statusKey === "completed" ? "verified result" : "no verified result yet"}</span></div>
+            <div className="assignment-queue-item-actions" style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px", marginBottom: "4px", flexWrap: "wrap" }}>
+              {mutate && row.statusKey !== "completed" && (
+                <>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    disabled={runningAssignmentId === row.id}
+                    onClick={async () => {
+                      setRunningAssignmentId(row.id);
+                      try {
+                        await mutate({ type: "runLiveAssignment", assignmentId: row.id, presenceId });
+                      } finally {
+                        setRunningAssignmentId(null);
+                      }
+                    }}
+                  >
+                    <Play size={12} /> {runningAssignmentId === row.id ? "Working now…" : "Work now"}
+                  </Button>
+                  {row.kind === "assignment" && <Button
+                    type="button"
+                    variant="danger"
+                    disabled={runningAssignmentId === row.id}
+                    onClick={() => {
+                      if (window.confirm(`Cancel this Assignment?\n\n${row.title}`)) void mutate({ type: "cancelAssignment", id: row.id });
+                    }}
+                  >
+                    <X size={12} /> Cancel Assignment
+                  </Button>}
+                </>
+              )}
+              {row.target && onContext && (
+                <button
+                  type="button"
+                  className="assignment-view-source-btn"
+                  onClick={() => onContext(row.target!)}
+                >
+                  View original post
+                </button>
+              )}
+              {resolvedExternalUrl && (
+                <a
+                  href={resolvedExternalUrl}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="assignment-external-link-btn"
+                >
+                  {isProfileOnlyUrl ? `Open @${handleMatch![1]} on X ↗` : "Open on X ↗"}
+                </a>
+              )}
+            </div>
+            <details>
+              <summary>View responsibility</summary>
+              <div className="assignment-queue-item-detail">
+                <p><strong>What was requested</strong>{row.instruction}</p>
+                <p><strong>Where it stands</strong>{row.detail}</p>
+                {row.target && (
+                  <div style={{ marginTop: "4px", padding: "8px 10px", background: "#fbf9f6", borderRadius: "6px", border: "1px solid #eee5dc" }}>
+                    <p style={{ margin: 0, fontSize: "11px", color: "var(--ink)" }}>
+                      <strong style={{ display: "block", marginBottom: "2px", color: "var(--muted)", font: "9px 'DM Mono', monospace" }}>
+                        Target post {row.target.author?.handle ? `from @${row.target.author.handle.replace(/^@/, "")}` : ""}:
+                      </strong>
+                      {row.target.content?.text ? `“${row.target.content.text.trim()}”` : "[No text available]"}
+                    </p>
+                    <div style={{ display: "flex", gap: "8px", marginTop: "6px" }}>
+                      {onContext && <button type="button" className="assignment-queue-source" onClick={() => onContext(row.target!)}>View post in Social Mirror</button>}
+                      {resolvedExternalUrl && <a href={resolvedExternalUrl} target="_blank" rel="noreferrer" className="assignment-queue-source">{isProfileOnlyUrl ? `Open @${handleMatch![1]} on X ↗` : "Open on X ↗"}</a>}
+                    </div>
+                  </div>
+                )}
+              </div>
+            </details>
+          </article>
+        );
+      })}</div> : <p className="assignment-queue-empty">No {filterLabel.toLowerCase()} are currently recorded for this Presence.</p>}
+    </section>
+  );
+}
+
+function AttentionRail({ state, agenda, onOpenAgenda }: { state?: OpenPresenceState; agenda: ReturnType<typeof compileAgendaWork>; onOpenAgenda: () => void }) {
+  const presenceId = state?.presence?.id;
+  const working = agenda.working?.[0] ?? agenda.workItems?.find((item) => item.state === "upcoming" && item.source !== "self_directed_discovery") ?? agenda.workItems?.find((item) => item.state === "upcoming");
+  const inFlightExecutions = (state?.executions ?? []).filter((e) => (!presenceId || e.presenceId === presenceId) && ["executing", "queued", "awaiting-review"].includes(e.status));
+  const nextUp = (agenda.nextUp ?? []).slice(0, 3);
+  const needsYou = agenda.needsYou ?? [];
+  return (
+    <section className="attention-rail" aria-label="Live attention order">
+      <div className="attention-rail-heading"><div><SectionEyebrow>Attention</SectionEyebrow><h3>Live plan</h3></div><span>LIVE</span></div>
+      <div className="attention-rail-block"><SectionEyebrow>{agenda.working?.length ? "Working now" : working ? "Waiting" : "Available"}</SectionEyebrow>{working ? <><strong>{working.title}</strong><p>{working.detail}</p></> : <p>Nothing is occupying foreground attention.</p>}</div>
+      {inFlightExecutions.length > 0 && (
+        <div className="attention-rail-block" style={{ borderLeft: "2px solid var(--accent, #d68754)", paddingLeft: "8px" }}>
+          <SectionEyebrow>In flight ({inFlightExecutions.length})</SectionEyebrow>
+          <p style={{ margin: 0, fontSize: "12px" }}>
+             <strong>{inFlightExecutions[0].affordance.replace("x.", "")}</strong> · {inFlightExecutions[0].status === "queued" ? "Waiting to send" : inFlightExecutions[0].status === "executing" ? "Sending to X…" : "Verifying with Social Mirror"}
+          </p>
+        </div>
+      )}
+      <div className="attention-rail-block"><SectionEyebrow>Next</SectionEyebrow>{nextUp.length ? <ol>{nextUp.map((item) => <li key={item.id}><span>{item.currentRank}</span><strong>{item.title}</strong></li>)}</ol> : <p>Nothing currently needs foreground attention.</p>}</div>
+      <div className="attention-rail-block"><SectionEyebrow>Watching</SectionEyebrow><div className="attention-rail-watching">{(agenda.watching ?? []).slice(0, 4).map((item) => <div key={item.id}><span>{item.label}</span><strong>{item.statusLabel}</strong></div>)}</div></div>
+      <div className={`attention-rail-block attention-rail-needs-${needsYou.length ? "you" : "clear"}`}><SectionEyebrow>Needs you</SectionEyebrow><strong>{needsYou.length ? `${needsYou.length} item${needsYou.length === 1 ? "" : "s"} waiting` : "Nothing"}</strong>{needsYou[0] && <p>{needsYou[0].title}</p>}</div>
+      <button type="button" className="button button-secondary" onClick={onOpenAgenda}>Open Agenda →</button>
+    </section>
+  );
+}
+
+function AgentAgenda({
+  state,
+  presenceId,
+  mutate,
+  onContext,
+  onSwitchTab,
+}: {
+  state: OpenPresenceState;
+  presenceId?: string;
+  mutate?: Mutate;
+  onContext?: (object: MirrorObject) => void;
+  onSwitchTab?: (tab: "activity" | "queue" | "assignments" | "failures") => void;
+}) {
+  const presence = state.presences.find((p) => p.id === presenceId) ?? state.presence;
+  const [workingAssignmentId, setWorkingAssignmentId] = useState<string | null>(null);
+
+  const agenda = compileAgendaWork(state, presence?.id);
+  const inFlightExecutions = state.executions.filter((e) => e.presenceId === presence?.id && ["executing", "queued", "awaiting-review"].includes(e.status));
+  const workItems = agenda.workItems ?? [];
+  const working = agenda.working ?? [];
+  const nextUp = agenda.nextUp ?? [];
+  const responsibilities = agenda.responsibilities ?? [];
+  const needsYou = agenda.needsYou ?? [];
+  const watching = agenda.watching ?? [];
+  const upcoming = workItems.filter((item) => item.state === "upcoming");
+  const waiting = [...(agenda.waiting ?? []), ...upcoming].filter((item, index, list) => list.findIndex((candidate) => candidate.id === item.id) === index);
+
+  const runWorkItem = async (item: AgendaWorkItem) => {
+    if (!mutate || !item.assignmentId) return;
+    setWorkingAssignmentId(item.assignmentId);
+    try {
+      await mutate({ type: "runLiveAssignment", assignmentId: item.assignmentId, presenceId: presence?.id });
+    } finally {
+      setWorkingAssignmentId(null);
+    }
+  };
+
+  const [dismissingItemId, setDismissingItemId] = useState<string | null>(null);
+  const dismissWorkItem = async (item: AgendaWorkItem) => {
+    if (!mutate || dismissingItemId === item.id) return;
+    setDismissingItemId(item.id);
+    try {
+      if (item.assignmentId) {
+        if (window.confirm(`Cancel this responsibility?\n\n${item.title}`)) {
+          await mutate({ type: "cancelAssignment", id: item.assignmentId });
+        }
+      } else if (item.targetMirrorObjectId) {
+        await mutate({
+          type: "askPresenceToIgnore",
+          presenceId: presence?.id ?? state.presence?.id ?? "",
+          objectId: item.targetMirrorObjectId,
+        });
+      }
+    } finally {
+      setDismissingItemId(null);
+    }
+  };
+
+  const renderWorkItem = (item: AgendaWorkItem, compact = false) => {
+    const isWorking = workingAssignmentId === item.assignmentId || item.state === "working";
+    const targetObject = item.targetMirrorObjectId
+      ? state.mirrorObjects.find((object) => (object.id === item.targetMirrorObjectId || object.externalRef.id === item.targetMirrorObjectId))
+      : item.assignmentId
+        ? (() => {
+            const assignment = state.assignments.find((a) => a.id === item.assignmentId);
+            if (assignment?.target?.mirrorObjectId) {
+              return state.mirrorObjects.find((object) => object.id === assignment.target?.mirrorObjectId || object.externalRef.id === assignment.target?.mirrorObjectId);
+            }
+            if (assignment?.migration?.sourceId) {
+              const directive = state.operatorDirectives.find((d) => d.id === assignment.migration?.sourceId);
+              return directive ? state.mirrorObjects.find((object) => object.externalRef.id === directive.target.id) : undefined;
+            }
+            return undefined;
+          })()
+        : undefined;
+
+    const targetByHandle = !targetObject ? (() => {
+      const match = item.title.match(/@([A-Za-z0-9_]+)/) || (item.detail && item.detail.match(/@([A-Za-z0-9_]+)/));
+      if (!match) return undefined;
+      const handle = match[1].toLowerCase();
+      return state.mirrorObjects.find((object) => object.presenceId === (presence?.id ?? state.presence?.id) && object.author?.handle?.replace(/^@/, "").toLowerCase() === handle);
+    })() : undefined;
+
+    const effectiveTarget = targetObject ?? targetByHandle;
+    const externalUrl = effectiveTarget ? externalUrlForMirrorObject(effectiveTarget, effectiveTarget.author?.handle) : undefined;
+    const handleMatch = item.title.match(/@([A-Za-z0-9_]+)/);
+    const fallbackExternalUrl = !externalUrl && handleMatch ? `https://x.com/${handleMatch[1]}` : undefined;
+    const resolvedExternalUrl = externalUrl ?? fallbackExternalUrl;
+    const isProfileOnlyUrl = !externalUrl && Boolean(fallbackExternalUrl);
+
+    return (
+      <article className={`attention-work-item attention-work-item-${item.state} ${compact ? "attention-work-item-compact" : ""}`} key={item.id}>
+        <div className="attention-work-rank">{item.currentRank ?? "·"}</div>
+        <div className="attention-work-copy">
+          <div className="attention-work-topline">
+            <span className="attention-work-status">{item.statusLabel}</span>
+            <span className="quiet-label">{item.originLabel}</span>
+          </div>
+          <strong>{item.title}</strong>
+          {!compact && <><p>{item.detail}</p><small>Why here · {item.safePriorityReason}</small></>}
+        </div>
+        {!compact && (
+          <div className="attention-work-actions">
+            {effectiveTarget && onContext && (
+              <button
+                type="button"
+                className="attention-view-source-btn"
+                onClick={() => onContext(effectiveTarget)}
+                title="View original post in Social Mirror"
+              >
+                View original post
+              </button>
+            )}
+            {resolvedExternalUrl && (
+              <a
+                href={resolvedExternalUrl}
+                target="_blank"
+                rel="noreferrer"
+                className="attention-external-link-btn"
+                title="Open on X"
+              >
+                {isProfileOnlyUrl ? `Open @${handleMatch![1]} on X ↗` : "Open on X ↗"}
+              </a>
+            )}
+            {mutate && item.assignmentId && item.state !== "upcoming" && item.state !== "needs_operator" && (
+              <button type="button" className="priority-agenda-btn" disabled={isWorking} onClick={() => void runWorkItem(item)}>
+                <Play size={11} /> {isWorking ? "Working now…" : "Work now"}
+              </button>
+            )}
+            {mutate && (
+              <button
+                type="button"
+                className="attention-work-dismiss-btn"
+                disabled={dismissingItemId === item.id || isWorking}
+                title={item.assignmentId ? "Cancel this assignment" : "Dismiss this item from Next Up"}
+                onClick={() => void dismissWorkItem(item)}
+              >
+                <X size={11} /> {dismissingItemId === item.id ? "Dismissing…" : item.assignmentId ? "Cancel" : "Dismiss"}
+              </button>
+            )}
+          </div>
+        )}
+      </article>
+    );
+  };
+
+  const renderResponsibility = (assignment: Assignment) => {
+    const status = assignment.activation?.type === "continuous" && !["completed", "completed_with_adaptation", "cancelled", "failed", "expired_incomplete"].includes(assignment.status)
+      ? "Active"
+      : ["active", "working", "awaiting_execution"].includes(assignment.status) ? "Active" : assignment.status === "paused" ? "Paused" : assignment.status === "draft" ? "Planned" : assignment.status.replaceAll("_", " ");
+    return <div className="agenda-responsibility-row" key={assignment.id}><strong>{assignment.title ?? cleanUserFacingAssignmentInstruction(assignment.instruction)}</strong><span>{status}</span></div>;
+  };
+
+  const workingItem = working[0] ?? waiting.find((item) => item.source !== "self_directed_discovery") ?? waiting[0];
+  return (
+    <section className="priority-agenda-panel attention-plan" aria-label="Agent Agenda">
+      <div className="priority-agenda-heading">
+        <div><SectionEyebrow>Agenda</SectionEyebrow><h2>What currently deserves {presence?.name ?? "the Agent"}&apos;s attention.</h2><p>Updated {agenda.compiledAt ? formatTime(agenda.compiledAt) : "now"} · this is a live priority snapshot and recalculates as reality changes.</p></div>
+        {onSwitchTab && <Button variant="ghost" onClick={() => onSwitchTab("assignments")}>Manage responsibilities ({responsibilities.length}) →</Button>}
+      </div>
+
+      <section className="attention-plan-section attention-plan-working" aria-label="Working now">
+        <div className="attention-plan-section-heading"><SectionEyebrow>{working.length ? "Working now" : workingItem ? "Waiting" : "Working now"}</SectionEyebrow><span>{working.length ? "LIVE" : workingItem ? "NEXT CHECKPOINT" : "AVAILABLE"}</span></div>
+        {workingItem ? <div className="attention-working-card"><div><span className="attention-work-status">{workingItem.statusLabel}</span><h3>{workingItem.title}</h3><p>{workingItem.detail}</p><div className="attention-working-grid"><span><small>Next</small><strong>{workingItem.nextAction}</strong></span><span><small>Done when</small><strong>{workingItem.doneWhen}</strong></span></div></div>{workingItem.progress && <div className="attention-progress"><strong>{workingItem.progress.label}</strong><span>Responsibility progress</span></div>}</div> : <p className="muted">No work is being performed this instant. Eligible attention sources remain visible below.</p>}
+      </section>
+
+      {inFlightExecutions.length > 0 && (
+        <section className="attention-plan-section attention-plan-inflight" aria-label="In flight deliveries" style={{ borderLeft: "3px solid var(--accent, #d68754)", paddingLeft: "12px", background: "var(--bg-subtle, #fbf9f6)" }}>
+          <div className="attention-plan-section-heading"><SectionEyebrow>In flight ({inFlightExecutions.length})</SectionEyebrow><span>DISPATCHED · VERIFYING</span></div>
+          <p style={{ margin: "4px 0 10px 0", fontSize: "12px", color: "var(--text-muted, #666)" }}>These decided social actions were dispatched by the body and are currently verifying external delivery with Social Mirror.</p>
+          <div className="attention-work-list">
+            {inFlightExecutions.map((exec) => {
+              const targetObject = exec.target?.id
+                ? state.mirrorObjects.find(
+                    (m) => (exec.presenceId ? m.presenceId === exec.presenceId : true) && (m.externalRef.id === exec.target?.id || m.id === exec.target?.id)
+                  )
+                : undefined;
+
+              const isSnowflake = (str?: string) => !str || /^@?\d{8,}$/.test(str.trim()) || str.startsWith("sandbox-object_");
+              const authorRaw = targetObject?.author?.handle ?? targetObject?.author?.displayName;
+              const targetHandle = authorRaw && !isSnowflake(authorRaw)
+                ? (authorRaw.startsWith("@") ? authorRaw : `@${authorRaw}`)
+                : undefined;
+
+              const snippet = targetObject?.content?.text?.trim()
+                ? `“${targetObject.content.text.slice(0, 48)}${targetObject.content.text.length > 48 ? "…" : ""}”`
+                : undefined;
+
+              const targetLabel = targetHandle
+                ? `to ${targetHandle}`
+                : snippet
+                ? `to ${snippet}`
+                : "to public post";
+
+              return (
+                <div key={exec.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "var(--bg-surface, #fff)", border: "1px solid var(--border, #eee)", borderRadius: "6px", marginBottom: "6px" }}>
+                  <div>
+                    <strong style={{ textTransform: "uppercase", fontSize: "12px", color: "var(--text, #111)" }}>{exec.affordance.replace("x.", "")}</strong>
+                    <span style={{ fontSize: "12px", color: "var(--text-muted, #777)", marginLeft: "8px" }}>{targetLabel}</span>
+                  </div>
+                   <span className="attention-work-status">{exec.status === "queued" ? "Waiting to send" : exec.status === "executing" ? "Sending…" : "Verifying"}</span>
+                </div>
+              );
+            })}
+          </div>
+        </section>
+      )}
+
+      <section className="attention-plan-section" aria-label="Next up">
+        <div className="attention-plan-section-heading"><SectionEyebrow>Next up</SectionEyebrow><span>{nextUp.length} dynamic snapshot items</span></div>
+        <div className="attention-work-list">{nextUp.length ? nextUp.map((item) => renderWorkItem(item)) : <p className="muted">Nothing currently needs foreground attention.</p>}</div>
+      </section>
+
+      <section className="attention-plan-section" aria-label="Watching in the background">
+        <div className="attention-plan-section-heading"><SectionEyebrow>Watching in the background</SectionEyebrow><span>Sources graduate into Next Up when worthwhile.</span></div>
+        <div className="attention-watching-grid">{watching.map((item) => <div className="attention-watching-card" key={item.id}><div><strong>{item.label}</strong><span>{item.statusLabel}</span></div><p>{item.detail}</p>{item.currentAgendaRank && <small>Current Agenda impact · #{item.currentAgendaRank}</small>}</div>)}</div>
+      </section>
+
+      {upcoming.length > 0 && <section className="attention-plan-section" aria-label="Upcoming"><div className="attention-plan-section-heading"><SectionEyebrow>Upcoming</SectionEyebrow><span>Future windows, not current work.</span></div><div className="attention-work-list">{upcoming.map((item) => renderWorkItem(item))}</div></section>}
+      <section className="attention-plan-section" aria-label="Ongoing responsibilities"><div className="attention-plan-section-heading"><SectionEyebrow>Ongoing responsibilities</SectionEyebrow><span>Durable obligations</span></div><div className="agenda-responsibility-list">{responsibilities.length ? responsibilities.map(renderResponsibility) : <p className="muted">No open responsibilities.</p>}</div></section>
+      <section className="attention-plan-section" aria-label="Needs you"><div className="attention-plan-section-heading"><SectionEyebrow>Needs you</SectionEyebrow><span>{needsYou.length ? "Action required" : "Nothing blocked"}</span></div>{needsYou.length ? <div className="attention-work-list">{needsYou.map((item) => renderWorkItem(item))}</div> : <p className="attention-nothing">Nothing. Genny can continue within the current authority.</p>}</section>
+      <details className="attention-explanation"><summary>How prioritization works</summary><p>The order is recalculated from current social evidence, explicit responsibility, timing, continuity, and authority. The numbers are a snapshot, not permanent category priority.</p></details>
+    </section>
+  );
+}
+
+const AgentPriorityAgenda = AgentAgenda;
 
 function ExecutionLedger({
   state,
@@ -6031,6 +9425,8 @@ function ExecutionLedger({
   environment,
   sessionIds,
   onContext,
+  showAssignments = true,
+  onSwitchTab,
 }: {
   state: OpenPresenceState;
   mutate: Mutate;
@@ -6038,14 +9434,13 @@ function ExecutionLedger({
   environment?: PresenceEnvironment;
   sessionIds?: Set<string>;
   onContext?: (object: MirrorObject) => void;
+  showAssignments?: boolean;
+  onSwitchTab?: (tab: "activity" | "queue" | "assignments" | "failures") => void;
 }) {
   const [externalType, setExternalType] = useState("post");
   const [externalId, setExternalId] = useState("");
-  const [countdownNow, setCountdownNow] = useState<number>(() => Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setCountdownNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, []);
+  const [stoppingExecution, setStoppingExecution] = useState(false);
+
   const executions = state.executions
     .filter((item) => {
       if (presenceId && item.presenceId !== presenceId) return false;
@@ -6054,11 +9449,23 @@ function ExecutionLedger({
       return true;
     })
     .sort((left, right) => new Date(right.createdAt).getTime() - new Date(left.createdAt).getTime());
-  const pendingStatuses = new Set<OpenPresenceState["executions"][number]["status"]>(["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing"]);
+  const pendingStatuses = new Set<OpenPresenceState["executions"][number]["status"]>(["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"]);
   const pendingExecutions = executions.filter((item) => pendingStatuses.has(item.status)).sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime());
   const latest = pendingExecutions.find((item) => item.status === "awaiting-review") ?? pendingExecutions[0] ?? executions[0];
+  const latestPulse = state.events
+    .filter((event) => event.title === "Pulse completed" && (!presenceId || event.presenceId === presenceId))
+    .sort((left, right) => new Date(right.time).getTime() - new Date(left.time).getTime())[0];
+  const latestBelongsToCurrentCheck = latestPulse
+    ? latestPulse.invocationId
+      ? latest?.invocationId === latestPulse.invocationId
+      : Boolean(latest && new Date(latest.createdAt).getTime() >= new Date(latestPulse.time).getTime())
+    : true;
+  const pendingFromEarlierCheck = Boolean(latest && pendingStatuses.has(latest.status) && latestPulse && !latestBelongsToCurrentCheck);
   const intent = latest
     ? state.socialIntents.find((item) => item.id === latest.socialIntentId)
+    : undefined;
+  const decision = latest
+    ? state.socialDecisions.find((item) => item.socialIntentId === latest.socialIntentId)
     : undefined;
   const presence = latest
     ? state.presences.find((item) => item.id === latest.presenceId)
@@ -6067,16 +9474,17 @@ function ExecutionLedger({
     ? state.mirrorObjects.find((item) => item.presenceId === latest?.presenceId && item.externalRef.id === intent.target?.id && (environment !== "sandbox" ? item.environment !== "sandbox" && !item.sessionId : item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && sessionIds?.has(item.sessionId)))))
     : undefined;
   const actionName = formatActivityAffordance(intent?.affordance ?? latest?.affordance);
-  const targetLabel = actionContext?.author?.handle ?? actionContext?.author?.displayName ?? "the observed post";
+  const targetLabel = actionContext?.author?.handle ? (actionContext.author.handle.startsWith("@") ? actionContext.author.handle : `@${actionContext.author.handle}`) : actionContext?.author?.displayName ?? "the observed post";
   const actionSnippet = actionContext?.content?.text?.trim();
+
   if (!latest || !intent)
     return (
       <div className="execution-ledger-stack">
-        <ExecutionQueueSummary state={state} executions={executions} presenceId={presenceId} countdownNow={countdownNow} />
+        {showAssignments && <AssignmentQueue state={state} presenceId={presenceId} environment={environment} sessionIds={sessionIds} onContext={onContext} mutate={mutate} />}
         <div className="decision-card execution-ledger">
           <div className="section-heading compact">
             <div>
-              <SectionEyebrow>Decision & action</SectionEyebrow>
+              <SectionEyebrow>{pendingFromEarlierCheck ? "Pending from an earlier check" : "Decision & action"}</SectionEyebrow>
               <h3>No action yet</h3>
             </div>
           </div>
@@ -6087,170 +9495,209 @@ function ExecutionLedger({
         <RecentPublicAttempts state={state} executions={executions} mutate={mutate} onContext={onContext} />
       </div>
     );
-  const needsApproval = latest.status === "awaiting-review";
+
+  const isVerified = latest.status === "succeeded";
+  const isVerifying = latest.status === "verification-pending";
+  const isSending = ["claimed", "executing"].includes(latest.status);
+  const isNeedsReview = latest.status === "awaiting-review";
+  const isWaitingToSend = ["approved", "queued", "awaiting-connector", "awaiting-manual"].includes(latest.status);
+  const isFailed = ["failed", "blocked", "expired"].includes(latest.status);
   const needsManualRelay = latest.status === "awaiting-manual";
   const languageBlocked = latest.status === "blocked" && latest.failure?.code === "LANGUAGE_POLICY_VIOLATION";
-  const failureExplanation = ["failed", "blocked", "expired"].includes(latest.status)
+  const failureExplanation = isFailed
     ? deliveryFailureExplanation(latest.failure, presence?.handle)
     : undefined;
   const usesChromeExtension = latest.connector === "bridge" || (latest.connector === undefined && Boolean(latest.bridgeId));
-  const bridge = usesChromeExtension
-    ? latest.bridgeId
-      ? state.bridges.find((item) => item.id === latest.bridgeId && item.state !== "offline")
-      : latest.presenceId
-        ? state.bridges.find((item) => item.presenceId === latest.presenceId && item.state !== "offline" && item.kind === "bridge")
-        : undefined
-    : undefined;
-  const bridgeConnected = Boolean(bridge && bridgeAdapterStatus(bridge) === "connected");
-  const nextChromeExtensionCheckAt = bridgeConnected && bridge?.lastHeartbeatAt
-    ? (() => {
-        const heartbeatAt = new Date(bridge.lastHeartbeatAt).getTime();
-        return Number.isFinite(heartbeatAt) ? new Date(heartbeatAt + 30_000).toISOString() : undefined;
-      })()
-    : undefined;
-  const nextBridgeAttemptAt = latest.status === "queued" ? nextChromeExtensionCheckAt : undefined;
-  const nextBridgeAttemptCountdown = formatCountdown(nextBridgeAttemptAt, countdownNow);
-  const nextChromeExtensionCheckCountdown = formatCountdown(nextChromeExtensionCheckAt, countdownNow);
-  const nativeConnection = state.nativeConnections.find((item) => item.presenceId === latest.presenceId && item.channelId === "x" && item.status === "connected");
-  const nextNativeCheckAt = nativeConnection?.observation?.nextObservationAt ?? presence?.nextExecutionCheckAt;
-  const nextNativeCheckCountdown = formatCountdown(nextNativeCheckAt, countdownNow);
-  const sendTiming = latest.status === "awaiting-review"
-    ? { kind: "blocked", label: "Waiting for your approval", detail: "Nothing will be sent until you approve this action." }
-    : latest.status === "approved"
-      ? { kind: "blocked", label: "Waiting for execution", detail: "This action is approved but has not entered the send queue." }
-      : latest.status === "queued" && usesChromeExtension && nextBridgeAttemptCountdown
-        ? { kind: "queued", label: nextBridgeAttemptCountdown === "now" ? "Next send attempt now" : `Next send attempt in ${nextBridgeAttemptCountdown}`, detail: "The Chrome extension checks the queue about every 30 seconds; the actual send may happen sooner when the controlled X tab is ready." }
-        : latest.status === "queued" && latest.connector === "native"
-          ? { kind: "queued", label: nextNativeCheckCountdown ? `Next API queue check in ${nextNativeCheckCountdown}` : "Queued for API delivery", detail: "One queued Native X action is processed per Check now or automatic attention cycle." }
-        : latest.status === "queued" && latest.connector === "bridge"
-          ? { kind: "blocked", label: bridgeConnected ? "Send time not available yet" : "No send time scheduled", detail: bridgeConnected ? "The Chrome extension is connected, but it has not reported a recent check to calculate the next send attempt." : "The Chrome extension must be connected before this fallback reply can enter a send countdown. Open the extension on the signed-in X tab; the next check will then show a countdown." }
-          : ["claimed", "executing"].includes(latest.status)
-            ? { kind: "sending", label: "Sending now", detail: "The connected executor is delivering this action." }
-            : latest.status === "awaiting-connector"
-              ? { kind: "blocked", label: "No send time scheduled", detail: "A connected channel writer is required before this action can be queued. Once it connects, the next send check will show a countdown." }
-              : latest.status === "awaiting-manual"
-                ? { kind: "blocked", label: "Waiting for manual confirmation", detail: "The action will not be counted until its external result is marked sent." }
-                : latest.status === "succeeded"
-                  ? { kind: "sent", label: "Sent", detail: `${latest.executedAt ? `Verified at ${formatHistoryTimestamp(latest.executedAt)}.` : "The channel result was verified."}${(usesChromeExtension ? nextChromeExtensionCheckCountdown : nextNativeCheckCountdown) ? ` Next ${usesChromeExtension ? "Chrome extension" : "API"} queue check in ${usesChromeExtension ? nextChromeExtensionCheckCountdown : nextNativeCheckCountdown}.` : ""}` }
-                  : undefined;
+  const channelName = presence ? channelLabel(presence.channel, state.channelDefinitions) : "X";
+
+  const stopPreDispatchExecution = async () => {
+    if (stoppingExecution) return;
+    if (!window.confirm("Cancel this action before it is sent? No delivery will be attempted.")) return;
+    setStoppingExecution(true);
+    try { await mutate({ type: "cancelExecution", id: latest.id }); } finally { setStoppingExecution(false); }
+  };
+
+  const actionVerbPast = actionName === "Like" ? "Liked" : actionName === "Reply" ? "Replied to" : actionName === "Quote" ? "Quoted" : actionName === "Follow" ? "Followed" : `${actionName} to`;
+
   return (
     <div className="execution-ledger-stack">
-      <ExecutionQueueSummary state={state} executions={executions} presenceId={presenceId} countdownNow={countdownNow} />
+      {showAssignments && <AssignmentQueue state={state} presenceId={presenceId} environment={environment} sessionIds={sessionIds} onContext={onContext} mutate={mutate} />}
       <div className="decision-card execution-ledger">
         <div className="section-heading compact">
           <div>
-            <SectionEyebrow>Decision & action</SectionEyebrow>
-            <h3>
-              {needsApproval
-                ? "Needs your review"
-                : languageBlocked
-                  ? "Language policy blocked"
-                  : latest.status === "succeeded"
-                  ? "Sent"
-                  : executionStatusLabel(latest.status)}
-            </h3>
+            <SectionEyebrow>{pendingFromEarlierCheck ? "Pending from an earlier check" : "Decision & action"}</SectionEyebrow>
+            <div className="execution-lead-headline">
+              {isVerified && <Check size={18} className="verified-check" />}
+              <strong>{isVerified ? `${actionVerbPast} ${targetLabel}` : `${actionName} to ${targetLabel}`}</strong>
+            </div>
           </div>
-          <span className="quiet-label">{actionName}</span>
+          <div>
+            {isVerified && (
+              <span className="execution-operator-badge badge-verified">
+                Verified on {channelName} · {formatTime(latest.executedAt || latest.updatedAt)}
+              </span>
+            )}
+            {isVerifying && (
+              <span className="execution-operator-badge badge-verifying">
+                Sent · verifying on {channelName}
+              </span>
+            )}
+            {isSending && (
+              <span className="execution-operator-badge badge-sending">
+                Sending now
+              </span>
+            )}
+            {isNeedsReview && (
+              <span className="execution-operator-badge badge-review">
+                Needs your review
+              </span>
+            )}
+            {isWaitingToSend && (
+              <span className="execution-operator-badge badge-waiting">
+                Waiting to send
+              </span>
+            )}
+            {isFailed && (
+              <span className="execution-operator-badge badge-failed">
+                {failureExplanation?.title ?? "Could not send"}
+              </span>
+            )}
+          </div>
         </div>
-        <div className="execution-line">
-          <div><SectionEyebrow>{actionContext ? `${actionName} to` : "Action"}</SectionEyebrow><strong>{actionContext ? targetLabel : actionName}</strong></div>
-          <span className={`execution-status execution-status-${latest.status}`}>{executionStatusLabel(latest.status)}</span>
+
+        {actionContext && (
+          <div className="action-context-card">
+            <span>{actionSnippet ? `“${actionSnippet.slice(0, 150)}${actionSnippet.length > 150 ? "…" : ""}”` : "This post is the source context for the action."}</span>
+            {onContext && <button type="button" className="action-context-button" onClick={() => onContext(actionContext)}>View post</button>}
+          </div>
+        )}
+
+        {decision?.summary && (
+          <div className="execution-reasoning">
+            <small style={{ color: "var(--muted)", font: "9px 'DM Mono', monospace", display: "block", marginBottom: "2px" }}>Why Genny chose this:</small>
+            <span>{decision.summary}</span>
+          </div>
+        )}
+
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", margin: "8px 0 4px" }}>
+          <span className="execution-provenance-tag">
+            {pendingFromEarlierCheck
+              ? `From an earlier check · Decided at ${formatTime(latest.createdAt)}`
+              : `From the latest check · Decided at ${formatTime(latest.createdAt)}`}
+          </span>
         </div>
-      {actionContext && (
-        <div className="action-context-card">
-          <span>{actionSnippet ? `“${actionSnippet.slice(0, 130)}${actionSnippet.length > 130 ? "…" : ""}”` : "This post is the source context for the action."}</span>
-          {onContext && <button type="button" className="action-context-button" onClick={() => onContext(actionContext)}>View post</button>}
-        </div>
-      )}
-      <div className="execution-detail-grid">
-        <span><small>Action</small><strong>{actionName}</strong></span>
-        <span><small>Channel</small><strong>{presence ? channelLabel(presence.channel, state.channelDefinitions) : "Selected Presence"}</strong></span>
-        <span><small>Approval</small><strong>{latest.mode === "review" ? "Review" : latest.mode === "manual" ? "Manual" : "Automatic"}</strong></span>
-      </div>
-      {sendTiming && <div className={`execution-send-timing execution-send-timing-${sendTiming.kind}`} role="status" aria-live="polite">
-        <div>
-          <SectionEyebrow>Send timing</SectionEyebrow>
-          <strong>{sendTiming.label}</strong>
-        </div>
-        <small>{sendTiming.detail}</small>
-      </div>}
-      <p className="execution-explanation">
-        {needsApproval
-          ? `${presence?.name ?? "The Presence"} has chosen this action. Your review decides whether it is sent.`
-          : languageBlocked
-            ? latest.failure?.message ?? "The final expression contains a prohibited literal. No external artifact was delivered."
-            : latest.externalRef
-            ? `Sent on ${presence ? channelLabel(presence.channel, state.channelDefinitions) : "the channel"}.`
-            : failureExplanation
-            ? failureExplanation.reason
-            : `${presence?.name ?? "The Presence"}'s decision, your approval, and the channel result are kept separate.`}
-      </p>
-      {failureExplanation && <div className="execution-failure-card" role="alert">
-        <strong>{failureExplanation.title}</strong>
-        <span>{failureExplanation.consequence}</span>
-        <small>Next step: {failureExplanation.fix}</small>
-        {latest.failure?.message && <details><summary>Technical details</summary><code>{latest.failure.message}</code></details>}
-      </div>}
-      {needsApproval && (
-        <Button
-          variant="secondary"
-          className="full-button review-cta"
-          onClick={() => mutate({ type: "approveExecution", id: latest.id })}
-        >
-          <Check size={14} /> Approve execution
-        </Button>
-      )}
-      {languageBlocked && latest.source === "operator" && (
-        <div className="language-override-actions">
-          <p className="form-hint">This exact operator-authored text conflicts with a language rule. You can go back and edit it, or explicitly publish it anyway for this action.</p>
-          <Button variant="secondary" className="full-button" onClick={() => void mutate({ type: "overrideLanguagePolicy", id: latest.id })}>
-            <Check size={14} /> Publish anyway
+
+        {/* State-aware controls & notices */}
+        {isVerifying || isSending ? (
+          <div className="execution-dispatched-note">
+            <ShieldCheck size={15} style={{ flex: "0 0 15px", marginTop: "1px" }} />
+            <span>Already submitted to {channelName}. OpenPresence is waiting to observe and confirm the public outcome in the Social Mirror.</span>
+          </div>
+        ) : isWaitingToSend ? (
+          <div style={{ display: "flex", alignItems: "center", gap: "8px", marginTop: "8px" }}>
+            <Button
+              variant="secondary"
+              disabled={stoppingExecution}
+              onClick={() => void stopPreDispatchExecution()}
+            >
+              <X size={13} /> {stoppingExecution ? "Cancelling…" : `Cancel ${actionName.toLowerCase()}`}
+            </Button>
+          </div>
+        ) : null}
+
+        {failureExplanation && (
+          <div className="execution-failure-card" role="alert">
+            <strong>{failureExplanation.title}</strong>
+            <span>{failureExplanation.consequence}</span>
+            <small>Next step: {failureExplanation.fix}</small>
+            {latest.failure?.message && <details><summary>Technical details</summary><code>{latest.failure.message}</code></details>}
+          </div>
+        )}
+
+        {isNeedsReview && (
+          <div style={{ display: "flex", gap: "8px", marginTop: "10px" }}>
+            <Button
+              variant="primary"
+              onClick={() => mutate({ type: "approveExecution", id: latest.id })}
+            >
+              <Check size={14} /> Approve {actionName.toLowerCase()}
+            </Button>
+            <Button
+              variant="secondary"
+              disabled={stoppingExecution}
+              onClick={() => void stopPreDispatchExecution()}
+            >
+              <X size={13} /> Cancel
+            </Button>
+          </div>
+        )}
+
+        {languageBlocked && latest.source === "operator" && (
+          <div className="language-override-actions">
+            <p className="form-hint">This exact operator-authored text conflicts with a language rule. You can go back and edit it, or explicitly publish it anyway for this action.</p>
+            <Button variant="secondary" className="full-button" onClick={() => void mutate({ type: "overrideLanguagePolicy", id: latest.id })}>
+              <Check size={14} /> Publish anyway
+            </Button>
+          </div>
+        )}
+
+        {latest.status === "approved" && (
+          <Button
+            variant="primary"
+            className="full-button"
+            onClick={() => void mutate({ type: "executeIntent", id: intent.id })}
+          >
+            <Play size={14} /> Execute approved action
           </Button>
-        </div>
-      )}
-      {latest.status === "approved" && (
-        <Button
-          variant="primary"
-          className="full-button"
-          onClick={() => void mutate({ type: "executeIntent", id: intent.id })}
-        >
-          <Play size={14} /> Execute approved action
-        </Button>
-      )}
-      {needsManualRelay && (
-        <form
-          className="manual-relay-form"
-          onSubmit={(event) => {
-            event.preventDefault();
-            if (!externalId.trim()) return;
-            void mutate({
-              type: "markManualExecution",
-              id: latest.id,
-              externalRef: { type: externalType, id: externalId.trim() },
-            }).then((next) => {
-              if (next) setExternalId("");
-            });
-          }}
-        >
-          <label>
-            External reference type
-            <input value={externalType} onChange={(event) => setExternalType(event.target.value)} />
-          </label>
-          <label>
-            External reference
-            <input value={externalId} onChange={(event) => setExternalId(event.target.value)} placeholder="post-123" required />
-          </label>
-          <Button variant="secondary" type="submit">
-            <Check size={14} /> Mark posted
-          </Button>
-        </form>
-      )}
+        )}
+
+        {needsManualRelay && (
+          <form
+            className="manual-relay-form"
+            onSubmit={(event) => {
+              event.preventDefault();
+              if (!externalId.trim()) return;
+              void mutate({
+                type: "markManualExecution",
+                id: latest.id,
+                externalRef: { type: externalType, id: externalId.trim() },
+              }).then((next) => {
+                if (next) setExternalId("");
+              });
+            }}
+          >
+            <label>
+              External reference type
+              <input value={externalType} onChange={(event) => setExternalType(event.target.value)} />
+            </label>
+            <label>
+              External reference
+              <input value={externalId} onChange={(event) => setExternalId(event.target.value)} placeholder="post-123" required />
+            </label>
+            <Button variant="secondary" type="submit">
+              <Check size={14} /> Mark posted
+            </Button>
+          </form>
+        )}
+
+        {/* Technical details behind disclosure */}
+        <details className="execution-tech-details">
+          <summary>Technical details</summary>
+          <div className="execution-tech-details-grid">
+            <span><small>Action</small><strong>{actionName}</strong></span>
+            <span><small>Channel</small><strong>{channelName}</strong></span>
+            <span><small>Authority</small><strong>{latest.mode === "review" ? "Review" : latest.mode === "manual" ? "Manual" : "Automatic"}</strong></span>
+            <span><small>Connector</small><strong>{usesChromeExtension ? "Chrome extension" : "Native X"}</strong></span>
+            <span><small>Execution ID</small><strong>{latest.id}</strong></span>
+            <span><small>Decided</small><strong>{formatTime(latest.createdAt)}</strong></span>
+            {latest.executedAt && <span><small>Dispatched</small><strong>{formatTime(latest.executedAt)}</strong></span>}
+          </div>
+        </details>
       </div>
       <RecentPublicAttempts state={state} executions={executions} mutate={mutate} onContext={onContext} />
     </div>
   );
 }
-void ExecutionLedger;
 
 const calendarWeekDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const calendarHours = Array.from({ length: 24 }, (_, index) => index);
@@ -6310,7 +9757,7 @@ function publishingWindowCalendarPosition(window: PublishingPlan["windows"][numb
   return { ...window, day: start.day, startTime: start.time, endTime: end.time, startMinutes: timeToMinutes(start.time), endMinutes };
 }
 
-type PublicHistoryFilter = "all" | "originals" | "replies" | "quote" | "repost";
+type PublicHistoryFilter = "all" | "originals" | "replies" | "quote" | "repost" | "like";
 
 type MirrorHealth = { label: string; detail: string; tone: "healthy" | "warning" | "offline" | "sandbox" };
 
@@ -6363,14 +9810,18 @@ function PublicHistoryView({
   const presenceId = state.activePresenceId ?? state.presence?.id ?? "";
   const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   const mirrorHealth = mirrorHealthFor(state, presence);
-  const [surface, setSurface] = useState<"timeline" | "calendar">("timeline");
+  const [surface, setSurface] = useState<"timeline" | "calendar">(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).get("surface") === "calendar" ? "calendar" : "timeline");
   const [range, setRange] = useState<"week" | "month" | "day">("week");
-  const [filter, setFilter] = useState<PublicHistoryFilter>("all");
+  const [filter, setFilter] = useState<PublicHistoryFilter>(() => {
+    const requested = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("filter") : null;
+    return requested && ["all", "originals", "replies", "quote", "repost", "like"].includes(requested) ? requested as PublicHistoryFilter : "all";
+  });
   const [selected, setSelected] = useState<PublicHistoryItem | null>(null);
   const [refreshing, setRefreshing] = useState(false);
   const [historyPage, setHistoryPage] = useState(1);
   const [anchor, setAnchor] = useState(() => new Date());
   const allHistory = derivePublicHistory(state, presence?.id).filter((item) => publicHistoryMatchesPresence(item, presence));
+  const requestedHistoryId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("historyId") : null;
   const resetHistoryPosition = () => {
     setHistoryPage(1);
     setSelected(null);
@@ -6394,6 +9845,7 @@ function PublicHistoryView({
     }
   };
   const filteredHistory = allHistory.filter((item) => matchesPublicHistoryFilter(item, filter));
+  const effectiveSelected = selected ?? (requestedHistoryId ? filteredHistory.find((item) => item.id === requestedHistoryId) : undefined) ?? null;
   const historyPageCount = Math.max(1, Math.ceil(filteredHistory.length / PUBLIC_HISTORY_PAGE_SIZE));
   const visibleHistoryPage = Math.min(historyPage, historyPageCount);
   const paginatedHistory = filteredHistory.slice(
@@ -6404,12 +9856,13 @@ function PublicHistoryView({
     setSelected(null);
     setHistoryPage((current) => Math.min(historyPageCount, Math.max(1, current + amount)));
   };
-  const selectedIndex = selected ? filteredHistory.findIndex((item) => item.id === selected.id) : -1;
+  const selectedIndex = effectiveSelected ? filteredHistory.findIndex((item) => item.id === effectiveSelected.id) : -1;
   const counts = {
     publications: allHistory.filter((item) => ["post", "thread"].includes(item.kind)).length,
     replies: allHistory.filter((item) => ["reply", "comment"].includes(item.kind)).length,
+    likes: allHistory.filter((item) => item.kind === "like").length,
     attributedFollows: allHistory.reduce((total, item) => total + (item.metrics.qualifiedFollows ?? item.metrics.follows ?? 0), 0),
-    observedOutcomes: allHistory.filter((item) => Object.keys(item.metrics).length > 0).length,
+    observedOutcomes: allHistory.filter((item) => item.executionId || Object.keys(item.metrics).length > 0).length,
   };
   const dateLabel = (date: Date, options: Intl.DateTimeFormatOptions) => new Intl.DateTimeFormat("en", options).format(date);
   const startOfWeek = (date: Date) => {
@@ -6459,13 +9912,14 @@ function PublicHistoryView({
       <div className="metric-row public-history-metrics" aria-label="Public history summary">
         <div className="metric"><span>Publications</span><strong>{counts.publications}</strong><small>Verified posts and threads</small></div>
         <div className="metric"><span>Replies</span><strong>{counts.replies}</strong><small>Public conversation turns</small></div>
+        <div className="metric"><span>Likes</span><strong>{counts.likes}</strong><small>Verified attention signals</small></div>
         <div className="metric"><span>Attributed follows</span><strong>{counts.attributedFollows}</strong><small>Only when the channel reports it</small></div>
         <div className="metric"><span>Observed outcomes</span><strong>{counts.observedOutcomes}</strong><small>Items with outcome evidence</small></div>
       </div>
       <div className="history-toolbar">
         {surface === "timeline" ? (
           <div className="feed-filter" role="group" aria-label="Feed filter">
-            {(["all", "originals", "replies", "quote", "repost"] as const).map((item) => <button type="button" key={item} className={filter === item ? "active" : ""} aria-pressed={filter === item} onClick={() => selectHistoryFilter(item)}>{item === "all" ? "All" : item === "quote" ? "Quotes" : item === "repost" ? "Reposts" : item[0].toUpperCase() + item.slice(1)}</button>)}
+            {(["all", "originals", "replies", "quote", "repost", "like"] as const).map((item) => <button type="button" key={item} className={filter === item ? "active" : ""} aria-pressed={filter === item} onClick={() => selectHistoryFilter(item)}>{item === "all" ? "All" : item === "quote" ? "Quotes" : item === "repost" ? "Reposts" : item === "like" ? "Likes" : item[0].toUpperCase() + item.slice(1)}</button>)}
           </div>
         ) : (
           <>
@@ -6473,7 +9927,7 @@ function PublicHistoryView({
               {(["week", "month", "day"] as const).map((item) => <button type="button" key={item} className={range === item ? "active" : ""} aria-pressed={range === item} onClick={() => setRange(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}
             </div>
             <div className="feed-filter" role="group" aria-label="Calendar filter">
-              {(["all", "originals", "replies", "quote", "repost"] as const).map((item) => <button type="button" key={item} className={filter === item ? "active" : ""} aria-pressed={filter === item} onClick={() => selectHistoryFilter(item)}>{item === "all" ? "All" : item === "quote" ? "Quotes" : item === "repost" ? "Reposts" : item[0].toUpperCase() + item.slice(1)}</button>)}
+              {(["all", "originals", "replies", "quote", "repost", "like"] as const).map((item) => <button type="button" key={item} className={filter === item ? "active" : ""} aria-pressed={filter === item} onClick={() => selectHistoryFilter(item)}>{item === "all" ? "All" : item === "quote" ? "Quotes" : item === "repost" ? "Reposts" : item === "like" ? "Likes" : item[0].toUpperCase() + item.slice(1)}</button>)}
             </div>
             <div className="history-date-controls">
               <button type="button" aria-label="Previous period" onClick={() => moveAnchor(-1)}><ChevronDown size={15} style={{ transform: "rotate(90deg)" }} /></button>
@@ -6483,7 +9937,7 @@ function PublicHistoryView({
           </>
         )}
       </div>
-      <div className={`public-history-layout ${selected ? "has-inspector" : ""}`}>
+      <div className={`public-history-layout ${effectiveSelected ? "has-inspector" : ""}`}>
         <section className="public-history-surface" aria-label={surface === "timeline" ? "Feed timeline" : `${range} public history`}>
           {surface === "timeline" ? (
             <>
@@ -6512,7 +9966,7 @@ function PublicHistoryView({
           )}
           {!filteredHistory.length && <EmptyState title="No public expression yet" body={mirrorHealth.tone === "healthy" || mirrorHealth.tone === "sandbox" ? `${mirrorHealth.detail}. ${presence?.name ?? "This Presence"} has not put anything into the public world yet.` : `${mirrorHealth.detail}.` } action={<Button variant="secondary" onClick={() => setView("schedule")}><Clock3 size={14} /> Open Schedule</Button>} />}
         </section>
-        {selected && <PublicHistoryInspector item={selected} state={state} mutate={mutate} index={selectedIndex} total={filteredHistory.length} onNavigate={(offset) => { const next = filteredHistory[selectedIndex + offset]; if (next) setSelected(next); }} onClose={() => setSelected(null)} onActivity={() => setView("live")} />}
+        {effectiveSelected && <PublicHistoryInspector item={effectiveSelected} state={state} mutate={mutate} index={selectedIndex} total={filteredHistory.length} onNavigate={(offset) => { const next = filteredHistory[selectedIndex + offset]; if (next) setSelected(next); }} onClose={() => setSelected(null)} onActivity={() => setView("live")} />}
       </div>
     </div>
   );
@@ -6550,18 +10004,55 @@ function FeedItem({ item, state, presenceName, onSelect }: { item: PublicHistory
   const displayAt = historyDisplayAt(item);
   const originLabel = item.origin?.kind === "publishing_initiative" ? "Publishing Initiative original" : item.origin?.kind === "assignment" ? "Assignment original" : item.origin?.kind === "inbound_social" ? "Inbound conversation" : item.origin?.kind === "standing_intent" ? "Standing intention" : item.origin?.kind === "operator" ? "Operator-directed" : undefined;
   const channelTag = publicHistoryChannelTag(item, state.channelDefinitions);
-  const isDeleted = item.availability === "deleted";
-  return <article className={`feed-item-shell mirror-post ${isDeleted ? "feed-item-shell-deleted" : ""}`}>
-    <button type="button" className={`feed-item feed-item-${item.kind}`} onClick={() => onSelect(item)}>
-      <span className="feed-item-header mirror-post-header"><ChannelAvatar className="feed-avatar mirror-avatar" avatarUrl={item.authorAvatarUrl} name={presence?.name ?? presenceName} /><span className="feed-item-identity mirror-post-author"><strong>{presence?.name ?? presenceName}</strong><small>{presence?.handle ?? ""} · {kindLabel}</small></span>{isDeleted && <span className="feed-item-availability feed-item-availability-deleted"><Trash2 size={11} /> Deleted on X</span>}<time dateTime={displayAt} title={historyTimeTitle(item)}>{formatHistoryTimestamp(displayAt)}</time></span>
-      {item.kind === "reply" || item.kind === "comment" ? <span className="feed-item-context">Replying in a public conversation</span> : null}
-      {originLabel ? <span className="feed-item-context">{originLabel}</span> : null}
-      <span className="feed-item-text mirror-post-content">{item.text || (item.kind === "repost" ? "Passed along publicly." : "Public expression without returned text.")}</span>
-      {assets.length > 0 && <span className="feed-item-assets">{assets.map((asset) => { const source = asset?.storage ? `/api/assets/${asset.id}` : asset?.dataUrl ?? asset?.provenance.sourceUrl; return source && (asset.type === "image" || asset.type === "gif" || asset.type === "chart") ? <span className="feed-item-asset" key={asset.id}><img src={source} alt={asset.description ?? `Published ${asset.type}`} />{asset.provenance.sourcePageUrl && <span className="feed-item-source">Source: {asset.provenance.publisher ?? asset.description ?? "Open source"}</span>}</span> : source && asset.type === "video" ? <video key={asset.id} controls src={source} aria-label="Published video" /> : <span className="social-link-asset" key={asset?.id}>{asset?.type === "link" ? asset.provenance.sourceUrl : `${asset?.type ?? "Asset"} published`}</span>; })}</span>}
-      <span className="feed-item-footer mirror-post-footer"><span>View details <ChevronRight size={13} /></span><span className="feed-item-channel-badge" aria-label={`Channel: ${channelTag}`}><Badge size={12} aria-hidden="true" />{channelTag}</span></span>
-    </button>
-    {item.environment !== "sandbox" && <div className="feed-item-source-row">{item.externalUrl ? <a className={`feed-item-source-link ${isDeleted ? "feed-item-source-link-deleted" : ""}`} href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={12} /> {isDeleted ? "Open original URL · deleted on X" : item.kind === "reply" || item.kind === "comment" ? "Open reply on X" : "Open original post on X"}</a> : <span className="feed-item-source-unavailable">Original X URL unavailable</span>}</div>}
-  </article>;
+    const isDeleted = item.availability === "deleted";
+    const parentPost = item.parentExternalRef ? state.mirrorObjects.find((object) => object.externalRef.type === item.parentExternalRef?.type && object.externalRef.id === item.parentExternalRef?.id) : undefined;
+    const likedPost = item.kind === "like" ? parentPost : undefined;
+    const likedPostText = item.kind === "like" ? (likedPost?.content?.text ?? item.text) : undefined;
+    const likedPostAuthor = likedPost?.author?.displayName ?? likedPost?.author?.handle;
+    const quotedPost = item.kind === "quote" ? parentPost : undefined;
+    const quotedPostText = quotedPost?.content?.text;
+    const quotedPostAuthor = quotedPost?.author?.displayName ?? quotedPost?.author?.handle;
+    const repostedPost = item.kind === "repost" ? parentPost : undefined;
+    const repostedPostText = repostedPost?.content?.text;
+    const repostedPostAuthor = repostedPost?.author?.displayName ?? repostedPost?.author?.handle;
+    return <article className={`feed-item-shell mirror-post ${isDeleted ? "feed-item-shell-deleted" : ""}`}>
+      <button type="button" className={`feed-item feed-item-${item.kind}`} onClick={() => onSelect(item)}>
+        <span className="feed-item-header mirror-post-header"><ChannelAvatar className="feed-avatar mirror-avatar" avatarUrl={item.authorAvatarUrl} name={presence?.name ?? presenceName} /><span className="feed-item-identity mirror-post-author"><strong>{presence?.name ?? presenceName}</strong><small>{presence?.handle ?? ""} · {kindLabel}</small></span>{isDeleted && <span className="feed-item-availability feed-item-availability-deleted"><Trash2 size={11} /> Deleted on X</span>}<time dateTime={displayAt} title={historyTimeTitle(item)}>{formatHistoryTimestamp(displayAt)}</time></span>
+        {item.kind === "reply" || item.kind === "comment" ? <span className="feed-item-context">Replying in a public conversation</span> : null}
+        {originLabel ? <span className="feed-item-context">{originLabel}</span> : null}
+        {item.kind === "like" ? (
+          <span className="feed-item-like-preview">
+            <span className="feed-item-like-icon"><Heart size={13} aria-hidden="true" /></span>
+            <span className="feed-item-like-post">
+              {likedPostAuthor && <span className="feed-item-like-author">{likedPostAuthor}</span>}
+              <span className="feed-item-like-text">{likedPostText ?? "Post preview unavailable."}</span>
+            </span>
+          </span>
+        ) : item.kind === "repost" ? (
+          <div className="feed-item-repost-preview">
+            <span className="feed-item-repost-header"><Repeat size={12} aria-hidden="true" /> Reposted {repostedPostAuthor ? `@${repostedPostAuthor}` : "public post"}</span>
+            <div className="feed-item-quoted-box">
+              {repostedPostAuthor && <strong>{repostedPostAuthor}</strong>}
+              <p>{repostedPostText ?? "Original post preview unavailable."}</p>
+            </div>
+          </div>
+        ) : item.kind === "quote" ? (
+          <div className="feed-item-quote-container">
+            <span className="feed-item-text mirror-post-content">{item.text}</span>
+            <div className="feed-item-quoted-box">
+              <span className="feed-item-quoted-kicker">Quoting {quotedPostAuthor ? `@${quotedPostAuthor}` : "post"}</span>
+              {quotedPostAuthor && <strong>{quotedPostAuthor}</strong>}
+              <p>{quotedPostText ?? "Original post preview unavailable."}</p>
+            </div>
+          </div>
+        ) : (
+          <span className="feed-item-text mirror-post-content">{item.text || "Public expression without returned text."}</span>
+        )}
+        {assets.length > 0 && <span className="feed-item-assets">{assets.map((asset) => { const source = asset?.storage ? `/api/assets/${asset.id}` : asset?.dataUrl ?? asset?.provenance.sourceUrl; return source && (asset.type === "image" || asset.type === "gif" || asset.type === "chart") ? <span className="feed-item-asset" key={asset.id}><img src={source} alt={asset.description ?? `Published ${asset.type}`} />{asset.provenance.sourcePageUrl && <span className="feed-item-source">Source: {asset.provenance.publisher ?? asset.description ?? "Open source"}</span>}</span> : source && asset.type === "video" ? <video key={asset.id} controls src={source} aria-label="Published video" /> : <span className="social-link-asset" key={asset?.id}>{asset?.type === "link" ? asset.provenance.sourceUrl : `${asset?.type ?? "Asset"} published`}</span>; })}</span>}
+        <span className="feed-item-footer mirror-post-footer"><span>View details <ChevronRight size={13} /></span><span className="feed-item-channel-badge" aria-label={`Channel: ${channelTag}`}><Badge size={12} aria-hidden="true" />{channelTag}</span></span>
+      </button>
+      {item.environment !== "sandbox" && <div className="feed-item-source-row">{item.externalUrl ? <a className={`feed-item-source-link ${isDeleted ? "feed-item-source-link-deleted" : ""}`} href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={12} /> {isDeleted ? "Open original URL · deleted on X" : item.kind === "reply" || item.kind === "comment" ? "Open reply on X" : item.kind === "like" ? "Open liked post on X" : item.kind === "repost" ? "Open reposted post on X" : "Open original post on X"}</a> : <span className="feed-item-source-unavailable">Original X URL unavailable</span>}</div>}
+    </article>;
 }
 
 function HistoryCard({ item, state, onSelect, compact = false }: { item: PublicHistoryItem; state: OpenPresenceState; onSelect: (item: PublicHistoryItem) => void; compact?: boolean }) {
@@ -6571,7 +10062,7 @@ function HistoryCard({ item, state, onSelect, compact = false }: { item: PublicH
   const isDeleted = item.availability === "deleted";
   return <button type="button" className={`history-card history-card-${item.kind} ${compact ? "compact" : ""}`} onClick={() => onSelect(item)}>
     <span className="history-card-kicker"><span className="history-card-author"><ChannelAvatar className="history-card-avatar" avatarUrl={item.authorAvatarUrl} name={state.presences.find((presence) => presence.id === item.presenceId)?.name ?? "Presence"} /><strong>{label}</strong>{isDeleted && <span className="history-card-availability"><Trash2 size={10} /> Deleted</span>}</span><time dateTime={displayAt} title={historyTimeTitle(item)}>{formatHistoryTimestamp(displayAt)}</time></span>
-    {item.text ? <span className="history-card-text">{item.text}</span> : <span className="history-card-text quiet">{item.kind === "repost" ? "Passed along publicly" : "Public expression"}</span>}
+    {item.text ? <span className="history-card-text">{item.text}</span> : <span className="history-card-text quiet">{item.kind === "repost" ? "Passed along publicly" : item.kind === "like" ? "Liked publicly" : "Public expression"}</span>}
     <span className="history-card-footer"><span className="history-card-proof">{isDeleted ? "Deleted on X · retained in Social Mirror" : item.environment === "sandbox" ? "Verified in Sandbox Mirror · simulated only" : item.externalUrl ? "Verified on X" : "Verified in Social Mirror"}</span><span className="history-card-channel-badge" aria-label={`Channel: ${channelTag}`}><Badge size={11} aria-hidden="true" />{channelTag}</span></span>
   </button>;
 }
@@ -6646,7 +10137,7 @@ function PublicHistoryInspector({ item, state, mutate, index, total, onNavigate,
       setPostIdCopied(false);
     }
   };
-  return <aside className="history-inspector" aria-label={`${kindLabel} details`}><div className="history-inspector-header"><div><SectionEyebrow>{kindLabel} details</SectionEyebrow><h2>{kindLabel}</h2><small title={historyTimeTitle(item)}>{formatHistoryTimestamp(displayAt)}{item.environment === "sandbox" ? " · Sandbox observed" : ""}</small></div><button type="button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button></div>{isDeleted && <div className="history-availability history-availability-deleted"><Trash2 size={14} /><span><strong>Deleted on X</strong><small>The original is retained here as verified history, but X no longer serves it.</small></span></div>}<div className="history-inspector-navigation" aria-label="Browse public posts"><span aria-live="polite"><strong>Post {position}</strong> of {total}</span><div><button type="button" aria-label="Previous post" disabled={index <= 0} onClick={() => onNavigate(-1)}><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /></button><button type="button" aria-label="Next post" disabled={index < 0 || index >= total - 1} onClick={() => onNavigate(1)}><ChevronRight size={14} /></button></div></div><div className="history-inspector-identity"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span><strong>{presence?.name ?? "Presence"}</strong><small>{presence?.handle ?? ""}</small></span></div>{parent?.content?.text && <div className="history-parent-context"><SectionEyebrow>Replying to</SectionEyebrow><p>{parent.content.text}</p><small>{parent.author?.displayName ?? "Public conversation"}</small></div>}<p className="history-inspector-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : "No text was returned by the channel.")}</p>{mirrorObject?.assetRefs?.length ? <MediaPerceptionDisclosure object={mirrorObject} state={state} mutate={mutate} presenceName={presence?.name ?? "this Presence"} /> : null}{itemAssets.length > 0 && <section className="history-provenance"><SectionEyebrow>Attached sources</SectionEyebrow>{itemAssets.map((asset) => <div key={asset.id}><a className="history-external-link" href={asset.provenance.sourcePageUrl ?? asset.provenance.sourceUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {asset.provenance.publisher ?? asset.description ?? "Open source"}</a><small>Origin: {asset.provenance.origin}. Source identity: {asset.provenance.sourceIdentityStatus ?? "unknown"}. Rights: {asset.rights?.status ?? "unknown"}.</small></div>)}</section>}<div className="history-proof">{isDeleted ? <Trash2 size={14} /> : <Check size={14} />}<span>{isDeleted ? "Deleted on X · retained in Social Mirror" : `Observed in Social Mirror · ${item.externalRef.type}`}</span><button type="button" className="history-copy-id" aria-label="Copy internal post ID" title="Copy internal post ID" onClick={() => void copyPostId()}><Copy size={12} /> {postIdCopied ? "Copied" : "Copy ID"}</button></div><section className="history-provenance"><SectionEyebrow>Provenance</SectionEyebrow><p>{originLabel}</p><p>{item.executionId ? "Published by OpenPresence and verified in the Social Mirror." : "Observed on the connected channel and attributed to this Presence."}</p>{item.origin?.planWindowId && <small>Plan window: {item.origin.planWindowId}</small>}{assignment && <p>Assignment output · {assignment.progress.verified} / {assignment.progress.required} verified publications</p>}{mirrorObject?.environment === "sandbox" && <small>Simulated social reality · this expression has no live destination. Sandbox world time: {formatTime(item.occurredAt)}.</small>}</section><section className="history-outcome"><SectionEyebrow>Outcome</SectionEyebrow>{metrics.length ? <div className="history-outcome-grid">{metrics.map(([key, value]) => <div key={key}><strong>{value}</strong><small>{key.replaceAll("_", " ")}</small></div>)}</div> : <p>No channel outcome evidence is attached to this expression yet.</p>}</section><div className="history-inspector-actions">{item.externalUrl ? <a className="history-external-link" href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {isDeleted ? "Open original URL · deleted on X" : item.kind === "reply" || item.kind === "comment" ? "Open reply on X" : "Open original on X"}</a> : item.environment === "sandbox" && item.channel === "x" ? <p className="history-sandbox-note">Sandbox rehearsal only. This expression has no live destination.</p> : item.channel === "x" ? <p className="history-sandbox-note">X URL unavailable from the connected account.</p> : null}<Button variant="secondary" onClick={onActivity}><Activity size={14} /> View in Activity</Button></div></aside>;
+  return <aside className="history-inspector" aria-label={`${kindLabel} details`}><div className="history-inspector-header"><div><SectionEyebrow>{kindLabel} details</SectionEyebrow><h2>{kindLabel}</h2><small title={historyTimeTitle(item)}>{formatHistoryTimestamp(displayAt)}{item.environment === "sandbox" ? " · Sandbox observed" : ""}</small></div><button type="button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button></div>{isDeleted && <div className="history-availability history-availability-deleted"><Trash2 size={14} /><span><strong>Deleted on X</strong><small>The original is retained here as verified history, but X no longer serves it.</small></span></div>}<div className="history-inspector-navigation" aria-label="Browse public posts"><span aria-live="polite"><strong>Post {position}</strong> of {total}</span><div><button type="button" aria-label="Previous post" disabled={index <= 0} onClick={() => onNavigate(-1)}><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /></button><button type="button" aria-label="Next post" disabled={index < 0 || index >= total - 1} onClick={() => onNavigate(1)}><ChevronRight size={14} /></button></div></div><div className="history-inspector-identity"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span><strong>{presence?.name ?? "Presence"}</strong><small>{presence?.handle ?? ""}</small></span></div>{parent?.content?.text && <div className="history-parent-context"><SectionEyebrow>Context</SectionEyebrow><p>{parent.content.text}</p><small>{parent.author?.displayName ?? "Public conversation"}</small></div>}<p className="history-inspector-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : item.kind === "like" ? "Liked publicly." : "No text was returned by the channel.")}</p>{mirrorObject?.assetRefs?.length ? <MediaPerceptionDisclosure object={mirrorObject} state={state} mutate={mutate} presenceName={presence?.name ?? "this Presence"} /> : null}{itemAssets.length > 0 && <section className="history-provenance"><SectionEyebrow>Attached sources</SectionEyebrow>{itemAssets.map((asset) => <div key={asset.id}><a className="history-external-link" href={asset.provenance.sourcePageUrl ?? asset.provenance.sourceUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {asset.provenance.publisher ?? asset.description ?? "Open source"}</a><small>Origin: {asset.provenance.origin}. Source identity: {asset.provenance.sourceIdentityStatus ?? "unknown"}. Rights: {asset.rights?.status ?? "unknown"}.</small></div>)}</section>}<div className="history-proof">{isDeleted ? <Trash2 size={14} /> : <Check size={14} />}<span>{isDeleted ? "Deleted on X · retained in Social Mirror" : `Observed in Social Mirror · ${item.externalRef.type}`}</span><button type="button" className="history-copy-id" aria-label="Copy internal post ID" title="Copy internal post ID" onClick={() => void copyPostId()}><Copy size={12} /> {postIdCopied ? "Copied" : "Copy ID"}</button></div><section className="history-provenance"><SectionEyebrow>Provenance</SectionEyebrow><p>{originLabel}</p><p>{item.executionId ? "Published by OpenPresence and verified in the Social Mirror." : "Observed on the connected channel and attributed to this Presence."}</p>{item.origin?.planWindowId && <small>Plan window: {item.origin.planWindowId}</small>}{assignment && <p>Assignment output · {assignment.progress.verified} / {assignment.progress.required} verified publications</p>}{mirrorObject?.environment === "sandbox" && <small>Simulated social reality · this expression has no live destination. Sandbox world time: {formatTime(item.occurredAt)}.</small>}</section><section className="history-outcome"><SectionEyebrow>Outcome</SectionEyebrow>{metrics.length ? <div className="history-outcome-grid">{metrics.map(([key, value]) => <div key={key}><strong>{value}</strong><small>{key.replaceAll("_", " ")}</small></div>)}</div> : <p>No channel outcome evidence is attached to this expression yet.</p>}</section><div className="history-inspector-actions">{item.externalUrl ? <a className="history-external-link" href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {isDeleted ? "Open original URL · deleted on X" : item.kind === "reply" || item.kind === "comment" ? "Open reply on X" : item.kind === "like" ? "Open liked post on X" : item.kind === "repost" ? "Open reposted post on X" : "Open original on X"}</a> : item.environment === "sandbox" && item.channel === "x" ? <p className="history-sandbox-note">Sandbox rehearsal only. This expression has no live destination.</p> : item.channel === "x" ? <p className="history-sandbox-note">X URL unavailable from the connected account.</p> : null}<Button variant="secondary" onClick={onActivity}><Activity size={14} /> View in Activity</Button></div></aside>;
 }
 
 function ScheduleLayerToolbar({
@@ -6715,6 +10206,19 @@ function PublishingPlanScheduleSummary({ plan, presenceName }: { plan: Publishin
     : "An expectation, not a forced quota; silence remains allowed.";
   const workStatus = (status: NonNullable<PublishingPlan["currentWork"]>[number]["status"]) => status.replaceAll("_", " ");
   const visibleWindows = plan.windows.filter((window) => !["completed", "missed", "superseded"].includes(window.status));
+  const isReassessmentDue = Boolean((plan.nextReassessmentAt && new Date(plan.nextReassessmentAt).getTime() <= Date.now()) || (plan.horizonEnd && new Date(plan.horizonEnd).getTime() <= Date.now()));
+  const nextConsiderationLabel = activeWindow
+    ? `${activeWindow.purpose[0].toUpperCase()}${activeWindow.purpose.slice(1)}`
+    : isReassessmentDue
+      ? "Reassessment due"
+      : "Resting · No window queued";
+  const nextConsiderationNote = activeWindow
+    ? formatPlanDateTime(activeWindow.startAt)
+    : isReassessmentDue
+      ? "Eligible for reconsideration"
+      : plan.nextReassessmentAt
+        ? `Reassessing at ${formatPlanDateTime(plan.nextReassessmentAt)}`
+        : "The plan has no queued windows.";
   return <section className={`publishing-plan-schedule-summary ${expanded ? "is-expanded" : "is-collapsed"}`} aria-label="Agent publishing plan">
     <div className="publishing-plan-schedule-header">
       <div>
@@ -6732,15 +10236,15 @@ function PublishingPlanScheduleSummary({ plan, presenceName }: { plan: Publishin
     </div>
     {!expanded && <div className="publishing-plan-schedule-collapsed-summary" aria-label="Publishing plan summary">
       <div><span>Chosen pace</span><strong>{pace}</strong></div>
-      <div><span>Next consideration</span><strong>{activeWindow ? `${activeWindow.purpose[0].toUpperCase()}${activeWindow.purpose.slice(1)}` : "No window queued"}</strong></div>
-      <div><span>Reassess</span><strong>{plan.nextReassessmentAt ? formatPlanDateTime(plan.nextReassessmentAt) : "Not scheduled"}</strong></div>
+      <div><span>Next consideration</span><strong>{nextConsiderationLabel}</strong></div>
+      <div><span>Reassess</span><strong>{isReassessmentDue ? "Due now" : plan.nextReassessmentAt ? formatPlanDateTime(plan.nextReassessmentAt) : "Not scheduled"}</strong></div>
     </div>}
     {expanded && <>
     <div className="publishing-plan-schedule-facts">
       <div><span>Chosen pace</span><strong>{pace}</strong><small>{paceNote}</small></div>
       <div><span>Plan horizon</span><strong>{formatPlanDate(plan.horizonStart)}–{formatPlanDate(plan.horizonEnd)}</strong><small>{plan.timezone}</small></div>
-      <div><span>Next consideration</span><strong>{activeWindow ? `${activeWindow.purpose[0].toUpperCase()}${activeWindow.purpose.slice(1)}` : "No window queued"}</strong><small>{activeWindow ? formatPlanDateTime(activeWindow.startAt) : "The plan needs a replan."}</small></div>
-      <div><span>Reassess</span><strong>{plan.nextReassessmentAt ? formatPlanDateTime(plan.nextReassessmentAt) : "Not scheduled"}</strong><small>{plan.verifiedOriginals} verified original{plan.verifiedOriginals === 1 ? "" : "s"} in this plan</small></div>
+      <div><span>Next consideration</span><strong>{nextConsiderationLabel}</strong><small>{nextConsiderationNote}</small></div>
+      <div><span>Reassess</span><strong>{isReassessmentDue ? "Due now" : plan.nextReassessmentAt ? formatPlanDateTime(plan.nextReassessmentAt) : "Not scheduled"}</strong><small>{plan.verifiedOriginals} verified original{plan.verifiedOriginals === 1 ? "" : "s"} in this plan</small></div>
     </div>
     <div className="publishing-plan-schedule-work">
       <div className="publishing-plan-schedule-subheading"><SectionEyebrow>Current work</SectionEyebrow><span>{plan.currentWork?.length ?? 0} item{(plan.currentWork?.length ?? 0) === 1 ? "" : "s"}</span></div>
@@ -6755,146 +10259,191 @@ function PublishingPlanScheduleSummary({ plan, presenceName }: { plan: Publishin
   </section>;
 }
 
-function GrowthEvidencePanel({
-  snapshots,
-  publicationSnapshots,
-  mirrorObjects,
+function growthReadStatus(assignment?: Assignment, review?: GrowthReview) {
+  if (assignment?.status === "blocked" || assignment?.status === "needs_operator") return { label: "Limited", tone: "limited" };
+  if (!review) return { label: "Learning", tone: "learning" };
+  if (review.working.length > 0) return { label: "Promising", tone: "promising" };
+  if (review.weak.length > 0) return { label: "Needs attention", tone: "weak" };
+  return { label: "Learning", tone: "learning" };
+}
+
+function growthReadHeadline(review?: GrowthReview) {
+  if (!review) return "Genny is still learning";
+  if (review.working.length > 0 && review.uncertain.length > 0) return "The current approach appears promising, but follower conversion is not clear yet.";
+  if (review.working.length > 0) return "The current approach appears promising.";
+  if (review.weak.length > 0) return "The current approach needs attention.";
+  return "The evidence is still too early to call.";
+}
+
+function growthPlanChanges(assignment: Assignment, review?: GrowthReview) {
+  if (!review?.changedPlan || !assignment.plan) return [] as Array<{ direction: "up" | "down" | "same"; text: string }>;
+  const history = assignment.planHistory ?? [];
+  const previous = history.length > 1 ? history[history.length - 2] : undefined;
+  if (!previous) return review.planChangeSummary ? [{ direction: "same" as const, text: review.planChangeSummary }] : [];
+  const changes: Array<{ direction: "up" | "down" | "same"; text: string }> = [];
+  const domains: Array<[keyof Pick<NonNullable<Assignment["plan"]>, "publishingApproach" | "discoveryDirections" | "relationshipFocus">, string]> = [
+    ["publishingApproach", "publishing"],
+    ["discoveryDirections", "discovery"],
+    ["relationshipFocus", "relationships"],
+  ];
+  for (const [key, label] of domains) {
+    const before = previous[key] ?? [];
+    const after = assignment.plan[key] ?? [];
+    for (const item of after.filter((value) => !before.includes(value)).slice(0, 1)) changes.push({ direction: "up", text: `${label}: ${item}` });
+    for (const item of before.filter((value) => !after.includes(value)).slice(0, 1)) changes.push({ direction: "down", text: `${label}: ${item}` });
+  }
+  return changes.slice(0, 4);
+}
+
+function GrowthCurrentRead({
+  assignment,
   review,
   reviewIsStale,
-  unreviewedAudienceCount,
-  unreviewedPublicationCount,
+  newerObservationCount,
+  nextGrowthReviewAt,
+  reviewingGrowth,
+  reviewGrowth,
 }: {
-  snapshots: PresenceAudienceSnapshot[];
-  publicationSnapshots: PublicationMetricSnapshot[];
-  mirrorObjects: MirrorObject[];
+  assignment: Assignment;
   review?: GrowthReview;
   reviewIsStale: boolean;
-  unreviewedAudienceCount: number;
-  unreviewedPublicationCount: number;
+  newerObservationCount: number;
+  nextGrowthReviewAt?: string;
+  reviewingGrowth: boolean;
+  reviewGrowth: (kind: "weekly" | "strategic") => void;
 }) {
+  const status = growthReadStatus(assignment, review);
+  const signals = [
+    { key: "working", label: "Working", tone: "positive", items: review?.working ?? [] },
+    { key: "uncertain", label: "Uncertain", tone: "uncertain", items: review?.uncertain ?? [] },
+    { key: "weak", label: "Working against the goal", tone: "weak", items: review?.weak ?? [] },
+  ];
+  const freshness = reviewIsStale
+    ? `${newerObservationCount.toLocaleString()} newer observation${newerObservationCount === 1 ? "" : "s"} will be incorporated automatically at the next review.`
+    : review
+      ? `Current read · ${formatHistoryTimestamp(review.createdAt)}${nextGrowthReviewAt ? ` · next review ${formatHistoryTimestamp(nextGrowthReviewAt)}` : ""}`
+      : "Genny is collecting a baseline. The first interpretation will happen automatically on the review rhythm.";
+  return <section className={`growth-current-read settings-card growth-current-read-${status.tone}`} aria-busy={reviewingGrowth} aria-label="Genny's current read">
+    <div className="growth-section-heading"><div><SectionEyebrow>Genny&apos;s current read</SectionEyebrow><h2>{growthReadHeadline(review)}</h2></div><span className={`growth-read-status growth-read-status-${status.tone}`}>{status.label}</span></div>
+    <div className="growth-signal-grid">{signals.map((signal) => <article className={`growth-signal growth-signal-${signal.tone}`} key={signal.key}><span>{signal.label}</span>{signal.items.length ? <p>{signal.items[0]}</p> : <p className="muted">Nothing strong enough to call yet.</p>}{signal.items.length > 1 && <small>{signal.items.length} observations in this read</small>}</article>)}</div>
+    <div className="growth-freshness-inline"><span>{freshness}</span>{review?.reviewSource === "model" && <small>Model-backed review</small>}</div>
+    {review && <details className="growth-read-why"><summary>Why?</summary><p>{review.summary}</p></details>}
+    <details className="growth-optional-action"><summary>Review evidence early</summary><div><p className="muted">The scheduled review remains the default. Use this only when you want Genny to interpret the available evidence sooner.</p><Button variant="ghost" disabled={reviewingGrowth} onClick={() => void reviewGrowth(review?.kind ?? "weekly")}>{reviewingGrowth ? <><LoaderCircle size={14} className="spin" /> Reviewing…</> : "Review now"}</Button></div></details>
+  </section>;
+}
+
+function GrowthEvidenceDetails({ snapshots, publicationSnapshots, mirrorObjects, review, reviewIsStale, unreviewedAudienceCount, unreviewedPublicationCount }: { snapshots: PresenceAudienceSnapshot[]; publicationSnapshots: PublicationMetricSnapshot[]; mirrorObjects: MirrorObject[]; review?: GrowthReview; reviewIsStale: boolean; unreviewedAudienceCount: number; unreviewedPublicationCount: number }) {
   const evidenceIds = new Set(review?.evidenceIds ?? []);
   const newSnapshots = review ? snapshots.filter((item) => !evidenceIds.has(item.id)) : snapshots;
   const newPublicationSnapshots = review ? publicationSnapshots.filter((item) => !evidenceIds.has(item.id)) : publicationSnapshots;
   const latest = snapshots[0];
   const latestPublication = publicationSnapshots[0];
+  const followerValues = snapshots.map((item) => item.followers);
+  const followersUnchanged = followerValues.length > 1 && new Set(followerValues).size === 1;
+  const maxImpressions = publicationSnapshots.reduce<number | undefined>((max, item) => item.impressions === undefined ? max : Math.max(max ?? item.impressions, item.impressions), undefined);
   const metricHighlights = latestPublication ? [
-    latestPublication.impressions !== undefined ? latestPublication.impressions.toLocaleString() + " impressions" : undefined,
+    latestPublication.impressions !== undefined ? latestPublication.impressions.toLocaleString() + " views" : undefined,
     latestPublication.likes !== undefined ? latestPublication.likes.toLocaleString() + " likes" : undefined,
     latestPublication.replies !== undefined ? latestPublication.replies.toLocaleString() + " replies" : undefined,
   ].filter(Boolean).slice(0, 2).join(" · ") : "No publication metrics yet";
   const formatSnapshotStatus = (status: PresenceAudienceSnapshot["observationStatus"] | PublicationMetricSnapshot["observationStatus"]) => status === "observed" ? "Verified" : status.replaceAll("_", " ");
-  const totalNew = unreviewedAudienceCount + unreviewedPublicationCount;
-  const summary = reviewIsStale
-    ? totalNew + " new signal" + (totalNew === 1 ? "" : "s") + " arrived after the last Growth read. Genny has not interpreted them yet."
-    : review
-      ? "The evidence below is already included in Genny's latest Growth read."
-      : "These verified observations are waiting for Genny's first Growth read.";
-  return <section className="growth-evidence-panel settings-card" aria-label="Growth evidence">
-    <div className="growth-evidence-panel-heading"><div><SectionEyebrow>{reviewIsStale ? "New evidence" : "Evidence"}</SectionEyebrow><h2>{reviewIsStale ? "Fresh signals are ready" : "What Genny can see"}</h2><p>{summary}</p></div><span className={"growth-evidence-state " + (reviewIsStale ? "growth-evidence-state-new" : "")}>{reviewIsStale ? "Not read yet" : review ? "Included in read" : "Awaiting first read"}</span></div>
+  const newerObservationCount = unreviewedAudienceCount + unreviewedPublicationCount;
+  return <div className="growth-disclosure-content">
     <div className="growth-evidence-summary-grid">
-      <div><span>Audience</span><strong>{latest ? latest.followers.toLocaleString() + " followers" : "Not observed"}</strong><small>{newSnapshots.length ? newSnapshots.length + " new snapshot" + (newSnapshots.length === 1 ? "" : "s") : "No new snapshot"}{latest ? " · " + formatHistoryTimestamp(latest.observedAt) : ""}</small></div>
-      <div><span>Publication performance</span><strong>{newPublicationSnapshots.length ? newPublicationSnapshots.length + " new post" + (newPublicationSnapshots.length === 1 ? "" : "s") : latestPublication ? "Up to date" : "Not observed"}</strong><small>{latestPublication ? metricHighlights + " · " + formatHistoryTimestamp(latestPublication.observedAt) : "No verified metrics yet"}</small></div>
+      <div><span>Audience evidence</span><strong>{latest ? latest.followers.toLocaleString() + " followers" : "Not observed"}</strong><small>{followersUnchanged ? `Unchanged across ${snapshots.length.toLocaleString()} recent observations` : `${snapshots.length.toLocaleString()} verified observations`}</small></div>
+      <div><span>Publication evidence</span><strong>{publicationSnapshots.length.toLocaleString()} observations</strong><small>{maxImpressions !== undefined ? `Recent reach up to ${maxImpressions.toLocaleString()} views` : metricHighlights}</small></div>
     </div>
-    <details className="growth-evidence-details" open={reviewIsStale}>
-      <summary><span>View the evidence</span><small>{reviewIsStale ? "These snapshots are not in the current read" : "Latest verified observations"}</small></summary>
-      <div className="growth-evidence-columns">
-        <div><div className="growth-evidence-subheading"><strong>Audience snapshots</strong><span>{newSnapshots.length || snapshots.length}</span></div>{(newSnapshots.length ? newSnapshots : snapshots).slice(0, 4).map((item) => <div className="growth-evidence-row" key={item.id}><strong>{item.followers.toLocaleString()} followers</strong><span>{formatHistoryTimestamp(item.observedAt)} · {item.source} · {formatSnapshotStatus(item.observationStatus)}</span></div>)}{!snapshots.length && <p className="muted">No verified audience snapshot has arrived.</p>}</div>
-        <div><div className="growth-evidence-subheading"><strong>Publication snapshots</strong><span>{newPublicationSnapshots.length || publicationSnapshots.length}</span></div>{(newPublicationSnapshots.length ? newPublicationSnapshots : publicationSnapshots).slice(0, 4).map((item) => { const object = mirrorObjects.find((candidate) => candidate.id === item.mirrorObjectId); const text = object?.content?.text?.trim() || "Publication performance observed"; const externalUrl = object ? externalUrlForMirrorObject(object, object.author?.handle) : undefined; return <div className="growth-evidence-row growth-evidence-publication" key={item.id}><div><strong>{object?.author?.handle ? "@" + object.author.handle : object?.author?.displayName ?? "X publication"}</strong><span>{text.length > 110 ? text.slice(0, 107) + "…" : text}</span></div><small>{[item.impressions !== undefined ? item.impressions.toLocaleString() + " views" : undefined, item.likes !== undefined ? item.likes.toLocaleString() + " likes" : undefined, formatSnapshotStatus(item.observationStatus)].filter(Boolean).join(" · ")}{externalUrl && <a href={externalUrl} target="_blank" rel="noreferrer">View post</a>}</small></div>; })}{!publicationSnapshots.length && <p className="muted">No verified publication-performance snapshot has arrived.</p>}</div>
-      </div>
-    </details>
-    <p className="growth-evidence-note">Evidence is shown immediately. Genny&apos;s interpretation updates on its scheduled review rhythm; viewing these snapshots does not spend a review call or change the plan.</p>
+    <p className="growth-evidence-meaning">{newerObservationCount > 0 ? `${newerObservationCount.toLocaleString()} newer observation${newerObservationCount === 1 ? "" : "s"} arrived since the current read. They will be interpreted automatically at the next review.` : reviewIsStale ? "New evidence is waiting to be interpreted." : "The evidence above is included in Genny's current read."}</p>
+    <details className="growth-raw-evidence"><summary><span>View audience and publication evidence</span><small>Raw snapshots and source records</small></summary><div className="growth-evidence-columns">
+      <div><div className="growth-evidence-subheading"><strong>Audience snapshots</strong><span>{snapshots.length}</span></div>{(newSnapshots.length ? newSnapshots : snapshots).slice(0, 8).map((item) => <div className="growth-evidence-row" key={item.id}><strong>{item.followers.toLocaleString()} followers</strong><span>{formatHistoryTimestamp(item.observedAt)} · {item.source} · {formatSnapshotStatus(item.observationStatus)}</span></div>)}{!snapshots.length && <p className="muted">No verified audience snapshot has arrived.</p>}</div>
+      <div><div className="growth-evidence-subheading"><strong>Publication snapshots</strong><span>{publicationSnapshots.length}</span></div>{(newPublicationSnapshots.length ? newPublicationSnapshots : publicationSnapshots).slice(0, 8).map((item) => { const object = mirrorObjects.find((candidate) => candidate.id === item.mirrorObjectId); const text = object?.content?.text?.trim() || "Publication performance observed"; const externalUrl = object ? externalUrlForMirrorObject(object, object.author?.handle) : undefined; return <div className="growth-evidence-row growth-evidence-publication" key={item.id}><div><strong>{object?.author?.handle ? "@" + object.author.handle : object?.author?.displayName ?? "X publication"}</strong><span>{text.length > 110 ? text.slice(0, 107) + "…" : text}</span></div><small>{[item.impressions !== undefined ? item.impressions.toLocaleString() + " views" : undefined, item.likes !== undefined ? item.likes.toLocaleString() + " likes" : undefined, formatSnapshotStatus(item.observationStatus)].filter(Boolean).join(" · ")}{externalUrl && <a href={externalUrl} target="_blank" rel="noreferrer">View post</a>}</small></div>; })}{!publicationSnapshots.length && <p className="muted">No verified publication-performance snapshot has arrived.</p>}</div>
+    </div></details>
+  </div>;
+}
+
+function GrowthApproach({ assignment, review }: { assignment: Assignment; review?: GrowthReview }) {
+  const plan = assignment.plan;
+  const changes = growthPlanChanges(assignment, review);
+  return <section className="growth-approach settings-card" aria-label="Current approach">
+    <div className="growth-section-heading"><div><SectionEyebrow>Current approach</SectionEyebrow><h2>What Genny is doing</h2></div><Sparkles size={17} /></div>
+    {plan ? <><p className="growth-approach-summary">{plan.summary}</p><div className="growth-approach-grid"><div><strong>Publishing</strong><span>{plan.publishingApproach[0] ?? "Choosing useful original contributions."}</span></div><div><strong>Discovery</strong><span>{plan.discoveryDirections[0] ?? "Following conversations where the Presence can add something real."}</span></div><div><strong>Relationships</strong><span>{plan.relationshipFocus[0] ?? "Building continuity with substantive responders."}</span></div></div></> : <p className="muted">Genny is preparing the first operating approach.</p>}
+    <div className="growth-changed-review"><div><SectionEyebrow>Changed last review</SectionEyebrow><h3>{review?.changedPlan ? "Genny changed the approach" : review ? "No strategy change" : "First approach"}</h3></div>{changes.length ? <ul>{changes.map((change, index) => <li className={`growth-plan-change growth-plan-change-${change.direction}`} key={`${change.direction}-${change.text}-${index}`}><span aria-hidden="true">{change.direction === "up" ? "↑" : change.direction === "down" ? "↓" : "→"}</span>{change.text}</li>)}</ul> : <p className="muted">{review?.planChangeSummary ?? (review ? "The evidence is still too limited to justify changing the current approach." : "The first review will establish a baseline for future changes.")}</p>}{review?.planChangeSummary && review.changedPlan && <details><summary>Why did Genny change it?</summary><p>{review.planChangeSummary}</p></details>}</div>
   </section>;
 }
 
-function GrowthReadPanel({ review, reviewingGrowth, reviewGrowth }: { review?: GrowthReview; reviewingGrowth: boolean; reviewGrowth: (kind: "weekly" | "strategic") => void }) {
-  if (!review) return <section className="settings-card" aria-busy={reviewingGrowth}><div className="section-heading compact"><div><SectionEyebrow>Genny&apos;s current read</SectionEyebrow><h2>Growth read</h2></div><TrendingUp size={17} /></div><div className="growth-no-review"><p>Genny has not interpreted the available evidence yet. The observations are visible above and the next scheduled review will turn them into a decision.</p><Button variant="secondary" disabled={reviewingGrowth} onClick={() => void reviewGrowth("weekly")}>{reviewingGrowth ? <><LoaderCircle size={14} className="spin" /> Updating read…</> : "Update read now"}</Button></div></section>;
-  const signals = [
-    { key: "working", label: "Helping growth", tone: "positive", items: review.working },
-    { key: "uncertain", label: "Still unclear", tone: "uncertain", items: review.uncertain },
-    { key: "weak", label: "Holding growth back", tone: "weak", items: review.weak },
-  ];
-  return <section className="settings-card growth-read-panel" aria-busy={reviewingGrowth} aria-label="Genny's current read">
-    <div className="section-heading compact"><div><SectionEyebrow>Genny&apos;s current read</SectionEyebrow><h2>Growth read</h2></div><span className="growth-read-meta">{review.kind === "strategic" ? "Strategic" : "Weekly"} · {formatHistoryTimestamp(review.createdAt)}</span></div>
-    <p className="growth-read-lead">{review.working.length ? "The strongest signal is positive, but it is not proof of follower growth yet." : review.weak.length ? "The current evidence does not justify more aggressive growth activity." : "The evidence is still too early to support a strong conclusion."}</p>
-    <div className="growth-signal-grid">{signals.map((signal) => <div className={"growth-signal growth-signal-" + signal.tone} key={signal.key}><div><span>{signal.label}</span><strong>{signal.items.length}</strong></div>{signal.items.length ? <p>{signal.items[0]}</p> : <p>None recorded.</p>}</div>)}</div>
-    <details className="growth-read-details"><summary><span>Read the reasoning</span><small>Why Genny reached this read</small></summary><p>{review.summary}</p><div className="growth-read-list">{signals.map((signal) => <div key={signal.key}><strong>{signal.label}</strong>{signal.items.length ? <ul>{signal.items.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">None recorded.</p>}</div>)}</div></details>
+function GrowthNext({ assignment, nextGrowthReviewAt, bodyHeading, limitationCopy, presencePaused }: { assignment: Assignment; nextGrowthReviewAt?: string; bodyHeading: string; limitationCopy: string[]; presencePaused: boolean }) {
+  const blocked = assignment.status === "blocked" || assignment.status === "needs_operator" || bodyHeading === "Unavailable";
+  const autonomyText = presencePaused ? "Growth is paused with this Presence." : blocked ? `Genny needs your attention${limitationCopy[0] ? `: ${limitationCopy[0]}` : "."}` : "No action needed from you. Genny is continuing the current approach and collecting more evidence.";
+  return <section className={`growth-next settings-card ${blocked || presencePaused ? "growth-next-attention" : "growth-next-healthy"}`} aria-label="What happens next">
+    <div className="growth-section-heading"><div><SectionEyebrow>What happens next</SectionEyebrow><h2>{presencePaused ? "Waiting for the Presence" : blocked ? "Growth needs attention" : "Genny continues the current approach"}</h2></div><span className="growth-next-date">Next review<br /><strong>{presencePaused ? "Paused" : nextGrowthReviewAt ? formatHistoryTimestamp(nextGrowthReviewAt) : "Not scheduled"}</strong></span></div>
+    <p>{autonomyText}</p>
+    {!blocked && !presencePaused && <div className="growth-autonomy-state"><Check size={15} aria-hidden="true" /> <strong>No action needed from you.</strong></div>}
+    {blocked && limitationCopy.length > 0 && <details className="growth-next-details"><summary>What is limited?</summary><ul>{limitationCopy.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ul></details>}
   </section>;
 }
 
-function GrowthView({ state, mutate, setView }: { state: OpenPresenceState; mutate: Mutate; setView: (view: View) => void }) {
+function GrowthReviewHistory({ reviews }: { reviews: GrowthReview[] }) {
+  return <div className="growth-history-content">{reviews.length ? reviews.slice(0, 8).map((item) => <div className="growth-history-row" key={item.id}><div><strong>{item.kind === "strategic" ? "Strategic review" : "Weekly review"}</strong><span>{formatHistoryTimestamp(item.createdAt)} · {item.reviewSource === "model" ? "Model-backed" : "Evidence review"}</span></div><p>{item.summary}</p><small>{item.changedPlan ? "Approach changed" : "Approach unchanged"}</small></div>) : <p className="muted">No Growth reviews have been completed yet.</p>}</div>;
+}
+
+function GrowthCapabilities({ state, presenceId, manifest, limitations }: { state: OpenPresenceState; presenceId: string; manifest: ReturnType<typeof derivePresenceCapabilityManifest>; limitations: ReturnType<typeof derivePresenceCapabilityManifest>["items"] }) {
+  const visible = manifest.items.filter((item) => ["post", "reply", "follow", "follower_measurement", "post_performance"].includes(item.capability));
+  return <div className="growth-capabilities-content"><p className="muted">Only capabilities that affect this responsibility are shown here. Full connector details remain in Presence Settings.</p><div className="capability-list">{visible.map((item) => <div className="capability-row" key={item.capability}><div><strong>{item.label}</strong><small>{capabilityProviderLabel(state, presenceId, item)}{item.limitation ? ` · ${item.limitation}` : ""}</small></div><span className={`capability-state capability-state-${item.availability}`}>{item.availability.replaceAll("-", " ")}</span></div>)}</div>{limitations.length > 0 && <p className="settings-warning">{limitations.length} capability limitation{limitations.length === 1 ? "" : "s"} currently reported.</p>}</div>;
+}
+
+function GrowthView({ state, mutate, setView: _setView }: { state: OpenPresenceState; mutate: Mutate; setView: (view: View) => void }) {
+  void _setView;
   const presence = state.presence;
-  const [countdownNow, setCountdownNow] = useState<number | null>(null);
   const [reviewingGrowth, setReviewingGrowth] = useState(false);
-  const clockAssignment = presence ? state.assignments.find((item) => item.presenceId === presence.id && item.successEvidence?.metric === "followers" && assignmentIsOpen(item)) : undefined;
-  const nextGrowthReviewAt = [clockAssignment?.plan?.nextWeeklyReviewAt, clockAssignment?.plan?.nextStrategicReviewAt].filter((value): value is string => Boolean(value)).sort((left, right) => left.localeCompare(right))[0];
-  useEffect(() => {
-    if (!nextGrowthReviewAt) return;
-    const timer = window.setInterval(() => setCountdownNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, [nextGrowthReviewAt]);
   if (!presence) return <div className="page"><PageHeader eyebrow="Growth" title="No Presence selected" description="Select a Presence before reviewing growth evidence." /></div>;
-  const assignment = clockAssignment;
-  const deltas = audienceDeltas(state, presence.id);
+  const assignment = state.assignments.find((item) => item.presenceId === presence.id && item.successEvidence?.metric === "followers" && assignmentIsOpen(item));
   const snapshots = collapseAudienceSnapshots(state.audienceSnapshots.filter((item) => item.presenceId === presence.id));
   const latest = snapshots[0];
+  const deltas = audienceDeltas(state, presence.id);
   const publicationSnapshots = state.publicationMetricSnapshots.filter((item) => item.presenceId === presence.id).sort((left, right) => right.observedAt.localeCompare(left.observedAt));
-  const latestPublicationSnapshot = publicationSnapshots[0];
-  const latestEvidence = [latest?.observedAt, latestPublicationSnapshot?.observedAt].filter((value): value is string => Boolean(value)).sort((left, right) => right.localeCompare(left))[0];
-  const review = state.growthReviews.filter((item) => item.presenceId === presence.id).sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+  const latestPublication = publicationSnapshots[0];
+  const latestEvidence = [latest?.observedAt, latestPublication?.observedAt].filter((value): value is string => Boolean(value)).sort((left, right) => right.localeCompare(left))[0];
+  const reviewHistory = state.growthReviews.filter((item) => item.presenceId === presence.id).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  const review = reviewHistory[0];
   const unreviewedAudienceCount = review ? snapshots.filter((item) => !(review.evidenceIds ?? []).includes(item.id)).length : 0;
   const unreviewedPublicationCount = review ? publicationSnapshots.filter((item) => !(review.evidenceIds ?? []).includes(item.id)).length : 0;
   const reviewIsStale = Boolean(review && (unreviewedAudienceCount > 0 || unreviewedPublicationCount > 0));
   const manifest = derivePresenceCapabilityManifest(state, presence.id);
-  const limitations = manifest.items.filter((item) => item.availability !== "available");
+  const growthCapabilities = ["post", "reply", "follow", "follower_measurement", "post_performance"];
+  const limitations = manifest.items.filter((item) => growthCapabilities.includes(item.capability) && item.availability !== "available");
   const limitationCopy = [...new Set(limitations.map((item) => item.limitation).filter((item): item is string => Boolean(item)))];
-  const goal = assignment?.successEvidence?.value ?? 100_000;
-  const progress = latest ? Math.min(100, Math.round((latest.followers / goal) * 100)) : 0;
-  const usesChromeExtensionRoute = presence.connectionMode === "bridge";
-  const bridge = usesChromeExtensionRoute ? state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline") : undefined;
-  const bridgeConnected = Boolean(bridge && bridgeAdapterStatus(bridge) === "connected");
-  const nativeConnection = state.nativeConnections.find((item) => item.presenceId === presence.id && item.channelId === presence.channel);
-  const nextChannelObservationAt = nativeConnection?.observation?.nextObservationAt;
-  const nextGrowthReviewCountdown = countdownNow === null ? undefined : formatCountdown(nextGrowthReviewAt, countdownNow);
+  const goal = assignment?.successEvidence?.value;
+  const progress = latest && goal ? Math.min(100, Math.round((latest.followers / goal) * 100)) : 0;
+  const nextGrowthReviewAt = [assignment?.plan?.nextWeeklyReviewAt, assignment?.plan?.nextStrategicReviewAt].filter((value): value is string => Boolean(value)).sort((left, right) => left.localeCompare(right))[0];
   const bodyHeading = manifest.bodyStatus === "degraded" ? "Degraded" : manifest.bodyStatus === "ready" ? limitations.length ? "Ready with limits" : "Ready to work" : "Unavailable";
-  const createGrowthResponsibility = async () => {
-    await mutate({ type: "createAssignment", presenceId: presence.id, environment: presence.connectionMode === "sandbox" ? "sandbox" : "live", instruction: `Grow this Presence toward ${goal.toLocaleString()} followers while building an audience of ${presence.brief.audience}.` });
-  };
+  const newerObservationCount = review ? unreviewedAudienceCount + unreviewedPublicationCount : snapshots.length + publicationSnapshots.length;
+  const trendLabel = deltas.sevenDay === undefined && deltas.twentyEightDay === undefined ? "Learning" : deltas.sevenDay !== undefined && deltas.sevenDay < 0 ? "Needs attention" : deltas.twentyEightDay !== undefined && deltas.twentyEightDay > 0 ? "Improving" : "Steady";
+  const trendTone = trendLabel === "Improving" ? "positive" : trendLabel === "Needs attention" ? "warning" : "neutral";
   const reviewGrowth = async (kind: "weekly" | "strategic") => {
     if (reviewingGrowth || !assignment) return;
     setReviewingGrowth(true);
-    try {
-      await mutate({ type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind });
-    } finally {
-      setReviewingGrowth(false);
-    }
+    try { await mutate({ type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind }); } finally { setReviewingGrowth(false); }
+  };
+  const createGrowthResponsibility = async () => {
+    const defaultGoal = 100_000;
+    await mutate({ type: "createAssignment", presenceId: presence.id, environment: presence.connectionMode === "sandbox" ? "sandbox" : "live", instruction: `Grow this Presence toward ${defaultGoal.toLocaleString()} followers while building an audience of ${presence.brief.audience}.` });
   };
   return <div className="page growth-page">
-    <PageHeader eyebrow={`${presence.name} · Growth`} title="Build durable attention" description="Growth is the Agent’s interpretation of verified audience and publication evidence—not a promise of a particular outcome." actions={<Button variant="secondary" onClick={() => setView("schedule")}><Clock3 size={14} /> Open Schedule</Button>} />
-    {!assignment ? <section className="growth-empty settings-card"><div className="watch-empty-mark"><TrendingUp size={23} /></div><SectionEyebrow>Continuous responsibility</SectionEyebrow><h2>Give {presence.name} a 100K growth responsibility.</h2><p>One long-lived Assignment owns the objective. The Agent chooses the day-to-day work, observes the public result, and revises its approach during review.</p><Button variant="primary" onClick={() => void createGrowthResponsibility()}><Plus size={14} /> Create growth responsibility</Button></section> : <>
+    <PageHeader eyebrow={`${presence.name} · Growth`} title="Growth" description="See what Genny currently believes, what changed, and what happens next." />
+    {!assignment ? <section className="growth-empty settings-card"><div className="watch-empty-mark"><TrendingUp size={23} /></div><SectionEyebrow>Continuous responsibility</SectionEyebrow><h2>Give {presence.name} a growth responsibility.</h2><p>One long-lived Assignment owns the objective. Genny chooses the day-to-day work, observes the public result, and revises its approach during review.</p><Button variant="primary" onClick={() => void createGrowthResponsibility()}><Plus size={14} /> Create growth responsibility</Button></section> : <>
       <section className="growth-goal-card settings-card" aria-label="Growth goal">
-        <div className="growth-goal-heading"><div><SectionEyebrow>Current goal</SectionEyebrow><h2>{goal.toLocaleString()} followers</h2><p>{assignment.audienceObjective ?? presence.brief.audience}</p></div><span className={`growth-status growth-status-${assignment.status}`}>{assignment.status.replaceAll("_", " ")}</span></div>
-        <div className="growth-progress-track"><span style={{ width: `${progress}%` }} /></div>
-        <div className="growth-stat-grid"><div><span>Observed now</span><strong>{latest ? latest.followers.toLocaleString() : "Not observed"}</strong><small>{latest ? `${formatHistoryTimestamp(latest.observedAt)} · ${latest.source}` : "Waiting for channel evidence"}</small></div><div><span>7-day change</span><strong>{deltas.sevenDay === undefined ? "Not enough data" : `${deltas.sevenDay >= 0 ? "+" : ""}${deltas.sevenDay.toLocaleString()}`}</strong><small>Compared with the latest prior snapshot</small></div><div><span>28-day change</span><strong>{deltas.twentyEightDay === undefined ? "Not enough data" : `${deltas.twentyEightDay >= 0 ? "+" : ""}${deltas.twentyEightDay.toLocaleString()}`}</strong><small>Strategic review window</small></div></div>
+        <div className="growth-overview-heading"><div><SectionEyebrow>Growth objective</SectionEyebrow><h2>{latest ? latest.followers.toLocaleString() : "—"} <span>/ {goal?.toLocaleString() ?? "Audience baseline"} followers</span></h2><p>{assignment.audienceObjective ?? presence.brief.audience}</p></div><div className={`growth-trend growth-trend-${trendTone}`}><strong>{trendLabel}</strong><span>{assignment.status.replaceAll("_", " ")}</span></div></div>
+        <div className="growth-progress-track" aria-label={`${latest?.followers.toLocaleString() ?? "No"} of ${goal?.toLocaleString() ?? "unknown"} followers`}><span style={{ width: `${progress}%` }} /></div>
+        <div className="growth-progress-summary"><strong>{deltas.sevenDay !== undefined ? `${deltas.sevenDay >= 0 ? "+" : ""}${deltas.sevenDay.toLocaleString()} this week` : "Collecting a 7-day baseline"}</strong><span>·</span><strong>{deltas.twentyEightDay !== undefined ? `${deltas.twentyEightDay >= 0 ? "+" : ""}${deltas.twentyEightDay.toLocaleString()} last 28 days` : "Collecting a 28-day baseline"}</strong><small>{latestEvidence ? `Evidence updated ${formatHistoryTimestamp(latestEvidence)}` : "Waiting for verified audience evidence"}</small></div>
       </section>
-      <section className="growth-freshness-card settings-card" aria-label="Growth check status">
-        <div className="section-heading compact"><div><SectionEyebrow>Evidence cadence</SectionEyebrow><h2>When Growth was checked</h2></div><Clock3 size={17} /></div>
-        <p className="muted">Channel evidence and Agent reviews have separate clocks. This status reports both so “not enough data” is never mistaken for a recent check.</p>
-        <div className="growth-freshness-grid">
-          <div><span>Last channel evidence</span><strong>{latestEvidence ? formatHistoryTimestamp(latestEvidence) : "Not observed"}</strong><small>{latestEvidence ? `${latest?.observedAt === latestEvidence ? "Audience" : "Publication performance"} · verified source` : nativeConnection ? "Native X is connected, but no metrics snapshot has arrived" : bridgeConnected ? "Chrome extension is connected, but no metrics report has arrived" : "Waiting for a connected observer"}</small></div>
-          <div><span>Last Growth review</span><strong>{review ? formatHistoryTimestamp(review.createdAt) : "Not reviewed"}</strong><small>{review ? `${review.kind === "strategic" ? "Strategic" : "Weekly"} evidence review` : "No review has been completed yet"}</small></div>
-          <div><span>Next Agent review</span><strong aria-live="polite">{presence.status === "paused" ? "Paused" : nextGrowthReviewCountdown === "now" ? "Due now" : nextGrowthReviewCountdown ? `In ${nextGrowthReviewCountdown}` : nextGrowthReviewAt ? "Scheduled" : "Not scheduled"}</strong><small>{presence.status === "paused" ? "Wake the Presence to resume autonomous checks" : nextGrowthReviewAt ? formatHistoryTimestamp(nextGrowthReviewAt) : "The Agent has no review time saved"}</small></div>
-          <div><span>Next channel check</span><strong>{presence.status === "paused" ? "Paused" : nextChannelObservationAt ? (countdownNow === null ? "Scheduled" : formatCountdown(nextChannelObservationAt, countdownNow) === "now" ? "Due now" : `In ${formatCountdown(nextChannelObservationAt, countdownNow)}`) : bridgeConnected ? "Chrome extension-controlled" : "Unavailable"}</strong><small>{presence.status === "paused" ? "Wake the Presence to resume observation" : nextChannelObservationAt ? formatHistoryTimestamp(nextChannelObservationAt) : bridgeConnected && bridge?.lastHeartbeatAt ? `Last Chrome extension check ${formatHistoryTimestamp(bridge.lastHeartbeatAt)} · adapter cadence not exposed` : "No connected observer is reporting a next check"}</small></div>
-        </div>
-      </section>
-      <GrowthEvidencePanel snapshots={snapshots} publicationSnapshots={publicationSnapshots} mirrorObjects={state.mirrorObjects} review={review} reviewIsStale={reviewIsStale} unreviewedAudienceCount={unreviewedAudienceCount} unreviewedPublicationCount={unreviewedPublicationCount} />
-      <GrowthReadPanel review={review} reviewingGrowth={reviewingGrowth} reviewGrowth={reviewGrowth} />
-      <div className="growth-columns">
-        <section className="settings-card" aria-busy={reviewingGrowth}><div className="section-heading compact"><div><SectionEyebrow>Genny&apos;s current read</SectionEyebrow><h2>What the evidence says</h2></div><TrendingUp size={17} /></div>{review ? <><p>{review.summary}</p><small className="muted">{review.reviewSource === "model" ? "Model-backed review" : "Deterministic evidence review"}{review.planChangeSummary ? ` · ${review.planChangeSummary}` : ""}</small>{reviewIsStale && <div className="growth-review-stale" role="status" aria-live="polite"><div><strong>New evidence since this review</strong><span>{[unreviewedAudienceCount ? `${unreviewedAudienceCount} audience snapshot${unreviewedAudienceCount === 1 ? "" : "s"}` : "", unreviewedPublicationCount ? `${unreviewedPublicationCount} publication-performance snapshot${unreviewedPublicationCount === 1 ? "" : "s"}` : ""].filter(Boolean).join(" and ")} has not been included in this read.</span></div><Button variant="secondary" disabled={reviewingGrowth} onClick={() => void reviewGrowth(review.kind)}>{reviewingGrowth ? <><LoaderCircle size={14} className="spin" /> Reviewing evidence…</> : "Review new evidence"}</Button></div>}<div className="growth-read-list"><div><strong>Working</strong>{review.working.length ? <ul>{review.working.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">Nothing strong enough to call yet.</p>}</div><div><strong>Uncertain</strong>{review.uncertain.length ? <ul>{review.uncertain.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">No open uncertainty recorded.</p>}</div><div><strong>Weak</strong>{review.weak.length ? <ul>{review.weak.map((item) => <li key={item}>{item}</li>)}</ul> : <p className="muted">No weak pattern recorded.</p>}</div></div></> : <div className="growth-no-review"><p>The Agent has not completed a Growth review yet. It will review follower movement and publication performance on the operating rhythm.</p><Button variant="secondary" disabled={reviewingGrowth} onClick={() => void reviewGrowth("weekly")}>{reviewingGrowth ? <><LoaderCircle size={14} className="spin" /> Reviewing evidence…</> : "Review available evidence"}</Button></div>}</section>
-        <section className="settings-card"><div className="section-heading compact"><div><SectionEyebrow>Current approach</SectionEyebrow><h2>How the Agent is working</h2></div><Sparkles size={17} /></div>{assignment.plan ? <><p>{assignment.plan.summary}</p><div className="growth-plan-list"><div><strong>Publishing</strong><ul>{assignment.plan.publishingApproach.map((item) => <li key={item}>{item}</li>)}</ul></div><div><strong>Discovery</strong><ul>{assignment.plan.discoveryDirections.map((item) => <li key={item}>{item}</li>)}</ul></div><div><strong>Relationships</strong><ul>{assignment.plan.relationshipFocus.map((item) => <li key={item}>{item}</li>)}</ul></div></div><small className="muted">Plan revision {assignment.plan.revision} · Next weekly review {assignment.plan.nextWeeklyReviewAt ? formatHistoryTimestamp(assignment.plan.nextWeeklyReviewAt) : "not scheduled"}</small></> : <p className="muted">The Agent is preparing its first operating plan.</p>}</section>
-      </div>
-      <div className="growth-columns">
-        <section className="settings-card"><div className="section-heading compact"><div><SectionEyebrow>Evidence quality</SectionEyebrow><h2>Recent audience observations</h2></div><ShieldCheck size={17} /></div>{snapshots.length ? <div className="growth-evidence-list">{snapshots.slice(0, 5).map((item) => <div key={item.id}><strong>{item.followers.toLocaleString()} followers</strong><span>{formatHistoryTimestamp(item.observedAt)} · {item.source} · {item.observationStatus}</span></div>)}</div> : <p className="muted">No verified audience snapshot has arrived from the selected channel.</p>}</section>
-        <section className="settings-card"><div className="section-heading compact"><div><SectionEyebrow>Body & limitations</SectionEyebrow><h2>{bodyHeading}</h2></div><PlugZap size={17} /></div><p className="muted">The Agent can only claim autonomy where the connected channel body can observe, execute, and verify.</p><div className="capability-list">{manifest.items.filter((item) => ["post", "reply", "follow", "follower_measurement", "post_performance"].includes(item.capability)).map((item) => <div className="capability-row" key={item.capability}><div><strong>{item.label}</strong><small>{capabilityProviderLabel(state, presence.id, item)}{item.limitation ? ` · ${item.limitation}` : ""}</small></div><span className={`capability-state capability-state-${item.availability}`}>{item.availability.replaceAll("-", " ")}</span></div>)}</div>{limitationCopy.length > 0 && <p className="settings-warning">Some channel capabilities are unavailable: {[...new Set(limitationCopy)].slice(0, 2).join(" ")}</p>}<Button variant="ghost" onClick={() => setView("presence")}>Review Settings</Button></section>
+      <GrowthCurrentRead assignment={assignment} review={review} reviewIsStale={reviewIsStale} newerObservationCount={newerObservationCount} nextGrowthReviewAt={nextGrowthReviewAt} reviewingGrowth={reviewingGrowth} reviewGrowth={reviewGrowth} />
+      <GrowthApproach assignment={assignment} review={review} />
+      <GrowthNext assignment={assignment} nextGrowthReviewAt={nextGrowthReviewAt} bodyHeading={bodyHeading} limitationCopy={limitationCopy} presencePaused={presence.status === "paused" || assignment.status === "paused"} />
+      <section className="growth-signals settings-card" aria-label="Recent signals"><div className="growth-section-heading"><div><SectionEyebrow>Recent signals</SectionEyebrow><h2>What the latest evidence looks like</h2></div><span className="growth-signal-freshness">{newerObservationCount.toLocaleString()} observed</span></div><div className="growth-signal-summary-grid"><div><span>Audience</span><strong>{latest ? latest.followers.toLocaleString() + " followers" : "No baseline yet"}</strong><small>{snapshots.length ? (snapshots.length > 1 && new Set(snapshots.map((item) => item.followers)).size === 1 ? `Unchanged across ${snapshots.length.toLocaleString()} recent checks` : `${snapshots.length.toLocaleString()} verified checks`) : "Genny is still collecting evidence."}</small></div><div><span>Publication performance</span><strong>{latestPublication ? [latestPublication.impressions !== undefined ? latestPublication.impressions.toLocaleString() + " views" : undefined, latestPublication.likes !== undefined ? latestPublication.likes.toLocaleString() + " likes" : undefined].filter(Boolean).join(" · ") || "Observed" : "No metrics yet"}</strong><small>{publicationSnapshots.length ? `${publicationSnapshots.length.toLocaleString()} publication observations; comparison confidence ${latestPublication?.baseline?.confidence ?? "low"}.` : "Genny is still collecting publication evidence."}</small></div></div></section>
+      <div className="growth-disclosures" aria-label="Growth details">
+        <details className="growth-disclosure"><summary><span>Evidence</span><small>Audience, publication, and Social Mirror records</small></summary><GrowthEvidenceDetails snapshots={snapshots} publicationSnapshots={publicationSnapshots} mirrorObjects={state.mirrorObjects} review={review} reviewIsStale={reviewIsStale} unreviewedAudienceCount={unreviewedAudienceCount} unreviewedPublicationCount={unreviewedPublicationCount} /></details>
+        <details className="growth-disclosure"><summary><span>Review history</span><small>{reviewHistory.length} completed review{reviewHistory.length === 1 ? "" : "s"}</small></summary><GrowthReviewHistory reviews={reviewHistory} /></details>
+        <details className="growth-disclosure"><summary><span>Capabilities &amp; limitations</span><small>{bodyHeading}</small></summary><GrowthCapabilities state={state} presenceId={presence.id} manifest={manifest} limitations={limitations} /></details>
       </div>
     </>}
   </div>;
@@ -7368,6 +10917,8 @@ function BrainView({
   const [agentProhibitedDraft, setAgentProhibitedDraft] = useState((agent.languagePolicy?.prohibited ?? []).join("\n"));
   const pending = state.proposals.filter((item) => item.status === "pending");
   const model = state.modelProfiles.find((item) => item.agentId === agent.id);
+  const activeKnowledgeDocuments = (state.knowledgeDocuments ?? []).filter((document) => document.agentId === agent.id && document.status === "active");
+  const usedKnowledgeDocuments = activeKnowledgeDocuments.filter(() => (state.presenceKnowledgeAccess ?? []).some((access) => access.agentId === agent.id && access.enabled && access.maximumUse !== "none"));
   const [showSkillForm, setShowSkillForm] = useState(false);
   const [editingSkillId, setEditingSkillId] = useState<string | null>(null);
   const [skillName, setSkillName] = useState("");
@@ -7379,6 +10930,9 @@ function BrainView({
   const [assetConnectionSecret, setAssetConnectionSecret] = useState("");
   const [ollamaModels, setOllamaModels] = useState<OllamaModelOption[]>([]);
   const [ollamaModelsError, setOllamaModelsError] = useState<string | null>(null);
+  const [deleteAgentOpen, setDeleteAgentOpen] = useState(false);
+  const [deleteAgentName, setDeleteAgentName] = useState("");
+  const [deletingAgent, setDeletingAgent] = useState(false);
   const ollamaConnection = state.providerConnections.find((item) => item.provider === "ollama" && item.status !== "needs-configuration");
   const tavilyConnection = state.assetProviderConnections.find((item) => item.provider === "tavily");
   const ollamaConnectionId = ollamaConnection?.id;
@@ -7677,9 +11231,10 @@ function BrainView({
       </section>
       <div className="brain-page-section brain-layout">
         <aside className="file-list">
-          <div className="file-list-label">Mind files</div>
+          <div className="file-list-label">Mind files{usedKnowledgeDocuments.length > 0 && <span className="file-list-knowledge-summary">{usedKnowledgeDocuments.length} Knowledge document{usedKnowledgeDocuments.length === 1 ? "" : "s"} available</span>}</div>
           {fileOrder.map((kind) => {
             const item = state.files.find((entry) => entry.kind === kind)!;
+            const mentionedDocuments = activeKnowledgeDocuments.filter((document) => document.name && item.content.includes(document.name));
             return (
               <button
                 key={kind}
@@ -7693,6 +11248,7 @@ function BrainView({
                 <span>
                   <strong>{kind}.md</strong>
                   <small>{item.subtitle}</small>
+                  {mentionedDocuments.length > 0 && <small className="file-knowledge-usage" title={mentionedDocuments.map((document) => document.name).join(", ")}>Uses {mentionedDocuments.length} Knowledge document{mentionedDocuments.length === 1 ? "" : "s"}</small>}
                 </span>
                 {item.protected && <ShieldCheck size={13} />}
               </button>
@@ -7747,6 +11303,33 @@ function BrainView({
           ))}
         </section>
       )}
+      <section className="settings-card destructive-settings-card" aria-labelledby="delete-agent-title">
+        <div className="destructive-settings-intro">
+          <div>
+            <SectionEyebrow>Danger zone</SectionEyebrow>
+            <h2 id="delete-agent-title">Delete this Agent</h2>
+            <p className="muted">Permanently removes {agent.name}, its Presences, and its Agent workspace. This cannot be undone.</p>
+          </div>
+          <button type="button" className="destructive-link" onClick={() => setDeleteAgentOpen((open) => !open)} aria-expanded={deleteAgentOpen}>
+            {deleteAgentOpen ? "Cancel deletion" : "Delete Agent"}
+          </button>
+        </div>
+        {deleteAgentOpen && (
+          <form className="destructive-confirmation" onSubmit={async (event) => {
+            event.preventDefault();
+            if (state.agents.length <= 1 || deleteAgentName !== agent.name || deletingAgent) return;
+            setDeletingAgent(true);
+            await mutate({ type: "deleteAgent", confirmationName: deleteAgentName });
+            setDeletingAgent(false);
+          }}>
+            {state.agents.length <= 1 ? <p className="destructive-help">OpenPresence needs at least one Agent, so this last Agent cannot be deleted.</p> : <>
+              <p className="destructive-help">To confirm, type <strong>{agent.name}</strong> exactly.</p>
+              <label>Agent name<input aria-label="Type Agent name to confirm deletion" value={deleteAgentName} onChange={(event) => setDeleteAgentName(event.target.value)} autoComplete="off" /></label>
+              <Button type="submit" variant="danger" disabled={deleteAgentName !== agent.name || deletingAgent}>{deletingAgent ? "Deleting…" : "Permanently delete Agent"}</Button>
+            </>}
+          </form>
+        )}
+      </section>
     </div>
   );
 }
@@ -7809,6 +11392,7 @@ function PresenceView({
   manageX: XManage;
 }) {
   const presence = state.presence!;
+  const operationalHealth = useOperationalHealth(presence.id);
   const agentName = state.agent?.name ?? "the Agent";
   const capabilities =
     presence.capabilities ??
@@ -7848,6 +11432,9 @@ function PresenceView({
   const [publishingPeriodDraft, setPublishingPeriodDraft] = useState<"day" | "week">(presence.publishingInitiative?.target?.period ?? "day");
   const [autoApprovalPrompt, setAutoApprovalPrompt] = useState<{ capabilities: string[]; labels: string[]; executionIds: string[] } | null>(null);
   const [confirmingAutoApproval, setConfirmingAutoApproval] = useState(false);
+  const [deletePresenceOpen, setDeletePresenceOpen] = useState(false);
+  const [deletePresenceName, setDeletePresenceName] = useState("");
+  const [deletingPresence, setDeletingPresence] = useState(false);
   const publicPostures: { id: PublicDisclosurePosture; label: string; detail: string }[] = presence.mode === "ghost"
     ? [{ id: "representational", label: "Representational", detail: "Speak as the person or organization this Presence extends." }, { id: "open-about-assistance", label: "Open about assistance", detail: "Acknowledge AI assistance when it is relevant." }]
     : [{ id: "contextual", label: "Contextual", detail: "Answer socially and acknowledge AI only when it matters." }, { id: "ai-forward", label: "AI-forward", detail: "Be direct that this is an AI presence when relevant." }, { id: "private", label: "Private", detail: "Keep technical identity private in public conversation." }];
@@ -7919,18 +11506,31 @@ function PresenceView({
   };
   const autoApprovalLabel = autoApprovalPrompt?.labels.length === 1 ? autoApprovalPrompt.labels[0] : "these capabilities";
   const publishingInitiative = presence.publishingInitiative;
+  const selfDirectedAttention = presence.selfDirectedAttention ?? defaultSelfDirectedAttentionPolicy();
+  const selfDirectedBudget = selfDirectedAttention.budget ?? {};
+  const updateSelfDirectedAttention = (patch: Partial<typeof selfDirectedAttention>) => void mutate({ type: "setPresence", patch: { selfDirectedAttention: { ...selfDirectedAttention, ...patch } } });
   const savePublishingPace = () => {
     const count = Math.max(1, Math.min(10_000, Math.round(Number(publishingCountDraft) || 0)));
     if (!count) return;
     void mutate({ type: "setPresence", patch: { publishingInitiative: { ...(publishingInitiative ?? { mode: "pace", timezone: "UTC", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }), mode: "pace", target: { count, period: publishingPeriodDraft }, updatedAt: new Date().toISOString() } } });
   };
-  const knowledgeCollections = state.knowledgeCollections.filter((collection) => collection.agentId === state.agent?.id && collection.status === "active");
   const knowledgeUseOptions: { id: KnowledgeUse; label: string; detail: string }[] = [
-    { id: "none", label: "Not available", detail: "Do not retrieve this collection for this Presence." },
-    { id: "internal", label: "Internal", detail: "Available to the Presence, but never public source material." },
+    { id: "none", label: "Off", detail: "This Presence cannot retrieve Agent Knowledge." },
+    { id: "internal", label: "Internal", detail: "Available to this Presence, but not as public source material." },
     { id: "public", label: "Public", detail: "May support public expression when the Agent chooses it." },
   ];
-  const knowledgeBindingFor = (collectionId: string) => state.presenceKnowledgeBindings.find((binding) => binding.presenceId === presence.id && binding.collectionId === collectionId && binding.enabled);
+  const knowledgeAccess = (state.presenceKnowledgeAccess ?? []).find((access) => access.agentId === state.agent?.id && access.presenceId === presence.id);
+  const knowledgeAccessValue = knowledgeAccess?.enabled ? knowledgeAccess.maximumUse : "none";
+  const [activeNav, setActiveNav] = useState("identity");
+
+  const scrollToSection = (id: string, navKey: string) => {
+    setActiveNav(navKey);
+    const elem = document.getElementById(id);
+    if (elem) {
+      elem.scrollIntoView({ behavior: "smooth" });
+    }
+  };
+
   return (
     <div className="page presence-settings-page">
       <PageHeader
@@ -7938,508 +11538,749 @@ function PresenceView({
         title="Presence settings"
         description="Choose who speaks here and how independently this Presence acts."
       />
-      <div className="presence-overview" style={{ "--agent-accent": presence.accent } as React.CSSProperties}>
-        <div className="presence-identity">
-          <div className="presence-overview-logo">
-            <PresenceLogo channel={presence.channel} definitions={state.channelDefinitions} size="large" />
+
+      {/* Sleek, compact top summary bar */}
+      <div className="compact-presence-header" style={{ "--agent-accent": presence.accent } as React.CSSProperties}>
+        <div className="presence-overview-left">
+          <div className="presence-header-avatar">
+            <PresenceLogo channel={presence.channel} definitions={state.channelDefinitions} size="small" />
           </div>
-          <div className="presence-overview-copy">
-            <span className="eyebrow">
-              {channelLabel(presence.channel, state.channelDefinitions)} ·
-              Presence
-            </span>
-            <h2>{presence.name}</h2>
-            <p className="presence-handle">{presence.handle}</p>
+          <div className="presence-header-info">
+            <div className="presence-header-name-line">
+              <strong className="presence-header-name">{presence.name}</strong>
+              <code className="presence-header-handle">{presence.handle}</code>
+              <span className={`presence-mode-tag ${presence.mode === "ghost" ? "is-ghost" : "is-agent"}`}>
+                {presence.mode === "ghost" ? "Ghost presence" : "Agent-owned"}
+              </span>
+            </div>
+            <p className="presence-header-sub">
+              {presence.mode === "ghost"
+                ? "Extends the operator’s attention and judgment here."
+                : `Speaks as ${presence.name} with an independent point of view.`}
+            </p>
           </div>
         </div>
-        <div className="presence-overview-intro">
-          <span className="eyebrow">Public identity</span>
-          <strong>{presence.mode === "ghost" ? "Ghost presence" : "Agent-owned presence"}</strong>
-          <p>
-            {presence.mode === "ghost"
-              ? "Extends the operator’s attention and judgment here."
-              : `Speaks as ${presence.name} with an independent point of view.`}
-          </p>
-        </div>
-        <div className="presence-overview-meta" aria-label="Presence summary">
-          <div>
-            <span>Channel</span>
+        <div className="presence-overview-badges" aria-label="Presence summary">
+          <div className="presence-badge-item">
+            <span className="badge-label">Channel</span>
             <strong>{channelLabel(presence.channel, state.channelDefinitions)}</strong>
           </div>
-          <div>
-            <span>Route</span>
-            <strong>{connectionMode === "sandbox" ? "Sandbox" : connectionMode === "native" ? "Live API" : "OpenPresence Chrome"}</strong>
+          <div className="presence-badge-item">
+            <span className="badge-label">World</span>
+            <strong>{presence.environment === "sandbox" ? "Sandbox" : "Live"}</strong>
           </div>
-          <div>
-            <span>Status</span>
+          <div className="presence-badge-item">
+            <span className="badge-label">Route</span>
+            <strong>{connectionMode === "sandbox" ? "Sandbox" : connectionMode === "native" ? "Native API" : "Managed Browser"}</strong>
+          </div>
+          <div className="presence-badge-item">
+            <span className="badge-label">Status</span>
             <strong className={presence.status === "paused" ? "presence-status paused" : "presence-status"}>
               <span aria-hidden="true" /> {presence.status === "paused" ? "Paused" : "Awake"}
             </strong>
           </div>
         </div>
       </div>
-      <section className="settings-card knowledge-access-card" aria-labelledby="presence-knowledge-title">
-        <div className="section-heading compact">
-          <div>
-            <SectionEyebrow>Knowledge access</SectionEyebrow>
-            <h2 id="presence-knowledge-title">What may this Presence retrieve?</h2>
-          </div>
-          <BookOpen size={17} />
-        </div>
-        <p className="muted">Access is scoped to this Presence. A collection binding can only narrow the collection&apos;s own disclosure level.</p>
-        {knowledgeCollections.length === 0 ? (
-          <div className="knowledge-empty-access"><p>No Agent Knowledge collections yet.</p><Button type="button" variant="secondary" onClick={() => setView?.("knowledge")}><BookOpen size={14} /> Open Knowledge</Button></div>
-        ) : (
-          <div className="knowledge-access-list">
-            {knowledgeCollections.map((collection) => {
-              const binding = knowledgeBindingFor(collection.id);
-              const selectedUse = binding?.maximumUse ?? "none";
-              return <div className="knowledge-access-row" key={collection.id}>
-                <div><strong>{collection.name}</strong><small>{collection.defaultRole === "procedure" ? "Procedure" : "Reference"} · collection default: {collection.defaultUse}</small></div>
-                <select aria-label={`Knowledge access for ${collection.name}`} value={selectedUse} onChange={(event) => void mutate({ type: "setKnowledgeBinding", presenceId: presence.id, collectionId: collection.id, maximumUse: event.target.value as KnowledgeUse, enabled: event.target.value !== "none" })}>
-                  {knowledgeUseOptions.map((option) => <option value={option.id} key={option.id}>{option.label}</option>)}
-                </select>
-              </div>;
-            })}
-          </div>
-        )}
-      </section>
-      <section className="settings-card channel-settings-card">
-        <div className="section-heading compact">
-          <div>
-            <SectionEyebrow>Channel & environment</SectionEyebrow>
-            <h2>Where should {agentName} show up?</h2>
-          </div>
-          <Globe2 size={17} />
-        </div>
-        <p className="muted channel-settings-intro">Choose one route for {simulation.worldLabel}. Sandbox is safe to rehearse; the official X API and OpenPresence Chrome are the live routes.</p>
-        {channelDefinition && (
-          <div className="channel-definition-editor">
-            {!editingChannel ? (
-              <div className="channel-definition-summary">
-                <div><span>Channel</span><strong>{channelDefinition.name}</strong><small>{channelDefinition.domain || "No destination set"}</small></div>
-                <Button type="button" variant="secondary" onClick={openChannelEditor}><Pencil size={14} /> Edit Channel</Button>
-              </div>
-            ) : (
-              <div className="channel-definition-form" aria-label="Edit Channel">
-                <div className="section-heading compact"><div><SectionEyebrow>Edit Channel</SectionEyebrow><h3>Update this destination</h3></div><Button type="button" variant="ghost" onClick={() => setEditingChannel(false)}>Cancel</Button></div>
-                <label>Channel name<input aria-label="Channel name" value={channelNameDraft} onChange={(event) => setChannelNameDraft(event.target.value)} maxLength={120} /></label>
-                <label>Destination URL<input aria-label="Channel destination" type="url" value={channelDomainDraft} onChange={(event) => setChannelDomainDraft(event.target.value)} placeholder="https://www.skool.com/saaspreneur-academy" /></label>
-                <fieldset className="channel-edit-capabilities"><legend>Channel actions</legend><div>{channelDefinition.affordances.map((item) => <label key={item.id}><input type="checkbox" checked={channelAffordancesDraft.some((current) => current.id === item.id)} onChange={() => toggleChannelAffordance(item.id)} /><span><strong>{item.label}</strong><small>{item.description}</small></span></label>)}</div></fieldset>
-              <fieldset className="channel-edit-capabilities"><legend>Channel media support</legend><div>{(["image", "gif"] as SocialAssetKind[]).map((kind) => <label key={kind}><input type="checkbox" checked={channelAssetsDraft.includes(kind)} onChange={() => toggleChannelAsset(kind)} /><span><strong>{kind === "image" ? "Images" : "GIFs"}</strong><small>Supported by this destination. The connected adapter must advertise the matching media capability.</small></span></label>)}</div><p className="form-hint">Media delivery uses the common asset route when the active Native or Browser Bridge connector advertises the selected type.</p></fieldset>
-                <div className="inline-form-actions"><Button type="button" variant="primary" disabled={!channelNameDraft.trim()} onClick={saveChannel}><Check size={14} /> Save Channel</Button></div>
-              </div>
-            )}
-          </div>
-        )}
-        <div className="channel-mode-options">
-          <button className={connectionMode === "sandbox" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { connectionMode: "sandbox" } })}>
-            <FlaskConical size={17} />
-            <span><strong>Sandbox · {simulation.worldLabel}</strong><small>Channel-specific simulated world · nothing leaves OpenPresence</small></span>
-          </button>
-          {presence.channel === "x" && <button className={connectionMode === "native" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { connectionMode: "native" } })}>
-            <span className="channel-option-mark"><XBrand /></span>
-            <span><strong>X</strong><small>Live public channel through the official API</small></span>
-          </button>}
-          <button className={connectionMode === "bridge" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { connectionMode: "bridge" } })}>
-            <PlugZap size={17} />
-            <span><strong>OpenPresence Chrome</strong><small>Use a signed-in Chrome session through the OpenPresence extension</small></span>
-          </button>
-        </div>
-        <div className="channel-selection-status">
-          {connectionMode === "sandbox" && <div className="channel-sandbox-summary"><div><strong>This world is simulated.</strong><p>{simulation.worldLabel} history stays in this rehearsal session; {agentName}&apos;s mind is shared.</p></div><Button variant="secondary" onClick={() => setView?.("playground")}><FlaskConical size={14} /> Open Playground</Button></div>}
-          {connectionMode === "native" && presence.channel === "x" && <XConnection state={state} presence={presence} manageX={manageX} />}
-          {connectionMode === "bridge" && <ChromeConnectionPanel state={state} presence={presence} mutate={mutate} manageBridge={manageBridge} refreshState={refreshState} />}
-        </div>
-        {connectionMode === "native" && !(nativeConnection?.status === "connected") && <p className="channel-not-connected">No live connection is active yet. Configure the selected route below when you’re ready.</p>}
-      </section>
-      <section className="identity-card settings-card">
-        <div>
-          <SectionEyebrow>Identity</SectionEyebrow>
-          <h2>Who speaks here?</h2>
-          <p>
-            {presence.mode === "ghost"
-              ? `${agentName} extends the operator’s attention and judgment.`
-              : `${agentName} speaks as an agent with their own point of view.`}
-          </p>
-        </div>
-        <div className="identity-name-form">
-          <label>
-            Presence name
-            <input
-              aria-label="Presence name"
-              value={presenceNameDraft}
-              onChange={(event) => setPresenceNameDraft(event.target.value)}
-              maxLength={120}
-            />
-          </label>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={!presenceNameDraft.trim() || presenceNameDraft.trim() === presence.name}
-            onClick={() => void mutate({ type: "setPresence", patch: { name: presenceNameDraft.trim() } })}
-          >
-            <Check size={14} /> Save name
-          </Button>
-          <label>
-            Presence handle
-            <input
-              aria-label="Presence handle"
-              value={presenceHandleDraft}
-              onChange={(event) => setPresenceHandleDraft(event.target.value)}
-              maxLength={80}
-              placeholder="@genny"
-            />
-          </label>
-          <Button
-            type="button"
-            variant="secondary"
-            disabled={!presenceHandleDraft.trim() || presenceHandleDraft.trim() === presence.handle}
-            onClick={() => void mutate({ type: "setPresence", patch: { handle: presenceHandleDraft.trim() } })}
-          >
-            <Check size={14} /> Save handle
-          </Button>
-        </div>
-        <div className="identity-options">
-          <button
-            className={presence.mode === "agent" ? "selected" : ""}
-            onClick={() =>
-              mutate({ type: "setPresence", patch: { mode: "agent" } })
-            }
-          >
-            <strong>{agentName}</strong>
-            <small>Agent-owned</small>
-          </button>
-          <button
-            className={presence.mode === "ghost" ? "selected" : ""}
-            onClick={() =>
-              mutate({ type: "setPresence", patch: { mode: "ghost" } })
-            }
-          >
-            <strong>Me / my organization</strong>
-            <small>Ghost · extends my identity</small>
-          </button>
-        </div>
-      </section>
-      <section className="settings-card public-self-card">
-        <div className="section-heading compact">
-          <div>
-            <SectionEyebrow>Public self · Presence-scoped</SectionEyebrow>
-            <h2>How this Presence describes itself</h2>
-          </div>
-          <ShieldCheck size={17} />
-        </div>
-        <p className="muted">The Agent is the private mind. This Public Self is who people meet here. Implementation details stay out of social judgment unless you approve a specific fact.</p>
-        {presence.mode === "ghost" && <div className="public-self-represented">
-          <div className="public-self-representation-toggle">
-            <span className="public-self-label">Represents</span>
-            <div className="public-self-representation-options" role="group" aria-label="Representation type">
-              <button type="button" className={ghostRepresentation.kind === "individual" ? "selected" : ""} aria-pressed={ghostRepresentation.kind === "individual"} onClick={() => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, kind: "individual" } })}>
-                <strong>Individual</strong><small>Use a person&apos;s name.</small>
+
+      <div className="presence-settings-container">
+        <aside className="presence-settings-nav" aria-label="Settings navigation">
+          <div className="settings-nav-sticky">
+            <span className="settings-nav-heading">Settings Navigation</span>
+            <nav className="settings-nav-list">
+              <button type="button" className={`settings-nav-item ${activeNav === "identity" ? "active" : ""}`} onClick={() => scrollToSection("section-identity", "identity")}>
+                <span className="nav-icon">👤</span> Identity & Public Self
               </button>
-              <button type="button" className={ghostRepresentation.kind === "organization" ? "selected" : ""} aria-pressed={ghostRepresentation.kind === "organization"} onClick={() => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, kind: "organization" } })}>
-                <strong>Organization</strong><small>Use an organization name and website.</small>
+              <button type="button" className={`settings-nav-item ${activeNav === "access" ? "active" : ""}`} onClick={() => scrollToSection("section-access", "access")}>
+                <span className="nav-icon">🌐</span> Channel & Access
+              </button>
+              <button type="button" className={`settings-nav-item ${activeNav === "brief" ? "active" : ""}`} onClick={() => scrollToSection("section-brief", "brief")}>
+                <span className="nav-icon">🎯</span> Presence Brief
+              </button>
+              <button type="button" className={`settings-nav-item ${activeNav === "attention" ? "active" : ""}`} onClick={() => scrollToSection("section-attention", "attention")}>
+                <span className="nav-icon">⏱️</span> Attention & Rhythm
+              </button>
+              <button type="button" className={`settings-nav-item ${activeNav === "policies" ? "active" : ""}`} onClick={() => scrollToSection("section-policies", "policies")}>
+                <span className="nav-icon">✍️</span> Publishing & Policies
+              </button>
+              <button type="button" className={`settings-nav-item ${activeNav === "execution" ? "active" : ""}`} onClick={() => scrollToSection("section-execution", "execution")}>
+                <span className="nav-icon">⚡</span> Execution Envelope
+              </button>
+              <button type="button" className={`settings-nav-item ${activeNav === "knowledge" ? "active" : ""}`} onClick={() => scrollToSection("section-knowledge", "knowledge")}>
+                <span className="nav-icon">📚</span> Knowledge Access
+              </button>
+              <button type="button" className={`settings-nav-item ${activeNav === "danger" ? "active" : ""}`} onClick={() => scrollToSection("section-danger", "danger")}>
+                <span className="nav-icon">⚠️</span> Danger Zone
+              </button>
+            </nav>
+          </div>
+        </aside>
+
+        <div className="presence-settings-body">
+          {/* 1. Identity & Public Self */}
+          <section className="identity-card settings-card" id="section-identity">
+            <div>
+              <SectionEyebrow>Identity</SectionEyebrow>
+              <h2>Who speaks here?</h2>
+              <p>
+                {presence.mode === "ghost"
+                  ? `${agentName} extends the operator’s attention and judgment.`
+                  : `${agentName} speaks as an agent with their own point of view.`}
+              </p>
+            </div>
+            <div className="identity-name-form">
+              <label>
+                Presence name
+                <input
+                  aria-label="Presence name"
+                  value={presenceNameDraft}
+                  onChange={(event) => setPresenceNameDraft(event.target.value)}
+                  maxLength={120}
+                />
+              </label>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={!presenceNameDraft.trim() || presenceNameDraft.trim() === presence.name}
+                onClick={() => void mutate({ type: "setPresence", patch: { name: presenceNameDraft.trim() } })}
+              >
+                <Check size={14} /> Save name
+              </Button>
+              <label>
+                Presence handle
+                <input
+                  aria-label="Presence handle"
+                  value={presenceHandleDraft}
+                  onChange={(event) => setPresenceHandleDraft(event.target.value)}
+                  maxLength={80}
+                  placeholder="@genny"
+                />
+              </label>
+              <Button
+                type="button"
+                variant="secondary"
+                disabled={!presenceHandleDraft.trim() || presenceHandleDraft.trim() === presence.handle}
+                onClick={() => void mutate({ type: "setPresence", patch: { handle: presenceHandleDraft.trim() } })}
+              >
+                <Check size={14} /> Save handle
+              </Button>
+            </div>
+            <div className="identity-options">
+              <button
+                className={presence.mode === "agent" ? "selected" : ""}
+                onClick={() =>
+                  mutate({ type: "setPresence", patch: { mode: "agent" } })
+                }
+              >
+                <strong>{agentName}</strong>
+                <small>Agent-owned</small>
+              </button>
+              <button
+                className={presence.mode === "ghost" ? "selected" : ""}
+                onClick={() =>
+                  mutate({ type: "setPresence", patch: { mode: "ghost" } })
+                }
+              >
+                <strong>Me / my organization</strong>
+                <small>Ghost · extends my identity</small>
               </button>
             </div>
-          </div>
-          {ghostRepresentation.kind === "individual" ? (
-            <div className="public-self-representation-fields individual-fields">
-              <label>First name<input aria-label="First name" value={ghostRepresentation.individual.firstName} onChange={(event) => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, individual: { ...ghostRepresentation.individual, firstName: event.target.value } } })} placeholder="First name" /></label>
-              <label>Middle name <small>(optional)</small><input aria-label="Middle name" value={ghostRepresentation.individual.middleName} onChange={(event) => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, individual: { ...ghostRepresentation.individual, middleName: event.target.value } } })} placeholder="Middle name" /></label>
-              <label>Last name<input aria-label="Last name" value={ghostRepresentation.individual.lastName} onChange={(event) => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, individual: { ...ghostRepresentation.individual, lastName: event.target.value } } })} placeholder="Last name" /></label>
-            </div>
-          ) : (
-            <div className="public-self-representation-fields organization-fields">
-              <label>Organization<input aria-label="Organization name" value={ghostRepresentation.organization.name} onChange={(event) => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, organization: { ...ghostRepresentation.organization, name: event.target.value } } })} placeholder="Organization name" /></label>
-              <label>Website<input aria-label="Organization website" type="url" value={ghostRepresentation.organization.website} onChange={(event) => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, organization: { ...ghostRepresentation.organization, website: event.target.value } } })} placeholder="https://example.com" /></label>
-            </div>
-          )}
-          {!ghostRepresentationReady && <p className="form-hint" role="status">{ghostRepresentation.kind === "individual" ? "Enter a first and last name before saving." : "Enter an organization name and a valid http(s) website before saving."}</p>}
-          <p className="form-hint">This is the public identity this Presence extends. The Agent can use these exact fields when someone asks who it represents.</p>
-        </div>}
-        <div className="public-self-postures">
-          <span className="public-self-label">Identity posture</span>
-          {publicPostures.map((option) => (
-            <button key={option.id} className={publicSelfDraft.posture === option.id ? "selected" : ""} onClick={() => setPublicSelfDraft({ ...publicSelfDraft, posture: option.id })}>
-              <strong>{option.label}</strong><small>{option.detail}</small>
-            </button>
-          ))}
-        </div>
-        <div className="public-facts">
-          <div><strong>Approved disclosure details</strong><p className="form-hint">Choose which details this Presence may share when relevant. These permissions never include credentials, private instructions, or hidden prompts.</p></div>
-          <div className="public-fact-grid">
-            {PUBLIC_TECHNICAL_FACTS.map((fact) => {
-              const checked = publicSelfDraft.approvedTechnicalFacts.includes(fact.id);
-              return <label key={fact.id}><input type="checkbox" checked={checked} onChange={() => setPublicSelfDraft({ ...publicSelfDraft, approvedTechnicalFacts: checked ? publicSelfDraft.approvedTechnicalFacts.filter((item) => item !== fact.id) : [...publicSelfDraft.approvedTechnicalFacts, fact.id] })} /><span><strong>{fact.label}</strong><small>{fact.detail}</small></span></label>;
-            })}
-          </div>
-        </div>
-        {publicSelfDraft.approvedTechnicalFacts.length === 0 && <div className="public-facts-default" role="note">
-          <strong>Default when none are selected</strong>
-          <p><b>Typical response:</b> answer naturally as this Presence without volunteering AI, platform, provider, model, or tool details. Direct questions still follow the Identity posture above.</p>
-        </div>}
-        <div className="inline-form-actions"><Button variant="primary" disabled={presence.mode === "ghost" && !ghostRepresentationReady} onClick={savePublicSelf}><Check size={14} /> Save Public Self</Button></div>
-      </section>
-      <section className="settings-card capability-manifest-card" aria-labelledby="presence-capability-title">
-        <div className="section-heading compact"><div><SectionEyebrow>Effective body</SectionEyebrow><h2 id="presence-capability-title">What {presence.name} can actually do</h2></div><PlugZap size={17} /></div>
-        <p className="muted">These capabilities combine channel support, connection health, permissions, execution, observation, and verification. “Auto” is not shown as ready when the body cannot confirm the public result.</p>
-        <div className="capability-list">{derivePresenceCapabilityManifest(state, presence.id).items.map((item) => <div className="capability-row" key={item.capability}><div><strong>{item.label}</strong><small>{capabilityProviderLabel(state, presence.id, item)}{item.limitation ? ` · ${item.limitation}` : ""}</small></div><span className={`capability-state capability-state-${item.availability}`}>{item.availability.replaceAll("-", " ")}</span></div>)}</div>
-      </section>
-      <section className="settings-card presence-brief-card">
-        <div className="section-heading compact">
-          <div>
-            <SectionEyebrow>PRESENCE BRIEF · Presence-scoped</SectionEyebrow>
-            <h2>What is this Presence here for?</h2>
-          </div>
-          <Button type="button" variant="ghost" onClick={() => { if (editingBrief) { setBriefDraft(presence.brief); setBriefTerritoryText({ primaryTerritory: presence.brief.primaryTerritory.join(", "), adjacentTerritory: presence.brief.adjacentTerritory.join(", "), boundaries: presence.brief.boundaries.join(", ") }); setEditingBrief(false); } else openBriefEditor(); }} aria-label={editingBrief ? "Close brief editor" : "Edit brief"}>
-            <Pencil size={14} /> {editingBrief ? "Close" : "Edit brief"}
-          </Button>
-        </div>
-        <p className="muted presence-brief-intro">{presence.name} brings the same mind here, but this Presence can have its own audience, emphasis, and boundaries.</p>
-        {!editingBrief ? (
-          <div className="presence-brief-summary">
-            <div><span>Purpose</span><p>{presence.brief.purpose}</p></div>
-            <div><span>Audience</span><p>{presence.brief.audience}</p></div>
-            <div><span>Known for</span><div className="presence-brief-chips">{presence.brief.primaryTerritory.length ? presence.brief.primaryTerritory.map((item) => <span key={item}>{item}</span>) : <em>Not narrowed yet</em>}</div></div>
-            <div><span>Also comfortable with</span><div className="presence-brief-chips">{presence.brief.adjacentTerritory.length ? presence.brief.adjacentTerritory.map((item) => <span key={item}>{item}</span>) : <em>Not specified yet</em>}</div></div>
-            <div><span>Keep out</span><div className="presence-brief-chips">{presence.brief.boundaries.length ? presence.brief.boundaries.map((item) => <span key={item}>{item}</span>) : <em>No public boundaries set</em>}</div></div>
-          </div>
-        ) : (
-          <div className="presence-brief-editor">
-            <label>Purpose<textarea aria-label="Presence Brief purpose" value={briefDraft.purpose} onChange={(event) => setBriefDraft({ ...briefDraft, purpose: event.target.value })} rows={2} /></label>
-            <label>Audience<input aria-label="Presence Brief audience" value={briefDraft.audience} onChange={(event) => setBriefDraft({ ...briefDraft, audience: event.target.value })} /></label>
-            <label>Primary territory <small>Topics, ideas, communities, or problems this Presence wants to be known for.</small><textarea aria-label="Primary territory" value={briefTerritoryText.primaryTerritory} onChange={(event) => updateBriefTerritory("primaryTerritory", event.target.value)} rows={2} /></label>
-            <label>Adjacent territory <small>Things this Presence can join without making them its main identity.</small><textarea aria-label="Adjacent territory" value={briefTerritoryText.adjacentTerritory} onChange={(event) => updateBriefTerritory("adjacentTerritory", event.target.value)} rows={2} /></label>
-            <label>Keep out <small>Public areas this Presence generally does not express or amplify. They remain visible for judgment.</small><textarea aria-label="Presence Brief boundaries" value={briefTerritoryText.boundaries} onChange={(event) => updateBriefTerritory("boundaries", event.target.value)} rows={2} /></label>
-            <div className="inline-form-actions"><Button type="button" variant="ghost" onClick={() => { setBriefDraft(presence.brief); setBriefTerritoryText({ primaryTerritory: presence.brief.primaryTerritory.join(", "), adjacentTerritory: presence.brief.adjacentTerritory.join(", "), boundaries: presence.brief.boundaries.join(", ") }); setEditingBrief(false); }}>Cancel</Button><Button type="button" variant="primary" disabled={!briefDraft.purpose.trim() || !briefDraft.audience.trim()} onClick={() => { void mutate({ type: "setPresence", patch: { brief: { purpose: briefDraft.purpose.trim(), audience: briefDraft.audience.trim(), primaryTerritory: territoryValues(briefTerritoryText.primaryTerritory), adjacentTerritory: territoryValues(briefTerritoryText.adjacentTerritory), boundaries: territoryValues(briefTerritoryText.boundaries) } } }); setEditingBrief(false); }}><Check size={14} /> Save brief</Button></div>
-          </div>
-        )}
-      </section>
-      <section className="settings-card language-policy-card presence-language-policy-card">
-        <div className="section-heading compact">
-          <div><SectionEyebrow>Presence taste · language</SectionEyebrow><h2>Language & phrasing here</h2></div>
-          <ShieldCheck size={17} />
-        </div>
-        <p className="muted">This Presence admits only confirmed-English social observations into the Feed and Agent context. It also keeps posts, replies, messages, and Presence Chat in English. Non-English or unknown-language observations are left out rather than guessed or translated. It inherits the Agent&apos;s hard boundaries and can add local ones.</p>
-        <div className="presence-language-selection">
-          <div><strong>Primary language</strong><small>The language this Presence uses when it speaks.</small></div>
-          <div className="presence-language-value"><small>English is the only supported Presence language right now.</small><select aria-label="Presence language" value={presence.language} onChange={(event) => void mutate({ type: "setPresence", patch: { language: event.target.value as "en" } })}><option value="en">English</option></select></div>
-        </div>
-        <div className="language-inherited-rules">
-          <span><strong>Inherited Never use</strong>{state.agent?.languagePolicy?.prohibited?.length ? state.agent.languagePolicy.prohibited.join(" · ") : "None set"}</span>
-        </div>
-        <div className="language-policy-editor">
-          <label>Prefer to avoid <small>Advisory and Presence-scoped.</small><textarea aria-label="Presence language preferences to avoid" rows={3} value={presenceAvoidDraft} onChange={(event) => setPresenceAvoidDraft(event.target.value)} /></label>
-          <label>Never use here <small>Additional literal boundaries for this channel and public self.</small><textarea aria-label="Presence prohibited language" rows={3} value={presenceProhibitedDraft} onChange={(event) => setPresenceProhibitedDraft(event.target.value)} /></label>
-        </div>
-        <div className="inline-form-actions"><Button variant="primary" onClick={() => void mutate({ type: "setPresenceLanguagePolicy", policy: { avoid: presenceAvoidDraft.split(/\r?\n/).map((item) => item.trim()).filter(Boolean), prohibited: presenceProhibitedDraft.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) } })}><Check size={14} /> Save Presence language</Button></div>
-      </section>
-      <section className="settings-card presence-rhythm-card" id="rhythm-settings">
-        <div className="section-heading compact">
-          <div>
-            <SectionEyebrow>Attention rhythm</SectionEyebrow>
-            <h2>When should {presence.name} look around?</h2>
-          </div>
-          <Clock3 size={17} />
-        </div>
-        <p className="muted rhythm-intro">Rhythm controls when this Presence checks its connected channel for something worth considering. It never tells {agentName} what to say, and it never turns a check into a forced publication.</p>
-        <div className="rhythm-options" role="group" aria-label="Attention rhythm">
-          {([
-            ["recommended", "Recommended", "Check about every 5 minutes when a live observer is connected."],
-            ["gentle", "Gentle", "Check about every 15 minutes to reduce interruptions."],
-            ["custom", "Custom", "Choose the check interval and a quiet-hours window."],
-          ] as const).map(([id, label, detail]) => (
-            <button type="button" key={id} className={presence.pacing === id ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { pacing: id } })} aria-pressed={presence.pacing === id}>
-              <strong>{label}</strong>
-              <small>{detail}</small>
-            </button>
-          ))}
-        </div>
-        {presence.pacing === "custom" && (
-          <div className="rhythm-custom-control">
-            <label htmlFor="attention-interval">Check interval</label>
-            <div className="rhythm-control-line">
-              <select id="attention-interval" aria-label="Custom attention interval" value={presence.attentionIntervalMinutes} onChange={(event) => void mutate({ type: "setPresence", patch: { attentionIntervalMinutes: Number(event.target.value) } })}>
-                {[5, 10, 15, 30, 45, 60, 90, 120].map((minutes) => <option key={minutes} value={minutes}>{minutes} minutes</option>)}
-              </select>
-              <small>Automatic observation only. “Check now” remains available at any time.</small>
-            </div>
-          </div>
-        )}
-        <div className="quiet-hours-control">
-          <div className="quiet-hours-heading">
-            <div><strong>Quiet hours</strong><small>Pause automatic channel checks during this local time window. Calendar intentions remain available to run explicitly.</small></div>
-            <label className="toggle-control"><input type="checkbox" aria-label="Enable quiet hours" checked={presence.quietHours.enabled} onChange={(event) => void mutate({ type: "setPresence", patch: { quietHours: { ...presence.quietHours, enabled: event.target.checked } } })} /><span aria-hidden="true" /></label>
-          </div>
-          {presence.quietHours.enabled ? (
-            <div className="quiet-hours-fields">
-              <label>Starts<input aria-label="Quiet hours start" type="time" value={presence.quietHours.start} onChange={(event) => void mutate({ type: "setPresence", patch: { quietHours: { ...presence.quietHours, start: event.target.value } } })} /></label>
-              <span>to</span>
-              <label>Ends<input aria-label="Quiet hours end" type="time" value={presence.quietHours.end} onChange={(event) => void mutate({ type: "setPresence", patch: { quietHours: { ...presence.quietHours, end: event.target.value } } })} /></label>
-            </div>
-          ) : <p className="form-hint quiet-hours-off">Off · automatic observation follows the selected rhythm.</p>}
-        </div>
-      </section>
-      <section className="settings-card publishing-initiative-card" id="publishing-pace-settings">
-        <div className="section-heading compact">
-          <div>
-          <SectionEyebrow>Publishing initiative · Presence-scoped</SectionEyebrow>
-          <h2>How actively should {presence.name} publish?</h2>
-          </div>
-          <Sparkles size={17} />
-        </div>
-        <p className="muted rhythm-intro">Set the responsibility, not the words. {presence.name} still decides what is worth saying, what to research, and when a particular post is ready.</p>
-        <div className="rhythm-options publishing-initiative-options" role="group" aria-label="Publishing pace">
-          <button type="button" className={publishingInitiative?.mode === "off" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { publishingInitiative: { ...(publishingInitiative ?? { timezone: "UTC", createdAt: new Date().toISOString() }), mode: "off", updatedAt: new Date().toISOString() } } })} aria-pressed={publishingInitiative?.mode === "off"}>
-            <strong>No publishing responsibility</strong>
-            <small>{presence.name} can still respond to events and explicit instructions, but does not maintain an ongoing original-publishing plan.</small>
-          </button>
-          <button type="button" className={publishingInitiative?.mode === "adaptive" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { publishingInitiative: { ...(publishingInitiative ?? { timezone: "UTC", createdAt: new Date().toISOString() }), mode: "adaptive", updatedAt: new Date().toISOString() } } })} aria-pressed={publishingInitiative?.mode === "adaptive"}>
-            <strong>Let {presence.name} decide <em className="recommended-tag">Recommended</em></strong>
-            <small>{presence.name} determines an appropriate pace from its Mission, Growth evidence, recent activity, and what is happening here.</small>
-          </button>
-          <button type="button" className={publishingInitiative?.mode === "pace" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { publishingInitiative: { ...(publishingInitiative ?? { timezone: "UTC", createdAt: new Date().toISOString() }), mode: "pace", target: { count: Math.max(1, Math.round(Number(publishingCountDraft) || 5)), period: publishingPeriodDraft }, updatedAt: new Date().toISOString() } } })} aria-pressed={publishingInitiative?.mode === "pace"}>
-            <strong>Set a pace</strong>
-            <small>Give {presence.name} a publishing expectation. {presence.name} decides how to work toward it.</small>
-          </button>
-        </div>
-        {publishingInitiative?.mode === "pace" && (
-          <div className="publishing-pace-editor">
-            <div className="publishing-pace-sentence" aria-label="Publishing pace target">
-              <span>Aim for about</span>
-              <input aria-label="Publishing pace count" type="number" min={1} max={10000} value={publishingCountDraft} onChange={(event) => setPublishingCountDraft(event.target.value)} />
-              <span>original posts</span>
-              <select aria-label="Publishing pace period" value={publishingPeriodDraft} onChange={(event) => setPublishingPeriodDraft(event.target.value as "day" | "week")}>
-                <option value="day">per day</option>
-                <option value="week">per week</option>
-              </select>
-              <Button type="button" variant="secondary" onClick={savePublishingPace}>Save pace</Button>
-            </div>
-            <p className="form-hint">This is a pace, not a forced quota. Weak ideas can still be rejected, but {presence.name} keeps responsibility for finding better ones.</p>
-          </div>
-        )}
-        {publishingInitiative?.mode !== "off" && connectionMode !== "sandbox" && !nativeConnection?.status && !activeBridge && <p className="settings-warning">{presence.name} needs automatic attention to pursue this pace on its own. Connect the selected live route or use Sandbox to rehearse it.</p>}
-        {publishingInitiative?.mode !== "off" && presence.execution.post === "off" && <p className="settings-warning">Original posts are currently Off. {presence.name} can work on ideas, but cannot complete this publishing responsibility.</p>}
-        {publishingInitiative?.mode !== "off" && presence.execution.post === "review" && <p className="settings-warning">{presence.name} can work toward this pace, but publications will wait for your approval.</p>}
-      </section>
-      <section className="settings-card media-policy-card">
-        <div className="section-heading compact">
-          <div>
-            <SectionEyebrow>Media understanding</SectionEyebrow>
-            <h2>When media is hard to interpret</h2>
-          </div>
-          <ShieldCheck size={17} />
-        </div>
-        <p className="muted">Perception explains what media appears to mean. Taste decides whether it is worth acting on. An uninspected asset is never treated as truth.</p>
-        <div className="media-policy-options">
-          {([
-            ["use-judgment", "Use judgment", "Continue only when the available perception is enough for this action."],
-            ["review-uncertain", "Review uncertain actions", "Send media-dependent actions for review when perception is uncertain."],
-            ["always-review", "Always review media actions", "Keep every reply, repost, or quote involving media under review."],
-          ] as const).map(([id, label, detail]) => <button type="button" key={id} className={mediaPolicyDraft === id ? "selected" : ""} onClick={() => { setMediaPolicyDraft(id); void mutate({ type: "setPresence", patch: { mediaPerceptionPolicy: id } }); }}><strong>{label}</strong><small>{detail}</small></button>)}
-        </div>
-      </section>
-      {presence.mode === "ghost" && (
-        <section className="settings-card ghost-profile-card" key={`${presence.id}-${JSON.stringify(presence.ghostProfile ?? {})}`}>
-          <div className="section-heading compact">
-            <div>
-              <SectionEyebrow>Ghost profile · Presence-scoped</SectionEyebrow>
-              <h2>What should this Ghost represent?</h2>
-            </div>
-            <Ghost size={17} />
-          </div>
-          <p className="muted">This is the context {agentName} uses to extend you here. It does not change {agentName}&apos;s Brain, Soul, Mission, Taste, Memory, or Growth.</p>
-          <p className="form-hint">The represented identity is set in Public Self above. This section adds the context the Ghost uses to extend it.</p>
-          <div className="ghost-profile-form">
-            <label>Priorities here<textarea aria-label="Ghost priorities" value={ghostDraft.priorities} onChange={(event) => setGhostDraft({ ...ghostDraft, priorities: event.target.value })} placeholder="What should this Presence help accomplish?" rows={3} /></label>
-            <label>Preferences and points of view<textarea aria-label="Ghost preferences" value={ghostDraft.preferences} onChange={(event) => setGhostDraft({ ...ghostDraft, preferences: event.target.value })} placeholder="What do you care about, prefer, or believe?" rows={3} /></label>
-            <label>Voice and tone<textarea aria-label="Ghost voice" value={ghostDraft.voice} onChange={(event) => setGhostDraft({ ...ghostDraft, voice: event.target.value })} placeholder="How should it sound when extending you?" rows={3} /></label>
-            <label>Boundaries and things to avoid<textarea aria-label="Ghost boundaries" value={ghostDraft.boundaries} onChange={(event) => setGhostDraft({ ...ghostDraft, boundaries: event.target.value })} placeholder="What should it never assume, disclose, or do?" rows={3} /></label>
-          </div>
-          <div className="ghost-understanding" role="status">
-            <div className="section-heading compact"><div><SectionEyebrow>Review before acting</SectionEyebrow><h3>What {agentName} currently understands</h3></div><span className={`status-tag ${ghostProfileReady ? "status-ready" : "status-incomplete"}`}>{ghostProfileReady ? "Profile defined" : "Needs your input"}</span></div>
-            <dl>
-              <div><dt>Represents</dt><dd>{ghostSubject || "Not defined yet"}</dd></div>
-              <div><dt>Priorities</dt><dd>{ghostDraft.priorities.trim() || "Not defined yet"}</dd></div>
-              <div><dt>Preferences</dt><dd>{ghostDraft.preferences.trim() || "Not defined yet"}</dd></div>
-              <div><dt>Voice</dt><dd>{ghostDraft.voice.trim() || "Not defined yet"}</dd></div>
-              <div><dt>Boundaries</dt><dd>{ghostDraft.boundaries.trim() || "Not defined yet"}</dd></div>
-            </dl>
-            <p className="form-hint">Empty fields are unknown. {agentName} must not infer them from their own identity or private context.</p>
-          </div>
-          <div className="inline-form-actions"><Button variant="primary" disabled={!ghostProfileReady} onClick={saveGhostProfile}><Check size={14} /> Save Ghost profile</Button></div>
-        </section>
-      )}
-      <section className="settings-card presence-execution-card">
-          <div className="section-heading compact">
-            <div>
-              <SectionEyebrow>
-                Execution envelope ·{" "}
-                {channelLabel(presence.channel, state.channelDefinitions)}
-              </SectionEyebrow>
-              <h2>How this Presence acts</h2>
-            </div>
-            <Settings2 size={17} />
-          </div>
-          <div className="independence-options">
-            <span>Independence</span>
-            <button onClick={() => applyPreset("review")}>
-              <strong>Supervised</strong>
-              <small>Review every action</small>
-            </button>
-            <button onClick={() => applyPreset("auto")}>
-              <strong>Independent</strong>
-              <small>Auto where allowed</small>
-            </button>
-            <button
-              className={customizing ? "selected" : ""}
-              onClick={() => setCustomizing(!customizing)}
-            >
-              <strong>Custom</strong>
-              <small>Choose by capability</small>
-            </button>
-          </div>
-          {customizing && (
-            <div className="capability-matrix">
-              <div className="matrix-head">
-                <span>Capability</span>
-                <span>Off</span>
-                <span>Manual</span>
-                <span>Review</span>
-                <span>Auto</span>
+          </section>
+
+          <section className="settings-card public-self-card">
+            <div className="section-heading compact">
+              <div>
+                <SectionEyebrow>Public self · Presence-scoped</SectionEyebrow>
+                <h2>How this Presence describes itself</h2>
               </div>
-              {capabilities.map((item) => (
-                <div className="matrix-row" key={item.id}>
-                  <div>
-                    <strong>{item.label}</strong>
-                    <small>{item.description}</small>
-                  </div>
-                  {(["off", "manual", "review", "auto"] as ExecutionMode[]).map(
-                    (mode) => (
-                      <button
-                        key={mode}
-                        aria-label={`${item.label} ${mode}`}
-                        aria-pressed={
-                          (presence.execution[item.id] ?? "off") === mode
-                        }
-                        className={
-                          (presence.execution[item.id] ?? "off") === mode
-                            ? "selected"
-                            : ""
-                        }
-                        onClick={() => setMode(item.id, mode)}
-                      >
-                        {(presence.execution[item.id] ?? "off") === mode
-                          ? "●"
-                          : ""}
-                      </button>
-                    ),
-                  )}
+              <ShieldCheck size={17} />
+            </div>
+            <p className="muted">The Agent is the private mind. This Public Self is who people meet here. Implementation details stay out of social judgment unless you approve a specific fact.</p>
+            {presence.mode === "ghost" && <div className="public-self-represented">
+              <div className="public-self-representation-toggle">
+                <span className="public-self-label">Represents</span>
+                <div className="public-self-representation-options" role="group" aria-label="Representation type">
+                  <button type="button" className={ghostRepresentation.kind === "individual" ? "selected" : ""} aria-pressed={ghostRepresentation.kind === "individual"} onClick={() => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, kind: "individual" } })}>
+                    <strong>Individual</strong><small>Use a person&apos;s name.</small>
+                  </button>
+                  <button type="button" className={ghostRepresentation.kind === "organization" ? "selected" : ""} aria-pressed={ghostRepresentation.kind === "organization"} onClick={() => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, kind: "organization" } })}>
+                    <strong>Organization</strong><small>Use an organization name and website.</small>
+                  </button>
                 </div>
+              </div>
+              {ghostRepresentation.kind === "individual" ? (
+                <div className="public-self-representation-fields individual-fields">
+                  <label>First name<input aria-label="First name" value={ghostRepresentation.individual.firstName} onChange={(event) => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, individual: { ...ghostRepresentation.individual, firstName: event.target.value } } })} placeholder="First name" /></label>
+                  <label>Middle name <small>(optional)</small><input aria-label="Middle name" value={ghostRepresentation.individual.middleName} onChange={(event) => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, individual: { ...ghostRepresentation.individual, middleName: event.target.value } } })} placeholder="Middle name" /></label>
+                  <label>Last name<input aria-label="Last name" value={ghostRepresentation.individual.lastName} onChange={(event) => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, individual: { ...ghostRepresentation.individual, lastName: event.target.value } } })} placeholder="Last name" /></label>
+                </div>
+              ) : (
+                <div className="public-self-representation-fields organization-fields">
+                  <label>Organization<input aria-label="Organization name" value={ghostRepresentation.organization.name} onChange={(event) => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, organization: { ...ghostRepresentation.organization, name: event.target.value } } })} placeholder="Organization name" /></label>
+                  <label>Website<input aria-label="Organization website" type="url" value={ghostRepresentation.organization.website} onChange={(event) => setGhostDraft({ ...ghostDraft, representation: { ...ghostRepresentation, organization: { ...ghostRepresentation.organization, website: event.target.value } } })} placeholder="https://example.com" /></label>
+                </div>
+              )}
+              {!ghostRepresentationReady && <p className="form-hint" role="status">{ghostRepresentation.kind === "individual" ? "Enter a first and last name before saving." : "Enter an organization name and a valid http(s) website before saving."}</p>}
+              <p className="form-hint">This is the public identity this Presence extends. The Agent can use these exact fields when someone asks who it represents.</p>
+            </div>}
+            <div className="public-self-postures">
+              <span className="public-self-label">Identity posture</span>
+              {publicPostures.map((option) => (
+                <button key={option.id} className={publicSelfDraft.posture === option.id ? "selected" : ""} onClick={() => setPublicSelfDraft({ ...publicSelfDraft, posture: option.id })}>
+                  <strong>{option.label}</strong><small>{option.detail}</small>
+                </button>
               ))}
             </div>
+            <div className="public-facts">
+              <div><strong>Approved disclosure details</strong><p className="form-hint">Choose which details this Presence may share when relevant. These permissions never include credentials, private instructions, or hidden prompts.</p></div>
+              <div className="public-fact-grid">
+                {PUBLIC_TECHNICAL_FACTS.map((fact) => {
+                  const checked = publicSelfDraft.approvedTechnicalFacts.includes(fact.id);
+                  return <label key={fact.id}><input type="checkbox" checked={checked} onChange={() => setPublicSelfDraft({ ...publicSelfDraft, approvedTechnicalFacts: checked ? publicSelfDraft.approvedTechnicalFacts.filter((item) => item !== fact.id) : [...publicSelfDraft.approvedTechnicalFacts, fact.id] })} /><span><strong>{fact.label}</strong><small>{fact.detail}</small></span></label>;
+                })}
+              </div>
+            </div>
+            {publicSelfDraft.approvedTechnicalFacts.length === 0 && <div className="public-facts-default" role="note">
+              <strong>Default when none are selected</strong>
+              <p><b>Typical response:</b> answer naturally as this Presence without volunteering AI, platform, provider, model, or tool details. Direct questions still follow the Identity posture above.</p>
+            </div>}
+            <div className="inline-form-actions"><Button variant="primary" disabled={presence.mode === "ghost" && !ghostRepresentationReady} onClick={savePublicSelf}><Check size={14} /> Save Public Self</Button></div>
+          </section>
+
+          {presence.mode === "ghost" && (
+            <section className="settings-card ghost-profile-card" key={`${presence.id}-${JSON.stringify(presence.ghostProfile ?? {})}`}>
+              <div className="section-heading compact">
+                <div>
+                  <SectionEyebrow>Ghost profile · Presence-scoped</SectionEyebrow>
+                  <h2>What should this Ghost represent?</h2>
+                </div>
+                <Ghost size={17} />
+              </div>
+              <p className="muted">This is the context {agentName} uses to extend you here. It does not change {agentName}&apos;s Brain, Soul, Mission, Taste, Memory, or Growth.</p>
+              <p className="form-hint">The represented identity is set in Public Self above. This section adds the context the Ghost uses to extend it.</p>
+              <div className="ghost-profile-form">
+                <label>Priorities here<textarea aria-label="Ghost priorities" value={ghostDraft.priorities} onChange={(event) => setGhostDraft({ ...ghostDraft, priorities: event.target.value })} placeholder="What should this Presence help accomplish?" rows={3} /></label>
+                <label>Preferences and points of view<textarea aria-label="Ghost preferences" value={ghostDraft.preferences} onChange={(event) => setGhostDraft({ ...ghostDraft, preferences: event.target.value })} placeholder="What do you care about, prefer, or believe?" rows={3} /></label>
+                <label>Voice and tone<textarea aria-label="Ghost voice" value={ghostDraft.voice} onChange={(event) => setGhostDraft({ ...ghostDraft, voice: event.target.value })} placeholder="How should it sound when extending you?" rows={3} /></label>
+                <label>Boundaries and things to avoid<textarea aria-label="Ghost boundaries" value={ghostDraft.boundaries} onChange={(event) => setGhostDraft({ ...ghostDraft, boundaries: event.target.value })} placeholder="What should it never assume, disclose, or do?" rows={3} /></label>
+              </div>
+              <div className="ghost-understanding" role="status">
+                <div className="section-heading compact"><div><SectionEyebrow>Review before acting</SectionEyebrow><h3>What {agentName} currently understands</h3></div><span className={`status-tag ${ghostProfileReady ? "status-ready" : "status-incomplete"}`}>{ghostProfileReady ? "Profile defined" : "Needs your input"}</span></div>
+                <dl>
+                  <div><dt>Represents</dt><dd>{ghostSubject || "Not defined yet"}</dd></div>
+                  <div><dt>Priorities</dt><dd>{ghostDraft.priorities.trim() || "Not defined yet"}</dd></div>
+                  <div><dt>Preferences</dt><dd>{ghostDraft.preferences.trim() || "Not defined yet"}</dd></div>
+                  <div><dt>Voice</dt><dd>{ghostDraft.voice.trim() || "Not defined yet"}</dd></div>
+                  <div><dt>Boundaries</dt><dd>{ghostDraft.boundaries.trim() || "Not defined yet"}</dd></div>
+                </dl>
+                <p className="form-hint">Empty fields are unknown. {agentName} must not infer them from their own identity or private context.</p>
+              </div>
+              <div className="inline-form-actions"><Button variant="primary" disabled={!ghostProfileReady} onClick={saveGhostProfile}><Check size={14} /> Save Ghost profile</Button></div>
+            </section>
           )}
-      </section>
+
+          {/* 2. Channel & Access */}
+          <section className="settings-card channel-settings-card" id="section-access">
+            <div className="section-heading compact">
+              <div>
+                <SectionEyebrow>Channel</SectionEyebrow>
+                <h2>Where does this Presence exist socially?</h2>
+              </div>
+              <Globe2 size={17} />
+            </div>
+            <p className="muted channel-settings-intro">
+              {presence.name} is socially present on {channelLabel(presence.channel, state.channelDefinitions)}{presence.handle ? ` as ${presence.handle.startsWith("@") ? presence.handle : `@${presence.handle}`}` : ""}.
+            </p>
+            {channelDefinition && !channelDefinition.builtIn && (
+              <div className="channel-definition-editor">
+                {!editingChannel ? (
+                  <div className="channel-definition-summary">
+                    <div>
+                      <span>Custom Community & Space</span>
+                      <strong>{channelDefinition.name}</strong>
+                      <small>{channelDefinition.domain || "Custom platform"}{presence.handle ? ` · Account ${presence.handle}` : ""}</small>
+                    </div>
+                    <Button type="button" variant="secondary" aria-label="Edit Channel" onClick={openChannelEditor}>
+                      <Pencil size={14} /> Configure Space
+                    </Button>
+                  </div>
+                ) : (
+                  <div className="channel-definition-form" aria-label="Configure Account or Space">
+                    <div className="section-heading compact">
+                      <div>
+                        <SectionEyebrow>Custom Space</SectionEyebrow>
+                        <h3>Update destination details</h3>
+                      </div>
+                      <Button type="button" variant="ghost" onClick={() => setEditingChannel(false)}>Cancel</Button>
+                    </div>
+                    <label>
+                      Channel / Community Name
+                      <input
+                        aria-label="Channel name"
+                        value={channelNameDraft}
+                        onChange={(event) => setChannelNameDraft(event.target.value)}
+                        maxLength={120}
+                      />
+                    </label>
+                    <label>
+                      Destination URL / Space
+                      <input
+                        aria-label="Channel destination"
+                        type="url"
+                        value={channelDomainDraft}
+                        onChange={(event) => setChannelDomainDraft(event.target.value)}
+                        placeholder="https://www.skool.com/saaspreneur-academy"
+                      />
+                    </label>
+                    <div className="inline-form-actions">
+                      <Button type="button" variant="primary" aria-label="Save Channel" disabled={!channelNameDraft.trim()} onClick={saveChannel}>
+                        <Check size={14} /> Save Details
+                      </Button>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+          </section>
+
+          <section className="settings-card environment-settings-card">
+            <div className="section-heading compact">
+              <div>
+                <SectionEyebrow>Environment</SectionEyebrow>
+                <h2>Which world is {presence.name} operating in?</h2>
+              </div>
+              <FlaskConical size={17} />
+            </div>
+            <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "16px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px", marginTop: "12px", gap: "16px", flexWrap: "wrap" }}>
+              <div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <span className={`live-pill ${presence.environment === "sandbox" ? "paused" : ""}`}>
+                    <span className="status-dot" /> {presence.environment === "sandbox" ? `Sandbox · Simulated ${channelLabel(presence.channel, state.channelDefinitions)}` : "Live"}
+                  </span>
+                  <strong>{presence.environment === "sandbox" ? "Simulated Rehearsal Environment" : `Live ${channelLabel(presence.channel, state.channelDefinitions)} Social World`}</strong>
+                </div>
+                <p style={{ margin: "6px 0 0", fontSize: "13px", color: "var(--muted)" }}>
+                  {presence.environment === "sandbox"
+                    ? "Simulated world — nothing leaves OpenPresence. Sandbox history stays in the rehearsal session."
+                    : `${presence.name} is operating in the real ${channelLabel(presence.channel, state.channelDefinitions)} social world. Rehearse safe experiments in Playground.`}
+                </p>
+              </div>
+              <Button variant="secondary" onClick={() => setView?.("playground")}>
+                <FlaskConical size={14} /> Rehearse in Playground
+              </Button>
+            </div>
+          </section>
+
+          <section className="settings-card access-settings-card" id="presence-access-section">
+            <div className="section-heading compact">
+              <div>
+                <SectionEyebrow>Access</SectionEyebrow>
+                <h2>How {presence.name} reaches {channelLabel(presence.channel, state.channelDefinitions)}</h2>
+              </div>
+              <PlugZap size={17} />
+            </div>
+            <p className="muted">
+              OpenPresence routes social actions to the preferred healthy access path based on action capabilities.
+            </p>
+
+            {/* 1. Native API Connector */}
+            <div className="access-connector-panel" style={{ padding: "16px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px", marginTop: "14px" }}>
+              {presence.channel === "x" ? (
+                <XConnection state={state} presence={presence} manageX={manageX} />
+              ) : (
+                <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
+                  <div>
+                    <strong>Native {channelLabel(presence.channel, state.channelDefinitions)} API</strong>
+                    <p style={{ margin: "4px 0 0", fontSize: "12px", color: "var(--muted)" }}>
+                      Native API connector is not available for {channelLabel(presence.channel, state.channelDefinitions)}.
+                    </p>
+                  </div>
+                  <span className="live-pill paused">
+                    <span className="status-dot" /> Unavailable
+                  </span>
+                </div>
+              )}
+            </div>
+
+            {/* 2. Managed Browser Body */}
+            <div className="access-connector-panel" style={{ padding: "16px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px", marginTop: "14px" }}>
+              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                  <strong>Managed Browser</strong>
+                  <span style={{ fontSize: "11px", fontWeight: 600, padding: "2px 8px", borderRadius: "4px", background: "rgba(59, 130, 246, 0.1)", color: "#2563eb" }}>
+                    Autonomous
+                  </span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                  <span style={{ fontSize: "11px", fontWeight: "600", padding: "3px 8px", borderRadius: "4px", background: operationalHealth?.browserBody?.state === "healthy" ? "rgba(34, 197, 94, 0.1)" : "rgba(234, 179, 8, 0.1)", color: operationalHealth?.browserBody?.state === "healthy" ? "#15803d" : "#a16207" }}>
+                    {operationalHealth?.browserBody?.state === "needs_auth" ? "Needs sign-in" : operationalHealth?.browserBody?.state === "recovering" ? "Recovering" : operationalHealth?.browserBody?.state === "healthy" ? "Ready · Logged in" : "Not configured"}
+                  </span>
+                  <Button
+                    type="button"
+                    variant="primary"
+                    onClick={async () => {
+                      await fetch("/api/browser/setup", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ presenceId: presence.id, action: "launch" }),
+                      }).catch(() => {});
+                    }}
+                  >
+                    Sign In
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={async () => {
+                      const res = await fetch("/api/browser/setup", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ presenceId: presence.id, action: "verify" }),
+                      }).then((r) => r.json()).catch(() => ({}));
+                      if (res.verified) {
+                        alert(`Identity confirmed: Logged in as @${res.observedIdentity}`);
+                      } else {
+                        alert("Not signed in or account handle did not match. Please sign in on the open browser window.");
+                      }
+                    }}
+                  >
+                    Verify
+                  </Button>
+                  <Button
+                    type="button"
+                    variant="secondary"
+                    onClick={async () => {
+                      await fetch("/api/browser/setup", {
+                        method: "POST",
+                        headers: { "Content-Type": "application/json" },
+                        body: JSON.stringify({ presenceId: presence.id, action: "seal" }),
+                      }).catch(() => {});
+                      alert("Session saved and browser sealed for autonomous operation.");
+                    }}
+                  >
+                    Save & Finish
+                  </Button>
+                </div>
+              </div>
+              <p style={{ margin: "6px 0 0", fontSize: "12px", color: "var(--muted)" }}>
+                Dedicated autonomous browser profile · Account: <code>{presence.handle}</code> · {operationalHealth?.browserBody?.verifiedIdentity ? `Verified as @${operationalHealth.browserBody.verifiedIdentity.replace(/^@/, "")}` : "Not verified"}
+                {operationalHealth?.browserBody?.profileDir && (
+                  <span> · Profile: <code>{operationalHealth.browserBody.profileDir}</code></span>
+                )}
+              </p>
+            </div>
+
+            {/* 3. Your Chrome (Operator-owned) */}
+            <div className="access-connector-panel" id="presence-chrome-section" style={{ marginTop: "14px" }}>
+              <ChromeConnectionPanel state={state} presence={presence} mutate={mutate} refreshState={refreshState} />
+            </div>
+
+            {/* 4. External Bridge */}
+            <div className="access-connector-panel" id="presence-bridge-section" style={{ marginTop: "14px" }}>
+              <BridgeManager state={state} presence={presence} manageBridge={manageBridge} refreshState={refreshState} />
+            </div>
+          </section>
+
+          {/* 3. Presence Brief */}
+          <section className="settings-card presence-brief-card" id="section-brief">
+            <div className="section-heading compact">
+              <div>
+                <SectionEyebrow>PRESENCE BRIEF · Presence-scoped</SectionEyebrow>
+                <h2>What is this Presence here for?</h2>
+              </div>
+              <Button type="button" variant="ghost" onClick={() => { if (editingBrief) { setBriefDraft(presence.brief); setBriefTerritoryText({ primaryTerritory: presence.brief.primaryTerritory.join(", "), adjacentTerritory: presence.brief.adjacentTerritory.join(", "), boundaries: presence.brief.boundaries.join(", ") }); setEditingBrief(false); } else openBriefEditor(); }} aria-label={editingBrief ? "Close brief editor" : "Edit brief"}>
+                <Pencil size={14} /> {editingBrief ? "Close" : "Edit brief"}
+              </Button>
+            </div>
+            <p className="muted presence-brief-intro">{presence.name} brings the same mind here, but this Presence can have its own audience, emphasis, and boundaries.</p>
+            {!editingBrief ? (
+              <div className="presence-brief-summary">
+                <div><span>Purpose</span><p>{presence.brief.purpose}</p></div>
+                <div><span>Audience</span><p>{presence.brief.audience}</p></div>
+                <div><span>Known for</span><div className="presence-brief-chips">{presence.brief.primaryTerritory.length ? presence.brief.primaryTerritory.map((item) => <span key={item}>{item}</span>) : <em>Not narrowed yet</em>}</div></div>
+                <div><span>Also comfortable with</span><div className="presence-brief-chips">{presence.brief.adjacentTerritory.length ? presence.brief.adjacentTerritory.map((item) => <span key={item}>{item}</span>) : <em>Not specified yet</em>}</div></div>
+                <div><span>Keep out</span><div className="presence-brief-chips">{presence.brief.boundaries.length ? presence.brief.boundaries.map((item) => <span key={item}>{item}</span>) : <em>No public boundaries set</em>}</div></div>
+              </div>
+            ) : (
+              <div className="presence-brief-editor">
+                <label>Purpose<textarea aria-label="Presence Brief purpose" value={briefDraft.purpose} onChange={(event) => setBriefDraft({ ...briefDraft, purpose: event.target.value })} rows={2} /></label>
+                <label>Audience<input aria-label="Presence Brief audience" value={briefDraft.audience} onChange={(event) => setBriefDraft({ ...briefDraft, audience: event.target.value })} /></label>
+                <label>Primary territory <small>Topics, ideas, communities, or problems this Presence wants to be known for.</small><textarea aria-label="Primary territory" value={briefTerritoryText.primaryTerritory} onChange={(event) => updateBriefTerritory("primaryTerritory", event.target.value)} rows={2} /></label>
+                <label>Adjacent territory <small>Things this Presence can join without making them its main identity.</small><textarea aria-label="Adjacent territory" value={briefTerritoryText.adjacentTerritory} onChange={(event) => updateBriefTerritory("adjacentTerritory", event.target.value)} rows={2} /></label>
+                <label>Keep out <small>Public areas this Presence generally does not express or amplify. They remain visible for judgment.</small><textarea aria-label="Presence Brief boundaries" value={briefTerritoryText.boundaries} onChange={(event) => updateBriefTerritory("boundaries", event.target.value)} rows={2} /></label>
+                <div className="inline-form-actions"><Button type="button" variant="ghost" onClick={() => { setBriefDraft(presence.brief); setBriefTerritoryText({ primaryTerritory: presence.brief.primaryTerritory.join(", "), adjacentTerritory: presence.brief.adjacentTerritory.join(", "), boundaries: presence.brief.boundaries.join(", ") }); setEditingBrief(false); }}>Cancel</Button><Button type="button" variant="primary" disabled={!briefDraft.purpose.trim() || !briefDraft.audience.trim()} onClick={() => { void mutate({ type: "setPresence", patch: { brief: { purpose: briefDraft.purpose.trim(), audience: briefDraft.audience.trim(), primaryTerritory: territoryValues(briefTerritoryText.primaryTerritory), adjacentTerritory: territoryValues(briefTerritoryText.adjacentTerritory), boundaries: territoryValues(briefTerritoryText.boundaries) } } }); setEditingBrief(false); }}><Check size={14} /> Save brief</Button></div>
+              </div>
+            )}
+          </section>
+
+          {/* 4. Attention & Rhythm */}
+          <section className="settings-card presence-rhythm-card" id="section-attention">
+            <div className="section-heading compact">
+              <div>
+                <SectionEyebrow>Attention rhythm</SectionEyebrow>
+                <h2>When should {presence.name} look around?</h2>
+              </div>
+              <Clock3 size={17} />
+            </div>
+            <p className="muted rhythm-intro">Rhythm controls when this Presence checks its connected channel for something worth considering. It never tells {agentName} what to say, and it never turns a check into a forced publication.</p>
+            <div className="rhythm-options" role="group" aria-label="Attention rhythm">
+              {([
+                ["recommended", "Recommended", "Check about every 5 minutes when a live observer is connected."],
+                ["gentle", "Gentle", "Check about every 15 minutes to reduce interruptions."],
+                ["custom", "Custom", "Choose the check interval and a quiet-hours window."],
+              ] as const).map(([id, label, detail]) => (
+                <button type="button" key={id} className={presence.pacing === id ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { pacing: id } })} aria-pressed={presence.pacing === id}>
+                  <strong>{label}</strong>
+                  <small>{detail}</small>
+                </button>
+              ))}
+            </div>
+            {presence.pacing === "custom" && (
+              <div className="rhythm-custom-control">
+                <label htmlFor="attention-interval">Check interval</label>
+                <div className="rhythm-control-line">
+                  <select id="attention-interval" aria-label="Custom attention interval" value={presence.attentionIntervalMinutes} onChange={(event) => void mutate({ type: "setPresence", patch: { attentionIntervalMinutes: Number(event.target.value) } })}>
+                    {[5, 10, 15, 30, 45, 60, 90, 120].map((minutes) => <option key={minutes} value={minutes}>{minutes} minutes</option>)}
+                  </select>
+                  <small>Automatic observation only. “Check now” remains available at any time.</small>
+                </div>
+              </div>
+            )}
+            <div className="quiet-hours-control">
+              <div className="quiet-hours-heading">
+                <div><strong>Quiet hours</strong><small>Pause automatic channel checks during this local time window. Calendar intentions remain available to run explicitly.</small></div>
+                <label className="toggle-control"><input type="checkbox" aria-label="Enable quiet hours" checked={presence.quietHours.enabled} onChange={(event) => void mutate({ type: "setPresence", patch: { quietHours: { ...presence.quietHours, enabled: event.target.checked } } })} /><span aria-hidden="true" /></label>
+              </div>
+              {presence.quietHours.enabled ? (
+                <div className="quiet-hours-fields">
+                  <label>Starts<input aria-label="Quiet hours start" type="time" value={presence.quietHours.start} onChange={(event) => void mutate({ type: "setPresence", patch: { quietHours: { ...presence.quietHours, start: event.target.value } } })} /></label>
+                  <span>to</span>
+                  <label>Ends<input aria-label="Quiet hours end" type="time" value={presence.quietHours.end} onChange={(event) => void mutate({ type: "setPresence", patch: { quietHours: { ...presence.quietHours, end: event.target.value } } })} /></label>
+                </div>
+              ) : <p className="form-hint quiet-hours-off">Off · automatic observation follows the selected rhythm.</p>}
+            </div>
+          </section>
+
+          <section className="settings-card self-directed-settings-card" id="self-directed-attention-settings">
+            <div className="section-heading compact"><div><SectionEyebrow>Self-directed attention · Presence-scoped</SectionEyebrow><h2>Where should {presence.name} look on its own?</h2></div><Sparkles size={17} /></div>
+            <p className="muted">This gives {presence.name} freedom to choose worthwhile public territory. It does not lower Taste, force activity, or replace explicit Assignments. The resource envelope controls infrastructure; it does not decide what deserves a social act.</p>
+            <div className="rhythm-options" role="group" aria-label="Self-directed attention">
+              <button type="button" className={!selfDirectedAttention.enabled ? "selected" : ""} onClick={() => updateSelfDirectedAttention({ enabled: false })} aria-pressed={!selfDirectedAttention.enabled}><strong>Off</strong><small>Only explicit attention sources and inbound work run.</small></button>
+              <button type="button" className={selfDirectedAttention.enabled && selfDirectedAttention.intensity === "balanced" ? "selected" : ""} onClick={() => updateSelfDirectedAttention({ enabled: true, intensity: "balanced" })} aria-pressed={selfDirectedAttention.enabled && selfDirectedAttention.intensity === "balanced"}><strong>Balanced <em className="recommended-tag">Recommended</em></strong><small>Look periodically across a few current directions.</small></button>
+              <button type="button" className={selfDirectedAttention.enabled && selfDirectedAttention.intensity === "curious" ? "selected" : ""} onClick={() => updateSelfDirectedAttention({ enabled: true, intensity: "curious" })} aria-pressed={selfDirectedAttention.enabled && selfDirectedAttention.intensity === "curious"}><strong>Curious</strong><small>Search more broadly; keep the same judgment threshold.</small></button>
+              <button type="button" className={selfDirectedAttention.enabled && selfDirectedAttention.intensity === "quiet" ? "selected" : ""} onClick={() => updateSelfDirectedAttention({ enabled: true, intensity: "quiet" })} aria-pressed={selfDirectedAttention.enabled && selfDirectedAttention.intensity === "quiet"}><strong>Quiet</strong><small>Use a smaller, less frequent attention envelope.</small></button>
+            </div>
+            <div className="self-directed-budget-grid"><label>Model calls per day<input aria-label="Self-directed model calls per day" type="number" min={0} max={10000} value={selfDirectedBudget.maxModelCallsPerDay ?? 8} onChange={(event) => updateSelfDirectedAttention({ budget: { ...selfDirectedBudget, maxModelCallsPerDay: Math.max(0, Number(event.target.value) || 0) } })} /></label><label>Vision calls per day<input aria-label="Self-directed vision calls per day" type="number" min={0} max={10000} value={selfDirectedBudget.maxVisionCallsPerDay ?? 4} onChange={(event) => updateSelfDirectedAttention({ budget: { ...selfDirectedBudget, maxVisionCallsPerDay: Math.max(0, Number(event.target.value) || 0) } })} /></label><label>X reads per day<input aria-label="Self-directed X reads per day" type="number" min={0} max={10000} value={selfDirectedBudget.maxChannelReadsPerDay ?? 4} onChange={(event) => updateSelfDirectedAttention({ budget: { ...selfDirectedBudget, maxChannelReadsPerDay: Math.max(0, Number(event.target.value) || 0) } })} /></label><label>Hydrations per day<input aria-label="Self-directed hydrations per day" type="number" min={0} max={10000} value={selfDirectedBudget.maxHydrationsPerDay ?? 6} onChange={(event) => updateSelfDirectedAttention({ budget: { ...selfDirectedBudget, maxHydrationsPerDay: Math.max(0, Number(event.target.value) || 0) } })} /></label></div>
+            <p className="form-hint">These are hard infrastructure ceilings. Provider quota and rate limits remain external body reality. If a ceiling is reached, the run is recorded as deferred—not as Genny deciding “nothing is worth doing.”</p>
+          </section>
+
+          {/* 5. Publishing & Policies */}
+          <section className="settings-card publishing-initiative-card" id="section-policies">
+            <div className="section-heading compact">
+              <div>
+              <SectionEyebrow>Publishing initiative · Presence-scoped</SectionEyebrow>
+              <h2>How actively should {presence.name} publish?</h2>
+              </div>
+              <Sparkles size={17} />
+            </div>
+            <p className="muted rhythm-intro">Set the responsibility, not the words. {presence.name} still decides what is worth saying, what to research, and when a particular post is ready.</p>
+            <div className="rhythm-options publishing-initiative-options" role="group" aria-label="Publishing pace">
+              <button type="button" className={publishingInitiative?.mode === "off" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { publishingInitiative: { ...(publishingInitiative ?? { timezone: "UTC", createdAt: new Date().toISOString() }), mode: "off", updatedAt: new Date().toISOString() } } })} aria-pressed={publishingInitiative?.mode === "off"}>
+                <strong>No publishing responsibility</strong>
+                <small>{presence.name} can still respond to events and explicit instructions, but does not maintain an ongoing original-publishing plan.</small>
+              </button>
+              <button type="button" className={publishingInitiative?.mode === "adaptive" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { publishingInitiative: { ...(publishingInitiative ?? { timezone: "UTC", createdAt: new Date().toISOString() }), mode: "adaptive", updatedAt: new Date().toISOString() } } })} aria-pressed={publishingInitiative?.mode === "adaptive"}>
+                <strong>Let {presence.name} decide <em className="recommended-tag">Recommended</em></strong>
+                <small>{presence.name} determines an appropriate pace from its Mission, Growth evidence, recent activity, and what is happening here.</small>
+              </button>
+              <button type="button" className={publishingInitiative?.mode === "pace" ? "selected" : ""} onClick={() => void mutate({ type: "setPresence", patch: { publishingInitiative: { ...(publishingInitiative ?? { timezone: "UTC", createdAt: new Date().toISOString() }), mode: "pace", target: { count: Math.max(1, Math.round(Number(publishingCountDraft) || 5)), period: publishingPeriodDraft }, updatedAt: new Date().toISOString() } } })} aria-pressed={publishingInitiative?.mode === "pace"}>
+                <strong>Set a pace</strong>
+                <small>Give {presence.name} a publishing expectation. {presence.name} decides how to work toward it.</small>
+              </button>
+            </div>
+            {publishingInitiative?.mode === "pace" && (
+              <div className="publishing-pace-editor">
+                <div className="publishing-pace-sentence" aria-label="Publishing pace target">
+                  <span>Aim for about</span>
+                  <input aria-label="Publishing pace count" type="number" min={1} max={10000} value={publishingCountDraft} onChange={(event) => setPublishingCountDraft(event.target.value)} />
+                  <span>original posts</span>
+                  <select aria-label="Publishing pace period" value={publishingPeriodDraft} onChange={(event) => setPublishingPeriodDraft(event.target.value as "day" | "week")}>
+                    <option value="day">per day</option>
+                    <option value="week">per week</option>
+                  </select>
+                  <Button type="button" variant="secondary" onClick={savePublishingPace}>Save pace</Button>
+                </div>
+                <p className="form-hint">This is a pace, not a forced quota. Weak ideas can still be rejected, but {presence.name} keeps responsibility for finding better ones.</p>
+              </div>
+            )}
+            {publishingInitiative?.mode !== "off" && connectionMode !== "sandbox" && !nativeConnection?.status && !activeBridge && <p className="settings-warning">{presence.name} needs automatic attention to pursue this pace on its own. Connect the selected live route or use Sandbox to rehearse it.</p>}
+            {publishingInitiative?.mode !== "off" && presence.execution.post === "off" && <p className="settings-warning">Original posts are currently Off. {presence.name} can work on ideas, but cannot complete this publishing responsibility.</p>}
+            {publishingInitiative?.mode !== "off" && presence.execution.post === "review" && <p className="settings-warning">{presence.name} can work toward this pace, but publications will wait for your approval.</p>}
+          </section>
+
+          <section className="settings-card language-policy-card presence-language-policy-card">
+            <div className="section-heading compact">
+              <div><SectionEyebrow>Presence taste · language</SectionEyebrow><h2>Language & phrasing here</h2></div>
+              <ShieldCheck size={17} />
+            </div>
+            <p className="muted">This Presence admits only confirmed-English social observations into the Feed and Agent context. It also keeps posts, replies, messages, and Presence Chat in English. Non-English or unknown-language observations are left out rather than guessed or translated. It inherits the Agent&apos;s hard boundaries and can add local ones.</p>
+            <div className="presence-language-selection">
+              <div><strong>Primary language</strong><small>The language this Presence uses when it speaks.</small></div>
+              <div className="presence-language-value"><small>English is the only supported Presence language right now.</small><select aria-label="Presence language" value={presence.language} onChange={(event) => void mutate({ type: "setPresence", patch: { language: event.target.value as "en" } })}><option value="en">English</option></select></div>
+            </div>
+            <div className="language-inherited-rules">
+              <span><strong>Inherited Never use</strong>{state.agent?.languagePolicy?.prohibited?.length ? state.agent.languagePolicy.prohibited.join(" · ") : "None set"}</span>
+            </div>
+            <div className="language-policy-editor">
+              <label>Prefer to avoid <small>Advisory and Presence-scoped.</small><textarea aria-label="Presence language preferences to avoid" rows={3} value={presenceAvoidDraft} onChange={(event) => setPresenceAvoidDraft(event.target.value)} /></label>
+              <label>Never use here <small>Additional literal boundaries for this channel and public self.</small><textarea aria-label="Presence prohibited language" rows={3} value={presenceProhibitedDraft} onChange={(event) => setPresenceProhibitedDraft(event.target.value)} /></label>
+            </div>
+            <div className="inline-form-actions"><Button variant="primary" onClick={() => void mutate({ type: "setPresenceLanguagePolicy", policy: { avoid: presenceAvoidDraft.split(/\r?\n/).map((item) => item.trim()).filter(Boolean), prohibited: presenceProhibitedDraft.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) } })}><Check size={14} /> Save Presence language</Button></div>
+          </section>
+
+          <section className="settings-card media-policy-card">
+            <div className="section-heading compact">
+              <div>
+                <SectionEyebrow>Media understanding</SectionEyebrow>
+                <h2>When media is hard to interpret</h2>
+              </div>
+              <ShieldCheck size={17} />
+            </div>
+            <p className="muted">Perception explains what media appears to mean. Taste decides whether it is worth acting on. An uninspected asset is never treated as truth.</p>
+            <div className="media-policy-options">
+              {([
+                ["use-judgment", "Use judgment", "Continue only when the available perception is enough for this action."],
+                ["review-uncertain", "Review uncertain actions", "Send media-dependent actions for review when perception is uncertain."],
+                ["always-review", "Always review media actions", "Keep every reply, repost, or quote involving media under review."],
+              ] as const).map(([id, label, detail]) => <button type="button" key={id} className={mediaPolicyDraft === id ? "selected" : ""} onClick={() => { setMediaPolicyDraft(id); void mutate({ type: "setPresence", patch: { mediaPerceptionPolicy: id } }); }}><strong>{label}</strong><small>{detail}</small></button>)}
+            </div>
+          </section>
+
+          {/* 6. Execution Envelope & Capabilities */}
+          <section className="settings-card presence-execution-card" id="section-execution">
+            <div className="section-heading compact">
+              <div>
+                <SectionEyebrow>
+                  Execution envelope ·{" "}
+                  {channelLabel(presence.channel, state.channelDefinitions)}
+                </SectionEyebrow>
+                <h2>How this Presence acts</h2>
+              </div>
+              <Settings2 size={17} />
+            </div>
+            <div className="independence-options">
+              <span>Independence</span>
+              <button onClick={() => applyPreset("review")}>
+                <strong>Supervised</strong>
+                <small>Review every action</small>
+              </button>
+              <button onClick={() => applyPreset("auto")}>
+                <strong>Independent</strong>
+                <small>Auto where allowed</small>
+              </button>
+              <button
+                className={customizing ? "selected" : ""}
+                onClick={() => setCustomizing(!customizing)}
+              >
+                <strong>Custom</strong>
+                <small>Choose by capability</small>
+              </button>
+            </div>
+            {customizing && (
+              <div className="capability-matrix">
+                <div className="matrix-head">
+                  <span>Capability</span>
+                  <span>Off</span>
+                  <span>Manual</span>
+                  <span>Review</span>
+                  <span>Auto</span>
+                </div>
+                {capabilities.map((item) => (
+                  <div className="matrix-row" key={item.id}>
+                    <div>
+                      <strong>{item.label}</strong>
+                      <small>{item.description}</small>
+                    </div>
+                    {(["off", "manual", "review", "auto"] as ExecutionMode[]).map(
+                      (mode) => (
+                        <button
+                          key={mode}
+                          aria-label={`${item.label} ${mode}`}
+                          aria-pressed={
+                            (presence.execution[item.id] ?? "off") === mode
+                          }
+                          className={
+                            (presence.execution[item.id] ?? "off") === mode
+                              ? "selected"
+                              : ""
+                          }
+                          onClick={() => setMode(item.id, mode)}
+                        >
+                          {(presence.execution[item.id] ?? "off") === mode
+                            ? "●"
+                            : ""}
+                        </button>
+                      ),
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+          </section>
+
+          <section className="settings-card capability-manifest-card" aria-labelledby="presence-capability-title">
+            <div className="section-heading compact"><div><SectionEyebrow>Effective body</SectionEyebrow><h2 id="presence-capability-title">What {presence.name} can actually do</h2></div><PlugZap size={17} /></div>
+            <p className="muted">These capabilities combine channel support, connection health, permissions, execution, observation, and verification. “Auto” is not shown as ready when the body cannot confirm the public result.</p>
+            <div className="capability-list">{derivePresenceCapabilityManifest(state, presence.id).items.map((item) => <div className="capability-row" key={item.capability}><div><strong>{item.label}</strong><small>{capabilityProviderLabel(state, presence.id, item)}{item.limitation ? ` · ${item.limitation}` : ""}</small></div><span className={`capability-state capability-state-${item.availability}`}>{item.availability.replaceAll("-", " ")}</span></div>)}</div>
+          </section>
+
+          {/* 7. Knowledge Access */}
+          <section className="settings-card knowledge-access-card" id="section-knowledge" aria-labelledby="presence-knowledge-title">
+            <div className="section-heading compact">
+              <div>
+                <SectionEyebrow>Knowledge access</SectionEyebrow>
+                <h2 id="presence-knowledge-title">What may this Presence retrieve?</h2>
+              </div>
+              <BookOpen size={17} />
+            </div>
+            <p className="muted">One setting controls the whole Agent Knowledge library. Document privacy can only narrow this Presence-level maximum.</p>
+            <div className="knowledge-access-row">
+              <div><strong>Agent Knowledge library</strong><small>{(state.knowledgeDocuments ?? []).filter((document) => document.agentId === state.agent?.id && document.status === "active").length} active documents · {knowledgeAccessValue === "none" ? "not available" : knowledgeAccessValue}</small></div>
+              <select aria-label="Knowledge access" value={knowledgeAccessValue} onChange={(event) => void mutate({ type: "setKnowledgeAccess", presenceId: presence.id, maximumUse: event.target.value as KnowledgeUse, enabled: event.target.value !== "none" })}>
+                {knowledgeUseOptions.map((option) => <option value={option.id} key={option.id}>{option.label}</option>)}
+              </select>
+            </div>
+          </section>
+
+          {/* 8. Danger Zone */}
+          <section className="settings-card destructive-settings-card presence-destructive-card" id="section-danger" aria-labelledby="delete-presence-title">
+            <div className="destructive-settings-intro">
+              <div>
+                <SectionEyebrow>Danger zone</SectionEyebrow>
+                <h2 id="delete-presence-title">Delete this Presence</h2>
+                <p className="muted">Permanently removes {presence.name}, its connection, and its Presence-scoped history. The Agent remains intact.</p>
+              </div>
+              <button type="button" className="destructive-link" onClick={() => setDeletePresenceOpen((open) => !open)} aria-expanded={deletePresenceOpen}>
+                {deletePresenceOpen ? "Cancel deletion" : "Delete Presence"}
+              </button>
+            </div>
+            {deletePresenceOpen && (
+              <form className="destructive-confirmation" onSubmit={async (event) => {
+                event.preventDefault();
+                if (state.presences.length <= 1 || deletePresenceName !== presence.name || deletingPresence) return;
+                setDeletingPresence(true);
+                await mutate({ type: "deletePresence", presenceId: presence.id, confirmationName: deletePresenceName });
+                setDeletingPresence(false);
+              }}>
+                {state.presences.length <= 1 ? <p className="destructive-help">OpenPresence needs at least one Presence for this Agent, so this last Presence cannot be deleted.</p> : <>
+                  <p className="destructive-help">To confirm, type <strong>{presence.name}</strong> exactly.</p>
+                  <label>Presence name<input aria-label="Type Presence name to confirm deletion" value={deletePresenceName} onChange={(event) => setDeletePresenceName(event.target.value)} autoComplete="off" /></label>
+                  <Button type="submit" variant="danger" disabled={deletePresenceName !== presence.name || deletingPresence}>{deletingPresence ? "Deleting…" : "Permanently delete Presence"}</Button>
+                </>}
+              </form>
+            )}
+          </section>
+        </div>
+      </div>
       {autoApprovalPrompt && (
         <div className="modal-backdrop auto-approval-modal-backdrop">
           <section className="presence-dialog auto-approval-dialog" role="dialog" aria-modal="true" aria-labelledby="auto-approval-title">
@@ -8483,44 +12324,111 @@ function XConnection({
   const [accessToken, setAccessToken] = useState("");
   const [accessTokenSecret, setAccessTokenSecret] = useState("");
   const [result, setResult] = useState<{ account: { id: string; username: string; name: string }; access: "read" | "read-write" } | null>(null);
+  const [feedback, setFeedback] = useState<{ tone: "error" | "success"; message: string } | null>(null);
   const [working, setWorking] = useState<"test" | "save" | "disconnect" | null>(null);
   const credentials = { apiKey, apiSecret, bearerToken, accessToken, accessTokenSecret };
   const clearForm = () => { setApiKey(""); setApiSecret(""); setBearerToken(""); setAccessToken(""); setAccessTokenSecret(""); setResult(null); };
-  const test = async () => { setWorking("test"); const response = await manageX({ action: "test", presenceId: presence.id, credentials }); setWorking(null); if (response?.result) setResult(response.result); };
-  const save = async (event: React.FormEvent) => { event.preventDefault(); setWorking("save"); const response = await manageX({ action: "save", presenceId: presence.id, credentials }); setWorking(null); if (response?.result) { setResult(response.result); setOpen(false); clearForm(); } };
-  const disconnect = async () => { setWorking("disconnect"); await manageX({ action: "disconnect", presenceId: presence.id }); setWorking(null); setResult(null); clearForm(); setOpen(true); };
+  const test = async () => {
+    setFeedback(null);
+    setWorking("test");
+    const response = await manageX({ action: "test", presenceId: presence.id, credentials });
+    setWorking(null);
+    if (response?.error) setFeedback({ tone: "error", message: response.error });
+    else if (response?.result) {
+      setResult(response.result);
+      setFeedback({ tone: "success", message: `X authenticated @${response.result.account.username} with ${response.result.access === "read-write" ? "read + write" : "read-only"} access.` });
+    }
+  };
+  const save = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setFeedback(null);
+    setWorking("save");
+    const response = await manageX({ action: "save", presenceId: presence.id, credentials });
+    setWorking(null);
+    if (response?.error) setFeedback({ tone: "error", message: response.error });
+    else if (response?.result) {
+      setResult(response.result);
+      const persisted = response.state?.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x");
+      const returnedHandle = response.result.account.username.replace(/^@/, "").toLowerCase();
+      const expectedHandle = presence.handle.replace(/^@/, "").toLowerCase();
+      if (persisted && returnedHandle === expectedHandle) {
+        setFeedback({ tone: "success", message: `Saved connection for @${response.result.account.username} · ${response.result.access === "read-write" ? "Read + write" : "Read only"}.` });
+        setOpen(false);
+        clearForm();
+      } else {
+        setFeedback({ tone: "error", message: `X authenticated @${response.result.account.username}, but the server did not return a saved connection for this Presence. Please retry once.` });
+      }
+    }
+  };
+  const disconnect = async () => { setWorking("disconnect"); await manageX({ action: "disconnect", presenceId: presence.id }); setWorking(null); setResult(null); setFeedback(null); clearForm(); setOpen(true); };
+  const accountUsername = connection?.account?.username ?? presence.handle.replace(/^@/, "");
+  const connectionHeading = connection
+    ? connection.status === "connected" ? `Connected to @${accountUsername}` : `Last authenticated account: @${accountUsername}`
+    : "Connect this Presence to X";
   return (
-    <div className="channel-connector-panel native-connection-card">
-      <div className="section-heading compact">
-        <div>
-          <SectionEyebrow>Official X API</SectionEyebrow>
-          <h2>{connection ? `Connected to @${connection.account?.username ?? presence.handle.replace(/^@/, "")}` : "Connect this Presence to X"}</h2>
-        </div>
-        <Radio size={17} />
-      </div>
+    <div className="native-connection-compact">
       {connection && !open ? (
-        <>
-          <div className="connection-summary">
-            <div><strong>{connection.account?.name ?? "X account"}</strong><small>@{connection.account?.username ?? "unknown"}</small></div>
-            <span className={`live-pill ${connection.status === "needs-attention" ? "paused" : ""}`}><span className="status-dot" /> {connection.status === "needs-attention" ? "Needs attention" : "Connected"}</span>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <strong>Native X API</strong>
+              {connection.status === "connected" && (
+                <span style={{ fontSize: "11px", fontWeight: 600, padding: "2px 8px", borderRadius: "4px", background: "rgba(34, 197, 94, 0.1)", color: "#15803d" }}>
+                  Preferred
+                </span>
+              )}
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+              <span className={`live-pill ${connection.status === "connected" ? "" : "paused"}`}>
+                <span className="status-dot" /> {connection.status === "connected" ? "Healthy" : "Needs attention"}
+              </span>
+              <Button variant="secondary" type="button" onClick={() => setOpen(true)}>
+                Edit Credentials
+              </Button>
+              <Button variant="danger" type="button" disabled={working === "disconnect"} onClick={() => void disconnect()}>
+                {working === "disconnect" ? "Disconnecting…" : "Disconnect"}
+              </Button>
+            </div>
           </div>
-          <p className="muted">Official X API authentication is {connection.access === "read-write" ? "configured with read + write credentials" : "read only"}. {connection.status === "needs-attention" ? `The last native request was rejected: ${connection.healthMessage ?? "X returned an error"}.` : connection.deliveryError ? `The last X delivery failed: ${connection.deliveryError}` : connection.access === "read" ? "Add User Access Token and User Access Token Secret to let Jenny publish and reply." : "A successful write is verified only when X accepts a post and returns its external ID."} Credentials are encrypted on this server and never returned to the browser.</p>
-          <div className="bridge-row-actions"><Button variant="ghost" onClick={() => setOpen(true)}>Update credentials</Button><Button variant="danger" disabled={working === "disconnect"} onClick={() => void disconnect()}>{working === "disconnect" ? "Disconnecting…" : "Disconnect"}</Button></div>
-        </>
+          <p style={{ margin: "6px 0 0", fontSize: "12px", color: "var(--muted)" }}>
+            @{accountUsername} · {connection.access === "read-write" ? "Read & Write" : "Read only"} · Preferred route for official API actions · Encrypted credentials on server
+          </p>
+        </div>
       ) : (
-        <form className="x-connection-form" onSubmit={(event) => void save(event)}>
-          <p className="muted">Use the official X API for this Presence. A Bearer Token enables read access; user access tokens enable posting and replies.</p>
-          <p className="x-credentials-help">Find these values in <a href="https://console.x.com/" target="_blank" rel="noreferrer">X Developer Console</a> → your app → <strong>Keys and tokens</strong>. Generate or regenerate <strong>Access Token and Secret</strong> after setting the app permission to read and write.</p>
-          <div className="x-credential-grid">
-            <label className="x-credential-field"><span className="x-field-label">API Key / Consumer Key</span><input aria-label="X API Key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="off" required /></label>
-            <label className="x-credential-field"><span className="x-field-label">API Key Secret / Consumer Secret</span><input aria-label="X API Key Secret" type="password" value={apiSecret} onChange={(event) => setApiSecret(event.target.value)} autoComplete="off" required /></label>
-            <label className="x-credential-field"><span className="x-field-label">Bearer Token <small>Optional · read access</small></span><input aria-label="X Bearer Token" type="password" value={bearerToken} onChange={(event) => setBearerToken(event.target.value)} autoComplete="off" /></label>
-            <label className="x-credential-field"><span className="x-field-label">User Access Token <small>Required · write access</small></span><input aria-label="X User Access Token" type="password" value={accessToken} onChange={(event) => setAccessToken(event.target.value)} autoComplete="off" /></label>
-            <label className="x-credential-field"><span className="x-field-label">User Access Token Secret <small>Required · write access</small></span><input aria-label="X User Access Token Secret" type="password" value={accessTokenSecret} onChange={(event) => setAccessTokenSecret(event.target.value)} autoComplete="off" /></label>
+        <div>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px", marginBottom: "10px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <strong>Native X API</strong>
+              <span className="live-pill paused">
+                <span className="status-dot" /> {connection ? "Editing" : "Not connected"}
+              </span>
+            </div>
+            {connection && (
+              <Button type="button" variant="ghost" onClick={() => { clearForm(); setOpen(false); }}>
+                Cancel
+              </Button>
+            )}
           </div>
-          {result && <div className="connection-result" role="status"><Check size={15} /><span>Connected to <strong>@{result.account.username}</strong> · {result.access === "read-write" ? "Read + write" : "Read only"}</span></div>}
-          <div className="inline-form-actions"><Button type="button" variant="ghost" onClick={() => { clearForm(); setOpen(Boolean(connection)); }}>Cancel</Button><Button type="button" variant="secondary" onClick={() => void test()} disabled={working !== null || !apiKey || !apiSecret}>{working === "test" ? "Testing…" : "Test connection"}</Button><Button type="submit" variant="primary" disabled={working !== null}>{working === "save" ? "Saving…" : "Save connection"}</Button></div>
-        </form>
+          <p style={{ margin: "0 0 12px", fontSize: "12px", color: "var(--muted)" }}>
+            Direct API connection for observation, search, and native posting as <code>@{presence.handle.replace(/^@/, "")}</code>.
+          </p>
+          <form className="x-connection-form" onSubmit={(event) => void save(event)}>
+            <div className="x-credential-grid">
+              <label className="x-credential-field"><span className="x-field-label">API Key / Consumer Key</span><input aria-label="X API Key" type="password" value={apiKey} onChange={(event) => setApiKey(event.target.value)} autoComplete="off" required /></label>
+              <label className="x-credential-field"><span className="x-field-label">API Key Secret / Consumer Secret</span><input aria-label="X API Key Secret" type="password" value={apiSecret} onChange={(event) => setApiSecret(event.target.value)} autoComplete="off" required /></label>
+              <label className="x-credential-field"><span className="x-field-label">Bearer Token <small>Optional · read access</small></span><input aria-label="X Bearer Token" type="password" value={bearerToken} onChange={(event) => setBearerToken(event.target.value)} autoComplete="off" /></label>
+              <label className="x-credential-field"><span className="x-field-label">User Access Token <small>Required · write access</small></span><input aria-label="X User Access Token" type="password" value={accessToken} onChange={(event) => setAccessToken(event.target.value)} autoComplete="off" /></label>
+              <label className="x-credential-field"><span className="x-field-label">User Access Token Secret <small>Required · write access</small></span><input aria-label="X User Access Token Secret" type="password" value={accessTokenSecret} onChange={(event) => setAccessTokenSecret(event.target.value)} autoComplete="off" /></label>
+            </div>
+            {feedback && <div className={`connection-feedback ${feedback.tone === "error" ? "is-error" : "is-success"}`} role={feedback.tone === "error" ? "alert" : "status"}>{feedback.message}</div>}
+            {result && <div className="connection-result" role="status"><Check size={15} /><span>Connected to <strong>@{result.account.username}</strong> · {result.access === "read-write" ? "Read + write" : "Read only"}</span></div>}
+            <div className="inline-form-actions" style={{ marginTop: "12px" }}>
+              {connection && <Button type="button" variant="ghost" onClick={() => { clearForm(); setOpen(false); }}>Cancel</Button>}
+              <Button type="button" variant="secondary" onClick={() => void test()} disabled={working !== null || !apiKey || !apiSecret}>{working === "test" ? "Testing…" : "Test connection"}</Button>
+              <Button type="submit" variant="primary" disabled={working !== null}>{working === "save" ? "Saving…" : "Save connection"}</Button>
+            </div>
+          </form>
+        </div>
       )}
     </div>
   );
@@ -8530,13 +12438,11 @@ function ChromeConnectionPanel({
   state,
   presence,
   mutate,
-  manageBridge,
   refreshState,
 }: {
   state: OpenPresenceState;
   presence: NonNullable<OpenPresenceState["presence"]>;
   mutate: Mutate;
-  manageBridge: BridgeManage;
   refreshState: () => Promise<OpenPresenceState>;
 }) {
   const [refreshing, setRefreshing] = useState(false);
@@ -8555,8 +12461,8 @@ function ChromeConnectionPanel({
     <div className="chrome-connection-panel" aria-label="Chrome connection">
       <div className="chrome-connection-heading">
         <div>
-          <SectionEyebrow>Chrome connection</SectionEyebrow>
-          <h2>Let {presence.name} use Chrome</h2>
+          <SectionEyebrow>Chrome extension · Presence-scoped</SectionEyebrow>
+          <h2 id="presence-chrome-title">Let {presence.name} use Chrome</h2>
           <p className="muted">OpenPresence chooses what is worth doing. The Chrome extension provides the visible tab, uses the account you sign into, and reports back only verified outcomes.</p>
         </div>
         <ShieldCheck size={17} />
@@ -8571,10 +12477,14 @@ function ChromeConnectionPanel({
         {activeBridge && <Button type="button" variant="ghost" disabled={refreshing} onClick={() => void refresh()}><RotateCcw size={13} /> {refreshing ? "Refreshing…" : "Refresh status"}</Button>}
       </div>
       <small className="chrome-connection-safety"><ShieldCheck size={13} /> No account credentials are stored in OpenPresence or the extension. Before a write, the tab checks the selected account and verifies the resulting post.</small>
-      <details className="advanced-connector-details">
-        <summary>Advanced connector diagnostics</summary>
-        <p>For developers testing alternative local executors. Most users should only use the OpenPresence Chrome extension above.</p>
-        <BridgeManager state={state} presence={presence} manageBridge={manageBridge} refreshState={refreshState} />
+      <details className="chrome-extension-setup">
+        <summary>Chrome extension setup & help</summary>
+        <ol>
+          <li>Open <code>chrome://extensions</code> in your Chrome browser.</li>
+          <li>Turn on <strong>Developer mode</strong> in the top right corner.</li>
+          <li>Click <strong>Load unpacked</strong> and select the <code>extension</code> directory from this OpenPresence installation.</li>
+          <li>Click the OpenPresence extension icon in your browser toolbar, and click <strong>Open controlled Chrome</strong> above to launch your signed-in tab.</li>
+        </ol>
       </details>
     </div>
   );
@@ -8591,17 +12501,17 @@ function BridgeManager({
   manageBridge: BridgeManage;
   refreshState: () => Promise<OpenPresenceState>;
 }) {
-  const [name, setName] = useState(presence.channel === "x" ? "X Browser Bridge" : "External Channel Bridge");
+  const [name, setName] = useState(presence.channel === "x" ? "X Connector Bridge" : "External Channel Bridge");
   const [kind, setKind] = useState<ConnectorKind>("bridge");
   const [key, setKey] = useState<string | undefined>();
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
-  const [guideOpen, setGuideOpen] = useState(true);
-  const [copied, setCopied] = useState<string | null>(null);
-  const [refreshing, setRefreshing] = useState(false);
   const bridges = state.bridges.filter(
     (item) => item.presenceId === presence?.id,
   );
   const activeBridges = bridges.filter((item) => item.state !== "offline");
+  const [guideOpen, setGuideOpen] = useState(activeBridges.length === 0);
+  const [copied, setCopied] = useState<string | null>(null);
+  const [refreshing, setRefreshing] = useState(false);
   const channel = state.channelDefinitions.find(
     (item) => item.id === presence?.channel,
   );
@@ -8616,7 +12526,7 @@ function BridgeManager({
     inbound: true,
     reconcile: true,
     affordances: ["post", "reply", "like", "repost", "quote", "follow"],
-    formats: ["x.post", "x.media-post", "x.reply"],
+    formats: ["x.post", "x.media-post", "x.reply", "x.quote", "x.repost", "x.like"],
     metrics: ["followers", "public_metrics"],
     assetKinds: ["image", "video"] as SocialAssetKind[],
   } : {
@@ -8644,6 +12554,7 @@ function BridgeManager({
       },
     });
     if (result?.key) setKey(result.key);
+    setGuideOpen(true);
   };
   const disconnect = async (bridgeId: string) => {
     setDisconnecting(bridgeId);
@@ -8671,86 +12582,33 @@ function BridgeManager({
   const externalExecutionsEndpoint = `${baseUrl}/api/bridge/v1/executions/claim`;
   const bridgeStatus = (bridge: (typeof bridges)[number]) => {
     const status = bridgeAdapterStatus(bridge);
-    return presence.channel === "x" && bridge.state !== "offline" && status === "waiting"
-      ? "Chrome extension not connected"
+    return bridge.state !== "offline" && status === "waiting"
+      ? "Waiting for check-in"
       : bridgeAdapterStatusLabel(status);
   };
-  const bridgeRow = (bridge: (typeof bridges)[number]) => (
-    <div className="bridge-row" key={bridge.id}>
-      <div>
-        <strong>{bridge.name}</strong>
-        <small>
-          {bridge.state === "offline"
-            ? bridge.credentialRevokedAt
-              ? "Disconnected · its credential has been revoked."
-              : bridge.keyPrefix || bridge.credentialId
-                ? "Disconnected · credential metadata is available, but its revocation time is unavailable."
-                : "Disconnected · credential metadata is unavailable."
-            : `Can observe · ${bridge.capabilities.inbound ? "social objects" : "nothing yet"}`}
-        </small>
-        {bridge.state === "offline" && (
-          <small className="bridge-credential-meta">
-            {bridge.keyPrefix || bridge.credentialId ? (
-              <>Credential prefix: <code>{bridge.keyPrefix ?? bridge.credentialId}</code>{bridge.credentialRevokedAt ? ` · revoked ${formatTime(bridge.credentialRevokedAt)}` : " · revocation time unavailable"}</>
-            ) : "No credential record remains for this Bridge."}
-            {" · secret value is not recoverable"}
-          </small>
-        )}
-        {bridge.state !== "offline" && (
-          <small>
-            Can perform · {bridge.capabilities.affordances.join(", ")}
-          </small>
-        )}
-      </div>
-      <div className="bridge-row-actions">
-        <span
-          className={`live-pill ${bridgeAdapterStatus(bridge) === "connected" ? "" : "paused"}`}
-        >
-          <span className="status-dot" />{" "}
-          {bridgeStatus(bridge)}
-        </span>
-        {bridge.state !== "offline" && (
-          <Button
-            variant="danger"
-            disabled={disconnecting === bridge.id}
-            onClick={() => void disconnect(bridge.id)}
-          >
-            {disconnecting === bridge.id ? "Disconnecting…" : "Disconnect"}
-          </Button>
-        )}
-        {bridge.state === "offline" && (
-          <Button
-            variant="danger"
-            disabled={disconnecting === bridge.id}
-            onClick={() => void remove(bridge.id)}
-          >
-            {disconnecting === bridge.id ? "Removing…" : "Remove Bridge"}
-          </Button>
-        )}
-      </div>
-    </div>
-  );
-  const activeBridgeRows = activeBridges.map(bridgeRow);
-  const offlineBridgeRows = bridges.filter((item) => item.state === "offline").map(bridgeRow);
+
+  const offlineBridges = bridges.filter((item) => item.state === "offline");
+
   return (
     <div className="channel-connector-panel bridge-manager">
       <div className="section-heading compact">
         <div>
-          <SectionEyebrow>{presence.channel === "x" ? "X Browser Bridge" : "External Bridge"}</SectionEyebrow>
-          <h2>{activeBridges.length ? "Signed-in browser route" : `Connect ${channelLabel(presence.channel, state.channelDefinitions)} through a Bridge`}</h2>
+          <SectionEyebrow>{presence.channel === "x" ? "X Connector Bridge · Custom Integration" : "External Bridge · Custom Integration"}</SectionEyebrow>
+          <h2 id="presence-bridge-title">{activeBridges.length ? "External Connector Bridge" : `Connect ${channelLabel(presence.channel, state.channelDefinitions)} through a Bridge`}</h2>
         </div>
-        <ShieldCheck size={17} />
+        <Radio size={17} />
       </div>
+
       {activeBridges.length === 0 && (
-        <div className="empty-bridge">
-          <p>
+        <div className="empty-bridge" style={{ marginTop: "10px" }}>
+          <p className="muted" style={{ margin: "0 0 12px", fontSize: "13px" }}>
             {channel?.builtIn
-              ? `Use a Bridge when ${channelLabel(presence.channel, state.channelDefinitions)} should be reached through an external adapter. Only the selected route above can deliver actions.`
-              : `A Bridge is an external adapter for ${channelLabel(presence.channel, state.channelDefinitions)}. It sends observed channel objects to OpenPresence and receives only approved actions from this Presence's execution envelope.`}
+              ? `Use an external Bridge when ${channelLabel(presence.channel, state.channelDefinitions)} should be connected via a custom browser runner or automation worker.`
+              : `External adapter for ${channelLabel(presence.channel, state.channelDefinitions)} that receives approved actions from this Presence.`}
           </p>
-          <div className="form-grid">
+          <div className="form-grid" style={{ gap: "10px", marginBottom: "12px" }}>
             <label>
-              Connection name
+              Bridge Name
               <input
                 aria-label="Bridge name"
                 value={name}
@@ -8758,7 +12616,7 @@ function BridgeManager({
               />
             </label>
             <label>
-              Connection type
+              Connection Type
               <select
                 aria-label="Bridge type"
                 value={kind}
@@ -8766,120 +12624,123 @@ function BridgeManager({
                   setKind(event.target.value as ConnectorKind)
                 }
               >
-                <option value="bridge">{presence.channel === "x" ? "X Browser Bridge · signed-in session" : "Bridge · external executor"}</option>
-                <option value="manual">
-                  Manual relay · you carry out actions
-                </option>
+                <option value="bridge">{presence.channel === "x" ? "X Bridge · external adapter" : "Bridge · external executor"}</option>
+                <option value="manual">Manual relay · you carry out actions</option>
               </select>
             </label>
           </div>
           <Button variant="primary" onClick={() => void create()}>
-            <Plus size={14} /> Connect
+            <Plus size={14} /> Create Bridge Key
           </Button>
         </div>
       )}
-      {bridges.length > 0 && (
-        <div className="bridge-list">
-          {activeBridgeRows.length > 0 && <div className="bridge-list-label">{presence.channel === "x" ? "Current Chrome extension route" : "Current route"}</div>}
-          {activeBridgeRows}
-          {offlineBridgeRows.length > 0 && (
-            <details className="bridge-history-details">
-              <summary>Connection history · {offlineBridgeRows.length} removed</summary>
-              <div className="bridge-history-list">{offlineBridgeRows}</div>
-            </details>
-          )}
-          {bridge && (
-            <div className="adapter-status-summary" role="status">
-              <div>
-                <span className="eyebrow">{presence.channel === "x" ? "Chrome extension status" : "Adapter status"}</span>
-                <strong>{bridgeStatus(bridge)}</strong>
-                <small>{bridge.lastSeenAt ? `Last check-in ${formatTime(bridge.lastSeenAt)}` : "No authenticated adapter request has arrived yet."}</small>
-              </div>
-              <Button variant="ghost" disabled={refreshing} onClick={() => void refresh()}>
-                <RotateCcw size={13} /> {refreshing ? "Refreshing…" : "Refresh status"}
+
+      {activeBridges.length > 0 && bridge && (
+        <div className="active-bridge-unified" style={{ display: "flex", flexDirection: "column", gap: "10px", marginTop: "10px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
+            <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
+              <strong>{bridge.name}</strong>
+              <span className={`live-pill ${bridgeAdapterStatus(bridge) === "connected" ? "" : "paused"}`}>
+                <span className="status-dot" /> {bridgeStatus(bridge)}
+              </span>
+            </div>
+            <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+              <Button type="button" variant="ghost" disabled={refreshing} onClick={() => void refresh()}>
+                <RotateCcw size={12} /> {refreshing ? "Refreshing…" : "Refresh"}
+              </Button>
+              <Button type="button" variant="ghost" onClick={() => setGuideOpen((v) => !v)}>
+                {guideOpen ? "Hide Setup" : "Setup & API"}
+              </Button>
+              <Button type="button" variant="danger" disabled={disconnecting === bridge.id} onClick={() => void disconnect(bridge.id)}>
+                {disconnecting === bridge.id ? "Disconnecting…" : "Disconnect"}
               </Button>
             </div>
-          )}
-          {key && (
-            <div className="bridge-key" role="status">
-              <strong>Connect your external adapter</strong>
-              <p>
-                This one-time key is for the adapter that represents this
-                Presence. It is not an Agent model key. Send inbound events to
-                the Events endpoint and claim approved work from the Execution
-                endpoint.
-              </p>
-              <code>{key}</code>
-              <Button
-                variant="ghost"
-                onClick={() => void copy(key, "key")}
-              >
-                {copied === "key" ? "Copied" : "Copy key"}
-              </Button>
-              <div className="bridge-endpoints">
-                <div>
-                  <small>Events endpoint</small>
-                  <code>{externalEventsEndpoint}</code>
-                </div>
-                <div>
-                  <small>Execution endpoint</small>
-                  <code>{externalExecutionsEndpoint}</code>
-                </div>
-              </div>
-              <small>
-                Use <code>Authorization: Bearer &lt;key&gt;</code>. The key will
-                not be shown again.
-              </small>
-            </div>
-          )}
-          {bridge && (
-            <div className="adapter-guide">
-              <div className="adapter-guide-heading">
-                <div>
-                  <SectionEyebrow>External browser adapter</SectionEyebrow>
-                  <h3>Set up the adapter that gives this Presence eyes and hands</h3>
-                  <p className="muted">OpenPresence decides what is worth doing. Your external browser agent observes this channel and carries out only approved executions.</p>
-                </div>
-                <Button variant="ghost" onClick={() => setGuideOpen((value) => !value)}>{guideOpen ? "Hide setup" : "Show setup"}</Button>
-              </div>
-              {guideOpen && (
-                <>
-                  <div className="adapter-summary-grid">
-                    <div><span>Presence</span><strong>{presence.name}</strong><small>{presence.handle}</small></div>
-                    <div><span>Channel</span><strong>{channelLabel(presence.channel, state.channelDefinitions)}</strong><small>{channel?.domain ?? "Custom destination"}</small></div>
-                    <div><span>Allowed actions</span><strong>{bridge.capabilities.affordances.join(", ") || "None"}</strong><small>Governed by the Execution Envelope</small></div>
-                    <div><span>Media</span><strong>{channel?.supportedAssetKinds?.length ? `Channel: ${channel.supportedAssetKinds.join(", ")}` : "Not declared"}</strong><small>Bridge delivery: supplied image/video assets only</small></div>
-                  </div>
-                  <div className="adapter-guide-actions">
-                    <Button variant="secondary" onClick={() => void copy(prompt, "prompt")}>{copied === "prompt" ? "Prompt copied" : "Copy adapter instructions"}</Button>
-                    <Button variant="secondary" onClick={() => void copy(environmentExample, "environment")}>{copied === "environment" ? "Environment copied" : "Copy environment config"}</Button>
-                  </div>
-                  <section className="adapter-test" aria-label="Supervised adapter test">
-                    <div>
-                      <SectionEyebrow>Supervised test</SectionEyebrow>
-                      <h4>Verify the adapter before it acts</h4>
-                      <p className="muted">Have the external browser worker follow the prompt, then refresh. The Chrome extension only carries approved actions for this selected route; it never changes the channel or gives the worker independent Agent judgment.</p>
-                    </div>
-                    <ol>
-                      <li className={supervisedTest.checkedIn ? "complete" : "pending"}><span>{supervisedTest.checkedIn ? "✓" : "1"}</span> Adapter checked in</li>
-                      <li className={supervisedTest.observed ? "complete" : "pending"}><span>{supervisedTest.observed ? "✓" : "2"}</span> Inbound observation received</li>
-                      <li className={supervisedTest.acknowledged ? "complete" : "pending"}><span>{supervisedTest.acknowledged ? "✓" : "3"}</span> Claimed test execution acknowledged</li>
-                    </ol>
-                    <Button variant="ghost" onClick={() => void refresh()} disabled={refreshing}>{refreshing ? "Refreshing…" : "Refresh test status"}</Button>
-                  </section>
-                  <details className="adapter-details">
-                    <summary>View API examples</summary>
-                    <pre>{apiExamples}</pre>
-                  </details>
-                  <details className="adapter-details">
-                    <summary>View browser-agent prompt</summary>
-                    <pre>{prompt}</pre>
-                  </details>
-                </>
-              )}
-            </div>
-          )}
+          </div>
+          <div style={{ fontSize: "12px", color: "var(--muted)", display: "flex", gap: "12px", flexWrap: "wrap" }}>
+            <span><b>Observe:</b> {bridge.capabilities.inbound ? "Inbound objects" : "Off"}</span>
+            <span><b>Perform:</b> {bridge.capabilities.affordances.join(", ")}</span>
+            <span><b>Last seen:</b> {bridge.lastSeenAt ? formatRelativeTime(bridge.lastSeenAt) : "Never"}</span>
+          </div>
         </div>
+      )}
+
+      {key && (
+        <div className="bridge-key" role="status" style={{ marginTop: "12px", padding: "12px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "10px", marginBottom: "6px" }}>
+            <strong style={{ fontSize: "13px" }}>Adapter API Key (One-Time)</strong>
+            <Button variant="ghost" onClick={() => void copy(key, "key")}>
+              {copied === "key" ? "Copied" : "Copy key"}
+            </Button>
+          </div>
+          <code style={{ display: "block", wordBreak: "break-all", fontSize: "12px", padding: "6px 8px", background: "rgba(0,0,0,0.04)", borderRadius: "4px" }}>{key}</code>
+          <p className="form-hint" style={{ marginTop: "6px", fontSize: "11px" }}>
+            Use <code>Authorization: Bearer &lt;key&gt;</code> · Events: <code>{externalEventsEndpoint}</code> · Executions: <code>{externalExecutionsEndpoint}</code>
+          </p>
+        </div>
+      )}
+
+      {guideOpen && bridge && (
+        <div className="adapter-guide compact" style={{ marginTop: "14px", padding: "14px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px", display: "flex", flexDirection: "column", gap: "12px" }}>
+          <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "8px" }}>
+            <div>
+              <strong style={{ fontSize: "13px" }}>Adapter Configuration & Test</strong>
+              <p style={{ margin: "2px 0 0", fontSize: "12px", color: "var(--muted)" }}>
+                {channelLabel(presence.channel, state.channelDefinitions)} · {presence.handle} · Allowed actions: <code>{bridge.capabilities.affordances.join(", ") || "None"}</code>
+              </p>
+            </div>
+            <div style={{ display: "flex", gap: "8px" }}>
+              <Button type="button" variant="secondary" onClick={() => void copy(prompt, "prompt")}>
+                {copied === "prompt" ? "Prompt copied" : "Copy Instructions"}
+              </Button>
+              <Button type="button" variant="secondary" onClick={() => void copy(environmentExample, "environment")}>
+                {copied === "environment" ? "Env copied" : "Copy Config"}
+              </Button>
+            </div>
+          </div>
+
+          <div style={{ display: "flex", alignItems: "center", gap: "16px", flexWrap: "wrap", padding: "8px 12px", background: "rgba(0,0,0,0.02)", border: "1px solid var(--border)", borderRadius: "6px", fontSize: "12px" }}>
+            <span style={{ fontWeight: 600 }}>Supervised Test:</span>
+            <span style={{ color: supervisedTest.checkedIn ? "#15803d" : "var(--muted)" }}>
+              {supervisedTest.checkedIn ? "✓" : "○"} 1. Check-in
+            </span>
+            <span style={{ color: supervisedTest.observed ? "#15803d" : "var(--muted)" }}>
+              {supervisedTest.observed ? "✓" : "○"} 2. Observation
+            </span>
+            <span style={{ color: supervisedTest.acknowledged ? "#15803d" : "var(--muted)" }}>
+              {supervisedTest.acknowledged ? "✓" : "○"} 3. Claimed Execution
+            </span>
+            <Button type="button" variant="ghost" style={{ marginLeft: "auto" }} onClick={() => void refresh()} disabled={refreshing}>
+              <RotateCcw size={11} /> {refreshing ? "Checking…" : "Check test"}
+            </Button>
+          </div>
+
+          <div style={{ display: "flex", gap: "16px" }}>
+            <details style={{ flex: 1, fontSize: "12px" }}>
+              <summary style={{ cursor: "pointer", color: "var(--ink)", fontWeight: 600 }}>API Reference</summary>
+              <pre style={{ margin: "8px 0 0", padding: "10px", borderRadius: "6px", background: "rgba(0,0,0,0.03)", fontSize: "11px", maxHeight: "180px", overflow: "auto" }}>{apiExamples}</pre>
+            </details>
+            <details style={{ flex: 1, fontSize: "12px" }}>
+              <summary style={{ cursor: "pointer", color: "var(--ink)", fontWeight: 600 }}>Full Adapter Prompt</summary>
+              <pre style={{ margin: "8px 0 0", padding: "10px", borderRadius: "6px", background: "rgba(0,0,0,0.03)", fontSize: "11px", maxHeight: "180px", overflow: "auto" }}>{prompt}</pre>
+            </details>
+          </div>
+        </div>
+      )}
+
+      {offlineBridges.length > 0 && (
+        <details className="bridge-history-details" style={{ marginTop: "10px", fontSize: "11px" }}>
+          <summary style={{ cursor: "pointer", color: "var(--muted)" }}>History ({offlineBridges.length} removed)</summary>
+          <div style={{ marginTop: "6px", display: "flex", flexDirection: "column", gap: "6px" }}>
+            {offlineBridges.map((b) => (
+              <div key={b.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", padding: "4px 8px", background: "rgba(0,0,0,0.02)", borderRadius: "4px" }}>
+                <span>{b.name} · Disconnected</span>
+                <Button type="button" variant="ghost" disabled={disconnecting === b.id} onClick={() => void remove(b.id)}>
+                  Remove
+                </Button>
+              </div>
+            ))}
+          </div>
+        </details>
       )}
     </div>
   );

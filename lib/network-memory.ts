@@ -105,20 +105,231 @@ export function relationshipHistory(state: OpenPresenceState, personId: string, 
     .slice(0, Math.max(1, Math.min(50, limit)));
 }
 
-export function createRememberedPerson(input: { agentId: string; presenceId: string; channel: string; externalActorId: string; displayName: string; handle?: string; profileUrl?: string; avatarUrl?: string; personId?: string; sourceEnvironment?: PresenceEnvironment; sourceSessionId?: string; source: "operator" | "current-context" | "watched" }, existingPeople: Person[], existingIdentities: PersonIdentity[], existingRelationships: Relationship[]) {
+export function isPlaceholderIdentity(str?: string): boolean {
+  if (!str) return true;
+  const trimmed = str.trim();
+  if (!trimmed) return true;
+  if (/^@?\d{8,}$/.test(trimmed)) return true;
+  const lower = trimmed.toLowerCase();
+  return (
+    lower === "x user" ||
+    lower === "unknown x account" ||
+    lower === "profile details pending" ||
+    lower === "profile details unavailable" ||
+    lower === "unknown account"
+  );
+}
+
+export function deriveIdentityHydrationState(
+  channel: string,
+  displayName?: string,
+  handle?: string
+): import("./types").IdentityHydrationState {
+  const hasValidName = !isPlaceholderIdentity(displayName);
+  const hasValidHandle = !isPlaceholderIdentity(handle);
+
+  if (channel === "x") {
+    if (hasValidHandle && hasValidName) return "hydrated";
+    if (hasValidHandle || hasValidName) return "partial";
+    return "unhydrated";
+  }
+
+  // Channels without handles (e.g. Skool, Discord, etc.)
+  if (hasValidName) return "hydrated";
+  return "unhydrated";
+}
+
+export function extractIdentityHydrationLeads(
+  channel: import("./types").ChannelId,
+  text: string,
+  sourceRef: string
+): import("./types").IdentityHydrationLead[] {
+  if (!text) return [];
+  const leads: import("./types").IdentityHydrationLead[] = [];
+  const handleMatches = text.matchAll(/@([a-zA-Z0-9_]{1,30})\b/g);
+  const seen = new Set<string>();
+  const timestamp = now();
+
+  for (const match of handleMatches) {
+    const raw = match[1];
+    if (!raw || seen.has(raw.toLowerCase()) || isPlaceholderIdentity(raw)) continue;
+    seen.add(raw.toLowerCase());
+    leads.push({
+      channel,
+      possibleHandle: raw,
+      sourceRef,
+      observedAt: timestamp,
+    });
+  }
+  return leads;
+}
+
+export function resolveCanonicalPerson(
+  state: OpenPresenceState,
+  personId: string,
+  presenceId?: string
+): {
+  displayName: string;
+  handleLabel: string;
+  rawHandle?: string;
+  avatarUrl?: string;
+  hydrationState: import("./types").IdentityHydrationState;
+  isPlaceholder: boolean;
+} {
+  const person = state.people.find((p) => p.id === personId);
+  const activePresenceId = presenceId ?? state.activePresenceId ?? state.presence?.id;
+  const activePresence = state.presences.find((p) => p.id === activePresenceId) ?? state.presence;
+  const targetEnv = activePresence?.environment ?? "live";
+
+  const identity = state.personIdentities.find(
+    (item) =>
+      item.personId === personId &&
+      (!activePresenceId || item.sourcePresenceId === activePresenceId) &&
+      (item.sourceEnvironment ?? "live") === targetEnv
+  ) ?? state.personIdentities.find((item) => item.personId === personId);
+
+  const actorId = identity?.externalActorId;
+  const matchingMirror = actorId
+    ? state.mirrorObjects.find(
+        (m) =>
+          (!activePresenceId || m.presenceId === activePresenceId) &&
+          (m.environment ?? "live") === targetEnv &&
+          m.author?.externalRef?.id === actorId &&
+          m.author?.displayName &&
+          !isPlaceholderIdentity(m.author.displayName)
+      )
+    : undefined;
+
+  const rawName = (!isPlaceholderIdentity(person?.displayName) ? person?.displayName : undefined)
+    ?? (!isPlaceholderIdentity(identity?.displayName) ? identity?.displayName : undefined)
+    ?? (!isPlaceholderIdentity(matchingMirror?.author?.displayName) ? matchingMirror?.author?.displayName : undefined);
+
+  const rawHandle = (!isPlaceholderIdentity(identity?.handle) ? identity?.handle : undefined)
+    ?? (!isPlaceholderIdentity(matchingMirror?.author?.handle) ? matchingMirror?.author?.handle : undefined);
+
+  const avatarUrl = identity?.avatarUrl ?? matchingMirror?.author?.avatarUrl;
+  const channel = identity?.channel ?? activePresence?.channel ?? "x";
+  const hydrationState = identity?.hydrationState ?? deriveIdentityHydrationState(channel, rawName, rawHandle);
+
+  const displayName = rawName ?? (rawHandle ? (rawHandle.startsWith("@") ? rawHandle : `@${rawHandle}`) : "Unknown X account");
+  const handleLabel = rawHandle ? (rawHandle.startsWith("@") ? rawHandle : `@${rawHandle}`) : "Profile details pending";
+  const isPlaceholder = isPlaceholderIdentity(rawName) && isPlaceholderIdentity(rawHandle);
+
+  return { displayName, handleLabel, rawHandle, avatarUrl, hydrationState, isPlaceholder };
+}
+
+export function createRememberedPerson(
+  input: {
+    agentId: string;
+    presenceId: string;
+    channel: import("./types").ChannelId;
+    externalActorId: string;
+    displayName: string;
+    handle?: string;
+    profileUrl?: string;
+    avatarUrl?: string;
+    personId?: string;
+    sourceEnvironment?: PresenceEnvironment;
+    sourceSessionId?: string;
+    source: "operator" | "current-context" | "watched";
+    evidenceKind?: import("./types").IdentitySourceKind;
+  },
+  existingPeople: Person[],
+  existingIdentities: PersonIdentity[],
+  existingRelationships: Relationship[]
+) {
   const timestamp = now();
   const sourceEnvironment = input.sourceEnvironment ?? "live";
-  const existingIdentity = existingIdentities.find((identity) => identity.channel === input.channel
-    && identity.externalActorId === input.externalActorId
-    && identity.sourcePresenceId === input.presenceId
-    && (identity.sourceEnvironment ?? "live") === sourceEnvironment);
+  const evidenceKind = input.evidenceKind ?? (input.source === "operator" ? "operator" : "mirror_author");
+
+  const existingIdentity = existingIdentities.find(
+    (identity) =>
+      identity.channel === input.channel &&
+      identity.externalActorId === input.externalActorId &&
+      identity.sourcePresenceId === input.presenceId &&
+      (identity.sourceEnvironment ?? "live") === sourceEnvironment
+  );
+
   const person = existingIdentity ? existingPeople.find((item) => item.id === existingIdentity.personId) : undefined;
   const personId = person?.id ?? input.personId ?? `person_${Math.random().toString(36).slice(2, 10)}`;
-  const nextPerson: Person = person ?? { id: personId, agentId: input.agentId, displayName: input.displayName.trim(), memoryState: "active", createdAt: timestamp, updatedAt: timestamp };
+
+  // Protect against placeholders overwriting known names
+  const candidateName = input.displayName.trim();
+  const resolvedDisplayName = !isPlaceholderIdentity(candidateName)
+    ? candidateName
+    : (!isPlaceholderIdentity(person?.displayName) ? person!.displayName : candidateName);
+
+  const nextPerson: Person = person
+    ? { ...person, displayName: resolvedDisplayName, updatedAt: timestamp }
+    : { id: personId, agentId: input.agentId, displayName: resolvedDisplayName, memoryState: "active", createdAt: timestamp, updatedAt: timestamp };
+
+  const candidateHandle = input.handle?.trim();
+  const resolvedHandle = !isPlaceholderIdentity(candidateHandle)
+    ? candidateHandle
+    : (!isPlaceholderIdentity(existingIdentity?.handle) ? existingIdentity!.handle : undefined);
+
+  const candidateAvatar = input.avatarUrl?.trim();
+  const resolvedAvatar = candidateAvatar || existingIdentity?.avatarUrl;
+
+  const hydrationState = deriveIdentityHydrationState(input.channel, resolvedDisplayName, resolvedHandle);
+
+  const displayNameEvidence: import("./types").IdentityFactEvidence | undefined = !isPlaceholderIdentity(candidateName)
+    ? { kind: evidenceKind, observedAt: timestamp }
+    : existingIdentity?.displayNameEvidence;
+
+  const handleEvidence: import("./types").IdentityFactEvidence | undefined = !isPlaceholderIdentity(candidateHandle)
+    ? { kind: evidenceKind, observedAt: timestamp }
+    : existingIdentity?.handleEvidence;
+
+  const avatarEvidence: import("./types").IdentityFactEvidence | undefined = candidateAvatar
+    ? { kind: evidenceKind, observedAt: timestamp }
+    : existingIdentity?.avatarEvidence;
+
   const identity: PersonIdentity = existingIdentity
-    ? { ...existingIdentity, handle: input.handle?.trim() || existingIdentity.handle, profileUrl: input.profileUrl?.trim() || existingIdentity.profileUrl, avatarUrl: input.avatarUrl?.trim() || existingIdentity.avatarUrl, sourceEnvironment, sourceSessionId: input.sourceSessionId ?? existingIdentity.sourceSessionId }
-    : { id: `person-identity_${Math.random().toString(36).slice(2, 10)}`, personId, channel: input.channel, externalActorId: input.externalActorId, handle: input.handle?.trim() || undefined, profileUrl: input.profileUrl?.trim() || undefined, avatarUrl: input.avatarUrl?.trim() || undefined, sourcePresenceId: input.presenceId, sourceEnvironment, sourceSessionId: input.sourceSessionId, verificationMethod: input.source === "operator" ? "operator_confirmed" : "connector_verified", createdAt: timestamp };
-  const relationship = existingRelationships.find((item) => item.personId === personId) ?? { id: `relationship_${Math.random().toString(36).slice(2, 10)}`, agentId: input.agentId, personId, state: "active" as const, createdAt: timestamp, updatedAt: timestamp };
+    ? {
+        ...existingIdentity,
+        displayName: resolvedDisplayName,
+        handle: resolvedHandle,
+        profileUrl: input.profileUrl?.trim() || existingIdentity.profileUrl,
+        avatarUrl: resolvedAvatar,
+        sourceEnvironment,
+        sourceSessionId: input.sourceSessionId ?? existingIdentity.sourceSessionId,
+        hydrationState,
+        displayNameEvidence,
+        handleEvidence,
+        avatarEvidence,
+        lastHydratedAt: hydrationState === "hydrated" ? timestamp : existingIdentity.lastHydratedAt,
+      }
+    : {
+        id: `person-identity_${Math.random().toString(36).slice(2, 10)}`,
+        personId,
+        channel: input.channel,
+        externalActorId: input.externalActorId,
+        displayName: resolvedDisplayName,
+        handle: resolvedHandle,
+        profileUrl: input.profileUrl?.trim() || undefined,
+        avatarUrl: resolvedAvatar,
+        sourcePresenceId: input.presenceId,
+        sourceEnvironment,
+        sourceSessionId: input.sourceSessionId,
+        verificationMethod: input.source === "operator" ? "operator_confirmed" : "connector_verified",
+        hydrationState,
+        displayNameEvidence,
+        handleEvidence,
+        avatarEvidence,
+        lastHydratedAt: hydrationState === "hydrated" ? timestamp : undefined,
+        createdAt: timestamp,
+      };
+
+  const relationship = existingRelationships.find((item) => item.personId === personId) ?? {
+    id: `relationship_${Math.random().toString(36).slice(2, 10)}`,
+    agentId: input.agentId,
+    personId,
+    state: "active" as const,
+    createdAt: timestamp,
+    updatedAt: timestamp,
+  };
+
   return { person: nextPerson, identity, relationship };
 }
 
@@ -131,11 +342,16 @@ export function normalizePersonIdentityScopes(state: OpenPresenceState) {
     sandboxSources.set(`${object.presenceId}:${object.channelId}:${actorId}`, { sessionId: object.sessionId });
   }
   return (state.personIdentities ?? []).map((identity) => {
-    if (identity.sourceEnvironment) return identity;
     const sandboxSource = sandboxSources.get(`${identity.sourcePresenceId}:${identity.channel}:${identity.externalActorId}`);
-    return sandboxSource
-      ? { ...identity, sourceEnvironment: "sandbox" as const, sourceSessionId: identity.sourceSessionId ?? sandboxSource.sessionId }
-      : { ...identity, sourceEnvironment: "live" as const };
+    const env = identity.sourceEnvironment ?? (sandboxSource ? "sandbox" : "live");
+    const sessionId = identity.sourceSessionId ?? sandboxSource?.sessionId;
+    const hydrationState = identity.hydrationState ?? deriveIdentityHydrationState(identity.channel, identity.displayName, identity.handle);
+    return {
+      ...identity,
+      sourceEnvironment: env,
+      ...(sessionId ? { sourceSessionId: sessionId } : {}),
+      hydrationState,
+    };
   });
 }
 
@@ -152,3 +368,4 @@ export function actorToNetworkCandidate(state: OpenPresenceState, presence: Pres
 export function factForCorrection(relationshipId: string, statement: string, visibility: RelationshipVisibility, sourcePresenceId: string): RelationshipFact {
   return { id: `relationship-fact_${Math.random().toString(36).slice(2, 10)}`, relationshipId, statement: statement.trim(), epistemicKind: "operator_provided", confidence: "high", provenanceRefs: [{ kind: "operator_input", id: `operator_${Math.random().toString(36).slice(2, 10)}`, sourcePresenceId, observedAt: now() }], visibility, validFrom: now(), createdAt: now() };
 }
+

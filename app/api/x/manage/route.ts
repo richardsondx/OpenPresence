@@ -58,7 +58,12 @@ export async function POST(request: Request) {
     return NextResponse.json({ state: next, result });
   } catch (error) {
     console.warn("X connection change rejected", error instanceof Error ? error.message : error);
+    const message = error instanceof z.ZodError
+      ? error.issues.map((issue) => issue.message).join(" ")
+      : error instanceof Error
+        ? error.message
+        : "X connection could not be completed.";
     if (error instanceof WorkspaceConflictError) return NextResponse.json({ error: error.message, conflict: true, state: stateForContext(readState(), { agentId: request.headers.get("x-openpresence-agent-id"), presenceId: request.headers.get("x-openpresence-presence-id") }) }, { status: error.status });
-    return NextResponse.json({ error: error instanceof Error ? error.message : "X connection could not be completed." }, { status: error instanceof WorkspaceConflictError ? error.status : 400 });
+    return NextResponse.json({ error: message }, { status: 400 });
   }
 }

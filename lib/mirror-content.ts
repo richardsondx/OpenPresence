@@ -9,9 +9,24 @@ const xMetric = "(?:\\d[\\d,.]*|\\d+(?:\\.\\d+)?[KMB])";
 const xMetricSuffix = new RegExp(`(?:\\s+${xMetric}){1,5}$`, "i");
 const xRenderedFooter = new RegExp(`\\s+\\d{1,2}:\\d{2}\\s*(?:AM|PM)\\s+·\\s+${xDate}\\s+·\\s+${xMetric}\\s+Views?$`, "i");
 
+/**
+ * Normalize adapter whitespace without changing the author's paragraph
+ * structure. X's browser surface exposes paragraph breaks through
+ * `innerText`, and those breaks are part of the public expression.
+ */
+function normalizeMirrorWhitespace(text: string) {
+  return text
+    .replace(/\r\n?/g, "\n")
+    .replace(/\u00a0/g, " ")
+    .split("\n")
+    .map((line) => line.replace(/[ \t]+/g, " ").trim())
+    .join("\n")
+    .trim();
+}
+
 export function parseRenderedXHeader(text: string | undefined) {
   if (!text) return undefined;
-  const normalized = text.replace(/\s+/g, " ").trim();
+  const normalized = normalizeMirrorWhitespace(text);
   const match = normalized.match(xRenderedHeader);
   if (!match) return undefined;
   return { displayName: match[1].trim(), handle: match[2], bodyStart: match[0].length };
@@ -23,7 +38,7 @@ export function parseRenderedXHeader(text: string | undefined) {
  */
 export function cleanMirrorText(channelId: ChannelId, text: string | undefined) {
   if (!text) return text;
-  const normalized = text.replace(/\s+/g, " ").trim();
+  const normalized = normalizeMirrorWhitespace(text);
   if (channelId !== "x") return normalized;
   const header = parseRenderedXHeader(normalized);
   const body = header ? normalized.slice(header.bodyStart).trim() : normalized;

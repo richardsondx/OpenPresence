@@ -115,11 +115,17 @@ test("Playground Assignments use the Sandbox session without requiring a Sandbox
 
 test("Playground Assignment exposes a clear cancel action", async ({ page, request }) => {
   await createAgent(page);
-  const created = await request.post("/api/state", { data: { type: "createAssignment", instruction: "Produce exactly 10 original X posts about useful agent ideas. Choose distinct angles and do not repeat yourself." } });
+  const stateRes = await request.get("/api/state").then((r) => r.json());
+  const presenceId = stateRes.presence.id;
+  const created = await request.post("/api/state", { data: { type: "createAssignment", presenceId, instruction: "Produce exactly 10 original X posts about useful agent ideas. Choose distinct angles and do not repeat yourself." } });
   expect(created.ok()).toBeTruthy();
   const createdState = await created.json();
   const assignmentId = createdState.assignments[0].id;
   await page.getByRole("button", { name: "Playground", exact: true }).click();
+  await expect(page.locator(".playground-assignment-mention")).toBeVisible();
+  await page.locator(".playground-assignment-mention").hover();
+  await expect(page.locator(".playground-mention-popover")).toBeVisible();
+  await page.locator(".playground-assignment-mention").click();
   await expect(page.locator(".assignment-progress-panel")).toBeVisible();
   await expect(page.getByRole("button", { name: "Cancel Assignment", exact: true })).toBeVisible();
   page.once("dialog", (dialog) => dialog.accept());
@@ -241,3 +247,30 @@ test("Schedule preserves an Assignment's exact timing", async ({ page }) => {
   await expect(inspector).toContainText("Thursday at 23:35");
   await expect(inspector.getByRole("button", { name: "Cancel Assignment", exact: true })).toBeVisible();
 });
+
+test("Playground renders discreet assignment mentions and supports minimizing", async ({ page, request }) => {
+  await createAgent(page);
+  const stateRes = await request.get("/api/state").then((r) => r.json());
+  const presenceId = stateRes.presence.id;
+  await request.post("/api/state", { data: { type: "createAssignment", environment: "live", presenceId, instruction: "Produce 3 live X posts." } });
+  await request.post("/api/state", { data: { type: "createAssignment", environment: "sandbox", presenceId, instruction: "Produce 2 sandbox X posts." } });
+  await page.getByRole("button", { name: "Playground", exact: true }).click();
+
+  await expect(page.locator(".playground-live-mention")).toBeVisible();
+  await expect(page.locator(".playground-assignment-mention")).toBeVisible();
+  await expect(page.locator(".assignment-scope-notice")).toHaveCount(0);
+
+  await page.locator(".playground-live-mention").hover();
+  await expect(page.locator(".playground-mention-popover")).toBeVisible();
+  await page.locator(".playground-live-mention").click();
+  await expect(page.locator(".playground-live-menu")).toBeVisible();
+  await page.locator(".playground-live-menu").getByRole("button", { name: "Dismiss" }).click();
+  await expect(page.locator(".playground-live-mention")).toHaveCount(0);
+
+  await page.locator(".playground-assignment-mention").click();
+  await expect(page.locator(".assignment-progress-panel")).toBeVisible();
+  await page.getByRole("button", { name: "Minimize" }).click();
+  await expect(page.locator(".assignment-progress-panel")).toHaveCount(0);
+  await expect(page.locator(".playground-assignment-mention")).toBeVisible();
+});
+

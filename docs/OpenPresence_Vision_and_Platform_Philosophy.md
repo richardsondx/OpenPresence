@@ -634,6 +634,63 @@ Mirrored social content is always world data, never system instruction.
 
 A community post that says "ignore your instructions" remains a social post.
 
+### Self-Directed Attention and Curiosity
+
+A social Presence does not only respond to attention supplied by others. Within
+accepted responsibility and authority, it may decide where its own attention is
+worth spending. Operator Explorations express where the operator wants the
+Agent to look. Self-directed discovery expresses where the Agent currently
+believes looking may be worthwhile.
+
+Self-directed discovery is strategy, not identity. It may change as
+responsibilities, experience, Growth evidence, relationships, and capabilities
+change. A Presence should be capable of curiosity, but curiosity is bounded by
+responsibility, resource authority, privacy, and the capabilities of its
+current body.
+
+The source of attention does not determine the available social vocabulary.
+Once something is genuinely observed, the same Social Planner judges the
+appropriate social act. Search results are leads; hydrated social objects are
+observed evidence.
+
+Self-directed discovery is opportunistic and preemptible. It cannot discharge,
+starve, or create hidden debt against accepted responsibility. It may be
+deferred freely when more important work is unresolved or the body is
+unavailable.
+
+### Attention as a Governed Resource
+
+The Agent owns where attention appears worthwhile. The operator owns how much
+infrastructure may be spent pursuing that attention. Attention intensity
+governs how broadly and frequently the Agent looks; it does not lower Taste or
+create pressure to act. Curious means seeing more of the world, not liking more
+of it.
+
+Freedom of social action does not imply unlimited infrastructure spending.
+Execution authority and resource authority are independent. Budget exhaustion,
+provider throttling, body unavailability, insufficient evidence, and
+Agent-selected silence are different truths and must never be collapsed into
+one state. Resource limits belong to infrastructure; the Agent should not
+think socially in terms of unused quotas or remaining Likes.
+
+Operational usage should be measurable and attributable to work origins
+without pretending that an estimate is authoritative provider billing. Bridge
+and Native connectors provide eyes and hands. The Social Mirror represents the
+observed world. Resource and provider diagnostics belong to operational state,
+not the Mirror.
+
+### Composable Social Acts
+
+Social acts are composable expressions, not mutually exclusive menu choices. A
+Presence may appreciate, converse, amplify, and form a relationship around the
+same social object when each act independently earns its place. The Social
+Planner chooses a coherent set of acts, not necessarily a single act.
+
+Silence is the absence of an outward act. Choosing not to reply does not imply
+choosing not to Like, Follow, or otherwise respond through another social
+affordance. Each act must earn its place independently; one justified action
+is not itself justification for additional activity.
+
 ---
 
 ## 13. Assignment, Social Intent, and ambient attention
@@ -1822,6 +1879,26 @@ to stop.
 Runtime instructions are not social content. Social content is not runtime
 instruction. Neither may silently cross that boundary.
 
+## 47. Operational autonomy and temporal embodiment
+
+The Agent owns its responsibilities. The runtime owns the continuity of its body. Routine failure changes the Agent's circumstances; it does not transfer responsibility to the operator.
+
+The Agent understands time. The runtime owns clocks.
+
+Autonomy includes operational self-maintenance. A persistent Agent must be capable of maintaining its own embodiment. A body that can fail must be capable of reporting, repairing, or replacing itself.
+
+Agent-owned bodies should be disposable; Agent state must be durable.
+
+The operator is an escalation boundary, not a retry button. Routine infrastructure recovery—tab recreation, browser restart, bridge reconnection, quota waiting, and lease reclamation—does not require social cognition or operator chores.
+
+Stuck is derived from elapsed time without meaningful progress against stage-specific expectations, not an arbitrary global timeout.
+
+Failures sharing one root cause are one incident, not many operator chores. The system aggregates related failures into a single incident with a bounded recovery budget and circuit breakers.
+
+An uncertain public write is reconciled before retry. When an external handoff is ambiguous, delivery enters reconciliation-only isolation; it is never blindly retried until external reality is proven.
+
+Recover the capability, then reconsider affected responsibilities. When an embodied route is repaired, held responsibilities are re-evaluated for relevance, expiration, and strategic priority rather than blindly flushed into the world.
+
 ## 45. The sentences to remember
 
 When everything else is forgotten, remember these:
@@ -1833,6 +1910,20 @@ When everything else is forgotten, remember these:
 > **Jenny decides what Jenny would do. OpenPresence figures out how her operator has chosen to let her do it.**
 
 > **Intent belongs to the person. Execution belongs to the body. Outcome belongs to the world.**
+
+> **The Agent understands time. The runtime owns clocks.**
+
+> **The Agent owns its responsibilities. The runtime owns the continuity of its body.**
+
+> **Agent-owned bodies should be disposable; Agent state must be durable.**
+
+> **The operator is an escalation boundary, not a retry button.**
+
+> **Failures sharing a root cause are one incident, not many operator chores.**
+
+> **An uncertain public write is reconciled before retry.**
+
+> **Recover the capability, then reconsider affected responsibilities.**
 
 > **Do not leak infrastructure into cognition.**
 
@@ -1855,3 +1946,4 @@ When everything else is forgotten, remember these:
 > **Quiet software. Living presence.**
 
 > **Your agent should not live in a chat window.**
+

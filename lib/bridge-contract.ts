@@ -16,16 +16,16 @@ export const bridgeEndpointPaths = {
 } as const;
 
 /**
- * The shipped Chrome adapter is intentionally narrow: it observes X, reports
- * verified profile/publication metrics, and delivers direct replies. Native X
- * remains the preferred API body for the other actions and media formats.
+ * The shipped Chrome adapter observes X, reports verified metrics, and delivers
+ * the low-level social actions that Genny's attention can authorize. The
+ * adapter still cannot publish original posts or invent content.
  */
 export function chromeBrowserBridgeCapabilities(): ConnectorCapabilities {
   return {
     inbound: true,
     reconcile: true,
-    affordances: ["reply"],
-    formats: ["x.reply"],
+    affordances: ["reply", "quote", "repost", "like"],
+    formats: ["x.reply", "x.quote", "x.repost", "x.like"],
     metrics: ["followers", "public_metrics"],
   };
 }

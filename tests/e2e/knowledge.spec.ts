@@ -5,7 +5,7 @@ test.beforeEach(async ({ request }) => {
   expect(response.ok()).toBeTruthy();
 });
 
-test("operator can create Agent Knowledge and bind it to a Presence", async ({ page }) => {
+test("operator can manage a flat Agent Knowledge document library", async ({ page }) => {
   const browserErrors: string[] = [];
   page.on("pageerror", (error) => browserErrors.push(error.message));
   page.on("console", (message) => {
@@ -18,19 +18,29 @@ test("operator can create Agent Knowledge and bind it to a Presence", async ({ p
   const navigation = test.info().project.name === "mobile" ? page.locator(".mobile-nav") : page.locator(".sidebar");
   await navigation.getByRole("button", { name: "Knowledge", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Knowledge", exact: true })).toBeVisible();
-  await page.getByLabel("Collection name").fill("Launch sources");
-  await page.getByRole("button", { name: "Create collection", exact: true }).click();
-  await expect(page.getByText("Launch sources", { exact: true }).first()).toBeVisible();
+  await expect(page.getByText("Collections", { exact: true })).toHaveCount(0);
 
-  await page.getByLabel("Knowledge item title").fill("Launch checklist");
-  await page.getByLabel("Knowledge content").fill("# Launch\n\nReview the owner and evidence before publishing.");
-  await page.getByRole("button", { name: "Add Knowledge item", exact: true }).click();
-  await expect(page.getByText("Launch checklist", { exact: true })).toBeVisible();
-  await expect(page.getByText(/Current v1/)).toBeVisible();
+  await page.getByRole("button", { name: "Add document", exact: true }).first().click();
+  await page.getByLabel("Knowledge document name").fill("Launch checklist.md");
+  await page.getByLabel("Knowledge document content").fill("# Launch\n\nReview the owner and evidence before publishing.");
+  await page.locator("form.knowledge-add-document-panel").getByRole("button", { name: "Add document", exact: true }).click();
+  await expect(page.getByLabel("Name for Launch checklist.md")).toHaveValue("Launch checklist.md");
+  await expect(page.getByLabel("Content for Launch checklist.md")).toHaveValue("# Launch\n\nReview the owner and evidence before publishing.");
 
-  await (test.info().project.name === "mobile" ? page.locator(".mobile-nav") : page.locator(".sidebar")).getByRole("button", { name: "Settings", exact: true }).click();
+  await page.getByLabel("Name for Launch checklist.md").fill("Launch checklist v2.md");
+  await page.getByLabel("Content for Launch checklist.md").fill("# Launch\n\nReview the owner and evidence before publishing.\n\n- Confirm owner");
+  await page.getByRole("button", { name: "Save", exact: true }).click();
+  await expect(page.getByText("Saved", { exact: true })).toBeVisible();
+  await page.reload();
+  await (test.info().project.name === "mobile" ? page.locator(".mobile-nav") : page.locator(".sidebar")).getByRole("button", { name: "Knowledge", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Knowledge", exact: true })).toBeVisible();
+  await expect(page.getByLabel("Name for Launch checklist v2.md")).toHaveValue("Launch checklist v2.md");
+  await expect(page.getByLabel("Content for Launch checklist v2.md")).toHaveValue("# Launch\n\nReview the owner and evidence before publishing.\n\n- Confirm owner");
+  await expect(page.getByText(/History · 2 versions/)).toBeVisible();
+
+  await navigation.getByRole("button", { name: "Settings", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Presence settings", exact: true })).toBeVisible();
-  const access = page.getByLabel("Knowledge access for Launch sources");
+  const access = page.getByLabel("Knowledge access");
   await expect(access).toHaveValue("none");
   await access.selectOption("internal");
   await expect(access).toHaveValue("internal");

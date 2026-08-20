@@ -31,6 +31,7 @@
   "include": [
     "**/*.ts",
     "**/*.tsx",
+    ".next-build/types/**/*.ts",
     ".next/types/**/*.ts",
     "/home/example/Code/OpenPresence/tmp/openpresence-boardy48-gptlow/.next/types/**/*.ts",
     "/home/example/Code/OpenPresence/tmp/openpresence-final-gptlow/.next/types/**/*.ts",

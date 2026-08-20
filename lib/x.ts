@@ -354,7 +354,7 @@ export async function searchRecentXPosts(credentials: XCredentials, query: strin
   const searchQuery = /(?:^|\s)-is:retweet(?:\s|$)/i.test(clean) ? clean : `${clean} -is:retweet`;
   const params = {
     query: searchQuery,
-    "tweet.fields": "created_at,conversation_id,author_id,lang",
+    "tweet.fields": "created_at,conversation_id,author_id,referenced_tweets,lang",
     expansions: "author_id",
     "user.fields": "name,username,profile_image_url",
     max_results: String(Math.min(100, Math.max(10, maxResults))),
@@ -433,6 +433,29 @@ export async function readXPostsByIds(credentials: XCredentials, ids: string[]):
     headers: { Authorization: readAuthHeader("GET", url, credentials, query) },
   });
   return parseXPosts({ data: [...(response.data ?? []), ...((response as XPostResponse).includes as { tweets?: NonNullable<XPostResponse["data"]> } | undefined)?.tweets ?? []], includes: response.includes });
+}
+
+export function normalizeXText(value: string) {
+  return value.normalize("NFKC").replace(/[\u2018\u2019]/g, "'").replace(/[\u201c\u201d]/g, '"').replace(/\s+/g, " ").trim();
+}
+
+export function matchesXReply(post: XRecentPost, input: { targetId: string; text: string; handle: string }) {
+  return post.parentId === input.targetId
+    && normalizeHandle(post.authorUsername ?? "") === normalizeHandle(input.handle)
+    && normalizeXText(post.text) === normalizeXText(input.text);
+}
+
+/**
+ * Verify a browser-submitted reply using X's public API. The browser is only
+ * the writer; the API response is the authoritative delivery evidence.
+ */
+export async function findVerifiedXReply(credentials: XCredentials, input: { targetId: string; text: string; handle: string; candidateId?: string }) {
+  if (input.candidateId) {
+    const candidate = (await readXPostsByIds(credentials, [input.candidateId])).find((post) => matchesXReply(post, input));
+    if (candidate) return candidate;
+  }
+  const posts = await searchRecentXPosts(credentials, `conversation_id:${input.targetId} from:${normalizeHandle(input.handle)} -is:retweet`, 100);
+  return posts.find((post) => matchesXReply(post, input));
 }
 
 export async function readXPublicationMetrics(credentials: XCredentials, ids: string[]): Promise<XPublicationMetrics[]> {

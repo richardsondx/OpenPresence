@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readChannelSecret, readProviderSecret, readState, writeState } from "../lib/db";
-import { readRecentXPosts, readXPostsByIds } from "../lib/x";
+import { findVerifiedXReply, matchesXReply, normalizeXText, readRecentXPosts, readXPostsByIds } from "../lib/x";
 import { applyOperation, createAgent, derivePublicHistory, recordNativeMirror, recordPublicFooting } from "../lib/runtime";
 import { generateAgentReply } from "../lib/ai";
 import { POST } from "../app/api/x/manage/route";
@@ -182,7 +182,7 @@ describe("native X connection", () => {
     expect(body.mirrorObjects.find((item: { externalRef: { id: string } }) => item.externalRef.id === "deleted-post").archived).toBe(true);
     expect(derivePublicHistory(body, presenceId)).toEqual(expect.arrayContaining([expect.objectContaining({ externalRef: expect.objectContaining({ id: "deleted-post" }), availability: "deleted", externalUrl: "https://x.com/jenny_ai/status/deleted-post" })]));
     expect(body.mirrorEvents.some((item: { event: string; externalRef: { id: string } }) => item.event === "deleted" && item.externalRef.id === "deleted-post")).toBe(true);
-    expect(body.events[0].detail).toContain("reconciled 1 deleted post");
+    expect(body.events.some((item: { detail?: string }) => item.detail?.includes("reconciled 1 deleted post"))).toBe(true);
     vi.unstubAllGlobals();
   });
 
@@ -585,6 +585,33 @@ describe("native X connection", () => {
     expect(body.executions[0]).toMatchObject({ status: "blocked", failure: { code: "PUBLIC_TEXT_INTERNAL_MARKER" } });
     expect(body.executions[0].externalRef).toBeUndefined();
     expect(fetchMock).toHaveBeenCalledTimes(1);
+    vi.unstubAllGlobals();
+  });
+
+  it("matches a Chrome-submitted reply only when X confirms the exact author, parent, and text", () => {
+    const post = {
+      id: "reply-1",
+      text: "I'm voting for cats as test authors, not judges.",
+      authorId: "genny-id",
+      authorUsername: "example_agent",
+      authorName: "Genny",
+      parentId: "boardy-post-1",
+    };
+    expect(normalizeXText("  I’m   voting for cats as test authors, not judges.  ")).toBe(post.text);
+    expect(matchesXReply(post, { targetId: "boardy-post-1", text: "I’m voting for cats as test authors, not judges.", handle: "@example_agent" })).toBe(true);
+    expect(matchesXReply(post, { targetId: "other-post", text: post.text, handle: "@example_agent" })).toBe(false);
+    expect(matchesXReply(post, { targetId: "boardy-post-1", text: post.text, handle: "@another-account" })).toBe(false);
+    expect(matchesXReply(post, { targetId: "boardy-post-1", text: "A different reply", handle: "@example_agent" })).toBe(false);
+  });
+
+  it("can verify through recent search when the browser did not expose a candidate id", async () => {
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: [{ id: "reply-from-search", text: "The verified reply.", author_id: "genny-id", conversation_id: "root-1", referenced_tweets: [{ type: "replied_to", id: "target-1" }] }],
+      includes: { users: [{ id: "genny-id", username: "example_agent", name: "Genny" }] },
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const result = await findVerifiedXReply({ apiKey: "api", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" }, { targetId: "target-1", text: "The verified reply.", handle: "@example_agent" });
+    expect(result?.id).toBe("reply-from-search");
     vi.unstubAllGlobals();
   });
 });

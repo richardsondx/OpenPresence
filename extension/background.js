@@ -1,6 +1,8 @@
 const sessions = new Map();
 const sessionStorageKey = "openpresenceChromeSessions";
 const heartbeatAlarmName = "openpresence-heartbeat";
+const verificationAlarmName = "openpresence-verification";
+const verificationStorageKey = "openpresenceVerificationJobs";
 // The Bridge lease is 120 seconds. Give a tab a small grace period, then
 // requeue work that was claimed by a content script that disappeared during
 // an X navigation or service-worker restart.
@@ -8,6 +10,10 @@ const activeExecutionWatchdogMs = 135_000;
 let lastConfig;
 const seenEvents = new Set();
 const claimRuns = new Map();
+const claimRetryTimers = new Map();
+const verificationTimers = new Map();
+const verificationJobs = new Map();
+const verificationRuns = new Set();
 
 const channelHome = (presence) => presence.domain || (presence.channel === "x" ? "https://x.com/home" : "https://www.linkedin.com/feed/");
 const groupColor = (accent) => {
@@ -38,6 +44,35 @@ function sendStatus(status) {
   chrome.tabs.query({ url: ["http://localhost:3015/*", "http://127.0.0.1:3015/*"] }).then((tabs) => tabs.forEach((tab) => chrome.tabs.sendMessage(tab.id, { type: "OPENPRESENCE_EXTENSION_STATUS", status }).catch(() => {})));
 }
 
+function publicSessionStatus(session) {
+  return {
+    state: "connected",
+    presenceId: session.presence.id,
+    presenceName: session.presence.name,
+    presenceHandle: session.presence.handle,
+    tabId: session.tabId,
+    windowId: session.windowId,
+    identityStatus: session.lastIdentityStatus,
+  };
+}
+
+async function popupStatus(presenceId) {
+  await restoreSessions();
+  const configured = lastConfig || (await chrome.storage.session.get("openpresenceConfig")).openpresenceConfig;
+  const presence = configured?.presences?.find((item) => item.id === presenceId)
+    || configured?.selected
+    || configured?.presences?.find((item) => item.id === configured?.activePresenceId);
+  const session = presence?.id ? sessions.get(presence.id) : undefined;
+  if (session) return publicSessionStatus(session);
+  if (!presence) return { state: "unconfigured" };
+  return {
+    state: presence.browserAccess?.enabled ? "ready" : "disabled",
+    presenceId: presence.id,
+    presenceName: presence.name,
+    presenceHandle: presence.handle,
+  };
+}
+
 function sendSessionContext(session) {
   return chrome.tabs.sendMessage(session.tabId, { type: "OPENPRESENCE_SESSION_CONTEXT", expectedHandle: session.presence.handle, presenceName: session.presence.name }).catch(() => {});
 }
@@ -54,6 +89,59 @@ async function updateBadge() {
 
 async function persistSessions() {
   await chrome.storage.session.set({ [sessionStorageKey]: [...sessions.values()] });
+}
+
+async function persistVerificationJobs() {
+  await chrome.storage.session.set({ [verificationStorageKey]: [...verificationJobs.values()] });
+}
+
+async function restoreVerificationJobs() {
+  if (verificationJobs.size) return;
+  const stored = await chrome.storage.session.get(verificationStorageKey);
+  const saved = Array.isArray(stored[verificationStorageKey]) ? stored[verificationStorageKey] : [];
+  for (const job of saved) {
+    if (!job?.executionId || !job?.presenceId || !job?.result?.executionId || !job?.nextAttemptAt) continue;
+    verificationJobs.set(job.executionId, job);
+  }
+  await scheduleVerificationAlarm();
+}
+
+async function scheduleVerificationAlarm() {
+  const next = [...verificationJobs.values()]
+    .map((job) => new Date(job.nextAttemptAt).getTime())
+    .filter((value) => Number.isFinite(value))
+    .sort((left, right) => left - right)[0];
+  if (next === undefined) {
+    await chrome.alarms.clear(verificationAlarmName);
+    return;
+  }
+  await chrome.alarms.create(verificationAlarmName, { when: Math.max(Date.now() + 250, next) });
+}
+
+async function clearVerificationJob(executionId) {
+  const timer = verificationTimers.get(executionId);
+  if (timer) clearTimeout(timer);
+  verificationTimers.delete(executionId);
+  if (verificationJobs.delete(executionId)) await persistVerificationJobs();
+  await scheduleVerificationAlarm();
+}
+
+async function processVerificationJobs() {
+  await restoreVerificationJobs();
+  const now = Date.now();
+  for (const job of [...verificationJobs.values()]) {
+    if (new Date(job.nextAttemptAt).getTime() > now || verificationRuns.has(job.executionId)) continue;
+    const session = sessions.get(job.presenceId);
+    if (!session) {
+      job.nextAttemptAt = new Date(now + 30_000).toISOString();
+      continue;
+    }
+    verificationRuns.add(job.executionId);
+    void verifySubmittedExecution(session, job.result, job.attempt)
+      .finally(() => verificationRuns.delete(job.executionId));
+  }
+  await persistVerificationJobs();
+  await scheduleVerificationAlarm();
 }
 
 async function reportMetrics(session, metrics) {
@@ -79,6 +167,7 @@ async function reportIdentity(session, username, claimAfterVerification = true) 
   if (typeof username !== "string" || !username.trim()) return undefined;
   try {
     const result = await bridgeRequest(session, "/api/bridge/v1/identity", { method: "POST", body: JSON.stringify({ executorId: session.executorId, username }) });
+    session.lastIdentityStatus = result.identity?.status;
     if (result.identity?.status === "verified") {
       sendStatus({ state: "connected", presenceId: session.presence.id, presenceName: session.presence.name, tabId: session.tabId });
       if (claimAfterVerification) await claim(session);
@@ -93,6 +182,7 @@ async function reportIdentity(session, username, claimAfterVerification = true) 
 }
 
 async function restoreSessions() {
+  await restoreVerificationJobs();
   if (sessions.size) return;
   const stored = await chrome.storage.session.get(sessionStorageKey);
   const saved = Array.isArray(stored[sessionStorageKey]) ? stored[sessionStorageKey] : [];
@@ -193,11 +283,26 @@ async function startSession(presenceId) {
 async function stopSession(presenceId) {
   const session = sessions.get(presenceId);
   if (!session) return;
+  const retryTimer = claimRetryTimers.get(presenceId);
+  if (retryTimer) {
+    clearTimeout(retryTimer);
+    claimRetryTimers.delete(presenceId);
+  }
   sessions.delete(presenceId);
   await persistSessions();
   try { await chrome.tabs.remove(session.tabId); } catch { /* The user may have closed it already. */ }
   await updateBadge();
   sendStatus({ state: "stopped", presenceId });
+}
+
+function scheduleClaimAfterIdentity(session) {
+  if (session.lastIdentityStatus === "mismatch") return;
+  if (claimRetryTimers.has(session.presence.id)) return;
+  const timer = setTimeout(() => {
+    claimRetryTimers.delete(session.presence.id);
+    if (sessions.get(session.presence.id) === session) void claim(session);
+  }, 400);
+  claimRetryTimers.set(session.presence.id, timer);
 }
 
 async function heartbeat(session) {
@@ -237,15 +342,78 @@ async function claim(session) {
         session.activeExecutionId = execution.id;
         session.activeExecutionStartedAt = Date.now();
         await persistSessions();
-        chrome.tabs.sendMessage(session.tabId, { type: "OPENPRESENCE_EXECUTE", execution, expectedHandle: session.presence.handle, presenceName: session.presence.name })
-          .catch((error) => finishExecution(session, { executionId: execution.id, ok: false, code: "CONTROLLED_TAB_UNAVAILABLE", message: error.message || "The controlled tab did not accept the execution.", retryable: true }));
+
+        const targetId = execution.target?.id;
+        const targetUrl = targetId ? `https://x.com/i/web/status/${encodeURIComponent(targetId)}` : channelHome(session.presence);
+
+        try {
+          let tab = null;
+          try {
+            tab = await chrome.tabs.get(session.tabId);
+          } catch {
+            tab = null;
+          }
+
+          if (!tab) {
+            const win = await chrome.windows.get(session.windowId).catch(() => null);
+            tab = await chrome.tabs.create({
+              windowId: win?.id,
+              url: targetUrl,
+              active: true,
+            });
+            session.tabId = tab.id;
+            if (session.groupId && tab.id) {
+              await chrome.tabs.group({ tabIds: [tab.id], groupId: session.groupId }).catch(() => {});
+            }
+            await persistSessions();
+          } else {
+            // Re-use the existing controlled tab: navigate to the target post URL if needed
+            if (tab.url !== targetUrl) {
+              await chrome.tabs.update(session.tabId, { url: targetUrl });
+            }
+          }
+
+          await waitForTabComplete(session.tabId);
+          await sendSessionContext(session);
+
+          // Deliver the execution to the controlled tab
+          chrome.tabs.sendMessage(session.tabId, {
+            type: "OPENPRESENCE_EXECUTE",
+            execution,
+            expectedHandle: session.presence.handle,
+            presenceName: session.presence.name,
+            dedicatedTab: false,
+          }).catch((error) => {
+            finishExecution(session, {
+              executionId: execution.id,
+              ok: false,
+              code: "CONTROLLED_TAB_UNAVAILABLE",
+              message: error.message || "The controlled tab did not accept the execution.",
+              retryable: true,
+            });
+          });
+        } catch (error) {
+          finishExecution(session, {
+            executionId: execution.id,
+            ok: false,
+            code: "EXECUTION_NAVIGATION_FAILED",
+            message: error.message || "Could not navigate controlled tab to target URL.",
+            retryable: true,
+          });
+        }
       }
       // A healthy Bridge can still be unable to claim work when the tab's
       // account identity is stale. Re-verify the signed-in account instead
       // of leaving the queue blocked until a manual reload or navigation.
       // Do not immediately claim from the identity callback: an empty queue
       // would otherwise recurse forever between claim and identity checks.
-      if (!claimed.length) await requestIdentity(session, false);
+      if (!claimed.length && result.retryAfterIdentity) {
+        await requestIdentity(session, false);
+        // The identity POST and the claim request are separate round trips.
+        // Retry only when the server explicitly says the queue was held for
+        // account freshness; otherwise an empty queue must stay quiet.
+        scheduleClaimAfterIdentity(session);
+      }
     } catch (error) { sendStatus({ state: "error", presenceId: session.presence.id, message: error.message }); }
   })();
   claimRuns.set(session.presence.id, run);
@@ -261,8 +429,74 @@ async function ingest(session, observation) {
   catch (error) { sendStatus({ state: "error", presenceId: session.presence.id, message: error.message }); }
 }
 
+function releaseActiveExecution(session, executionId) {
+  if (session.activeExecutionId !== executionId) return;
+  session.activeExecutionId = undefined;
+  session.activeExecutionStartedAt = undefined;
+  void persistSessions();
+}
+
+async function verifySubmittedExecution(session, result, attempt = 0) {
+  if (!result.executionId) return;
+  const executionPath = `/api/bridge/v1/executions/${encodeURIComponent(result.executionId)}/verify`;
+  try {
+    const response = await bridgeRequest(session, executionPath, {
+      method: "POST",
+      body: JSON.stringify({ executorId: session.executorId, candidateExternalRef: result.externalRef, observedAt: new Date().toISOString() })
+    });
+    if (response.verified || response.execution?.status === "succeeded") {
+      await clearVerificationJob(result.executionId);
+      releaseActiveExecution(session, result.executionId);
+      setTimeout(() => void claim(session), 2_000);
+      return;
+    }
+    if (response.execution?.status === "verification-pending" && response.execution?.failure?.retryable !== false && attempt < 5) {
+      const delay = [1_000, 3_000, 8_000, 20_000, 45_000][attempt] || 45_000;
+      const job = { executionId: result.executionId, presenceId: session.presence.id, result, attempt: attempt + 1, nextAttemptAt: new Date(Date.now() + delay).toISOString() };
+      verificationJobs.set(result.executionId, job);
+      await persistVerificationJobs();
+      await scheduleVerificationAlarm();
+      const timer = setTimeout(() => {
+        verificationTimers.delete(result.executionId);
+        if (verificationRuns.has(result.executionId)) return;
+        verificationRuns.add(result.executionId);
+        void verifySubmittedExecution(session, result, attempt + 1).finally(() => verificationRuns.delete(result.executionId));
+      }, delay);
+      verificationTimers.set(result.executionId, timer);
+      // Retain session.activeExecutionId so subsequent executions remain strictly queued until verified
+      return;
+    }
+    await clearVerificationJob(result.executionId);
+    releaseActiveExecution(session, result.executionId);
+    setTimeout(() => void claim(session), 2_000);
+  } catch (error) {
+    if (attempt < 5) {
+      const delay = [1_000, 3_000, 8_000, 20_000, 45_000][attempt] || 45_000;
+      verificationJobs.set(result.executionId, { executionId: result.executionId, presenceId: session.presence.id, result, attempt: attempt + 1, nextAttemptAt: new Date(Date.now() + delay).toISOString() });
+      await persistVerificationJobs();
+      await scheduleVerificationAlarm();
+      const timer = setTimeout(() => {
+        verificationTimers.delete(result.executionId);
+        if (verificationRuns.has(result.executionId)) return;
+        verificationRuns.add(result.executionId);
+        void verifySubmittedExecution(session, result, attempt + 1).finally(() => verificationRuns.delete(result.executionId));
+      }, delay);
+      verificationTimers.set(result.executionId, timer);
+    } else {
+      await clearVerificationJob(result.executionId);
+      sendStatus({ state: "error", presenceId: session.presence.id, message: error.message || "X API verification could not be completed." });
+      releaseActiveExecution(session, result.executionId);
+      setTimeout(() => void claim(session), 2_000);
+    }
+  }
+}
+
 async function finishExecution(session, result) {
   if (!result.executionId) return;
+  if (result.verifyWithApi) {
+    await verifySubmittedExecution(session, result);
+    return;
+  }
   let acknowledged = false;
   try {
     if (result.ok) {
@@ -275,47 +509,63 @@ async function finishExecution(session, result) {
     }
   } catch (error) { sendStatus({ state: "error", presenceId: session.presence.id, message: error.message }); }
   finally {
-    if (session.activeExecutionId === result.executionId) {
-      session.activeExecutionId = undefined;
-      session.activeExecutionStartedAt = undefined;
-      await persistSessions();
-    }
+    releaseActiveExecution(session, result.executionId);
   }
-  // Always resume claiming after a content-script result. A failed or
-  // expired acknowledgement must not leave the local queue idle; the server
-  // remains the source of truth and will either expose the next queued
-  // execution or re-expose this one once its lease expires.
-  setTimeout(() => void claim(session), acknowledged ? 250 : 1000);
+  setTimeout(() => void claim(session), acknowledged ? 2_000 : 3_000);
 }
 
-chrome.runtime.onMessage.addListener((message, sender) => {
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
   (async () => {
-    await restoreSessions();
-    if (message?.type === "OPENPRESENCE_APP_STATE") {
-      lastConfig = message.config;
-      await chrome.storage.session.set({ openpresenceConfig: lastConfig });
-      return;
-    }
-    if (message?.type === "OPENPRESENCE_OPEN_CHROME") {
-      try { await startSession(message.presenceId || lastConfig?.activePresenceId); }
-      catch (error) { sendStatus({ state: "error", presenceId: message.presenceId, message: error.message }); }
-      return;
-    }
-    if (message?.type === "OPENPRESENCE_STOP_CHROME") { await stopSession(message.presenceId); return; }
-    const session = [...sessions.values()].find((item) => item.tabId === sender.tab?.id);
-    if (!session) return;
-    if (message?.type === "OPENPRESENCE_OBSERVATION") await ingest(session, message.observation);
-    if (message?.type === "OPENPRESENCE_ACCOUNT_IDENTITY") await reportIdentity(session, message.username, message.claimAfterVerification !== false);
-    if (message?.type === "OPENPRESENCE_METRICS") {
-      try {
-        await reportMetrics(session, message.metrics);
-        sendStatus({ state: "connected", presenceId: session.presence.id, presenceName: session.presence.name, tabId: session.tabId });
-      } catch (error) {
-        sendStatus({ state: "error", presenceId: session.presence.id, message: error.message || "The channel metrics could not be saved." });
+    try {
+      await restoreSessions();
+      if (message?.type === "OPENPRESENCE_GET_STATUS") {
+        sendResponse(await popupStatus(message.presenceId || lastConfig?.activePresenceId));
+        return;
       }
+      if (message?.type === "OPENPRESENCE_APP_STATE") {
+        lastConfig = message.config;
+        await chrome.storage.session.set({ openpresenceConfig: lastConfig });
+        sendResponse({ ok: true });
+        return;
+      }
+      if (message?.type === "OPENPRESENCE_OPEN_CHROME") {
+        try {
+          const session = await startSession(message.presenceId || lastConfig?.activePresenceId);
+          sendResponse({ ok: true, status: publicSessionStatus(session) });
+        } catch (error) {
+          const detail = error instanceof Error ? error.message : "OpenPresence could not open the controlled Chrome session.";
+          sendStatus({ state: "error", presenceId: message.presenceId, message: detail });
+          sendResponse({ ok: false, error: detail });
+        }
+        return;
+      }
+      if (message?.type === "OPENPRESENCE_STOP_CHROME") {
+        await stopSession(message.presenceId);
+        sendResponse({ ok: true, status: await popupStatus(message.presenceId) });
+        return;
+      }
+      const execContext = sender.tab?.id ? executionTabs.get(sender.tab.id) : undefined;
+      const session = execContext?.session || [...sessions.values()].find((item) => item.tabId === sender.tab?.id);
+      if (!session) { sendResponse({ ok: false, error: "The controlled Chrome session is no longer active." }); return; }
+      if (message?.type === "OPENPRESENCE_OBSERVATION") await ingest(session, message.observation);
+      if (message?.type === "OPENPRESENCE_ACCOUNT_IDENTITY") await reportIdentity(session, message.username, message.claimAfterVerification !== false);
+      if (message?.type === "OPENPRESENCE_METRICS") {
+        try {
+          await reportMetrics(session, message.metrics);
+          sendStatus({ state: "connected", presenceId: session.presence.id, presenceName: session.presence.name, tabId: session.tabId });
+        } catch (error) {
+          sendStatus({ state: "error", presenceId: session.presence.id, message: error.message || "The channel metrics could not be saved." });
+        }
+      }
+      if (message?.type === "OPENPRESENCE_EXECUTION_RESULT") {
+        await finishExecution(session, message.result);
+      }
+      sendResponse({ ok: true });
+    } catch (error) {
+      sendResponse({ ok: false, error: error instanceof Error ? error.message : "The OpenPresence extension request failed." });
     }
-    if (message?.type === "OPENPRESENCE_EXECUTION_RESULT") await finishExecution(session, message.result);
   })();
+  return true;
 });
 
 chrome.tabs.onRemoved.addListener((tabId) => {
@@ -339,12 +589,16 @@ chrome.tabs.onActivated.addListener(({ tabId }) => {
 });
 
 chrome.alarms.onAlarm.addListener((alarm) => {
+  if (alarm.name === verificationAlarmName) {
+    void restoreSessions().then(() => processVerificationJobs());
+    return;
+  }
   if (alarm.name !== heartbeatAlarmName) return;
   void restoreSessions().then(() => Promise.all([...sessions.values()].map(async (session) => {
     await heartbeat(session);
     await claim(session);
     if (!session.lastMetricsAt || Date.now() - session.lastMetricsAt >= 15 * 60_000) await requestMetrics(session);
-  })));
+  })).then(() => processVerificationJobs()));
 });
 chrome.runtime.onInstalled.addListener(() => { void ensureHeartbeatAlarm(); });
 chrome.runtime.onStartup.addListener(() => { void ensureHeartbeatAlarm(); });

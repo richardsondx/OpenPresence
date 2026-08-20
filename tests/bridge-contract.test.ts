@@ -21,8 +21,8 @@ describe("Bridge adapter contract", () => {
 
   it("keeps the shipped Chrome adapter capability-scoped", () => {
     expect(chromeBrowserBridgeCapabilities()).toMatchObject({
-      affordances: ["reply"],
-      formats: ["x.reply"],
+      affordances: ["reply", "quote", "repost", "like"],
+      formats: ["x.reply", "x.quote", "x.repost", "x.like"],
       metrics: ["followers", "public_metrics"],
     });
   });

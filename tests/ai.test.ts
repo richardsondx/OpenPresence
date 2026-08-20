@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { generateAgentReply, generateAgentSocialDecision, generateAssetResearchPlannerDecision, generatePresenceChatReply, parseAgentSocialDecision, parseAgentSocialEdit, parseAgentSocialJudgment, parseAssetResearchPlannerDecision, parseGrowthReviewDecision } from "../lib/ai";
+import { generateAgentReply, generateAgentSocialDecision, generateAssetResearchPlannerDecision, generatePlaygroundTestStimulus, generatePresenceChatReply, parseAgentSocialDecision, parseAgentSocialEdit, parseAgentSocialJudgment, parseAssetResearchPlannerDecision, parseGrowthReviewDecision, parsePlaygroundTestStimulus } from "../lib/ai";
 import { saveProviderSecret } from "../lib/db";
 import { applyOperation, createAgent } from "../lib/runtime";
+import type { PresenceBrief } from "../lib/types";
 
 describe("Agent social decision parsing", () => {
   it("parses bounded model-backed Growth Review decisions", () => {
@@ -31,6 +32,17 @@ describe("Agent social decision parsing", () => {
   });
   it("accepts structured affordance decisions", () => {
     expect(parseAgentSocialDecision('{"action":"quote","text":"The denominator is the story.","rationale":"Adds a distinct point."}', ["post", "quote", "no_op"])).toEqual({ action: "quote", text: "The denominator is the story.", rationale: "Adds a distinct point." });
+  });
+
+  it("preserves independent social acts in a composable decision bundle", () => {
+    expect(parseAgentSocialDecision('{"acts":[{"action":"like","rationale":"A quiet signal is enough."},{"action":"follow","rationale":"This author is relevant to the Presence territory."},{"action":"quote","text":"The denominator is the story.","rationale":"Adds a distinct point."}]}', ["like", "follow", "quote", "no_op"])).toMatchObject({
+      action: "like",
+      acts: [
+        { action: "like", rationale: "A quiet signal is enough." },
+        { action: "follow", rationale: "This author is relevant to the Presence territory." },
+        { action: "quote", text: "The denominator is the story." },
+      ],
+    });
   });
 
   it("normalizes silence and rejects unsupported actions", () => {
@@ -269,10 +281,17 @@ describe("Agent social decision parsing", () => {
       if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
       return new Response(JSON.stringify({ message: { content: "Ada answered from the public self." } }), { status: 200 });
     }));
+    const temporaryBrief: PresenceBrief = {
+      purpose: "Temporary rehearsal purpose for testing.",
+      audience: "Test audience",
+      primaryTerritory: ["Rehearsal testing"],
+      adjacentTerritory: ["Edge cases"],
+      boundaries: ["Noise"],
+    };
     await expect(generatePresenceChatReply(state, presence.id, "What should I notice next?", [
       { role: "presence", content: "Start with the evidence." },
       { role: "user", content: "I am listening." },
-    ], "The attached chart was not inspected.")).resolves.toBe("Ada answered from the public self.");
+    ], "The attached chart was not inspected.", undefined, temporaryBrief)).resolves.toBe("Ada answered from the public self.");
     const chatCall = calls.find((call) => call.url.endsWith("/api/chat"));
     const messages = chatCall?.body?.messages as Array<{ role: string; content: string }>;
     expect(messages).toHaveLength(4);
@@ -282,7 +301,36 @@ describe("Agent social decision parsing", () => {
     expect(messages[0]?.content).toContain("This is a private test conversation with the Presence's public self");
     expect(messages[0]?.content).toContain("CONVERSATIONAL REHEARSAL MODE");
     expect(messages[0]?.content).toContain("The attached chart was not inspected.");
+    expect(messages[0]?.content).toContain("TEMPORARY PRESENCE BRIEF PREVIEW");
+    expect(messages[0]?.content).toContain("Temporary rehearsal purpose for testing.");
+    expect(messages[0]?.content).toContain("Rehearsal testing");
     expect(messages[0]?.content).not.toContain("Private operator transcript");
+  });
+
+  it("injects the bound internal conversation style guide into social cognition", async () => {
+    let state = createAgent({ name: "Genny", description: "Make useful founder observations.", mode: "agent", handle: "@genny_ai", accent: "#D68754" });
+    state.providerConnections.push({ id: "ollama-style-guide", provider: "ollama", label: "Ollama", status: "local", endpoint: "http://ollama.test", createdAt: new Date().toISOString() });
+    state = applyOperation(state, { type: "setModel", provider: "ollama", model: "glm-5.2:cloud", vision: false });
+    state = applyOperation(state, { type: "createKnowledgeCollection", name: "Genny — Conversation Style", description: "Reference guide for conversational social voice", defaultRole: "reference", defaultUse: "internal" });
+    const collection = state.knowledgeCollections![0]!;
+    state = applyOperation(state, { type: "addKnowledgeItem", collectionId: collection.id, title: "Genny Conversation Style Guide", sourceType: "markdown", content: "## Replies\n\nUse one sentence per line and stop after the useful move." });
+    state = applyOperation(state, { type: "setKnowledgeBinding", presenceId: state.presence!.id, collectionId: collection.id, maximumUse: "internal" });
+    const calls: Array<{ url: string; body?: Record<string, unknown> }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
+      calls.push({ url, body });
+      if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
+      return new Response(JSON.stringify({ message: { content: "A concise reply." } }), { status: 200 });
+    }));
+
+    await generatePresenceChatReply(state, state.presence!.id, "I am bored", []);
+
+    const chatCall = calls.find((call) => call.url.endsWith("/api/chat"));
+    const system = String((chatCall?.body?.messages as Array<{ role: string; content: string }>)[0]?.content ?? "");
+    expect(system).toContain('"styleGuidance"');
+    expect(system).toContain("Use one sentence per line and stop after the useful move.");
+    expect(system).toContain("internal control context");
   });
 
   it("keeps Teach person-shaped and does not invite generic onboarding for a short cue", async () => {
@@ -317,6 +365,36 @@ describe("Agent social decision parsing", () => {
     await expect(generateAgentReply(state, "Say hello.")).resolves.toBe("Luna answered through the shared runtime.");
     expect(body?.model).toBe("gpt-5.6-luna");
     expect(body?.reasoning_effort).toBe("medium");
+  });
+
+  it("parses structured Playground test stimuli", () => {
+    const parsed = parsePlaygroundTestStimulus('```json\n{"authorName":"Maya Chen","authorHandle":"@mayachen","content":"Why multi-agent systems need explicit memory schemas.","rationale":"Shares a strong thesis inviting a quote tweet."}\n```', "quote");
+    expect(parsed).toEqual({
+      authorName: "Maya Chen",
+      authorHandle: "@mayachen",
+      content: "Why multi-agent systems need explicit memory schemas.",
+      targetAffordance: "quote",
+      rationale: "Shares a strong thesis inviting a quote tweet.",
+    });
+  });
+
+  it("generates tailored test stimuli across all target affordances under mock runtime", async () => {
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
+    const state = createAgent({ name: "Genny", description: "Build persistent social presence.", mode: "agent", handle: "@genny", accent: "#D68754" });
+    const presenceId = state.presence!.id;
+
+    const quoteTarget = await generatePlaygroundTestStimulus(state, presenceId, "quote");
+    expect(quoteTarget).toMatchObject({ targetAffordance: "quote", authorHandle: "@mayachen" });
+    expect(quoteTarget.content.length).toBeGreaterThan(10);
+
+    const repostTarget = await generatePlaygroundTestStimulus(state, presenceId, "repost");
+    expect(repostTarget).toMatchObject({ targetAffordance: "repost", authorHandle: "@alexrivera" });
+
+    const likeTarget = await generatePlaygroundTestStimulus(state, presenceId, "like");
+    expect(likeTarget).toMatchObject({ targetAffordance: "like", authorHandle: "@sarahlin_dev" });
+
+    const replyTarget = await generatePlaygroundTestStimulus(state, presenceId, "reply");
+    expect(replyTarget).toMatchObject({ targetAffordance: "reply", authorHandle: "@davidpark_ai" });
   });
 });
 

@@ -8,6 +8,8 @@
     "start": "node scripts/openpresence-server.mjs start",
     "openpresence": "node bin/openpresence.mjs",
     "bridge:x": "node scripts/x-browser-bridge.mjs",
+    "test:repost-live": "node scripts/run-repost-attention-test.mjs",
+    "test:capability-live": "node scripts/run-repost-attention-test.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",
     "test": "vitest run",

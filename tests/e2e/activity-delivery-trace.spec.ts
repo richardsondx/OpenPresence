@@ -5,6 +5,140 @@ test.beforeEach(async ({ request }) => {
   expect(response.ok()).toBeTruthy();
 });
 
+test("Activity surfaces Genny's self-directed attention", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Agent name").fill("Jenny");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+
+  await page.route("**/api/state**", async (route) => {
+    if (route.request().method() !== "GET" || new URL(route.request().url()).pathname !== "/api/state") return route.continue();
+    const response = await route.fetch();
+    if (response.status() !== 200 || !response.headers()["content-type"]?.includes("application/json")) return route.fulfill({ response });
+    const body = await response.json();
+    const presenceId = body.presence.id;
+    const now = new Date().toISOString();
+    body.events.unshift(
+      { id: "self-directed-activity-look", type: "system", title: "Genny looked around X", detail: "Genny followed its current interests across AI agents.", time: now, tone: "positive", presenceId },
+      { id: "self-directed-activity-held", type: "system", title: "Self-directed opportunity held", detail: "Nothing in the candidate earned an outward act.", time: now, tone: "quiet", presenceId },
+    );
+    await route.fulfill({ response, json: body });
+  });
+
+  await page.reload();
+  await expect(page.locator(".activity-page")).toBeVisible();
+  const activity = page.locator(".activity-log");
+  await expect(activity.locator(".event-title").filter({ hasText: "Genny looked around X" })).toBeVisible();
+  await expect(activity.locator(".event-title").filter({ hasText: "Self-directed opportunity held" })).toBeVisible();
+});
+
+test("Activity keeps durable Assignments visible before any delivery exists", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Agent name").fill("Jenny");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+
+  await page.route("**/api/state**", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    const body = await response.json();
+    const presenceId = body.presence.id;
+    const now = new Date().toISOString();
+    body.presence.environment = "live";
+    const listedPresence = body.presences?.find((item: { id: string }) => item.id === presenceId);
+    if (listedPresence) listedPresence.environment = "live";
+    body.assignments.unshift({
+      id: "visible-assignment",
+      agentId: body.agent.id,
+      presenceId,
+      channelId: body.presence.channel,
+      environment: "live",
+      title: "Produce one useful original post",
+      instruction: "Produce one useful original post about persistent agents.",
+      deliverable: { type: "original_publication", quantity: 1, quantityMode: "exact" },
+      quantityPolicy: { quantity: 1, mode: "exact", period: "assignment" },
+      executionPolicy: { usePresenceEnvelope: true },
+      status: "active",
+      progress: { required: 1, verified: 0 },
+      rejectedCandidates: 0,
+      systemFailures: 0,
+      work: { phase: "candidate_review", attempts: 0, maxAttempts: 4, storiesResearched: 0 },
+      createdAt: now,
+      updatedAt: now,
+    });
+    body.assignments.unshift({
+      id: "completed-assignment",
+      agentId: body.agent.id,
+      presenceId,
+      channelId: body.presence.channel,
+      environment: "live",
+      title: "Publish one verified post",
+      instruction: "Publish one verified post about persistent agents.",
+      deliverable: { type: "original_publication", quantity: 1, quantityMode: "exact" },
+      quantityPolicy: { quantity: 1, mode: "exact", period: "assignment" },
+      executionPolicy: { usePresenceEnvelope: true },
+      status: "completed",
+      progress: { required: 1, verified: 1 },
+      completionReport: "The post was verified in the Social Mirror today.",
+      rejectedCandidates: 0,
+      systemFailures: 0,
+      work: { phase: "completed", attempts: 1, maxAttempts: 4, storiesResearched: 0 },
+      createdAt: now,
+      updatedAt: now,
+    });
+    await route.fulfill({ response, json: body });
+  });
+
+  await page.reload();
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Recent activity" })).toBeVisible();
+  await expect(page.locator(".activity-log-explainer")).toContainText("Open Assignments above are the source of truth");
+  const assignments = page.locator("[data-testid=assignment-queue-summary]");
+  await expect(assignments).toContainText("1 open");
+  await expect(assignments).toContainText("Planned · 1");
+  await expect(assignments).toContainText("Produce one useful original post");
+  await expect(assignments).toContainText("0/1 verified");
+  await expect(assignments).toContainText("no verified result yet");
+  await expect(assignments.locator(".assignment-queue-item")).toHaveCount(1);
+  await assignments.getByRole("button", { name: "Completed · 1" }).click();
+  await expect(assignments.locator(".assignment-queue-item")).toHaveCount(1);
+  await expect(assignments).toContainText("Publish one verified post");
+  await expect(assignments).toContainText("1/1 verified");
+  await expect(assignments).toContainText("Today · verified result");
+  await expect(assignments).toContainText("verified result");
+});
+
+test("Activity distinguishes an older pending action from the latest check", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Agent name").fill("Jenny");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+
+  await page.route("**/api/state**", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    const body = await response.json();
+    const presenceId = body.presence.id;
+    const now = Date.now();
+    const older = new Date(now - 10 * 60 * 1000).toISOString();
+    const current = new Date(now).toISOString();
+    body.presence.environment = "live";
+    const listedPresence = body.presences?.find((item: { id: string }) => item.id === presenceId);
+    if (listedPresence) listedPresence.environment = "live";
+    body.socialIntents.push({ id: "older-intent", agentId: body.agent.id, presenceId, affordance: "x.reply", target: { type: "x.post", id: "older-post" }, priority: 1, validity: {}, state: "active", formedAt: older, updatedAt: older, environment: "live" });
+    body.executions.push({ id: "older-execution", socialIntentId: "older-intent", presenceId, affordance: "x.reply", mode: "auto", status: "queued", attempts: 0, connector: "bridge", idempotencyKey: "older-execution", target: { type: "x.post", id: "older-post" }, createdAt: older, updatedAt: older, environment: "live" });
+    body.mirrorObjects.push({ id: "older-post-object", presenceId, channelId: body.presence.channel, environment: "live", externalRef: { type: "x.post", id: "older-post" }, objectType: "post", author: { displayName: "div_yahan", handle: "div_yahan" }, content: { text: "Some of the best essays I read on Substack last week" }, observedAt: older, visibility: "public", shareability: "presence-only" });
+    body.events.unshift({ id: "current-pulse", type: "system", title: "Pulse completed", detail: "The latest check did not select a public action.", time: current, tone: "quiet", presenceId, invocationId: "current-pulse" });
+    await route.fulfill({ response, json: body });
+  });
+
+  await page.reload();
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await expect(page.locator(".execution-ledger")).toContainText("Pending from an earlier check");
+  await expect(page.locator(".execution-origin-note")).toContainText("not a new action from the latest check");
+  await expect(page.locator(".recent-public-attempts-empty")).toContainText("1 pending public action was selected by an earlier check and remains");
+});
+
 test("Activity explains a legacy failed Pulse from its adjacent delivery event", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
@@ -34,7 +168,7 @@ test("Activity explains a legacy failed Pulse from its adjacent delivery event",
   await page.reload();
   await page.getByRole("button", { name: "Activity", exact: true }).click();
   const queue = page.locator("[data-testid=execution-queue-summary]");
-  await expect(queue).toContainText("1 need attention");
+  await expect(queue).toContainText("1 failure to resolve");
   await expect(queue).toContainText("1 previous action was not delivered");
   await expect(queue).toContainText("Latest:");
   const pulse = page.locator(".event-row").filter({ hasText: "Pulse completed" }).first();
@@ -84,6 +218,51 @@ test("Activity shows every public attempt triggered by the latest Pulse", async 
   await expect(attempts).toContainText("Latest check reply one.");
   await expect(attempts).toContainText("Latest check reply two.");
   await expect(attempts).not.toContainText("Older check reply that must stay out of this result.");
+});
+
+test("Activity paginates long failure history", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Agent name").fill("Jenny");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+
+  await page.route("**/api/state**", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    const body = await response.json();
+    const presenceId = body.presence.id;
+    const now = new Date().toISOString();
+    body.presence.environment = "live";
+    const listedPresence = body.presences?.find((item: { id: string }) => item.id === presenceId);
+    if (listedPresence) listedPresence.environment = "live";
+    body.executions.push(...Array.from({ length: 21 }, (_, index) => ({
+      id: `reviewed-failure-${index}`,
+      presenceId,
+      affordance: "x.reply",
+      mode: "auto",
+      status: "failed",
+      attempts: 1,
+      connector: "native",
+      idempotencyKey: `reviewed-failure-${index}`,
+      target: { type: "x.post", id: `source-${index}` },
+      failure: { message: "X access was unavailable.", retryable: false, reviewedAt: now, reviewDisposition: "operator_action_required", reviewNote: "Historical failure retained for review." },
+      createdAt: now,
+      updatedAt: now,
+      environment: "live",
+    })));
+    await route.fulfill({ response, json: body });
+  });
+
+  await page.reload();
+  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  await page.getByText("Reviewed failures · 21 · still not delivered", { exact: true }).click();
+  const pages = page.getByRole("navigation", { name: "Reviewed failure pages" });
+  await expect(pages).toContainText("Showing 1–10 of 21");
+  await expect(pages).toContainText("Page 1 of 3");
+  await expect(page.locator(".failed-attempt-card-reviewed")).toHaveCount(10);
+  await pages.getByRole("button", { name: "Older" }).click();
+  await expect(pages).toContainText("Showing 11–20 of 21");
+  await expect(pages).toContainText("Page 2 of 3");
 });
 
 test("Activity pipeline cards reveal the exact selected and preparing actions", async ({ page }) => {

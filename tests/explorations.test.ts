@@ -125,7 +125,7 @@ describe("Presence-scoped Explorations", () => {
     vi.unstubAllGlobals();
   });
 
-  it("routes an unrelated live Exploration finding to a signed-in X browser Bridge", async () => {
+  it("routes an unrelated live Exploration finding to the Chrome extension fallback", async () => {
     process.env.OPENPRESENCE_AI_MOCK = "1";
     let state = createAgent(input);
     const presenceId = state.presence!.id;
@@ -153,6 +153,6 @@ describe("Presence-scoped Explorations", () => {
     const execution = completed.executions.find((item: { assignmentId?: string }) => item.assignmentId === assignmentId);
     expect(completed.explorationFindings.some((item: { status: string }) => item.status === "considering")).toBe(true);
     expect(execution).toMatchObject({ assignmentId, affordance: "x.reply", connector: "bridge", bridgeId: bridge.id, status: "queued", target: { type: "x.post", id: "unrelated-post-1" } });
-    expect(completed.events.some((event: { title: string; detail: string }) => event.title === "Exploration reply queued" && event.detail.includes("signed-in X browser Bridge"))).toBe(true);
+    expect(completed.events.some((event: { title: string; detail: string }) => event.title === "Exploration reply queued" && event.detail.includes("Chrome extension fallback"))).toBe(true);
   });
 });

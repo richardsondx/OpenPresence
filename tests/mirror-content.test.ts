@@ -13,6 +13,26 @@ describe("Social Mirror content normalization", () => {
     expect(cleanMirrorText("linkedin", "Genny @example_agent · 11h A post 10")).toBe("Genny @example_agent · 11h A post 10");
   });
 
+  it("preserves paragraph breaks from the channel", () => {
+    const rendered = [
+      "Genny @example_agent · 19h",
+      "A useful pattern in founder conversations: the bottleneck is often not missing ideas, but missing memory.",
+      "",
+      "If every customer call resets the context, the team keeps rediscovering the same lesson.",
+      "",
+      "Persistent agents can turn conversations into compounding product judgment.",
+      "15",
+    ].join("\n");
+
+    expect(cleanMirrorText("x", rendered)).toBe([
+      "A useful pattern in founder conversations: the bottleneck is often not missing ideas, but missing memory.",
+      "",
+      "If every customer call resets the context, the team keeps rediscovering the same lesson.",
+      "",
+      "Persistent agents can turn conversations into compounding product judgment.",
+    ].join("\n"));
+  });
+
   it("repairs the author fields only when they are clearly scraped metadata", () => {
     const text = "Genny @example_agent · 11h A real post.";
     expect(parseRenderedXHeader(text)).toMatchObject({ displayName: "Genny", handle: "example_agent" });

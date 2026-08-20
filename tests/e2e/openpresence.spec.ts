@@ -162,22 +162,36 @@ test("Presence Chat speaks as the selected public self without teaching the Agen
   await createAgent(page);
   await navigate(page, "Chat");
   await expect(page.getByLabel("Post for Jenny to encounter")).toBeVisible();
-  await expect(page.locator(".topbar-actions")).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "See Jenny in the feed." })).toBeVisible();
+  await expect(page.locator(".topbar-actions")).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "New rehearsal", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "See Jenny in the feed." })).toHaveCount(0);
   await expect(page.getByText("Public self · @jenny_ai", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("Chat · X", { exact: true })).toBeVisible();
+  await expect(page.getByText("Chat · X", { exact: true })).toHaveCount(0);
   await expect(page.getByText("X · Jenny", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Start the rehearsal.", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("Add a post to the scene, or choose Reply on a post to continue its thread. Nothing publishes or changes the Agent during this rehearsal.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Add a post to the scene, or choose Reply on a post to continue its thread. Nothing publishes or changes the Agent during this rehearsal.", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Post", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("button", { name: "Reply", exact: true })).toBeDisabled();
   await expect(page.getByRole("complementary", { name: "Context & Changes sidebar" })).toHaveCount(0);
   await expect(page.getByText("Private thread · not published", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Brief rehearsal", exact: true })).toBeVisible();
+  await expect(page.getByText("Durable", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Edit brief", exact: true }).click();
+  await expect(page.getByRole("heading", { name: /Rehearse brief for/ })).toBeVisible();
+  await page.getByLabel("Presence Brief purpose").fill("Explore edge cases in autonomous software.");
+  await page.getByRole("button", { name: "Preview in rehearsal", exact: true }).click();
+  await expect(page.getByText("Preview active", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Save to Presence", exact: true })).toBeVisible();
   await expect(page.getByLabel("Model")).toHaveCount(0);
   await expectComposerLayout(page);
   await expectChatViewportLayout(page);
+  let chatCallCount = 0;
   await page.route("**/api/state", async (route) => {
     if (route.request().method() === "POST" && (route.request().postDataJSON() as { type?: string }).type === "sendPresenceChatMessage") {
+      chatCallCount++;
+      if (chatCallCount === 1) {
+        expect((route.request().postDataJSON() as { briefOverride?: { purpose?: string } }).briefOverride?.purpose).toContain("Explore edge cases");
+      }
       await new Promise((resolve) => setTimeout(resolve, 800));
     }
     await route.continue();
@@ -194,6 +208,10 @@ test("Presence Chat speaks as the selected public self without teaching the Agen
   expect(afterChat.presenceChatSessions[0].messages.map((message: { role: string }) => message.role)).toEqual(["user", "presence"]);
   expect(afterChat.conversations[0].messages).toHaveLength(0);
   expect(afterChat.changeSets).toHaveLength(0);
+  await page.getByRole("button", { name: "Save to Presence", exact: true }).click();
+  await expect(page.getByText("Durable", { exact: true })).toBeVisible();
+  const afterSave = await (await request.get("/api/state")).json();
+  expect(afterSave.presences[0].brief.purpose).toBe("Explore edge cases in autonomous software.");
   await page.getByRole("button", { name: "Reply to this post", exact: true }).click();
   await expect(page.getByRole("button", { name: "Reply", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByLabel("Reply for Jenny to encounter")).toBeVisible();
@@ -211,7 +229,7 @@ test("Presence Chat speaks as the selected public self without teaching the Agen
   await expect(page.getByText("The edge cases are where the product tells the truth.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "New rehearsal", exact: true }).click();
   await expect(page.getByText("Start the rehearsal.", { exact: true })).toHaveCount(0);
-  await expect(page.getByText("Add a post to the scene, or choose Reply on a post to continue its thread. Nothing publishes or changes the Agent during this rehearsal.", { exact: true })).toBeVisible();
+  await expect(page.getByText("The edge cases are where the product tells the truth.", { exact: true })).toHaveCount(0);
   expect(duplicateKeyErrors).toEqual([]);
 });
 
@@ -272,6 +290,7 @@ test("Teach is the operator-facing surface for durable Agent changes", async ({ 
   await expect(page.getByRole("status").getByText("Thinking", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Taste proposal created" })).toBeVisible();
   await expect(page.getByRole("status")).toHaveCount(0);
+  await expect(page.locator(".context-change-time").first()).toHaveText(/^(just now|\d+m ago|\d+h ago|\d+ day(s)? ago|\d+ week(s)? ago)$/);
   const navigation = test.info().project.name === "mobile" ? page.locator(".mobile-nav") : page.locator(".sidebar");
   await expect(navigation.getByRole("button", { name: /^Teach$/ })).toHaveClass(/active/);
 });
@@ -656,13 +675,12 @@ test("Growth exposes evidence freshness and the next Agent review", async ({ pag
 
   await page.reload();
   await navigate(page, "Growth");
-  const cadence = page.getByRole("region", { name: "Growth check status" });
-  await expect(cadence).toContainText("When Growth was checked");
-  await expect(cadence).toContainText("Last channel evidence");
-  await expect(cadence).toContainText("Not observed");
-  await expect(cadence).toContainText("Next Agent review");
-  await expect(cadence).toContainText(/In \d+:\d{2}:\d{2}|Scheduled|Due now/);
-  await expect(cadence).toContainText("Next channel check");
+  await expect(page.getByRole("region", { name: "Genny's current read" })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Genny's current read" })).toContainText("Genny is still learning");
+  await expect(page.getByRole("region", { name: "What happens next" })).toContainText("Growth needs attention");
+  await expect(page.getByRole("region", { name: "What happens next" })).toContainText("No connected X body can perform this action.");
+  await expect(page.getByText("When Growth was checked", { exact: true })).toHaveCount(0);
+  await expect(page.locator(".growth-disclosure").filter({ hasText: "Capabilities & limitations" })).toContainText("Unavailable");
 });
 
 test("Growth shows fresh evidence directly without requiring a review action", async ({ page, request }) => {
@@ -688,13 +706,14 @@ test("Growth shows fresh evidence directly without requiring a review action", a
   });
   await page.reload();
   await navigate(page, "Growth");
-  const evidence = page.getByRole("region", { name: "Growth evidence" });
-  await expect(evidence).toContainText("Fresh signals are ready");
-  await expect(evidence).toContainText("1 new snapshot");
-  await expect(evidence).toContainText("1 new post");
-  await expect(evidence).toContainText("A fresh implementation lesson.");
-  await expect(evidence).toContainText("View the evidence");
+  const read = page.getByRole("region", { name: "Genny's current read" });
+  await expect(read).toContainText("2 newer observations will be incorporated automatically");
   await expect(page.getByRole("button", { name: "Review new evidence" })).toHaveCount(0);
+  const evidence = page.locator(".growth-disclosure").filter({ hasText: "Evidence" }).first();
+  await expect(evidence).toContainText("Audience, publication, and Social Mirror records");
+  await evidence.locator("summary").first().click();
+  await evidence.getByText("View audience and publication evidence", { exact: true }).click();
+  await expect(evidence).toContainText("A fresh implementation lesson.");
 });
 
 test("Growth review shows immediate feedback while new evidence is processing", async ({ page, request }) => {
@@ -706,7 +725,8 @@ test("Growth review shows immediate feedback while new evidence is processing", 
 
   await page.reload();
   await navigate(page, "Growth");
-  const reviewButton = page.getByRole("button", { name: "Update read now" });
+  await page.getByText("Review evidence early", { exact: true }).click();
+  const reviewButton = page.getByRole("button", { name: "Review now" });
   await expect(reviewButton).toBeVisible();
   await page.route(/\/api\/state(?:\?.*)?$/, async (route) => {
     if (route.request().method() !== "POST" || !route.request().postData()?.includes('"reviewGrowth"')) return route.continue();
@@ -714,12 +734,12 @@ test("Growth review shows immediate feedback while new evidence is processing", 
     return route.continue();
   });
   await reviewButton.click();
-  await expect(page.getByText("Updating read…", { exact: true })).toBeVisible();
-  await expect(page.getByRole("button", { name: "Updating read…", exact: true })).toBeDisabled();
-  await expect(page.getByText("Updating read…", { exact: true })).toBeHidden({ timeout: 10_000 });
+  await expect(page.getByText("Reviewing…", { exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Reviewing…", exact: true })).toBeDisabled();
+  await expect(page.getByText("Reviewing…", { exact: true })).toBeHidden({ timeout: 10_000 });
 });
 
-test("Activity filters mentions and shows whether each observed post was judged", async ({ page }) => {
+test("Activity distinguishes observed Mirror volume from selected attention", async ({ page }) => {
   await createAgent(page);
   await page.route("**/api/state*", async (route) => {
     if (route.request().method() !== "GET") return route.continue();
@@ -729,6 +749,7 @@ test("Activity filters mentions and shows whether each observed post was judged"
     if (!presenceId) return route.fulfill({ response, json: payload });
     const observedAt = new Date().toISOString();
     const objectId = "mirror-test-mention";
+    const judgedObjectId = "mirror-test-judged";
     payload.mirrorObjects = [{
       id: objectId,
       bridgeId: "native:test",
@@ -746,16 +767,112 @@ test("Activity filters mentions and shows whether each observed post was judged"
       environment: "sandbox",
       source: "native",
       trust: "untrusted_world_content",
+    }, {
+      id: judgedObjectId,
+      bridgeId: "native:test",
+      presenceId,
+      channelId: "x",
+      externalRef: { type: "x.post", id: "2089273076663955539" },
+      objectType: "post",
+      language: "en",
+      author: { displayName: "Judged Person", handle: "judged_person" },
+      content: { text: "This observed post has already been evaluated." },
+      occurredAt: observedAt,
+      observedAt,
+      visibility: "public",
+      shareability: "presence-only",
+      environment: "sandbox",
+      source: "native",
+      trust: "untrusted_world_content",
     }, ...payload.mirrorObjects];
+    payload.socialDecisions = [{
+      id: "social-decision-mirror-test-judged",
+      agentId: payload.agent?.id ?? "test-agent",
+      presenceId,
+      environment: "sandbox",
+      focalMirrorObjectIds: [judgedObjectId],
+      decision: "no_op",
+      summary: "The observed post was evaluated and left alone.",
+      influences: [],
+      createdAt: observedAt,
+    }, ...(payload.socialDecisions ?? [])];
     await route.fulfill({ response, json: payload });
   });
   await page.reload();
   await navigate(page, "Activity");
+  const judgmentFilter = page.getByRole("group", { name: "Attention selection filter" });
+  await expect(judgmentFilter.getByRole("button", { name: /Awaiting judgment/ })).toBeVisible();
+  await expect(judgmentFilter.getByRole("button", { name: /Selected for attention/ })).toBeVisible();
+  await judgmentFilter.getByRole("button", { name: /Awaiting judgment/ }).click();
+  await expect(page.getByText("we need another opinion here please", { exact: false })).toBeVisible();
+  await expect(page.getByText("This observed post has already been evaluated.", { exact: false })).toHaveCount(0);
+  await judgmentFilter.getByRole("button", { name: /All/ }).click();
+  await judgmentFilter.getByRole("button", { name: /Selected for attention/ }).click();
+  await expect(page.getByText("This observed post has already been evaluated.", { exact: false })).toBeVisible();
+  await expect(page.getByText("we need another opinion here please", { exact: false })).toHaveCount(0);
+  await judgmentFilter.getByRole("button", { name: /All/ }).click();
   await page.getByRole("button", { name: /Mentions/ }).click();
   await expect(page.getByText("we need another opinion here please", { exact: false })).toBeVisible();
   await expect(page.getByText("Seen by Jenny", { exact: true })).toBeVisible();
   await expect(page.getByText("Mentioned @jenny_ai", { exact: true })).toBeVisible();
-  await expect(page.getByText("Judgment not recorded", { exact: true })).toBeVisible();
+  await expect(page.getByText("Observed · not selected", { exact: true })).toBeVisible();
+});
+
+test("Activity and Agenda expose the current dynamic attention plan", async ({ page, request }) => {
+  await createAgent(page);
+  const initial = await (await request.get("/api/state")).json();
+  const created = await request.post("/api/state", { data: { type: "createAssignment", presenceId: initial.presence.id, environment: "live", instruction: "Grow this Presence toward 100,000 followers while building an audience of AI founders." } });
+  expect(created.ok()).toBeTruthy();
+  await page.reload();
+
+  const rail = page.getByRole("region", { name: "Live attention order" });
+  await expect(rail).toBeVisible();
+  await expect(rail.getByText("Next", { exact: true })).toBeVisible();
+  await expect(rail.getByText("Watching", { exact: true })).toBeVisible();
+  await expect(rail.getByText("Needs you", { exact: true })).toBeVisible();
+  await expect(rail.getByRole("button", { name: "Open Agenda →" })).toBeVisible();
+  await expect(page.getByText("Queue clear", { exact: true })).toHaveCount(0);
+  await expect(page.getByText("Behind the mind", { exact: true })).toHaveCount(0);
+
+  await page.getByRole("tab", { name: /Agenda/ }).click();
+  const agenda = page.getByRole("region", { name: "Agent Agenda" });
+  await expect(agenda).toBeVisible();
+  await expect(agenda.getByRole("region", { name: "Next up" })).toBeVisible();
+  await expect(agenda.getByRole("region", { name: "Watching in the background" })).toBeVisible();
+  await expect(agenda.getByRole("region", { name: "Ongoing responsibilities" })).toContainText("Active");
+  await expect(agenda.getByRole("region", { name: "Needs you" })).toBeVisible();
+  await expect(agenda.getByText("dynamic snapshot items", { exact: false })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
+});
+
+test("People paginates a long remembered-facts record", async ({ page }) => {
+  await createAgent(page);
+  await page.route("**/api/state*", async (route) => {
+    if (route.request().method() !== "GET") return route.continue();
+    const response = await route.fetch();
+    const body = await response.json();
+    const presenceId = body.presence.id;
+    const agentId = body.agent.id;
+    const now = new Date().toISOString();
+    const personId = "person-boardy";
+    const relationshipId = "relationship-boardy";
+    body.people.push({ id: personId, agentId, displayName: "Boardy", memoryState: "active", createdAt: now, updatedAt: now });
+    body.personIdentities.push({ id: "identity-boardy", personId, channel: "x", externalActorId: "boardyai", handle: "@boardyai", sourcePresenceId: presenceId, sourceEnvironment: body.presence.environment ?? "live", verificationMethod: "connector_verified", createdAt: now });
+    body.relationships.push({ id: relationshipId, agentId, personId, state: "active", lastMeaningfulInteractionAt: now, createdAt: now, updatedAt: now });
+    body.relationshipFacts.push(...Array.from({ length: 17 }, (_, index) => ({ id: `boardy-fact-${index}`, relationshipId, statement: `Boardy remembered fact ${index + 1}.`, epistemicKind: "stated_by_person", provenanceRefs: [{ kind: "mirror_object", id: `boardy-evidence-${index}` }], visibility: `presence:${presenceId}`, createdAt: now })));
+    await route.fulfill({ response, json: body });
+  });
+
+  await page.reload();
+  await navigate(page, "People");
+  const facts = page.locator(".person-inspector-section").filter({ hasText: "What Jenny remembers" });
+  await expect(facts).toContainText("17 remembered facts");
+  const pages = page.getByRole("navigation", { name: "Boardy remembered facts pages" });
+  await expect(pages).toContainText("Page 1 of 3");
+  await expect(facts.locator("li")).toHaveCount(8);
+  await pages.getByRole("button", { name: "Older" }).click();
+  await expect(pages).toContainText("Page 2 of 3");
+  await expect(facts).toContainText("Boardy remembered fact 9.");
 });
 
 test("Activity separates configuration changes from Presence decisions", async ({ page, request }) => {
@@ -1016,14 +1133,14 @@ test("Chat stays quiet when Presence identity changes outside Chat", async ({ pa
   await navigate(page, "Chat");
   await expect(page.getByText("I noticed this Presence is now Ghost.", { exact: false })).toHaveCount(0);
   await expect(page.getByText("I noticed the Ghost profile changed.", { exact: false })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "See Jenny in the feed." })).toBeVisible();
+  await expect(page.getByLabel("Post for Jenny to encounter")).toBeVisible();
 
   await navigate(page, "Settings");
   await identityOptions.getByRole("button", { name: /^Jenny Agent-owned/ }).click();
   await expect(identityOptions.getByRole("button", { name: /^Jenny Agent-owned/ })).toHaveClass(/selected/);
   await navigate(page, "Chat");
   await expect(page.getByText("I noticed this Presence is now Agent-owned.", { exact: false })).toHaveCount(0);
-  await expect(page.getByRole("heading", { name: "See Jenny in the feed." })).toBeVisible();
+  await expect(page.getByLabel("Post for Jenny to encounter")).toBeVisible();
 });
 
 test("desktop shell keeps sidebar and runtime status available", async ({ page }) => {

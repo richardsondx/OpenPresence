@@ -82,4 +82,41 @@ describe("publication security boundary", () => {
     await expect(publishSealedXPost({ apiKey: "api", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" }, sealed.expression, sealed.permit)).resolves.toEqual({ type: "x.post", id: "post-1" });
     await expect(publishSealedXPost({ apiKey: "api", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" }, sealed.expression, sealed.permit)).rejects.toThrow(/REPLAYED_PERMIT/);
   });
+
+  it("Negative Bypass: blocks unsealed raw Quote or Reply from reaching live connector", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("OPENPRESENCE_TEST_MODE", "0");
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "0");
+    const state = createAgent({ name: "Ada", description: "A production agent", mode: "agent", handle: "@ada", accent: "#D68754" });
+
+    // 1. Raw unsealed execution with NO PublicExpression attached
+    const unsealedExecution: Execution = {
+      id: "raw-execution-bypass",
+      socialIntentId: "intent-bypass",
+      presenceId: state.presence!.id,
+      affordance: "x.quote",
+      mode: "auto",
+      status: "queued",
+      attempts: 0,
+      connector: "native",
+      idempotencyKey: "bypass-test",
+      environment: "live",
+      source: "agent",
+      publication: { id: "pub-raw", format: "x.quote", payload: { text: "Arbitrary unsealed quote text." }, assetIds: [], links: [], createdAt: new Date().toISOString(), environment: "live" },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+
+    // Attempting to verify or seal an execution without PublicExpression fails
+    expect(() => verifyExecutionPermit(unsealedExecution)).toThrow(/MISSING_PERMIT|MISSING_PUBLIC_EXPRESSION/);
+    expect(() => sealExecutionForDelivery(unsealedExecution)).toThrow(/INVALID_PROVENANCE/);
+
+    // 2. Tampered execution where payload was altered after permit creation
+    const validExecution = liveExecution(state, "agent", "Valid quote text.");
+    validExecution.affordance = "x.quote";
+    const sealed = sealExecutionForDelivery(validExecution);
+    // Tamper with payload
+    validExecution.publication!.publicExpression!.text = "Tampered text injected post-sealing.";
+    expect(() => verifyExecutionPermit(validExecution)).toThrow(/PAYLOAD_MUTATION/);
+  });
 });

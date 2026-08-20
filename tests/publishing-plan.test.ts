@@ -1,7 +1,7 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { writeState } from "../lib/db";
 import { POST as statePost } from "../app/api/state/route";
-import { applyOperation, createAgent, derivePublicHistory, derivePublishingPlanProjection, normalizeState, replacePublishingPlan, startPlaygroundSession } from "../lib/runtime";
+import { applyOperation, compileAgendaWork, createAgent, derivePublicHistory, derivePublishingPlanProjection, normalizeState, replacePublishingPlan, startPlaygroundSession } from "../lib/runtime";
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
@@ -149,5 +149,186 @@ describe("Publishing Plan", () => {
     expect(next.mirrorObjects.filter((item: { actorPresenceId?: string }) => item.actorPresenceId === next.presence.id)).toHaveLength(0);
     expect(plan.verifiedOriginals).toBe(0);
     expect(plan.workHistory.some((item: { stage: string }) => item.stage === "awaiting_review")).toBe(true);
+  });
+
+  it("emits a reassess_plan step in Agenda when nextReassessmentAt is due and rolls forward autonomously", async () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { publishingInitiative: { ...state.presence!.publishingInitiative, mode: "adaptive" } } });
+    const presence = state.presence!;
+    const pastTime = new Date(Date.now() - 3_600_000).toISOString();
+    const draft = {
+      horizonStart: new Date(Date.now() - 86_400_000).toISOString(),
+      horizonEnd: pastTime,
+      windows: [],
+      nextReassessmentAt: pastTime,
+      rationaleSummary: "Prior plan has concluded.",
+    };
+    state = replacePublishingPlan(state, { presenceId: presence.id, draft });
+    expect(state.publishingPlans).toHaveLength(1);
+    const initialPlanId = state.publishingPlans[0]!.id;
+
+    const agenda = compileAgendaWork(state, presence.id);
+    const reassessItem = agenda.workItems.find((item) => item.source === "publishing" && item.step === "reassess_plan");
+    expect(reassessItem).toBeDefined();
+    expect(reassessItem).toMatchObject({
+      source: "publishing",
+      workKind: "publishing_step",
+      step: "reassess_plan",
+      planRef: initialPlanId,
+      planRevision: 1,
+      statusLabel: "Reassessment due",
+    });
+
+    writeState(state);
+    const afterWake = await stateOperation({ type: "wakePresence", presenceId: presence.id });
+    const activePlan = afterWake.publishingPlans.find((item: { status: string }) => item.status === "active");
+    const supersededPlan = afterWake.publishingPlans.find((item: { id: string }) => item.id === initialPlanId);
+
+    expect(activePlan).toBeDefined();
+    expect(activePlan.revision).toBe(2);
+    expect(supersededPlan).toMatchObject({
+      id: initialPlanId,
+      status: "superseded",
+      supersededBy: activePlan.id,
+    });
+    expect(supersededPlan.supersededAt).toBeDefined();
+  });
+
+  it("guarantees atomic compare-and-swap idempotency under concurrent reassessment calls", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { publishingInitiative: { ...state.presence!.publishingInitiative, mode: "adaptive" } } });
+    const presence = state.presence!;
+    const draft1 = {
+      horizonStart: new Date().toISOString(),
+      horizonEnd: new Date(Date.now() + 86_400_000).toISOString(),
+      windows: [],
+      rationaleSummary: "Base plan.",
+    };
+    state = replacePublishingPlan(state, { presenceId: presence.id, draft: draft1 });
+    const planP1 = state.publishingPlans[0]!;
+    expect(planP1.revision).toBe(1);
+
+    // Call 1 with correct expectedPlanId and expectedRevision -> succeeds
+    const draft2 = { ...draft1, rationaleSummary: "Successor revision 2." };
+    const next1 = replacePublishingPlan(state, {
+      presenceId: presence.id,
+      draft: draft2,
+      expectedPlanId: planP1.id,
+      expectedRevision: planP1.revision,
+    });
+    const planP2 = next1.publishingPlans.find((p) => p.status === "active")!;
+    expect(planP2.revision).toBe(2);
+    expect(planP2.id).not.toBe(planP1.id);
+
+    // Call 2 racing with stale expectedRevision (still expecting planP1 / revision 1) -> must safely NO-OP
+    const next2 = replacePublishingPlan(next1, {
+      presenceId: presence.id,
+      draft: { ...draft1, rationaleSummary: "Stale racing revision." },
+      expectedPlanId: planP1.id,
+      expectedRevision: planP1.revision,
+    });
+    // State remains unchanged; no duplicate revision created
+    expect(next2.publishingPlans.filter((p) => p.status === "active")).toHaveLength(1);
+    expect(next2.publishingPlans.find((p) => p.status === "active")!.id).toBe(planP2.id);
+  });
+
+  it("recovers from a missing plan by emitting create_plan step in Agenda", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { publishingInitiative: { ...state.presence!.publishingInitiative, mode: "adaptive" } } });
+    const presence = state.presence!;
+    state.publishingPlans = []; // Simulate missing plan edge case
+
+    const agenda = compileAgendaWork(state, presence.id);
+    const createItem = agenda.workItems.find((item) => item.source === "publishing" && item.step === "create_plan");
+    expect(createItem).toBeDefined();
+    expect(createItem).toMatchObject({
+      source: "publishing",
+      workKind: "publishing_step",
+      step: "create_plan",
+      statusLabel: "Plan needed",
+    });
+  });
+
+  it("preserves an intentional rest state when windows complete early before nextReassessmentAt", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { publishingInitiative: { ...state.presence!.publishingInitiative, mode: "adaptive" } } });
+    const presence = state.presence!;
+    const futureReassessment = new Date(Date.now() + 6 * 3_600_000).toISOString();
+    const draft = {
+      horizonStart: new Date(Date.now() - 3_600_000).toISOString(),
+      horizonEnd: new Date(Date.now() + 24 * 3_600_000).toISOString(),
+      windows: [
+        { startAt: new Date(Date.now() - 3_600_000).toISOString(), endAt: new Date(Date.now() - 1_800_000).toISOString(), purpose: "originate" as const, summary: "Completed window.", desiredContribution: { min: 1, max: 1 } },
+      ],
+      nextReassessmentAt: futureReassessment,
+      rationaleSummary: "Work complete for the morning; resting until afternoon review.",
+    };
+    state = replacePublishingPlan(state, { presenceId: presence.id, draft });
+
+    // In Agenda, no reassess_plan or create_plan is due because nextReassessmentAt is in the future
+    const agenda = compileAgendaWork(state, presence.id);
+    const reassessItem = agenda.workItems.find((item) => item.source === "publishing" && (item.step === "reassess_plan" || item.step === "create_plan"));
+    expect(reassessItem).toBeUndefined();
+  });
+
+  it("balances overdue reassessment urgency against active conversation turns in Agenda", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { connectionMode: "native", publishingInitiative: { ...state.presence!.publishingInitiative, mode: "adaptive" } } });
+    const presence = state.presence!;
+    const overdueTime = new Date(Date.now() - 4 * 3_600_000).toISOString();
+    const draft = {
+      horizonStart: new Date(Date.now() - 48 * 3_600_000).toISOString(),
+      horizonEnd: overdueTime,
+      windows: [],
+      nextReassessmentAt: overdueTime,
+      rationaleSummary: "Overdue plan.",
+    };
+    state = replacePublishingPlan(state, { presenceId: presence.id, draft });
+
+    // Add an active conversation episode
+    state = {
+      ...state,
+      conversationEpisodes: [
+        {
+          id: "ep_1",
+          presenceId: presence.id,
+          channel: "x",
+          counterpartyActorId: "actor_1",
+          counterpartyHandle: "@maya",
+          status: "active",
+          rootMirrorObjectId: "m_1",
+          branchAnchorMirrorObjectId: "m_1",
+          lastExternalObjectId: "ext_1",
+          exchangeCount: 2,
+          lastMeaningfulDevelopment: "Maya asked a clarifying question.",
+          createdAt: new Date().toISOString(),
+          updatedAt: new Date().toISOString(),
+        },
+      ],
+      mirrorObjects: [
+        {
+          id: "m_1",
+          presenceId: presence.id,
+          channelId: "x",
+          environment: "live",
+          objectType: "reply",
+          externalRef: { type: "x.post", id: "ext_1" },
+          author: { displayName: "Maya", handle: "@maya" },
+          content: { text: "What do you think about agent memory persistence?" },
+          visibility: "public",
+          observedAt: new Date().toISOString(),
+        },
+      ],
+    };
+
+    const agenda = compileAgendaWork(state, presence.id);
+    const conversationItem = agenda.workItems.find((item) => item.source === "conversation");
+    const reassessItem = agenda.workItems.find((item) => item.source === "publishing" && item.step === "reassess_plan");
+
+    expect(conversationItem).toBeDefined();
+    expect(reassessItem).toBeDefined();
+    // Both items enter Agenda with appropriate priority scores without starvation
+    expect(conversationItem!.urgencyScore).toBeGreaterThan(400);
+    expect(reassessItem!.urgencyScore).toBeGreaterThan(800);
   });
 });

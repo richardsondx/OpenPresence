@@ -1,0 +1,7 @@
+interface:
+  display_name: "Autonomous Behavior Debugger"
+  short_description: "QA, diagnose, repair, and verify autonomous AI behaviors"
+  default_prompt: "Use $autonomous-behavior-debugger to investigate and repair why [behavior] is not occurring autonomously."
+
+policy:
+  allow_implicit_invocation: true

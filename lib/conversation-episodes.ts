@@ -18,11 +18,16 @@ function episodeContainsObject(state: OpenPresenceState, episode: ConversationEp
   if (!scoped(object, episode.presenceId, episode.environment, object.sessionId)) return false;
   const lastExternal = objectForEpisode(state, episode, episode.lastExternalObjectId);
   const lastAgent = objectForEpisode(state, episode, episode.lastAgentObjectId);
+  const rootObject = objectForEpisode(state, episode, episode.rootMirrorObjectId);
+  const anchorObject = objectForEpisode(state, episode, episode.branchAnchorMirrorObjectId);
   const parent = refKey(object.parentExternalRef);
   return parent === refKey(lastExternal?.externalRef)
     || parent === refKey(lastAgent?.externalRef)
+    || parent === refKey(rootObject?.externalRef)
+    || parent === refKey(anchorObject?.externalRef)
     || refKey(object.externalRef) === refKey(lastExternal?.externalRef)
     || refKey(object.externalRef) === refKey(lastAgent?.externalRef)
+    || refKey(object.externalRef) === refKey(rootObject?.externalRef)
     || (object.conversationExternalRef && object.conversationExternalRef === lastExternal?.conversationExternalRef && Boolean(object.rootExternalRef?.id === lastExternal?.rootExternalRef?.id));
 }
 
@@ -47,6 +52,12 @@ export function findConversationEpisode(state: OpenPresenceState, object: Mirror
 export function createConversationEpisode(state: OpenPresenceState, object: MirrorObject, presenceId = object.presenceId): ConversationEpisode {
   const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   const timestamp = nowIso();
+  const isAgent = object.actorPresenceId === presenceId;
+  const parentObject = object.parentExternalRef
+    ? state.mirrorObjects.find((item) => item.externalRef.type === object.parentExternalRef?.type && item.externalRef.id === object.parentExternalRef?.id)
+    : undefined;
+  const rootObject = parentObject ?? object;
+  const participantActorIds = [object.author?.externalRef?.id, parentObject?.author?.externalRef?.id].filter((id): id is string => Boolean(id));
   return {
     id: episodeId(),
     agentId: state.agent?.id ?? "unknown-agent",
@@ -55,24 +66,30 @@ export function createConversationEpisode(state: OpenPresenceState, object: Mirr
     channelId: object.channelId,
     surface: object.objectType,
     privacyScope: object.visibility,
-    rootMirrorObjectId: object.id,
+    rootMirrorObjectId: rootObject.id,
     branchAnchorMirrorObjectId: object.id,
-    participantActorIds: object.author?.externalRef?.id ? [object.author.externalRef.id] : [],
+    participantActorIds: [...new Set(participantActorIds)],
     linkedEpisodeIds: [],
     status: "active",
-    lastExternalObjectId: object.actorPresenceId === presenceId ? undefined : object.id,
-    lastAgentObjectId: object.actorPresenceId === presenceId ? object.id : undefined,
-    agentTurnCount: object.actorPresenceId === presenceId ? 1 : 0,
-    externalTurnCount: object.actorPresenceId === presenceId ? 0 : 1,
+    lastExternalObjectId: isAgent ? parentObject?.id : object.id,
+    lastAgentObjectId: isAgent ? object.id : undefined,
+    agentTurnCount: isAgent ? 1 : 0,
+    externalTurnCount: isAgent ? (parentObject ? 1 : 0) : 1,
     createdAt: timestamp,
     updatedAt: timestamp,
   };
 }
 
-/** Lazily derives one Presence-centric interaction trajectory from Mirror evidence. */
+/** Lazily derives one Presence-centric interaction trajectory from Mirror evidence when conversational lineage exists. */
 export function ensureConversationEpisode(state: OpenPresenceState, object: MirrorObject, presenceId = object.presenceId) {
   const existing = findConversationEpisode(state, object, presenceId);
   if (existing) return existing;
+  const isConversational = (
+    object.objectType === "reply" ||
+    (Boolean(object.parentExternalRef) && !["quote", "repost", "like", "follow", "x.quote", "x.repost", "x.like", "x.follow"].includes(object.objectType)) ||
+    Boolean(object.conversationExternalRef && object.conversationExternalRef !== object.externalRef.id && object.conversationExternalRef !== object.id)
+  );
+  if (!isConversational) return undefined;
   const episode = createConversationEpisode(state, object, presenceId);
   state.conversationEpisodes.unshift(episode);
   return episode;
@@ -83,14 +100,21 @@ export function conversationEpisodeForObject(state: OpenPresenceState, object: M
 }
 
 export function updateConversationEpisodeFromMirror(state: OpenPresenceState, object: MirrorObject, presenceId = object.presenceId) {
+  if (["quote", "repost", "like", "follow", "x.quote", "x.repost", "x.like", "x.follow"].includes(object.objectType)) {
+    return undefined;
+  }
+  const isExisting = Boolean(findConversationEpisode(state, object, presenceId));
   const episode = conversationEpisodeForObject(state, object, presenceId);
+  if (!episode) return undefined;
   const isAgent = object.actorPresenceId === presenceId;
   const actorId = object.author?.externalRef?.id;
   episode.status = episode.status === "closed" && !isAgent ? episode.status : episode.status;
   episode.lastExternalObjectId = isAgent ? episode.lastExternalObjectId : object.id;
   episode.lastAgentObjectId = isAgent ? object.id : episode.lastAgentObjectId;
-  episode.agentTurnCount += isAgent ? 1 : 0;
-  episode.externalTurnCount += isAgent ? 0 : 1;
+  if (isExisting) {
+    episode.agentTurnCount += isAgent ? 1 : 0;
+    episode.externalTurnCount += isAgent ? 0 : 1;
+  }
   if (actorId && !episode.participantActorIds.includes(actorId)) episode.participantActorIds.push(actorId);
   episode.updatedAt = nowIso();
   return episode;

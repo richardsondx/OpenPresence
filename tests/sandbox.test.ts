@@ -194,6 +194,31 @@ describe("Sandbox and Playground boundaries", () => {
     expect(state.nativeConnections).toHaveLength(0);
   });
 
+  it("blocks Assignment wording from becoming the public opening", () => {
+    let state = startPlaygroundSession(createAgent(input));
+    const session = state.playgroundSessions[0]!;
+    state = applyOperation(state, {
+      type: "createAssignment",
+      presenceId: state.presence!.id,
+      sessionId: session.id,
+      environment: "sandbox",
+      instruction: "Notice one useful pattern in founder conversations. Produce exactly 1 original X post.",
+    });
+    const assignment = state.assignments[0]!;
+    state = formSandboxIntent(state, {
+      sessionId: session.id,
+      affordance: "post",
+      assignmentId: assignment.id,
+      text: "A useful pattern in founder conversations: memory compounds product judgment.",
+    });
+
+    expect(state.executions[0]).toMatchObject({
+      status: "blocked",
+      failure: { code: "ASSIGNMENT_TEXT_LEAKAGE" },
+    });
+    expect(state.events[0]?.title).toBe("Public text boundary blocked");
+  });
+
   it("delivers a Sandbox execution idempotently and carries publication assets into the Mirror", () => {
     let state = startPlaygroundSession(createAgent(input));
     const session = state.playgroundSessions[0]!;

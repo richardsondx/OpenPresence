@@ -1,6 +1,6 @@
 import type { AgentModelProfile, Execution, ExecutionPermit, OpenPresenceState, Presence, PublicExpression, PublicExpressionArtifactKind } from "./types";
 import { assertLiveWriteRuntimeAllowed, isAiMockEnabled, isTestRuntime } from "./test-runtime";
-import { publicExpressionLeakageReason } from "./public-expression";
+import { formatOneSentencePerLine, publicExpressionLeakageReason } from "./public-expression";
 
 type NodeCryptoModule = {
   randomUUID: () => string;
@@ -75,7 +75,7 @@ export function createPublicExpressionCandidate(input: {
     socialIntentId: input.socialIntentId ?? "pending",
     channel: input.presence.channel,
     affordance: input.affordance,
-    text: input.text.trim(),
+    text: formatOneSentencePerLine(input.text),
     mediaIds: [...(input.mediaIds ?? [])],
     provenance: {
       cognitionPurpose: "public_expression" as const,

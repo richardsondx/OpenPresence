@@ -46,6 +46,105 @@ test("the Chrome adapter reads approved text from the Bridge publication envelop
   expect(text).toBe("Approved reply text.");
 });
 
+test("the Chrome adapter does not navigate away from a dirty X composer", async ({ page }) => {
+  await page.route("http://openpresence.test/**", (route) => route.fulfill({
+    status: 200,
+    contentType: "text/html",
+    body: "<!doctype html><html><body></body></html>",
+  }));
+  await page.goto("http://openpresence.test/reply");
+  await page.setContent(`
+    <nav><a href="/example_agent">@example_agent</a></nav>
+    <div data-testid="tweetTextarea_0" contenteditable="true">Unsent reply</div>
+  `);
+  await page.evaluate(() => {
+    const listeners: Array<(message: unknown) => void> = [];
+    const messages: unknown[] = [];
+    Object.assign(window, { __openPresenceMessages: messages, __openPresenceListeners: listeners });
+    Object.defineProperty(window, "chrome", {
+      configurable: true,
+      value: {
+        runtime: {
+          id: "test-extension",
+          onMessage: { addListener: (listener: (message: unknown) => void) => listeners.push(listener) },
+          sendMessage: (message: unknown) => { messages.push(message); return Promise.resolve(); },
+        },
+      },
+    });
+  });
+  await page.addScriptTag({ path: "extension/execution.js" });
+  await page.addScriptTag({ path: "extension/composer.js" });
+  await page.addScriptTag({ path: "extension/channel-x.js" });
+  await page.evaluate(() => {
+    const listeners = (window as typeof window & { __openPresenceListeners: Array<(message: unknown) => void> }).__openPresenceListeners;
+    listeners.forEach((listener) => listener({ type: "OPENPRESENCE_SESSION_CONTEXT", expectedHandle: "@example_agent", presenceName: "Genny" }));
+    listeners.forEach((listener) => listener({
+      type: "OPENPRESENCE_EXECUTE",
+      expectedHandle: "@example_agent",
+      presenceName: "Genny",
+      execution: { id: "execution-dirty-composer", affordance: "x.reply", target: { type: "x.post", id: "missing-target" }, publication: { payload: { text: "A reply that must not navigate." } } },
+    }));
+  });
+  await page.waitForTimeout(3_500);
+  expect(await page.url()).toBe("http://openpresence.test/reply");
+  const result = await page.evaluate(() => (window as typeof window & { __openPresenceMessages: Array<{ type?: string; result?: { code?: string; retryable?: boolean } }> }).__openPresenceMessages.find((message) => message.type === "OPENPRESENCE_EXECUTION_RESULT")?.result);
+  expect(result).toMatchObject({ code: "COMPOSER_BUSY", retryable: true });
+});
+
+test("the Chrome adapter closes duplicate X submissions instead of retrying them", async ({ page }) => {
+  await page.route("http://openpresence.test/**", (route) => route.fulfill({
+    status: 200,
+    contentType: "text/html",
+    body: "<!doctype html><html><body></body></html>",
+  }));
+  await page.goto("http://openpresence.test/reply");
+  await page.setContent(`
+    <nav><a href="/example_agent">@example_agent</a></nav>
+    <article>
+      <a href="/builder/status/123">Open post</a>
+      <div data-testid="User-Name"><a href="/builder">Builder</a><a href="/builder">@builder</a></div>
+      <div data-testid="tweetText" lang="en">A target post.</div>
+      <button data-testid="reply">Reply</button>
+    </article>
+    <div data-testid="tweetTextarea_0" contenteditable="true"></div>
+    <button data-testid="tweetButtonInline" aria-disabled="false">Reply</button>
+  `);
+  await page.evaluate(() => {
+    const submit = document.querySelector<HTMLButtonElement>('[data-testid="tweetButtonInline"]')!;
+    submit.addEventListener("click", () => {
+      const alert = document.createElement("div");
+      alert.setAttribute("role", "alert");
+      alert.textContent = "Whoops! You already said that.";
+      document.body.appendChild(alert);
+    });
+    const listeners: Array<(message: unknown) => void> = [];
+    const messages: unknown[] = [];
+    Object.assign(window, { __openPresenceMessages: messages, __openPresenceListeners: listeners });
+    Object.defineProperty(window, "chrome", {
+      configurable: true,
+      value: {
+        runtime: {
+          id: "test-extension",
+          onMessage: { addListener: (listener: (message: unknown) => void) => listeners.push(listener) },
+          sendMessage: (message: unknown) => { messages.push(message); return Promise.resolve(); },
+        },
+      },
+    });
+    sessionStorage.setItem("openpresence-pending-execution", JSON.stringify({
+      expectedHandle: "@example_agent",
+      presenceName: "Genny",
+      stage: "composer",
+      execution: { id: "execution-duplicate", affordance: "x.reply", target: { type: "x.post", id: "123" }, publication: { payload: { text: "A duplicate reply." } } },
+    }));
+  });
+  await page.addScriptTag({ path: "extension/execution.js" });
+  await page.addScriptTag({ path: "extension/composer.js" });
+  await page.addScriptTag({ path: "extension/channel-x.js" });
+  await page.waitForTimeout(1_000);
+  const result = await page.evaluate(() => (window as typeof window & { __openPresenceMessages: Array<{ type?: string; result?: { code?: string; retryable?: boolean } }> }).__openPresenceMessages.find((message) => message.type === "OPENPRESENCE_EXECUTION_RESULT")?.result);
+  expect(result).toMatchObject({ code: "DUPLICATE_PUBLICATION", retryable: false });
+});
+
 test("the Chrome adapter preserves X's confirmed post language in observations", async ({ page }) => {
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));

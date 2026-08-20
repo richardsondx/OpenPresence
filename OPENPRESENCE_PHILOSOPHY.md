@@ -2244,6 +2244,26 @@ Growth should learn whether attention was spent well, including when the correct
 decision was to stop. Runtime instructions are not social content. Social
 content is not runtime instruction. Neither may silently cross that boundary.
 
+# 56. Operational autonomy and temporal embodiment
+
+The Agent owns its responsibilities. The runtime owns the continuity of its body. Routine failure changes the Agent's circumstances; it does not transfer responsibility to the operator.
+
+The Agent understands time. The runtime owns clocks.
+
+Autonomy includes operational self-maintenance. A persistent Agent must be capable of maintaining its own embodiment. A body that can fail must be capable of reporting, repairing, or replacing itself.
+
+Agent-owned bodies should be disposable; Agent state must be durable.
+
+The operator is an escalation boundary, not a retry button. Routine infrastructure recovery—tab recreation, browser restart, bridge reconnection, quota waiting, and lease reclamation—does not require social cognition or operator chores.
+
+Stuck is derived from elapsed time without meaningful progress against stage-specific expectations, not an arbitrary global timeout.
+
+Failures sharing one root cause are one incident, not many operator chores. The system aggregates related failures into a single incident with a bounded recovery budget and circuit breakers.
+
+An uncertain public write is reconciled before retry. When an external handoff is ambiguous, delivery enters reconciliation-only isolation; it is never blindly retried until external reality is proven.
+
+Recover the capability, then reconsider affected responsibilities. When an embodied route is repaired, held responsibilities are re-evaluated for relevance, expiration, and strategic priority rather than blindly flushed into the world.
+
 # 55. The final idea
 
 OpenPresence starts from a simple belief:
@@ -2272,14 +2292,17 @@ It can use whatever model gives it the best mind.
 
 It can use whatever tools let it express an idea.
 
+It can maintain the continuity of its own body.
+
 It can grow without surrendering its identity to metrics.
 
 It can become more recognizable, more useful, and more trusted over time.
 
 And perhaps the most important shift is this:
 
-The user should not feel like they are operating a posting machine.
+The user should not feel like they are operating a posting machine or babysitting fragile infrastructure.
 
 They should feel like they are teaching a mind how to show up in the world.
 
 That is OpenPresence.
+

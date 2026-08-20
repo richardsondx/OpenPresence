@@ -1,4 +1,4 @@
-export type View = "teach" | "knowledge" | "chat" | "watching" | "people" | "playground" | "live" | "feed" | "growth" | "calendar" | "schedule" | "brain" | "presence";
+export type View = "teach" | "knowledge" | "usage" | "chat" | "watching" | "people" | "playground" | "live" | "feed" | "growth" | "calendar" | "schedule" | "brain" | "presence";
 export type BuiltInChannelId = "x" | "linkedin" | "substack";
 export type ChannelId = string;
 export type ConnectorKind = "simulated" | "native" | "bridge" | "manual";
@@ -22,7 +22,7 @@ export type AssetResearchDecision = "select" | "search_again" | "render" | "text
 export type PublicDisclosurePosture = "contextual" | "ai-forward" | "private" | "representational" | "open-about-assistance";
 export type PublicTechnicalFact = "ai-presence" | "open-source" | "built-with-openpresence" | "model-provider" | "exact-model" | "tools";
 export type ExecutionMode = "off" | "manual" | "review" | "auto";
-export type ExecutionStatus = "awaiting-review" | "approved" | "awaiting-manual" | "awaiting-connector" | "queued" | "claimed" | "executing" | "succeeded" | "failed" | "blocked" | "cancelled" | "expired";
+export type ExecutionStatus = "awaiting-review" | "approved" | "awaiting-manual" | "awaiting-connector" | "queued" | "claimed" | "executing" | "verification-pending" | "verification-closed" | "succeeded" | "failed" | "blocked" | "cancelled" | "expired";
 export type FileKind = "BRAIN" | "SOUL" | "MISSION" | "TASTE" | "MEMORY" | "GROWTH" | "PULSE" | "PRESENCE";
 export type EventTone = "neutral" | "positive" | "quiet" | "warning";
 export type JsonValue = string | number | boolean | null | JsonValue[] | { [key: string]: JsonValue };
@@ -51,6 +51,58 @@ export type VisibilityScope = "public" | "private-community" | "private-thread" 
 export type PresenceEnvironment = "live" | "sandbox";
 export type PresenceConnectionMode = "sandbox" | "native" | "bridge";
 export interface PresenceBrowserAccess { enabled: boolean; }
+
+export interface PresenceDestination {
+  handle?: string;
+  accountExternalRef?: string;
+  communityId?: string;
+  displayName?: string;
+  destinationUrl?: string;
+}
+
+export type AccessBindingKind = "native" | "managed_browser" | "user_attached_browser" | "external_bridge";
+
+export type AccessBinding =
+  | { kind: "native"; channel: ChannelId; status: "connected" | "needs-attention" | "disconnected" }
+  | { kind: "managed_browser"; channel: ChannelId; profileDir?: string; status: "healthy" | "needs_auth" | "recovering" | "unstarted" }
+  | { kind: "user_attached_browser"; channel: ChannelId; status: "connected" | "disconnected" }
+  | { kind: "external_bridge"; channel: ChannelId; bridgeId?: string; status: "connected" | "disconnected" };
+
+export type SelfDirectedAttentionIntensity = "quiet" | "balanced" | "curious" | "custom";
+export type SelfDirectedAttentionDeferral = "deferred_priority" | "deferred_budget" | "deferred_provider_quota" | "deferred_body_unavailable" | "deferred_pacing" | "insufficient_context";
+export interface ResourceBudget {
+  maxEstimatedCostCentsPerDay?: number;
+  maxModelCallsPerDay?: number;
+  maxVisionCallsPerDay?: number;
+  maxChannelReadsPerDay?: number;
+  maxHydrationsPerDay?: number;
+}
+export interface SelfDirectedAttentionPolicy {
+  enabled: boolean;
+  intensity: SelfDirectedAttentionIntensity;
+  budget?: ResourceBudget;
+  mediaUnderstanding: "when_needed" | "off";
+  lastRunAt?: string;
+  nextEligibleAt?: string;
+  lastRunId?: string;
+}
+export type ResourceUsageCategory = "model" | "vision" | "channel_read" | "channel_write" | "media_fetch" | "hydration";
+export interface ResourceUsageEvent {
+  id: string;
+  agentId: string;
+  presenceId?: string;
+  invocationId: string;
+  originKind: SocialOriginKind | "self_directed_discovery";
+  originId?: string;
+  attentionSource?: "self_directed_discovery" | "exploration" | "watchlist" | "inbound_social" | "assignment" | "publishing";
+  category: ResourceUsageCategory;
+  provider: string;
+  model?: string;
+  usage: { inputTokens?: number; outputTokens?: number; reasoningTokens?: number; totalTokens?: number; cacheReadTokens?: number; requests?: number; bytes?: number };
+  cost?: { amount: number; currency: string; provenance: "reported" | "estimated" };
+  quota?: { remaining?: number; resetsAt?: string; provenance: "reported" | "inferred" };
+  createdAt: string;
+}
 export type RelationshipMemoryState = "active" | "forgotten";
 export type RelationshipEpistemicKind = "stated_by_person" | "inferred" | "operator_provided" | "connector_verified";
 export type RelationshipVisibility = "public" | `presence:${string}` | `community:${string}` | `conversation:${string}` | "operator_only";
@@ -63,9 +115,197 @@ export type BridgeAdapterStatus = "waiting" | "connected" | "stale" | "disconnec
 // runtime without destroying their history.
 export type AssignmentStatus = "draft" | "accepted" | "planning" | "active" | "working" | "awaiting_execution" | "awaiting_review" | "needs_operator" | "paused" | "blocked" | "completed" | "completed_with_adaptation" | "failed" | "expired_incomplete" | "cancelled";
 export type AssignmentPreflightStatus = "ready" | "ready_with_assumptions" | "needs_input" | "blocked";
+
+// ============================================================================
+// Operational Autonomy & Temporal Runtime Types (Phase 1)
+// ============================================================================
+
+export type OperationalRunState =
+  | "queued"
+  | "running"
+  | "waiting"
+  | "recovering"
+  | "delivery_uncertain"
+  | "reconciling"
+  | "blocked"
+  | "needs_operator"
+  | "succeeded"
+  | "failed"
+  | "cancelled";
+
+export type OperationalRunKind =
+  | "delivery"
+  | "verification"
+  | "observation"
+  | "discovery"
+  | "browser_recovery"
+  | "runtime_recovery"
+  | "reconsideration";
+
+export interface OperationalRun {
+  id: string;
+  presenceId: string;
+  kind: OperationalRunKind;
+  sourceRef?: string;
+  executionId?: string;
+  state: OperationalRunState;
+  stage: string;
+  createdAt: string;
+  eligibleAt?: string;
+  startedAt?: string;
+  lastProgressAt?: string;
+  lastHeartbeatAt?: string;
+  nextWakeAt?: string;
+  deadlineAt?: string;
+  expiresAt?: string;
+  leaseOwner?: string;
+  leaseExpiresAt?: string;
+  attemptCount: number;
+  recoveryCount: number;
+  incidentId?: string;
+  blockedReason?: string;
+  lastErrorCode?: string;
+  dependencyRefs?: string[];
+  metadata?: Record<string, JsonValue>;
+}
+
+export type ScheduledWakeKind =
+  | "retry"
+  | "verification"
+  | "provider_reset"
+  | "stale_check"
+  | "deadline"
+  | "recovery_cooldown"
+  | "circuit_reopen"
+  | "reconsideration";
+
+export interface ScheduledWake {
+  id: string;
+  presenceId?: string;
+  wakeAt: string; // ISO UTC
+  kind: ScheduledWakeKind;
+  targetId?: string;
+  payload?: Record<string, JsonValue>;
+  state: "pending" | "dispatched" | "cancelled" | "failed";
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type DependencyHealthState =
+  | "healthy"
+  | "degraded"
+  | "recovering"
+  | "waiting"
+  | "circuit_open"
+  | "unavailable"
+  | "requires_operator";
+
+export type DependencyHealthKind =
+  | "runtime"
+  | "native_x"
+  | "managed_browser"
+  | "user_attached_bridge"
+  | "model_provider"
+  | "database";
+
+export interface DependencyHealth {
+  id: string;
+  presenceId?: string;
+  dependency: DependencyHealthKind;
+  state: DependencyHealthState;
+  lastHealthyAt?: string;
+  lastFailureAt?: string;
+  consecutiveFailures: number;
+  circuitUntil?: string;
+  currentIncidentId?: string;
+  metadata?: Record<string, JsonValue>;
+  updatedAt: string;
+}
+
+export type RecoveryIncidentState =
+  | "open"
+  | "recovering"
+  | "waiting"
+  | "needs_operator"
+  | "resolved";
+
+export interface RecoveryIncident {
+  id: string;
+  rootCauseKey: string;
+  dependencyId: string;
+  presenceId?: string;
+  state: RecoveryIncidentState;
+  openedAt: string;
+  lastObservedAt: string;
+  resolvedAt?: string;
+  affectedRunIds: string[];
+  currentRecoveryStep?: string;
+  recoveryAttempts: number;
+  nextAttemptAt?: string;
+  safeSummary: string;
+  operatorActionRequired: boolean;
+  requiresAuth?: boolean;
+  updatedAt: string;
+}
+
+export interface RecoveryAttempt {
+  id: string;
+  incidentId: string;
+  attemptNumber: number;
+  step: string;
+  outcome: "succeeded" | "failed" | "deferred";
+  error?: string;
+  timestamp: string;
+}
+
+export type BrowserBodyState =
+  | "stopped"
+  | "starting"
+  | "healthy"
+  | "degraded"
+  | "recovering"
+  | "circuit_open"
+  | "needs_auth";
+
+export interface BrowserBody {
+  presenceId: string;
+  mode: "managed" | "user_attached";
+  ownership: "openpresence" | "operator";
+  state: BrowserBodyState;
+  canOpenTabs: boolean;
+  canCloseOwnedTabs: boolean;
+  canRestartBrowser: boolean;
+  canRestoreSession: boolean;
+  expectedIdentity?: string;
+  verifiedIdentity?: string;
+  lastHealthyAt?: string;
+  profileDir?: string;
+  updatedAt: string;
+}
+
+export interface OperationalHealthSnapshot {
+  now: string;
+  status: "healthy" | "recovering" | "waiting" | "needs_you";
+  summary: string;
+  presenceId?: string;
+  dependencyHealth: DependencyHealth[];
+  incidents: Array<Pick<RecoveryIncident, "id" | "rootCauseKey" | "state" | "safeSummary" | "affectedRunIds" | "recoveryAttempts" | "nextAttemptAt" | "currentRecoveryStep" | "operatorActionRequired" | "requiresAuth"> & { lastObservedAt: string }>;
+  activeRuns: Array<Pick<OperationalRun, "id" | "kind" | "state" | "stage" | "lastProgressAt" | "nextWakeAt" | "expiresAt" | "blockedReason" | "incidentId">>;
+  dueWakeCount: number;
+  browserBody?: BrowserBody;
+  heartbeats: ProcessHeartbeat[];
+}
+
+export interface ProcessHeartbeat {
+  processId: string;
+  processType: "supervisor" | "runtime" | "browser_worker" | "scheduler";
+  lastHeartbeatAt: string;
+  metadata?: Record<string, JsonValue>;
+}
+
 export type AssignmentDelegationPolicy = "keep_moving" | "ask_before_change" | "stop_on_deviation";
 export type AssignmentQuantityMode = "target" | "at_least" | "exact" | "at_most" | "minimum" | "maximum";
-export type AssignmentOrigin = "schedule" | "exploration" | "watchlist" | "publishing_initiative" | "teach" | "manual" | "system";
+export type AssignmentOrigin = "schedule" | "exploration" | "watchlist" | "publishing_initiative" | "teach" | "manual" | "system" | "capability_trial";
 export type AssignmentMetricComparator = ">=" | ">" | "=" | "<" | "<=";
 export interface AssignmentMetricThreshold { metric: string; comparator: AssignmentMetricComparator; value: number; label?: string; }
 export interface AssignmentPlan {
@@ -216,7 +456,7 @@ export type AssignmentActivation =
   | { type: "attention_source"; sourceIds: string[]; startsAt?: string; endsAt?: string }
   | { type: "continuous" }
   | { type: "manual" };
-export type AssignmentDeliverableType = "original_publication" | "maintain_original_presence" | "meaningful_engagement" | "reply" | "public_interaction" | "introduction" | "quote" | "repost" | "message" | "decision_report" | "custom" | string;
+export type AssignmentDeliverableType = "original_publication" | "maintain_original_presence" | "meaningful_engagement" | "reply" | "like" | "public_interaction" | "introduction" | "quote" | "repost" | "message" | "decision_report" | "custom" | string;
 export type AssignmentOutcomeClass = "candidate_rejected" | "action_no_op" | "assignment_blocked" | "assignment_completed" | "assignment_cancelled" | "evaluation_failed" | "delivery_failed" | "language_policy_failed" | "incomplete";
 export type AssignmentWorkPhase = "researching" | "candidate_review" | "visual_research" | "publishing" | "blocked" | "completed";
 export type AssignmentRunStatus = "queued" | "researching" | "selecting" | "writing" | "delivering" | "published" | "blocked" | "failed" | "cancelled";
@@ -337,7 +577,7 @@ export interface MirrorObject {
 }
 
 export interface EvidenceRef {
-  kind: "mirror_object" | "conversation_event" | "connector_identity" | "community_directory" | "operator_input" | "publication" | "social_intent";
+  kind: "mirror_object" | "conversation_event" | "connector_identity" | "community_directory" | "operator_input" | "publication" | "social_intent" | "conversation_episode" | "relationship" | "knowledge" | "growth_revision" | "presence_revision" | "assignment";
   id: string;
   sourcePresenceId?: string;
   observedAt?: string;
@@ -353,12 +593,36 @@ export interface Person {
   updatedAt: string;
 }
 
+export type IdentitySourceKind =
+  | "provider_profile"
+  | "mirror_author"
+  | "reply_target"
+  | "structured_mention"
+  | "operator";
+
+export interface IdentityFactEvidence {
+  kind: IdentitySourceKind;
+  observedAt: string;
+  detail?: string;
+}
+
+export type IdentityHydrationState = "unhydrated" | "partial" | "hydrated";
+
+export interface IdentityHydrationLead {
+  channel: ChannelId;
+  possibleHandle?: string;
+  possibleDisplayName?: string;
+  sourceRef: string;
+  observedAt: string;
+}
+
 export interface PersonIdentity {
   id: string;
   personId: string;
   channel: ChannelId;
   externalActorId: string;
   handle?: string;
+  displayName?: string;
   profileUrl?: string;
   avatarUrl?: string;
   sourcePresenceId: string;
@@ -366,6 +630,11 @@ export interface PersonIdentity {
   sourceEnvironment?: PresenceEnvironment;
   sourceSessionId?: string;
   verificationMethod: PersonIdentityVerificationMethod;
+  hydrationState?: IdentityHydrationState;
+  displayNameEvidence?: IdentityFactEvidence;
+  handleEvidence?: IdentityFactEvidence;
+  avatarEvidence?: IdentityFactEvidence;
+  lastHydratedAt?: string;
   createdAt: string;
 }
 
@@ -671,7 +940,7 @@ export interface AgentFile { kind: FileKind; title: string; subtitle: string; co
 export interface FileProposal { id: string; file: FileKind; title: string; reason: string; current: string; proposed: string; status: "pending" | "approved" | "rejected"; createdAt: string; changeSetId?: string; target?: { type: "presence_identity"; presenceId: string; name: string }; }
 export type PresenceLanguage = "en";
 export interface LanguagePolicy { avoid: string[]; prohibited: string[]; }
-export interface Agent { id: string; name: string; description: string; audience: string; topics: string[]; accent: string; glyph: string; languagePolicy: LanguagePolicy; }
+export interface Agent { id: string; name: string; description: string; audience: string; topics: string[]; accent: string; glyph: string; languagePolicy: LanguagePolicy; resourceBudget?: ResourceBudget; }
 
 export interface ModelRuntimeCapabilities { vision: boolean; toolCalling: boolean; structuredOutput: boolean; streaming: boolean; }
 export type ModelProvider = "openai" | "anthropic" | "gemini" | "openrouter" | "ollama" | "custom";
@@ -744,6 +1013,26 @@ export interface KnowledgeItem {
   updatedAt: string;
 }
 
+/** Canonical Agent-owned Knowledge document. Legacy collection fields are migrated at the runtime boundary. */
+export interface KnowledgeDocument {
+  id: string;
+  agentId: string;
+  name: string;
+  sourceType: KnowledgeSourceType;
+  role: KnowledgeRole;
+  /** Stored effective source visibility. Presence access can only narrow it. */
+  knowledgeUse: KnowledgeUse;
+  effectiveFrom?: string;
+  reviewAfter?: string;
+  status: "active" | "archived";
+  currentVersionId?: string;
+  createdAt: string;
+  updatedAt: string;
+  /** Retained only to explain and repair legacy provenance after flattening. */
+  legacyCollectionId?: string;
+  legacyCollectionName?: string;
+}
+
 export interface KnowledgeVersion {
   id: string;
   itemId: string;
@@ -783,6 +1072,16 @@ export interface PresenceKnowledgeBinding {
   updatedAt: string;
 }
 
+export interface PresenceKnowledgeAccess {
+  id: string;
+  agentId: string;
+  presenceId: string;
+  maximumUse: KnowledgeUse;
+  enabled: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
 export type KnowledgeRetrievalPurpose = "operator_chat" | "social_planning" | "public_expression" | "assignment" | "support" | string;
 export interface KnowledgeRetrievalRun {
   id: string;
@@ -791,7 +1090,10 @@ export interface KnowledgeRetrievalRun {
   invocationId: string;
   purpose: KnowledgeRetrievalPurpose;
   query: string;
-  accessibleCollectionIds: string[];
+  knowledgeAccess: KnowledgeUse;
+  accessibleDocumentIds: string[];
+  /** Legacy audit field retained for old retrieval records. */
+  accessibleCollectionIds?: string[];
   candidateSegmentIds: string[];
   selectedSegmentIds: string[];
   createdAt: string;
@@ -801,7 +1103,9 @@ export type KnowledgeCitationUsage = "retrieved" | "relied_on" | "quoted" | "con
 export interface KnowledgeCitation {
   id: string;
   retrievalRunId: string;
-  knowledgeItemId: string;
+  knowledgeDocumentId: string;
+  /** Legacy citation field retained for old audit records. */
+  knowledgeItemId?: string;
   knowledgeVersionId: string;
   knowledgeSegmentId: string;
   usage: KnowledgeCitationUsage;
@@ -811,10 +1115,9 @@ export interface KnowledgeCitation {
 }
 
 export interface KnowledgeEvidence {
-  collectionId: string;
-  collectionName: string;
-  itemId: string;
-  itemTitle: string;
+  agentId: string;
+  documentId: string;
+  documentName: string;
   versionId: string;
   versionNumber: number;
   segmentId: string;
@@ -825,12 +1128,19 @@ export interface KnowledgeEvidence {
   effectiveUse: Exclude<KnowledgeUse, "none">;
   sourceType: KnowledgeSourceType;
   reviewAfter?: string;
+  /** Legacy collection/item aliases retained at the evidence boundary. */
+  collectionId?: string;
+  collectionName?: string;
+  itemId?: string;
+  itemTitle?: string;
 }
 
 export interface KnowledgeContextPacket {
   retrievalRunId: string;
   publicEvidence: KnowledgeEvidence[];
   restrictedEvidence: KnowledgeEvidence[];
+  /** Internal style references may shape public wording without becoming public facts. */
+  styleEvidence: KnowledgeEvidence[];
   unresolvedConflicts?: string[];
   missingEvidence?: string[];
   staleWarnings?: string[];
@@ -911,6 +1221,8 @@ export interface PublishingPlan {
   createdAt: string;
   updatedAt: string;
   revision: number;
+  supersededBy?: string;
+  supersededAt?: string;
   modelProvider?: string;
   modelId?: string;
 }
@@ -926,14 +1238,35 @@ export interface PublishingPlanDraft {
   constraints?: string[];
   replanSignals?: string[];
 }
-export type SocialOriginKind = "publishing_initiative" | "assignment" | "standing_intent" | "exploration" | "inbound_social" | "operator" | "teach" | "other";
+export type SocialOriginKind = "publishing_initiative" | "assignment" | "capability_trial" | "standing_intent" | "exploration" | "inbound_social" | "operator" | "teach" | "other";
 export interface SocialOrigin {
-  kind: SocialOriginKind;
+  kind: SocialOriginKind | "self_directed_discovery";
   refId?: string;
   planId?: string;
   planRevision?: number;
   planWindowId?: string;
 }
+export type SocialActDecision =
+  | { kind: "like" }
+  | { kind: "repost" }
+  | { kind: "follow" }
+  | { kind: "reply"; expressionIntent?: string; text?: string }
+  | { kind: "quote"; expressionIntent?: string; text?: string };
+
+export type SocialPlannerResult =
+  | {
+      kind: "inspect_more";
+      requests: Array<{ type: "thread_context" | "media_inspection" | "author_profile"; targetRef: string }>;
+      safeSummary?: string;
+    }
+  | {
+      kind: "decision";
+      acts: SocialActDecision[];
+      conversationDisposition?: ConversationDisposition;
+      safeSummary: string;
+      evidenceRefs: EvidenceRef[];
+    };
+
 export type SocialDecisionKind = "reply" | "like" | "follow" | "quote" | "repost" | "original_post" | "no_op";
 export type SocialDecisionConfidence = "low" | "medium" | "high";
 export interface SocialDecision {
@@ -944,11 +1277,15 @@ export interface SocialDecision {
   focalMirrorObjectIds: string[];
   origin?: SocialOrigin;
   decision: SocialDecisionKind;
+  /** A decision may express several independent, compatible social acts. */
+  acts?: Array<{ decision: Exclude<SocialDecisionKind, "no_op" | "original_post">; text?: string; rationale?: string }>;
+  conversationDisposition?: ConversationDisposition;
   summary: string;
   influences: string[];
   confidence?: SocialDecisionConfidence;
   closestAlternative?: SocialDecisionKind;
   closestAlternativeReason?: string;
+  evidenceRefs?: EvidenceRef[];
   socialIntentId?: string;
   plannerRunId?: string;
   createdAt: string;
@@ -1003,7 +1340,7 @@ export interface AssignmentPreflight {
 export interface PresenceContext { presenceId: string; channel: ChannelId; language?: PresenceLanguage; publicIdentity: { displayName: string; handle?: string; mode: PresenceMode }; publicSelf: PublicSelf; brief: PresenceBrief; audienceContext?: string; voiceAdaptation?: string; availableAffordances: string[]; relevantRelationshipContext?: string; publicFooting?: PublicFooting; ghostProfile?: GhostProfile; publishingInitiative?: PublishingInitiative; }
 export type PresencePacing = "recommended" | "gentle" | "custom";
 export interface PresenceQuietHours { enabled: boolean; start: string; end: string; }
-export interface Presence { id: string; channel: ChannelId; name: string; handle: string; mode: PresenceMode; status: "live" | "paused" | "disconnected"; accent: string; capabilities: ChannelCapability[]; execution: Record<string, ExecutionMode>; executionEnvelope: ExecutionEnvelope; context: PresenceContext; brief: PresenceBrief; publicSelf: PublicSelf; mediaPerceptionPolicy: MediaPerceptionPolicy; evidencePolicy?: "use-judgment" | "review-uncertain" | "always-review"; language?: PresenceLanguage; languagePolicy: LanguagePolicy; ghostProfile?: GhostProfile; pacing: PresencePacing; attentionIntervalMinutes: number; nextExecutionCheckAt?: string; quietHours: PresenceQuietHours; publishingInitiative: PublishingInitiative; accountHealth: "healthy" | "elevated"; environment?: PresenceEnvironment; connectionMode?: PresenceConnectionMode; browserAccess?: PresenceBrowserAccess; }
+export interface Presence { id: string; channel: ChannelId; name: string; handle: string; mode: PresenceMode; status: "live" | "paused" | "disconnected"; accent: string; capabilities: ChannelCapability[]; execution: Record<string, ExecutionMode>; executionEnvelope: ExecutionEnvelope; context: PresenceContext; brief: PresenceBrief; publicSelf: PublicSelf; mediaPerceptionPolicy: MediaPerceptionPolicy; evidencePolicy?: "use-judgment" | "review-uncertain" | "always-review"; language?: PresenceLanguage; languagePolicy: LanguagePolicy; ghostProfile?: GhostProfile; pacing: PresencePacing; attentionIntervalMinutes: number; nextExecutionCheckAt?: string; quietHours: PresenceQuietHours; publishingInitiative: PublishingInitiative; selfDirectedAttention?: SelfDirectedAttentionPolicy; accountHealth: "healthy" | "elevated"; environment?: PresenceEnvironment; destination?: PresenceDestination; accessBindings?: AccessBinding[]; connectionMode?: PresenceConnectionMode; browserAccess?: PresenceBrowserAccess; }
 
 export interface ChatMessage { id: string; role: "agent" | "operator"; content: string; timestamp: string; change?: string; }
 export interface Conversation { id: string; title: string; createdAt: string; updatedAt: string; messages: ChatMessage[]; }
@@ -1022,7 +1359,7 @@ export interface PresenceChatAttachment {
     providerId?: string;
   };
 }
-export interface PresenceChatMessage { id: string; role: "presence" | "user"; content: string; timestamp: string; attachments?: PresenceChatAttachment[]; replyToMessageId?: string; }
+export interface PresenceChatMessage { id: string; role: "presence" | "user"; content: string; timestamp: string; attachments?: PresenceChatAttachment[]; replyToMessageId?: string; operatorFeedback?: boolean; }
 export interface PresenceChatSession { id: string; presenceId: string; title: string; createdAt: string; updatedAt: string; messages: PresenceChatMessage[]; }
 export interface ChangeSetOperation { path: string; action: "create" | "update" | "delete"; before?: JsonValue; after?: JsonValue; }
 export interface ChangeSet { id: string; agentId: string; conversationId?: string; summary: string; operations: ChangeSetOperation[]; createdAt: string; }
@@ -1068,10 +1405,107 @@ export interface ExecutionPermit {
 }
 export interface Publication { id: string; format: string; payload: JsonValue; assetIds: string[]; links: { url: string; label?: string }[]; publicExpression?: PublicExpression; expressionMode?: ExpressionMode; groundingStatus?: GroundingStatus; factuality?: Factuality; assetReuse?: { usageType: AssetUsageType; reason: string }; operatorOverride?: { operatorId?: string; reason: string; at: string }; origin?: SocialOrigin; createdAt: string; environment?: PresenceEnvironment; sessionId?: string; rehearsalAttemptId?: string; assignmentId?: string; invocationId?: string; }
 export interface SocialIntentPersonReference { candidateId: string; personId?: string; purpose: "recommendation" | "introduction_offer" | "introduction_request" | "contextual_reference"; }
-export interface OperatorDirective { id: string; agentId: string; presenceId: string; target: EntityRef; requiredAct: "reply" | "no_op"; optionalDirection?: string; provenance: "operator"; initialAct: "no_op"; status: "requested" | "expressed" | "failed"; environment?: PresenceEnvironment; sessionId?: string; createdAt: string; }
-export interface SocialIntent { id: string; agentId: string; presenceId: string; affordance: string; target?: EntityRef; publicationId?: string; priority: number; validity: { expiresAt?: string; staleAfterMs?: number }; state: "active" | "withdrawn" | "expired"; formedAt: string; updatedAt: string; standingIntentId?: string; assignmentId?: string; conversationEpisodeId?: string; origin?: SocialOrigin; environment?: PresenceEnvironment; sessionId?: string; rehearsalAttemptId?: string; invocationId?: string; referencedPeople?: SocialIntentPersonReference[]; networkReason?: string; source?: "agent" | "operator"; operatorDirectiveId?: string; }
-export interface Execution { id: string; socialIntentId: string; presenceId: string; affordance: string; mode: Exclude<ExecutionMode, "off">; status: ExecutionStatus; attempts: number; bridgeId?: string; connector?: ConnectorKind; idempotencyKey: string; target?: EntityRef; publication?: Publication; permit?: ExecutionPermit; lease?: { executorId: string; claimedAt: string; expiresAt: string }; externalRef?: EntityRef; failure?: { code?: string; message: string; retryable?: boolean }; reviewReason?: string; createdAt: string; updatedAt: string; executedAt?: string; assignmentId?: string; conversationEpisodeId?: string; environment?: PresenceEnvironment; sessionId?: string; rehearsalAttemptId?: string; invocationId?: string; source?: "agent" | "operator"; operatorDirectiveId?: string; }
+export interface OperatorDirective { id: string; agentId: string; presenceId: string; target: EntityRef; requiredAct: "reply" | "no_op"; optionalDirection?: string; provenance: "operator"; initialAct: "no_op"; status: "requested" | "expressed" | "failed"; migratedToAssignmentId?: string; environment?: PresenceEnvironment; sessionId?: string; createdAt: string; }
+export interface SocialIntent { id: string; agentId: string; presenceId: string; affordance: string; target?: EntityRef; publicationId?: string; priority: number; validity: { expiresAt?: string; staleAfterMs?: number }; state: "active" | "withdrawn" | "expired"; formedAt: string; updatedAt: string; standingIntentId?: string; assignmentId?: string; conversationEpisodeId?: string; origin?: SocialOrigin; environment?: PresenceEnvironment; sessionId?: string; rehearsalAttemptId?: string; invocationId?: string; referencedPeople?: SocialIntentPersonReference[]; networkReason?: string; source?: "agent" | "operator"; operatorDirectiveId?: string; attentionTestId?: string; capabilityTrialId?: string; }
+export type FailureReviewDisposition = "closed_non_retryable" | "stale" | "operator_action_required";
+export interface Execution { id: string; socialIntentId: string; presenceId: string; affordance: string; mode: Exclude<ExecutionMode, "off">; status: ExecutionStatus; attempts: number; bridgeId?: string; connector?: ConnectorKind; idempotencyKey: string; target?: EntityRef; publication?: Publication; permit?: ExecutionPermit; lease?: { executorId: string; claimedAt: string; expiresAt: string }; externalRef?: EntityRef; failure?: { code?: string; message: string; retryable?: boolean; reviewedAt?: string; reviewDisposition?: FailureReviewDisposition; reviewNote?: string }; reviewReason?: string; createdAt: string; updatedAt: string; executedAt?: string; assignmentId?: string; conversationEpisodeId?: string; environment?: PresenceEnvironment; sessionId?: string; rehearsalAttemptId?: string; invocationId?: string; source?: "agent" | "operator"; operatorDirectiveId?: string; attentionTestId?: string; capabilityTrialId?: string; }
 export interface Outcome { id: string; socialIntentId: string; executionId?: string; presenceId: string; status: "succeeded" | "failed" | "unknown"; observedAt: string; metrics: Record<string, number>; evidence?: EntityRef[]; environment?: PresenceEnvironment; sessionId?: string; conversationEpisodeId?: string; }
+
+export type AgendaHorizon = "now" | "ongoing" | "upcoming" | "attention";
+
+export type AgendaWorkKind =
+  | "social_opportunity"
+  | "discovery_session"
+  | "conversation"
+  | "assignment_step"
+  | "publishing_step"
+  | "growth_review"
+  | "reconciliation";
+
+export type AgendaWorkSource =
+  | "assignment"
+  | "conversation"
+  | "mention"
+  | "publishing"
+  | "exploration"
+  | "watchlist"
+  | "self_directed_discovery"
+  | "capability_trial"
+  | "growth_review";
+export type AgendaWorkState = "working" | "ready" | "waiting" | "watching" | "upcoming" | "awaiting_verification" | "deferred" | "needs_operator";
+
+export interface AgendaWorkItem {
+  id: string;
+  source: AgendaWorkSource;
+  workKind?: AgendaWorkKind;
+  step?: "reassess_plan" | "create_plan" | "window_work" | string;
+  planRef?: string;
+  planRevision?: number;
+  sourceRef?: string;
+  assignmentId?: string;
+  state: AgendaWorkState;
+  currentRank?: number;
+  safePriorityReason: string;
+  nextAction: string;
+  doneWhen: string;
+  title: string;
+  originLabel: string;
+  statusLabel: string;
+  detail: string;
+  progress?: { verified: number; required?: number; label?: string };
+  nextEligibleAt?: string;
+  targetMirrorObjectId?: string;
+  updatedAt?: string;
+  urgencyScore: number;
+  assignment?: Assignment;
+}
+
+export interface AgendaWatchingItem {
+  id: string;
+  source: AgendaWorkSource;
+  label: string;
+  statusLabel: string;
+  detail: string;
+  count?: number;
+  lastCheckedAt?: string;
+  nextEligibleAt?: string;
+  currentAgendaRank?: number;
+}
+
+export interface AgendaItem {
+  id: string;
+  assignmentId: string;
+  horizon: AgendaHorizon;
+  title: string;
+  subtitle?: string;
+  statusLabel: string;
+  detail: string;
+  deliverableLabel?: string;
+  timingLabel?: string;
+  isReady: boolean;
+  isWorking: boolean;
+  isDueNow: boolean;
+  urgencyScore: number;
+  scheduledFor?: string;
+  targetMirrorObjectId?: string;
+  assignment: Assignment;
+}
+
+export interface AgendaCompilation {
+  items: AgendaItem[];
+  now: AgendaItem[];
+  ongoing: AgendaItem[];
+  upcoming: AgendaItem[];
+  attention: AgendaItem[];
+  compiledAt?: string;
+  workItems?: AgendaWorkItem[];
+  working?: AgendaWorkItem[];
+  nextUp?: AgendaWorkItem[];
+  waiting?: AgendaWorkItem[];
+  responsibilities?: Assignment[];
+  needsYou?: AgendaWorkItem[];
+  watching?: AgendaWatchingItem[];
+}
 
 export interface ConversationEpisode {
   id: string;
@@ -1123,8 +1557,11 @@ export interface Assignment {
   channelId: ChannelId;
   environment: PresenceEnvironment;
   title?: string;
+  createdBy?: "operator" | "agent" | "system";
   origin?: AssignmentOrigin;
   activation?: AssignmentActivation;
+  target?: { mirrorObjectId: string; relationshipId?: string };
+  migration?: { sourceType: "operatorDirective" | string; sourceId: string };
   instruction: string;
   deliverable: { type: AssignmentDeliverableType; quantity?: number; quantityMode?: AssignmentQuantityMode };
   quantityPolicy?: { quantity?: number | "agent_planned"; mode: AssignmentQuantityMode; period?: "day" | "week" | "assignment"; timezone?: string };
@@ -1174,6 +1611,42 @@ export interface Assignment {
   createdAt: string;
   updatedAt: string;
 }
+
+export type CapabilityTrialCapability = "like" | "repost" | "quote" | "follow" | "reply" | "original_post" | "image_post" | "video_post";
+export type CapabilityTrialEnvironment = "sandbox" | "live";
+export type CapabilityTrialStatus = "draft" | "preflight" | "active" | "discovering" | "judging" | "awaiting_execution" | "awaiting_verification" | "completed" | "expired" | "failed" | "cancelled";
+export type CapabilityTrialResult = "PASS_VERIFIED" | "INCONCLUSIVE_NO_OPPORTUNITY" | "WAITING_REVIEW" | "BLOCKED_CAPABILITY" | "BLOCKED_RESOURCE" | "FAIL_EXECUTION" | "FAIL_VERIFICATION" | "CANCELLED";
+export interface CapabilityTrialResourceEnvelope { maxDurationMinutes: number; maxSearchDirections: number; maxLightweightHits: number; maxCandidatesTriaged: number; maxHydratedCandidates: number; maxModelCalls?: number; maxVisionCalls?: number; }
+export interface CapabilityTrialCandidateAudit { mirrorObjectId: string; socialDecisionId?: string; acts?: string[]; suppressedActs?: string[]; status: "rejected" | "matched" | "blocked"; rationale?: string; createdAt: string; }
+export interface CapabilityTrial {
+  id: string;
+  agentId: string;
+  presenceId: string;
+  capability: CapabilityTrialCapability;
+  environment: CapabilityTrialEnvironment;
+  assignmentId: string;
+  status: CapabilityTrialStatus;
+  focusPolicy: { objective: string; discovery: "agent-directed"; target: "agent-discovered"; preservePlannerVocabulary: true };
+  executionIsolation: { testedCapability: CapabilityTrialCapability; mode: "auto" | "review"; suppressOtherTrialActs: true; presenceWide: false };
+  resourceEnvelope: CapabilityTrialResourceEnvelope;
+  startedAt?: string;
+  expiresAt: string;
+  result?: CapabilityTrialResult;
+  discoveryPlanId?: string;
+  candidateAudits: CapabilityTrialCandidateAudit[];
+  matchedCandidateMirrorObjectId?: string;
+  socialIntentId?: string;
+  executionId?: string;
+  verifiedOutcomeId?: string;
+  why?: string;
+  lastError?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+export type CapabilityTrialPlan = Record<string, JsonValue>;
+export type CapabilityTrialStimulus = Record<string, JsonValue>;
+export type CapabilityTrialObservation = Record<string, JsonValue>;
+export type CapabilityTrialEvaluation = Record<string, JsonValue>;
 
 /** One durable, bounded worker execution for an operator-owned Assignment. */
 export interface AssignmentRun {
@@ -1340,13 +1813,20 @@ export interface ExplorationBrief {
 /** Cached Agent strategy. It may adapt; it cannot rewrite the operator brief. */
 export interface DiscoveryPlan {
   id: string;
-  explorationId: string;
-  briefRevision: number;
+  explorationId?: string;
+  presenceId?: string;
+  origin?: "operator_exploration" | "self_directed_discovery";
+  briefRevision?: number;
+  revision?: number;
   channel: ChannelId;
   surfaces: string[];
   directions: string[];
   exclusions: string[];
   source: "agent" | "fallback";
+  safeRationale?: string;
+  searchQueries?: string[];
+  evidenceRequirements?: string[];
+  resourceHints?: string[];
   generatedAt: string;
   expiresAt: string;
 }
@@ -1387,7 +1867,7 @@ export interface ExplorationFinding {
 
 export interface LiveEvent { id: string; type: "decision" | "execution" | "learning" | "memory" | "system"; title: string; detail: string; time: string; tone: EventTone; presenceId?: string; intentId?: string; executionId?: string; outcomeId?: string; decisionId?: string; sessionId?: string; invocationId?: string; sourceObjectId?: string; }
 export interface CalendarSlot { id: string; label: string; instruction: string; day: string; time: string; objective: string; presence: string; mode: ExecutionMode; enabled: boolean; executionWindow: string; standingIntentId?: string; assignmentId?: string; lastEvaluatedAt?: string; }
-export type PublicHistoryKind = "post" | "reply" | "quote" | "repost" | "thread" | "comment";
+export type PublicHistoryKind = "post" | "reply" | "quote" | "repost" | "like" | "thread" | "comment";
 export interface PublicHistoryItem {
   id: string;
   presenceId: string;
@@ -1408,6 +1888,47 @@ export interface PublicHistoryItem {
   availability?: "available" | "deleted";
   metrics: Record<string, number>;
 }
+export type AttentionTestAction = "like" | "repost" | "quote";
+export type AttentionTestMode = "sandbox" | "live";
+export type AttentionTestDecisionAction = AttentionTestAction | "no_op";
+export type AttentionTestStage = "queued" | "decided" | "claimed" | "executed" | "verified" | "recorded" | "visible" | "held" | "retrying" | "failed";
+export interface AttentionTestTelemetry {
+  id: string;
+  stage: AttentionTestStage;
+  at: string;
+  executionId?: string;
+  action?: AttentionTestAction;
+  targetId?: string;
+  bridgeStatus?: string;
+  verificationResult?: "pending" | "verified" | "failed" | "timeout" | "not_run";
+  persistenceResult?: "pending" | "recorded" | "failed";
+  detail?: string;
+  transitionKey: string;
+}
+export interface AttentionTest {
+  id: string;
+  agentId: string;
+  presenceId: string;
+  candidateId?: string;
+  action?: AttentionTestAction;
+  mode: AttentionTestMode;
+  targetUrl?: string;
+  target?: EntityRef;
+  targetLabel?: string;
+  quoteText?: string;
+  decision?: { action: AttentionTestDecisionAction; rationale: string; at: string };
+  executionId?: string;
+  sessionId?: string;
+  status: AttentionTestStage;
+  failure?: { code: string; message: string; retryable?: boolean };
+  lastFailure?: { code: string; message: string; at: string };
+  feedRecordId?: string;
+  calendarRecordId?: string;
+  externalUrl?: string;
+  telemetry: AttentionTestTelemetry[];
+  createdAt: string;
+  updatedAt: string;
+}
 export interface ActivitySummary {
   current: { label: string; detail: string; tone: EventTone };
   lastPulseAt?: string;
@@ -1424,13 +1945,15 @@ export interface ActionRecord { id: string; intent: "post" | "reply" | "like" | 
 export interface AgentWorkspaceSnapshot {
   onboarded: boolean; agent: Agent | null; presence: Presence | null; presences: Presence[]; activePresenceId: string | null;
   files: AgentFile[]; proposals: FileProposal[]; messages: ChatMessage[]; conversations: Conversation[]; activeConversationId: string | null; presenceChatSessions: PresenceChatSession[]; agentRequests: AgentRequest[]; capabilityChangeEvents: CapabilityChangeEvent[];
-  events: LiveEvent[]; socialDecisions: SocialDecision[]; calendar: CalendarSlot[]; assignments: Assignment[]; growthReviews: GrowthReview[]; growthFileVersions: GrowthFileVersion[]; audienceSnapshots: PresenceAudienceSnapshot[]; publicationMetricSnapshots: PublicationMetricSnapshot[]; watches: Watch[]; explorations: ExplorationBrief[]; discoveryPlans: DiscoveryPlan[]; explorationSessions: ExplorationSession[]; explorationFindings: ExplorationFinding[]; actions: ActionRecord[]; publishingPlans: PublishingPlan[]; metrics: { qualifiedFollows: number; conversations: number; opportunitiesIgnored: number; audienceHealth: number };
-  modelProfiles: AgentModelProfile[]; providerConnections: ProviderConnection[]; assetProviderConnections: AssetProviderConnection[]; toolBindings: AgentToolBinding[]; changeSets: ChangeSet[]; standingIntents: StandingIntent[]; operatorDirectives: OperatorDirective[]; socialIntents: SocialIntent[]; executions: Execution[]; outcomes: Outcome[]; publications: Publication[]; assetUsages: AssetUsage[]; sourceEvidence: SourceEvidence[]; claimGrounding: ClaimGrounding[]; preferenceEvidence: PreferenceEvidence[]; originalPostRehearsals: OriginalPostRehearsalAttempt[]; librarySources: LibrarySource[]; assets: Asset[]; perceptions: AssetPerception[]; assetResearchSessions: AssetResearchSession[]; skills: Skill[]; agentSkills: AgentSkill[]; contentDrops: ContentDrop[]; channelDefinitions: ChannelDefinition[]; nativeConnections: NativeChannelConnection[]; bridges: Bridge[]; mirrorObjects: MirrorObject[]; mirrorEvents: MirrorEvent[]; bridgeSync: BridgeSyncState[]; conversationEpisodes: ConversationEpisode[]; assignmentContributions: AssignmentContribution[]; people: Person[]; personIdentities: PersonIdentity[]; relationships: Relationship[]; relationshipFacts: RelationshipFact[]; relationshipOpenLoops: RelationshipOpenLoop[]; recommendationRecords: RecommendationRecord[]; introductionRecords: IntroductionRecord[]; sandboxEnvironments: SandboxEnvironment[]; playgroundSessions: PlaygroundSession[]; sandboxActors: SandboxActor[]; networkSearches: SandboxNetworkSearch[]; networkIntroductions: SandboxNetworkIntroduction[]; scenarios: Scenario[]; scenarioVersions: ScenarioVersion[]; scenarioRuns: ScenarioRun[]; scenarioRunProvenance: ScenarioRunProvenance[]; scenarioEvaluations: ScenarioRunEvaluation[]; knowledgeCollections: KnowledgeCollection[]; knowledgeItems: KnowledgeItem[]; knowledgeVersions: KnowledgeVersion[]; knowledgeSegments: KnowledgeSegment[]; presenceKnowledgeBindings: PresenceKnowledgeBinding[]; knowledgeRetrievalRuns: KnowledgeRetrievalRun[]; knowledgeCitations: KnowledgeCitation[];
+  events: LiveEvent[]; socialDecisions: SocialDecision[]; resourceUsageEvents: ResourceUsageEvent[]; calendar: CalendarSlot[]; assignments: Assignment[]; growthReviews: GrowthReview[]; growthFileVersions: GrowthFileVersion[]; audienceSnapshots: PresenceAudienceSnapshot[]; publicationMetricSnapshots: PublicationMetricSnapshot[]; watches: Watch[]; explorations: ExplorationBrief[]; discoveryPlans: DiscoveryPlan[]; explorationSessions: ExplorationSession[]; explorationFindings: ExplorationFinding[]; actions: ActionRecord[]; publishingPlans: PublishingPlan[]; metrics: { qualifiedFollows: number; conversations: number; opportunitiesIgnored: number; audienceHealth: number };
+  modelProfiles: AgentModelProfile[]; providerConnections: ProviderConnection[]; assetProviderConnections: AssetProviderConnection[]; toolBindings: AgentToolBinding[]; changeSets: ChangeSet[]; standingIntents: StandingIntent[]; operatorDirectives: OperatorDirective[]; socialIntents: SocialIntent[]; executions: Execution[]; outcomes: Outcome[]; attentionTests: AttentionTest[]; capabilityTrials: CapabilityTrial[]; publications: Publication[]; assetUsages: AssetUsage[]; sourceEvidence: SourceEvidence[]; claimGrounding: ClaimGrounding[]; preferenceEvidence: PreferenceEvidence[]; originalPostRehearsals: OriginalPostRehearsalAttempt[]; librarySources: LibrarySource[]; assets: Asset[]; perceptions: AssetPerception[]; assetResearchSessions: AssetResearchSession[]; skills: Skill[]; agentSkills: AgentSkill[]; contentDrops: ContentDrop[]; channelDefinitions: ChannelDefinition[]; nativeConnections: NativeChannelConnection[]; bridges: Bridge[]; mirrorObjects: MirrorObject[]; mirrorEvents: MirrorEvent[]; bridgeSync: BridgeSyncState[]; conversationEpisodes: ConversationEpisode[]; assignmentContributions: AssignmentContribution[]; people: Person[]; personIdentities: PersonIdentity[]; relationships: Relationship[]; relationshipFacts: RelationshipFact[]; relationshipOpenLoops: RelationshipOpenLoop[]; recommendationRecords: RecommendationRecord[]; introductionRecords: IntroductionRecord[]; sandboxEnvironments: SandboxEnvironment[]; playgroundSessions: PlaygroundSession[]; sandboxActors: SandboxActor[]; networkSearches: SandboxNetworkSearch[]; networkIntroductions: SandboxNetworkIntroduction[]; scenarios: Scenario[]; scenarioVersions: ScenarioVersion[]; scenarioRuns: ScenarioRun[]; scenarioRunProvenance: ScenarioRunProvenance[]; scenarioEvaluations: ScenarioRunEvaluation[]; knowledgeDocuments: KnowledgeDocument[]; knowledgeVersions: KnowledgeVersion[]; knowledgeSegments: KnowledgeSegment[]; presenceKnowledgeAccess: PresenceKnowledgeAccess[]; knowledgeRetrievalRuns: KnowledgeRetrievalRun[]; knowledgeCitations: KnowledgeCitation[]; knowledgeCollections?: KnowledgeCollection[]; knowledgeItems?: KnowledgeItem[]; presenceKnowledgeBindings?: PresenceKnowledgeBinding[];
+  operationalRuns?: OperationalRun[]; scheduledWakes?: ScheduledWake[]; dependencyHealth?: DependencyHealth[]; recoveryIncidents?: RecoveryIncident[]; recoveryAttempts?: RecoveryAttempt[]; browserBodies?: BrowserBody[];
   workspaceRevision?: number;
 }
 
 export interface OpenPresenceState extends AgentWorkspaceSnapshot {
   agents: Agent[]; activeAgentId: string | null; agentWorkspaces: AgentWorkspaceSnapshot[]; assignmentRuns?: AssignmentRun[];
+  lastStimulus?: PlaygroundStimulusResult;
 }
 
 export interface CreateAgentInput { name: string; description: string; audience?: string; mode: PresenceMode; handle: string; accent: string; }
@@ -1438,6 +1961,10 @@ export type ToolBindingOperation = { type: "setToolBinding"; toolId: string; pro
 export type CapabilityOperation = { type: "setCapability"; capabilityId: AgentCapabilityId; enabled: boolean };
 export type RuntimeOperation = Operation | ToolBindingOperation | CapabilityOperation;
 export type KnowledgeOperation =
+  | { type: "createKnowledgeDocument"; name: string; content: string; sourceType?: KnowledgeSourceType; mimeType?: string; originalDataUrl?: string; originalFileName?: string; originalAssetId?: string }
+  | { type: "saveKnowledgeDocument"; documentId: string; name: string; content: string; mimeType?: string; originalAssetId?: string }
+  | { type: "setKnowledgeAccess"; presenceId: string; maximumUse: KnowledgeUse; enabled?: boolean }
+  | { type: "archiveKnowledgeDocument"; documentId: string }
   | { type: "createKnowledgeCollection"; name: string; description?: string; defaultRole: KnowledgeRole; defaultUse: KnowledgeUse }
   | { type: "updateKnowledgeCollection"; collectionId: string; name: string; description?: string; defaultRole: KnowledgeRole; defaultUse: KnowledgeUse }
   | { type: "addKnowledgeItem"; collectionId: string; title: string; role?: KnowledgeRole; useOverride?: KnowledgeUse; sourceType: KnowledgeSourceType; content: string; mimeType?: string; originalDataUrl?: string; originalFileName?: string; originalAssetId?: string }
@@ -1452,33 +1979,44 @@ export type AssignmentOperation =
   | { type: "updateAssignmentPlan"; assignmentId: string; plan: Omit<AssignmentPlan, "id" | "assignmentId" | "revision" | "createdAt" | "updatedAt"> }
   | { type: "startAssignment"; id: string; sessionId: string }
   | { type: "workAssignment"; id: string; sessionId: string }
+  | { type: "runLiveAssignment"; assignmentId: string; presenceId?: string }
   | { type: "cancelAssignment"; id: string };
+export type CapabilityTrialOperation =
+  | { type: "createCapabilityTrial"; presenceId?: string; capability: CapabilityTrialCapability; environment?: CapabilityTrialEnvironment; executionMode?: "auto" | "review"; resourceEnvelope?: Partial<CapabilityTrialResourceEnvelope> }
+  | { type: "startCapabilityTrial"; id: string; confirmLive?: true }
+  | { type: "pauseCapabilityTrial"; id: string }
+  | { type: "resumeCapabilityTrial"; id: string }
+  | { type: "completeCapabilityTrial"; id: string; status?: "completed" | "failed" | "cancelled"; feedback?: string }
+  | { type: "updateCapabilityTrialPlan"; id: string; plan: CapabilityTrialPlan }
+  | { type: "recordCapabilityTrialCandidate"; trialId: string; stimulus: CapabilityTrialStimulus; observation: CapabilityTrialObservation; evaluation: CapabilityTrialEvaluation }
+  | { type: "runCapabilityTrialStep"; id: string }
+  | { type: "cancelCapabilityTrial"; id: string }
+  | { type: "runCapabilityTrial"; id: string };
 export type LanguagePolicyOperation =
-  | { type: "setAgentLanguagePolicy"; policy: LanguagePolicy }
-  | { type: "setPresenceLanguagePolicy"; policy: LanguagePolicy }
-  | { type: "overrideLanguagePolicy"; id: string };
+  | { type: "setLanguagePolicy"; presenceId?: string; policy: Partial<LanguagePolicy> }
+  | { type: "setPresenceLanguage"; presenceId: string; language: PresenceLanguage }
+  | { type: "recordLanguageConflictOverride"; presenceId: string; intentId: string; ruleId: string; author: "operator"; reason?: string };
 export type ScenarioOperation =
-  | { type: "createScenarioFromPrompt"; prompt: string; presenceId?: string }
-  | { type: "importScenario"; payload: JsonValue; presenceId?: string }
-  | { type: "generateMissingScenarioEvents"; scenarioId: string }
-  | { type: "updateScenarioEvents"; scenarioId: string; stimuli: ScenarioStimulus[] }
-  | { type: "updateScenarioRequirements"; scenarioId: string; requirements: ScenarioStimulusRequirements }
-  | { type: "renameScenario"; scenarioId: string; title: string }
-  | { type: "deleteScenario"; scenarioId: string }
-  | { type: "startScenarioRun"; scenarioId: string; presenceId?: string }
-  | { type: "resumeScenarioRun"; runId: string }
-  | { type: "stopScenarioRun"; runId: string }
-  | { type: "rerunScenario"; runId: string }
-  | { type: "evaluateScenarioRun"; runId: string }
-  | { type: "recordScenarioReview"; runId: string; disposition: "accepted" | "okay" | "concern"; note?: string };
-export type PublishingPlanOperation = { type: "replanPublishing"; presenceId?: string };
+  | { type: "createScenario"; input: { title: string; objective: string; initialPost: string; targetAuthorName: string; targetAuthorHandle: string; difficulty: "beginner" | "intermediate" | "advanced"; audienceState: "neutral" | "skeptical" | "enthusiastic" | "adversarial"; domain: "technology" | "business" | "creative" | "general" } }
+  | { type: "saveScenarioVersion"; input: { scenarioId: string; title: string; objective: string; initialPost: string; targetAuthorName: string; targetAuthorHandle: string; difficulty: "beginner" | "intermediate" | "advanced"; audienceState: "neutral" | "skeptical" | "enthusiastic" | "adversarial"; domain: "technology" | "business" | "creative" | "general" } }
+  | { type: "runScenario"; input: { scenarioId: string; versionId?: string; presenceId: string } }
+  | { type: "evaluateScenarioRun"; input: { runId: string } };
+export type PublishingPlanOperation =
+  | { type: "createPublishingPlan"; presenceId?: string; title: string; objective: string; timeWindow: string; scheduleDays: string[]; slotsPerDay: number; topics: string[]; targetThemes: string[]; voiceNotes: string[]; constraints: string[] }
+  | { type: "updatePublishingPlan"; id: string; patch: Partial<PublishingPlan> }
+  | { type: "activatePublishingPlan"; id: string }
+  | { type: "pausePublishingPlan"; id: string }
+  | { type: "archivePublishingPlan"; id: string };
 export type GrowthOperation =
-  | { type: "recordAudienceSnapshot"; presenceId?: string; followers: number; following?: number; source?: MetricObservationSource; observationStatus?: PresenceAudienceSnapshot["observationStatus"]; observedAt?: string }
-  | { type: "recordPublicationMetricSnapshot"; presenceId?: string; mirrorObjectId: string; publicationAgeSeconds?: number; metrics: Partial<Pick<PublicationMetricSnapshot, "impressions" | "likes" | "replies" | "reposts" | "quotes">>; source?: MetricObservationSource; observationStatus?: PublicationMetricSnapshot["observationStatus"] }
   | { type: "reviewGrowth"; assignmentId?: string; presenceId?: string; kind?: GrowthReviewKind; modelDecision?: GrowthReviewDecision };
 export type AgentRequestOperation =
   | { type: "updateAgentRequest"; id: string; status: AgentRequestStatus }
   | { type: "recordCapabilityChange"; presenceId: string; changes: Array<Pick<CapabilityChangeEvent, "capability" | "previousAvailability" | "nextAvailability" | "provider" | "detail">> };
+export type FailureReviewOperation =
+  | { type: "reviewFailedExecution"; id: string; disposition: FailureReviewDisposition; note?: string }
+  | { type: "reviewAllFailedExecutions"; presenceId?: string; disposition?: FailureReviewDisposition; note?: string }
+  | { type: "clearReviewedExecutions"; presenceId?: string }
+  | { type: "closeUnverifiedExecutions"; ids: string[]; note?: string };
 export type ExplorationOperation =
   | { type: "createExploration"; brief: string; presenceId?: string }
   | { type: "updateExploration"; id: string; brief: string }
@@ -1487,12 +2025,51 @@ export type ExplorationOperation =
   | { type: "lookNow"; id: string }
   | { type: "runAttentionWorker" };
 export type BrowserOperation = { type: "setPresenceBrowserAccess"; presenceId?: string; enabled: boolean };
-export type Operation = AssignmentOperation | LanguagePolicyOperation | ScenarioOperation | PublishingPlanOperation | GrowthOperation | AgentRequestOperation | ExplorationOperation
+export type ObservabilityOperation =
+  | { type: "recordAudienceSnapshot"; presenceId?: string; followers: number; following?: number; source?: MetricObservationSource; observationStatus?: "observed" | "partial" | "unavailable"; observedAt?: string }
+  | { type: "recordPublicationMetricSnapshot"; presenceId?: string; mirrorObjectId: string; publicationAgeSeconds?: number; metrics: Partial<Record<"impressions" | "likes" | "replies" | "reposts" | "quotes", number>>; source?: MetricObservationSource; observationStatus?: "observed" | "partial" | "unavailable" };
+export type LegacyLanguageOperation =
+  | { type: "setAgentLanguagePolicy"; policy: Partial<LanguagePolicy> }
+  | { type: "setPresenceLanguagePolicy"; policy: Partial<LanguagePolicy> }
+  | { type: "overrideLanguagePolicy"; id: string };
+export type OperationalOperation =
+  | { type: "createOperationalRun"; run: OperationalRun }
+  | { type: "updateOperationalRun"; id: string; patch: Partial<OperationalRun> }
+  | { type: "scheduleWake"; wake: ScheduledWake }
+  | { type: "cancelWake"; id: string }
+  | { type: "recordDependencyHealth"; health: DependencyHealth }
+  | { type: "createRecoveryIncident"; incident: RecoveryIncident }
+  | { type: "updateRecoveryIncident"; id: string; patch: Partial<RecoveryIncident> }
+  | { type: "recordRecoveryAttempt"; attempt: RecoveryAttempt }
+  | { type: "updateBrowserBody"; presenceId: string; patch: Partial<BrowserBody> }
+  | { type: "reconsiderAffectedRuns"; incidentId?: string; presenceId?: string };
+
+export type PlaygroundStimulusTarget = "quote" | "repost" | "like" | "reply" | "silence";
+export type PresenceChatRehearsalOperation =
+  | { type: "sendPresenceChatMessage"; presenceId: string; sessionId: string; content: string; attachments?: SandboxAssetInput[]; replyToMessageId?: string; briefOverride?: PresenceBrief; respond?: boolean }
+  | { type: "askPresenceChatToReply"; presenceId: string; sessionId: string; targetMessageId: string; briefOverride?: PresenceBrief };
+
+export interface PlaygroundStimulusResult {
+  authorName: string;
+  authorHandle: string;
+  content: string;
+  targetAffordance: PlaygroundStimulusTarget;
+  rationale: string;
+}
+
+export type Operation = AssignmentOperation | CapabilityTrialOperation | LanguagePolicyOperation | ScenarioOperation | PublishingPlanOperation | GrowthOperation | AgentRequestOperation | FailureReviewOperation | ExplorationOperation | OperationalOperation
   | BrowserOperation
+  | ObservabilityOperation
+  | LegacyLanguageOperation
+  | PresenceChatRehearsalOperation
   | KnowledgeOperation
   | { type: "removeSandboxObject"; sessionId: string; objectId: string }
+  | { type: "cancelExecution"; id: string }
   | { type: "askPresenceToReply"; presenceId: string; objectId: string; sessionId?: string; optionalDirection?: string }
+  | { type: "askPresenceToEvaluate"; presenceId: string; objectId: string; sessionId?: string; optionalDirection?: string }
   | { type: "importXPost"; presenceId: string; url: string }
+  | { type: "runAttentionTest"; presenceId: string; mode: AttentionTestMode; confirmed: true }
   | { type: "removeLegacyCalendarEntries" }
   | { type: "askPresenceToIgnore"; presenceId: string; objectId: string; sessionId?: string }
-  | { type: "reset" } | { type: "createAgent"; input: CreateAgentInput } | { type: "createAdditionalAgent"; input: CreateAgentInput } | { type: "selectAgent"; id: string } | { type: "renameAgent"; name: string } | { type: "createPresence"; input: CreatePresenceInput } | { type: "createChannel"; definition: ChannelDefinition } | { type: "updateChannel"; definition: ChannelDefinition } | { type: "createBridge"; input: { presenceId: string; name: string; kind: ConnectorKind; capabilities: ConnectorCapabilities } } | { type: "rotateBridgeKey"; id: string } | { type: "revokeBridge"; id: string } | { type: "removeBridge"; id: string } | { type: "markManualExecution"; id: string; externalRef: EntityRef } | { type: "retryExecution"; id: string } | { type: "selectPresence"; id: string } | { type: "selectConversation"; id: string } | { type: "newConversation" } | { type: "sendMessage"; content: string; conversationId?: string } | { type: "newPresenceChatSession"; presenceId: string } | { type: "sendPresenceChatMessage"; presenceId: string; sessionId: string; content: string; attachments?: SandboxAssetInput[]; replyToMessageId?: string } | { type: "saveFile"; kind: FileKind; content: string } | { type: "resolveProposal"; id: string; decision: "approve" | "reject" } | { type: "addSlot"; instruction: string; day: string; time: string; objective: string; executionWindow: string; presenceId?: string } | { type: "editSlot"; id: string; instruction: string; day: string; time: string; objective: string; executionWindow: string; presenceId?: string } | { type: "runNow"; instruction: string; presenceId?: string } | { type: "createWatch"; query: string; purpose?: string; presenceId?: string } | { type: "deleteWatch"; id: string } | { type: "rememberPerson"; personId?: string; presenceId?: string; channel?: ChannelId; externalActorId: string; displayName: string; handle?: string; profileUrl?: string; source?: "operator" | "current-context" | "watched" } | { type: "forgetRelationship"; relationshipId: string } | { type: "restoreRelationship"; relationshipId: string } | { type: "correctRelationshipFact"; factId?: string; relationshipId: string; statement: string; visibility?: RelationshipVisibility } | { type: "createIntroductionRecord"; presenceId?: string; requesterPersonId?: string; requesterActorId?: string; candidatePersonId?: string; candidateActorId?: string; sourceIntentIds?: string[] } | { type: "respondIntroductionConsent"; id: string; party: "requester" | "candidate"; consent: boolean } | { type: "createSkill"; name: string; description: string } | { type: "editSkill"; id: string; name: string; description: string } | { type: "configureProvider"; provider: ModelProvider; label: string; endpoint?: string; hasSecret?: boolean; secret?: string } | { type: "configureAssetProvider"; provider: AssetProviderConnection["provider"]; label: string; endpoint?: string; secretConfigured?: boolean; hasSecret?: boolean; secret?: string; createdAt?: string } | { type: "disconnectAssetProvider"; provider: AssetDiscoveryProviderId } | { type: "wakePresence"; presenceId?: string } | { type: "runPulse"; presenceId?: string } | { type: "syncNativeX"; presenceId?: string } | { type: "setModel"; model: string; provider?: ModelProvider; quality?: ModelQuality; vision?: boolean } | { type: "runSlot"; id: string; scheduled?: boolean } | { type: "approveExecution"; id: string } | { type: "executeIntent"; id: string } | { type: "confirmAutoMode"; presenceId: string; capabilities: string[]; executionIds: string[] } | { type: "approveSandboxIntroduction"; id: string } | { type: "declineSandboxIntroduction"; id: string } | { type: "setPresence"; patch: Partial<Pick<Presence, "name" | "handle" | "mode" | "status" | "pacing" | "attentionIntervalMinutes" | "quietHours" | "publishingInitiative" | "execution" | "ghostProfile" | "connectionMode" | "brief" | "publicSelf" | "mediaPerceptionPolicy" | "language">> } | { type: "startPlayground"; presenceId?: string; source?: "fresh" | "scenario" | "replay" } | { type: "syncPlaygroundTime"; sessionId: string } | { type: "resetPlayground"; sessionId: string } | { type: "inspectMirrorMedia"; presenceId: string; objectId: string } | { type: "inspectSandboxMedia"; sessionId: string; objectId: string } | { type: "addSandboxEvent"; sessionId: string; kind?: string; actionId?: string; actorId?: string; actorName?: string; actorHandle?: string; profile?: SandboxActorProfile; content?: string; language?: string; assets?: SandboxAssetInput[]; targetExternalRef?: EntityRef; parentExternalRef?: EntityRef; observeOnly?: boolean } | { type: "advanceSandboxTime"; sessionId: string; minutes: number } | { type: "runSandboxPulse"; sessionId: string } | { type: "considerOriginalPublication"; sessionId: string; inspiration?: string } | { type: "recordPreferenceEvidence"; sessionId: string; attemptId: string; reaction: PreferenceReaction; reasons?: PreferenceReason[]; note?: string };
+  | { type: "generatePlaygroundStimulus"; sessionId: string; presenceId?: string; targetAffordance: PlaygroundStimulusTarget; topic?: string }
+  | { type: "reset" } | { type: "createAgent"; input: CreateAgentInput } | { type: "createAdditionalAgent"; input: CreateAgentInput } | { type: "selectAgent"; id: string } | { type: "deleteAgent"; confirmationName: string } | { type: "setAgentAccent"; agentId: string; accent: string } | { type: "renameAgent"; name: string } | { type: "createPresence"; input: CreatePresenceInput } | { type: "deletePresence"; presenceId: string; confirmationName: string } | { type: "createChannel"; definition: ChannelDefinition } | { type: "updateChannel"; definition: ChannelDefinition } | { type: "createBridge"; input: { presenceId: string; name: string; kind: ConnectorKind; capabilities: ConnectorCapabilities } } | { type: "rotateBridgeKey"; id: string } | { type: "revokeBridge"; id: string } | { type: "removeBridge"; id: string } | { type: "markManualExecution"; id: string; externalRef: EntityRef } | { type: "retryExecution"; id: string } | { type: "reconcileXDeliveries"; presenceId?: string; retryMissing?: boolean } | { type: "selectPresence"; id: string } | { type: "selectConversation"; id: string } | { type: "newConversation" } | { type: "sendMessage"; content: string; conversationId?: string } | { type: "newPresenceChatSession"; presenceId: string } | { type: "sendPresenceChatMessage"; presenceId: string; sessionId: string; content: string; attachments?: SandboxAssetInput[]; replyToMessageId?: string; briefOverride?: PresenceBrief } | { type: "saveFile"; kind: FileKind; content: string } | { type: "resolveProposal"; id: string; decision: "approve" | "reject" } | { type: "addSlot"; instruction: string; day: string; time: string; objective: string; executionWindow: string; presenceId?: string } | { type: "editSlot"; id: string; instruction: string; day: string; time: string; objective: string; executionWindow: string; presenceId?: string } | { type: "runNow"; instruction: string; presenceId?: string } | { type: "createWatch"; query: string; purpose?: string; presenceId?: string } | { type: "deleteWatch"; id: string } | { type: "rememberPerson"; personId?: string; presenceId?: string; channel?: ChannelId; externalActorId: string; displayName: string; handle?: string; profileUrl?: string; source?: "operator" | "current-context" | "watched" } | { type: "forgetRelationship"; relationshipId: string } | { type: "restoreRelationship"; relationshipId: string } | { type: "correctRelationshipFact"; factId?: string; relationshipId: string; statement: string; visibility?: RelationshipVisibility } | { type: "createIntroductionRecord"; presenceId?: string; requesterPersonId?: string; requesterActorId?: string; candidatePersonId?: string; candidateActorId?: string; sourceIntentIds?: string[] } | { type: "respondIntroductionConsent"; id: string; party: "requester" | "candidate"; consent: boolean } | { type: "createSkill"; name: string; description: string } | { type: "editSkill"; id: string; name: string; description: string } | { type: "configureProvider"; provider: ModelProvider; label: string; endpoint?: string; hasSecret?: boolean; secret?: string } | { type: "configureAssetProvider"; provider: AssetProviderConnection["provider"]; label: string; endpoint?: string; hasSecret?: boolean; secret?: string; createdAt?: string } | { type: "disconnectAssetProvider"; provider: AssetProviderConnection["provider"] } | { type: "wakePresence"; presenceId?: string } | { type: "runPulse"; presenceId?: string } | { type: "syncNativeX"; presenceId?: string } | { type: "setModel"; model: string; provider?: ModelProvider; quality?: ModelQuality; vision?: boolean } | { type: "runSlot"; id: string; scheduled?: boolean } | { type: "approveExecution"; id: string } | { type: "executeIntent"; id: string } | { type: "confirmAutoMode"; presenceId: string; capabilities: string[]; executionIds: string[] } | { type: "approveSandboxIntroduction"; id: string } | { type: "declineSandboxIntroduction"; id: string } | { type: "setPresence"; patch: Partial<Pick<Presence, "name" | "handle" | "mode" | "status" | "pacing" | "attentionIntervalMinutes" | "quietHours" | "publishingInitiative" | "execution" | "ghostProfile" | "connectionMode" | "brief" | "publicSelf" | "mediaPerceptionPolicy" | "language" | "selfDirectedAttention">> } | { type: "startPlayground"; presenceId?: string; source?: "fresh" | "scenario" | "replay" } | { type: "syncPlaygroundTime"; sessionId: string } | { type: "resetPlayground"; sessionId: string } | { type: "inspectMirrorMedia"; presenceId: string; objectId: string } | { type: "inspectSandboxMedia"; sessionId: string; objectId: string } | { type: "addSandboxEvent"; sessionId: string; kind?: string; actionId?: string; actorId?: string; actorName?: string; actorHandle?: string; profile?: SandboxActorProfile; targetExternalRef?: EntityRef; parentExternalRef?: EntityRef; observeOnly?: boolean } | { type: "advanceSandboxTime"; sessionId: string; minutes: number } | { type: "runSandboxPulse"; sessionId: string } | { type: "considerOriginalPublication"; sessionId: string; inspiration?: string } | { type: "recordPreferenceEvidence"; sessionId: string; attemptId: string; reaction: PreferenceReaction; reasons?: PreferenceReason[]; note?: string };

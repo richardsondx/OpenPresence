@@ -25,7 +25,8 @@ export async function POST(request: Request) {
     if (input.mode === "search") {
       const compiled = compileKnowledgeContext(state, { presenceId, query: input.query, purpose: input.purpose ?? "operator_chat", limit: input.limit });
       writeState(compiled.state);
-      return NextResponse.json({ packet: compiled.packet, result: { retrievalRunId: compiled.packet.retrievalRunId, results: [...compiled.packet.publicEvidence, ...compiled.packet.restrictedEvidence], accessibleCollectionIds: compiled.state.knowledgeRetrievalRuns.find((run) => run.id === compiled.packet.retrievalRunId)?.accessibleCollectionIds ?? [], missingEvidence: compiled.packet.missingEvidence, unresolvedConflicts: compiled.packet.unresolvedConflicts, staleWarnings: compiled.packet.staleWarnings }, state: compiled.state });
+      const run = compiled.state.knowledgeRetrievalRuns.find((item) => item.id === compiled.packet.retrievalRunId);
+      return NextResponse.json({ packet: compiled.packet, result: { retrievalRunId: compiled.packet.retrievalRunId, results: [...compiled.packet.publicEvidence, ...compiled.packet.restrictedEvidence], knowledgeAccess: run?.knowledgeAccess ?? "none", accessibleDocumentIds: run?.accessibleDocumentIds ?? [], accessibleCollectionIds: run?.accessibleCollectionIds ?? [], missingEvidence: compiled.packet.missingEvidence, unresolvedConflicts: compiled.packet.unresolvedConflicts, staleWarnings: compiled.packet.staleWarnings }, state: compiled.state });
     }
     const read = readKnowledge(state, { presenceId, segmentId: input.segmentId, purpose: input.purpose ?? "operator_chat" });
     writeState(read.state);
