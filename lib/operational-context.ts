@@ -1,11 +1,10 @@
-import { getBrowserBody, getDueScheduledWakes, getProcessHeartbeats, listDependencyHealth, listOperationalRuns, listRecoveryIncidents } from "./db";
+import { getDueScheduledWakes, getProcessHeartbeats, listDependencyHealth, listOperationalRuns, listRecoveryIncidents } from "./db";
 import type { OperationalHealthSnapshot } from "./types";
 
 export interface CompiledOperationalContext {
   now: string;
   overallStatus: "healthy" | "recovering" | "waiting" | "needs_you";
   nativeStatus: string;
-  browserStatus: string;
   activeIncidentsCount: number;
   waitingRunsCount: number;
   recoveringRunsCount: number;
@@ -28,11 +27,26 @@ export function readOperationalHealth(presenceId?: string, now = new Date()): Op
         ? "Genny is waiting for a known time or provider reset. It will resume automatically."
         : "Human action is required before this responsibility can continue.";
 
+  const activeIncidentIds = new Set(incidents.map((i) => i.id));
+  const recoveringIncidents = incidents.filter((i) => i.state === "recovering" || i.state === "open").length;
+  const waitingIncidents = incidents.filter((i) => i.state === "waiting").length;
+  const needsOperatorIncidents = incidents.filter((i) => i.state === "needs_operator" || i.operatorActionRequired).length;
+  const orphanRecoveringRuns = activeRuns.filter((r) => (r.state === "recovering" || r.state === "reconciling") && (!r.incidentId || !activeIncidentIds.has(r.incidentId))).length;
+
+  const counts: OperationalHealthSnapshot["counts"] = {
+    activeIncidents: incidents.length,
+    recoveringIncidents,
+    waitingIncidents,
+    needsOperatorIncidents,
+    orphanRecoveringRuns,
+  };
+
   return {
     now: now.toISOString(),
     status,
     summary,
     presenceId,
+    counts,
     dependencyHealth,
     incidents: incidents.map((incident) => ({
       id: incident.id,
@@ -59,7 +73,7 @@ export function readOperationalHealth(presenceId?: string, now = new Date()): Op
       incidentId: run.incidentId,
     })),
     dueWakeCount: getDueScheduledWakes(now.toISOString()).length,
-    browserBody: presenceId ? getBrowserBody(presenceId) : undefined,
+
     heartbeats: getProcessHeartbeats(),
   };
 }
@@ -82,7 +96,7 @@ export function compileOperationalContext(
   const recoveringRuns = listOperationalRuns(presenceId, ["recovering"]);
 
   const nativeHealth = healthList.find((h) => h.dependency === "native_x");
-  const browserHealth = healthList.find((h) => h.dependency === "managed_browser");
+
 
   let overallStatus: CompiledOperationalContext["overallStatus"] = "healthy";
   if (needsOperator) {
@@ -97,12 +111,6 @@ export function compileOperationalContext(
     ? `Waiting on quota (resumes ${nativeHealth.circuitUntil ?? "soon"})`
     : nativeHealth?.state ?? "Healthy";
 
-  const browserStatus = browserHealth?.state === "circuit_open"
-    ? `Cooldown active (retries ${browserHealth.circuitUntil ?? "soon"})`
-    : browserHealth?.state === "recovering"
-      ? "Self-recovery in progress"
-      : browserHealth?.state ?? "Healthy";
-
   const summary = overallStatus === "healthy"
     ? "All operational channels and bodies are healthy."
     : overallStatus === "recovering"
@@ -115,7 +123,6 @@ export function compileOperationalContext(
     now: now.toISOString(),
     overallStatus,
     nativeStatus,
-    browserStatus,
     activeIncidentsCount: incidents.length,
     waitingRunsCount: waitingRuns.length,
     recoveringRunsCount: recoveringRuns.length,

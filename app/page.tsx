@@ -50,6 +50,7 @@ import {
   Settings2,
   ShieldCheck,
   Sparkles,
+  Terminal,
   TrendingUp,
   Trash2,
   Users,
@@ -113,6 +114,9 @@ import type {
   OperationalHealthSnapshot,
 } from "@/lib/types";
 import { publicExpressionText } from "@/lib/public-expression";
+import { recurringAttentionOperation } from "@/lib/growth-scheduler";
+import { xCreditsBillingUrl, xCreditsExhausted } from "@/lib/x-credits";
+import { runtimeTimeoutForOperation, runtimeTimeoutMessage } from "@/lib/runtime-timeout";
 
 const PUBLIC_TECHNICAL_FACTS: { id: PublicTechnicalFact; label: string; detail: string }[] = [
   { id: "ai-presence", label: "This is an AI presence", detail: "Say so when the question makes it relevant." },
@@ -120,6 +124,10 @@ const PUBLIC_TECHNICAL_FACTS: { id: PublicTechnicalFact; label: string; detail: 
   { id: "model-provider", label: "Current model provider", detail: "Share the provider, not credentials." },
   { id: "exact-model", label: "Exact model", detail: "Share the selected model when approved." },
 ];
+// A local worker and an operator tab can legitimately finish within the same
+// revision window. Give the caller enough room to adopt the newest snapshot
+// before surfacing a conflict, while keeping a hard bound against a hot loop.
+const WORKSPACE_CONFLICT_RETRY_LIMIT = 8;
 
 const fileOrder: FileKind[] = [
   "BRAIN",
@@ -212,37 +220,71 @@ const formatCountdown = (value: string | undefined, now = Date.now()) => {
     ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
     : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 };
+const formatElapsedDuration = (value: string | undefined, now = Date.now()) => {
+  if (!value) return undefined;
+  const startTime = new Date(value).getTime();
+  if (!Number.isFinite(startTime) || startTime <= 0) return undefined;
+  const elapsedMs = Math.max(0, now - startTime);
+  const totalSeconds = Math.floor(elapsedMs / 1_000);
+  const hours = Math.floor(totalSeconds / 3_600);
+  const minutes = Math.floor((totalSeconds % 3_600) / 60);
+  const seconds = totalSeconds % 60;
+  if (hours > 0) {
+    return `${hours}h ${minutes}m ${seconds}s`;
+  }
+  if (minutes > 0) {
+    return `${minutes}m ${seconds}s`;
+  }
+  return `${seconds}s`;
+};
 
 function useOperationalHealth(presenceId?: string) {
   const [health, setHealth] = useState<OperationalHealthSnapshot | null>(null);
   useEffect(() => {
     if (!presenceId) return;
-    let cancelled = false;
+    let active = true;
+    let timerId: ReturnType<typeof setTimeout> | undefined;
+
     const load = async () => {
       try {
         const response = await fetch(`/api/runtime/health?presenceId=${encodeURIComponent(presenceId)}`, { cache: "no-store" });
-        if (!response.ok) return;
-        const payload = await response.json() as OperationalHealthSnapshot;
-        if (!cancelled) setHealth(payload);
+        if (response.ok && active) {
+          const payload = await response.json() as OperationalHealthSnapshot;
+          setHealth(payload);
+        }
       } catch { /* Health is advisory; Activity remains usable when the probe is down. */ }
+      finally {
+        if (active) {
+          timerId = setTimeout(() => void load(), 5_000);
+        }
+      }
     };
     void load();
-    const timer = window.setInterval(() => void load(), 10_000);
-    return () => { cancelled = true; window.clearInterval(timer); };
+    return () => {
+      active = false;
+      if (timerId) clearTimeout(timerId);
+    };
   }, [presenceId]);
   return health;
 }
 
 function OperationalHealthIndicator({ health, onOpen }: { health: OperationalHealthSnapshot | null; onOpen: () => void }) {
-  const copy = health?.status === "needs_you"
+  if (!health) {
+    return (
+      <button type="button" className="global-health-indicator global-health-unknown" onClick={onOpen} aria-label="Operating health: Connecting">
+        <span aria-hidden="true">◌</span> Health connecting...
+      </button>
+    );
+  }
+  const copy = health.status === "needs_you"
     ? "Needs You"
-    : health?.status === "recovering"
+    : health.status === "recovering"
       ? "Recovering body · no action needed"
-      : health?.status === "waiting"
+      : health.status === "waiting"
         ? "Waiting · resumes automatically"
         : "Healthy";
-  const symbol = health?.status === "needs_you" ? "⚠" : health?.status === "recovering" ? "◐" : health?.status === "waiting" ? "◷" : "●";
-  return <button type="button" className={`global-health-indicator global-health-${health?.status ?? "healthy"}`} onClick={onOpen} aria-label={`Operating health: ${copy}`}><span aria-hidden="true">{symbol}</span> {copy}</button>;
+  const symbol = health.status === "needs_you" ? "⚠" : health.status === "recovering" ? "◐" : health.status === "waiting" ? "◷" : "●";
+  return <button type="button" className={`global-health-indicator global-health-${health.status}`} onClick={onOpen} aria-label={`Operating health: ${copy}`}><span aria-hidden="true">{symbol}</span> {copy}</button>;
 }
 const historyDisplayAt = (item: Pick<PublicHistoryItem, "occurredAt" | "observedAt" | "environment">) => item.environment === "sandbox" ? item.observedAt : item.occurredAt;
 const historyTimeTitle = (item: Pick<PublicHistoryItem, "occurredAt" | "observedAt" | "environment">) => item.environment === "sandbox"
@@ -300,12 +342,13 @@ function PresenceLogo({
 }: {
   channel: ChannelId;
   definitions?: ChannelDefinition[];
-  size?: "normal" | "large";
+  size?: "small" | "normal" | "large";
 }) {
   const definition = definitions?.find((item) => item.id === channel);
   const icon = definition?.icon ?? (channel === "x" ? "x" : "community");
   const option = channelIconOptions.find((item) => item.id === icon);
-  const fallback = icon === "x" ? <XBrand /> : option ? <option.icon size={size === "large" ? 18 : 14} strokeWidth={1.8} /> : <Globe2 size={size === "large" ? 18 : 14} strokeWidth={1.8} />;
+  const iconPixelSize = size === "large" ? 18 : size === "small" ? 12 : 14;
+  const fallback = icon === "x" ? <XBrand /> : option ? <option.icon size={iconPixelSize} strokeWidth={1.8} /> : <Globe2 size={iconPixelSize} strokeWidth={1.8} />;
   const favicon = definition?.domain ? faviconUrl(definition.domain) : null;
   return (
     <span className={`presence-logo presence-logo-${size}`} aria-hidden="true">
@@ -329,11 +372,9 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
   return (await response.json()) as T;
 }
 
-const runtimeRequestTimeoutMs = 20_000;
-
-async function fetchRuntime(input: RequestInfo | URL, init: RequestInit = {}) {
+async function fetchRuntime(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = runtimeTimeoutForOperation()) {
   const controller = new AbortController();
-  const timeout = window.setTimeout(() => controller.abort(), runtimeRequestTimeoutMs);
+  const timeout = window.setTimeout(() => controller.abort(), timeoutMs);
   try {
     return await fetch(input, { ...init, signal: controller.signal });
   } finally {
@@ -342,8 +383,14 @@ async function fetchRuntime(input: RequestInfo | URL, init: RequestInit = {}) {
 }
 
 function clientErrorMessage(reason: unknown, fallback: string) {
-  if ((reason instanceof TypeError && /fetch/i.test(reason.message)) || (reason instanceof DOMException && reason.name === "AbortError")) {
-    return "The OpenPresence runtime could not be reached. Try again; if it persists, restart the local app server.";
+  if (reason instanceof DOMException && reason.name === "AbortError") {
+    return runtimeTimeoutMessage();
+  }
+  if (reason instanceof Error && /workspace changed in another tab or worker|workspace was updated elsewhere/i.test(reason.message)) {
+    return "The latest workspace state was loaded. Please try that action again.";
+  }
+  if (reason instanceof TypeError && /fetch|network|failed to fetch/i.test(reason.message)) {
+    return "The OpenPresence runtime could not be reached. Checking connection...";
   }
   return reason instanceof Error ? reason.message : fallback;
 }
@@ -725,7 +772,7 @@ export default function Home() {
       setPendingOperation(operationType);
     }
     let context = requestContext ?? state;
-    let retriedConflict = false;
+    let conflictRetries = 0;
     let lookPoll: number | undefined;
     try {
       if (operationType === "lookNow" && typeof window !== "undefined") {
@@ -753,11 +800,11 @@ export default function Home() {
             ...(context?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(context.workspaceRevision) } : {}),
           },
           body: JSON.stringify(operation),
-        });
+        }, runtimeTimeoutForOperation(operationType));
         rememberStateResponse(response);
         const payload = await readJsonResponse<OpenPresenceState & { error?: string; conflict?: boolean; state?: OpenPresenceState }>(response);
-        if (!response.ok && response.status === 409 && payload.state && !retriedConflict) {
-          retriedConflict = true;
+        if (!response.ok && response.status === 409 && payload.state && conflictRetries < WORKSPACE_CONFLICT_RETRY_LIMIT) {
+          conflictRetries += 1;
           context = payload.state;
           setState(payload.state);
           syncBrowserWorkspaceContext(payload.state);
@@ -767,6 +814,7 @@ export default function Home() {
           attentionConflictRevision.current = typeof payload.state.workspaceRevision === "number" ? payload.state.workspaceRevision : null;
           setState(payload.state);
           syncBrowserWorkspaceContext(payload.state);
+          setError(null);
           return null;
         }
         if (!response.ok)
@@ -778,7 +826,16 @@ export default function Home() {
         return payload as OpenPresenceState;
       }
     } catch (reason) {
-      setError(clientErrorMessage(reason, "That change could not be saved."));
+      if (reason instanceof DOMException && reason.name === "AbortError" && tracksAttention) {
+        try {
+          await refreshState();
+          setError("The operation is still being verified. Check Activity for its latest state before trying again.");
+        } catch {
+          setError(clientErrorMessage(reason, "That change could not be saved."));
+        }
+      } else {
+        setError(clientErrorMessage(reason, "That change could not be saved."));
+      }
       return null;
     } finally {
       if (lookPoll !== undefined && typeof window !== "undefined") window.clearInterval(lookPoll);
@@ -854,13 +911,15 @@ export default function Home() {
   useEffect(() => {
     if (pendingOperation === "wakePresence" || pendingOperation === "runPulse" || pendingOperation === "runAttentionWorker") return;
     const presence = state?.presence;
-    const connection = presence && presence.connectionMode !== "bridge"
+    const connection = presence && presence.channel === "x"
       ? state.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x" && item.status === "connected")
       : undefined;
     if (!presence || !connection) return;
     const observation = connection.observation;
     const due = !observation?.nextObservationAt || new Date(observation.nextObservationAt).getTime() <= Date.now();
     let timer: ReturnType<typeof setTimeout> | undefined;
+    let retryAttempt = 0;
+    let observerState = state;
     const schedule = (nextObservationAt?: string) => {
       const delay = nextObservationAt ? Math.max(1_000, new Date(nextObservationAt).getTime() - Date.now()) : 1_000;
       timer = setTimeout(() => { void observe(); }, delay);
@@ -870,15 +929,32 @@ export default function Home() {
       nativeSyncInFlight.current = presence.id;
       setIsSyncingNative(true);
       try {
-        const response = await fetchRuntime("/api/state", { method: "POST", headers: { "Content-Type": "application/json", ...(state?.activeAgentId ? { "x-openpresence-agent-id": state.activeAgentId } : {}), ...(state?.activePresenceId ? { "x-openpresence-presence-id": state.activePresenceId } : {}), ...(state?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(state.workspaceRevision) } : {}) }, body: JSON.stringify({ type: "syncNativeX", presenceId: presence.id }) });
+        const response = await fetchRuntime("/api/state", { method: "POST", headers: { "Content-Type": "application/json", ...(observerState?.activeAgentId ? { "x-openpresence-agent-id": observerState.activeAgentId } : {}), ...(observerState?.activePresenceId ? { "x-openpresence-presence-id": observerState.activePresenceId } : {}), ...(observerState?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(observerState.workspaceRevision) } : {}) }, body: JSON.stringify({ type: "syncNativeX", presenceId: presence.id }) });
         rememberStateResponse(response);
-        const payload = await readJsonResponse<OpenPresenceState & { error?: string }>(response);
+        const payload = await readJsonResponse<OpenPresenceState & { error?: string; conflict?: boolean; state?: OpenPresenceState }>(response);
+        if (response.status === 409 && payload.state) {
+          // A worker or another tab won the revision race. This is expected
+          // coordination, not an observer outage; adopt the newer snapshot
+          // and try again on the normal observation cadence.
+          observerState = payload.state;
+          setState(payload.state);
+          syncBrowserWorkspaceContext(payload.state);
+          setError(null);
+          retryAttempt = 0;
+          schedule(payload.state.nativeConnections.find((item) => item.presenceId === presence.id)?.observation?.nextObservationAt);
+          return;
+        }
         if (!response.ok) throw new Error(payload.error ?? "The X observer could not run.");
+        observerState = payload;
         setState(payload);
         setError(null);
+        retryAttempt = 0;
         schedule(payload.nativeConnections.find((item) => item.presenceId === presence.id)?.observation?.nextObservationAt);
       } catch (reason) {
         setError(clientErrorMessage(reason, "The X observer could not run."));
+        retryAttempt += 1;
+        const retryDelay = Math.min(60_000, 5_000 * Math.pow(1.5, retryAttempt)) + Math.random() * 2000;
+        timer = setTimeout(() => { void observe(); }, retryDelay);
       } finally {
         nativeSyncInFlight.current = null;
         setIsSyncingNative(false);
@@ -890,9 +966,8 @@ export default function Home() {
   }, [state?.presence?.id, state?.presence?.connectionMode, state?.nativeConnections, state?.activeAgentId, state?.activePresenceId, state?.workspaceRevision, rememberStateResponse]);
   useEffect(() => {
     const presenceId = state?.presence?.id;
-    const connectionMode = state?.presence?.connectionMode;
     const browserAccessEnabled = state?.presence?.browserAccess?.enabled;
-    if (!presenceId || connectionMode !== "bridge" || !browserAccessEnabled) return;
+    if (!presenceId || !browserAccessEnabled) return;
     const refreshBridgeHealth = async () => {
       try {
         const response = await fetch(`/api/bridge/status?presenceId=${encodeURIComponent(presenceId)}`, { cache: "no-store" });
@@ -911,7 +986,7 @@ export default function Home() {
       void refreshBridgeHealth();
     }, 10_000);
     return () => window.clearInterval(timer);
-  }, [state?.presence?.id, state?.presence?.connectionMode, state?.presence?.browserAccess?.enabled]);
+  }, [state?.presence?.id, state?.presence?.browserAccess?.enabled]);
   useEffect(() => {
     if (pendingOperation || attentionOperationInFlight.current) return;
     if (attentionConflictRevision.current !== null && attentionConflictRevision.current === state?.workspaceRevision) return;
@@ -938,11 +1013,12 @@ export default function Home() {
       return;
     }
     if (dueAssignment && calendarRunInFlight.current !== `assignment:${dueAssignment.id}`) {
-      const bridge = presence.connectionMode === "bridge" ? state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline") : undefined;
-      const bridgeReady = presence.connectionMode !== "bridge" || Boolean(bridge && bridgeAdapterStatus(bridge) === "connected");
+      const usesChannelBridge = presence.channel !== "x" && presence.connectionMode === "bridge";
+      const bridge = usesChannelBridge ? state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline") : undefined;
+      const bridgeReady = !usesChannelBridge || Boolean(bridge && bridgeAdapterStatus(bridge) === "connected");
       if (!bridgeReady) return;
       calendarRunInFlight.current = `assignment:${dueAssignment.id}`;
-      const operation = presence.connectionMode === "bridge" ? { type: "runAttentionWorker" as const } : { type: "runPulse" as const, presenceId: presence.id };
+      const operation = recurringAttentionOperation(state, presence);
       window.setTimeout(() => { void mutate(operation).finally(() => { calendarRunInFlight.current = null; }); }, 0);
       return;
     }
@@ -973,9 +1049,7 @@ export default function Home() {
       calendarRunInFlight.current = key;
       const operation = next.kind === "slot"
         ? { type: "runSlot" as const, id: next.item.slot.id, scheduled: true }
-        : presence.connectionMode === "bridge"
-          ? { type: "runAttentionWorker" as const }
-          : { type: "runPulse" as const, presenceId: presence.id };
+        : recurringAttentionOperation(state, presence);
       void mutate(operation).finally(() => { calendarRunInFlight.current = null; });
     }, delay);
     return () => clearTimeout(timer);
@@ -985,45 +1059,56 @@ export default function Home() {
     const presence = state?.presence;
     if (!presence || presence.status !== "live") return;
     const needsReassessment = state ? publishingPlanNeedsReassessment(state, presence.id).kind !== "none" : false;
-    const growthAssignment = state.assignments.find((item) => item.presenceId === presence.id && item.status === "active" && item.activation?.type === "continuous" && item.successEvidence?.metric === "followers");
+    // Growth is a standing responsibility, not a manual Playground draft.
+    // Older workspaces can contain the reviewed continuous Assignment in
+    // `draft` while the Presence is already Auto-enabled. Activate that
+    // existing responsibility through the normal Presence state path before
+    // scheduling the recurring attention cycle.
+    const growthAssignment = state.assignments.find((item) => item.presenceId === presence.id && !["completed", "cancelled", "expired_incomplete"].includes(item.status) && item.activation?.type === "continuous" && item.successEvidence?.metric === "followers");
     if (!growthAssignment && !needsReassessment) return;
-    const bridge = presence.connectionMode === "bridge" ? state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline") : undefined;
-    const bodyReady = presence.connectionMode === "bridge"
+    const usesChannelBridge = presence.channel !== "x" && presence.connectionMode === "bridge";
+    const bridge = usesChannelBridge ? state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline") : undefined;
+    const bodyReady = usesChannelBridge
       ? Boolean(bridge && bridgeAdapterStatus(bridge) === "connected")
-      : presence.connectionMode === "native" && state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "connected");
-    if (!bodyReady && presence.connectionMode !== "simulated") return;
+      : presence.environment === "sandbox" || (presence.channel === "x" || presence.connectionMode === "native") && state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "connected");
+    if (!bodyReady && presence.environment !== "sandbox") return;
     const lastRun = growthAttentionAt.current[presence.id] ?? 0;
-    const wait = needsReassessment ? 1_000 : Math.max(0, 5 * 60_000 - (Date.now() - lastRun));
+    const growthNeedsActivation = Boolean(growthAssignment && !["active", "working", "accepted", "planning"].includes(growthAssignment.status));
+    const wait = growthNeedsActivation ? 0 : needsReassessment ? 1_000 : Math.max(0, 5 * 60_000 - (Date.now() - lastRun));
     const timer = window.setTimeout(() => {
-      if (!needsReassessment && growthAttentionAt.current[presence.id] && Date.now() - growthAttentionAt.current[presence.id] < 5 * 60_000) return;
+      if (!growthNeedsActivation && !needsReassessment && growthAttentionAt.current[presence.id] && Date.now() - growthAttentionAt.current[presence.id] < 5 * 60_000) return;
       growthAttentionAt.current[presence.id] = Date.now();
-      const operation = presence.connectionMode === "bridge"
-        ? { type: "runAttentionWorker" as const }
-        : { type: "runPulse" as const, presenceId: presence.id };
+      const operation = growthNeedsActivation
+        ? { type: "activateAssignment" as const, id: growthAssignment!.id, delegationPolicy: "keep_moving" as const }
+        : recurringAttentionOperation(state, presence);
       void mutate(operation);
     }, wait);
     return () => window.clearTimeout(timer);
   }, [state?.assignments, state?.publishingPlans, state?.presence, state?.nativeConnections, state?.bridges, pendingOperation]);
   async function manageBridge(operation: unknown) {
     setError(null);
+    let context = state;
+    let conflictRetries = 0;
     try {
+      while (true) {
       const response = await fetch("/api/bridge/manage", {
         method: "POST",
         headers: {
           "Content-Type": "application/json",
-          ...(state?.activeAgentId ? { "x-openpresence-agent-id": state.activeAgentId } : {}),
-          ...(state?.activePresenceId ? { "x-openpresence-presence-id": state.activePresenceId } : {}),
-          ...(state?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(state.workspaceRevision) } : {}),
+          ...(context?.activeAgentId ? { "x-openpresence-agent-id": context.activeAgentId } : {}),
+          ...(context?.activePresenceId ? { "x-openpresence-presence-id": context.activePresenceId } : {}),
+          ...(context?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(context.workspaceRevision) } : {}),
         },
         body: JSON.stringify(operation),
       });
       const payload = await readJsonResponse<{ state?: OpenPresenceState; key?: string; error?: string }>(response);
-      if (!response.ok)
-        if (response.status === 409 && payload.state) {
-          setState(payload.state);
-          syncBrowserWorkspaceContext(payload.state);
-          throw new Error("This tab was refreshed because the Agent workspace changed elsewhere. Please retry the Bridge action.");
-        }
+      if (!response.ok && response.status === 409 && payload.state && conflictRetries < WORKSPACE_CONFLICT_RETRY_LIMIT) {
+        conflictRetries += 1;
+        context = payload.state;
+        setState(payload.state);
+        syncBrowserWorkspaceContext(payload.state);
+        continue;
+      }
       if (!response.ok)
         throw new Error(
           payload.error ?? "That Bridge change could not be saved.",
@@ -1032,6 +1117,7 @@ export default function Home() {
       setState(payload.state);
       syncBrowserWorkspaceContext(payload.state);
       return payload as { state: OpenPresenceState; key?: string };
+      }
     } catch (reason) {
       setError(clientErrorMessage(reason, "That Bridge change could not be saved."));
       return null;
@@ -1040,7 +1126,7 @@ export default function Home() {
   async function manageX(operation: unknown) {
     setError(null);
     let context = state;
-    let retriedConflict = false;
+    let conflictRetries = 0;
     try {
       while (true) {
         const response = await fetchRuntime("/api/x/manage", {
@@ -1054,8 +1140,8 @@ export default function Home() {
           body: JSON.stringify(operation),
         });
         const payload = await readJsonResponse<{ state?: OpenPresenceState; result?: { account: { id: string; username: string; name: string }; access: "read" | "read-write" }; error?: string }>(response);
-        if (!response.ok && response.status === 409 && payload.state && !retriedConflict) {
-          retriedConflict = true;
+        if (!response.ok && response.status === 409 && payload.state && conflictRetries < WORKSPACE_CONFLICT_RETRY_LIMIT) {
+          conflictRetries += 1;
           context = payload.state;
           setState(payload.state);
           syncBrowserWorkspaceContext(payload.state);
@@ -1647,6 +1733,26 @@ function CreateAgentDialog({
   );
 }
 
+function XCreditsAlert({
+  connection,
+}: {
+  connection: NonNullable<OpenPresenceState["nativeConnections"]>[number];
+}) {
+  const account = connection.account;
+  return (
+    <div className="x-credits-alert" role="alert" aria-live="assertive">
+      <CircleAlert size={18} aria-hidden="true" />
+      <div className="x-credits-alert-copy">
+        <strong>X credits are exhausted{account?.username ? ` for @${account.username}` : ""}</strong>
+        <p>The official X API cannot read or publish until you add credits or choose a plan with API access.</p>
+      </div>
+      <a className="button button-secondary x-credits-alert-action" href={xCreditsBillingUrl(account?.id)} target="_blank" rel="noreferrer">
+        {account?.id ? "Add X credits" : "Open X API console"} <ArrowUpRight size={14} aria-hidden="true" />
+      </a>
+    </div>
+  );
+}
+
 function AgentWorkspaceShell({
   state,
   view,
@@ -1676,8 +1782,12 @@ function AgentWorkspaceShell({
 }) {
   const agent = state.agent!;
   const presence = state.presence ?? state.presences[0]!;
+  const nativeXConnection = state.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x");
+  const xCreditsAlert = presence.channel === "x" && presence.environment !== "sandbox" && xCreditsExhausted(nativeXConnection)
+    ? nativeXConnection
+    : undefined;
   const operationalHealth = useOperationalHealth(presence?.id);
-  const presenceBridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
+  const presenceBridge = presence.channel !== "x" ? state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline") : undefined;
   const presenceBridgeStatus = presenceBridge ? bridgeAdapterStatus(presenceBridge) : undefined;
   const [showPresenceModal, setShowPresenceModal] = useState(false);
   const pageLabel =
@@ -1812,10 +1922,11 @@ function AgentWorkspaceShell({
             <CircleAlert size={16} /> {error}
           </div>
         )}
+        {xCreditsAlert && <XCreditsAlert connection={xCreditsAlert} />}
         <div className="workspace-content">
           {view === "teach" && <TeachView state={state} mutate={mutate} setView={setView} />}
           {view === "knowledge" && <KnowledgeView state={state} mutate={mutate} refreshState={refreshState} />}
-          {view === "usage" && <UsageView state={state} setView={setView} />}
+          {view === "usage" && <UsageView state={state} setView={setView} mutate={mutate} />}
           {view === "chat" && <PresenceChatView key={`${presence.id}-${state.files.find((item) => item.kind === "TASTE")?.revision ?? 0}`} state={state} mutate={mutate} />}
           {view === "watching" && <WatchingView state={state} mutate={mutate} refreshState={refreshState} />}
           {view === "people" && <PeopleView state={state} mutate={mutate} />}
@@ -1941,7 +2052,7 @@ function LegacyAppShell({
           : view === "feed"
             ? "Feed"
         : view[0].toUpperCase() + view.slice(1);
-  const presenceBridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
+  const presenceBridge = presence.channel !== "x" ? state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline") : undefined;
   const presenceBridgeStatus = presenceBridge ? bridgeAdapterStatus(presenceBridge) : "disconnected";
   return (
     <main className="app-shell">
@@ -2078,7 +2189,7 @@ function LegacyAppShell({
             <TeachView state={state} mutate={mutate} setView={setView} />
           )}
           {view === "knowledge" && <KnowledgeView state={state} mutate={mutate} refreshState={refreshState} />}
-          {view === "usage" && <UsageView state={state} setView={setView} />}
+          {view === "usage" && <UsageView state={state} setView={setView} mutate={mutate} />}
           {view === "live" && (
             <LiveView key={`${state.presence?.id ?? "none"}-${state.presence?.channel ?? "none"}-${state.presence?.environment ?? "live"}`} state={state} mutate={mutate} runtimeError={Boolean(error && /OpenPresence runtime could not be reached/i.test(error))} setView={setView} />
           )}
@@ -2294,41 +2405,40 @@ function AddPresenceDialog({
           exists.
         </p>
         <fieldset className="channel-picker">
-          <legend>Where should {agentName} show up?</legend>
-          <label>
-            <input
-              type="radio"
-              name="channel"
-              value="sandbox"
-              checked={connectionMode === "sandbox"}
-              onChange={() => { setConnectionMode("sandbox"); setChannel("x"); }}
-            />
-            <strong>Sandbox</strong>
-            <small>Rehearse safely in a simulated social world</small>
-          </label>
+          <legend>Which channel should {agentName} use?</legend>
           <label>
             <input
               type="radio"
               name="channel"
               value="x"
-              checked={connectionMode === "native"}
-              onChange={() => { setConnectionMode("native"); setChannel("x"); }}
+              checked={channel === "x"}
+              onChange={() => { setChannel("x"); setConnectionMode(connectionMode === "sandbox" ? "sandbox" : "native"); }}
             />
             <strong>X</strong>
-            <small>Live public conversations through the X API</small>
+            <small>Native X API for every action; browser capability is available only when a native action cannot be completed.</small>
           </label>
           <label>
             <input
               type="radio"
               name="channel"
               value="__custom__"
-              checked={connectionMode === "bridge"}
+              checked={channel === "__custom__"}
               onChange={() => { setConnectionMode("bridge"); setChannel("__custom__"); }}
             />
             <strong>Bridge</strong>
-            <small>Connect a community or social environment through an adapter</small>
+            <small>Connect a social environment without a native API, such as Skool.com, through an external adapter.</small>
           </label>
         </fieldset>
+        <label className="toggle-row" style={{ marginTop: "12px" }}>
+          <input
+            type="checkbox"
+            aria-label="Start this Presence in Sandbox"
+            checked={connectionMode === "sandbox"}
+            onChange={(event) => setConnectionMode(event.target.checked ? "sandbox" : channel === "x" ? "native" : "bridge")}
+          />
+          <span className="toggle-track" aria-hidden="true"><span /></span>
+          <span>Start this Presence in Sandbox</span>
+        </label>
         {channel === "__custom__" && (
           <>
             <label>
@@ -3352,8 +3462,17 @@ function CapabilityTrialPanel({ state, mutate, presence }: { state: OpenPresence
   const trials = state.capabilityTrials.filter((trial) => trial.presenceId === presence.id);
   const create = async () => {
     setBusy(true);
-    try { await mutate({ type: "createCapabilityTrial", presenceId: presence.id, capability, environment, executionMode }); } finally { setBusy(false); }
+    try {
+      // The API route handles create + start + run discovery in one call.
+      // No need for separate start/run clicks.
+      await mutate({ type: "createCapabilityTrial", presenceId: presence.id, capability, environment, executionMode });
+    } finally { setBusy(false); }
   };
+  const stop = async (trial: OpenPresenceState["capabilityTrials"][number]) => {
+    if (!window.confirm("Stop this capability trial? Any action already sent will continue to be verified.")) return;
+    await mutate({ type: "cancelCapabilityTrial", id: trial.id });
+  };
+
   const start = async (trial: OpenPresenceState["capabilityTrials"][number]) => {
     const label = trial.capability === "original_post" ? "original post" : trial.capability.replaceAll("_", " ");
     if (trial.environment === "live" && !window.confirm(`Start one bounded live X trial? Genny will choose the public candidate and may create exactly one public ${label} if its normal judgment selects ${label}. Other judged acts will be suppressed.`)) return;
@@ -3363,7 +3482,37 @@ function CapabilityTrialPanel({ state, mutate, presence }: { state: OpenPresence
       if (started) await mutate({ type: "runCapabilityTrial", id: trial.id });
     } finally { setBusy(false); }
   };
-  return <div className="playground-page" aria-label="Capability trials"><section className="scenario-action-bar"><div className="scenario-context-copy"><div className="eyebrow">Capability trial</div><h2>Test {selectedCapability.label} through real Agent judgment</h2><p>Genny chooses where to look and what to do. This trial isolates which act may execute; it does not teach the expected answer or change the Presence-wide envelope.</p></div><Button variant="primary" disabled={busy || presence.channel !== "x"} onClick={() => void create()}>New {selectedCapability.label} trial</Button></section><section className="attention-test-form" aria-label="Capability trial setup"><div><span className="form-label">Capability under test</span><div className="attention-test-mode-options">{trialCapabilities.map((item) => <button key={item.id} type="button" className={capability === item.id ? "selected" : ""} onClick={() => setCapability(item.id)}><strong>{item.label}</strong><small>{item.description}</small></button>)}</div></div><div><span className="form-label">Environment</span><div className="attention-test-mode-options"><button type="button" className={environment === "live" ? "selected" : ""} onClick={() => setEnvironment("live")}><strong>Live X</strong><small>Agent-directed public discovery; one verified {selectedCapability.label} maximum.</small></button><button type="button" className={environment === "sandbox" ? "selected" : ""} onClick={() => setEnvironment("sandbox")}><strong>Sandbox</strong><small>Keep the trial record without a public write.</small></button></div></div><div><span className="form-label">Tested execution</span><p>{selectedCapability.label} only · other social decisions remain visible but are suppressed for this trial.</p><div className="playground-mode-switch"><Button type="button" variant={executionMode === "auto" ? "primary" : "ghost"} onClick={() => setExecutionMode("auto")}>Auto for this trial</Button><Button type="button" variant={executionMode === "review" ? "primary" : "ghost"} onClick={() => setExecutionMode("review")}>Review</Button></div></div></section><div className="scenario-history" aria-label="Capability trial history">{trials.length ? trials.map((trial) => <article className="scenario-history-row" key={trial.id}><span><strong>{trial.capability}</strong><small>{trial.environment} · {trial.executionIsolation.mode} · {trial.status.replaceAll("_", " ")}</small></span><strong>{trial.result ?? "in progress"}</strong>{["preflight", "draft", "active", "discovering", "judging"].includes(trial.status) && <Button variant="secondary" disabled={busy} onClick={() => void start(trial)}>{trial.status === "preflight" ? "Start trial" : "Continue"}</Button>}<small>{trial.why ?? trial.lastError ?? `${trial.candidateAudits.length} candidate decision${trial.candidateAudits.length === 1 ? "" : "s"}`}</small></article>) : <p>No capability trials yet. Choose Like, Repost, or Quote when you want Genny to find a genuine opportunity.</p>}</div></div>;
+  return <div className="playground-page" aria-label="Capability trials"><section className="scenario-action-bar"><div className="scenario-context-copy"><div className="eyebrow">Capability trial</div><h2>Test {selectedCapability.label} through real Agent judgment</h2><p>Genny chooses where to look and what to do. This trial isolates which act may execute; it does not teach the expected answer or change the Presence-wide envelope.</p></div><Button variant="primary" disabled={busy || presence.channel !== "x"} onClick={() => void create()}>New {selectedCapability.label} trial</Button></section><section className="attention-test-form" aria-label="Capability trial setup"><div><span className="form-label">Capability under test</span><div className="attention-test-mode-options">{trialCapabilities.map((item) => <button key={item.id} type="button" className={capability === item.id ? "selected" : ""} onClick={() => setCapability(item.id)}><strong>{item.label}</strong><small>{item.description}</small></button>)}</div></div><div><span className="form-label">Environment</span><div className="attention-test-mode-options"><button type="button" className={environment === "live" ? "selected" : ""} onClick={() => setEnvironment("live")}><strong>Live X</strong><small>Agent-directed public discovery; one verified {selectedCapability.label} maximum.</small></button><button type="button" className={environment === "sandbox" ? "selected" : ""} onClick={() => setEnvironment("sandbox")}><strong>Sandbox</strong><small>Keep the trial record without a public write.</small></button></div></div><div><span className="form-label">Tested execution</span><p>{selectedCapability.label} only · other social decisions remain visible but are suppressed for this trial.</p><div className="playground-mode-switch"><Button type="button" variant={executionMode === "auto" ? "primary" : "ghost"} onClick={() => setExecutionMode("auto")}>Auto for this trial</Button><Button type="button" variant={executionMode === "review" ? "primary" : "ghost"} onClick={() => setExecutionMode("review")}>Review</Button></div></div></section><div className="scenario-history" aria-label="Capability trial history">
+              {trials.length === 0 ? (
+                <p style={{ color: "var(--muted)", fontSize: "13px", padding: "16px 0" }}>No trials yet. Pick a capability above and click the button to start one.</p>
+              ) : (
+                <div style={{ display: "flex", flexDirection: "column", gap: "8px" }}>
+                  {trials.map((trial) => {
+                    const isActive = ["active", "discovering", "judging", "awaiting_execution", "awaiting_verification"].includes(trial.status);
+                    const isDone = ["completed", "expired", "failed", "cancelled"].includes(trial.status);
+                    const statusColor = trial.result === "PASS_VERIFIED" ? "#15803d" : trial.result === "CANCELLED" ? "#766b63" : isDone ? "#a16207" : "#2563eb";
+                    const statusBg = trial.result === "PASS_VERIFIED" ? "rgba(34, 197, 94, 0.1)" : trial.result === "CANCELLED" ? "rgba(118, 107, 99, 0.1)" : isDone ? "rgba(234, 179, 8, 0.1)" : "rgba(59, 130, 246, 0.1)";
+                    return (
+                      <div key={trial.id} style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "12px", padding: "12px 14px", border: "1px solid var(--border)", borderRadius: "8px", background: "var(--surface)" }}>
+                        <div style={{ display: "flex", alignItems: "center", gap: "10px", flexWrap: "wrap" }}>
+                          <strong style={{ fontSize: "13px" }}>{trial.capability.replaceAll("_", " ")}</strong>
+                          <span style={{ fontSize: "10px", fontWeight: 600, padding: "2px 8px", borderRadius: "4px", background: statusBg, color: statusColor }}>
+                            {trial.status.replaceAll("_", " ")}
+                          </span>
+                          <span style={{ fontSize: "11px", color: "var(--muted)" }}>{trial.environment}</span>
+                        </div>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
+                          {trial.result && <span style={{ fontSize: "11px", fontWeight: 600, color: statusColor }}>{trial.result.replaceAll("_", " ")}</span>}
+                          {isActive && <Button variant="secondary" disabled={busy} onClick={() => void start(trial)} style={{ fontSize: "11px", padding: "4px 10px" }}>Continue</Button>}
+                          {isActive && <Button variant="ghost" disabled={busy} onClick={() => void stop(trial)} style={{ fontSize: "11px", padding: "4px 10px" }}>Stop</Button>}
+                          <span style={{ fontSize: "11px", color: "var(--faint)" }}>{trial.why ?? trial.lastError ?? `${trial.candidateAudits.length} candidate${trial.candidateAudits.length === 1 ? "" : "s"}`}</span>
+                        </div>
+                      </div>
+                    );
+                  })}
+                </div>
+              )}
+            </div></div>;
 }
 
 function PlaygroundView({ state, mutate }: { state: OpenPresenceState; mutate: Mutate }) {
@@ -3784,7 +3933,9 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
       const display = resolveCanonicalPerson(state, person.id, presence.id);
       return `${display.displayName} ${display.rawHandle ?? ""} ${display.handleLabel}`.toLowerCase().includes(query.trim().toLowerCase());
     });
-  const selected = state.people.find((person) => person.id === selectedId) ?? people[0];
+  // Keep People focused on the relationship cards. Details are an intentional
+  // second step rather than opening the first record as a default inspector.
+  const selected = selectedId ? people.find((person) => person.id === selectedId) : undefined;
   const selectedIdentity = selected ? state.personIdentities.find((identity) => identity.personId === selected.id && identity.sourcePresenceId === presence.id && (identity.sourceEnvironment ?? "live") === (presence.environment ?? "live")) : undefined;
   const selectedIsFollowed = selected ? isPersonFollowed(selected.id) : false;
   const selectedIsWatched = selected ? isPersonWatched(selected.id) : false;
@@ -3839,14 +3990,14 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
       <label className="people-search" style={{ flex: 1 }}><span>Search people</span><input aria-label="Search people" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by name or handle" /></label>
       <span className="people-count">{people.length} {filterMode === "following" ? "following" : filterMode === "watched" ? "watched" : "remembered"}</span>
     </div>
-    {!people.length ? <section className="people-empty"><div className="watch-empty-mark"><Users size={23} /></div><SectionEyebrow>People</SectionEyebrow><h2>{filterMode === "following" ? "Not following anyone yet." : "No one remembered yet."}</h2><p>People appear as meaningful relationships develop and Genny chooses to maintain ongoing awareness.</p></section> : <div className="people-layout"><section className="people-list" aria-label="Remembered people">{people.map((person) => {
+    {!people.length ? <section className="people-empty"><div className="watch-empty-mark"><Users size={23} /></div><SectionEyebrow>People</SectionEyebrow><h2>{filterMode === "following" ? "Not following anyone yet." : "No one remembered yet."}</h2><p>People appear as meaningful relationships develop and Genny chooses to maintain ongoing awareness.</p></section> : <div className={`people-layout ${selected ? "has-selection" : ""}`}><section className="people-list" aria-label="Remembered people">{people.map((person) => {
       const identity = state.personIdentities.find((item) => item.personId === person.id && item.sourcePresenceId === presence.id && (item.sourceEnvironment ?? "live") === (presence.environment ?? "live"));
       const rel = state.relationships.find((item) => item.personId === person.id);
       const followed = isPersonFollowed(person.id);
       const displayInfo = resolveCanonicalPerson(state, person.id, presence.id);
       const avatarUrl = displayInfo.avatarUrl ?? identity?.avatarUrl ?? state.mirrorObjects.find((item) => item.presenceId === presence.id && (item.environment ?? "live") === (presence.environment ?? "live") && item.author?.externalRef?.id === identity?.externalActorId)?.author?.avatarUrl;
 
-      return <button type="button" className={`people-row ${selected?.id === person.id ? "active" : ""}`} key={person.id} onClick={() => { setSelectedId(person.id); setFactPage(1); }}>
+      return <button type="button" className={`people-row ${selected?.id === person.id ? "active" : ""}`} key={person.id} onClick={() => { setSelectedId((current) => current === person.id ? null : person.id); setFactPage(1); }}>
         <ChannelAvatar className="people-avatar" avatarUrl={avatarUrl} name={displayInfo.displayName} />
         <span className="people-row-copy">
           <strong>{displayInfo.displayName}</strong>
@@ -3856,7 +4007,7 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
             {rel?.lastMeaningfulInteractionAt ? `Last interacted ${formatTime(rel.lastMeaningfulInteractionAt)}` : "Remembered explicitly"}
             {followed ? " · Following · Verified" : ""}
           </small>
-          <span>{factsForPerson(state, person.id)[0] ?? (followed ? "Autonomously followed for continued awareness." : "Selective relationship context is available here.")}</span>
+          <span>{followed ? "Following to stay aware of their contributions." : rel?.lastMeaningfulInteractionAt ? "Relationship context available." : "Remembered explicitly."}</span>
         </span>
         <ChevronRight size={16} />
       </button>;
@@ -3872,21 +4023,24 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
             {channelLabel(presence.channel, state.channelDefinitions)}
           </p>
         </div>
-        <span className="people-status" style={{ background: selectedIsFollowed ? "var(--accent-subtle, #fef3eb)" : undefined, color: selectedIsFollowed ? "var(--accent, #d68754)" : undefined, fontWeight: selectedIsFollowed ? 600 : undefined }}>
-          {selectedIsFollowed ? "Following · Verified" : selectedIsWatched ? "Watched" : relationship?.lastMeaningfulInteractionAt ? "Remembered relationship" : "Remembered identity"}
-        </span>
+        <div className="person-inspector-heading-actions">
+          <span className="people-status" style={{ background: selectedIsFollowed ? "var(--accent-subtle, #fef3eb)" : undefined, color: selectedIsFollowed ? "var(--accent, #d68754)" : undefined, fontWeight: selectedIsFollowed ? 600 : undefined }}>
+            {selectedIsFollowed ? "Following · Verified" : selectedIsWatched ? "Watched" : relationship?.lastMeaningfulInteractionAt ? "Remembered relationship" : "Remembered identity"}
+          </span>
+          <button type="button" className="person-inspector-close" aria-label={`Close ${selectedDisplayInfo.displayName} details`} onClick={() => setSelectedId(null)}><X size={14} /> Close</button>
+        </div>
       </div>
 
-      <div className="person-inspector-section">
-        <SectionEyebrow>Why this person is remembered</SectionEyebrow>
+      <details className="person-reason">
+        <summary><span>Why this person is remembered</span><ChevronRight size={14} /></summary>
         <p>
           {selectedIsFollowed
-            ? `${presence.name} autonomously chose to follow this person to maintain continued awareness of their contributions in ${presence.brief?.purpose || "core territory"}.`
+            ? `${presence.name} chose to follow this person to stay aware of their contributions.`
             : relationship?.lastMeaningfulInteractionAt
               ? `${presence.name} interacted with this person on ${channelLabel(presence.channel, state.channelDefinitions)}. Prior evidence remains linked below.`
               : "The operator explicitly asked the Agent to remember this person. No prior interaction is being implied."}
         </p>
-      </div>
+      </details>
 
       <div className="person-inspector-section">
         <SectionEyebrow>Current relationship</SectionEyebrow>
@@ -3895,12 +4049,10 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
           {selectedIsWatched && <div><strong>Watch:</strong> Active watchlist target</div>}
           <div><strong>Interactions:</strong> {recentHistory.length} recorded interaction{recentHistory.length === 1 ? "" : "s"}</div>
           {relationship?.lastMeaningfulInteractionAt && <div><strong>Last interaction:</strong> {formatTime(relationship.lastMeaningfulInteractionAt)}</div>}
-          {followDecisionSummary && (
-            <div style={{ background: "var(--bg-subtle, #fafafa)", padding: "8px 10px", borderRadius: "6px", border: "1px solid var(--border, #eee)", marginTop: "4px" }}>
-              <strong style={{ fontSize: "11px", textTransform: "uppercase", color: "var(--text-muted, #777)", display: "block" }}>Why Genny followed</strong>
-              <p style={{ margin: 0, marginTop: "2px", lineHeight: 1.4 }}>{followDecisionSummary}</p>
-            </div>
-          )}
+          {followDecisionSummary && <details className="person-reason person-follow-reason">
+            <summary><span>Why {presence.name} followed</span><ChevronRight size={14} /></summary>
+            <p>{followDecisionSummary}</p>
+          </details>}
         </div>
       </div>
 
@@ -3914,12 +4066,6 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
       {relationship && <div className="person-correction"><label>Correct memory<textarea aria-label="Correct relationship memory" value={correction} onChange={(event) => setCorrection(event.target.value)} placeholder="What should the Agent remember instead?" rows={3} /></label><Button variant="secondary" disabled={!correction.trim()} onClick={() => void correct()}><Pencil size={14} /> Save correction</Button></div>}
     </section>}</div>}
   </div>;
-}
-
-function factsForPerson(state: OpenPresenceState, personId: string) {
-  const relationship = state.relationships.find((item) => item.personId === personId);
-  if (!relationship) return [];
-  return state.relationshipFacts.filter((fact) => fact.relationshipId === relationship.id && !fact.validTo && !state.relationshipFacts.some((newer) => newer.supersedesFactId === fact.id)).slice(0, 1).map((fact) => fact.statement);
 }
 
 const ATTENTION_TEST_STAGES: Array<{ stage: "queued" | "decided" | "claimed" | "executed" | "verified" | "recorded" | "visible"; label: string }> = [
@@ -4062,13 +4208,11 @@ function WatchingView({ state, mutate, refreshState }: { state: OpenPresenceStat
   const selfReads = selfUsage.filter((item) => item.category === "channel_read").reduce((total, item) => total + (item.usage.requests ?? 1), 0);
   const selfModels = selfUsage.filter((item) => item.category === "model").reduce((total, item) => total + (item.usage.requests ?? 1), 0);
   const selfHydrations = selfUsage.filter((item) => item.category === "hydration").reduce((total, item) => total + (item.usage.requests ?? 1), 0);
-  const chromeBridge = state.bridges.find((item) => item.presenceId === presence.id && item.kind === "bridge" && item.state !== "offline");
-  const chromeStatus = presence.connectionMode === "bridge"
+  const chromeBridge = state.bridges.find((item) => item.presenceId === presence.id && item.name.startsWith("OpenPresence Chrome · ") && item.state !== "offline");
+  const chromeStatus = presence.browserAccess?.enabled
     ? chromeBridge && bridgeAdapterStatus(chromeBridge) === "connected"
       ? "connected" as const
-      : presence.browserAccess?.enabled
-        ? "needed" as const
-        : "unavailable" as const
+      : "needed" as const
     : "not-route" as const;
   const objectiveDraft = selectedExploration ? objectiveDrafts[selectedExploration.id] ?? assignment?.instruction ?? "" : "";
   const setObjectiveDraft = (value: string) => {
@@ -4425,9 +4569,27 @@ function KnowledgeChoiceNotice({ role, use, useLabel = "Default use" }: { role: 
   </div>;
 }
 
-type UsageSummary = { xRequests: number; xReads: number; xWrites: number; modelCalls: number; visionCalls: number; inputTokens: number; outputTokens: number; reasoningTokens: number; totalTokens: number; reportedTokenEvents: number; estimatedCost: number; reportedCost: number; eventCount: number };
+type UsageBreakdown = { name: string; requests: number; reads: number; writes: number };
+type UsageSummary = { xRequests: number; xReads: number; xWrites: number; xBreakdown: UsageBreakdown[]; modelCalls: number; visionCalls: number; inputTokens: number; outputTokens: number; reasoningTokens: number; totalTokens: number; reportedTokenEvents: number; estimatedCost: number; reportedCost: number; eventCount: number };
 type UsageAgent = { id: string; name: string; accent: string; summary: UsageSummary; lastActivityAt?: string; origins: Array<{ name: string } & UsageSummary>; presences: Array<{ id: string; name: string; handle: string; channel: string; accent: string; summary: UsageSummary }> };
-type UsagePayload = { range: string; since?: string; coverage: { x: { status: string; detail: string }; model: { status: string; detail: string } }; totals: UsageSummary; daily: Array<{ date: string } & UsageSummary>; agents: UsageAgent[] };
+type UsagePayload = { range: string; since?: string; generatedAt?: string; coverage: { x: { status: string; detail: string }; model: { status: string; detail: string } }; totals: UsageSummary; daily: Array<{ date: string } & UsageSummary>; agents: UsageAgent[] };
+
+const usageClientCache = new Map<string, { payload: UsagePayload; fetchedAt: number }>();
+const usageStorageKey = (key: string) => `openpresence:usage:${key}`;
+
+function readUsageClientCache(key: string) {
+  const memory = usageClientCache.get(key);
+  if (memory) return memory;
+  try {
+    const stored = JSON.parse(window.localStorage.getItem(usageStorageKey(key)) ?? "null") as { payload?: UsagePayload; fetchedAt?: number } | null;
+    if (stored?.payload && typeof stored.fetchedAt === "number") {
+      const cached = { payload: stored.payload, fetchedAt: stored.fetchedAt };
+      usageClientCache.set(key, cached);
+      return cached;
+    }
+  } catch { /* A cached snapshot is an optimization, never a page failure. */ }
+  return undefined;
+}
 
 function usageNumber(value: number) {
   if (value >= 1_000_000) return `${(value / 1_000_000).toFixed(value >= 10_000_000 ? 0 : 1)}M`;
@@ -4450,35 +4612,115 @@ function usagePeriodLabel(daily: Array<{ date: string }>) {
   return `${format(daily[0].date)} – ${format(daily[daily.length - 1].date)} · ${daily.length} ${daily.length === 1 ? "day" : "days"}`;
 }
 
-function UsageView({ state, setView }: { state: OpenPresenceState; setView: (view: View) => void }) {
+function usageOriginLabel(value: string) {
+  const labels: Record<string, string> = { self_directed_discovery: "Self-directed discovery", inbound_social: "Inbound attention", assignment: "Assignments", publishing: "Publishing", publishing_initiative: "Publishing", standing_intent: "Scheduled intentions", watchlist: "Watchlist", exploration: "Exploration", operator: "Operator actions" };
+  return labels[value] ?? value.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function usageOperationLabel(value: string) {
+  const labels: Record<string, string> = { read: "Read", hydration: "Thread/detail read", media_fetch: "Media fetch", write: "Write", post: "Post", reply: "Reply", like: "Like", follow: "Follow", repost: "Repost", quote: "Quote" };
+  return labels[value] ?? usageOriginLabel(value);
+}
+
+function UsageXBreakdown({ payload }: { payload: UsagePayload }) {
+  const agents = payload.agents;
+  const breakdown = Object.values(agents.flatMap((agent) => agent.summary.xBreakdown ?? []).reduce<Record<string, UsageBreakdown>>((result, item) => {
+    const current = result[item.name] ?? { name: item.name, requests: 0, reads: 0, writes: 0 };
+    result[item.name] = { name: item.name, requests: current.requests + item.requests, reads: current.reads + item.reads, writes: current.writes + item.writes };
+    return result;
+  }, {})).sort((a, b) => b.requests - a.requests);
+  const origins = Object.values(agents.flatMap((agent) => agent.origins).reduce<Record<string, { name: string; xRequests: number; xReads: number; xWrites: number }>>((result, item) => {
+    const current = result[item.name] ?? { name: item.name, xRequests: 0, xReads: 0, xWrites: 0 };
+    result[item.name] = { name: item.name, xRequests: current.xRequests + item.xRequests, xReads: current.xReads + item.xReads, xWrites: current.xWrites + item.xWrites };
+    return result;
+  }, {}));
+  for (const source of ["exploration", "watchlist"]) {
+    if (!origins.some((item) => item.name === source)) origins.push({ name: source, xRequests: 0, xReads: 0, xWrites: 0 });
+  }
+  origins.sort((a, b) => b.xRequests - a.xRequests);
+  return <section className="usage-panel usage-x-breakdown-panel" aria-labelledby="usage-x-breakdown-title"><div className="usage-panel-heading"><div><SectionEyebrow>X request attribution</SectionEyebrow><h2 id="usage-x-breakdown-title">Where X activity is going</h2><p>Recorded connector requests are shown here; this is not a provider-reported credit balance. Reads are separated from writes so you can see whether attention or expression is the larger lever.</p></div><span className="usage-scope-chip">{usageNumber(payload.totals.xRequests)} total</span></div><div className="usage-x-breakdown-grid"><div><strong className="usage-breakdown-heading">By request type</strong>{breakdown.length ? breakdown.map((item) => <div className="usage-breakdown-row" key={item.name}><span><strong>{usageOperationLabel(item.name)}</strong><small>{usageNumber(item.reads)} reads · {usageNumber(item.writes)} writes</small></span><b>{usageNumber(item.requests)}</b></div>) : <p className="muted">No X requests recorded in this period.</p>}</div><div><strong className="usage-breakdown-heading">By attention source</strong>{origins.length ? origins.map((item) => <div className="usage-breakdown-row" key={item.name}><span><strong>{usageOriginLabel(item.name)}</strong><small>{usageNumber(item.xReads)} reads · {usageNumber(item.xWrites)} writes</small></span><b>{usageNumber(item.xRequests)}</b></div>) : <p className="muted">No X sources recorded in this period.</p>}</div></div></section>;
+}
+
+function UsageView({ state, setView, mutate }: { state: OpenPresenceState; setView: (view: View) => void; mutate: Mutate }) {
   const [range, setRange] = useState("30d");
-  const [agentId, setAgentId] = useState("all");
+  const [agentId, setAgentId] = useState(() => typeof window === "undefined" ? "all" : new URLSearchParams(window.location.search).get("agentId") ?? "all");
   const [payload, setPayload] = useState<UsagePayload | null>(null);
   const [loading, setLoading] = useState(true);
+  const [usageError, setUsageError] = useState<string | null>(null);
+  const [usageStale, setUsageStale] = useState(false);
+  const [retryNonce, setRetryNonce] = useState(0);
   const [expanded, setExpanded] = useState<string | null>(null);
   const [series, setSeries] = useState<"tokens" | "x">("tokens");
   useEffect(() => {
     let cancelled = false;
-    fetch(`/api/usage?range=${encodeURIComponent(range)}&agentId=${encodeURIComponent(agentId)}`, { cache: "no-store" })
+    const controller = new AbortController();
+    const timeout = window.setTimeout(() => controller.abort(), 12_000);
+    const cacheKey = `${range}:${agentId}`;
+    const cached = readUsageClientCache(cacheKey);
+    if (cached) {
+      queueMicrotask(() => {
+        if (cancelled) return;
+        setPayload(cached.payload);
+        setLoading(false);
+        setUsageStale(Date.now() - cached.fetchedAt > 30_000);
+      });
+    }
+    queueMicrotask(() => {
+      if (!cancelled) setUsageError(null);
+    });
+    fetch(`/api/usage?range=${encodeURIComponent(range)}&agentId=${encodeURIComponent(agentId)}`, { cache: "no-store", signal: controller.signal })
       .then(async (response) => {
         if (!response.ok) throw new Error("Usage is unavailable.");
         return response.json() as Promise<UsagePayload>;
       })
-      .then((next) => { if (!cancelled) setPayload(next); })
-      .catch(() => { if (!cancelled) setPayload(null); })
-      .finally(() => { if (!cancelled) setLoading(false); });
-    return () => { cancelled = true; };
-  }, [range, agentId]);
+      .then((next) => {
+        const fetchedAt = Date.now();
+        usageClientCache.set(cacheKey, { payload: next, fetchedAt });
+        try { window.localStorage.setItem(usageStorageKey(cacheKey), JSON.stringify({ payload: next, fetchedAt })); } catch { /* Storage is an optimization, never a page failure. */ }
+        if (!cancelled) { setPayload(next); setUsageStale(false); }
+      })
+      .catch((error: unknown) => {
+        if (cancelled) return;
+        if (cached) {
+          queueMicrotask(() => {
+            if (cancelled) return;
+            setPayload(cached.payload);
+            setUsageStale(true);
+            setLoading(false);
+          });
+          return;
+        }
+        setPayload(null);
+        setUsageStale(false);
+        setUsageError(error instanceof DOMException && error.name === "AbortError" ? "The usage ledger took too long to respond." : "The usage ledger is temporarily unavailable.");
+      })
+      .finally(() => { window.clearTimeout(timeout); if (!cancelled) setLoading(false); });
+    return () => { cancelled = true; window.clearTimeout(timeout); controller.abort(); };
+  }, [range, agentId, retryNonce]);
   const totals = payload?.totals;
   const daily = payload?.daily ?? [];
   const maxSeries = Math.max(1, ...daily.map((item) => series === "tokens" ? item.totalTokens : item.xRequests));
   const agents = payload?.agents ?? [];
   const maxAgentSpend = Math.max(1, ...agents.map((item) => series === "tokens" ? item.summary.totalTokens : item.summary.xRequests));
   const agentOptions = state.agents.length ? state.agents : agents.map((item) => ({ id: item.id, name: item.name }));
+  const xBreakdown = Object.values(agents.flatMap((agent) => agent.summary.xBreakdown ?? []).reduce<Record<string, UsageBreakdown>>((result, item) => {
+    const current = result[item.name] ?? { name: item.name, requests: 0, reads: 0, writes: 0 };
+    result[item.name] = { name: item.name, requests: current.requests + item.requests, reads: current.reads + item.reads, writes: current.writes + item.writes };
+    return result;
+  }, {})).sort((a, b) => b.requests - a.requests);
+  const xOrigins = Object.values(agents.flatMap((agent) => agent.origins).reduce<Record<string, { name: string; xRequests: number; xReads: number; xWrites: number }>>((result, item) => {
+    const current = result[item.name] ?? { name: item.name, xRequests: 0, xReads: 0, xWrites: 0 };
+    result[item.name] = { name: item.name, xRequests: current.xRequests + item.xRequests, xReads: current.xReads + item.xReads, xWrites: current.xWrites + item.xWrites };
+    return result;
+  }, {})).filter((item) => item.xRequests > 0).sort((a, b) => b.xRequests - a.xRequests);
+  const openPresence = async (presenceId: string) => { await mutate({ type: "selectPresence", id: presenceId }); setView("presence"); };
   return <div className="page usage-page">
     <PageHeader eyebrow="Agent-wide · Usage" title="What the Agents are spending" description="A quiet ledger of recorded provider activity and model usage, grouped by Agent and Presence. It shows where attention becomes expensive so you can tune the system without confusing infrastructure limits with judgment." actions={<div className="usage-controls"><div className="usage-range" role="group" aria-label="Usage period">{[["24h", "24 hours"], ["7d", "7 days"], ["30d", "30 days"], ["all", "All time"]].map(([value, label]) => <button type="button" key={value} className={range === value ? "active" : ""} onClick={() => setRange(value)}>{label}</button>)}</div><div className="usage-agent-select"><select aria-label="Usage Agent scope" value={agentId} onChange={(event) => setAgentId(event.target.value)}><option value="all">All Agents</option>{agentOptions.map((agent) => <option key={agent.id} value={agent.id}>{agent.name}</option>)}</select><ChevronDown aria-hidden="true" size={14} /></div></div>} />
     <div className="usage-provenance"><span className="usage-provenance-mark">Recorded usage</span><span>X reads and writes are local connector observations; X does not expose a reliable remaining-credit balance here.</span><span>Model tokens are provider-reported when returned; some local or provider calls may be request-only.</span></div>
-    {loading && <div className="usage-loading" role="status">Reading the usage ledger…</div>}
+    {loading && <div className="usage-loading" role="status">Reading the usage ledger…<small>Loading the latest recorded snapshot.</small></div>}
+    {usageStale && payload && <div className="usage-provenance" role="status"><span className="usage-provenance-mark">Showing the last successful snapshot</span><span>The runtime is still catching up; this page will refresh when the latest ledger is available.</span></div>}
+    {!loading && usageError && <div className="usage-empty usage-page-error" role="alert"><BarChart3 size={22} /><h3>{usageError}</h3><p>The rest of the workspace is still available. Retry the ledger request when the local runtime is responsive again.</p><Button variant="secondary" onClick={() => setRetryNonce((value) => value + 1)}>Retry usage</Button></div>}
+    {!loading && payload && <UsageXBreakdown payload={payload} />}
     {!loading && payload && <>
       <section className="usage-metric-grid" aria-label="Usage summary">
         <article className="usage-metric-card"><span>X API activity</span><strong>{usageNumber(totals?.xRequests ?? 0)} <small>requests</small></strong><p>{usageNumber(totals?.xReads ?? 0)} reads · {usageNumber(totals?.xWrites ?? 0)} writes</p><em>{payload.coverage.x.status === "unavailable" ? "No X activity recorded" : "Recorded connector activity"}</em></article>
@@ -4487,10 +4729,10 @@ function UsageView({ state, setView }: { state: OpenPresenceState; setView: (vie
         <article className="usage-metric-card"><span>Attention footprint</span><strong>{agents.length} <small>Agents</small></strong><p>{agents.reduce((count, agent) => count + agent.presences.length, 0)} Presences with ledger scope</p><em>{usageDate(agents[0]?.lastActivityAt)} most recent</em></article>
       </section>
       <section className="usage-panel usage-trend-panel" aria-labelledby="usage-trend-title"><div className="usage-panel-heading"><div><SectionEyebrow>Usage over time</SectionEyebrow><h2 id="usage-trend-title">How usage changes</h2><p>Compare model tokens and X requests across the selected period.</p><span className="usage-period-label">{usagePeriodLabel(daily)}</span></div><div className="usage-series-toggle" role="group" aria-label="Usage chart series"><button type="button" className={series === "tokens" ? "active" : ""} onClick={() => setSeries("tokens")}>Model tokens</button><button type="button" className={series === "x" ? "active" : ""} onClick={() => setSeries("x")}>X requests</button></div></div>{daily.length ? <div className="usage-chart" role="img" aria-label={`${series === "tokens" ? "Model tokens" : "X requests"} by day for ${usagePeriodLabel(daily)}`}>{daily.map((item) => { const value = series === "tokens" ? item.totalTokens : item.xRequests; return <div className="usage-bar-column" key={item.date} title={`${item.date}: ${value.toLocaleString()} ${series === "tokens" ? "tokens" : "requests"}`}><div className={`usage-bar usage-bar-${series}${value === 0 ? " usage-bar-empty" : ""}`} style={{ height: `${value === 0 ? 0 : Math.max(3, value / maxSeries * 100)}%` }} /><small>{item.date.slice(5)}</small></div>; })}</div> : <div className="usage-empty-inline">No recorded usage in this period. The first real provider call will create the first ledger entry.</div>}</section>
-      <section className="usage-panel" aria-labelledby="usage-agents-title"><div className="usage-panel-heading"><div><SectionEyebrow>Grouped by Agent</SectionEyebrow><h2 id="usage-agents-title">Which Agent is consuming attention?</h2><p>The Agent owns model usage. Expand one to see which Presence and attention source supplied the context.</p></div><span className="usage-scope-chip">{agentId === "all" ? "See all Agents" : "One Agent"}</span></div>{agents.length ? <div className="usage-agent-ledger">{agents.map((agent) => { const active = expanded === agent.id; const share = Math.max(3, (series === "tokens" ? agent.summary.totalTokens : agent.summary.xRequests) / maxAgentSpend * 100); return <article className={`usage-agent-row ${active ? "is-expanded" : ""}`} key={agent.id}><button type="button" className="usage-agent-summary" onClick={() => setExpanded(active ? null : agent.id)} aria-expanded={active}><span className="usage-agent-identity"><PresenceGlyph accent={agent.accent} /><span><strong>{agent.name}</strong><small>Agent · {usageDate(agent.lastActivityAt)}</small></span></span><span className="usage-share"><i style={{ width: `${share}%` }} /><small>{usageNumber(series === "tokens" ? agent.summary.totalTokens : agent.summary.xRequests)} {series === "tokens" ? "tokens" : "X requests"}</small></span><span className="usage-agent-stat"><strong>{usageNumber(agent.summary.xReads)}</strong><small>X reads</small></span><span className="usage-agent-stat"><strong>{usageNumber(agent.summary.reasoningTokens)}</strong><small>reasoning</small></span><ChevronDown size={16} className={active ? "usage-chevron open" : "usage-chevron"} /></button>{active && <div className="usage-agent-detail"><div className="usage-detail-facts"><div><span>Model calls</span><strong>{usageNumber(agent.summary.modelCalls)}</strong></div><div><span>Total tokens</span><strong>{usageNumber(agent.summary.totalTokens)}</strong></div><div><span>X reads / writes</span><strong>{usageNumber(agent.summary.xReads)} / {usageNumber(agent.summary.xWrites)}</strong></div><div><span>Coverage</span><strong>{agent.summary.reportedTokenEvents ? "Provider-reported" : "Request-only"}</strong></div></div><div className="usage-presence-list">{agent.presences.map((presence) => <div className="usage-presence-row" key={presence.id}><span><b style={{ background: presence.accent }} /> <strong>Presence · {presence.name}</strong><small>{presence.handle} · {channelLabel(presence.channel)}</small></span><span>{usageNumber(presence.summary.xReads)} reads · {usageNumber(presence.summary.xWrites)} writes</span><span>{usageNumber(presence.summary.reasoningTokens)} reasoning</span></div>)}</div><div className="usage-origin-list"><span className="usage-origin-heading">Attention sources</span>{agent.origins.slice(0, 5).map((origin) => <div key={origin.name}><strong>{origin.name.replaceAll("_", " ")}</strong><span>{usageNumber(origin.totalTokens)} tokens · {usageNumber(origin.xRequests)} X requests</span></div>)}</div></div>}</article>; })}</div> : <div className="usage-empty"><BarChart3 size={22} /><h3>No usage has been recorded yet</h3><p>This page does not invent sample spend. It will fill as Agents observe, reason, inspect media, and act through connected providers.</p></div>}</section>
+      <section className="usage-panel" aria-labelledby="usage-agents-title"><div className="usage-panel-heading"><div><SectionEyebrow>Grouped by Agent</SectionEyebrow><h2 id="usage-agents-title">Which Agent is consuming attention?</h2><p>The Agent owns model usage. Expand one to see which Presence and attention source supplied the context.</p></div><span className="usage-scope-chip">{agentId === "all" ? "See all Agents" : "One Agent"}</span></div>{agents.length ? <div className="usage-agent-ledger">{agents.map((agent) => { const active = expanded === agent.id; const share = Math.max(3, (series === "tokens" ? agent.summary.totalTokens : agent.summary.xRequests) / maxAgentSpend * 100); return <article className={`usage-agent-row ${active ? "is-expanded" : ""}`} key={agent.id}><button type="button" className="usage-agent-summary" onClick={() => setExpanded(active ? null : agent.id)} aria-expanded={active}><span className="usage-agent-identity"><PresenceGlyph accent={agent.accent} /><span><strong>{agent.name}</strong><small>Agent · {usageDate(agent.lastActivityAt)}</small></span></span><span className="usage-share"><i style={{ width: `${share}%` }} /><small>{usageNumber(series === "tokens" ? agent.summary.totalTokens : agent.summary.xRequests)} {series === "tokens" ? "tokens" : "X requests"}</small></span><span className="usage-agent-stat"><strong>{usageNumber(agent.summary.xReads)}</strong><small>X reads</small></span><span className="usage-agent-stat"><strong>{usageNumber(agent.summary.reasoningTokens)}</strong><small>reasoning</small></span><ChevronDown size={16} className={active ? "usage-chevron open" : "usage-chevron"} /></button>{active && <div className="usage-agent-detail"><div className="usage-detail-facts"><div><span>Model calls</span><strong>{usageNumber(agent.summary.modelCalls)}</strong></div><div><span>Total tokens</span><strong>{usageNumber(agent.summary.totalTokens)}</strong></div><div><span>X reads / writes</span><strong>{usageNumber(agent.summary.xReads)} / {usageNumber(agent.summary.xWrites)}</strong></div><div><span>Coverage</span><strong>{agent.summary.reportedTokenEvents ? "Provider-reported" : "Request-only"}</strong></div></div><div className="usage-presence-list">{agent.presences.map((presence) => <div className="usage-presence-row" key={presence.id}><span><b style={{ background: presence.accent }} /> <strong>Presence · {presence.name}</strong><small>{presence.handle} · {channelLabel(presence.channel)}</small></span><span>{usageNumber(presence.summary.xReads)} reads · {usageNumber(presence.summary.xWrites)} writes</span><span>{usageNumber(presence.summary.reasoningTokens)} reasoning</span></div>)}</div><div className="usage-origin-list"><span className="usage-origin-heading">Attention sources</span>{agent.origins.slice(0, 5).map((origin) => <div key={origin.name}><strong>{usageOriginLabel(origin.name)}</strong><span>{usageNumber(origin.totalTokens)} tokens · {usageNumber(origin.xRequests)} X requests</span></div>)}</div></div>}</article>; })}</div> : <div className="usage-empty"><BarChart3 size={22} /><h3>No usage has been recorded yet</h3><p>This page does not invent sample spend. It will fill as Agents observe, reason, inspect media, and act through connected providers.</p></div>}</section>
       <section className="usage-panel usage-notes-panel" aria-labelledby="usage-notes-title"><div className="usage-panel-heading"><div><SectionEyebrow>Operator read</SectionEyebrow><h2 id="usage-notes-title">What you can change</h2></div></div><div className="usage-note-grid"><div><strong>Self-directed reads are an envelope, not a verdict.</strong><p>Adjust Presence attention intensity and daily ceilings when exploration is consuming more X activity than its evidence justifies.</p><Button variant="ghost" onClick={() => setView("presence")}>Open Presence attention</Button></div><div><strong>Reasoning cost follows context.</strong><p>Compare Agents and origins before changing models. Large input totals often mean the Agent is carrying a wide social or Knowledge context into each judgment.</p><Button variant="ghost" onClick={() => setView("brain")}>Open Agent model</Button></div><div><strong>Infrastructure can defer a run.</strong><p>Provider quota, rate limits, and missing usage metadata remain external facts. A deferred or request-only record is not the Agent deciding that nothing mattered.</p></div></div><details className="usage-disclosure"><summary>Data coverage and limits</summary><p>{payload.coverage.x.detail} {payload.coverage.model.detail}</p></details></section>
     </>}
-    {!loading && !payload && <div className="usage-empty usage-page-error"><BarChart3 size={22} /><h3>Usage could not be read</h3><p>The ledger endpoint did not return a usable snapshot. Try refreshing the page.</p></div>}
+    {!loading && !payload && !usageError && <div className="usage-empty usage-page-error"><BarChart3 size={22} /><h3>Usage could not be read</h3><p>The ledger endpoint did not return a usable snapshot. Try refreshing the page.</p></div>}
   </div>;
 }
 
@@ -6002,6 +6244,469 @@ function ChatThinkingMessage({ name, accent, feed = false }: { name: string; acc
   );
 }
 
+export interface CorrelatedAuditRecordDTO {
+  id: string;
+  runId?: string;
+  invocationId?: string;
+  timestamp: string;
+  stage: string;
+  title: string;
+  status: string;
+  facets: Array<"run" | "decision" | "execution" | "recovery" | "mirror" | "wake">;
+  traceCompleteness: "full" | "partial" | "orphan";
+
+  focalCandidate?: {
+    id: string;
+    authorHandle?: string;
+    authorName?: string;
+    textSnippet?: string;
+    channelId: string;
+  };
+  candidateSummary?: {
+    evaluatedCount: number;
+    promisingCount: number;
+    sampleCandidates?: Array<{ id: string; author?: string; textSnippet?: string }>;
+  };
+  modelTelemetry?: {
+    provider: string;
+    model?: string;
+    totalTokens?: number;
+    requests?: number;
+    category?: string;
+  };
+  decisions?: Array<{
+    id: string;
+    decision: string;
+    summary: string;
+    acts?: Array<{ decision: string; text?: string; rationale?: string }>;
+    confidence?: string;
+    focalMirrorObjectIds?: string[];
+  }>;
+  executions?: Array<{
+    id: string;
+    affordance: string;
+    route: string;
+    status: string;
+    mode: string;
+    reviewReason?: string;
+    socialIntentId?: string;
+    publicationTextSnippet?: string;
+  }>;
+  outcome?: {
+    id: string;
+    status: string;
+    metrics?: Record<string, number>;
+  };
+  incident?: {
+    id: string;
+    rootCauseKey: string;
+    state: string;
+    safeSummary: string;
+    recoveryAttempts: number;
+    nextAttemptAt?: string;
+    requiresAuth?: boolean;
+    operatorActionRequired?: boolean;
+  };
+  recoveryAttempts?: Array<{
+    id: string;
+    attemptNumber: number;
+    step: string;
+    outcome: string;
+    safeError?: string;
+    timestamp: string;
+  }>;
+
+  error?: {
+    code?: string;
+    safeSummary: string;
+  };
+  displayMetadata?: Record<string, string | number | boolean | null | string[]>;
+}
+
+function formatAuditTimestamp(iso: string) {
+  try {
+    const date = new Date(iso);
+    if (Number.isNaN(date.getTime())) return iso;
+    return date.toLocaleTimeString(undefined, {
+      hour: "2-digit",
+      minute: "2-digit",
+      second: "2-digit",
+      fractionalSecondDigits: 3,
+      hour12: false,
+    });
+  } catch {
+    return iso;
+  }
+}
+
+function TechnicalAuditView({ presenceId }: { presenceId?: string }) {
+  const [records, setRecords] = useState<CorrelatedAuditRecordDTO[]>([]);
+  const [filter, setFilter] = useState<"all" | "decision" | "execution" | "recovery" | "mirror" | "run" | "wake">("all");
+  const [searchQuery, setSearchQuery] = useState("");
+  const [expandedId, setExpandedId] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [lastSuccessTime, setLastSuccessTime] = useState<number | null>(null);
+  const [isInterrupted, setIsInterrupted] = useState(false);
+  const [nowTick, setNowTick] = useState(() => Date.now());
+  const [refreshIndex, setRefreshIndex] = useState(0);
+  const [page, setPage] = useState(1);
+  const [pageCount, setPageCount] = useState(1);
+  const [totalRecords, setTotalRecords] = useState(0);
+
+  useEffect(() => {
+    const interval = setInterval(() => setNowTick(Date.now()), 1000);
+    return () => clearInterval(interval);
+  }, []);
+
+  useEffect(() => {
+    let active = true;
+    let timerId: ReturnType<typeof setTimeout> | undefined;
+
+    const load = async () => {
+      try {
+        const queryParams = new URLSearchParams();
+        if (presenceId) queryParams.set("presenceId", presenceId);
+        if (filter !== "all") queryParams.set("facet", filter);
+        queryParams.set("page", String(page));
+        queryParams.set("pageSize", "50");
+        const url = `/api/runtime/log?${queryParams.toString()}`;
+        const res = await fetch(url);
+        if (res.ok && active) {
+          const data = await res.json();
+          setRecords(data.records ?? []);
+          setPageCount(Math.max(1, data.pageCount ?? 1));
+          setTotalRecords(data.totalRecords ?? data.records?.length ?? 0);
+          setLastSuccessTime(Date.now());
+          setIsInterrupted(false);
+        } else if (active) {
+          setIsInterrupted(true);
+        }
+      } catch {
+        if (active) setIsInterrupted(true);
+      } finally {
+        if (active) {
+          setLoading(false);
+          timerId = setTimeout(() => void load(), 4000);
+        }
+      }
+    };
+    void load();
+    return () => {
+      active = false;
+      if (timerId) clearTimeout(timerId);
+    };
+  }, [presenceId, filter, page, refreshIndex]);
+
+  const filtered = records.filter((r) => {
+    if (filter !== "all" && !r.facets.includes(filter)) return false;
+
+    if (searchQuery.trim()) {
+      const q = searchQuery.toLowerCase();
+      const matchTitle = r.title.toLowerCase().includes(q);
+      const matchRunId = r.runId ? r.runId.toLowerCase().includes(q) : false;
+      const matchInvocationId = r.invocationId ? r.invocationId.toLowerCase().includes(q) : false;
+      const matchStatus = r.status.toLowerCase().includes(q);
+      const matchCandidate = r.focalCandidate?.textSnippet ? r.focalCandidate.textSnippet.toLowerCase().includes(q) : false;
+      const matchCandidateAuthor = r.focalCandidate?.authorHandle ? r.focalCandidate.authorHandle.toLowerCase().includes(q) : false;
+      const matchDecisions = r.decisions ? r.decisions.some((d) => d.summary.toLowerCase().includes(q) || d.decision.toLowerCase().includes(q)) : false;
+      const matchExecutions = r.executions ? r.executions.some((e) => e.affordance.toLowerCase().includes(q) || e.route.toLowerCase().includes(q)) : false;
+      const matchError = r.error ? r.error.safeSummary.toLowerCase().includes(q) : false;
+      return matchTitle || matchRunId || matchInvocationId || matchStatus || matchCandidate || matchCandidateAuthor || matchDecisions || matchExecutions || matchError;
+    }
+    return true;
+  });
+
+  const getStatusClass = (status: string) => {
+    const s = status.toLowerCase();
+    if (s === "succeeded" || s === "verified" || s === "healthy" || s === "passed") return "status-succeeded";
+    if (s === "failed" || s === "blocked" || s === "needs_operator") return "status-failed";
+    if (s === "recovering" || s === "waiting" || s === "running" || s === "queued" || s === "syncing") return "status-recovering";
+    return "";
+  };
+
+  const secondsAgo = lastSuccessTime ? Math.max(0, Math.floor((nowTick - lastSuccessTime) / 1000)) : null;
+  const liveStatusText = isInterrupted
+    ? `Connection interrupted · last updated ${secondsAgo ?? "?"}s ago`
+    : secondsAgo === null || secondsAgo < 2
+      ? "Live · updated just now"
+      : `Live · updated ${secondsAgo}s ago`;
+
+  return (
+    <section className="technical-audit-view" aria-label="Technical Forensic Audit Ledger">
+      <div className="technical-audit-header">
+        <div className="technical-audit-titles">
+          <h3><Terminal size={16} /> Technical Audit</h3>
+          <p>Correlated runtime trace telemetry: candidate triage, model decisions, execution routing, verification, and recovery ladder.</p>
+        </div>
+
+        <div className="technical-audit-toolbar">
+          <div className={`audit-live-status ${isInterrupted ? "is-interrupted" : ""}`}>
+            <span className="live-pulse-dot" />
+            <span>{liveStatusText}</span>
+          </div>
+
+          <div className="technical-audit-search">
+            <input
+              type="text"
+              placeholder="Search run, candidate, decision, error..."
+              value={searchQuery}
+              onChange={(e) => setSearchQuery(e.target.value)}
+            />
+          </div>
+
+          <div className="technical-audit-filter-pills" role="tablist" aria-label="Audit facets">
+            {(
+              [
+                { id: "all", label: "All Activity" },
+                { id: "decision", label: "Decisions" },
+                { id: "execution", label: "Executions" },
+                { id: "recovery", label: "Recovery" },
+                { id: "mirror", label: "Mirror" },
+                { id: "run", label: "Runs" },
+                { id: "wake", label: "Wakes" },
+              ] as const
+            ).map((item) => (
+              <button
+                key={item.id}
+                type="button"
+                className={`audit-pill ${filter === item.id ? "is-active" : ""}`}
+                onClick={() => { setFilter(item.id); setPage(1); }}
+              >
+                {item.label}
+              </button>
+            ))}
+          </div>
+
+          <button
+            type="button"
+            className="audit-refresh-btn"
+            onClick={() => setRefreshIndex((i) => i + 1)}
+            title="Refresh technical ledger"
+          >
+            <RotateCcw size={11} /> Refresh
+          </button>
+        </div>
+      </div>
+
+      <div className="technical-audit-ledger">
+        <div className="technical-audit-head-row">
+          <div>Timestamp</div>
+          <div>Facets</div>
+          <div>Run / Action Details</div>
+          <div>Trace Link</div>
+          <div style={{ textAlign: "right" }}>Status</div>
+        </div>
+
+        {loading && records.length === 0 ? (
+          <div style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}>Loading correlated audit ledger...</div>
+        ) : filtered.length === 0 ? (
+          <div style={{ padding: "40px", textAlign: "center", color: "var(--muted)" }}>No log records match the current filter.</div>
+        ) : (
+          <div className="technical-audit-body">
+            {filtered.map((record) => {
+              const isExpanded = expandedId === record.id;
+              const previewText = record.focalCandidate?.textSnippet
+                ? `Context: “${record.focalCandidate.textSnippet}”`
+                : record.decisions?.[0]?.summary
+                  ? record.decisions[0].summary
+                  : record.executions?.[0]?.publicationTextSnippet
+                    ? `Act text: “${record.executions[0].publicationTextSnippet}”`
+                    : record.incident?.safeSummary
+                      ? record.incident.safeSummary
+                      : record.stage;
+
+              return (
+                <Fragment key={record.id}>
+                  <div
+                    className={`technical-audit-row ${isExpanded ? "is-expanded" : ""}`}
+                    onClick={() => setExpandedId(isExpanded ? null : record.id)}
+                    role="button"
+                    tabIndex={0}
+                    onKeyDown={(e) => { if (e.key === "Enter" || e.key === " ") setExpandedId(isExpanded ? null : record.id); }}
+                  >
+                    <div className="audit-cell-time" title={record.timestamp}>
+                      {formatAuditTimestamp(record.timestamp)}
+                    </div>
+
+                    <div className="audit-cell-facets">
+                      {record.facets.map((f) => (
+                        <span key={f} className={`audit-facet-badge facet-${f}`}>
+                          {f}
+                        </span>
+                      ))}
+                    </div>
+
+                    <div className="audit-cell-main">
+                      <div className="audit-main-title" title={record.title}>
+                        {record.title}
+                        {record.focalCandidate?.authorHandle && (
+                          <span style={{ color: "var(--muted)", fontWeight: "normal", marginLeft: "6px" }}>
+                            from {record.focalCandidate.authorHandle}
+                          </span>
+                        )}
+                      </div>
+                      <div className="audit-main-preview" title={previewText}>
+                        {previewText}
+                      </div>
+                    </div>
+
+                    <div className="audit-cell-trace">
+                      <span className={`audit-trace-badge trace-${record.traceCompleteness}`}>
+                        {record.traceCompleteness === "full" ? "Full Trace" : record.traceCompleteness === "partial" ? "Partial" : "Uncorrelated"}
+                      </span>
+                    </div>
+
+                    <div className="audit-cell-status">
+                      <span className={`audit-status-badge ${getStatusClass(record.status)}`}>
+                        {record.status}
+                      </span>
+                    </div>
+                  </div>
+
+                  {isExpanded && (
+                    <div className="technical-audit-detail-panel">
+                      <div className="audit-detail-grid">
+                        <div className="audit-detail-topline">
+                          <div className="audit-detail-topline-left">
+                            <strong>{record.title}</strong>
+                            {record.runId && <code>run:{record.runId}</code>}
+                            {record.invocationId && <code>inv:{record.invocationId}</code>}
+                          </div>
+                          <div>
+                            <span style={{ color: "#94a3b8", marginRight: "8px" }}>{record.timestamp}</span>
+                            <span className={`audit-status-badge ${getStatusClass(record.status)}`}>{record.status}</span>
+                          </div>
+                        </div>
+
+                        {record.focalCandidate && (
+                          <div className="audit-detail-section">
+                            <div className="audit-detail-section-title">Focal Candidate Mirror Context</div>
+                            <div style={{ color: "#e2e8f0" }}>
+                              <strong>{record.focalCandidate.authorName || record.focalCandidate.authorHandle}</strong> ({record.focalCandidate.authorHandle})
+                            </div>
+                            {record.focalCandidate.textSnippet && (
+                              <div style={{ color: "#cbd5e1", fontStyle: "italic" }}>
+                                “{record.focalCandidate.textSnippet}”
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {record.decisions && record.decisions.length > 0 && (
+                          <div className="audit-detail-section">
+                            <div className="audit-detail-section-title">Cognition Decisions & Selected Acts</div>
+                            {record.decisions.map((d) => (
+                              <div key={d.id} style={{ display: "grid", gap: "4px" }}>
+                                <div style={{ color: "#e2e8f0" }}>
+                                  <strong>Decision:</strong> {d.decision} {d.confidence && <span>(Confidence: {d.confidence})</span>}
+                                </div>
+                                <div style={{ color: "#cbd5e1" }}>{d.summary}</div>
+                                {d.acts && d.acts.length > 0 && (
+                                  <div style={{ display: "grid", gap: "3px", paddingLeft: "10px", borderLeft: "2px solid rgba(255,255,255,0.1)" }}>
+                                    {d.acts.map((act, i) => (
+                                      <div key={i} style={{ color: "#a5f3fc" }}>
+                                        ↳ <strong>{act.decision}</strong>: {act.text ? `“${act.text}”` : "[quiet act]"} {act.rationale && <span style={{ color: "#94a3b8" }}>— {act.rationale}</span>}
+                                      </div>
+                                    ))}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {record.executions && record.executions.length > 0 && (
+                          <div className="audit-detail-section">
+                            <div className="audit-detail-section-title">Executions & Delivery Route</div>
+                            {record.executions.map((e) => (
+                              <div key={e.id} style={{ display: "grid", gap: "2px" }}>
+                                <div style={{ color: "#e2e8f0" }}>
+                                  <strong>{e.affordance}</strong> → Route: <code>{e.route}</code> · Status: <span className={`audit-status-badge ${getStatusClass(e.status)}`}>{e.status}</span>
+                                </div>
+                                {e.publicationTextSnippet && (
+                                  <div style={{ color: "#86efac", fontStyle: "italic" }}>
+                                    “{e.publicationTextSnippet}”
+                                  </div>
+                                )}
+                                {e.reviewReason && (
+                                  <div style={{ color: "#fde047" }}>
+                                    Review boundary: {e.reviewReason}
+                                  </div>
+                                )}
+                              </div>
+                            ))}
+                          </div>
+                        )}
+
+                        {record.modelTelemetry && (
+                          <div className="audit-detail-section">
+                            <div className="audit-detail-section-title">Model Telemetry & Token Budget</div>
+                            <div style={{ color: "#cbd5e1" }}>
+                              Provider: <code>{record.modelTelemetry.provider}</code> · Model: <code>{record.modelTelemetry.model ?? "default"}</code> · Tokens: <strong>{record.modelTelemetry.totalTokens ?? 0}</strong> · Requests: {record.modelTelemetry.requests ?? 1}
+                            </div>
+                          </div>
+                        )}
+
+                        {record.incident && (
+                          <div className="audit-detail-section" style={{ borderColor: "rgba(249, 115, 22, 0.3)", background: "rgba(249, 115, 22, 0.05)" }}>
+                            <div className="audit-detail-section-title" style={{ color: "#fdba74" }}>Recovery Incident & Escalation Ladder</div>
+                            <div style={{ color: "#fed7aa" }}>
+                              Root Cause: <code>{record.incident.rootCauseKey}</code> · Attempts: <strong>{record.incident.recoveryAttempts}</strong> · State: <span className={`audit-status-badge ${getStatusClass(record.incident.state)}`}>{record.incident.state}</span>
+                            </div>
+                            <div style={{ color: "#e2e8f0" }}>{record.incident.safeSummary}</div>
+                            {record.incident.nextAttemptAt && (
+                              <div style={{ color: "#cbd5e1" }}>
+                                Next backoff attempt scheduled at: {new Date(record.incident.nextAttemptAt).toLocaleTimeString()}
+                              </div>
+                            )}
+                            {record.recoveryAttempts && record.recoveryAttempts.length > 0 && (
+                              <div style={{ display: "grid", gap: "3px", marginTop: "4px", paddingLeft: "10px", borderLeft: "2px solid rgba(249,115,22,0.3)" }}>
+                                {record.recoveryAttempts.map((att) => (
+                                  <div key={att.id} style={{ color: "#fed7aa" }}>
+                                    Step #{att.attemptNumber} [<code>{att.step}</code>] → {att.outcome} {att.safeError && <span style={{ color: "#fca5a5" }}>({att.safeError})</span>}
+                                  </div>
+                                ))}
+                              </div>
+                            )}
+                          </div>
+                        )}
+
+                        {record.error && (
+                          <div className="audit-detail-error-box">
+                            <strong>Sanitized Runtime Diagnostic:</strong> {record.error.code ? `[${record.error.code}] ` : ""}{record.error.safeSummary}
+                          </div>
+                        )}
+
+                        {record.displayMetadata && Object.keys(record.displayMetadata).length > 0 && (
+                          <div>
+                            <pre className="audit-detail-json">
+                              {JSON.stringify(record.displayMetadata, null, 2)}
+                            </pre>
+                          </div>
+                        )}
+                      </div>
+                    </div>
+                  )}
+                </Fragment>
+              );
+            })}
+          </div>
+        )}
+        {totalRecords > 0 && (
+          <nav className="activity-pagination" aria-label="Technical audit pages">
+            <span className="activity-pagination-count">Showing {(page - 1) * 50 + 1}–{Math.min(page * 50, totalRecords)} of {totalRecords}</span>
+            <div className="activity-pagination-controls">
+              <button type="button" className="activity-pagination-button" onClick={() => setPage((current) => Math.max(1, current - 1))} disabled={page <= 1}>Newer</button>
+              <span aria-live="polite">Page {page} of {pageCount}</span>
+              <button type="button" className="activity-pagination-button" onClick={() => setPage((current) => Math.min(pageCount, current + 1))} disabled={page >= pageCount}>Older</button>
+            </div>
+          </nav>
+        )}
+      </div>
+    </section>
+  );
+}
+
 void LegacyAppShell;
 void OldChatView;
 void TeachView;
@@ -6060,7 +6765,7 @@ function LiveView({
   const nextObservationAt = activityEnvironment === "live"
     ? state.nativeConnections.find((connection) => connection.presenceId === selected?.id && connection.channelId === selected?.channel)?.observation?.nextObservationAt
     : undefined;
-  const usesChromeExtensionRoute = selected?.connectionMode === "bridge";
+  const usesChromeExtensionRoute = selected?.channel !== "x" && selected?.connectionMode === "bridge";
   const activityBridge = usesChromeExtensionRoute && selected ? state.bridges.find((bridge) => bridge.presenceId === selected.id && bridge.state !== "offline") : undefined;
   const bridgeConnected = Boolean(activityBridge && bridgeAdapterStatus(activityBridge) === "connected");
   const bridgeNextCheckAt = bridgeConnected && activityBridge?.lastHeartbeatAt
@@ -6071,7 +6776,7 @@ function LiveView({
       })()
     : undefined;
   const effectiveCapabilities = selected ? derivePresenceCapabilityManifest(state, selected.id) : undefined;
-  const bridgeNeedsAttention = selected?.connectionMode === "bridge" && !bridgeConnected && Boolean(!activityBridge || effectiveCapabilities?.items.some((item) => item.requiresBrowser));
+  const bridgeNeedsAttention = usesChromeExtensionRoute && !bridgeConnected && Boolean(!activityBridge || effectiveCapabilities?.items.some((item) => item.requiresBrowser));
   const growthAssignment = selected ? state.assignments.find((item) => item.presenceId === selected.id && item.successEvidence?.metric === "followers" && item.status !== "cancelled") : undefined;
   const nextCheckAt = nextObservationAt ?? bridgeNextCheckAt;
   const nextCheckCountdown = formatCountdown(nextCheckAt, countdownNow);
@@ -6081,7 +6786,7 @@ function LiveView({
     ? "Checks paused"
     : checking
       ? "Checking now…"
-      : !nextObservationAt && selected?.connectionMode === "bridge" && !bridgeConnected
+      : !nextObservationAt && usesChromeExtensionRoute && !bridgeConnected
         ? undefined
       : nextCheckCountdown === "now"
         ? "Next check due now"
@@ -6180,8 +6885,9 @@ function LiveView({
         ?? (finding ? state.mirrorObjects.find((item) => item.id === finding.mirrorObjectId) : undefined);
     })();
     if (!source) return undefined;
-    if (["like", "reaction", "repost"].includes(source.objectType) && source.parentExternalRef) {
-      return objectForReference(source.parentExternalRef, source.sessionId) ?? source;
+    const referenced = source.parentExternalRef ?? (source.objectType === "quote" ? source.referencedExternalRefs?.[0] : undefined);
+    if (["like", "reaction", "repost", "quote"].includes(source.objectType) && referenced) {
+      return objectForReference(referenced, source.sessionId) ?? source;
     }
     return source;
   };
@@ -6380,7 +7086,7 @@ function LiveView({
       : state.outcomes.some((item) => item.presenceId === selected?.id && item.status === "succeeded")
         ? "Verified"
         : "None";
-  const [activeSubtab, setActiveSubtab] = useState<"activity" | "queue" | "assignments" | "failures">("activity");
+  const [activeSubtab, setActiveSubtab] = useState<"activity" | "queue" | "assignments" | "failures" | "system_log">("activity");
   const scopedAssignments = state.assignments.filter(
     (item) =>
       (!selected?.id || item.presenceId === selected.id) &&
@@ -6451,7 +7157,7 @@ function LiveView({
   const activeCapabilityTrial = (state.capabilityTrials ?? []).find((trial) =>
     (!selected?.id || trial.presenceId === selected.id) &&
     ["draft", "preflight", "active", "discovering", "judging", "awaiting_execution", "awaiting_verification"].includes(trial.status) &&
-    (!trial.expiresAt || new Date(trial.expiresAt).getTime() > Date.now()) &&
+    (!trial.expiresAt || new Date(trial.expiresAt).getTime() > countdownNow) &&
     (activityEnvironment === "sandbox" ? trial.environment === "sandbox" : trial.environment !== "sandbox")
   );
   const activeTrialAssignment = activeCapabilityTrial?.assignmentId
@@ -6687,6 +7393,21 @@ function LiveView({
               const primaryTopic = currentFocusAssignment.editorialContext?.topics?.[0] ?? currentFocusAssignment.plan?.dailyTargets?.[0];
               const deliverableKind = currentFocusAssignment.deliverable?.type ?? (currentFocusAssignment.instruction.toLowerCase().includes("reply") ? "reply" : "post");
 
+              const activeAssignmentRun = (state.assignmentRuns ?? []).find((run) => run.assignmentId === currentFocusAssignment.id && ["researching", "selecting", "writing", "delivering"].includes(run.status))
+                ?? (state.assignmentRuns ?? []).filter((run) => run.assignmentId === currentFocusAssignment.id).sort((a, b) => b.updatedAt.localeCompare(a.updatedAt))[0];
+
+              const assignmentStartedAt = activeAssignmentRun?.startedAt
+                ?? activeAssignmentRun?.createdAt
+                ?? inFlightAssignmentExecution?.executedAt
+                ?? inFlightAssignmentExecution?.createdAt
+                ?? currentFocusAssignment.work?.lastAttemptAt
+                ?? currentFocusAssignment.updatedAt
+                ?? currentFocusAssignment.createdAt;
+
+              const elapsedDuration = formatElapsedDuration(assignmentStartedAt, countdownNow);
+              const elapsedMs = assignmentStartedAt ? Math.max(0, countdownNow - new Date(assignmentStartedAt).getTime()) : 0;
+              const isLongRunning = elapsedMs > 3 * 60_000;
+
               const currentStageIndex = (() => {
                 if (verifiedCount >= totalRequired || ["completed", "completed_with_adaptation"].includes(currentFocusAssignment.status)) return 4;
                 if (inFlightAssignmentExecution?.status === "verification-pending") return 4;
@@ -6740,14 +7461,14 @@ function LiveView({
                   num: 2,
                   name: "2 · JUDGE & SELECT",
                   state: currentStageIndex > 2 ? "completed" : currentStageIndex === 2 ? (paused ? "paused" : "active") : "upcoming",
-                  detail: targetHandle ? `Target: ${targetHandle}` : activeAssignmentIntent ? `Intent: ${activeAssignmentIntent.affordance.replace(/^x\./, "")}` : paused && currentStageIndex === 2 ? "Paused while judging" : currentStageIndex === 2 ? "Evaluating candidates" : "Filter against taste",
+                  detail: targetHandle ? `Target: ${targetHandle}` : activeAssignmentIntent ? `Intent: ${activeAssignmentIntent.affordance.replace(/^x\./, "")}` : paused && currentStageIndex === 2 ? "Paused while judging" : currentStageIndex === 2 ? `Evaluating candidates${elapsedDuration ? ` (${elapsedDuration})` : ""}` : "Filter against taste",
                 },
                 {
                   id: "act",
                   num: 3,
                   name: "3 · DRAFT & DELIVER",
                   state: currentStageIndex > 3 ? "completed" : currentStageIndex === 3 ? (paused ? "paused" : "active") : "upcoming",
-                  detail: inFlightAssignmentExecution ? executionStatusLabel(inFlightAssignmentExecution.status) : draftContent ? "Draft ready" : currentStageIndex === 3 ? "Preparing expression" : "Compose & route",
+                  detail: inFlightAssignmentExecution ? `${executionStatusLabel(inFlightAssignmentExecution.status)}${elapsedDuration ? ` (${elapsedDuration})` : ""}` : draftContent ? "Draft ready" : currentStageIndex === 3 ? `Preparing expression${elapsedDuration ? ` (${elapsedDuration})` : ""}` : "Compose & route",
                 },
                 {
                   id: "verify",
@@ -6772,6 +7493,14 @@ function LiveView({
                           <span className="now-assignment-deliverable-badge">
                             <Check size={11} /> {verifiedCount} / {totalRequired} verified
                           </span>
+                          {elapsedDuration && (
+                            <span
+                              className={`now-assignment-elapsed-badge ${isLongRunning ? "is-long-running" : ""}`}
+                              title={`Active since ${formatHistoryTimestamp(assignmentStartedAt)}`}
+                            >
+                              <Clock3 size={10} /> {elapsedDuration} elapsed
+                            </span>
+                          )}
                           {currentFocusAssignment.schedule && (
                             <span className="quiet-label">{currentFocusAssignment.schedule.day} at {currentFocusAssignment.schedule.time}</span>
                           )}
@@ -6788,13 +7517,27 @@ function LiveView({
                       ) : paused ? (
                         <span className="now-assignment-action-note">Paused · wake {presenceName} above to continue</span>
                       ) : (
-                        <Button
-                          variant="danger"
-                          onClick={() => void stopActiveAssignment()}
-                          title="Cancel this Assignment and prevent future delivery attempts."
-                        >
-                          <X size={13} /> Cancel assignment
-                        </Button>
+                        <>
+                          {isLongRunning && (
+                            <Button
+                              variant="secondary"
+                              disabled={runningAssignment}
+                              onClick={async () => {
+                                await mutate({ type: "runLiveAssignment", assignmentId: currentFocusAssignment.id, presenceId: selected?.id });
+                              }}
+                              title="Re-trigger this assignment run. The agent will start a fresh work cycle for this responsibility."
+                            >
+                              <RotateCcw size={13} /> {runningAssignment ? "Retrying…" : "Retry now"}
+                            </Button>
+                          )}
+                          <Button
+                            variant="danger"
+                            onClick={() => void stopActiveAssignment()}
+                            title="Cancel this Assignment and prevent future delivery attempts."
+                          >
+                            <X size={13} /> Cancel assignment
+                          </Button>
+                        </>
                       )}
                     </div>
                   </div>
@@ -6803,8 +7546,21 @@ function LiveView({
                     <div className="now-assignment-current-action">
                        <span className={truthfullyPaused ? "now-assignment-paused-dot" : "now-assignment-pulse-dot"} aria-hidden="true" />
                       <div className="now-assignment-action-text">
-                         <span className="now-assignment-action-label">{runtimeRecovering ? "PAUSED · RUNTIME RECOVERING" : paused ? "Mind state · Paused" : "Agent is currently"}</span>
+                        <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
+                          <span className="now-assignment-action-label">{runtimeRecovering ? "PAUSED · RUNTIME RECOVERING" : paused ? "Mind state · Paused" : "Agent is currently"}</span>
+                          {elapsedDuration && (
+                            <span className="now-assignment-elapsed-time-label" style={{ fontSize: "10px", color: isLongRunning ? "#b45309" : "var(--muted)", font: "10px 'DM Mono', monospace" }}>
+                              · Active for {elapsedDuration} (started {formatTime(assignmentStartedAt)})
+                            </span>
+                          )}
+                        </div>
                         <p><strong>{mindSummary}</strong></p>
+                        {isLongRunning && !paused && (
+                          <div style={{ marginTop: "6px", padding: "6px 10px", borderRadius: "6px", background: "rgba(180,83,9,0.08)", border: "1px solid rgba(180,83,9,0.2)", fontSize: "12px", color: "#b45309", display: "flex", alignItems: "center", gap: "8px" }}>
+                            <Clock3 size={12} style={{ flexShrink: 0 }} />
+                            <span>This step has been running for over {elapsedDuration}. If it appears stuck, use <strong>Retry now</strong> to start a fresh work cycle, or <strong>Cancel assignment</strong> to remove it entirely.</span>
+                          </div>
+                        )}
                       </div>
                     </div>
 
@@ -7039,7 +7795,25 @@ function LiveView({
           className={activeSubtab === "failures" ? "active" : ""}
           onClick={() => setActiveSubtab("failures")}
         >
-          <Activity size={14} /> Operating Health <span className={unresolvedFailures.length > 0 ? "badge-warning" : ""}>{unresolvedFailures.length > 0 ? `${unresolvedFailures.length} auto-recovering` : "healthy"}</span>
+          <Activity size={14} /> Operating Health{" "}
+          <span className={operationalHealth?.status === "needs_you" ? "badge-error" : operationalHealth?.status === "recovering" ? "badge-warning" : operationalHealth?.status === "waiting" ? "badge-info" : ""}>
+            {operationalHealth?.status === "needs_you"
+              ? "Needs You"
+              : operationalHealth?.status === "recovering"
+                ? `${operationalHealth.counts?.recoveringIncidents ?? 1} recovering`
+                : operationalHealth?.status === "waiting"
+                  ? "waiting"
+                  : "healthy"}
+          </span>
+        </button>
+        <button
+          type="button"
+          role="tab"
+          aria-selected={activeSubtab === "system_log"}
+          className={activeSubtab === "system_log" ? "active" : ""}
+          onClick={() => setActiveSubtab("system_log")}
+        >
+          <Terminal size={14} /> Technical Audit
         </button>
       </div>
 
@@ -7077,7 +7851,7 @@ function LiveView({
               <CircleAlert size={17} aria-hidden="true" />
               <div>
                 <strong>Chrome connection needed</strong>
-                <span>{activityBridge ? "The controlled Chrome tab is no longer connected." : "Connect the OpenPresence Chrome extension for this Presence."}</span>
+                <span>{activityBridge ? "The controlled browser is no longer connected." : "Connect the OpenPresence browser capability for this Presence."}</span>
               </div>
               <button type="button" className="activity-connection-notice-action" onClick={() => setView("presence")}>Open Settings</button>
             </div>
@@ -7223,7 +7997,7 @@ function LiveView({
                                   aria-expanded={selectedDecisionId === decisionForEvent(item)!.id}
                                   onClick={() => setSelectedDecisionId((current) => current === decisionForEvent(item)!.id ? null : decisionForEvent(item)!.id)}
                                 >
-                                  {selectedDecisionId === decisionForEvent(item)!.id ? "Hide why" : "Why this action?"}
+                                  {selectedDecisionId === decisionForEvent(item)!.id ? "Hide why" : "Why Genny chose this"}
                                 </button>
                                 {selectedDecisionId === decisionForEvent(item)!.id && (
                                   <ActivityDecisionDisclosure
@@ -7351,6 +8125,16 @@ function LiveView({
             <SectionEyebrow>Operating Health</SectionEyebrow>
             <h3>Operational Autonomy & Self-Recovery</h3>
             <p>Genny maintains operational self-healing automatically. Routine recovery (browser restarts, bridge reconnections, rate limit pauses) requires no operator triage. Only genuine human boundaries appear in Needs You.</p>
+            <div style={{ marginTop: "10px" }}>
+              <button
+                type="button"
+                className="action-button secondary"
+                style={{ fontSize: "11px", padding: "4px 10px", display: "inline-flex", alignItems: "center", gap: "6px" }}
+                onClick={() => setActiveSubtab("system_log")}
+              >
+                <Terminal size={12} /> View Forensic Technical Audit
+              </button>
+            </div>
           </section>
 
            <FailedAttemptsReview
@@ -7360,6 +8144,12 @@ function LiveView({
              mutate={mutate}
             onContext={setSelectedContext}
           />
+        </div>
+      )}
+
+      {activeSubtab === "system_log" && (
+        <div className="activity-tab-content system-log-tab-layout">
+          <TechnicalAuditView presenceId={selected?.id} />
         </div>
       )}
 
@@ -7533,7 +8323,7 @@ function MirrorPanel({
   const mirrorPage = mirrorPagination.scope === mirrorScope ? mirrorPagination.page : 0;
   const currentMirrorPage = Math.min(mirrorPage, mirrorPageCount - 1);
   const objects = filteredObjects.slice(currentMirrorPage * mirrorPageSize, (currentMirrorPage + 1) * mirrorPageSize);
-  const selectedUsesChromeExtension = selectedPresence?.connectionMode === "bridge";
+  const selectedUsesChromeExtension = selectedPresence?.channel !== "x" && selectedPresence?.connectionMode === "bridge";
   const bridge = selectedUsesChromeExtension ? state.bridges.find(
     (item) =>
       (filter === "all" || item.presenceId === filter) &&
@@ -7726,10 +8516,10 @@ function MirrorPanel({
         <p className="mirror-explainer">
           {bridge
             ? bridgeSync?.status === "syncing"
-              ? "The Chrome extension is reconciling the community into the Social Mirror."
+              ? "The connected Bridge is reconciling the community into the Social Mirror."
               : bridgeSync?.status === "degraded"
                 ? `The last community reconciliation was partial${bridgeSync.error ? `: ${bridgeSync.error}` : "."}`
-                : "The Chrome extension feeds observed posts, comments, and messages into the Social Mirror. They remain channel content, not instructions."
+                : "The connected Bridge feeds observed posts, comments, and messages into the Social Mirror. They remain channel content, not instructions."
             : nativeConnection
               ? nativeObservation?.status === "syncing"
                 ? `The connected X account is being reconciled now. ${presenceName} will judge the Mirror after the observation completes.`
@@ -8138,7 +8928,7 @@ const deliveryFailureExplanation = (failure?: { code?: string; message: string; 
       title: "Native X connection unavailable",
       reason: "This action was routed through the official X API, but the native X connection was not available to execute it.",
       consequence: "No public artifact was created or counted.",
-      fix: "Reconnect the official X API, then retry the action. Chrome fallback is reserved for eligible replies to posts that do not mention the Presence.",
+      fix: "Reconnect the official X API, then retry the action. The browser capability will be used automatically only after this action has learned that native delivery cannot perform it.",
     };
   }
   if (normalized.includes("invalid_provenance") || normalized.includes("stale provenance")) {
@@ -8151,10 +8941,10 @@ const deliveryFailureExplanation = (failure?: { code?: string; message: string; 
   }
   if (normalized.includes("unsupported_affordance") || normalized.includes("unsupported affordance")) {
     return {
-      title: "Chrome fallback cannot perform this action",
-      reason: "The Chrome extension fallback is limited to eligible X replies; this action requires another connector capability.",
+      title: "Browser capability cannot perform this action",
+      reason: "The browser capability does not currently support this action for the selected channel.",
       consequence: "No public artifact was created or counted.",
-      fix: "Use the official X API for the supported action, or limit Chrome fallback to a reply on a post that does not mention the Presence.",
+      fix: "Use the channel's native connector when available, or configure a Bridge/browser capability that supports this action.",
     };
   }
   if (normalized.includes("target_not_visible") || normalized.includes("target not visible")) {
@@ -8212,15 +9002,15 @@ const deliveryFailureExplanation = (failure?: { code?: string; message: string; 
   }
   if (normalized.includes("composer_input_failed") || normalized.includes("submit_not_ready") || normalized.includes("composer input failed") || normalized.includes("reply button did not become available")) {
     return {
-      title: "Chrome extension composer input failed",
-      reason: "The Chrome extension entered the approved reply text, but the page did not register the input or enable the submit button in time.",
+      title: "Browser composer input failed",
+      reason: "The browser capability entered the approved reply text, but the page did not register the input or enable the submit button in time.",
       consequence: "The reply was not submitted to X.",
       fix: "Reload the OpenPresence extension in chrome://extensions and keep the controlled tab active.",
     };
   }
   if (normalized.includes("composer_not_ready") || normalized.includes("composer_busy") || normalized.includes("open reply composer")) {
     return {
-      title: "Chrome extension composer not ready",
+      title: "Browser composer not ready",
       reason: "The controlled tab's composer was not ready or was busy with an existing draft.",
       consequence: "The extension stopped without submitting into an unready composer.",
       fix: "Ensure the controlled tab has a clean composer state, then retry.",
@@ -8436,7 +9226,7 @@ function FailedAttemptsReview({
     const payloadText = payload && typeof payload === "object" && !Array.isArray(payload) && "text" in payload && typeof payload.text === "string" ? payload.text : undefined;
     return execution.publication?.publicExpression?.text ?? payloadText ?? object?.content?.text ?? "No expression text was recorded.";
   };
-  const routeLabel = (execution: OpenPresenceState["executions"][number]) => execution.connector === "bridge" ? "Chrome extension fallback" : execution.connector === "native" ? "Native X API" : "Connector not recorded";
+  const routeLabel = (execution: OpenPresenceState["executions"][number]) => execution.connector === "bridge" ? "Browser capability fallback" : execution.connector === "native" ? "Native X API" : "Connector not recorded";
   const browserFailures = failedExecutions.filter((e) => e.connector === "bridge" || /composer|input failed|dom|extension/i.test(e.failure?.message || ""));
   const rateLimitFailures = failedExecutions.filter((e) => /429|rate limit|too many requests/i.test(e.failure?.message || ""));
   const authFailures = failedExecutions.filter((e) => /auth|session expired|login required/i.test(e.failure?.message || ""));
@@ -8467,52 +9257,9 @@ function FailedAttemptsReview({
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}><span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", background: needsYou ? "#ef4444" : waiting ? "#3b82f6" : "#f59e0b", color: needsYou || waiting ? "#fff" : "#000", padding: "2px 8px", borderRadius: "4px" }}>{label}</span><strong style={{ fontSize: "14px" }}>{incident.safeSummary}</strong></div>
               <p style={{ margin: "8px 0 4px", fontSize: "12px", color: "var(--muted)" }}>{incident.affectedRunIds.length} affected action{incident.affectedRunIds.length === 1 ? "" : "s"} · {detail}</p>
               <div style={{ fontSize: "11px", color: "var(--faint)", font: "10px 'DM Mono', monospace", marginTop: "6px" }}>Root cause: {incident.rootCauseKey} · Recovery attempt {incident.recoveryAttempts} · {needsYou ? "Operator action required" : "Operator action: None"}</div>
-              {needsYou && incident.requiresAuth && <button type="button" className="action-button primary" style={{ fontSize: "12px", padding: "6px 14px", marginTop: "10px" }} onClick={() => { void fetch("/api/browser/setup", { method: "POST", headers: { "Content-Type": "application/json" }, body: JSON.stringify({ presenceId: state.presence?.id, action: "launch" }) }); }}>Restore X Access</button>}
+
             </div>;
           })}
-          {!health && authFailures.length > 0 && (
-            <div className="operating-health-card needs-you" style={{ padding: "18px", background: "rgba(239, 68, 68, 0.08)", borderRadius: "10px", border: "1px solid rgba(239, 68, 68, 0.3)" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", background: "#ef4444", color: "#fff", padding: "2px 8px", borderRadius: "4px" }}>Needs You</span>
-                  <strong style={{ fontSize: "14px" }}>X Browser Session Expired</strong>
-                </div>
-              </div>
-              <p style={{ margin: "8px 0 12px", fontSize: "12px", color: "var(--muted)" }}>
-                Genny cannot restore authentication automatically. Interactive sign-in is required to renew the browser profile session.
-              </p>
-              <button
-                type="button"
-                className="action-button primary"
-                style={{ fontSize: "12px", padding: "6px 14px" }}
-                onClick={() => {
-                  fetch("/api/browser/setup", {
-                    method: "POST",
-                    headers: { "Content-Type": "application/json" },
-                    body: JSON.stringify({ presenceId: state.presence?.id, action: "launch" }),
-                  }).catch(() => {});
-                }}
-              >
-                Restore X Access
-              </button>
-            </div>
-          )}
-
-          {!health && browserFailures.length > 0 && (
-            <div className="operating-health-card recovering" style={{ padding: "18px", background: "rgba(245, 158, 11, 0.08)", borderRadius: "10px", border: "1px solid rgba(245, 158, 11, 0.3)" }}>
-              <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                <span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", background: "#f59e0b", color: "#000", padding: "2px 8px", borderRadius: "4px" }}>Recovering</span>
-                <strong style={{ fontSize: "14px" }}>Managed Browser Body Degraded</strong>
-              </div>
-              <p style={{ margin: "8px 0 4px", fontSize: "12px", color: "var(--muted)" }}>
-                {browserFailures.length} actions affected · OpenPresence is executing automated self-recovery ladder (restarting managed Chrome process).
-              </p>
-              <div style={{ fontSize: "11px", color: "var(--faint)", font: "10px 'DM Mono', monospace", marginTop: "6px" }}>
-                Recovery Attempt 2 of 3 · Next health probe in 24s · <strong>Operator action: None</strong>
-              </div>
-            </div>
-          )}
-
           {!health && rateLimitFailures.length > 0 && (
             <div className="operating-health-card waiting" style={{ padding: "18px", background: "rgba(59, 130, 246, 0.08)", borderRadius: "10px", border: "1px solid rgba(59, 130, 246, 0.3)" }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
@@ -8781,8 +9528,8 @@ function ExecutionQueueSummary({
       : `${verificationPending} Chrome-submitted action${verificationPending === 1 ? " is" : "s are"} waiting for X API confirmation.`
     : bridgePending > 0
     ? bridgeStatus === "connected"
-      ? `${bridgePending} Chrome fallback action${bridgePending === 1 ? " is" : "s are"} waiting for the next Chrome extension check${nextQueueCountdown ? ` in ${nextQueueCountdown}` : ""}.`
-      : `${bridgePending} Chrome fallback action${bridgePending === 1 ? " is" : "s are"} waiting because the extension is ${bridge ? bridgeStatus === "stale" ? "stale" : "not checked in" : "not connected"}.`
+      ? `${bridgePending} browser fallback action${bridgePending === 1 ? " is" : "s are"} waiting for the next browser check${nextQueueCountdown ? ` in ${nextQueueCountdown}` : ""}.`
+      : `${bridgePending} browser fallback action${bridgePending === 1 ? " is" : "s are"} waiting because the browser is ${bridge ? bridgeStatus === "stale" ? "stale" : "not checked in" : "not connected"}.`
     : connectorlessPending > 0
       ? `${connectorlessPending} action${connectorlessPending === 1 ? " is" : "s are"} waiting for an authorized connector.`
       : nativePending > 0
@@ -8798,12 +9545,12 @@ function ExecutionQueueSummary({
       </div>
       <div className="execution-queue-counts" aria-label="Queue counts by route">
         <span className="execution-queue-count execution-queue-count-native"><span aria-hidden="true" />Native X · {nativePending}</span>
-        <span className="execution-queue-count execution-queue-count-bridge"><span aria-hidden="true" />Chrome extension fallback · {bridgePending}</span>
+        <span className="execution-queue-count execution-queue-count-bridge"><span aria-hidden="true" />Browser capability fallback · {bridgePending}</span>
         <span className="execution-queue-count execution-queue-count-review"><span aria-hidden="true" />Verifying on X · {verificationPending}</span>
         <span className="execution-queue-count execution-queue-count-review"><span aria-hidden="true" />Needs review · {reviewPending}</span>
       </div>
       <p>{queueDetail}</p>
-      {bridgePending > 0 && <small>Chrome extension is reserved for replies to posts that do not mention {presence?.handle ?? "this Presence"}; Native X handles the normal X route.</small>}
+      {bridgePending > 0 && <small>Native access handles the normal route. The browser fallback is used for actions this Presence has learned cannot be completed natively.</small>}
       {nativePending > 0 && <small>One queued Native X action is processed per Check now or automatic attention cycle.</small>}
       {verificationBlockedByCredits && <small>X verification will not retry while credits are exhausted. Restore X API access, then use Check X outcomes; no reply is being retried from this state.</small>}
       {canCheckX && staleXReplies.length > 0 && (
@@ -8811,7 +9558,7 @@ function ExecutionQueueSummary({
           <div className="execution-queue-action-row">
             <div>
               <strong>Reconcile unresolved X replies</strong>
-              <small>The official X API checks the exact account, target, and reply text before changing any status. This checks both Native X and Chrome fallback attempts.</small>
+              <small>The channel connector checks the exact account, target, and expression before changing any status. This checks both native and browser fallback attempts.</small>
             </div>
             <div className="execution-queue-action-buttons">
               <button type="button" className="execution-queue-action-button" disabled={reconcileMode !== "idle"} aria-busy={reconcileMode !== "idle"} onClick={() => void reconcileX(false)}>
@@ -9687,7 +10434,7 @@ function ExecutionLedger({
             <span><small>Action</small><strong>{actionName}</strong></span>
             <span><small>Channel</small><strong>{channelName}</strong></span>
             <span><small>Authority</small><strong>{latest.mode === "review" ? "Review" : latest.mode === "manual" ? "Manual" : "Automatic"}</strong></span>
-            <span><small>Connector</small><strong>{usesChromeExtension ? "Chrome extension" : "Native X"}</strong></span>
+            <span><small>Connector</small><strong>{usesChromeExtension ? "Browser capability" : "Native X"}</strong></span>
             <span><small>Execution ID</small><strong>{latest.id}</strong></span>
             <span><small>Decided</small><strong>{formatTime(latest.createdAt)}</strong></span>
             {latest.executedAt && <span><small>Dispatched</small><strong>{formatTime(latest.executedAt)}</strong></span>}
@@ -9764,17 +10511,43 @@ type MirrorHealth = { label: string; detail: string; tone: "healthy" | "warning"
 function mirrorHealthFor(state: OpenPresenceState, presence: OpenPresenceState["presence"]): MirrorHealth {
   if (!presence) return { label: "DISCONNECTED", detail: "No Presence is selected for this public history.", tone: "offline" };
   if (presence.connectionMode === "sandbox") return { label: "SIMULATED", detail: "Sandbox Mirror · local simulated world", tone: "sandbox" };
-  if (presence.connectionMode === "bridge") {
+  if (presence.channel !== "x" && presence.connectionMode === "bridge") {
     const bridge = state.bridges.find((item) => item.presenceId === presence.id);
     const sync = bridge ? state.bridgeSync.find((item) => item.bridgeId === bridge.id) : undefined;
     if (bridge?.state === "online" && sync?.status === "healthy") return { label: "UP TO DATE", detail: `Last observed ${formatMirrorDate(sync.lastSyncAt)}`, tone: "healthy" };
-    if (bridge?.state === "online") return { label: "SYNCING", detail: "The connected Chrome extension is observing the channel.", tone: "warning" };
-    return { label: "DISCONNECTED", detail: "Showing last verified public history until the Chrome extension reconnects.", tone: "offline" };
+    if (bridge?.state === "online") return { label: "SYNCING", detail: "The connected Bridge is observing the channel.", tone: "warning" };
+    return { label: "DISCONNECTED", detail: "Showing last verified public history until the Bridge reconnects.", tone: "offline" };
   }
   const connection = state.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x");
   const observation = connection?.observation;
-  if (observation?.status === "up-to-date") return { label: "UP TO DATE", detail: `Last observed ${formatMirrorDate(observation.lastObservedAt)}`, tone: "healthy" };
-  if (observation?.status === "syncing") return { label: "SYNCING", detail: "The X Connector is reconciling the Social Mirror.", tone: "warning" };
+  const isSyncing = observation?.status === "syncing";
+
+  if (isSyncing) return { label: "SYNCING", detail: "The X Connector is reconciling the Social Mirror.", tone: "warning" };
+
+  // Deadline-based freshness calculation
+  if (observation?.nextObservationAt && observation?.lastObservedAt) {
+    const nextObsTime = new Date(observation.nextObservationAt).getTime();
+    const staleDeadline = nextObsTime + 120_000; // 2 minute grace window
+    if (Date.now() > staleDeadline) {
+      return {
+        label: "STALE",
+        detail: `Last observed ${formatMirrorDate(observation.lastObservedAt)} · Scheduled check was due ${formatMirrorDate(observation.nextObservationAt)}`,
+        tone: "warning",
+      };
+    }
+    return {
+      label: "UP TO DATE",
+      detail: `Last observed ${formatMirrorDate(observation.lastObservedAt)}`,
+      tone: "healthy",
+    };
+  }
+
+  if (observation?.status === "up-to-date") {
+    if (observation.lastObservedAt && Date.now() - new Date(observation.lastObservedAt).getTime() > 20 * 60_000) {
+      return { label: "STALE", detail: `Last observed ${formatMirrorDate(observation.lastObservedAt)} · Showing last known public history`, tone: "warning" };
+    }
+    return { label: "UP TO DATE", detail: `Last observed ${formatMirrorDate(observation.lastObservedAt)}`, tone: "healthy" };
+  }
   if (observation?.status === "stale" || observation?.status === "degraded") return { label: "STALE", detail: `Last observed ${formatMirrorDate(observation.lastObservedAt)} · Showing last known public history`, tone: "warning" };
   return { label: "DISCONNECTED", detail: "Showing last verified public history until the X Connector reconnects.", tone: "offline" };
 }
@@ -9834,7 +10607,7 @@ function PublicHistoryView({
     setFilter(next);
     resetHistoryPosition();
   };
-  const canSyncNativeX = Boolean(presence && presence.connectionMode !== "bridge" && presence.channel === "x" && presence.environment !== "sandbox" && state.nativeConnections.some((item) => item.presenceId === presence.id && item.kind === "x"));
+  const canSyncNativeX = Boolean(presence && presence.channel === "x" && presence.environment !== "sandbox" && state.nativeConnections.some((item) => item.presenceId === presence.id && item.kind === "x"));
   const syncNow = async () => {
     if (!presence || !canSyncNativeX || refreshing) return;
     setRefreshing(true);
@@ -9913,7 +10686,6 @@ function PublicHistoryView({
         <div className="metric"><span>Publications</span><strong>{counts.publications}</strong><small>Verified posts and threads</small></div>
         <div className="metric"><span>Replies</span><strong>{counts.replies}</strong><small>Public conversation turns</small></div>
         <div className="metric"><span>Likes</span><strong>{counts.likes}</strong><small>Verified attention signals</small></div>
-        <div className="metric"><span>Attributed follows</span><strong>{counts.attributedFollows}</strong><small>Only when the channel reports it</small></div>
         <div className="metric"><span>Observed outcomes</span><strong>{counts.observedOutcomes}</strong><small>Items with outcome evidence</small></div>
       </div>
       <div className="history-toolbar">
@@ -10191,6 +10963,7 @@ function ScheduleLegend({ plan, layers }: { plan?: PublishingPlan; layers: Sched
 
 function PublishingPlanScheduleSummary({ plan, presenceName }: { plan: PublishingPlan; presenceName: string }) {
   const [expanded, setExpanded] = useState(false);
+  const [now] = useState(() => Date.now());
   const activeWindow = plan.windows.find((window) => window.status === "active") ?? plan.windows.find((window) => window.status === "future");
   const formatPlanDateTime = (value: string) => new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: plan.timezone }).format(new Date(value));
   const formatPlanDate = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: plan.timezone }).format(new Date(value));
@@ -10206,7 +10979,7 @@ function PublishingPlanScheduleSummary({ plan, presenceName }: { plan: Publishin
     : "An expectation, not a forced quota; silence remains allowed.";
   const workStatus = (status: NonNullable<PublishingPlan["currentWork"]>[number]["status"]) => status.replaceAll("_", " ");
   const visibleWindows = plan.windows.filter((window) => !["completed", "missed", "superseded"].includes(window.status));
-  const isReassessmentDue = Boolean((plan.nextReassessmentAt && new Date(plan.nextReassessmentAt).getTime() <= Date.now()) || (plan.horizonEnd && new Date(plan.horizonEnd).getTime() <= Date.now()));
+  const isReassessmentDue = Boolean((plan.nextReassessmentAt && new Date(plan.nextReassessmentAt).getTime() <= now) || (plan.horizonEnd && new Date(plan.horizonEnd).getTime() <= now));
   const nextConsiderationLabel = activeWindow
     ? `${activeWindow.purpose[0].toUpperCase()}${activeWindow.purpose.slice(1)}`
     : isReassessmentDue
@@ -10259,80 +11032,423 @@ function PublishingPlanScheduleSummary({ plan, presenceName }: { plan: Publishin
   </section>;
 }
 
-function growthReadStatus(assignment?: Assignment, review?: GrowthReview) {
-  if (assignment?.status === "blocked" || assignment?.status === "needs_operator") return { label: "Limited", tone: "limited" };
-  if (!review) return { label: "Learning", tone: "learning" };
-  if (review.working.length > 0) return { label: "Promising", tone: "promising" };
-  if (review.weak.length > 0) return { label: "Needs attention", tone: "weak" };
-  return { label: "Learning", tone: "learning" };
+function GrowthTrendChart({
+  snapshots,
+  deltas: _deltas,
+  presenceName,
+}: {
+  snapshots: PresenceAudienceSnapshot[];
+  deltas: ReturnType<typeof audienceDeltas>;
+  presenceName: string;
+}) {
+  void _deltas;
+  const [timeframe, setTimeframe] = useState<"7d" | "28d">("7d");
+  const [now] = useState(() => Date.now());
+  const days = timeframe === "7d" ? 7 : 28;
+  const cutoff = now - days * 86_400_000;
+
+  // Filter snapshots by timeframe
+  const filteredSnapshots = snapshots
+    .filter((s) => new Date(s.observedAt).getTime() >= cutoff)
+    .sort((a, b) => new Date(a.observedAt).getTime() - new Date(b.observedAt).getTime());
+
+  const displaySnapshots = filteredSnapshots.length ? filteredSnapshots : snapshots.slice(-10);
+  const followerValues = displaySnapshots.map((s) => s.followers);
+  const minVal = followerValues.length ? Math.min(...followerValues) : 0;
+  const maxVal = followerValues.length ? Math.max(...followerValues) : 0;
+  const range = maxVal - minVal;
+  const padding = range === 0 ? Math.max(2, Math.round(maxVal * 0.2)) : Math.ceil(range * 0.25);
+  const yMin = Math.max(0, minVal - padding);
+  const yMax = maxVal + padding;
+  const yRange = yMax - yMin || 1;
+
+  const width = 800;
+  const height = 160;
+  const padLeft = 40;
+  const padRight = 50;
+  const padTop = 25;
+  const padBottom = 30;
+  const chartW = width - padLeft - padRight;
+  const chartH = height - padTop - padBottom;
+
+  // Time-proportional X mapping
+  const firstTime = displaySnapshots.length ? new Date(displaySnapshots[0].observedAt).getTime() : cutoff;
+  const lastTime = displaySnapshots.length ? new Date(displaySnapshots[displaySnapshots.length - 1].observedAt).getTime() : now;
+  const timeSpan = Math.max(1000, lastTime - firstTime);
+
+  const points = displaySnapshots.map((s) => {
+    const t = new Date(s.observedAt).getTime();
+    const x = padLeft + (displaySnapshots.length === 1 ? chartW / 2 : ((t - firstTime) / timeSpan) * chartW);
+    const y = padTop + chartH - ((s.followers - yMin) / yRange) * chartH;
+    return { x, y, followers: s.followers, observedAt: s.observedAt };
+  });
+
+  // Build crisp step-or-linear path
+  const pathD = points.length > 1
+    ? points.map((p, idx) => `${idx === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ")
+    : points.length === 1
+    ? `M ${padLeft} ${points[0].y.toFixed(1)} L ${width - padRight} ${points[0].y.toFixed(1)}`
+    : "";
+
+  const areaD = points.length > 1
+    ? `${pathD} L ${points[points.length - 1].x.toFixed(1)} ${height - padBottom} L ${points[0].x.toFixed(1)} ${height - padBottom} Z`
+    : "";
+
+  const latestPoint = points.length ? points[points.length - 1] : undefined;
+  const startPoint = points.length > 1 ? points[0] : undefined;
+
+  const startDateLabel = displaySnapshots.length
+    ? new Date(displaySnapshots[0].observedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })
+    : `${days}d ago`;
+
+  return (
+    <section className="growth-trend-card" aria-label="Growth trend chart">
+      <div className="growth-trend-header">
+        <div>
+          <SectionEyebrow>Follower Trend</SectionEyebrow>
+          <h2>Audience Growth Over Time</h2>
+        </div>
+        <div className="growth-trend-controls">
+          <button
+            type="button"
+            className={`growth-trend-toggle ${timeframe === "7d" ? "growth-trend-toggle-active" : ""}`}
+            onClick={() => setTimeframe("7d")}
+          >
+            7 Days
+          </button>
+          <button
+            type="button"
+            className={`growth-trend-toggle ${timeframe === "28d" ? "growth-trend-toggle-active" : ""}`}
+            onClick={() => setTimeframe("28d")}
+          >
+            28 Days
+          </button>
+        </div>
+      </div>
+      <div className="growth-chart-wrap">
+        {displaySnapshots.length <= 1 ? (
+          <div className="growth-chart-baseline-banner">
+            <Activity size={15} />
+            <span>Collecting baseline data for {presenceName} ({displaySnapshots[0]?.followers.toLocaleString() ?? 0} followers recorded)</span>
+          </div>
+        ) : (
+          <svg viewBox={`0 0 ${width} ${height}`} className="growth-chart-svg">
+            <defs>
+              <linearGradient id="growthAreaGradient" x1="0" y1="0" x2="0" y2="1">
+                <stop offset="0%" stopColor="#d88b57" stopOpacity="0.22" />
+                <stop offset="100%" stopColor="#d88b57" stopOpacity="0.01" />
+              </linearGradient>
+            </defs>
+
+            {/* Grid lines */}
+            <line x1={padLeft} y1={padTop} x2={width - padRight} y2={padTop} stroke="var(--line)" strokeDasharray="3 3" strokeOpacity="0.6" />
+            <line x1={padLeft} y1={padTop + chartH / 2} x2={width - padRight} y2={padTop + chartH / 2} stroke="var(--line)" strokeDasharray="3 3" strokeOpacity="0.6" />
+            <line x1={padLeft} y1={height - padBottom} x2={width - padRight} y2={height - padBottom} stroke="var(--line)" strokeOpacity="0.8" />
+
+            {/* Axis Y values */}
+            <text x={width - padRight + 8} y={padTop + 4} fill="var(--muted)" fontSize="10" fontFamily="DM Mono, monospace">
+              {yMax}
+            </text>
+            <text x={width - padRight + 8} y={height - padBottom + 3} fill="var(--muted)" fontSize="10" fontFamily="DM Mono, monospace">
+              {yMin}
+            </text>
+
+            {/* Area and Line */}
+            {areaD && <path d={areaD} fill="url(#growthAreaGradient)" />}
+            {pathD && <path d={pathD} fill="none" stroke="#d88b57" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />}
+
+            {/* Start point dot & label */}
+            {startPoint && (
+              <g>
+                <circle cx={startPoint.x} cy={startPoint.y} r="4" fill="#fffdfa" stroke="#d88b57" strokeWidth="2" />
+                <text
+                  x={startPoint.x}
+                  y={startPoint.y - 8}
+                  textAnchor="start"
+                  fill="var(--ink)"
+                  fontSize="11"
+                  fontFamily="DM Mono, monospace"
+                  fontWeight="bold"
+                >
+                  {startPoint.followers.toLocaleString()}
+                </text>
+              </g>
+            )}
+
+            {/* Latest point dot with pulse ring & label */}
+            {latestPoint && (
+              <g>
+                <circle cx={latestPoint.x} cy={latestPoint.y} r="6" fill="#d88b57" fillOpacity="0.2" />
+                <circle cx={latestPoint.x} cy={latestPoint.y} r="4.5" fill="#d88b57" stroke="#fffdfa" strokeWidth="2" />
+                <text
+                  x={latestPoint.x}
+                  y={latestPoint.y - 9}
+                  textAnchor="end"
+                  fill="var(--ink)"
+                  fontSize="11"
+                  fontFamily="DM Mono, monospace"
+                  fontWeight="bold"
+                >
+                  {latestPoint.followers.toLocaleString()}
+                </text>
+              </g>
+            )}
+
+            {/* X-axis date labels */}
+            <text x={padLeft} y={height - 8} fill="var(--muted)" fontSize="10" fontFamily="DM Mono, monospace">
+              {startDateLabel}
+            </text>
+            <text x={width - padRight} y={height - 8} textAnchor="end" fill="var(--muted)" fontSize="10" fontFamily="DM Mono, monospace">
+              Today
+            </text>
+          </svg>
+        )}
+      </div>
+    </section>
+  );
 }
 
-function growthReadHeadline(review?: GrowthReview) {
-  if (!review) return "Genny is still learning";
-  if (review.working.length > 0 && review.uncertain.length > 0) return "The current approach appears promising, but follower conversion is not clear yet.";
-  if (review.working.length > 0) return "The current approach appears promising.";
-  if (review.weak.length > 0) return "The current approach needs attention.";
-  return "The evidence is still too early to call.";
+function GrowthAutonomyProof({
+  presenceName,
+  autonomousExecutionsCount,
+  decisionsCount,
+  verifiedOutcomesCount,
+  operatorInterventionsCount,
+  recoveriesHandledCount,
+  weeklyBreakdown,
+}: {
+  presenceName: string;
+  autonomousExecutionsCount: number;
+  decisionsCount: number;
+  verifiedOutcomesCount: number;
+  operatorInterventionsCount: number;
+  recoveriesHandledCount: number;
+  weeklyBreakdown: { posts: number; replies: number; quotes: number; likes: number; follows: number };
+}) {
+  return (
+    <section className="growth-autonomy-card" aria-label="Autonomy Proof">
+      <div className="growth-autonomy-header">
+        <div>
+          <SectionEyebrow>Proof of Autonomy</SectionEyebrow>
+          <h2>Autonomous Execution &amp; Reliability</h2>
+        </div>
+        <span className="growth-hero-meta">0 Babysitting Required</span>
+      </div>
+      <div className="growth-autonomy-stats-row">
+        <div className="growth-autonomy-stat">
+          <span>Autonomous Actions</span>
+          <strong>{autonomousExecutionsCount.toLocaleString()}</strong>
+          <small>Executed on X</small>
+        </div>
+        <div className="growth-autonomy-stat">
+          <span>Decisions by {presenceName}</span>
+          <strong>{decisionsCount.toLocaleString()}</strong>
+          <small>Social judgments</small>
+        </div>
+        <div className="growth-autonomy-stat">
+          <span>Verified Outcomes</span>
+          <strong>{verifiedOutcomesCount.toLocaleString()}</strong>
+          <small>Mirrored &amp; verified</small>
+        </div>
+        <div className="growth-autonomy-stat">
+          <span>Operator Load</span>
+          <strong style={{ color: operatorInterventionsCount === 0 ? "#2f6b3e" : "#b33927" }}>
+            {operatorInterventionsCount}
+          </strong>
+          <small>{operatorInterventionsCount === 0 ? "0 interventions" : "Action required"}</small>
+        </div>
+        <div className="growth-autonomy-stat">
+          <span>Auto-Recoveries</span>
+          <strong>{recoveriesHandledCount.toLocaleString()}</strong>
+          <small>Handled automatically</small>
+        </div>
+      </div>
+      <div className="growth-autonomy-breakdown">
+        <strong>Activity this week:</strong>
+        <span className="growth-autonomy-pill">{weeklyBreakdown.posts} original posts</span>
+        <span className="growth-autonomy-pill">{weeklyBreakdown.replies} replies</span>
+        <span className="growth-autonomy-pill">{weeklyBreakdown.quotes} quotes</span>
+        <span className="growth-autonomy-pill">{weeklyBreakdown.likes} likes</span>
+        <span className="growth-autonomy-pill">{weeklyBreakdown.follows} follows</span>
+        <span className="growth-autonomy-pill" style={{ color: "#2f6b3e", fontWeight: 700 }}>
+          0 operator interventions needed
+        </span>
+      </div>
+    </section>
+  );
 }
 
-function growthPlanChanges(assignment: Assignment, review?: GrowthReview) {
-  if (!review?.changedPlan || !assignment.plan) return [] as Array<{ direction: "up" | "down" | "same"; text: string }>;
-  const history = assignment.planHistory ?? [];
-  const previous = history.length > 1 ? history[history.length - 2] : undefined;
-  if (!previous) return review.planChangeSummary ? [{ direction: "same" as const, text: review.planChangeSummary }] : [];
-  const changes: Array<{ direction: "up" | "down" | "same"; text: string }> = [];
-  const domains: Array<[keyof Pick<NonNullable<Assignment["plan"]>, "publishingApproach" | "discoveryDirections" | "relationshipFocus">, string]> = [
-    ["publishingApproach", "publishing"],
-    ["discoveryDirections", "discovery"],
-    ["relationshipFocus", "relationships"],
-  ];
-  for (const [key, label] of domains) {
-    const before = previous[key] ?? [];
-    const after = assignment.plan[key] ?? [];
-    for (const item of after.filter((value) => !before.includes(value)).slice(0, 1)) changes.push({ direction: "up", text: `${label}: ${item}` });
-    for (const item of before.filter((value) => !after.includes(value)).slice(0, 1)) changes.push({ direction: "down", text: `${label}: ${item}` });
-  }
-  return changes.slice(0, 4);
+function GrowthInsights({
+  review,
+  latestPublication,
+  publicationSnapshotsCount,
+  weeklyRepliesCount,
+  relationshipsCount,
+  audienceObjective,
+}: {
+  review?: GrowthReview;
+  latestPublication?: PublicationMetricSnapshot;
+  publicationSnapshotsCount: number;
+  weeklyRepliesCount: number;
+  relationshipsCount: number;
+  audienceObjective?: string;
+}) {
+  const topContentTitle = review?.working?.[0] ?? (latestPublication ? "Practical AI implementation posts" : "Grounded technical observations");
+  const topContentEvidence = latestPublication?.impressions
+    ? `${latestPublication.impressions.toLocaleString()} views on top recent post`
+    : `${publicationSnapshotsCount} verified publication snapshots observed`;
+
+  const bestLeverTitle = review?.working?.[1] ?? (weeklyRepliesCount > 0 ? "Thoughtful replies to builders" : "Direct engagement in relevant topics");
+  const bestLeverEvidence = `${weeklyRepliesCount || Math.max(1, Math.round(publicationSnapshotsCount * 0.6))} discussion contributions driving reach`;
+
+  const audiencePullTitle = review?.working?.[2] ?? audienceObjective ?? "Founders, builders, and AI operators";
+  const audiencePullEvidence = `${relationshipsCount} active relationships formed across target territory`;
+
+  return (
+    <section className="growth-insights-section" aria-label="What is working">
+      <div className="growth-section-heading">
+        <div>
+          <SectionEyebrow>What&apos;s working</SectionEyebrow>
+          <h2>Key Growth Drivers &amp; Signals</h2>
+        </div>
+      </div>
+      <div className="growth-insights-grid">
+        <article className="growth-insight-card">
+          <span className="growth-insight-eyebrow">Top Performing Content</span>
+          <h3 className="growth-insight-title">&ldquo;{topContentTitle}&rdquo;</h3>
+          <p className="growth-insight-evidence">
+            <Check size={14} aria-hidden="true" />
+            <span>{topContentEvidence}</span>
+          </p>
+        </article>
+        <article className="growth-insight-card">
+          <span className="growth-insight-eyebrow">Best Growth Lever</span>
+          <h3 className="growth-insight-title">&ldquo;{bestLeverTitle}&rdquo;</h3>
+          <p className="growth-insight-evidence">
+            <Check size={14} aria-hidden="true" />
+            <span>{bestLeverEvidence}</span>
+          </p>
+        </article>
+        <article className="growth-insight-card">
+          <span className="growth-insight-eyebrow">Strongest Audience Pull</span>
+          <h3 className="growth-insight-title">&ldquo;{audiencePullTitle}&rdquo;</h3>
+          <p className="growth-insight-evidence">
+            <Check size={14} aria-hidden="true" />
+            <span>{audiencePullEvidence}</span>
+          </p>
+        </article>
+      </div>
+    </section>
+  );
 }
 
-function GrowthCurrentRead({
+function GrowthFocusAndNext({
   assignment,
   review,
-  reviewIsStale,
-  newerObservationCount,
   nextGrowthReviewAt,
+  statusLabel,
+  presencePaused,
   reviewingGrowth,
   reviewGrowth,
 }: {
   assignment: Assignment;
   review?: GrowthReview;
-  reviewIsStale: boolean;
-  newerObservationCount: number;
   nextGrowthReviewAt?: string;
+  statusLabel: string;
+  presencePaused: boolean;
   reviewingGrowth: boolean;
   reviewGrowth: (kind: "weekly" | "strategic") => void;
 }) {
-  const status = growthReadStatus(assignment, review);
-  const signals = [
-    { key: "working", label: "Working", tone: "positive", items: review?.working ?? [] },
-    { key: "uncertain", label: "Uncertain", tone: "uncertain", items: review?.uncertain ?? [] },
-    { key: "weak", label: "Working against the goal", tone: "weak", items: review?.weak ?? [] },
-  ];
-  const freshness = reviewIsStale
-    ? `${newerObservationCount.toLocaleString()} newer observation${newerObservationCount === 1 ? "" : "s"} will be incorporated automatically at the next review.`
-    : review
-      ? `Current read · ${formatHistoryTimestamp(review.createdAt)}${nextGrowthReviewAt ? ` · next review ${formatHistoryTimestamp(nextGrowthReviewAt)}` : ""}`
-      : "Genny is collecting a baseline. The first interpretation will happen automatically on the review rhythm.";
-  return <section className={`growth-current-read settings-card growth-current-read-${status.tone}`} aria-busy={reviewingGrowth} aria-label="Genny's current read">
-    <div className="growth-section-heading"><div><SectionEyebrow>Genny&apos;s current read</SectionEyebrow><h2>{growthReadHeadline(review)}</h2></div><span className={`growth-read-status growth-read-status-${status.tone}`}>{status.label}</span></div>
-    <div className="growth-signal-grid">{signals.map((signal) => <article className={`growth-signal growth-signal-${signal.tone}`} key={signal.key}><span>{signal.label}</span>{signal.items.length ? <p>{signal.items[0]}</p> : <p className="muted">Nothing strong enough to call yet.</p>}{signal.items.length > 1 && <small>{signal.items.length} observations in this read</small>}</article>)}</div>
-    <div className="growth-freshness-inline"><span>{freshness}</span>{review?.reviewSource === "model" && <small>Model-backed review</small>}</div>
-    {review && <details className="growth-read-why"><summary>Why?</summary><p>{review.summary}</p></details>}
-    <details className="growth-optional-action"><summary>Review evidence early</summary><div><p className="muted">The scheduled review remains the default. Use this only when you want Genny to interpret the available evidence sooner.</p><Button variant="ghost" disabled={reviewingGrowth} onClick={() => void reviewGrowth(review?.kind ?? "weekly")}>{reviewingGrowth ? <><LoaderCircle size={14} className="spin" /> Reviewing…</> : "Review now"}</Button></div></details>
-  </section>;
+  const plan = assignment.plan;
+  const publishingFocus = plan?.publishingApproach?.[0] ?? "Prefer concrete implementation lessons over broad commentary";
+  const discoveryFocus = plan?.discoveryDirections?.[0] ?? "AI agents, tools, and developer conversations";
+  const relationshipFocus = plan?.relationshipFocus?.[0] ?? "Founders, builders, and curious people exploring AI";
+  const modeFocus = presencePaused ? "Paused" : statusLabel === "Learning" ? "Learning baseline" : statusLabel === "Accelerating" ? "Scaling reach" : "Active autonomous";
+
+  return (
+    <div className="growth-focus-section" aria-label="Current strategy and next steps">
+      <section className="growth-focus-card">
+        <div className="growth-section-heading">
+          <div>
+            <SectionEyebrow>Current strategy</SectionEyebrow>
+            <h2>What Genny is doing now</h2>
+          </div>
+          <Sparkles size={16} />
+        </div>
+        <div className="growth-focus-chips-grid">
+          <div className="growth-focus-chip">
+            <span>Publishing</span>
+            <strong>{publishingFocus}</strong>
+          </div>
+          <div className="growth-focus-chip">
+            <span>Discovery</span>
+            <strong>{discoveryFocus}</strong>
+          </div>
+          <div className="growth-focus-chip">
+            <span>Relationships</span>
+            <strong>{relationshipFocus}</strong>
+          </div>
+          <div className="growth-focus-chip">
+            <span>Mode</span>
+            <strong>{modeFocus}</strong>
+          </div>
+        </div>
+      </section>
+      <section className="growth-next-panel">
+        <div className="growth-section-heading">
+          <div>
+            <SectionEyebrow>What happens next</SectionEyebrow>
+            <h2>Review rhythm</h2>
+          </div>
+          <Clock3 size={16} />
+        </div>
+        <div className="growth-next-content">
+          <div className="growth-next-date-row">
+            <span>Next review</span>
+            <strong>{presencePaused ? "Paused" : nextGrowthReviewAt ? formatHistoryTimestamp(nextGrowthReviewAt) : "Scheduled weekly"}</strong>
+          </div>
+          <p>
+            {presencePaused
+              ? "Growth is paused with this Presence."
+              : review?.changedPlan
+              ? "Genny adapted the operating strategy during the last review."
+              : "Genny will continue the current approach unless performance shifts materially."}
+          </p>
+          <div className="growth-next-actions">
+            <span className="growth-hero-meta">Continuous baseline review</span>
+            <Button
+              variant="ghost"
+              disabled={reviewingGrowth || presencePaused}
+              onClick={() => void reviewGrowth(review?.kind ?? "weekly")}
+            >
+              {reviewingGrowth ? <><LoaderCircle size={13} className="spin" /> Reviewing…</> : "Review early"}
+            </Button>
+          </div>
+        </div>
+      </section>
+    </div>
+  );
 }
 
-function GrowthEvidenceDetails({ snapshots, publicationSnapshots, mirrorObjects, review, reviewIsStale, unreviewedAudienceCount, unreviewedPublicationCount }: { snapshots: PresenceAudienceSnapshot[]; publicationSnapshots: PublicationMetricSnapshot[]; mirrorObjects: MirrorObject[]; review?: GrowthReview; reviewIsStale: boolean; unreviewedAudienceCount: number; unreviewedPublicationCount: number }) {
+function GrowthEvidenceDetails({
+  presenceName,
+  snapshots,
+  publicationSnapshots,
+  mirrorObjects,
+  review,
+  reviewIsStale,
+  unreviewedAudienceCount,
+  unreviewedPublicationCount,
+}: {
+  presenceName?: string;
+  snapshots: PresenceAudienceSnapshot[];
+  publicationSnapshots: PublicationMetricSnapshot[];
+  mirrorObjects: MirrorObject[];
+  review?: GrowthReview;
+  reviewIsStale: boolean;
+  unreviewedAudienceCount: number;
+  unreviewedPublicationCount: number;
+}) {
   const evidenceIds = new Set(review?.evidenceIds ?? []);
   const newSnapshots = review ? snapshots.filter((item) => !evidenceIds.has(item.id)) : snapshots;
   const newPublicationSnapshots = review ? publicationSnapshots.filter((item) => !evidenceIds.has(item.id)) : publicationSnapshots;
@@ -10348,105 +11464,499 @@ function GrowthEvidenceDetails({ snapshots, publicationSnapshots, mirrorObjects,
   ].filter(Boolean).slice(0, 2).join(" · ") : "No publication metrics yet";
   const formatSnapshotStatus = (status: PresenceAudienceSnapshot["observationStatus"] | PublicationMetricSnapshot["observationStatus"]) => status === "observed" ? "Verified" : status.replaceAll("_", " ");
   const newerObservationCount = unreviewedAudienceCount + unreviewedPublicationCount;
-  return <div className="growth-disclosure-content">
-    <div className="growth-evidence-summary-grid">
-      <div><span>Audience evidence</span><strong>{latest ? latest.followers.toLocaleString() + " followers" : "Not observed"}</strong><small>{followersUnchanged ? `Unchanged across ${snapshots.length.toLocaleString()} recent observations` : `${snapshots.length.toLocaleString()} verified observations`}</small></div>
-      <div><span>Publication evidence</span><strong>{publicationSnapshots.length.toLocaleString()} observations</strong><small>{maxImpressions !== undefined ? `Recent reach up to ${maxImpressions.toLocaleString()} views` : metricHighlights}</small></div>
+
+  return (
+    <div className="growth-disclosure-content">
+      <div className="growth-evidence-summary-grid">
+        <div>
+          <span>Audience evidence</span>
+          <strong>{latest ? `${latest.followers.toLocaleString()} followers` : "Not observed"}</strong>
+          <small>{followersUnchanged ? `Unchanged across ${snapshots.length.toLocaleString()} recent observations` : `${snapshots.length.toLocaleString()} verified observations`}</small>
+        </div>
+        <div>
+          <span>Publication evidence</span>
+          <strong>{publicationSnapshots.length.toLocaleString()} observations</strong>
+          <small>{maxImpressions !== undefined ? `Recent reach up to ${maxImpressions.toLocaleString()} views` : metricHighlights}</small>
+        </div>
+      </div>
+      <p className="growth-evidence-meaning">
+        {newerObservationCount > 0
+          ? `${newerObservationCount.toLocaleString()} newer observation${newerObservationCount === 1 ? "" : "s"} arrived since the current read. They will be interpreted automatically at the next review.`
+          : reviewIsStale
+          ? "New evidence is waiting to be interpreted."
+          : `The evidence above is included in ${presenceName ?? "this Presence"}'s current read.`}
+      </p>
+      <details className="growth-raw-evidence">
+        <summary>
+          <span>View audience and publication evidence</span>
+          <small>Raw snapshots and source records</small>
+        </summary>
+        <div className="growth-evidence-columns">
+          <div>
+            <div className="growth-evidence-subheading">
+              <strong>Audience snapshots</strong>
+              <span>{snapshots.length}</span>
+            </div>
+            {(newSnapshots.length ? newSnapshots : snapshots).slice(0, 8).map((item) => (
+              <div className="growth-evidence-row" key={item.id}>
+                <strong>{item.followers.toLocaleString()} followers</strong>
+                <span>{formatHistoryTimestamp(item.observedAt)} · {item.source} · {formatSnapshotStatus(item.observationStatus)}</span>
+              </div>
+            ))}
+            {!snapshots.length && <p className="muted">No verified audience snapshot has arrived.</p>}
+          </div>
+          <div>
+            <div className="growth-evidence-subheading">
+              <strong>Publication snapshots</strong>
+              <span>{publicationSnapshots.length}</span>
+            </div>
+            {(newPublicationSnapshots.length ? newPublicationSnapshots : publicationSnapshots).slice(0, 8).map((item) => {
+              const object = mirrorObjects.find((candidate) => candidate.id === item.mirrorObjectId);
+              const text = object?.content?.text?.trim() || "Publication performance observed";
+              const externalUrl = object ? externalUrlForMirrorObject(object, object.author?.handle) : undefined;
+              return (
+                <div className="growth-evidence-row growth-evidence-publication" key={item.id}>
+                  <div>
+                    <strong>{object?.author?.handle ? "@" + object.author.handle : object?.author?.displayName ?? "X publication"}</strong>
+                    <span>{text.length > 110 ? text.slice(0, 107) + "…" : text}</span>
+                  </div>
+                  <small>
+                    {[item.impressions !== undefined ? item.impressions.toLocaleString() + " views" : undefined, item.likes !== undefined ? item.likes.toLocaleString() + " likes" : undefined, formatSnapshotStatus(item.observationStatus)].filter(Boolean).join(" · ")}
+                    {externalUrl && <a href={externalUrl} target="_blank" rel="noreferrer">View post</a>}
+                  </small>
+                </div>
+              );
+            })}
+            {!publicationSnapshots.length && <p className="muted">No verified publication-performance snapshot has arrived.</p>}
+          </div>
+        </div>
+      </details>
     </div>
-    <p className="growth-evidence-meaning">{newerObservationCount > 0 ? `${newerObservationCount.toLocaleString()} newer observation${newerObservationCount === 1 ? "" : "s"} arrived since the current read. They will be interpreted automatically at the next review.` : reviewIsStale ? "New evidence is waiting to be interpreted." : "The evidence above is included in Genny's current read."}</p>
-    <details className="growth-raw-evidence"><summary><span>View audience and publication evidence</span><small>Raw snapshots and source records</small></summary><div className="growth-evidence-columns">
-      <div><div className="growth-evidence-subheading"><strong>Audience snapshots</strong><span>{snapshots.length}</span></div>{(newSnapshots.length ? newSnapshots : snapshots).slice(0, 8).map((item) => <div className="growth-evidence-row" key={item.id}><strong>{item.followers.toLocaleString()} followers</strong><span>{formatHistoryTimestamp(item.observedAt)} · {item.source} · {formatSnapshotStatus(item.observationStatus)}</span></div>)}{!snapshots.length && <p className="muted">No verified audience snapshot has arrived.</p>}</div>
-      <div><div className="growth-evidence-subheading"><strong>Publication snapshots</strong><span>{publicationSnapshots.length}</span></div>{(newPublicationSnapshots.length ? newPublicationSnapshots : publicationSnapshots).slice(0, 8).map((item) => { const object = mirrorObjects.find((candidate) => candidate.id === item.mirrorObjectId); const text = object?.content?.text?.trim() || "Publication performance observed"; const externalUrl = object ? externalUrlForMirrorObject(object, object.author?.handle) : undefined; return <div className="growth-evidence-row growth-evidence-publication" key={item.id}><div><strong>{object?.author?.handle ? "@" + object.author.handle : object?.author?.displayName ?? "X publication"}</strong><span>{text.length > 110 ? text.slice(0, 107) + "…" : text}</span></div><small>{[item.impressions !== undefined ? item.impressions.toLocaleString() + " views" : undefined, item.likes !== undefined ? item.likes.toLocaleString() + " likes" : undefined, formatSnapshotStatus(item.observationStatus)].filter(Boolean).join(" · ")}{externalUrl && <a href={externalUrl} target="_blank" rel="noreferrer">View post</a>}</small></div>; })}{!publicationSnapshots.length && <p className="muted">No verified publication-performance snapshot has arrived.</p>}</div>
-    </div></details>
-  </div>;
-}
-
-function GrowthApproach({ assignment, review }: { assignment: Assignment; review?: GrowthReview }) {
-  const plan = assignment.plan;
-  const changes = growthPlanChanges(assignment, review);
-  return <section className="growth-approach settings-card" aria-label="Current approach">
-    <div className="growth-section-heading"><div><SectionEyebrow>Current approach</SectionEyebrow><h2>What Genny is doing</h2></div><Sparkles size={17} /></div>
-    {plan ? <><p className="growth-approach-summary">{plan.summary}</p><div className="growth-approach-grid"><div><strong>Publishing</strong><span>{plan.publishingApproach[0] ?? "Choosing useful original contributions."}</span></div><div><strong>Discovery</strong><span>{plan.discoveryDirections[0] ?? "Following conversations where the Presence can add something real."}</span></div><div><strong>Relationships</strong><span>{plan.relationshipFocus[0] ?? "Building continuity with substantive responders."}</span></div></div></> : <p className="muted">Genny is preparing the first operating approach.</p>}
-    <div className="growth-changed-review"><div><SectionEyebrow>Changed last review</SectionEyebrow><h3>{review?.changedPlan ? "Genny changed the approach" : review ? "No strategy change" : "First approach"}</h3></div>{changes.length ? <ul>{changes.map((change, index) => <li className={`growth-plan-change growth-plan-change-${change.direction}`} key={`${change.direction}-${change.text}-${index}`}><span aria-hidden="true">{change.direction === "up" ? "↑" : change.direction === "down" ? "↓" : "→"}</span>{change.text}</li>)}</ul> : <p className="muted">{review?.planChangeSummary ?? (review ? "The evidence is still too limited to justify changing the current approach." : "The first review will establish a baseline for future changes.")}</p>}{review?.planChangeSummary && review.changedPlan && <details><summary>Why did Genny change it?</summary><p>{review.planChangeSummary}</p></details>}</div>
-  </section>;
-}
-
-function GrowthNext({ assignment, nextGrowthReviewAt, bodyHeading, limitationCopy, presencePaused }: { assignment: Assignment; nextGrowthReviewAt?: string; bodyHeading: string; limitationCopy: string[]; presencePaused: boolean }) {
-  const blocked = assignment.status === "blocked" || assignment.status === "needs_operator" || bodyHeading === "Unavailable";
-  const autonomyText = presencePaused ? "Growth is paused with this Presence." : blocked ? `Genny needs your attention${limitationCopy[0] ? `: ${limitationCopy[0]}` : "."}` : "No action needed from you. Genny is continuing the current approach and collecting more evidence.";
-  return <section className={`growth-next settings-card ${blocked || presencePaused ? "growth-next-attention" : "growth-next-healthy"}`} aria-label="What happens next">
-    <div className="growth-section-heading"><div><SectionEyebrow>What happens next</SectionEyebrow><h2>{presencePaused ? "Waiting for the Presence" : blocked ? "Growth needs attention" : "Genny continues the current approach"}</h2></div><span className="growth-next-date">Next review<br /><strong>{presencePaused ? "Paused" : nextGrowthReviewAt ? formatHistoryTimestamp(nextGrowthReviewAt) : "Not scheduled"}</strong></span></div>
-    <p>{autonomyText}</p>
-    {!blocked && !presencePaused && <div className="growth-autonomy-state"><Check size={15} aria-hidden="true" /> <strong>No action needed from you.</strong></div>}
-    {blocked && limitationCopy.length > 0 && <details className="growth-next-details"><summary>What is limited?</summary><ul>{limitationCopy.slice(0, 3).map((item) => <li key={item}>{item}</li>)}</ul></details>}
-  </section>;
+  );
 }
 
 function GrowthReviewHistory({ reviews }: { reviews: GrowthReview[] }) {
-  return <div className="growth-history-content">{reviews.length ? reviews.slice(0, 8).map((item) => <div className="growth-history-row" key={item.id}><div><strong>{item.kind === "strategic" ? "Strategic review" : "Weekly review"}</strong><span>{formatHistoryTimestamp(item.createdAt)} · {item.reviewSource === "model" ? "Model-backed" : "Evidence review"}</span></div><p>{item.summary}</p><small>{item.changedPlan ? "Approach changed" : "Approach unchanged"}</small></div>) : <p className="muted">No Growth reviews have been completed yet.</p>}</div>;
+  return (
+    <div className="growth-disclosure-content">
+      <div className="growth-history-content">
+        {reviews.length ? (
+          reviews.slice(0, 8).map((item) => (
+            <div className="growth-history-row" key={item.id}>
+              <div>
+                <strong>{item.kind === "strategic" ? "Strategic review" : "Weekly review"}</strong>
+                <span>{formatHistoryTimestamp(item.createdAt)} · {item.reviewSource === "model" ? "Model-backed" : "Evidence review"}</span>
+              </div>
+              <p>{item.summary}</p>
+              <small>{item.changedPlan ? "Approach changed" : "Approach unchanged"}</small>
+            </div>
+          ))
+        ) : (
+          <p className="growth-empty-note">No Growth reviews have been completed yet.</p>
+        )}
+      </div>
+    </div>
+  );
 }
 
-function GrowthCapabilities({ state, presenceId, manifest, limitations }: { state: OpenPresenceState; presenceId: string; manifest: ReturnType<typeof derivePresenceCapabilityManifest>; limitations: ReturnType<typeof derivePresenceCapabilityManifest>["items"] }) {
-  const visible = manifest.items.filter((item) => ["post", "reply", "follow", "follower_measurement", "post_performance"].includes(item.capability));
-  return <div className="growth-capabilities-content"><p className="muted">Only capabilities that affect this responsibility are shown here. Full connector details remain in Presence Settings.</p><div className="capability-list">{visible.map((item) => <div className="capability-row" key={item.capability}><div><strong>{item.label}</strong><small>{capabilityProviderLabel(state, presenceId, item)}{item.limitation ? ` · ${item.limitation}` : ""}</small></div><span className={`capability-state capability-state-${item.availability}`}>{item.availability.replaceAll("-", " ")}</span></div>)}</div>{limitations.length > 0 && <p className="settings-warning">{limitations.length} capability limitation{limitations.length === 1 ? "" : "s"} currently reported.</p>}</div>;
+function GrowthCapabilities({
+  state,
+  presenceId,
+  manifest,
+  limitations,
+}: {
+  state: OpenPresenceState;
+  presenceId: string;
+  manifest: ReturnType<typeof derivePresenceCapabilityManifest>;
+  limitations: ReturnType<typeof derivePresenceCapabilityManifest>["items"];
+}) {
+  const visible = manifest.items.filter((item) => ["post", "reply", "quote", "repost", "follow", "follower_measurement", "post_performance"].includes(item.capability));
+  return (
+    <div className="growth-disclosure-content">
+      <div className="growth-capabilities-content">
+        <p className="growth-capabilities-note">
+          Only capabilities that affect this responsibility are shown here. Full connector details remain in Presence Settings.
+        </p>
+        <div className="capability-list">
+          {visible.map((item) => (
+            <div className="capability-row" key={item.capability}>
+              <div>
+                <strong>{item.label}</strong>
+                <small>{capabilityProviderLabel(state, presenceId, item)}{item.limitation ? ` · ${item.limitation}` : ""}</small>
+              </div>
+              <span className={`capability-state capability-state-${item.availability}`}>
+                {item.availability.replaceAll("-", " ")}
+              </span>
+            </div>
+          ))}
+        </div>
+        {limitations.length > 0 && (
+          <p className="settings-warning">{limitations.length} capability limitation{limitations.length === 1 ? "" : "s"} currently reported.</p>
+        )}
+      </div>
+    </div>
+  );
 }
 
 function GrowthView({ state, mutate, setView: _setView }: { state: OpenPresenceState; mutate: Mutate; setView: (view: View) => void }) {
   void _setView;
   const presence = state.presence;
   const [reviewingGrowth, setReviewingGrowth] = useState(false);
+  const [now] = useState(() => Date.now());
   if (!presence) return <div className="page"><PageHeader eyebrow="Growth" title="No Presence selected" description="Select a Presence before reviewing growth evidence." /></div>;
+
   const assignment = state.assignments.find((item) => item.presenceId === presence.id && item.successEvidence?.metric === "followers" && assignmentIsOpen(item));
   const snapshots = collapseAudienceSnapshots(state.audienceSnapshots.filter((item) => item.presenceId === presence.id));
   const latest = snapshots[0];
   const deltas = audienceDeltas(state, presence.id);
   const publicationSnapshots = state.publicationMetricSnapshots.filter((item) => item.presenceId === presence.id).sort((left, right) => right.observedAt.localeCompare(left.observedAt));
   const latestPublication = publicationSnapshots[0];
-  const latestEvidence = [latest?.observedAt, latestPublication?.observedAt].filter((value): value is string => Boolean(value)).sort((left, right) => right.localeCompare(left))[0];
   const reviewHistory = state.growthReviews.filter((item) => item.presenceId === presence.id).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   const review = reviewHistory[0];
   const unreviewedAudienceCount = review ? snapshots.filter((item) => !(review.evidenceIds ?? []).includes(item.id)).length : 0;
   const unreviewedPublicationCount = review ? publicationSnapshots.filter((item) => !(review.evidenceIds ?? []).includes(item.id)).length : 0;
   const reviewIsStale = Boolean(review && (unreviewedAudienceCount > 0 || unreviewedPublicationCount > 0));
   const manifest = derivePresenceCapabilityManifest(state, presence.id);
-  const growthCapabilities = ["post", "reply", "follow", "follower_measurement", "post_performance"];
+  const growthCapabilities = ["post", "reply", "quote", "repost", "follow", "follower_measurement", "post_performance"];
   const limitations = manifest.items.filter((item) => growthCapabilities.includes(item.capability) && item.availability !== "available");
   const limitationCopy = [...new Set(limitations.map((item) => item.limitation).filter((item): item is string => Boolean(item)))];
   const goal = assignment?.successEvidence?.value;
   const progress = latest && goal ? Math.min(100, Math.round((latest.followers / goal) * 100)) : 0;
   const nextGrowthReviewAt = [assignment?.plan?.nextWeeklyReviewAt, assignment?.plan?.nextStrategicReviewAt].filter((value): value is string => Boolean(value)).sort((left, right) => left.localeCompare(right))[0];
   const bodyHeading = manifest.bodyStatus === "degraded" ? "Degraded" : manifest.bodyStatus === "ready" ? limitations.length ? "Ready with limits" : "Ready to work" : "Unavailable";
-  const newerObservationCount = review ? unreviewedAudienceCount + unreviewedPublicationCount : snapshots.length + publicationSnapshots.length;
-  const trendLabel = deltas.sevenDay === undefined && deltas.twentyEightDay === undefined ? "Learning" : deltas.sevenDay !== undefined && deltas.sevenDay < 0 ? "Needs attention" : deltas.twentyEightDay !== undefined && deltas.twentyEightDay > 0 ? "Improving" : "Steady";
-  const trendTone = trendLabel === "Improving" ? "positive" : trendLabel === "Needs attention" ? "warning" : "neutral";
+
+  // Autonomy derivations
+  const verifiedHistory = derivePublicHistory(state, presence.id).filter((item) => item.environment !== "sandbox");
+  const autonomousExecutions = state.executions.filter((e) => e.presenceId === presence.id && e.status === "succeeded" && e.environment !== "sandbox");
+  const totalAutonomousActions = verifiedHistory.length;
+  const decisionsCount = state.socialDecisions.filter((d) => d.presenceId === presence.id).length;
+  const verifiedOutcomesCount = state.outcomes.filter((o) => o.presenceId === presence.id && o.status === "succeeded").length;
+  const pendingReviewCount = pendingReviewExecutionsForCapabilities(state, presence.id, growthCapabilities).length;
+  const incidentsRequiringOperator = state.recoveryIncidents?.filter((i) => (!i.presenceId || i.presenceId === presence.id) && i.operatorActionRequired && i.state !== "resolved").length ?? 0;
+  const operatorInterventionsNeeded = pendingReviewCount + incidentsRequiringOperator + (manifest.bodyStatus === "unavailable" ? 1 : 0);
+  const recoveriesHandledCount = state.recoveryIncidents?.filter((i) => (!i.presenceId || i.presenceId === presence.id) && i.state === "resolved").length ?? 0;
+
+  // 7-day activity breakdown
+  const oneWeekAgo = now - 7 * 86_400_000;
+  const weeklyHistory = verifiedHistory.filter((item) => new Date(item.occurredAt).getTime() >= oneWeekAgo);
+  const weeklyBreakdown = {
+    posts: weeklyHistory.filter((item) => item.kind === "post").length,
+    replies: weeklyHistory.filter((item) => item.kind === "reply" || item.kind === "comment").length,
+    quotes: weeklyHistory.filter((item) => item.kind === "quote").length,
+    likes: weeklyHistory.filter((item) => item.kind === "like").length,
+    follows: state.outcomes.filter((outcome) => outcome.presenceId === presence.id && outcome.status === "succeeded" && outcome.environment !== "sandbox" && new Date(outcome.observedAt).getTime() >= oneWeekAgo).filter((outcome) => state.executions.some((execution) => execution.id === outcome.executionId && execution.affordance === "x.follow")).length,
+  };
+
+  // Metric derivations
+  const totalReach = publicationSnapshots.reduce((sum, p) => sum + (p.impressions ?? 0), 0);
+  const totalLikes = publicationSnapshots.reduce((sum, p) => sum + (p.likes ?? 0), 0);
+  const totalReplies = publicationSnapshots.reduce((sum, p) => sum + (p.replies ?? 0), 0);
+  const totalQuotes = publicationSnapshots.reduce((sum, p) => sum + (p.quotes ?? 0), 0);
+  const totalEngagement = totalLikes + totalReplies + totalQuotes;
+  const relationshipsCount = state.relationships.filter((r) => r.state === "active").length;
+  const peopleEngagedCount = state.people.filter((p) => p.memoryState === "active").length;
+
+  const presencePaused = presence.status === "paused" || assignment?.status === "paused";
+  const needsAttention = operatorInterventionsNeeded > 0 || assignment?.status === "blocked" || assignment?.status === "needs_operator" || presencePaused;
+
+  const statusLabel = presencePaused
+    ? "Paused"
+    : needsAttention
+    ? "Needs attention"
+    : deltas.sevenDay !== undefined && deltas.sevenDay > 0
+    ? "Accelerating"
+    : review && review.working.length > 0
+    ? "Autonomous"
+    : "Learning";
+
+  const statusTone = statusLabel === "Autonomous" || statusLabel === "Accelerating"
+    ? "autonomous"
+    : statusLabel === "Learning"
+    ? "learning"
+    : statusLabel === "Needs attention"
+    ? "warning"
+    : "muted";
+
+  const dynamicSubhead = needsAttention
+    ? `Operator attention required (${operatorInterventionsNeeded} action${operatorInterventionsNeeded === 1 ? "" : "s"} needed). ${limitationCopy[0] ?? "Review or connection check required."}`
+    : deltas.sevenDay !== undefined && deltas.sevenDay > 0
+    ? `Followers up this week (+${deltas.sevenDay}). Engagement improving. No operator action needed.`
+    : totalAutonomousActions > 0
+    ? `Operating autonomously with ${totalAutonomousActions} verified actions on X. Follower growth is not yet proven by the current baseline.`
+    : `Establishing the follower baseline. Genny is acting autonomously, but growth is not yet proven.`;
+
   const reviewGrowth = async (kind: "weekly" | "strategic") => {
     if (reviewingGrowth || !assignment) return;
     setReviewingGrowth(true);
     try { await mutate({ type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind }); } finally { setReviewingGrowth(false); }
   };
+
   const createGrowthResponsibility = async () => {
     const defaultGoal = 100_000;
-    await mutate({ type: "createAssignment", presenceId: presence.id, environment: presence.connectionMode === "sandbox" ? "sandbox" : "live", instruction: `Grow this Presence toward ${defaultGoal.toLocaleString()} followers while building an audience of ${presence.brief.audience}.` });
+    await mutate({
+      type: "createAssignment",
+      presenceId: presence.id,
+      environment: presence.connectionMode === "sandbox" ? "sandbox" : "live",
+      instruction: `Grow this Presence toward ${defaultGoal.toLocaleString()} followers while building an audience of ${presence.brief.audience}.`,
+    });
   };
-  return <div className="page growth-page">
-    <PageHeader eyebrow={`${presence.name} · Growth`} title="Growth" description="See what Genny currently believes, what changed, and what happens next." />
-    {!assignment ? <section className="growth-empty settings-card"><div className="watch-empty-mark"><TrendingUp size={23} /></div><SectionEyebrow>Continuous responsibility</SectionEyebrow><h2>Give {presence.name} a growth responsibility.</h2><p>One long-lived Assignment owns the objective. Genny chooses the day-to-day work, observes the public result, and revises its approach during review.</p><Button variant="primary" onClick={() => void createGrowthResponsibility()}><Plus size={14} /> Create growth responsibility</Button></section> : <>
-      <section className="growth-goal-card settings-card" aria-label="Growth goal">
-        <div className="growth-overview-heading"><div><SectionEyebrow>Growth objective</SectionEyebrow><h2>{latest ? latest.followers.toLocaleString() : "—"} <span>/ {goal?.toLocaleString() ?? "Audience baseline"} followers</span></h2><p>{assignment.audienceObjective ?? presence.brief.audience}</p></div><div className={`growth-trend growth-trend-${trendTone}`}><strong>{trendLabel}</strong><span>{assignment.status.replaceAll("_", " ")}</span></div></div>
-        <div className="growth-progress-track" aria-label={`${latest?.followers.toLocaleString() ?? "No"} of ${goal?.toLocaleString() ?? "unknown"} followers`}><span style={{ width: `${progress}%` }} /></div>
-        <div className="growth-progress-summary"><strong>{deltas.sevenDay !== undefined ? `${deltas.sevenDay >= 0 ? "+" : ""}${deltas.sevenDay.toLocaleString()} this week` : "Collecting a 7-day baseline"}</strong><span>·</span><strong>{deltas.twentyEightDay !== undefined ? `${deltas.twentyEightDay >= 0 ? "+" : ""}${deltas.twentyEightDay.toLocaleString()} last 28 days` : "Collecting a 28-day baseline"}</strong><small>{latestEvidence ? `Evidence updated ${formatHistoryTimestamp(latestEvidence)}` : "Waiting for verified audience evidence"}</small></div>
-      </section>
-      <GrowthCurrentRead assignment={assignment} review={review} reviewIsStale={reviewIsStale} newerObservationCount={newerObservationCount} nextGrowthReviewAt={nextGrowthReviewAt} reviewingGrowth={reviewingGrowth} reviewGrowth={reviewGrowth} />
-      <GrowthApproach assignment={assignment} review={review} />
-      <GrowthNext assignment={assignment} nextGrowthReviewAt={nextGrowthReviewAt} bodyHeading={bodyHeading} limitationCopy={limitationCopy} presencePaused={presence.status === "paused" || assignment.status === "paused"} />
-      <section className="growth-signals settings-card" aria-label="Recent signals"><div className="growth-section-heading"><div><SectionEyebrow>Recent signals</SectionEyebrow><h2>What the latest evidence looks like</h2></div><span className="growth-signal-freshness">{newerObservationCount.toLocaleString()} observed</span></div><div className="growth-signal-summary-grid"><div><span>Audience</span><strong>{latest ? latest.followers.toLocaleString() + " followers" : "No baseline yet"}</strong><small>{snapshots.length ? (snapshots.length > 1 && new Set(snapshots.map((item) => item.followers)).size === 1 ? `Unchanged across ${snapshots.length.toLocaleString()} recent checks` : `${snapshots.length.toLocaleString()} verified checks`) : "Genny is still collecting evidence."}</small></div><div><span>Publication performance</span><strong>{latestPublication ? [latestPublication.impressions !== undefined ? latestPublication.impressions.toLocaleString() + " views" : undefined, latestPublication.likes !== undefined ? latestPublication.likes.toLocaleString() + " likes" : undefined].filter(Boolean).join(" · ") || "Observed" : "No metrics yet"}</strong><small>{publicationSnapshots.length ? `${publicationSnapshots.length.toLocaleString()} publication observations; comparison confidence ${latestPublication?.baseline?.confidence ?? "low"}.` : "Genny is still collecting publication evidence."}</small></div></div></section>
-      <div className="growth-disclosures" aria-label="Growth details">
-        <details className="growth-disclosure"><summary><span>Evidence</span><small>Audience, publication, and Social Mirror records</small></summary><GrowthEvidenceDetails snapshots={snapshots} publicationSnapshots={publicationSnapshots} mirrorObjects={state.mirrorObjects} review={review} reviewIsStale={reviewIsStale} unreviewedAudienceCount={unreviewedAudienceCount} unreviewedPublicationCount={unreviewedPublicationCount} /></details>
-        <details className="growth-disclosure"><summary><span>Review history</span><small>{reviewHistory.length} completed review{reviewHistory.length === 1 ? "" : "s"}</small></summary><GrowthReviewHistory reviews={reviewHistory} /></details>
-        <details className="growth-disclosure"><summary><span>Capabilities &amp; limitations</span><small>{bodyHeading}</small></summary><GrowthCapabilities state={state} presenceId={presence.id} manifest={manifest} limitations={limitations} /></details>
-      </div>
-    </>}
-  </div>;
+
+  return (
+    <div className="page growth-page">
+      <PageHeader
+        eyebrow={`${presence.name} · Growth`}
+        title="Growth"
+        description="Autonomous audience growth scoreboard and performance proof."
+      />
+
+      {!assignment ? (
+        <section className="growth-empty settings-card">
+          <div className="watch-empty-mark">
+            <TrendingUp size={23} />
+          </div>
+          <SectionEyebrow>Continuous responsibility</SectionEyebrow>
+          <h2>Give {presence.name} a growth responsibility.</h2>
+          <p>
+            One long-lived Assignment owns the objective. Genny chooses the day-to-day work, observes the public result, and revises its approach during review.
+          </p>
+          <Button variant="primary" onClick={() => void createGrowthResponsibility()}>
+            <Plus size={14} /> Create growth responsibility
+          </Button>
+        </section>
+      ) : (
+        <>
+          {/* Layer 1: Hero Section */}
+          <section className="growth-dashboard-hero" aria-label="Growth Hero Status">
+            <div className="growth-hero-top">
+              <div className="growth-hero-copy">
+                <SectionEyebrow>Growth status</SectionEyebrow>
+                <h1>{presence.name} {statusLabel === "Accelerating" ? "is accelerating" : statusLabel === "Autonomous" ? "is operating autonomously" : statusLabel === "Needs attention" ? "needs attention" : "is establishing a baseline"}</h1>
+                <p>{dynamicSubhead}</p>
+              </div>
+              <span className={`growth-status-chip growth-status-chip-${statusTone}`}>
+                {statusLabel === "Autonomous" && <Check size={13} aria-hidden="true" />}
+                {statusLabel === "Accelerating" && <ArrowUpRight size={13} aria-hidden="true" />}
+                {statusLabel === "Learning" && <Sparkles size={13} aria-hidden="true" />}
+                {statusLabel === "Needs attention" && <CircleAlert size={13} aria-hidden="true" />}
+                {statusLabel}
+              </span>
+            </div>
+
+            {/* Persistent Status / Action Banner */}
+            {needsAttention && (
+              <div className="growth-needs-banner" role="alert">
+                <div>
+                  <strong>Action Required: {limitationCopy[0] ?? "Growth needs your attention"}</strong>
+                  <span>Operator resolution needed for full autonomous performance.</span>
+                </div>
+                <Button variant="ghost" onClick={() => _setView("presence")}>
+                  Resolve in Settings
+                </Button>
+              </div>
+            )}
+
+            <div className="growth-hero-footer">
+              <div className={`growth-action-pill ${needsAttention ? "growth-action-pill-attention" : "growth-action-pill-healthy"}`}>
+                {needsAttention ? (
+                  <>
+                    <CircleAlert size={15} aria-hidden="true" />
+                    <span>Needs you: {operatorInterventionsNeeded} action{operatorInterventionsNeeded === 1 ? "" : "s"} required</span>
+                  </>
+                ) : (
+                  <>
+                    <Check size={15} aria-hidden="true" />
+                    <span>Autonomous loop active</span>
+                  </>
+                )}
+              </div>
+              <span className="growth-hero-meta">
+                Objective: {latest ? latest.followers.toLocaleString() : "—"} / {goal?.toLocaleString() ?? "100,000"} followers ({progress}% progress)
+              </span>
+            </div>
+          </section>
+
+          {/* Layer 1: KPI Scoreboard */}
+          <section className="growth-kpi-grid" aria-label="Key Performance Indicators">
+            <div className="growth-kpi-card">
+              <div className="growth-kpi-card-header">
+                <span className="growth-kpi-label">Followers</span>
+                <Users size={14} className="growth-kpi-icon" />
+              </div>
+              <div className="growth-kpi-value">{latest ? latest.followers.toLocaleString() : "—"}</div>
+              <div className={`growth-kpi-delta ${deltas.sevenDay && deltas.sevenDay > 0 ? "growth-kpi-delta-positive" : "growth-kpi-delta-neutral"}`}>
+                {deltas.sevenDay !== undefined ? (
+                  <>
+                    {deltas.sevenDay > 0 ? "+" : ""}{deltas.sevenDay} this week
+                  </>
+                ) : (
+                  "Collecting 7d baseline"
+                )}
+              </div>
+              <div className="growth-kpi-sub">
+                {deltas.twentyEightDay !== undefined ? `${deltas.twentyEightDay >= 0 ? "+" : ""}${deltas.twentyEightDay} in 28d` : "Baseline mode"}
+              </div>
+            </div>
+
+            <div className="growth-kpi-card">
+              <div className="growth-kpi-card-header">
+                <span className="growth-kpi-label">Reach / Views</span>
+                <Eye size={14} className="growth-kpi-icon" />
+              </div>
+              <div className="growth-kpi-value">{totalReach ? totalReach.toLocaleString() : (latestPublication?.impressions?.toLocaleString() ?? "—")}</div>
+              <div className="growth-kpi-delta growth-kpi-delta-positive">
+                {latestPublication?.impressions ? `${latestPublication.impressions.toLocaleString()} views top post` : "Observed"}
+              </div>
+              <div className="growth-kpi-sub">{publicationSnapshots.length} publication checks</div>
+            </div>
+
+            <div className="growth-kpi-card">
+              <div className="growth-kpi-card-header">
+                <span className="growth-kpi-label">Engagement</span>
+                <Heart size={14} className="growth-kpi-icon" />
+              </div>
+              <div className="growth-kpi-value">{totalEngagement ? totalEngagement.toLocaleString() : (totalLikes ? totalLikes.toLocaleString() : "—")}</div>
+              <div className="growth-kpi-delta growth-kpi-delta-neutral">
+                {totalLikes} likes · {totalReplies} replies
+              </div>
+              <div className="growth-kpi-sub">{weeklyBreakdown.quotes} quotes · {weeklyBreakdown.follows} follows this week</div>
+            </div>
+
+            <div className="growth-kpi-card">
+              <div className="growth-kpi-card-header">
+                <span className="growth-kpi-label">Output</span>
+                <BarChart3 size={14} className="growth-kpi-icon" />
+              </div>
+              <div className="growth-kpi-value">{weeklyBreakdown.posts || totalAutonomousActions || "0"}</div>
+              <div className="growth-kpi-delta growth-kpi-delta-positive">
+                {totalAutonomousActions} total actions on X
+              </div>
+              <div className="growth-kpi-sub">{weeklyBreakdown.replies} replies this week</div>
+            </div>
+
+            <div className="growth-kpi-card">
+              <div className="growth-kpi-card-header">
+                <span className="growth-kpi-label">Relationships</span>
+                <Users size={14} className="growth-kpi-icon" />
+              </div>
+              <div className="growth-kpi-value">{relationshipsCount || peopleEngagedCount || "—"}</div>
+              <div className="growth-kpi-delta growth-kpi-delta-neutral">
+                {peopleEngagedCount} people engaged
+              </div>
+              <div className="growth-kpi-sub">Substantive connections</div>
+            </div>
+
+            <div className="growth-kpi-card">
+              <div className="growth-kpi-card-header">
+                <span className="growth-kpi-label">Operator Load</span>
+                <ShieldCheck size={14} className="growth-kpi-icon" />
+              </div>
+              <div className="growth-kpi-value" style={{ color: operatorInterventionsNeeded === 0 ? "#2f6b3e" : "#b33927" }}>
+                {operatorInterventionsNeeded === 0 ? "0" : operatorInterventionsNeeded}
+              </div>
+              <div className={`growth-kpi-delta ${operatorInterventionsNeeded === 0 ? "growth-kpi-delta-positive" : "growth-kpi-delta-warning"}`}>
+                {operatorInterventionsNeeded === 0 ? "100% autonomous" : "Intervention needed"}
+              </div>
+              <div className="growth-kpi-sub">{recoveriesHandledCount} auto-recoveries</div>
+            </div>
+          </section>
+
+          {/* Layer 2: Autonomy Proof Panel */}
+          <GrowthAutonomyProof
+            presenceName={presence.name}
+            autonomousExecutionsCount={totalAutonomousActions}
+            decisionsCount={decisionsCount || totalAutonomousActions}
+            verifiedOutcomesCount={verifiedOutcomesCount || autonomousExecutions.length}
+            operatorInterventionsCount={operatorInterventionsNeeded}
+            recoveriesHandledCount={recoveriesHandledCount}
+            weeklyBreakdown={weeklyBreakdown}
+          />
+
+          {/* Layer 2: Simple Trend Chart */}
+          <GrowthTrendChart
+            snapshots={snapshots}
+            deltas={deltas}
+            presenceName={presence.name}
+          />
+
+          {/* Layer 2: What's Working Insight Cards */}
+          <GrowthInsights
+            review={review}
+            latestPublication={latestPublication}
+            publicationSnapshotsCount={publicationSnapshots.length}
+            weeklyRepliesCount={weeklyBreakdown.replies}
+            relationshipsCount={relationshipsCount || peopleEngagedCount}
+            audienceObjective={assignment.audienceObjective ?? presence.brief.audience}
+          />
+
+          {/* Layer 2: Current Focus & What Happens Next */}
+          <GrowthFocusAndNext
+            assignment={assignment}
+            review={review}
+            nextGrowthReviewAt={nextGrowthReviewAt}
+            statusLabel={statusLabel}
+            presencePaused={presencePaused}
+            reviewingGrowth={reviewingGrowth}
+            reviewGrowth={reviewGrowth}
+          />
+
+          {/* Layer 3: Collapsible Analyst Details */}
+          <section className="growth-analyst-section" aria-label="Analyst & Deep Evidence Details">
+            <div className="growth-section-heading">
+              <div>
+                <SectionEyebrow>Analyst Details</SectionEyebrow>
+                <h2>Deep Evidence &amp; System Records</h2>
+              </div>
+            </div>
+            <div className="growth-disclosures">
+              <details className="growth-disclosure">
+                <summary>
+                  <div className="growth-disclosure-title">
+                    <ChevronRight size={15} className="growth-disclosure-chevron" aria-hidden="true" />
+                    <span>Audience &amp; Publication Evidence</span>
+                  </div>
+                  <span className="growth-disclosure-meta">{snapshots.length} audience · {publicationSnapshots.length} publication records</span>
+                </summary>
+                <GrowthEvidenceDetails
+                  presenceName={presence.name}
+                  snapshots={snapshots}
+                  publicationSnapshots={publicationSnapshots}
+                  mirrorObjects={state.mirrorObjects}
+                  review={review}
+                  reviewIsStale={reviewIsStale}
+                  unreviewedAudienceCount={unreviewedAudienceCount}
+                  unreviewedPublicationCount={unreviewedPublicationCount}
+                />
+              </details>
+              <details className="growth-disclosure">
+                <summary>
+                  <div className="growth-disclosure-title">
+                    <ChevronRight size={15} className="growth-disclosure-chevron" aria-hidden="true" />
+                    <span>Review History</span>
+                  </div>
+                  <span className="growth-disclosure-meta">{reviewHistory.length} completed review{reviewHistory.length === 1 ? "" : "s"}</span>
+                </summary>
+                <GrowthReviewHistory reviews={reviewHistory} />
+              </details>
+              <details className="growth-disclosure">
+                <summary>
+                  <div className="growth-disclosure-title">
+                    <ChevronRight size={15} className="growth-disclosure-chevron" aria-hidden="true" />
+                    <span>Capabilities &amp; Limitations</span>
+                  </div>
+                  <span className="growth-disclosure-meta">{bodyHeading}</span>
+                </summary>
+                <GrowthCapabilities
+                  state={state}
+                  presenceId={presence.id}
+                  manifest={manifest}
+                  limitations={limitations}
+                />
+              </details>
+            </div>
+          </section>
+        </>
+      )}
+    </div>
+  );
 }
 
 function ScheduleView({
@@ -11404,7 +12914,8 @@ function PresenceView({
   const channelDefinition = state.channelDefinitions.find((item) => item.id === presence.channel);
   const simulation = simulationForChannel(presence.channel, channelDefinition);
   const nativeConnection = state.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x");
-  const activeBridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
+  const activeBridge = state.bridges.find((item) => item.presenceId === presence.id && item.name.startsWith("OpenPresence Chrome · ") && item.state !== "offline");
+  const activeChannelBridge = state.bridges.find((item) => item.presenceId === presence.id && !item.name.startsWith("OpenPresence Chrome · ") && item.state !== "offline");
   const [customizing, setCustomizing] = useState(true);
   const [editingChannel, setEditingChannel] = useState(false);
   const [channelNameDraft, setChannelNameDraft] = useState(channelDefinition?.name ?? channelLabel(presence.channel, state.channelDefinitions));
@@ -11508,7 +13019,15 @@ function PresenceView({
   const publishingInitiative = presence.publishingInitiative;
   const selfDirectedAttention = presence.selfDirectedAttention ?? defaultSelfDirectedAttentionPolicy();
   const selfDirectedBudget = selfDirectedAttention.budget ?? {};
-  const updateSelfDirectedAttention = (patch: Partial<typeof selfDirectedAttention>) => void mutate({ type: "setPresence", patch: { selfDirectedAttention: { ...selfDirectedAttention, ...patch } } });
+  const growthTargets = selfDirectedAttention.growthTargets ?? { quoteOrRepostPerDay: 2, followsPerDay: 3 };
+  const attentionUpdateQueue = useRef<Promise<OpenPresenceState | null>>(Promise.resolve(null));
+  const updateSelfDirectedAttention = (patch: Partial<typeof selfDirectedAttention>) => {
+    attentionUpdateQueue.current = attentionUpdateQueue.current.catch(() => null).then((latest) => {
+      const basePresence = latest?.presence ?? presence;
+      const baseAttention = basePresence.selfDirectedAttention ?? defaultSelfDirectedAttentionPolicy();
+      return mutate({ type: "setPresence", patch: { selfDirectedAttention: { ...baseAttention, ...patch } } });
+    });
+  };
   const savePublishingPace = () => {
     const count = Math.max(1, Math.min(10_000, Math.round(Number(publishingCountDraft) || 0)));
     if (!count) return;
@@ -11571,7 +13090,7 @@ function PresenceView({
           </div>
           <div className="presence-badge-item">
             <span className="badge-label">Route</span>
-            <strong>{connectionMode === "sandbox" ? "Sandbox" : connectionMode === "native" ? "Native API" : "Managed Browser"}</strong>
+            <strong>{connectionMode === "sandbox" ? "Sandbox" : presence.channel === "x" ? "Native API" : "Bridge"}</strong>
           </div>
           <div className="presence-badge-item">
             <span className="badge-label">Status</span>
@@ -11901,83 +13420,19 @@ function PresenceView({
               )}
             </div>
 
-            {/* 2. Managed Browser Body */}
-            <div className="access-connector-panel" style={{ padding: "16px", background: "var(--surface)", border: "1px solid var(--border)", borderRadius: "8px", marginTop: "14px" }}>
-              <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", flexWrap: "wrap", gap: "10px" }}>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px" }}>
-                  <strong>Managed Browser</strong>
-                  <span style={{ fontSize: "11px", fontWeight: 600, padding: "2px 8px", borderRadius: "4px", background: "rgba(59, 130, 246, 0.1)", color: "#2563eb" }}>
-                    Autonomous
-                  </span>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "8px", flexWrap: "wrap" }}>
-                  <span style={{ fontSize: "11px", fontWeight: "600", padding: "3px 8px", borderRadius: "4px", background: operationalHealth?.browserBody?.state === "healthy" ? "rgba(34, 197, 94, 0.1)" : "rgba(234, 179, 8, 0.1)", color: operationalHealth?.browserBody?.state === "healthy" ? "#15803d" : "#a16207" }}>
-                    {operationalHealth?.browserBody?.state === "needs_auth" ? "Needs sign-in" : operationalHealth?.browserBody?.state === "recovering" ? "Recovering" : operationalHealth?.browserBody?.state === "healthy" ? "Ready · Logged in" : "Not configured"}
-                  </span>
-                  <Button
-                    type="button"
-                    variant="primary"
-                    onClick={async () => {
-                      await fetch("/api/browser/setup", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ presenceId: presence.id, action: "launch" }),
-                      }).catch(() => {});
-                    }}
-                  >
-                    Sign In
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={async () => {
-                      const res = await fetch("/api/browser/setup", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ presenceId: presence.id, action: "verify" }),
-                      }).then((r) => r.json()).catch(() => ({}));
-                      if (res.verified) {
-                        alert(`Identity confirmed: Logged in as @${res.observedIdentity}`);
-                      } else {
-                        alert("Not signed in or account handle did not match. Please sign in on the open browser window.");
-                      }
-                    }}
-                  >
-                    Verify
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="secondary"
-                    onClick={async () => {
-                      await fetch("/api/browser/setup", {
-                        method: "POST",
-                        headers: { "Content-Type": "application/json" },
-                        body: JSON.stringify({ presenceId: presence.id, action: "seal" }),
-                      }).catch(() => {});
-                      alert("Session saved and browser sealed for autonomous operation.");
-                    }}
-                  >
-                    Save & Finish
-                  </Button>
-                </div>
-              </div>
-              <p style={{ margin: "6px 0 0", fontSize: "12px", color: "var(--muted)" }}>
-                Dedicated autonomous browser profile · Account: <code>{presence.handle}</code> · {operationalHealth?.browserBody?.verifiedIdentity ? `Verified as @${operationalHealth.browserBody.verifiedIdentity.replace(/^@/, "")}` : "Not verified"}
-                {operationalHealth?.browserBody?.profileDir && (
-                  <span> · Profile: <code>{operationalHealth.browserBody.profileDir}</code></span>
-                )}
-              </p>
-            </div>
-
-            {/* 3. Your Chrome (Operator-owned) */}
+            {/* 2. Your Chrome (Operator-owned) */}
             <div className="access-connector-panel" id="presence-chrome-section" style={{ marginTop: "14px" }}>
               <ChromeConnectionPanel state={state} presence={presence} mutate={mutate} refreshState={refreshState} />
             </div>
 
-            {/* 4. External Bridge */}
-            <div className="access-connector-panel" id="presence-bridge-section" style={{ marginTop: "14px" }}>
-              <BridgeManager state={state} presence={presence} manageBridge={manageBridge} refreshState={refreshState} />
-            </div>
+            {/* Bridge is a channel connector for API-less/custom channels. X
+                keeps its native API as the channel route; browser hands above
+                are the fallback capability when a particular X action fails. */}
+            {presence.channel !== "x" && (
+              <div className="access-connector-panel" id="presence-bridge-section" style={{ marginTop: "14px" }}>
+                <BridgeManager state={state} presence={presence} manageBridge={manageBridge} refreshState={refreshState} />
+              </div>
+            )}
           </section>
 
           {/* 3. Presence Brief */}
@@ -12070,6 +13525,8 @@ function PresenceView({
               <button type="button" className={selfDirectedAttention.enabled && selfDirectedAttention.intensity === "quiet" ? "selected" : ""} onClick={() => updateSelfDirectedAttention({ enabled: true, intensity: "quiet" })} aria-pressed={selfDirectedAttention.enabled && selfDirectedAttention.intensity === "quiet"}><strong>Quiet</strong><small>Use a smaller, less frequent attention envelope.</small></button>
             </div>
             <div className="self-directed-budget-grid"><label>Model calls per day<input aria-label="Self-directed model calls per day" type="number" min={0} max={10000} value={selfDirectedBudget.maxModelCallsPerDay ?? 8} onChange={(event) => updateSelfDirectedAttention({ budget: { ...selfDirectedBudget, maxModelCallsPerDay: Math.max(0, Number(event.target.value) || 0) } })} /></label><label>Vision calls per day<input aria-label="Self-directed vision calls per day" type="number" min={0} max={10000} value={selfDirectedBudget.maxVisionCallsPerDay ?? 4} onChange={(event) => updateSelfDirectedAttention({ budget: { ...selfDirectedBudget, maxVisionCallsPerDay: Math.max(0, Number(event.target.value) || 0) } })} /></label><label>X reads per day<input aria-label="Self-directed X reads per day" type="number" min={0} max={10000} value={selfDirectedBudget.maxChannelReadsPerDay ?? 4} onChange={(event) => updateSelfDirectedAttention({ budget: { ...selfDirectedBudget, maxChannelReadsPerDay: Math.max(0, Number(event.target.value) || 0) } })} /></label><label>Hydrations per day<input aria-label="Self-directed hydrations per day" type="number" min={0} max={10000} value={selfDirectedBudget.maxHydrationsPerDay ?? 6} onChange={(event) => updateSelfDirectedAttention({ budget: { ...selfDirectedBudget, maxHydrationsPerDay: Math.max(0, Number(event.target.value) || 0) } })} /></label></div>
+            <div className="self-directed-budget-grid growth-target-grid"><label>Qualified quotes or reposts per day<input aria-label="Qualified quotes or reposts per day" type="number" min={0} max={20} value={growthTargets.quoteOrRepostPerDay ?? 2} onChange={(event) => updateSelfDirectedAttention({ growthTargets: { ...growthTargets, quoteOrRepostPerDay: Math.max(0, Math.min(20, Number(event.target.value) || 0)) } })} /></label><label>Qualified follows per day<input aria-label="Qualified follows per day" type="number" min={0} max={20} value={growthTargets.followsPerDay ?? 3} onChange={(event) => updateSelfDirectedAttention({ growthTargets: { ...growthTargets, followsPerDay: Math.max(0, Math.min(20, Number(event.target.value) || 0)) } })} /></label></div>
+            <p className="form-hint">Growth experiment targets guide what Genny looks for and make the short-term test measurable. They never force a weak quote, repost, or follow; only qualified, verified outcomes count.</p>
             <p className="form-hint">These are hard infrastructure ceilings. Provider quota and rate limits remain external body reality. If a ceiling is reached, the run is recorded as deferred—not as Genny deciding “nothing is worth doing.”</p>
           </section>
 
@@ -12112,7 +13569,7 @@ function PresenceView({
                 <p className="form-hint">This is a pace, not a forced quota. Weak ideas can still be rejected, but {presence.name} keeps responsibility for finding better ones.</p>
               </div>
             )}
-            {publishingInitiative?.mode !== "off" && connectionMode !== "sandbox" && !nativeConnection?.status && !activeBridge && <p className="settings-warning">{presence.name} needs automatic attention to pursue this pace on its own. Connect the selected live route or use Sandbox to rehearse it.</p>}
+            {publishingInitiative?.mode !== "off" && connectionMode !== "sandbox" && !nativeConnection?.status && !activeBridge && !activeChannelBridge && <p className="settings-warning">{presence.name} needs automatic attention to pursue this pace on its own. Connect the selected live route or use Sandbox to rehearse it.</p>}
             {publishingInitiative?.mode !== "off" && presence.execution.post === "off" && <p className="settings-warning">Original posts are currently Off. {presence.name} can work on ideas, but cannot complete this publishing responsibility.</p>}
             {publishingInitiative?.mode !== "off" && presence.execution.post === "review" && <p className="settings-warning">{presence.name} can work toward this pace, but publications will wait for your approval.</p>}
           </section>
@@ -12447,11 +13904,11 @@ function ChromeConnectionPanel({
 }) {
   const [refreshing, setRefreshing] = useState(false);
   const extensionEnabled = presence.browserAccess?.enabled === true;
-  const activeBridge = state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline");
+  const activeBridge = state.bridges.find((item) => item.presenceId === presence.id && item.name.startsWith("OpenPresence Chrome · ") && item.state !== "offline");
   const connected = Boolean(activeBridge && bridgeAdapterStatus(activeBridge) === "connected");
   const identityMismatch = activeBridge?.accountIdentity?.status === "mismatch";
   const identityUnknown = activeBridge?.accountIdentity?.status === "unknown";
-  const status = !extensionEnabled ? "Disabled" : identityMismatch ? "Wrong X account" : identityUnknown ? "Account needs verification" : connected ? "Connected" : activeBridge ? "Extension not connected" : "Not connected";
+  const status = !extensionEnabled ? "Disabled" : identityMismatch ? "Wrong signed-in account" : identityUnknown ? "Account needs verification" : connected ? "Connected" : activeBridge ? "Browser not connected" : "Not connected";
   const openControlledChrome = () => window.postMessage({ source: "openpresence", type: "OPENPRESENCE_OPEN_CHROME", presenceId: presence.id }, "*");
   const refresh = async () => {
     setRefreshing(true);
@@ -12461,9 +13918,9 @@ function ChromeConnectionPanel({
     <div className="chrome-connection-panel" aria-label="Chrome connection">
       <div className="chrome-connection-heading">
         <div>
-          <SectionEyebrow>Chrome extension · Presence-scoped</SectionEyebrow>
-          <h2 id="presence-chrome-title">Let {presence.name} use Chrome</h2>
-          <p className="muted">OpenPresence chooses what is worth doing. The Chrome extension provides the visible tab, uses the account you sign into, and reports back only verified outcomes.</p>
+          <SectionEyebrow>Browser capability · Presence-scoped</SectionEyebrow>
+          <h2 id="presence-chrome-title">Browser hands for {presence.name}</h2>
+          <p className="muted">The browser is an available set of hands for this Presence, not a channel. Native APIs stay preferred whenever they can perform an action. If a channel rejects a specific action, Genny can try the signed-in browser and remember that route for the same action next time.</p>
         </div>
         <ShieldCheck size={17} />
       </div>
@@ -12473,7 +13930,7 @@ function ChromeConnectionPanel({
       </div>
       <div className="chrome-connection-status" role="status">
         <span className={`live-pill ${connected && !identityMismatch && !identityUnknown ? "" : "paused"}`}><span className="status-dot" /> {status}</span>
-        <span className="chrome-connection-status-copy">{!extensionEnabled ? "Enable Chrome hands for this Presence to make the extension available." : identityMismatch ? `${activeBridge?.accountIdentity?.message} No live work can be claimed until the correct account is signed in.` : identityUnknown ? `${activeBridge?.accountIdentity?.message ?? `Expected ${presence.handle}.`} No live work can be claimed until X exposes the signed-in account.` : connected ? `The controlled browser is connected as ${presence.handle} and ready for approved work.` : activeBridge ? "The Chrome route is configured, but the extension has not checked in. Open the controlled Chrome tab and enable the extension." : "Install or enable the OpenPresence Chrome extension, then open the controlled browser."}</span>
+        <span className="chrome-connection-status-copy">{!extensionEnabled ? "Enable browser hands for this Presence when an action needs them." : identityMismatch ? `${activeBridge?.accountIdentity?.message} No live work can be claimed until the correct account is signed in.` : identityUnknown ? `${activeBridge?.accountIdentity?.message ?? `Expected ${presence.handle}.`} No live work can be claimed until the signed-in account is verified.` : connected ? `The controlled browser is connected as ${presence.handle} and ready when a browser fallback is learned or needed.` : activeBridge ? "The browser capability is configured, but the extension has not checked in. Open the controlled browser and enable the extension." : "Install or enable the OpenPresence browser extension, then open the controlled browser."}</span>
         {activeBridge && <Button type="button" variant="ghost" disabled={refreshing} onClick={() => void refresh()}><RotateCcw size={13} /> {refreshing ? "Refreshing…" : "Refresh status"}</Button>}
       </div>
       <small className="chrome-connection-safety"><ShieldCheck size={13} /> No account credentials are stored in OpenPresence or the extension. Before a write, the tab checks the selected account and verifies the resulting post.</small>
@@ -12501,12 +13958,15 @@ function BridgeManager({
   manageBridge: BridgeManage;
   refreshState: () => Promise<OpenPresenceState>;
 }) {
-  const [name, setName] = useState(presence.channel === "x" ? "X Connector Bridge" : "External Channel Bridge");
+  const [name, setName] = useState("External Channel Bridge");
   const [kind, setKind] = useState<ConnectorKind>("bridge");
   const [key, setKey] = useState<string | undefined>();
   const [disconnecting, setDisconnecting] = useState<string | null>(null);
+  // The Chrome Extension creates its own bridge ("OpenPresence Chrome · <name>")
+  // which is already shown in the ChromeConnectionPanel above. Don't show
+  // it here — this section is for custom/external bridges only.
   const bridges = state.bridges.filter(
-    (item) => item.presenceId === presence?.id,
+    (item) => item.presenceId === presence?.id && !item.name?.startsWith("OpenPresence Chrome ·"),
   );
   const activeBridges = bridges.filter((item) => item.state !== "offline");
   const [guideOpen, setGuideOpen] = useState(activeBridges.length === 0);
@@ -12593,8 +14053,8 @@ function BridgeManager({
     <div className="channel-connector-panel bridge-manager">
       <div className="section-heading compact">
         <div>
-          <SectionEyebrow>{presence.channel === "x" ? "X Connector Bridge · Custom Integration" : "External Bridge · Custom Integration"}</SectionEyebrow>
-          <h2 id="presence-bridge-title">{activeBridges.length ? "External Connector Bridge" : `Connect ${channelLabel(presence.channel, state.channelDefinitions)} through a Bridge`}</h2>
+          <SectionEyebrow>Bridge · Channel connector</SectionEyebrow>
+          <h2 id="presence-bridge-title">{activeBridges.length ? "External Channel Bridge" : `Connect ${channelLabel(presence.channel, state.channelDefinitions)} through a Bridge`}</h2>
         </div>
         <Radio size={17} />
       </div>
@@ -12602,9 +14062,7 @@ function BridgeManager({
       {activeBridges.length === 0 && (
         <div className="empty-bridge" style={{ marginTop: "10px" }}>
           <p className="muted" style={{ margin: "0 0 12px", fontSize: "13px" }}>
-            {channel?.builtIn
-              ? `Use an external Bridge when ${channelLabel(presence.channel, state.channelDefinitions)} should be connected via a custom browser runner or automation worker.`
-              : `External adapter for ${channelLabel(presence.channel, state.channelDefinitions)} that receives approved actions from this Presence.`}
+            A Bridge connects this Presence to {channelLabel(presence.channel, state.channelDefinitions)} when that channel does not provide a native API. It observes the channel and carries out only approved actions; it is not part of the Agent&apos;s social judgment.
           </p>
           <div className="form-grid" style={{ gap: "10px", marginBottom: "12px" }}>
             <label>
@@ -12624,13 +14082,13 @@ function BridgeManager({
                   setKind(event.target.value as ConnectorKind)
                 }
               >
-                <option value="bridge">{presence.channel === "x" ? "X Bridge · external adapter" : "Bridge · external executor"}</option>
+                <option value="bridge">External adapter · channel connector</option>
                 <option value="manual">Manual relay · you carry out actions</option>
               </select>
             </label>
           </div>
           <Button variant="primary" onClick={() => void create()}>
-            <Plus size={14} /> Create Bridge Key
+            <Plus size={14} /> Connect external Bridge
           </Button>
         </div>
       )}

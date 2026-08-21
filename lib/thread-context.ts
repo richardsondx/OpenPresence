@@ -100,6 +100,11 @@ export async function hydrateThreadContext(input: {
   maxDepth?: number;
   maxObjects?: number;
 }): Promise<HydratedThreadContext> {
+  // Only extract info from a thread during replies.
+  // When observing a specific post (not a reply), do not fetch thread ancestry or referenced items.
+  if (!input.observedObject.parentExternalRef) {
+    return { objects: [], missingExternalRefs: [] };
+  }
   const maxDepth = Math.max(0, Math.min(8, input.maxDepth ?? 8));
   const maxObjects = Math.max(1, Math.min(8, input.maxObjects ?? 8));
   const known = objectMap(input.mirror, input.observedObject);

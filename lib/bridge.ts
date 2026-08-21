@@ -106,9 +106,9 @@ export function reportBridgeIdentity(bridge: Bridge, input: z.infer<typeof ident
   const actual = normalizedHandle(input.username);
   const status = actual && expected && actual === expected ? "verified" : actual ? "mismatch" : "unknown";
   const message = status === "mismatch"
-    ? `The controlled X tab is signed in as @${actual}, but this Presence expects @${expected}.`
+    ? `The controlled browser is signed in as @${actual}, but this Presence expects @${expected}.`
     : status === "unknown"
-      ? `The controlled X tab did not expose a verifiable signed-in account. Expected @${expected}.`
+      ? `The controlled browser did not expose a verifiable signed-in account. Expected @${expected}.`
       : undefined;
   current.accountIdentity = { username: actual || undefined, status, message, observedAt: timestamp() };
   current.updatedAt = timestamp();
@@ -121,7 +121,7 @@ export function reportBridgeIdentity(bridge: Bridge, input: z.infer<typeof ident
     const sync = state.bridgeSync.find((item) => item.bridgeId === current.id);
     if (sync) { sync.status = "healthy"; sync.error = undefined; }
   }
-  state.events.unshift(bridgeEvent(state, status === "verified" ? "Bridge account verified" : "Bridge account check failed", message ?? `The controlled channel account matches @${expected}.`, status === "verified" ? "positive" : "warning"));
+  state.events.unshift(bridgeEvent(state, status === "verified" ? "Browser account verified" : "Browser account check failed", message ?? `The controlled channel account matches @${expected}.`, status === "verified" ? "positive" : "warning"));
   writeState(state, { advanceWorkspaceRevision: false, syncNormalized: false });
   return { state, identity: current.accountIdentity, expectedHandle: presence?.handle };
 }
@@ -219,13 +219,21 @@ export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput
   const state = readStateForBridge(bridge.id); const current = state.bridges.find((item) => item.id === bridge.id); if (!current) throw new Error("Bridge not found"); const now = Date.now(); const expiresAt = new Date(now + 120_000).toISOString();
   const liveWork = state.executions.some((execution) => execution.bridgeId === bridge.id && execution.status === "queued" && execution.environment === "live");
   const identityFresh = current.accountIdentity?.status === "verified"
-    && Date.now() - new Date(current.accountIdentity.observedAt).getTime() <= BRIDGE_IDENTITY_MAX_AGE_MS;
+    && (Date.now() - new Date(current.accountIdentity.observedAt).getTime() <= BRIDGE_IDENTITY_MAX_AGE_MS
+      || (current.lastHeartbeatAt !== undefined && Date.now() - new Date(current.lastHeartbeatAt).getTime() <= 120_000));
   if (liveWork && !identityFresh) return { state, executions: [], retryAfterIdentity: true };
   for (const execution of state.executions) {
     if (execution.bridgeId !== bridge.id || execution.status !== "claimed" || !execution.lease?.expiresAt) continue;
     if (new Date(execution.lease.expiresAt).getTime() <= now) {
       execution.status = "queued";
       execution.lease = undefined;
+      // A lease expiry means the browser never completed this delivery. The
+      // prior permit may be almost or already expired by the next claim, so
+      // force the sealed expression back to candidate state and issue a fresh
+      // permit on the retry. Reusing the old permit strands live work in a
+      // repeated EXPIRED_PERMIT loop.
+      execution.permit = undefined;
+      if (execution.publication?.publicExpression) execution.publication.publicExpression.safetyStatus = "candidate";
       execution.updatedAt = timestamp();
     }
   }
@@ -259,7 +267,13 @@ export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput
   for (const execution of candidates) {
     if (execution.environment === "live" && execution.publication?.publicExpression) {
       try {
-        sealExecutionForDelivery(execution);
+        // Claim polling is intentionally idempotent. A browser service-worker
+        // restart or a second claim request can observe an execution after
+        // the first claimant has sealed it but before the DOM action returns;
+        // sealing that same artifact again incorrectly treats it as stale.
+        const expression = execution.publication.publicExpression;
+        if (expression.safetyStatus === "sealed" && execution.permit) verifyExecutionPermit(execution, expression);
+        else sealExecutionForDelivery(execution);
       } catch (error) {
         execution.status = "blocked";
         execution.failure = { code: error instanceof PublicationSecurityError ? error.code : "PUBLICATION_SECURITY_BLOCKED", message: error instanceof Error ? error.message : "Live publication security validation failed.", retryable: false };
@@ -358,6 +372,37 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
     "positive",
     execution.id,
   )); touchBridge(state, bridge); writeState(state); return { state, execution };
+}
+
+/**
+ * Record a Bridge reaction after an independent, read-only X API lookup has
+ * confirmed the authored post/reaction. This path intentionally does not
+ * consume the browser permit again: permits authorize the write, while the
+ * provider evidence authorizes the later verification transition.
+ */
+export function recordVerifiedBridgeReaction(source: OpenPresenceState, executionId: string, externalRef: import("./types").EntityRef) {
+  const state = JSON.parse(JSON.stringify(source)) as OpenPresenceState;
+  const execution = state.executions.find((item) => item.id === executionId && item.connector === "bridge");
+  if (!execution || !["x.quote", "x.repost", "quote", "repost"].includes(execution.affordance)) return state;
+  if (execution.status === "succeeded") return state;
+  const bridge = state.bridges.find((item) => item.id === execution.bridgeId);
+  if (!bridge) return state;
+  const verifiedAt = timestamp();
+  execution.status = "succeeded";
+  execution.externalRef = externalRef;
+  execution.executedAt = execution.executedAt ?? verifiedAt;
+  execution.updatedAt = verifiedAt;
+  execution.failure = undefined;
+  execution.reviewReason = undefined;
+  execution.lease = undefined;
+  const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, status: "succeeded", observedAt: verifiedAt, metrics: {}, evidence: [externalRef], environment: execution.environment, sessionId: execution.sessionId, conversationEpisodeId: execution.conversationEpisodeId };
+  state.outcomes.unshift(outcome);
+  recordVerifiedCapabilityTrial(state, execution, outcome);
+  recordVerifiedBridgeAttention(state, bridge, execution, externalRef);
+  const action = state.actions.find((item) => item.executionId === execution.id);
+  if (action) { action.status = "executed"; action.outcomeId = outcome.id; }
+  state.events.unshift(bridgeEvent(state, "Chrome reaction verified on X", "The X API confirmed the authored Bridge reaction and its public target lineage.", "positive", execution.id));
+  return state;
 }
 
 export function failExecution(bridge: Bridge, executionId: string, input: z.infer<typeof failInput>) {

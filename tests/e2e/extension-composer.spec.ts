@@ -254,3 +254,46 @@ test("the Chrome adapter reports X profile and publication metrics", async ({ pa
   expect(metrics?.metrics?.audience).toMatchObject({ followers: 3, following: 321 });
   expect(metrics?.metrics?.publications?.[0]).toMatchObject({ externalRef: { id: "123" }, metrics: { impressions: 4567, likes: 89, replies: 12, reposts: 4 } });
 });
+
+test("the Chrome adapter keeps a timeline tab in place while collecting observations", async ({ page }) => {
+  await page.route("http://openpresence.test/**", (route) => route.fulfill({
+    status: 200,
+    contentType: "text/html",
+    body: "<!doctype html><html><body></body></html>",
+  }));
+  await page.goto("http://openpresence.test/home");
+  await page.setContent(`
+    <nav><a href="/example_agent">@example_agent</a></nav>
+    <article>
+      <a href="/builder/status/456">Open post</a>
+      <div data-testid="User-Name"><a href="/builder">Builder</a><a href="/builder">@builder</a></div>
+      <div data-testid="tweetText" lang="en">A concrete public result from an AI builder.</div>
+    </article>
+  `);
+  await page.evaluate(() => {
+    const listeners: Array<(message: unknown) => void> = [];
+    const messages: unknown[] = [];
+    Object.assign(window, { __openPresenceMessages: messages, __openPresenceListeners: listeners });
+    Object.defineProperty(window, "chrome", {
+      configurable: true,
+      value: {
+        runtime: {
+          id: "test-extension",
+          onMessage: { addListener: (listener: (message: unknown) => void) => listeners.push(listener) },
+          sendMessage: (message: unknown) => { messages.push(message); return Promise.resolve(); },
+        },
+      },
+    });
+  });
+  await page.addScriptTag({ path: "extension/execution.js" });
+  await page.addScriptTag({ path: "extension/channel-x.js" });
+  await page.evaluate(() => {
+    const listeners = (window as typeof window & { __openPresenceListeners: Array<(message: unknown) => void> }).__openPresenceListeners;
+    listeners.forEach((listener) => listener({ type: "OPENPRESENCE_SESSION_CONTEXT", expectedHandle: "@example_agent", presenceName: "Genny" }));
+    listeners.forEach((listener) => listener({ type: "OPENPRESENCE_REQUEST_METRICS" }));
+  });
+  await page.waitForTimeout(2_500);
+  expect(await page.url()).toBe("http://openpresence.test/home");
+  const observation = await page.evaluate(() => (window as typeof window & { __openPresenceMessages: Array<{ type?: string; observation?: { externalRef?: { id?: string } } }> }).__openPresenceMessages.find((message) => message.type === "OPENPRESENCE_OBSERVATION"));
+  expect(observation?.observation?.externalRef?.id).toBe("456");
+});

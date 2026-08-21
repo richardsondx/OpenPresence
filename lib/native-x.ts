@@ -65,25 +65,48 @@ function xPostMirrorObject(post: XRecentPost, presenceId: string, connectionId: 
  * the provider-neutral traversal in thread-context.ts; fetched posts are
  * returned to the caller as ordinary Mirror evidence.
  */
-export async function hydrateNativeXThreadContext(source: OpenPresenceState, presenceId: string, observedObject: MirrorObject): Promise<OpenPresenceState> {
+export async function hydrateNativeXThreadContext(
+  source: OpenPresenceState,
+  presenceId: string,
+  observedObject: MirrorObject,
+  options?: {
+    originKind?: import("./types").ResourceUsageEvent["originKind"];
+    attentionSource?: import("./types").ResourceUsageEvent["attentionSource"];
+    invocationId?: string;
+    runId?: string;
+  },
+): Promise<OpenPresenceState> {
+  if (!observedObject.parentExternalRef) return source;
   const connection = source.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x");
   const credentials = connection ? readNativeXCredentials(connection.id) : undefined;
   if (!connection || !credentials) return source;
   const presence = source.presences.find((item) => item.id === presenceId) ?? source.presence;
   const mirror = source.mirrorObjects.filter((item) => item.presenceId === presenceId && item.channelId === "x" && (item.environment === "live" || item.environment === undefined) && Boolean(presence && languagesMatch(presence.language, item.language ?? item.content?.language)));
   const fetchedPosts = new Map<string, XRecentPost>();
+  let next = source;
   const hydrated = await hydrateThreadContext({
     mirror,
     observedObject,
     maxDepth: 8,
     maxObjects: 8,
     fetchObjects: async (refs: EntityRef[]) => {
-      const posts = await readXPostsByIds(credentials, refs.filter((ref) => ref.type === "x.post").map((ref) => ref.id));
+      const targetRefs = refs.filter((ref) => ref.type === "x.post");
+      if (!targetRefs.length) return [];
+      next = recordResourceUsageEvent(next, {
+        presenceId,
+        invocationId: options?.invocationId ?? `hydrate:${randomUUID()}`,
+        runId: options?.runId,
+        originKind: options?.originKind ?? "inbound_social",
+        attentionSource: options?.attentionSource ?? "inbound_social",
+        category: "hydration",
+        provider: "x",
+        usage: { requests: 1 },
+      });
+      const posts = await readXPostsByIds(credentials, targetRefs.map((ref) => ref.id));
       for (const post of posts) fetchedPosts.set(post.id, post);
       return posts.map((post) => xPostMirrorObject(post, presenceId, connection.id));
     },
   });
-  let next = source;
   for (const object of hydrated.objects) {
     const sourcePost = fetchedPosts.get(object.externalRef.id);
     if (!sourcePost) continue;
@@ -188,7 +211,7 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
       try {
         const stillVisible: XRecentPost[] = [];
         for (let offset = 0; offset < missingOwnPostIds.length; offset += 100) {
-          next = recordResourceUsageEvent(next, { presenceId, invocationId: `x-reconcile:${randomUUID()}`, originKind: "other", attentionSource: "inbound_social", category: "hydration", provider: "x", usage: { requests: 1 } });
+          next = recordResourceUsageEvent(next, { presenceId, invocationId: `x-reconcile:${randomUUID()}`, originKind: "other", attentionSource: "inbound_social", category: "channel_read", provider: "x", usage: { requests: 1 } });
           stillVisible.push(...await readXPostsByIds(credentials, missingOwnPostIds.slice(offset, offset + 100)));
         }
         const stillVisibleIds = new Set(stillVisible.map((post) => post.id));
@@ -198,13 +221,13 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
         next = recordRuntimeEvent(next, presenceId, "Deleted-post check unavailable", error instanceof Error ? error.message : "X did not confirm whether missing posts were deleted.", "warning");
       }
     }
-    // Eagerly make the public ancestry available before Pulse runs. The
-    // hydrator is bounded and idempotent, so a later lazy check is cheap.
+    // Eagerly make the public ancestry available before Pulse runs during replies.
+    // The hydrator is bounded and idempotent, so a later lazy check is cheap.
     for (const mention of mentions) {
       const observed = next.mirrorObjects.find((item) => item.externalRef.type === "x.post" && item.externalRef.id === mention.id);
-      if (!observed?.parentExternalRef && !(observed?.referencedExternalRefs?.length)) continue;
+      if (!observed?.parentExternalRef) continue;
       try {
-        next = await hydrateNativeXThreadContext(next, presenceId, observed);
+        next = await hydrateNativeXThreadContext(next, presenceId, observed, { originKind: "inbound_social", attentionSource: "inbound_social" });
       } catch (error) {
         next = recordRuntimeEvent(next, presenceId, "Thread context partially available", error instanceof Error ? error.message : "X did not return all referenced public context.", "warning", { sourceObjectId: observed.id });
       }

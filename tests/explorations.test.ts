@@ -125,22 +125,24 @@ describe("Presence-scoped Explorations", () => {
     vi.unstubAllGlobals();
   });
 
-  it("routes an unrelated live Exploration finding to the Chrome extension fallback", async () => {
+  it("routes an unrelated live Exploration finding to the browser capability fallback", async () => {
     process.env.OPENPRESENCE_AI_MOCK = "1";
     let state = createAgent(input);
     const presenceId = state.presence!.id;
-    state = applyOperation(state, { type: "setPresence", patch: { connectionMode: "bridge", publishingInitiative: { ...state.presence!.publishingInitiative, mode: "off" }, execution: { ...state.presence!.execution, reply: "auto", post: "auto" } } });
+    state = applyOperation(state, { type: "setPresence", patch: { connectionMode: "native", publishingInitiative: { ...state.presence!.publishingInitiative, mode: "off" }, execution: { ...state.presence!.execution, reply: "auto", post: "auto" } } });
     state.presence!.environment = "live";
-    state.presence!.connectionMode = "bridge";
-    state.presences = state.presences.map((item) => item.id === presenceId ? { ...item, environment: "live", connectionMode: "bridge" } : item);
+    state.presence!.connectionMode = "native";
+    state.presence!.browserAccess = { enabled: true, learnedFallbacks: [{ action: "x.reply", reason: "The native X API rejected this reply because the post did not mention the Presence.", learnedAt: new Date().toISOString() }] };
+    state.presences = state.presences.map((item) => item.id === presenceId ? { ...item, environment: "live", connectionMode: "native", browserAccess: state.presence!.browserAccess } : item);
     state = applyOperation(state, { type: "createExploration", presenceId, brief: "Find builders discussing persistent agent memory." });
     const exploration = state.explorations[0]!;
     state = applyOperation(state, { type: "setExplorationEngagement", id: exploration.id, mode: "opportunistic" });
-    state = applyOperation(state, { type: "createBridge", input: { presenceId, name: "Signed-in X browser", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply", "comment", "post"], formats: ["text"], metrics: ["replies"], assetKinds: [] } } });
+    state = applyOperation(state, { type: "createBridge", input: { presenceId, name: "OpenPresence Chrome · Jenny", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply", "comment", "post"], formats: ["text"], metrics: ["replies"], assetKinds: [] } } });
     const bridge = state.bridges[0]!;
     bridge.state = "online";
     bridge.lastSeenAt = new Date().toISOString();
     bridge.lastHeartbeatAt = bridge.lastSeenAt;
+    state.nativeConnections = [{ id: "native-x-exploration", presenceId, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "builder-presence", username: "jenny_ai", name: "Jenny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
     const mirrorId = "mirror-browser-reply-1";
     state.mirrorObjects.unshift({ id: mirrorId, bridgeId: bridge.id, presenceId, channelId: "x", externalRef: { type: "x.post", id: "unrelated-post-1" }, objectType: "post", language: "en", author: { externalRef: { type: "x.user", id: "builder-1" }, displayName: "Builder", handle: "builder" }, content: { text: "We are struggling to deploy persistent agent memory and keep decisions coherent." }, observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", environment: "live", source: "operator", trust: "untrusted_world_content" });
     state.explorations[0]!.nextEligibleAt = new Date(Date.now() - 1_000).toISOString();
@@ -153,6 +155,6 @@ describe("Presence-scoped Explorations", () => {
     const execution = completed.executions.find((item: { assignmentId?: string }) => item.assignmentId === assignmentId);
     expect(completed.explorationFindings.some((item: { status: string }) => item.status === "considering")).toBe(true);
     expect(execution).toMatchObject({ assignmentId, affordance: "x.reply", connector: "bridge", bridgeId: bridge.id, status: "queued", target: { type: "x.post", id: "unrelated-post-1" } });
-    expect(completed.events.some((event: { title: string; detail: string }) => event.title === "Exploration reply queued" && event.detail.includes("Chrome extension fallback"))).toBe(true);
+    expect(completed.events.some((event: { title: string; detail: string }) => event.title === "Exploration reply queued" && event.detail.includes("browser capability fallback"))).toBe(true);
   });
 });

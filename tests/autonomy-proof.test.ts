@@ -1,7 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { createAgent, applyOperation, startPlaygroundSession, addSandboxEvent, formSandboxIntent, deliverSandboxExecution, compileAgendaWork, buildSocialEvidenceContext } from "../lib/runtime";
+import { createAgent, applyOperation, startPlaygroundSession, addSandboxEvent, formSandboxIntent, deliverSandboxExecution, compileAgendaWork } from "../lib/runtime";
 import { parseAgentSocialDecision } from "../lib/ai";
-import * as fs from "fs";
 
 describe("Empirical Autonomy Evidence Harness", () => {
   it("executes end-to-end closed loop and extracts durable trace records", async () => {
@@ -48,10 +47,11 @@ describe("Empirical Autonomy Evidence Harness", () => {
       content: stimulusMirror.content?.text,
     };
 
-    // 3. Deliberation: Multi-Act Decision [Quote + Follow]
+    // 3. Deliberation: Multi-Act Decision [Quote + Repost + Follow]
     const decisionRaw = JSON.stringify({
       acts: [
         { action: "quote", text: "The essential insight here is that durable memory requires indexing decisions and grounding evidence, not raw conversation tokens.", rationale: "Adds our distinct territory contribution to a major research milestone." },
+        { action: "repost", rationale: "The benchmark announcement is independently useful to our audience as-is." },
         { action: "follow", rationale: "Author is doing primary research in our core territory." },
       ],
       rationale: "Quote with our architectural perspective and follow for continued awareness.",
@@ -94,7 +94,26 @@ describe("Empirical Autonomy Evidence Harness", () => {
       mirroredText: quoteMirror.content?.text,
     };
 
-    // 6. Intent & Execution: Follow
+    // 6. Intent & Execution: Repost
+    state = formSandboxIntent(state, {
+      sessionId,
+      affordance: "repost",
+      format: "x.repost",
+      text: "",
+      target: stimulusMirror.externalRef,
+      perceptionTarget: stimulusMirror.externalRef,
+    });
+    const repostExecution = state.executions.find(e => e.affordance === "repost")!;
+    state = deliverSandboxExecution(state, repostExecution.id);
+    const deliveredRepost = state.executions.find(e => e.id === repostExecution.id)!;
+    const repostOutcome = state.outcomes.find(o => o.executionId === repostExecution.id)!;
+    results.verifiedRepost = {
+      executionId: deliveredRepost.id,
+      executionStatus: deliveredRepost.status,
+      outcomeStatus: repostOutcome.status,
+    };
+
+    // 7. Intent & Execution: Follow
     state = formSandboxIntent(state, {
       sessionId,
       affordance: "follow",
@@ -112,7 +131,7 @@ describe("Empirical Autonomy Evidence Harness", () => {
       personActorId: stimulusMirror.author?.externalRef?.id,
     };
 
-    // 7. Closed-Loop Relationship Memory Check
+    // 8. Closed-Loop Relationship Memory Check
     const personIdentity = state.personIdentities.find(
       (p) => p.externalActorId === stimulusMirror.author?.externalRef?.id && p.sourcePresenceId === presenceId
     );
@@ -125,7 +144,7 @@ describe("Empirical Autonomy Evidence Harness", () => {
       followingVerified: isFollowed,
     };
 
-    // 8. Agenda Compilation & Priority Invariant
+    // 9. Agenda Compilation & Priority Invariant
     const agenda = compileAgendaWork(state, presenceId);
     results.agenda = {
       compiledAt: agenda.compiledAt,
@@ -141,6 +160,8 @@ describe("Empirical Autonomy Evidence Harness", () => {
 
     expect(deliveredQuote.status).toBe("succeeded");
     expect(quoteOutcome.status).toBe("succeeded");
+    expect(deliveredRepost.status).toBe("succeeded");
+    expect(repostOutcome.status).toBe("succeeded");
     expect(deliveredFollow.status).toBe("succeeded");
     expect(results.relationshipMemory.followingVerified).toBe(true);
 

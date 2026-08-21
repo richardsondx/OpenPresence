@@ -77,64 +77,68 @@
     if (!rawExpected) return false;
     const expectedNormalized = normalizeText(rawExpected);
 
-    const attempts = [
-      () => {
-        const node = liveComposer(composer);
-        if (!node) return;
-        node.focus();
-        try { root.document.execCommand("selectAll", false, null); } catch {}
-        selectContents(node);
-        try {
-          node.dispatchEvent(new root.InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText", data: rawExpected }));
-        } catch {}
-        root.document.execCommand("insertText", false, rawExpected);
-      },
-      () => {
-        const node = liveComposer(composer);
-        if (!node) return;
-        node.focus();
-        node.click();
-        try { root.document.execCommand("selectAll", false, null); } catch {}
-        try {
-          node.dispatchEvent(new root.InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText", data: rawExpected }));
-        } catch {}
-        root.document.execCommand("insertText", false, rawExpected);
-      },
-    ];
+    function tryExecCommand(node) {
+      node.focus();
+      try { root.document.execCommand("selectAll", false, null); } catch {}
+      selectContents(node);
+      try {
+        node.dispatchEvent(new root.InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText", data: rawExpected }));
+      } catch {}
+      root.document.execCommand("insertText", false, rawExpected);
+    }
 
-    for (const attempt of attempts) {
-      clearComposer(liveComposer(composer));
-      attempt();
+    function tryPaste(node) {
+      node.focus();
+      try { root.document.execCommand("selectAll", false, null); } catch {}
+      try {
+        const transfer = new root.DataTransfer();
+        transfer.setData("text/plain", rawExpected);
+        node.dispatchEvent(new root.ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: transfer }));
+      } catch {}
+      try {
+        node.dispatchEvent(new root.InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertFromPaste", data: rawExpected }));
+      } catch {}
+      root.document.execCommand("insertText", false, rawExpected);
+    }
+
+    function tryCharacterByCharacter(node) {
+      // Last resort: type each character individually. This is slow but
+      // mirrors real keyboard input and works with Draft.js editors that
+      // ignore bulk insertText/paste events.
+      node.focus();
+      try { root.document.execCommand("selectAll", false, null); } catch {}
+      selectContents(node);
+      try { root.document.execCommand("delete", false, null); } catch {}
+      for (const char of rawExpected) {
+        try {
+          node.dispatchEvent(new root.InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertText", data: char }));
+        } catch {}
+        try {
+          node.dispatchEvent(new root.InputEvent("input", { bubbles: true, inputType: "insertText", data: char }));
+        } catch {}
+        root.document.execCommand("insertText", false, char);
+      }
+    }
+
+    const strategies = [tryExecCommand, tryPaste, tryCharacterByCharacter];
+
+    for (const strategy of strategies) {
       const node = liveComposer(composer);
       if (!node) continue;
-      dispatchInput(node, rawExpected);
+      clearComposer(node);
+      // Small delay to let X's editor settle after clearing
+      await new Promise((resolve) => root.setTimeout(resolve, 100));
+      strategy(node);
+      const currentNode = liveComposer(composer);
+      if (!currentNode) continue;
+      dispatchInput(currentNode, rawExpected);
       // X's Draft.js editor can update the DOM before React receives the
       // input event. Visible text is not success until the controlled
       // submit button becomes enabled too.
       if (await waitFor(() => visibleText(liveComposer(composer)) === expectedNormalized && Boolean(enabledSubmitButton(submitSelector)))) return true;
-
-      clearComposer(node);
     }
 
-    // Some X releases handle a paste-shaped event more reliably than
-    // execCommand. Keep it as a final fallback, with the same state check.
-    const current = liveComposer(composer);
-    if (!current) return false;
-    clearComposer(current);
-    current.focus();
-    try {
-      const transfer = new root.DataTransfer();
-      transfer.setData("text/plain", rawExpected);
-      current.dispatchEvent(new root.ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: transfer }));
-    } catch {
-      // ClipboardEvent/DataTransfer are not available in every embedded page.
-    }
-    try {
-      current.dispatchEvent(new root.InputEvent("beforeinput", { bubbles: true, cancelable: true, inputType: "insertFromPaste", data: rawExpected }));
-    } catch {}
-    root.document.execCommand("insertText", false, rawExpected);
-    dispatchInput(current, rawExpected);
-    return waitFor(() => visibleText(liveComposer(composer)) === expectedNormalized && Boolean(enabledSubmitButton(submitSelector)));
+    return false;
   }
 
   root.OpenPresenceComposer = { fillComposer };

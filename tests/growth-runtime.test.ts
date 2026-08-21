@@ -2,12 +2,24 @@ import { describe, expect, it } from "vitest";
 import { applyOperation, audienceDeltas, capabilityProviderLabel, collapseAudienceSnapshots, compileAssignmentInstruction, completeNativeExecution, derivePresenceCapabilityManifest, formChatPostIntent, formXActionIntent, formXReplyIntent, publicationMetricBaseline, recordVerifiedFollow } from "@/lib/runtime";
 import { createAgent } from "@/lib/runtime";
 import type { MirrorObject, OpenPresenceState } from "@/lib/types";
+import { nextSelfDirectedAttentionAt, recurringAttentionOperation, selectBridgeDiscoveryCandidates, selectGrowthDiscoverySource } from "@/lib/growth-scheduler";
 
 function fixture(): OpenPresenceState {
   return createAgent({ name: "Genny", description: "An agent for useful software conversations.", audience: "AI builders", mode: "agent", handle: "@genny", accent: "#d88b57" });
 }
 
 describe("continuous growth responsibility", () => {
+  it("shortens bounded attention cadence while a configured growth target is unmet", () => {
+    const now = Date.parse("2026-08-21T05:00:00.000Z");
+    expect(nextSelfDirectedAttentionAt({ intensity: "curious", now, verifiedQuoteOrRepostsToday: 0, quoteOrRepostTarget: 2, verifiedFollowsToday: 0, followsTarget: 3 })).toBe("2026-08-21T05:20:00.000Z");
+    expect(nextSelfDirectedAttentionAt({ intensity: "curious", now, verifiedQuoteOrRepostsToday: 2, quoteOrRepostTarget: 2, verifiedFollowsToday: 3, followsTarget: 3 })).toBe("2026-08-21T06:00:00.000Z");
+  });
+
+  it("hands discovery to a healthy Bridge when Native X needs attention", () => {
+    expect(selectGrowthDiscoverySource({ nativeReadable: true, nativeStatus: "needs-attention", bridgeConnected: true, hasNativeCredentials: true })).toBe("bridge");
+    expect(selectGrowthDiscoverySource({ nativeReadable: true, nativeStatus: "connected", bridgeConnected: true, hasNativeCredentials: true })).toBe("native");
+  });
+
   it("compiles a 100K request into one continuous Assignment with an evidence contract", () => {
     const state = fixture();
     const assignment = compileAssignmentInstruction(state, "Grow this Presence toward 100,000 followers while building an audience of AI founders.", state.presence!.id, "live");
@@ -158,6 +170,60 @@ describe("continuous growth responsibility", () => {
     const next = { ...state, presence: bridgePresence, presences: [bridgePresence], nativeConnections: [{ id: "native-x", presenceId: bridgePresence.id, channelId: "x", kind: "x" as const, status: "connected" as const, access: "read-write" as const, account: { id: "account-1", username: "genny", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }] };
     const post = derivePresenceCapabilityManifest(next, bridgePresence.id).items.find((item) => item.capability === "post");
     expect(post).toMatchObject({ availability: "available", provider: "Native X", canExecute: true, requiresBrowser: false });
+  });
+
+  it("projects the connected Browser Bridge when Native X is readable but creditless", () => {
+    const state = fixture();
+    const presence = { ...state.presence!, connectionMode: "native" as const };
+    const now = new Date().toISOString();
+    const next = {
+      ...state,
+      presence,
+      presences: [presence],
+      nativeConnections: [{ id: "native-x", presenceId: presence.id, channelId: "x" as const, kind: "x" as const, status: "connected" as const, access: "read-write" as const, deliveryError: "X has no API credits remaining for this app.", account: { id: "account-1", username: "genny", name: "Genny" }, createdAt: now, updatedAt: now }],
+      bridges: [{ id: "bridge-x", presenceId: presence.id, channelId: "x" as const, name: "OpenPresence Chrome", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: now, capabilities: { inbound: true, reconcile: true, affordances: ["post", "reply", "like", "repost", "quote", "follow"], formats: ["x.post", "x.reply", "x.like", "x.repost", "x.quote", "x.follow"], metrics: ["followers", "public_metrics"] }, createdAt: now, updatedAt: now }],
+    };
+    const manifest = derivePresenceCapabilityManifest(next, presence.id);
+    for (const capability of ["post", "repost", "quote", "follow"]) {
+      expect(manifest.items.find((item) => item.capability === capability)).toMatchObject({ availability: "available", provider: "Browser Bridge", canExecute: true, requiresBrowser: true });
+    }
+  });
+
+  it("routes recurring Native Growth through self-directed attention when Chrome is connected", () => {
+    const state = fixture();
+    const presence = { ...state.presence!, connectionMode: "native" as const, selfDirectedAttention: { ...state.presence!.selfDirectedAttention!, enabled: true } };
+    const now = new Date().toISOString();
+    const next = {
+      ...state,
+      presence,
+      presences: [presence],
+      bridges: [{ id: "bridge-x", presenceId: presence.id, channelId: "x" as const, name: "OpenPresence Chrome", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: now, capabilities: { inbound: true, reconcile: true, affordances: ["post", "quote", "repost", "follow"], formats: ["x.post", "x.quote", "x.repost", "x.follow"], metrics: [] }, createdAt: now, updatedAt: now }],
+    };
+    expect(recurringAttentionOperation(next, presence)).toEqual({ type: "runAttentionWorker" });
+  });
+
+  it("keeps Native Pulse for a readable Presence without a connected Chrome body", () => {
+    const state = fixture();
+    const presence = { ...state.presence!, connectionMode: "native" as const, selfDirectedAttention: { ...state.presence!.selfDirectedAttention!, enabled: true } };
+    expect(recurringAttentionOperation({ ...state, presence, presences: [presence], bridges: [] }, presence)).toEqual({ type: "runPulse", presenceId: presence.id });
+  });
+
+  it("turns fresh Bridge observations into bounded discovery leads without judging them", () => {
+    const state = fixture();
+    const presenceId = state.presence!.id;
+    const now = Date.parse("2026-08-21T05:00:00.000Z");
+    const mirror = (id: string, observedAt: string, text: string, actorPresenceId?: string): MirrorObject => ({ id: `mirror-${id}`, bridgeId: "bridge-x", presenceId, channelId: "x", externalRef: { type: "x.post", id }, objectType: "post", author: { displayName: "Builder", handle: "builder" }, content: { text }, observedAt, occurredAt: observedAt, visibility: "public", shareability: "presence-only", environment: "live", actorPresenceId });
+    const candidates = selectBridgeDiscoveryCandidates([
+      mirror("fresh", "2026-08-21T04:59:00.000Z", "A concrete AI systems result."),
+      { ...mirror("legacy", "2026-08-21T04:58:30.000Z", "A fresh observation from the readable Native source."), bridgeId: `native:${presenceId}` },
+      mirror("old", "2026-08-20T20:00:00.000Z", "Too old for this attention slice."),
+      mirror("judged", "2026-08-21T04:58:00.000Z", "Already considered."),
+      mirror("self", "2026-08-21T04:57:00.000Z", "Own post.", presenceId),
+    ], { bridgeId: "bridge-x", legacyBridgeIds: [`native:${presenceId}`], presenceId, judgedIds: ["judged"], now, isEligible: () => true, limit: 10 });
+    expect(candidates).toEqual([
+      { id: "fresh", authorName: "Builder", text: "A concrete AI systems result." },
+      { id: "legacy", authorName: "Builder", text: "A fresh observation from the readable Native source." },
+    ]);
   });
 
   it("keeps API evidence primary when one native delivery is rejected", () => {

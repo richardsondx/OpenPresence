@@ -1,11 +1,13 @@
 import crypto from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
-import { readChannelSecret, readProviderSecret, readState, writeState } from "../lib/db";
+import { readChannelSecret, readProviderSecret, readState, shouldRecordNativeOperationalFailure, writeState } from "../lib/db";
 import { findVerifiedXReply, matchesXReply, normalizeXText, readRecentXPosts, readXPostsByIds } from "../lib/x";
-import { applyOperation, createAgent, derivePublicHistory, recordNativeMirror, recordPublicFooting } from "../lib/runtime";
+import { applyOperation, createAgent, derivePublicHistory, recordNativeMirror, recordPublicFooting, settleCapabilityTrialNoOpportunity } from "../lib/runtime";
+import { hydrateNativeXThreadContext } from "../lib/native-x";
 import { generateAgentReply } from "../lib/ai";
 import { POST } from "../app/api/x/manage/route";
 import { POST as statePost } from "../app/api/state/route";
+import { WorkspaceConflictError } from "../lib/db";
 import { GET as ollamaModelsGet } from "../app/api/ollama/models/route";
 
 beforeEach(() => {
@@ -19,6 +21,23 @@ beforeEach(() => {
 });
 
 describe("native X connection", () => {
+  it("does not classify workspace revision contention as a native X outage", () => {
+    const conflict = new WorkspaceConflictError("agent-test", 4, 5);
+    expect(shouldRecordNativeOperationalFailure(conflict)).toBe(false);
+    expect(shouldRecordNativeOperationalFailure(new Error("X returned 503"))).toBe(true);
+  });
+
+  it("closes the linked Assignment when a bounded trial finds no opportunity", () => {
+    const state = applyOperation(readState(), { type: "createCapabilityTrial", capability: "repost", environment: "sandbox", executionMode: "auto" });
+    const trial = state.capabilityTrials[0]!;
+    trial.status = "active";
+    const assignment = state.assignments.find((item) => item.id === trial.assignmentId)!;
+    assignment.status = "active";
+    const settled = settleCapabilityTrialNoOpportunity(state, trial.id, "No bounded candidate earned amplification.");
+    expect(settled.capabilityTrials[0]).toMatchObject({ status: "completed", result: "INCONCLUSIVE_NO_OPPORTUNITY" });
+    expect(settled.assignments.find((item) => item.id === trial.assignmentId)).toMatchObject({ status: "expired_incomplete", lastOutcome: { class: "incomplete" } });
+  });
+
   it("resolves a friendly Ollama model name to an installed tag", async () => {
     let state = readState();
     state = applyOperation(state, { type: "configureProvider", provider: "ollama", label: "Ollama local", endpoint: "http://localhost:11434" });
@@ -612,6 +631,45 @@ describe("native X connection", () => {
     }), { status: 200, headers: { "content-type": "application/json" } })));
     const result = await findVerifiedXReply({ apiKey: "api", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" }, { targetId: "target-1", text: "The verified reply.", handle: "@example_agent" });
     expect(result?.id).toBe("reply-from-search");
+    vi.unstubAllGlobals();
+  });
+
+  it("skips hydration network calls and hydration usage tracking for standalone posts without parentExternalRef", async () => {
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    const fetchMock = vi.fn();
+    vi.stubGlobal("fetch", fetchMock);
+
+    const state = createAgent({ name: "Jenny", description: "Useful ideas", audience: "builders", mode: "agent", handle: "@jenny_ai", accent: "#D68754" });
+    state.nativeConnections = [{
+      id: "conn-1",
+      presenceId: state.presence!.id,
+      kind: "x",
+      status: "connected",
+      environment: "live",
+      account: { id: "user-1", username: "jenny_ai", name: "Jenny" },
+      createdAt: "2026-08-20T00:00:00.000Z",
+      updatedAt: "2026-08-20T00:00:00.000Z",
+    }];
+    const standaloneMirror = {
+      id: "mirror-standalone",
+      bridgeId: "native:conn-1",
+      presenceId: state.presence!.id,
+      channelId: "x" as const,
+      externalRef: { type: "x.post", id: "standalone-1" },
+      objectType: "post",
+      occurredAt: "2026-08-20T00:00:00.000Z",
+      observedAt: "2026-08-20T00:00:00.000Z",
+      visibility: "public" as const,
+      shareability: "presence-only" as const,
+      environment: "live" as const,
+      source: "native" as const,
+      trust: "untrusted_world_content" as const,
+    };
+    state.mirrorObjects = [standaloneMirror];
+
+    const next = await hydrateNativeXThreadContext(state, state.presence!.id, standaloneMirror);
+    expect(fetchMock).not.toHaveBeenCalled();
+    expect(next.resourceUsageEvents.filter((event) => event.category === "hydration")).toHaveLength(0);
     vi.unstubAllGlobals();
   });
 });

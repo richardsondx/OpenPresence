@@ -1,7 +1,9 @@
 import {
   getDependencyHealth,
   getOpenRecoveryIncident,
+  getRecoveryIncident,
   listRecoveryAttempts,
+  listRecoveryIncidents,
   recordRecoveryAttempt,
   upsertDependencyHealth,
   upsertOperationalRun,
@@ -68,8 +70,8 @@ export function classifyFailureRootCause(
   // Rate limits / 429
   if (/rate limit|429|too many requests|quota/i.test(lower)) {
     return {
-      rootCauseKey: "provider.rate_limit",
-      safeSummary: "Provider request rate limit reached. Waiting for quota reset.",
+      rootCauseKey: `${dependency}.rate_limit`,
+      safeSummary: `${dependency === "native_x" ? "X API" : dependency === "model_provider" ? "AI Model Provider" : "Provider"} request rate limit reached. Waiting for quota reset.`,
       retryable: true,
       requiresOperator: false,
       requiresAuth: false,
@@ -137,6 +139,7 @@ export function recordOperationalFailure(input: {
   dependency: DependencyHealthKind;
   presenceId?: string;
   runId?: string;
+  invocationId?: string;
   error: string | Error;
   resetAt?: string;
 }): {
@@ -146,7 +149,7 @@ export function recordOperationalFailure(input: {
 } {
   const nowIso = new Date().toISOString();
   const classification = classifyFailureRootCause(input.error, input.dependency);
-  const budget = RECOVERY_BUDGETS[input.dependency];
+  const budget = RECOVERY_BUDGETS[input.dependency] ?? RECOVERY_BUDGETS.runtime;
 
   // 1. Get or initialize dependency health
   let health = getDependencyHealth(input.dependency, input.presenceId);
@@ -183,6 +186,8 @@ export function recordOperationalFailure(input: {
       safeSummary: classification.safeSummary,
       operatorActionRequired: classification.requiresOperator,
       requiresAuth: classification.requiresAuth,
+      runId: input.runId,
+      invocationId: input.invocationId,
       updatedAt: nowIso,
     };
   } else {
@@ -198,7 +203,7 @@ export function recordOperationalFailure(input: {
   if (classification.requiresOperator) {
     health.state = "requires_operator";
     incident.state = "needs_operator";
-  } else if (classification.rootCauseKey === "provider.rate_limit") {
+  } else if (classification.rootCauseKey.endsWith(".rate_limit") || classification.rootCauseKey === "provider.rate_limit") {
     quotaWaiting = true;
     const resetAt = input.resetAt ?? new Date(Date.now() + 15 * 60_000).toISOString();
     health.state = "waiting";
@@ -227,7 +232,7 @@ export function recordOperationalFailure(input: {
     const run = getOperationalRun(input.runId);
     if (run) {
       run.incidentId = incident.id;
-       run.state = classification.requiresOperator || circuitOpen ? "needs_operator" : quotaWaiting ? "waiting" : "recovering";
+      run.state = classification.requiresOperator || circuitOpen ? "needs_operator" : quotaWaiting ? "waiting" : "recovering";
       run.stage = `incident_${classification.rootCauseKey}`;
       run.lastProgressAt = nowIso;
       upsertOperationalRun(run);
@@ -268,24 +273,24 @@ export function recordOperationalSuccess(
 
   upsertDependencyHealth(health);
 
-  // Resolve every open incident owned by this dependency. A successful probe
-  // is stronger evidence than a root-cause string lookup.
-  const resolvedIncidents: RecoveryIncident[] = [];
+  // Resolve all open/recovering incidents for this dependency & presence
+  const openIncidents = listRecoveryIncidents(presenceId).filter(
+    (item) => item.state !== "resolved" && (
+      item.dependencyId === health?.id ||
+      item.dependencyId?.includes(dependency) ||
+      item.rootCauseKey.startsWith(`${dependency}.`) ||
+      (dependency === "managed_browser" && item.rootCauseKey.startsWith("browser.")) ||
+      (dependency === "user_attached_bridge" && item.rootCauseKey.startsWith("bridge."))
+    )
+  );
 
-  for (const candidate of [
-    getOpenRecoveryIncident("browser.composer_unavailable", presenceId),
-    getOpenRecoveryIncident("browser.auth_expired", presenceId),
-    getOpenRecoveryIncident("browser.connection_lost", presenceId),
-    getOpenRecoveryIncident("bridge.disconnected", presenceId),
-    getOpenRecoveryIncident("provider.rate_limit", presenceId),
-    getOpenRecoveryIncident("runtime.unresponsive", presenceId),
-    getOpenRecoveryIncident(`${dependency}.transient_error`, presenceId),
-  ]) {
-    if (!candidate || candidate.state === "resolved" || resolvedIncidents.some((item) => item.id === candidate.id)) continue;
+  const resolvedIncidents: RecoveryIncident[] = [];
+  for (const candidate of openIncidents) {
     candidate.state = "resolved";
     candidate.resolvedAt = nowIso;
     candidate.updatedAt = nowIso;
     candidate.operatorActionRequired = false;
+    delete candidate.nextAttemptAt;
     upsertRecoveryIncident(candidate);
     resolvedIncidents.push(candidate);
   }
@@ -298,6 +303,8 @@ export function logRecoveryAttempt(input: {
   step: string;
   outcome: "succeeded" | "failed" | "deferred";
   error?: string;
+  runId?: string;
+  invocationId?: string;
 }): RecoveryAttempt {
   const attempts = listRecoveryAttempts(input.incidentId);
   const attemptNumber = attempts.length + 1;
@@ -308,8 +315,61 @@ export function logRecoveryAttempt(input: {
     step: input.step,
     outcome: input.outcome,
     error: input.error,
+    runId: input.runId,
+    invocationId: input.invocationId,
     timestamp: new Date().toISOString(),
   };
   recordRecoveryAttempt(attempt);
+
+  // Atomically update the incident recovery attempt count and advance state/health
+  const incident = getRecoveryIncident(input.incidentId);
+  if (incident) {
+    incident.recoveryAttempts = attemptNumber;
+    incident.lastObservedAt = attempt.timestamp;
+    incident.currentRecoveryStep = input.step;
+    incident.updatedAt = attempt.timestamp;
+    if (input.runId && !incident.affectedRunIds.includes(input.runId)) {
+      incident.affectedRunIds.push(input.runId);
+    }
+
+    const dependencyKind = (incident.dependencyId?.replace(/^dh_/, "").split("_")[0] ?? "runtime") as DependencyHealthKind;
+    const health = getDependencyHealth(dependencyKind, incident.presenceId);
+    const budget = RECOVERY_BUDGETS[dependencyKind] ?? RECOVERY_BUDGETS.runtime;
+
+    if (input.outcome === "succeeded") {
+      incident.state = "resolved";
+      incident.resolvedAt = attempt.timestamp;
+      incident.operatorActionRequired = false;
+      delete incident.nextAttemptAt;
+      if (health) {
+        health.state = "healthy";
+        health.consecutiveFailures = 0;
+        health.lastHealthyAt = attempt.timestamp;
+        delete health.currentIncidentId;
+        health.updatedAt = attempt.timestamp;
+        upsertDependencyHealth(health);
+      }
+    } else if (incident.recoveryAttempts >= budget.maxAttempts) {
+      incident.state = "needs_operator";
+      incident.operatorActionRequired = true;
+      delete incident.nextAttemptAt;
+      if (health) {
+        health.state = "requires_operator";
+        health.updatedAt = attempt.timestamp;
+        upsertDependencyHealth(health);
+      }
+    } else if (input.outcome === "failed") {
+      incident.state = "recovering";
+      const cooldownSec = budget.cooldownSeconds * Math.pow(1.5, attemptNumber - 1);
+      incident.nextAttemptAt = new Date(Date.now() + cooldownSec * 1000).toISOString();
+      if (health) {
+        health.state = "recovering";
+        health.updatedAt = attempt.timestamp;
+        upsertDependencyHealth(health);
+      }
+    }
+    upsertRecoveryIncident(incident);
+  }
+
   return attempt;
 }

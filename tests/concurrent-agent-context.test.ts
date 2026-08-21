@@ -74,6 +74,14 @@ describe("independent Agent browser contexts", () => {
     expect(payload.conflict).toBe(true);
     expect(payload.state.presence.pacing).toBe("gentle");
 
+    // A client that adopts the conflict snapshot must be able to replay its
+    // pending local change against the returned revision without losing the
+    // newer write. This is the protocol used by the browser mutation paths.
+    const refreshedHeaders = { ...headers, "x-openpresence-workspace-revision": String(payload.state.workspaceRevision) };
+    const replayed = await statePost(new Request("http://localhost/api/state", { method: "POST", headers: refreshedHeaders, body: JSON.stringify({ type: "setPresence", patch: { pacing: "custom" } }) }));
+    expect(replayed.status).toBe(200);
+    expect((await replayed.json()).presence.pacing).toBe("custom");
+
     writeState(initialState());
   });
 });

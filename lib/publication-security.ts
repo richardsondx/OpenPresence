@@ -125,7 +125,12 @@ export function sealExecutionForDelivery(execution: Execution) {
   const payloadHash = publicExpressionHash({ ...candidate, text, safetyStatus: "sealed" });
   const sealed: PublicExpression = { ...candidate, text, safetyStatus: "sealed", payloadHash };
   const issuedAt = new Date().toISOString();
-  const expiresAt = new Date(Date.now() + 60_000).toISOString();
+  // Bridge claims have a 120-second lease and the Chrome executor keeps a
+  // small recovery grace period while X navigates between timeline, target,
+  // and composer. The permit must outlive that bounded delivery window or a
+  // healthy Auto Presence can be blocked as EXPIRED_PERMIT before the tab has
+  // a chance to submit and verify the action.
+  const expiresAt = new Date(Date.now() + 180_000).toISOString();
   const unsigned: Omit<ExecutionPermit, "signature"> = { executionId: execution.id, publicExpressionId: sealed.id, presenceId: execution.presenceId, environment: "live", channel: sealed.channel, affordance: execution.affordance, payloadHash, issuedAt, expiresAt, nonce: randomId() };
   const permit: ExecutionPermit = { ...unsigned, signature: signatureFor(unsigned) };
   execution.publication = { ...publication, publicExpression: sealed };

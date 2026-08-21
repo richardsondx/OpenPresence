@@ -10,6 +10,10 @@ const preferredDbPath = path.join(projectRoot, "data", "openpresence-genny-resto
 const fallbackDbPath = path.join(projectRoot, "data", "openpresence.db");
 const dbPath = process.env.OPENPRESENCE_DB_PATH || (fs.existsSync(preferredDbPath) ? preferredDbPath : fallbackDbPath);
 const port = process.env.OPENPRESENCE_PORT || "3015";
+// Multiple local Presence workspaces can run side by side. Keep their Next
+// build artifacts isolated so one dev server cannot invalidate another
+// server's route manifests while Chrome is exercising the interface.
+const nextDistDir = process.env.OPENPRESENCE_NEXT_DIST_DIR || `.next-${port}`;
 const publicationSigningKeyPath = path.join(path.dirname(dbPath), ".publication-signing-key");
 const localSecretKeyPath = path.join(path.dirname(dbPath), ".secret-key");
 const localSecretKey = process.env.OPENPRESENCE_SECRET_KEY || (() => {
@@ -39,6 +43,7 @@ const child = spawn("pnpm", ["exec", "next", mode, "-p", port], {
     OPENPRESENCE_SECRET_KEY: localSecretKey,
     OPENPRESENCE_DEFAULT_AGENT_NAME: process.env.OPENPRESENCE_DEFAULT_AGENT_NAME || "Genny",
     OPENPRESENCE_PUBLICATION_SIGNING_KEY: publicationSigningKey,
+    OPENPRESENCE_NEXT_DIST_DIR: nextDistDir,
   },
   stdio: "inherit",
 });

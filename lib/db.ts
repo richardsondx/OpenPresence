@@ -18,11 +18,45 @@ const defaultDbPath = fs.existsSync(preferredDbPath)
     : path.join(dataDir, "openpresence.db");
 const sqlite = new Database(process.env.OPENPRESENCE_DB_PATH ?? defaultDbPath);
 sqlite.pragma("journal_mode = WAL");
+// Chrome Bridge heartbeats and the Presence worker can touch the same local
+// database concurrently. Wait briefly for the writer instead of surfacing a
+// transient SQLITE_BUSY as a hung or failed interface request.
+sqlite.pragma("busy_timeout = 5000");
 const db = drizzle(sqlite);
 
 type StateContext = { agentId?: string | null; presenceId?: string | null };
 type StateCache = { updatedAt: string; state: OpenPresenceState };
 let stateCache: StateCache | undefined;
+
+type UsageWorkspace = Pick<OpenPresenceState, "agent" | "presences" | "resourceUsageEvents">;
+
+/** Read the small usage projection without normalizing the full operational workspace. */
+export function readUsageWorkspaces(): UsageWorkspace[] {
+  const rows = sqlite.prepare(`
+    SELECT
+      json_extract(payload, '$.agent') AS agent,
+      json_extract(payload, '$.presences') AS presences,
+      json_extract(payload, '$.resourceUsageEvents') AS resource_usage_events
+    FROM app_state WHERE id = 1
+    UNION ALL
+    SELECT
+      json_extract(payload, '$.agent') AS agent,
+      json_extract(payload, '$.presences') AS presences,
+      json_extract(payload, '$.resourceUsageEvents') AS resource_usage_events
+    FROM agent_workspaces
+  `).all() as Array<{ agent?: string | null; presences?: string | null; resource_usage_events?: string | null }>;
+  return rows.flatMap((row) => {
+    try {
+      return [{
+        agent: row.agent ? JSON.parse(row.agent) as UsageWorkspace["agent"] : null,
+        presences: row.presences ? JSON.parse(row.presences) as UsageWorkspace["presences"] : [],
+        resourceUsageEvents: row.resource_usage_events ? JSON.parse(row.resource_usage_events) as UsageWorkspace["resourceUsageEvents"] : [],
+      }];
+    } catch {
+      return [];
+    }
+  });
+}
 
 // app_state is retained as a compatibility read model for the first local release.
 // The domain collections below are the normalized write projection used for audit,
@@ -141,6 +175,88 @@ function hydrateAgentWorkspaces(state: OpenPresenceState): OpenPresenceState {
   return { ...state, workspaceRevision: state.activeAgentId ? revisions.get(state.activeAgentId) ?? state.workspaceRevision ?? 0 : state.workspaceRevision, agentWorkspaces: snapshots };
 }
 
+function hydrateOperationalState(state: OpenPresenceState): OpenPresenceState {
+  let recoveryIncidents = state.recoveryIncidents;
+  try {
+    const rows = sqlite.prepare("SELECT payload FROM recovery_incidents_live ORDER BY updated_at DESC").all() as Array<{ payload: string }>;
+    if (rows.length > 0) {
+      recoveryIncidents = rows.flatMap((r) => {
+        try { return [JSON.parse(r.payload) as RecoveryIncident]; } catch { return []; }
+      });
+    }
+  } catch { /* retain compatibility when table not available */ }
+
+  let recoveryAttempts = state.recoveryAttempts;
+  try {
+    const attemptRows = sqlite.prepare("SELECT id, incident_id, attempt_number, step, outcome, error, timestamp FROM recovery_attempts_log ORDER BY timestamp ASC").all() as Array<{
+      id: string;
+      incident_id: string;
+      attempt_number: number;
+      step: string;
+      outcome: string;
+      error?: string | null;
+      timestamp: string;
+    }>;
+    if (attemptRows.length > 0) {
+      recoveryAttempts = attemptRows.map((r) => ({
+        id: r.id,
+        incidentId: r.incident_id,
+        attemptNumber: r.attempt_number,
+        step: r.step,
+        outcome: r.outcome as RecoveryAttempt["outcome"],
+        error: r.error ?? undefined,
+        timestamp: r.timestamp,
+      }));
+    }
+  } catch { /* retain compatibility when table not available */ }
+
+  let operationalRuns = state.operationalRuns;
+  try {
+    const opRows = sqlite.prepare("SELECT payload FROM operational_runs_idx ORDER BY updated_at DESC").all() as Array<{ payload: string }>;
+    if (opRows.length > 0) {
+      operationalRuns = opRows.flatMap((r) => {
+        try { return [JSON.parse(r.payload) as OperationalRun]; } catch { return []; }
+      });
+    }
+  } catch { /* retain compatibility when table not available */ }
+
+  let dependencyHealth = state.dependencyHealth;
+  try {
+    const dhRows = sqlite.prepare("SELECT id, presence_id, dependency, state, consecutive_failures, circuit_until, current_incident_id, metadata, updated_at FROM dependency_health_live").all() as Array<{
+      id: string;
+      presence_id?: string | null;
+      dependency: string;
+      state: string;
+      consecutive_failures: number;
+      circuit_until?: string | null;
+      current_incident_id?: string | null;
+      metadata?: string | null;
+      updated_at: string;
+    }>;
+    if (dhRows.length > 0) {
+      dependencyHealth = dhRows.map((r) => ({
+        id: r.id,
+        presenceId: r.presence_id ?? undefined,
+        dependency: r.dependency as DependencyHealthKind,
+        state: r.state as DependencyHealthState,
+        consecutiveFailures: r.consecutive_failures,
+        circuitUntil: r.circuit_until ?? undefined,
+        currentIncidentId: r.current_incident_id ?? undefined,
+        metadata: r.metadata ? (JSON.parse(r.metadata) as Record<string, JsonValue>) : undefined,
+        updatedAt: r.updated_at,
+      }));
+    }
+  } catch { /* retain compatibility when table not available */ }
+
+  return {
+    ...state,
+    recoveryIncidents: recoveryIncidents ?? [],
+    recoveryAttempts: recoveryAttempts ?? [],
+    operationalRuns: operationalRuns ?? [],
+    dependencyHealth: dependencyHealth ?? [],
+  };
+}
+
 /** Return the cheap persistence token used by conditional state reads. */
 export function readStateVersion() {
   const row = sqlite.prepare("SELECT updated_at FROM app_state WHERE id = 1").get() as { updated_at?: string } | undefined;
@@ -148,14 +264,15 @@ export function readStateVersion() {
 }
 
 /**
- * Conditional browser reads must also notice operational bridge changes.
+ * Conditional browser reads must also notice operational bridge and incident changes.
  * Keep readStateVersion focused on workspace writes for conflict semantics,
  * while this read token includes the separate high-frequency health model.
  */
 export function readStateReadToken() {
   const workspace = readStateVersion();
   const health = sqlite.prepare("SELECT MAX(updated_at) AS updated_at FROM bridge_health").get() as { updated_at?: string | null } | undefined;
-  return `${workspace}:${health?.updated_at ?? "empty"}`;
+  const incident = sqlite.prepare("SELECT MAX(updated_at) AS updated_at FROM recovery_incidents_live").get() as { updated_at?: string | null } | undefined;
+  return `${workspace}:${health?.updated_at ?? "empty"}:${incident?.updated_at ?? "empty"}`;
 }
 
 export function writeBridgeHeartbeat(input: { bridgeId: string; state: string; adapterStatus: string; lastHeartbeatAt: string; lastSeenAt: string }) {
@@ -212,24 +329,24 @@ export function readStateSnapshot(): OpenPresenceState {
 }
 
 export function readState(): OpenPresenceState {
-  return JSON.parse(JSON.stringify(hydrateBridgeHealth(readStateSnapshot()))) as OpenPresenceState;
+  return JSON.parse(JSON.stringify(hydrateOperationalState(hydrateBridgeHealth(readStateSnapshot())))) as OpenPresenceState;
 }
 
 /** Materialize a mutable context from the cached state with one clone. */
 export function readStateForContext(context: StateContext): OpenPresenceState {
-  return stateForContext(hydrateBridgeHealth(readStateSnapshot()), context);
+  return stateForContext(hydrateOperationalState(hydrateBridgeHealth(readStateSnapshot())), context);
 }
 
 /** Read-only context projection for GET responses; unchanged active reads share the cache. */
 export function readStateSnapshotForContext(context: StateContext): OpenPresenceState {
-  const state = hydrateBridgeHealth(readStateSnapshot());
+  const state = hydrateOperationalState(hydrateBridgeHealth(readStateSnapshot()));
   const activeAgentMatches = !context.agentId || context.agentId === state.activeAgentId;
   const activePresenceMatches = !context.presenceId || context.presenceId === state.activePresenceId;
   return activeAgentMatches && activePresenceMatches ? state : stateForContext(state, context);
 }
 
 export function readStateForAgent(agentId?: string | null): OpenPresenceState {
-  return stateForAgent(hydrateBridgeHealth(readStateSnapshot()), agentId);
+  return stateForAgent(hydrateOperationalState(hydrateBridgeHealth(readStateSnapshot())), agentId);
 }
 
 /** Resolve connector work from its durable Presence/Agent owner, never from the active projection. */
@@ -258,6 +375,11 @@ export class WorkspaceConflictError extends Error {
     super("This Agent workspace changed in another tab or worker. Refreshing this context is required before applying the change.");
     this.name = "WorkspaceConflictError";
   }
+}
+
+/** Workspace contention is a local retry condition, not a Native X outage. */
+export function shouldRecordNativeOperationalFailure(error: unknown) {
+  return !(error instanceof WorkspaceConflictError);
 }
 
 function entityRows(state: OpenPresenceState): Record<string, { id: string; agentId?: string; parentId?: string; payload: unknown }[]> {
@@ -349,7 +471,7 @@ function writeNormalized(state: OpenPresenceState) {
   transaction();
 }
 
-export function writeState(state: OpenPresenceState, options?: { advanceWorkspaceRevision?: boolean; syncNormalized?: boolean; persistAgentWorkspaces?: boolean }) {
+export function writeState(state: OpenPresenceState, options?: { advanceWorkspaceRevision?: boolean; syncNormalized?: boolean; persistAgentWorkspaces?: boolean; force?: boolean }) {
   const normalized = normalizeState(state);
   const agentId = normalized.agent?.id;
   const advanceWorkspaceRevision = options?.advanceWorkspaceRevision !== false;
@@ -361,7 +483,7 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
     if (agentId) {
       sqlite.prepare("INSERT OR IGNORE INTO agent_workspace_revisions (agent_id, revision, updated_at) VALUES (?, 0, ?)").run(agentId, persistedAt);
       actualRevision = ((sqlite.prepare("SELECT revision FROM agent_workspace_revisions WHERE agent_id = ?").get(agentId) as { revision?: number } | undefined)?.revision ?? 0);
-      if (expectedRevision !== undefined && expectedRevision !== actualRevision) throw new WorkspaceConflictError(agentId, expectedRevision, actualRevision);
+      if (expectedRevision !== undefined && expectedRevision !== actualRevision && !options?.force) throw new WorkspaceConflictError(agentId, expectedRevision, actualRevision);
       normalized.workspaceRevision = advanceWorkspaceRevision ? actualRevision + 1 : actualRevision;
     }
     sqlite.prepare("INSERT INTO app_state (id, payload, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at").run(JSON.stringify(normalized), persistedAt);
@@ -600,6 +722,34 @@ export function getDueScheduledWakes(nowIso = new Date().toISOString()): Schedul
     WHERE state = 'pending' AND wake_at <= ?
     ORDER BY wake_at ASC
   `).all(nowIso) as Array<{
+    id: string;
+    presence_id?: string | null;
+    wake_at: string;
+    kind: string;
+    target_id?: string | null;
+    state: string;
+    payload?: string | null;
+    updated_at: string;
+    created_at?: string | null;
+  }>;
+  return rows.map((r) => ({
+    id: r.id,
+    presenceId: r.presence_id ?? undefined,
+    wakeAt: r.wake_at,
+    kind: r.kind as ScheduledWake["kind"],
+    targetId: r.target_id ?? undefined,
+    state: r.state as ScheduledWake["state"],
+    payload: r.payload ? (JSON.parse(r.payload) as Record<string, JsonValue>) : undefined,
+    createdAt: r.created_at ?? r.updated_at,
+    updatedAt: r.updated_at,
+  }));
+}
+
+export function listScheduledWakes(presenceId?: string): ScheduledWake[] {
+  const query = presenceId
+    ? `SELECT id, presence_id, wake_at, kind, target_id, state, payload, updated_at, created_at FROM scheduled_wakes_idx WHERE presence_id = ? ORDER BY created_at DESC LIMIT 100`
+    : `SELECT id, presence_id, wake_at, kind, target_id, state, payload, updated_at, created_at FROM scheduled_wakes_idx ORDER BY created_at DESC LIMIT 100`;
+  const rows = (presenceId ? sqlite.prepare(query).all(presenceId) : sqlite.prepare(query).all()) as Array<{
     id: string;
     presence_id?: string | null;
     wake_at: string;

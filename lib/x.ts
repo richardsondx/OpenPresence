@@ -163,10 +163,19 @@ function apiError(status: number, body: unknown) {
 }
 
 async function requestJson<T>(path: string, init: RequestInit): Promise<T> {
-  const response = await fetch(`${apiBase()}${path}`, { ...init, headers: { Accept: "application/json", ...init.headers } });
-  const body = await response.json().catch(() => undefined);
-  if (!response.ok) throw apiError(response.status, body);
-  return body as T;
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(`${apiBase()}${path}`, { ...init, signal: controller.signal, headers: { Accept: "application/json", ...init.headers } });
+    const body = await response.json().catch(() => undefined);
+    if (!response.ok) throw apiError(response.status, body);
+    return body as T;
+  } catch (error) {
+    if (error instanceof Error && error.name === "AbortError") throw new Error("X did not respond within the bounded connector window.");
+    throw error;
+  } finally {
+    clearTimeout(timer);
+  }
 }
 
 async function requestUpload(path: string, init: RequestInit): Promise<Record<string, unknown>> {

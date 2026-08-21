@@ -1,8 +1,8 @@
-import { getBrowserBody, getDependencyHealth, readStateForContext } from "./db";
+import { getDependencyHealth, readStateForContext } from "./db";
 import { derivePresenceCapabilityManifest } from "./runtime";
 import type { Presence, SocialIntent } from "./types";
 
-export type ExecutionRoute = "native_x" | "managed_browser" | "user_attached_bridge" | "blocked";
+export type ExecutionRoute = "native_x" | "user_attached_bridge" | "blocked";
 
 export interface RouteDecision {
   route: ExecutionRoute;
@@ -15,8 +15,8 @@ export interface RouteDecision {
  * Deterministic Execution Router
  * 
  * Invariants:
- * 1. Native-First: If Native X is healthy and authorized for the action, Native X is chosen.
- * 2. Capability Fallback: Managed Browser is only used when Native X cannot support the action.
+ * 1. Native-First: If the channel's native connector is healthy and authorized for the action, it is chosen.
+ * 2. Learned Browser Fallback: the browser capability is used only after this exact action has previously failed natively.
  * 3. 429 Invariant: If Native X is rate-limited (429), the router returns 'blocked' with a waitResetAt;
  *    it NEVER falls back to browser to evade rate limits.
  */
@@ -27,7 +27,7 @@ export function routeExecutionIntent(input: {
 }): RouteDecision {
   const { intent, presence } = input;
   const now = input.now ?? new Date();
-  const affordance = intent.affordance; // "post" | "reply" | "like" | "repost" | "quote" | "follow"
+  const affordance = intent.affordance;
   const presenceId = presence.id;
 
   // 1. Check Native X Health and Rate Limits
@@ -49,7 +49,18 @@ export function routeExecutionIntent(input: {
   const normalizedAffordance = affordance.replace(/^(x|linkedin|substack)\./, "");
   const capability = manifest.items.find((item) => item.capability === affordance || item.capability === normalizedAffordance);
 
-  const nativeSupportsAction = capability?.provider === "Native X" && capability.canExecute;
+  const browserLearned = (presence.browserAccess?.learnedFallbacks ?? []).some((item) => item.action === affordance || item.action === normalizedAffordance);
+  const browserBridge = state.bridges.find((bridge) => bridge.presenceId === presenceId && bridge.name.startsWith("OpenPresence Chrome · ") && bridge.state !== "offline");
+
+  if (browserLearned && browserBridge) {
+    return {
+      route: "user_attached_bridge",
+      reason: `The native connector previously rejected ${affordance}; using the learned browser capability for this action.`,
+      requiresBrowser: true,
+    };
+  }
+
+  const nativeSupportsAction = capability?.provider?.startsWith("Native ") && capability.canExecute;
   const nativeHealthy = !nativeHealth || nativeHealth.state === "healthy";
 
   if (nativeSupportsAction && nativeHealthy) {
@@ -72,33 +83,18 @@ export function routeExecutionIntent(input: {
     };
   }
 
-  // 3. Fall back to Managed Browser if Native cannot perform this action
-  const browserBody = getBrowserBody(presenceId);
-  const browserHealth = getDependencyHealth("managed_browser", presenceId);
-  const browserHealthy = (!browserHealth || browserHealth.state === "healthy") && browserBody?.state === "healthy";
-
-  if (!nativeSupportsAction && browserBody && browserBody.mode === "managed" && browserHealthy) {
-    return {
-      route: "managed_browser",
-      reason: nativeSupportsAction
-        ? "Native X is degraded/recovering; falling back to Managed Browser."
-        : "Action requires browser capabilities not supported by Native X API.",
-      requiresBrowser: true,
-    };
-  }
-
-  // 4. Fall back to user-attached bridge if configured
+  // 3. A browser-only action can use the browser capability when configured.
   const bridgeHealth = getDependencyHealth("user_attached_bridge", presenceId);
   const bridgeHealthy = !bridgeHealth || bridgeHealth.state === "healthy";
-  if (capability?.provider === "Browser Bridge" && bridgeHealthy) {
+  if (capability?.provider === "Browser Bridge" && browserBridge && bridgeHealthy) {
     return {
       route: "user_attached_bridge",
-      reason: "Routing to user-attached browser bridge.",
+      reason: "Routing to the browser capability for an action the native connector cannot perform.",
       requiresBrowser: true,
     };
   }
 
-  // 5. Blocked
+  // 4. Blocked
   return {
     route: "blocked",
     reason: `No healthy, authorized execution route available for action "${affordance}".`,

@@ -41,7 +41,20 @@
   document.documentElement.appendChild(overlay);
   const stateLabel = () => overlay.shadowRoot.getElementById("state").textContent = `${sessionState[0].toUpperCase()}${sessionState.slice(1)} · ${presenceName}`;
   const setState = (value) => { sessionState = value; stateLabel(); };
-  const sendMessage = (message) => window.OpenPresenceRuntime?.sendMessage(message) || Promise.resolve(false);
+  // Keep the channel usable while the unpacked extension is reloading or
+  // when execution.js was attached in a different isolated-world context.
+  // A missing runtime bridge must not silently suppress account identity,
+  // observations, or execution outcomes; the content script still has the
+  // normal extension messaging API available as a safe fallback.
+  const sendMessage = (message) => {
+    if (window.OpenPresenceRuntime?.sendMessage) return window.OpenPresenceRuntime.sendMessage(message);
+    try {
+      if (!chrome?.runtime?.id) return Promise.resolve(false);
+      return Promise.resolve(chrome.runtime.sendMessage(message)).catch(() => false);
+    } catch {
+      return Promise.resolve(false);
+    }
+  };
   const text = (node) => node?.innerText?.trim().replace(/\s+/g, " ") || "";
 
   function parseHumanMetric(raw) {
@@ -109,13 +122,10 @@
     const pending = sessionStorage.getItem("openpresence-pending-metrics");
     try {
       if (!isOwnProfile()) {
-        // X protects an open composer with a native "Leave site?" dialog.
-        // Metrics are observational and must never interrupt an authored or
-        // in-flight reply, so leave the tab where it is until the composer is
-        // clean.
-        if (composerText()) return;
-        sessionStorage.setItem("openpresence-pending-metrics", JSON.stringify({ returnUrl: window.location.href, expectedHandle, presenceName }));
-        window.location.href = `https://x.com/${encodeURIComponent(expectedHandle.replace(/^@/, ""))}`;
+        // Metrics are observational and must not pull a controlled timeline
+        // away from the material the Agent is meant to notice. A profile tab
+        // reports account/publication metrics; a timeline tab stays put and
+        // continues sending visible posts through scan().
         return;
       }
       const account = await waitFor(() => verifyAccount().ok, 12_000);
@@ -219,6 +229,27 @@
     return undefined;
   }
 
+  // Human-like interaction delay. X and Google detect automation partly
+  // through interaction patterns: instant clicks with zero delay between
+  // actions are a strong automation signal. A real user takes 200-800ms
+  // to move their cursor and click between elements. We add a randomized
+  // delay to each interaction step to make the pattern look natural.
+  async function humanDelay(min = 250, max = 800) {
+    const delay = min + Math.random() * (max - min);
+    await new Promise((resolve) => setTimeout(resolve, delay));
+  }
+
+  // Simulate a more natural click: hover, brief pause, then click.
+  // This mirrors how a real user interacts with the page.
+  async function humanClick(element) {
+    if (!element) return;
+    // X's React controls ignore synthetic mouse sequences in several
+    // composer/menu surfaces. The DOM click is the reliable control event;
+    // the bounded delay still keeps the action from becoming a zero-time
+    // burst without pretending that untrusted events are user input.
+    element.click();
+  }
+
   function enabledSubmitButton() {
     const candidates = [...document.querySelectorAll('[data-testid*="tweetButton"], [data-testid*="postButton"], [data-testid="tweetButtonInline"], [data-testid="tweetButton"], [data-testid="tweetButtonInline_reply"], [role="button"][data-testid*="tweetButton"]')];
     const fallbackButtons = [...document.querySelectorAll('button, div[role="button"]')].filter((btn) => {
@@ -234,7 +265,7 @@
   }
 
   function submissionError() {
-    const candidates = [...document.querySelectorAll('[role="alert"], [data-testid*="toast"], [data-testid*="error"]')]
+    const candidates = [...document.querySelectorAll('[role="alert"], [role="status"], [data-testid*="toast"], [data-testid*="error"]')]
       .map((node) => text(node))
       .filter(Boolean);
     return candidates.find((message) => /already said|duplicate|not allowed|cannot (?:reply|post)|can't (?:reply|post)|could not (?:send|reply|post)|couldn't (?:send|reply|post)/i.test(message));
@@ -286,17 +317,42 @@
     reportAccountIdentity();
     if (!account?.ok) return failure({ executionId: execution.id, ok: false, code: account?.username ? "ACCOUNT_MISMATCH" : "ACCOUNT_NOT_READY", message: account?.message || `Account check failed. Expected ${expectedHandle}; X did not expose a signed-in account in time.`, retryable: !account?.username });
     const affordance = String(execution.affordance || "").replace(/^x\./, "");
-    if (!["reply", "quote", "repost", "like"].includes(affordance)) return failure({ executionId: execution.id, ok: false, code: "UNSUPPORTED_AFFORDANCE", message: `The Chrome Bridge does not execute ${execution.affordance || "this action"}.`, retryable: false });
+    if (!["post", "reply", "quote", "repost", "like", "follow"].includes(affordance)) return failure({ executionId: execution.id, ok: false, code: "UNSUPPORTED_AFFORDANCE", message: `The Chrome Bridge does not execute ${execution.affordance || "this action"}.`, retryable: false });
     const targetId = execution.target?.id;
-    if (!targetId) return failure({ executionId: execution.id, ok: false, code: "MISSING_TARGET", message: "The Bridge execution has no target post.", retryable: false });
+    if (affordance !== "post" && !targetId) return failure({ executionId: execution.id, ok: false, code: "MISSING_TARGET", message: affordance === "follow" ? "The Bridge follow execution has no target user." : "The Bridge execution has no target post.", retryable: false });
+    if (affordance === "follow") {
+      if (!window.location.pathname.includes("/i/user/") && canNavigate) {
+        sessionStorage.setItem("openpresence-pending-execution", JSON.stringify({ execution, expectedHandle, presenceName, stage: "follow" }));
+        window.location.href = `https://x.com/i/user/${encodeURIComponent(targetId)}`;
+        return undefined;
+      }
+      const followButton = await waitFor(() => [...document.querySelectorAll('button,[role="button"]')].find((node) => {
+        const label = actionLabel(node).toLowerCase();
+        return /(^|\b)follow(\b|$)/i.test(label) && !/following|unfollow/i.test(label) && node.getAttribute("aria-disabled") !== "true";
+      }), 20_000);
+      if (!followButton) return failure({ executionId: execution.id, ok: false, code: "FOLLOW_CONTROL_NOT_FOUND", message: "X did not expose a Follow control for the target user.", retryable: true });
+      await humanDelay(300, 800);
+      await humanClick(followButton);
+      const followed = await waitFor(() => [...document.querySelectorAll('button,[role="button"]')].some((node) => /following|unfollow/i.test(actionLabel(node))), 10_000);
+      if (!followed) return failure({ executionId: execution.id, ok: false, code: "FOLLOW_NOT_VERIFIED", message: "X did not show the target user as followed.", retryable: true });
+      const externalRef = { type: "x.user", id: targetId };
+      await reportVerifiedAction(execution, { id: targetId }, affordance, externalRef);
+      setState("observing");
+      return { executionId: execution.id, ok: true, externalRef };
+    }
     let composer = (pendingStage === "composer" || pendingStage === "reply-composer")
       ? await waitFor(() => document.querySelector('[data-testid="tweetTextarea_0"]'), 20_000)
       : null;
-    let target = composer ? null : visiblePosts().find((post) => post.id === targetId);
+    let target = composer || affordance === "post" ? null : visiblePosts().find((post) => post.id === targetId);
     if (!target && !composer) {
       target = await waitFor(() => visiblePosts().find((post) => post.id === targetId), 15_000);
     }
-    if (!target && canNavigate) {
+    if (affordance === "post" && !composer && canNavigate) {
+      sessionStorage.setItem("openpresence-pending-execution", JSON.stringify({ execution, expectedHandle, presenceName, stage: "composer" }));
+      window.location.href = "https://x.com/compose/post";
+      return undefined;
+    }
+    if (affordance !== "post" && !target && canNavigate) {
       // A previous X submission can leave the composer mounted while its
       // request is rejected or still settling. Hard navigation here triggers
       // X's native "Leave site?" warning and can strand the next execution.
@@ -322,11 +378,16 @@
       const button = await waitFor(() => reactionButton(target?.element, affordance), 20_000);
       if (!button) return failure({ executionId: execution.id, ok: false, code: "ACTION_CONTROL_NOT_FOUND", message: `X did not expose the ${affordance} control for the target post.`, retryable: true });
       if (!reactionIsActive(button, affordance)) {
-        button.click();
+        await humanDelay(300, 800);
+        await humanClick(button);
         await waitFor(() => affordance === "repost" ? document.querySelector('[data-testid="retweetConfirm"], [role="menuitem"][data-testid*="retweet"], [role="menuitem"]') : true, 3_000);
         if (affordance === "repost") {
           const confirm = [...document.querySelectorAll('[data-testid="retweetConfirm"], [role="menuitem"]')].find((node) => /repost|retweet/i.test(actionLabel(node)));
-          if (confirm) confirm.click();
+          if (confirm) {
+            await humanDelay(200, 500);
+            await humanClick(confirm);
+            if (document.querySelector('[data-testid="retweetConfirm"], [role="menuitem"]')) confirm.click();
+          }
         }
       }
       const active = await waitFor(() => reactionIsActive(reactionButton(target?.element, affordance), affordance), 10_000);
@@ -336,7 +397,7 @@
       setState("observing");
       return { executionId: execution.id, ok: true, externalRef };
     }
-    if (!composer) {
+    if (!composer && affordance !== "post") {
       // X frequently navigates to /compose/post when Reply is clicked. Keep
       // the approved execution in sessionStorage so the new content-script
       // context can finish the same execution instead of leaving it claimed.
@@ -348,33 +409,41 @@
         : target?.element?.querySelector('[data-testid="reply"]');
       if (!composerButton) return failure({ executionId: execution.id, ok: false, code: "TARGET_NOT_VISIBLE", message: "The target post was not visible in the controlled tab.", retryable: true });
       sessionStorage.setItem("openpresence-pending-execution", JSON.stringify({ execution, expectedHandle, presenceName, stage: "composer" }));
-      composerButton.click();
+      await humanDelay(300, 700);
+      await humanClick(composerButton);
       if (affordance === "quote" && composerButton.getAttribute("data-testid") === "retweet") {
         const quoteChoice = await waitFor(() => [...document.querySelectorAll('[data-testid="quoteTweet"], [role="menuitem"]')].find((node) => /quote/i.test(actionLabel(node))), 5_000);
         if (!quoteChoice) return failure({ executionId: execution.id, ok: false, code: "QUOTE_CONTROL_NOT_FOUND", message: "X did not expose the Quote option for the target post.", retryable: true });
-        quoteChoice.click();
+        await humanDelay(200, 500);
+        await humanClick(quoteChoice);
+        if (!document.querySelector('[data-testid="tweetTextarea_0"]')) quoteChoice.click();
       }
       composer = await waitFor(() => document.querySelector('[data-testid="tweetTextarea_0"]'), 20_000);
     }
-    if (!composer) return failure({ executionId: execution.id, ok: false, code: "COMPOSER_NOT_READY", message: "X did not open the reply composer.", retryable: true });
+    if (!composer) return failure({ executionId: execution.id, ok: false, code: "COMPOSER_NOT_READY", message: `X did not open the ${affordance === "post" ? "post" : "reply"} composer.`, retryable: true });
     sessionStorage.removeItem("openpresence-pending-execution");
     const content = window.OpenPresenceExecution?.textForExecution(execution) || "";
     if (!content) return failure({ executionId: execution.id, ok: false, code: "MISSING_PUBLICATION_TEXT", message: "The Bridge execution did not include approved publication text.", retryable: false });
     if (!(await window.OpenPresenceComposer?.fillComposer({ composer, value: content }))) {
-      return failure({ executionId: execution.id, ok: false, code: "COMPOSER_INPUT_FAILED", message: "X did not accept the approved reply text or enable the Reply button.", retryable: true });
+      return failure({ executionId: execution.id, ok: false, code: "COMPOSER_INPUT_FAILED", message: `X did not accept the approved ${affordance === "post" ? "post" : "reply"} text or enable the submit button.`, retryable: true });
     }
     const submit = await waitFor(enabledSubmitButton, 12_000);
     if (!submit) {
       return failure({ executionId: execution.id, ok: false, code: "SUBMIT_NOT_READY", message: "The reply button did not become available after X accepted the reply text.", retryable: true });
     }
     setState("acting");
+    await humanDelay(500, 1200);
     try { submit.focus(); } catch {}
-    submit.click();
     try {
+      submit.dispatchEvent(new MouseEvent("mouseover", { bubbles: true, cancelable: true }));
+      await humanDelay(100, 300);
       submit.dispatchEvent(new MouseEvent("mousedown", { bubbles: true, cancelable: true }));
+      await humanDelay(50, 150);
       submit.dispatchEvent(new MouseEvent("mouseup", { bubbles: true, cancelable: true }));
       submit.dispatchEvent(new MouseEvent("click", { bubbles: true, cancelable: true }));
-    } catch {}
+    } catch {
+      submit.click();
+    }
     setState("verifying");
     // The DOM is not the delivery authority: X virtualizes posts and can
     // render a successful reply late (or not in the current view at all).
@@ -408,8 +477,9 @@
 
     const ownReply = submission?.kind === "visible" ? submission.ownReply : undefined;
     if (submission?.kind === "settled" || ownReply) {
-      const externalRef = { type: affordance === "quote" ? "x.post" : "x.reply", id: ownReply ? ownReply.id : targetId };
-      if (affordance === "quote" && ownReply) {
+      if (affordance === "post" && !ownReply) return failure({ executionId: execution.id, ok: false, code: "PUBLIC_OBJECT_NOT_VISIBLE", message: "X accepted the composer, but the new original post was not visible for verification.", retryable: true });
+      const externalRef = { type: affordance === "quote" || affordance === "post" ? "x.post" : "x.reply", id: ownReply ? ownReply.id : targetId };
+      if ((affordance === "quote" || affordance === "post") && ownReply) {
         await reportVerifiedAction(execution, target, affordance, externalRef, content);
         return { executionId: execution.id, ok: true, externalRef };
       }

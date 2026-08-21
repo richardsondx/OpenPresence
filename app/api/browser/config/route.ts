@@ -27,7 +27,7 @@ function safePresence(presence: Presence) {
     channel: presence.channel,
     accent: presence.accent,
     environment: presence.environment ?? "live",
-    connectionMode: presence.connectionMode ?? "bridge",
+    connectionMode: presence.connectionMode ?? (presence.channel === "x" ? "native" : "bridge"),
     browserAccess: { enabled: presence.browserAccess?.enabled === true },
     domain: channelDomains[presence.channel] ?? undefined,
   };

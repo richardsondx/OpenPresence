@@ -865,6 +865,7 @@ test("People paginates a long remembered-facts record", async ({ page }) => {
 
   await page.reload();
   await navigate(page, "People");
+  await page.getByRole("button", { name: /Boardy/ }).click();
   const facts = page.locator(".person-inspector-section").filter({ hasText: "What Jenny remembers" });
   await expect(facts).toContainText("17 remembered facts");
   const pages = page.getByRole("navigation", { name: "Boardy remembered facts pages" });
@@ -873,6 +874,8 @@ test("People paginates a long remembered-facts record", async ({ page }) => {
   await pages.getByRole("button", { name: "Older" }).click();
   await expect(pages).toContainText("Page 2 of 3");
   await expect(facts).toContainText("Boardy remembered fact 9.");
+  await page.getByRole("button", { name: "Close Boardy details" }).click();
+  await expect(page.locator(".person-inspector")).toHaveCount(0);
 });
 
 test("Activity separates configuration changes from Presence decisions", async ({ page, request }) => {
@@ -1625,19 +1628,19 @@ test("Custom Channel connects a Bridge, receives Mirror events, and completes qu
   expect(customChannel.channelDefinitions.find((item: { id: string }) => item.id === "founder-community")).toMatchObject({ icon: "forum", domain: "https://www.skool.com/" });
 
   await navigate(page, "Settings");
-  await expect(page.getByRole("heading", { name: "Connect this Presence" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /Connect .* through a Bridge/ })).toBeVisible();
   await page.getByLabel("Bridge name").fill("Founder Bridge");
-  await page.getByRole("button", { name: "Connect", exact: true }).click();
-  await expect(page.locator(".bridge-key")).toContainText("Connect your external adapter");
-  await expect(page.locator(".bridge-key")).toContainText("Events endpoint");
-  await expect(page.locator(".bridge-key")).toContainText("Execution endpoint");
-  await expect(page.locator(".adapter-guide")).toContainText("Copy adapter instructions");
-  await expect(page.locator(".adapter-status-summary").getByText("Bridge configured · waiting for adapter", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Connect external Bridge", exact: true }).click();
+  await expect(page.locator(".bridge-key")).toContainText("Adapter API Key (One-Time)");
+  await expect(page.locator(".bridge-key")).toContainText("Events:");
+  await expect(page.locator(".bridge-key")).toContainText("Executions:");
+  await expect(page.locator(".adapter-guide")).toContainText("Copy Instructions");
+  await expect(page.locator(".active-bridge-unified")).toContainText("Founder Bridge");
   const bridgeKey = await page.locator(".bridge-key > code").innerText();
   expect(bridgeKey).toMatch(/^opb_/);
-  await page.getByRole("button", { name: "Copy adapter instructions" }).click();
+  await page.getByRole("button", { name: "Copy Instructions", exact: true }).click();
   await expect(page.getByText("Prompt copied", { exact: true })).toBeVisible();
-  await page.getByText("View browser-agent prompt", { exact: true }).click();
+  await page.getByText("Full Adapter Prompt", { exact: true }).click();
   const promptText = await page.locator(".adapter-guide").innerText();
   expect(promptText).toContain("UNSUPPORTED_ASSET");
   expect(promptText).not.toContain(bridgeKey);
@@ -1674,19 +1677,17 @@ test("Custom Channel connects a Bridge, receives Mirror events, and completes qu
 
   await navigate(page, "Settings");
   await page.getByRole("button", { name: "Disconnect", exact: true }).click();
-  await expect(page.getByText("Disconnected", { exact: true })).toBeVisible();
+  await expect(page.getByText("Founder Bridge · Disconnected", { exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Disconnect", exact: true })).toHaveCount(0);
-  const disconnectedRow = page.locator(".bridge-row").filter({ hasText: "Founder Bridge" });
-  await expect(disconnectedRow).toContainText("Credential prefix:");
-  await expect(disconnectedRow).toContainText("secret value is not recoverable");
-  await disconnectedRow.getByRole("button", { name: "Remove Bridge", exact: true }).click();
-  await expect(disconnectedRow).toHaveCount(0);
+  const bridgeHistory = page.locator(".bridge-history-details");
+  await expect(bridgeHistory).toContainText("Founder Bridge · Disconnected");
+  await bridgeHistory.getByRole("button", { name: "Remove", exact: true }).click();
+  await expect(page.getByText("Founder Bridge · Disconnected", { exact: true })).toHaveCount(0);
   await expect(page.getByLabel("Bridge name")).toBeVisible();
   await page.getByLabel("Bridge name").fill("Reconnected Bridge");
-  await page.getByRole("button", { name: "Connect", exact: true }).click();
-  const reconnectedRow = page.locator(".bridge-row").filter({ hasText: "Reconnected Bridge" });
-  await expect(reconnectedRow).toBeVisible();
-  await expect(reconnectedRow.getByText("Bridge configured · waiting for adapter", { exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Connect external Bridge", exact: true }).click();
+  const reconnectedBridge = page.locator(".active-bridge-unified");
+  await expect(reconnectedBridge).toContainText("Reconnected Bridge");
   const revoked = await request.get("/api/bridge/v1/health", { headers: { Authorization: `Bearer ${bridgeKey}` } });
   expect(revoked.status()).toBe(401);
 });

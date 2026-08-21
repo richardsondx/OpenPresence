@@ -50,6 +50,7 @@ describe("publication security boundary", () => {
     expect(sealed.expression.payloadHash).toMatch(/^[a-f0-9]{64}$/);
     expect(execution.permit).toEqual(sealed.permit);
     expect(verifyExecutionPermit(execution)).toEqual(sealed.permit);
+    expect(new Date(sealed.permit.expiresAt).getTime() - new Date(sealed.permit.issuedAt).getTime()).toBe(180_000);
     execution.publication!.publicExpression!.text = "runtime secret";
     expect(() => verifyExecutionPermit(execution)).toThrow(/PAYLOAD_MUTATION/);
   });

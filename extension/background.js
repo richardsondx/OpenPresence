@@ -11,6 +11,7 @@ let lastConfig;
 const seenEvents = new Set();
 const claimRuns = new Map();
 const claimRetryTimers = new Map();
+const activeExecutionWatchdogs = new Map();
 const verificationTimers = new Map();
 const verificationJobs = new Map();
 const verificationRuns = new Set();
@@ -29,6 +30,26 @@ async function appOrigin() {
   if (lastConfig?.appOrigin) return lastConfig.appOrigin;
   const stored = await chrome.storage.session.get("openpresenceConfig");
   return stored.openpresenceConfig?.appOrigin || "http://localhost:3015";
+}
+
+// Fetch config directly from the OpenPresence app API. The app-bridge.js
+// content script only syncs when the user has the app open in a Chrome tab.
+// This fallback lets the extension work even without that tab open.
+async function fetchConfigFromApp() {
+  for (const origin of ["http://localhost:3015", "http://127.0.0.1:3015"]) {
+    try {
+      const response = await fetch(`${origin}/api/browser/config`, { cache: "no-store" });
+      if (response.ok) {
+        const data = await response.json();
+        if (data?.selected || data?.presences?.length) {
+          lastConfig = data;
+          await chrome.storage.session.set({ openpresenceConfig: lastConfig });
+          return data;
+        }
+      }
+    } catch { /* app not reachable at this origin */ }
+  }
+  return null;
 }
 
 async function bridgeRequest(session, path, options = {}) {
@@ -58,7 +79,11 @@ function publicSessionStatus(session) {
 
 async function popupStatus(presenceId) {
   await restoreSessions();
-  const configured = lastConfig || (await chrome.storage.session.get("openpresenceConfig")).openpresenceConfig;
+  let configured = lastConfig || (await chrome.storage.session.get("openpresenceConfig")).openpresenceConfig;
+  // If no config from app-bridge.js sync, try fetching directly from the app API
+  if (!configured) {
+    configured = await fetchConfigFromApp();
+  }
   const presence = configured?.presences?.find((item) => item.id === presenceId)
     || configured?.selected
     || configured?.presences?.find((item) => item.id === configured?.activePresenceId);
@@ -307,6 +332,16 @@ function scheduleClaimAfterIdentity(session) {
 
 async function heartbeat(session) {
   try {
+    // A service-worker restart can restore a persisted local execution guard
+    // without restoring the watchdog timer that originally owned it. The
+    // Bridge lease is authoritative; once its grace window has elapsed, clear
+    // the local guard so the next heartbeat can reconcile and claim queued
+    // Growth work instead of leaving the queue stranded indefinitely.
+    if (session.activeExecutionId && (!session.activeExecutionStartedAt || Date.now() - session.activeExecutionStartedAt >= activeExecutionWatchdogMs)) {
+      session.activeExecutionId = undefined;
+      session.activeExecutionStartedAt = undefined;
+      await persistSessions();
+    }
     await bridgeRequest(session, "/api/bridge/v1/heartbeat", { method: "POST", body: JSON.stringify({ executorId: session.executorId }) });
     await requestIdentity(session);
     return true;
@@ -328,6 +363,9 @@ async function claim(session) {
     // The local execution watchdog is deliberately conservative: by this
     // point the server lease has expired or is about to expire, so releasing
     // the local guard is safer than blocking every later reply indefinitely.
+    const watchdog = activeExecutionWatchdogs.get(session.presence.id);
+    if (watchdog) clearTimeout(watchdog);
+    activeExecutionWatchdogs.delete(session.presence.id);
     session.activeExecutionId = undefined;
     session.activeExecutionStartedAt = undefined;
     await persistSessions();
@@ -342,9 +380,17 @@ async function claim(session) {
         session.activeExecutionId = execution.id;
         session.activeExecutionStartedAt = Date.now();
         await persistSessions();
+        armActiveExecutionWatchdog(session, execution.id);
 
         const targetId = execution.target?.id;
-        const targetUrl = targetId ? `https://x.com/i/web/status/${encodeURIComponent(targetId)}` : channelHome(session.presence);
+        const affordance = String(execution.affordance || "").replace(/^x\./, "");
+        const targetUrl = affordance === "follow" && targetId
+          ? `https://x.com/i/user/${encodeURIComponent(targetId)}`
+          : affordance === "post"
+            ? "https://x.com/compose/post"
+            : targetId
+              ? `https://x.com/i/web/status/${encodeURIComponent(targetId)}`
+              : channelHome(session.presence);
 
         try {
           let tab = null;
@@ -367,8 +413,27 @@ async function claim(session) {
             }
             await persistSessions();
           } else {
-            // Re-use the existing controlled tab: navigate to the target post URL if needed
-            if (tab.url !== targetUrl) {
+            // X can replace the persisted tab with a composer tab during a
+            // navigation. Prefer the live composer in the controlled window
+            // so a service-worker restart does not send the execution back to
+            // the pre-composer tab.
+            const windowTabs = await chrome.tabs.query({ windowId: session.windowId }).catch(() => []);
+            const composerTab = windowTabs.find((candidate) => typeof candidate.url === "string" && /\/compose\/post(?:\?|$)/.test(candidate.url));
+            if (composerTab?.id) {
+              tab = composerTab;
+              session.tabId = composerTab.id;
+              await persistSessions();
+            }
+            // Re-use an already-open X composer when an operator or a prior
+            // navigation has left one mounted. Navigating that tab to the
+            // target first destroys the composer and makes the pending
+            // execution impossible to finish within its permit window.
+            // A generic composer is reusable only for an original post. A
+            // reply/quote/repost composer is target-bound; reusing an old one
+            // routes the next execution into the wrong conversation and can
+            // leave the server lease claimed until it expires.
+            const composerIsOpen = affordance === "post" && typeof tab.url === "string" && /\/compose\/post(?:\?|$)/.test(tab.url);
+            if (!composerIsOpen && tab.url !== targetUrl) {
               await chrome.tabs.update(session.tabId, { url: targetUrl });
             }
           }
@@ -431,9 +496,31 @@ async function ingest(session, observation) {
 
 function releaseActiveExecution(session, executionId) {
   if (session.activeExecutionId !== executionId) return;
+  const watchdog = activeExecutionWatchdogs.get(session.presence.id);
+  if (watchdog) clearTimeout(watchdog);
+  activeExecutionWatchdogs.delete(session.presence.id);
   session.activeExecutionId = undefined;
   session.activeExecutionStartedAt = undefined;
   void persistSessions();
+}
+
+function armActiveExecutionWatchdog(session, executionId) {
+  const previous = activeExecutionWatchdogs.get(session.presence.id);
+  if (previous) clearTimeout(previous);
+  const timer = setTimeout(() => {
+    activeExecutionWatchdogs.delete(session.presence.id);
+    if (session.activeExecutionId !== executionId) return;
+    // The server-side Bridge lease is already expired at this point. Release
+    // only the local guard and let the next claim reconcile/requeue the stale
+    // execution; never synthesize success for a target we could not verify.
+    session.activeExecutionId = undefined;
+    session.activeExecutionStartedAt = undefined;
+    void persistSessions();
+    setTimeout(() => {
+      if (sessions.get(session.presence.id) === session) void claim(session);
+    }, 250);
+  }, activeExecutionWatchdogMs + 1_000);
+  activeExecutionWatchdogs.set(session.presence.id, timer);
 }
 
 async function verifySubmittedExecution(session, result, attempt = 0) {

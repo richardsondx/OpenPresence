@@ -20,7 +20,9 @@ export function canonicalUsageEvents(workspaces: UsageWorkspace[], knownAgentIds
       const eventKey = event.id || `${ownerId}:${event.invocationId}:${event.createdAt}`;
       if (seen.has(eventKey)) continue;
       seen.add(eventKey);
-      eventsByAgent.set(ownerId, [...(eventsByAgent.get(ownerId) ?? []), event]);
+      const ownerEvents = eventsByAgent.get(ownerId);
+      if (ownerEvents) ownerEvents.push(event);
+      else eventsByAgent.set(ownerId, [event]);
     }
   }
   return eventsByAgent;

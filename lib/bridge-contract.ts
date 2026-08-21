@@ -18,14 +18,15 @@ export const bridgeEndpointPaths = {
 /**
  * The shipped Chrome adapter observes X, reports verified metrics, and delivers
  * the low-level social actions that Genny's attention can authorize. The
- * adapter still cannot publish original posts or invent content.
+ * adapter still cannot invent content; it may only deliver the exact sealed
+ * publication or target returned by OpenPresence.
  */
 export function chromeBrowserBridgeCapabilities(): ConnectorCapabilities {
   return {
     inbound: true,
     reconcile: true,
-    affordances: ["reply", "quote", "repost", "like"],
-    formats: ["x.reply", "x.quote", "x.repost", "x.like"],
+    affordances: ["post", "reply", "quote", "repost", "like", "follow"],
+    formats: ["x.post", "x.reply", "x.quote", "x.repost", "x.like", "x.follow"],
     metrics: ["followers", "public_metrics"],
   };
 }
@@ -89,6 +90,7 @@ export function bridgeAdapterPrompt(input: BridgePromptInput) {
     "5. Poll POST " + input.baseUrl + bridgeEndpointPaths.claim + " to claim approved work, using {\"executorId\":\"<stable-adapter-id>\",\"limit\":10}.",
     "6. Perform only claimed executions. Use the supplied publication payload and target exactly as returned. This adapter may deliver only the declared actions: " + capabilities + ". Media must be uploaded only from the supplied assetIds through the authenticated OpenPresence asset route.",
     ...(input.presence.channel === "x" ? [
+      ...(supports("post") ? ["   For x.post, open the X composer, enter exactly the supplied publication text, upload only supplied media, and verify the resulting post id before acknowledging."] : []),
       ...(supports("reply") ? [
         "   For x.reply, open https://x.com/i/web/status/<target.id>, choose Reply, enter exactly the supplied publication text, and submit the direct reply.",
         "   This is a direct reply to the existing post. Do not convert it into a quote post, a new standalone post, or a reply to a different object.",

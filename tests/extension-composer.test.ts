@@ -232,4 +232,17 @@ describe("Chrome extension composer and execution helpers", () => {
     expect(suppressScriptEntry.world).toBe("MAIN");
     expect(suppressScriptEntry.run_at).toBe("document_start");
   });
+
+  it("keeps Growth's browser capability contract executable for original posts and follows", () => {
+    const channelSource = readFileSync(join(process.cwd(), "extension/channel-x.js"), "utf8");
+    const backgroundSource = readFileSync(join(process.cwd(), "extension/background.js"), "utf8");
+    expect(channelSource).toContain('["post", "reply", "quote", "repost", "like", "follow"]');
+    expect(channelSource).toContain('https://x.com/i/user/${encodeURIComponent(targetId)}');
+    expect(channelSource).toContain('window.location.href = "https://x.com/compose/post"');
+    expect(backgroundSource).toContain('affordance === "follow"');
+    expect(backgroundSource).toContain('affordance === "post"');
+    expect(backgroundSource).toContain('const composerIsOpen = affordance === "post"');
+    expect(channelSource).toContain('[role="status"]');
+    expect(channelSource).toContain('DUPLICATE_PUBLICATION');
+  });
 });

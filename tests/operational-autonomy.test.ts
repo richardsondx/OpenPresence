@@ -7,6 +7,7 @@ import {
   listOperationalRuns,
   listRecoveryAttempts,
   listRecoveryIncidents,
+  readStateSnapshotForContext,
   reclaimExpiredLeases,
   releaseOperationalRunLease,
   upsertBrowserBody,
@@ -17,6 +18,7 @@ import {
 import { routeExecutionIntent } from "../lib/execution-router";
 import {
   classifyFailureRootCause,
+  logRecoveryAttempt,
   recordOperationalFailure,
   recordOperationalSuccess,
 } from "../lib/incident-engine";
@@ -156,7 +158,7 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
 
     // When Native is healthy -> Native route
     const decision = routeExecutionIntent({ intent, presence: mockPresence });
-    expect(["native_x", "blocked", "managed_browser", "user_attached_bridge"]).toContain(decision.route);
+    expect(["native_x", "blocked", "user_attached_bridge"]).toContain(decision.route);
 
     // When Native is rate limited (429) -> blocked with waitResetAt, NEVER browser evasion
     const resetTime = new Date(Date.now() + 900000).toISOString();
@@ -340,5 +342,73 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
     expect(migration.projectedIncidentsCount).toBe(1);
     expect(migration.incidents[0].affectedRunIds).toContain("exec_legacy_1");
     expect(migration.incidents[0].affectedRunIds).toContain("exec_legacy_2");
+  });
+
+  it("Invariant: Recovery attempt ladder increments atomically and exhausts to needs_operator", () => {
+    const uniquePresence = `presence_exhaust_${Date.now()}`;
+    const failure = recordOperationalFailure({
+      dependency: "native_x",
+      presenceId: uniquePresence,
+      runId: "run_exhaust_1",
+      error: "X API network timeout",
+    });
+
+    const incidentId = failure.incident.id;
+
+    // Attempt 1
+    const att1 = logRecoveryAttempt({ incidentId, step: "reconnect_probe_1", outcome: "failed", error: "Still timed out" });
+    expect(att1.attemptNumber).toBe(1);
+    let inc = listRecoveryIncidents(uniquePresence).find((i) => i.id === incidentId);
+    expect(inc?.recoveryAttempts).toBe(1);
+    expect(inc?.state).toBe("recovering");
+
+    // Attempt 2
+    const att2 = logRecoveryAttempt({ incidentId, step: "reconnect_probe_2", outcome: "failed", error: "Still timed out" });
+    expect(att2.attemptNumber).toBe(2);
+    inc = listRecoveryIncidents(uniquePresence).find((i) => i.id === incidentId);
+    expect(inc?.recoveryAttempts).toBe(2);
+    expect(inc?.state).toBe("recovering");
+
+    // Attempt 3 (exhaustion for native_x maxAttempts: 3)
+    const att3 = logRecoveryAttempt({ incidentId, step: "reconnect_probe_3", outcome: "failed", error: "Still timed out" });
+    expect(att3.attemptNumber).toBe(3);
+    inc = listRecoveryIncidents(uniquePresence).find((i) => i.id === incidentId);
+    expect(inc?.recoveryAttempts).toBe(3);
+    expect(inc?.state).toBe("needs_operator");
+    expect(inc?.operatorActionRequired).toBe(true);
+  });
+
+  it("Invariant: Root causes are scoped by dependency and resolve by dependencyId upon verified success", () => {
+    const uniquePresence = `presence_dep_${Date.now()}`;
+    const xFailure = recordOperationalFailure({ dependency: "native_x", presenceId: uniquePresence, error: "429 Too Many Requests" });
+    const aiFailure = recordOperationalFailure({ dependency: "model_provider", presenceId: uniquePresence, error: "429 Too Many Requests" });
+
+    expect(xFailure.incident.rootCauseKey).toBe("native_x.rate_limit");
+    expect(aiFailure.incident.rootCauseKey).toBe("model_provider.rate_limit");
+    expect(xFailure.incident.id).not.toBe(aiFailure.incident.id);
+
+    // Resolving native_x only resolves native_x incidents
+    const resolvedX = recordOperationalSuccess("native_x", uniquePresence);
+    expect(resolvedX.resolvedIncidents.some((i) => i.id === xFailure.incident.id)).toBe(true);
+    expect(resolvedX.resolvedIncidents.some((i) => i.id === aiFailure.incident.id)).toBe(false);
+
+    // model_provider incident remains open until model_provider succeeds
+    const remaining = listRecoveryIncidents(uniquePresence).find((i) => i.id === aiFailure.incident.id);
+    expect(remaining?.state).not.toBe("resolved");
+
+    const resolvedAi = recordOperationalSuccess("model_provider", uniquePresence);
+    expect(resolvedAi.resolvedIncidents.some((i) => i.id === aiFailure.incident.id)).toBe(true);
+  });
+
+  it("Invariant: readStateSnapshotForContext hydrates live recovery incidents into state for accurate UI metrics", () => {
+    const uniquePresence = `presence_ui_rec_${Date.now()}`;
+    const failure = recordOperationalFailure({ dependency: "native_x", presenceId: uniquePresence, error: "Network timeout" });
+    const resolved = recordOperationalSuccess("native_x", uniquePresence);
+    expect(resolved.resolvedIncidents.length).toBeGreaterThan(0);
+
+    const snapshot = readStateSnapshotForContext({ presenceId: uniquePresence });
+    expect(snapshot.recoveryIncidents).toBeDefined();
+    const matched = snapshot.recoveryIncidents?.filter((i) => (!i.presenceId || i.presenceId === uniquePresence) && i.state === "resolved");
+    expect(matched?.some((i) => i.id === failure.incident.id)).toBe(true);
   });
 });

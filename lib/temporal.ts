@@ -3,6 +3,8 @@ import {
   claimDueScheduledWakes,
   getOperationalRun,
   listOperationalRuns,
+  listScheduledWakes,
+  readState,
   reclaimExpiredLeases,
   recordProcessHeartbeat,
   releaseOperationalRunLease,
@@ -198,6 +200,15 @@ export function scheduleRecoveryCooldownWake(
 // Temporal Sweep & Recovery Loop
 // ============================================================================
 
+import {
+  logRecoveryAttempt,
+  recordOperationalFailure,
+} from "./incident-engine";
+import {
+  dispatchAutonomyWorker,
+  queueAutonomyRun,
+} from "./autonomy-worker";
+
 export interface SweepResult {
   reclaimedLeases: number;
   staleRunsDetected: OperationalRun[];
@@ -207,6 +218,20 @@ export interface SweepResult {
 
 export function runOperationalSweep(now = new Date()): SweepResult {
   const nowIso = now.toISOString();
+
+  // Repair the migration gap where self-directed attention had a persisted
+  // nextEligibleAt but no durable wake. Without this repair, Auto can be
+  // enabled forever while the temporal engine has nothing to dispatch.
+  const state = readState();
+  for (const presence of state.presences.filter((item) => item.status === "live" && item.selfDirectedAttention?.enabled)) {
+    const nextEligibleAt = presence.selfDirectedAttention?.nextEligibleAt;
+    if (nextEligibleAt && new Date(nextEligibleAt).getTime() > now.getTime()) continue;
+    const hasPendingAttentionWake = listScheduledWakes(presence.id).some((wake) => wake.state === "pending" && (wake.kind === "attention" || wake.kind === "self_directed_discovery"));
+    const hasAttentionRun = listOperationalRuns(presence.id, ["queued", "running"]).some((run) => run.kind === "discovery");
+    if (!hasPendingAttentionWake && !hasAttentionRun) {
+      upsertScheduledWake({ id: `wake_attention_${presence.id}`, presenceId: presence.id, wakeAt: nowIso, kind: "attention", targetId: presence.id, state: "pending", createdAt: nowIso, updatedAt: nowIso });
+    }
+  }
 
   // 1. Reclaim expired leases
   const reclaimedLeases = reclaimExpiredLeases(nowIso);
@@ -218,8 +243,22 @@ export function runOperationalSweep(now = new Date()): SweepResult {
   for (const wake of dueWakes) {
     dispatchedWakes.push(wake);
 
-    // If wake is linked to an operational run, advance or unblock the run
-    if (wake.targetId) {
+    // If wake is an autonomous observation or attention wake
+    if (wake.kind === "observation" || (wake.kind as string) === "attention" || (wake.kind as string) === "self_directed_discovery") {
+      const presenceId = wake.presenceId ?? "global";
+      const kind = wake.kind === "observation" ? "observation" : "discovery";
+      const existingRuns = listOperationalRuns(presenceId, ["queued", "running"]);
+      const alreadyRunning = existingRuns.some((r) => r.kind === kind);
+
+      if (!alreadyRunning) {
+        const { run } = queueAutonomyRun(presenceId, kind, {
+          stage: `woken_from_${wake.kind}`,
+          sourceRef: wake.id,
+        });
+        dispatchAutonomyWorker(run.id);
+      }
+    } else if (wake.targetId) {
+      // If wake is linked to an operational run, advance or unblock the run
       const run = getOperationalRun(wake.targetId);
       if (run && run.state === "waiting") {
         run.state = "queued";
@@ -227,6 +266,7 @@ export function runOperationalSweep(now = new Date()): SweepResult {
         run.lastProgressAt = nowIso;
         delete run.nextWakeAt;
         upsertOperationalRun(run);
+        dispatchAutonomyWorker(run.id);
       }
     }
   }
@@ -239,6 +279,27 @@ export function runOperationalSweep(now = new Date()): SweepResult {
     const evaluation = evaluateOperationalRunProgress(run, now);
     if (evaluation.isStale) {
       staleRunsDetected.push(run);
+
+      // Trigger recovery for stale operational runs
+      const dependency = run.kind === "observation" ? "native_x" : "runtime";
+      const { incident } = recordOperationalFailure({
+        dependency,
+        presenceId: run.presenceId,
+        runId: run.id,
+        error: evaluation.reason ?? `Run exceeded expected stage duration in stage ${run.stage}`,
+      });
+
+      logRecoveryAttempt({
+        incidentId: incident.id,
+        step: `recover_stale_run_${run.stage}`,
+        outcome: "failed",
+        error: evaluation.reason,
+      });
+
+      run.state = incident.state === "needs_operator" ? "needs_operator" : "recovering";
+      run.stage = `stale_recovery_${run.stage}`;
+      run.lastProgressAt = nowIso;
+      upsertOperationalRun(run);
     }
   }
 

@@ -50,7 +50,18 @@ export type Shareability = "presence-only" | "agent-wide" | "public";
 export type VisibilityScope = "public" | "private-community" | "private-thread" | "direct-message" | "unknown";
 export type PresenceEnvironment = "live" | "sandbox";
 export type PresenceConnectionMode = "sandbox" | "native" | "bridge";
-export interface PresenceBrowserAccess { enabled: boolean; }
+export interface PresenceBrowserFallback {
+  /** Channel affordance, optionally qualified like `x.reply`. */
+  action: string;
+  /** The channel/provider reason that made native execution unsuitable. */
+  reason: string;
+  learnedAt: string;
+}
+export interface PresenceBrowserAccess {
+  enabled: boolean;
+  /** Durable per-action knowledge; this is a learned execution hint, not a channel route. */
+  learnedFallbacks?: PresenceBrowserFallback[];
+}
 
 export interface PresenceDestination {
   handle?: string;
@@ -77,10 +88,17 @@ export interface ResourceBudget {
   maxChannelReadsPerDay?: number;
   maxHydrationsPerDay?: number;
 }
+export interface GrowthActionTargets {
+  /** A bounded experiment target; it guides attention but never forces filler. */
+  quoteOrRepostPerDay?: number;
+  /** A bounded experiment target; only qualified author relationships count. */
+  followsPerDay?: number;
+}
 export interface SelfDirectedAttentionPolicy {
   enabled: boolean;
   intensity: SelfDirectedAttentionIntensity;
   budget?: ResourceBudget;
+  growthTargets?: GrowthActionTargets;
   mediaUnderstanding: "when_needed" | "off";
   lastRunAt?: string;
   nextEligibleAt?: string;
@@ -92,10 +110,13 @@ export interface ResourceUsageEvent {
   agentId: string;
   presenceId?: string;
   invocationId: string;
+  runId?: string;
   originKind: SocialOriginKind | "self_directed_discovery";
   originId?: string;
   attentionSource?: "self_directed_discovery" | "exploration" | "watchlist" | "inbound_social" | "assignment" | "publishing";
   category: ResourceUsageCategory;
+  /** Provider operation or product affordance, when the caller can identify it. */
+  action?: string;
   provider: string;
   model?: string;
   usage: { inputTokens?: number; outputTokens?: number; reasoningTokens?: number; totalTokens?: number; cacheReadTokens?: number; requests?: number; bytes?: number };
@@ -148,6 +169,8 @@ export interface OperationalRun {
   kind: OperationalRunKind;
   sourceRef?: string;
   executionId?: string;
+  invocationId?: string;
+  runId?: string;
   state: OperationalRunState;
   stage: string;
   createdAt: string;
@@ -177,7 +200,10 @@ export type ScheduledWakeKind =
   | "deadline"
   | "recovery_cooldown"
   | "circuit_reopen"
-  | "reconsideration";
+  | "reconsideration"
+  | "observation"
+  | "attention"
+  | "self_directed_discovery";
 
 export interface ScheduledWake {
   id: string;
@@ -245,6 +271,8 @@ export interface RecoveryIncident {
   safeSummary: string;
   operatorActionRequired: boolean;
   requiresAuth?: boolean;
+  invocationId?: string;
+  runId?: string;
   updatedAt: string;
 }
 
@@ -255,6 +283,8 @@ export interface RecoveryAttempt {
   step: string;
   outcome: "succeeded" | "failed" | "deferred";
   error?: string;
+  runId?: string;
+  invocationId?: string;
   timestamp: string;
 }
 
@@ -283,11 +313,20 @@ export interface BrowserBody {
   updatedAt: string;
 }
 
+export interface OperationalHealthCounts {
+  activeIncidents: number;
+  recoveringIncidents: number;
+  waitingIncidents: number;
+  needsOperatorIncidents: number;
+  orphanRecoveringRuns: number;
+}
+
 export interface OperationalHealthSnapshot {
   now: string;
   status: "healthy" | "recovering" | "waiting" | "needs_you";
   summary: string;
   presenceId?: string;
+  counts: OperationalHealthCounts;
   dependencyHealth: DependencyHealth[];
   incidents: Array<Pick<RecoveryIncident, "id" | "rootCauseKey" | "state" | "safeSummary" | "affectedRunIds" | "recoveryAttempts" | "nextAttemptAt" | "currentRecoveryStep" | "operatorActionRequired" | "requiresAuth"> & { lastObservedAt: string }>;
   activeRuns: Array<Pick<OperationalRun, "id" | "kind" | "state" | "stage" | "lastProgressAt" | "nextWakeAt" | "expiresAt" | "blockedReason" | "incidentId">>;
@@ -1288,6 +1327,8 @@ export interface SocialDecision {
   evidenceRefs?: EvidenceRef[];
   socialIntentId?: string;
   plannerRunId?: string;
+  runId?: string;
+  invocationId?: string;
   createdAt: string;
 }
 export type PublishingInitiativeStatus = "idle" | "seeking" | "awaiting_review" | "blocked" | "at_pace";
@@ -1406,9 +1447,9 @@ export interface ExecutionPermit {
 export interface Publication { id: string; format: string; payload: JsonValue; assetIds: string[]; links: { url: string; label?: string }[]; publicExpression?: PublicExpression; expressionMode?: ExpressionMode; groundingStatus?: GroundingStatus; factuality?: Factuality; assetReuse?: { usageType: AssetUsageType; reason: string }; operatorOverride?: { operatorId?: string; reason: string; at: string }; origin?: SocialOrigin; createdAt: string; environment?: PresenceEnvironment; sessionId?: string; rehearsalAttemptId?: string; assignmentId?: string; invocationId?: string; }
 export interface SocialIntentPersonReference { candidateId: string; personId?: string; purpose: "recommendation" | "introduction_offer" | "introduction_request" | "contextual_reference"; }
 export interface OperatorDirective { id: string; agentId: string; presenceId: string; target: EntityRef; requiredAct: "reply" | "no_op"; optionalDirection?: string; provenance: "operator"; initialAct: "no_op"; status: "requested" | "expressed" | "failed"; migratedToAssignmentId?: string; environment?: PresenceEnvironment; sessionId?: string; createdAt: string; }
-export interface SocialIntent { id: string; agentId: string; presenceId: string; affordance: string; target?: EntityRef; publicationId?: string; priority: number; validity: { expiresAt?: string; staleAfterMs?: number }; state: "active" | "withdrawn" | "expired"; formedAt: string; updatedAt: string; standingIntentId?: string; assignmentId?: string; conversationEpisodeId?: string; origin?: SocialOrigin; environment?: PresenceEnvironment; sessionId?: string; rehearsalAttemptId?: string; invocationId?: string; referencedPeople?: SocialIntentPersonReference[]; networkReason?: string; source?: "agent" | "operator"; operatorDirectiveId?: string; attentionTestId?: string; capabilityTrialId?: string; }
+export interface SocialIntent { id: string; agentId: string; presenceId: string; affordance: string; target?: EntityRef; publicationId?: string; priority: number; validity: { expiresAt?: string; staleAfterMs?: number }; state: "active" | "withdrawn" | "expired"; formedAt: string; updatedAt: string; standingIntentId?: string; assignmentId?: string; conversationEpisodeId?: string; origin?: SocialOrigin; environment?: PresenceEnvironment; sessionId?: string; rehearsalAttemptId?: string; invocationId?: string; runId?: string; referencedPeople?: SocialIntentPersonReference[]; networkReason?: string; source?: "agent" | "operator"; operatorDirectiveId?: string; attentionTestId?: string; capabilityTrialId?: string; }
 export type FailureReviewDisposition = "closed_non_retryable" | "stale" | "operator_action_required";
-export interface Execution { id: string; socialIntentId: string; presenceId: string; affordance: string; mode: Exclude<ExecutionMode, "off">; status: ExecutionStatus; attempts: number; bridgeId?: string; connector?: ConnectorKind; idempotencyKey: string; target?: EntityRef; publication?: Publication; permit?: ExecutionPermit; lease?: { executorId: string; claimedAt: string; expiresAt: string }; externalRef?: EntityRef; failure?: { code?: string; message: string; retryable?: boolean; reviewedAt?: string; reviewDisposition?: FailureReviewDisposition; reviewNote?: string }; reviewReason?: string; createdAt: string; updatedAt: string; executedAt?: string; assignmentId?: string; conversationEpisodeId?: string; environment?: PresenceEnvironment; sessionId?: string; rehearsalAttemptId?: string; invocationId?: string; source?: "agent" | "operator"; operatorDirectiveId?: string; attentionTestId?: string; capabilityTrialId?: string; }
+export interface Execution { id: string; socialIntentId: string; presenceId: string; affordance: string; mode: Exclude<ExecutionMode, "off">; status: ExecutionStatus; attempts: number; bridgeId?: string; connector?: ConnectorKind; idempotencyKey: string; target?: EntityRef; publication?: Publication; permit?: ExecutionPermit; lease?: { executorId: string; claimedAt: string; expiresAt: string }; externalRef?: EntityRef; failure?: { code?: string; message: string; retryable?: boolean; reviewedAt?: string; reviewDisposition?: FailureReviewDisposition; reviewNote?: string }; reviewReason?: string; createdAt: string; updatedAt: string; executedAt?: string; assignmentId?: string; conversationEpisodeId?: string; environment?: PresenceEnvironment; sessionId?: string; rehearsalAttemptId?: string; invocationId?: string; runId?: string; source?: "agent" | "operator"; operatorDirectiveId?: string; attentionTestId?: string; capabilityTrialId?: string; }
 export interface Outcome { id: string; socialIntentId: string; executionId?: string; presenceId: string; status: "succeeded" | "failed" | "unknown"; observedAt: string; metrics: Record<string, number>; evidence?: EntityRef[]; environment?: PresenceEnvironment; sessionId?: string; conversationEpisodeId?: string; }
 
 export type AgendaHorizon = "now" | "ongoing" | "upcoming" | "attention";
@@ -1865,7 +1906,7 @@ export interface ExplorationFinding {
   socialIntentId?: string;
 }
 
-export interface LiveEvent { id: string; type: "decision" | "execution" | "learning" | "memory" | "system"; title: string; detail: string; time: string; tone: EventTone; presenceId?: string; intentId?: string; executionId?: string; outcomeId?: string; decisionId?: string; sessionId?: string; invocationId?: string; sourceObjectId?: string; }
+export interface LiveEvent { id: string; type: "decision" | "execution" | "learning" | "memory" | "system"; title: string; detail: string; time: string; tone: EventTone; presenceId?: string; intentId?: string; executionId?: string; outcomeId?: string; decisionId?: string; sessionId?: string; invocationId?: string; runId?: string; sourceObjectId?: string; }
 export interface CalendarSlot { id: string; label: string; instruction: string; day: string; time: string; objective: string; presence: string; mode: ExecutionMode; enabled: boolean; executionWindow: string; standingIntentId?: string; assignmentId?: string; lastEvaluatedAt?: string; }
 export type PublicHistoryKind = "post" | "reply" | "quote" | "repost" | "like" | "thread" | "comment";
 export interface PublicHistoryItem {

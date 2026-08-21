@@ -89,4 +89,24 @@ describe("shared social thread context", () => {
     expect(context.objects.map((item) => item.externalRef.id)).toEqual(["parent", "focal"]);
     expect(context.missingExternalRefs).toEqual(["x.post:missing"]);
   });
+
+  it("does not fetch thread ancestry or references when observing a specific standalone post (not a reply)", async () => {
+    const standalonePost = object("standalone", {
+      conversationExternalRef: "standalone",
+      referencedExternalRefs: [ref("referenced-post")],
+    });
+    const fetchObjects = vi.fn(async () => []);
+
+    const hydrated = await hydrateThreadContext({
+      mirror: [standalonePost],
+      observedObject: standalonePost,
+      fetchObjects,
+      maxDepth: 8,
+      maxObjects: 8,
+    });
+
+    expect(fetchObjects).not.toHaveBeenCalled();
+    expect(hydrated.objects).toEqual([]);
+    expect(hydrated.missingExternalRefs).toEqual([]);
+  });
 });

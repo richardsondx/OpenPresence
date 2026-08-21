@@ -131,6 +131,42 @@ describe("Bridge browser retry lifecycle", () => {
     expect(claim.state.executions[0]?.status).toBe("queued");
   });
 
+  it("issues a fresh permit after an expired browser lease", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("OPENPRESENCE_TEST_MODE", "0");
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "0");
+
+    let state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    state.presence!.environment = "live";
+    state.presence!.connectionMode = "bridge";
+    state.presences = state.presences.map((presence) => presence.id === state.presence!.id ? { ...presence, environment: "live", connectionMode: "bridge" } : presence);
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });
+    state = applyOperation(bridgeResult.state, { type: "setPresence", patch: { execution: { reply: "auto" } } });
+    state = formXReplyIntent(state, "Retry with a fresh permit.", "target-post-expired-lease");
+    writeState(state);
+
+    let bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge?.id)!;
+    reportBridgeIdentity(bridge, { executorId: "chrome-test", username: "example_agent" });
+    ingestEvents(readState().bridges.find((item) => item.id === bridge.id)!, { events: [{ sourceEventId: "expired-lease-target", event: "created", object: { externalRef: { type: "x.post", id: "target-post-expired-lease" }, objectType: "post", language: "en", author: { displayName: "Target" }, content: { text: "A target conversation." }, visibility: "public", shareability: "presence-only" } }] });
+    bridge = readState().bridges.find((item) => item.id === bridge.id)!;
+
+    const firstClaim = claimExecutions(bridge, { executorId: "chrome-test", limit: 1 });
+    const firstExecution = firstClaim.executions[0]!;
+    const firstPermitIssuedAt = firstExecution.permit!.issuedAt;
+    const expiredState = readState();
+    const expiredExecution = expiredState.executions.find((item) => item.id === firstExecution.id)!;
+    expiredExecution.lease = { executorId: "chrome-test", claimedAt: new Date(Date.now() - 121_000).toISOString(), expiresAt: new Date(Date.now() - 1_000).toISOString() };
+    writeState(expiredState);
+
+    bridge = readState().bridges.find((item) => item.id === bridge.id)!;
+    const secondClaim = claimExecutions(bridge, { executorId: "chrome-test", limit: 1 });
+    const retriedExecution = secondClaim.executions[0]!;
+    expect(retriedExecution.id).toBe(firstExecution.id);
+    expect(retriedExecution.permit!.issuedAt).not.toBe(firstPermitIssuedAt);
+    expect(new Date(retriedExecution.permit!.expiresAt).getTime()).toBeGreaterThan(Date.now() + 150_000);
+    expect(retriedExecution.publication?.publicExpression?.safetyStatus).toBe("sealed");
+  });
+
   it("strictly serializes executions and holds queued actions while an execution is in verification", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("OPENPRESENCE_TEST_MODE", "0");

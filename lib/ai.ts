@@ -6,6 +6,7 @@ import { isAiMockEnabled } from "./test-runtime";
 import { marketMockCandidate } from "./market-research";
 import { compileKnowledgeContext } from "./knowledge";
 import { isCognitionEligibleMirrorObject } from "./social-context";
+import { recordOperationalFailure, recordOperationalSuccess } from "./incident-engine";
 import type { AssetSemanticKind, Assignment, Conversation, ConversationDisposition, EvidenceNeed, GrowthReviewDecision, GrowthReviewKind, KnowledgeContextPacket, ModelProvider, OpenPresenceState, PlaygroundStimulusResult, PlaygroundStimulusTarget, Presence, PresenceBrief, PresenceChatMessage, PublishingPlanDraft, ResourceUsageEvent, SocialAssetKind, StoryCandidate, VisualBrief, VisualNeed } from "./types";
 
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -279,10 +280,38 @@ function providerUsage(body: Record<string, unknown>, provider: ModelProvider) {
   return Object.keys(numeric).length ? numeric : undefined;
 }
 
-function recordModelUsage(state: OpenPresenceState, profile: OpenPresenceState["modelProfiles"][number], result: ModelRunResult, options?: { usageOrigin?: ResourceUsageEvent["originKind"]; attentionSource?: ResourceUsageEvent["attentionSource"]; presence?: Presence; social?: boolean }) {
+function recordModelUsage(
+  state: OpenPresenceState,
+  profile: OpenPresenceState["modelProfiles"][number],
+  result: ModelRunResult,
+  options?: {
+    usageOrigin?: ResourceUsageEvent["originKind"];
+    attentionSource?: ResourceUsageEvent["attentionSource"];
+    presence?: Presence;
+    social?: boolean;
+    runId?: string;
+    invocationId?: string;
+    presenceId?: string;
+    operational?: boolean;
+  }
+) {
   if (!result.usage || !state.agent) return;
   const usage = { ...result.usage, requests: 1 };
-  state.resourceUsageEvents.unshift({ id: `resource-usage:${randomUUID()}`, agentId: state.agent.id, presenceId: options?.presence?.id ?? state.presence?.id, invocationId: `model:${randomUUID()}`, originKind: options?.usageOrigin ?? (options?.attentionSource === "self_directed_discovery" ? "self_directed_discovery" : options?.social ? "inbound_social" : "operator"), attentionSource: options?.attentionSource, category: "model", provider: profile.provider, model: profile.model, usage, createdAt: new Date().toISOString() });
+  const eventId = `resource-usage:${randomUUID()}`;
+  state.resourceUsageEvents.unshift({
+    id: eventId,
+    agentId: state.agent.id,
+    presenceId: options?.presence?.id ?? options?.presenceId ?? state.presence?.id,
+    invocationId: options?.invocationId ?? eventId,
+    runId: options?.runId,
+    originKind: options?.usageOrigin ?? (options?.attentionSource === "self_directed_discovery" ? "self_directed_discovery" : options?.social ? "inbound_social" : "operator"),
+    attentionSource: options?.attentionSource,
+    category: "model",
+    provider: profile.provider,
+    model: profile.model,
+    usage,
+    createdAt: new Date().toISOString(),
+  });
   state.resourceUsageEvents = state.resourceUsageEvents.slice(0, 5_000);
 }
 
@@ -353,7 +382,7 @@ async function runGemini(secret: string, model: string, prompt: ReturnType<typeo
   return { text: content, usage: providerUsage(body, "gemini") };
 }
 
-export async function generateAgentReply(state: OpenPresenceState, content: string, conversationId?: string, options?: { social?: boolean; presence?: Presence; socialHistory?: Array<Pick<PresenceChatMessage, "role" | "content">>; socialEvidence?: string; socialThreadContext?: string; knowledgeContext?: KnowledgeContextPacket; assignmentMode?: boolean; briefOverride?: PresenceBrief; usageOrigin?: ResourceUsageEvent["originKind"]; attentionSource?: ResourceUsageEvent["attentionSource"] }) {
+export async function generateAgentReply(state: OpenPresenceState, content: string, conversationId?: string, options?: { social?: boolean; presence?: Presence; socialHistory?: Array<Pick<PresenceChatMessage, "role" | "content">>; socialEvidence?: string; socialThreadContext?: string; knowledgeContext?: KnowledgeContextPacket; assignmentMode?: boolean; briefOverride?: PresenceBrief; usageOrigin?: ResourceUsageEvent["originKind"]; attentionSource?: ResourceUsageEvent["attentionSource"]; operational?: boolean; runId?: string; presenceId?: string; invocationId?: string }) {
   if (isAiMockEnabled()) return `I understood “${content.slice(0, 160)}”. This response came through the Agent runtime.`;
   if (!state.agent) throw new AiRuntimeError("Create an Agent before starting a conversation.");
   const profile = state.modelProfiles.find((item) => item.agentId === state.agent?.id);
@@ -367,14 +396,29 @@ export async function generateAgentReply(state: OpenPresenceState, content: stri
   const secret = profile.provider === "ollama" || profile.provider === "custom" && !connection.secretConfigured ? undefined : connection.id ? readProviderSecret(connection.id) : undefined;
   if (["openai", "anthropic", "gemini", "openrouter"].includes(profile.provider) && !secret) throw new AiRuntimeError(`${providerLabel(profile.provider)} is selected but no API key is stored. Open Brain → Provider access and save the key.`);
   const prompt = promptFor(state, conversationId, content, options);
-  const result = profile.provider === "ollama" ? await runOllama(connection.endpoint || "http://localhost:11434", profile.model, prompt)
-    : profile.provider === "anthropic" ? await runAnthropic(secret!, profile.model, prompt)
-      : profile.provider === "gemini" ? await runGemini(secret!, profile.model, prompt)
-        : profile.provider === "openrouter" ? await runOpenAiCompatible(profile.provider, connection.endpoint || "https://openrouter.ai/api/v1", secret!, profile.model, prompt)
-          : profile.provider === "custom" ? await runOpenAiCompatible(profile.provider, connection.endpoint || "http://localhost:11434/v1", secret || "", profile.model, prompt)
-            : await runOpenAiCompatible(profile.provider, connection.endpoint || "https://api.openai.com/v1", secret!, profile.model, prompt, profile.quality === "low" || profile.quality === "medium" || profile.quality === "high" ? profile.quality : undefined);
-  recordModelUsage(state, profile, result, options);
-  return result.text;
+  try {
+    const result = profile.provider === "ollama" ? await runOllama(connection.endpoint || "http://localhost:11434", profile.model, prompt)
+      : profile.provider === "anthropic" ? await runAnthropic(secret!, profile.model, prompt)
+        : profile.provider === "gemini" ? await runGemini(secret!, profile.model, prompt)
+          : profile.provider === "openrouter" ? await runOpenAiCompatible(profile.provider, connection.endpoint || "https://openrouter.ai/api/v1", secret!, profile.model, prompt)
+            : profile.provider === "custom" ? await runOpenAiCompatible(profile.provider, connection.endpoint || "http://localhost:11434/v1", secret || "", profile.model, prompt)
+              : await runOpenAiCompatible(profile.provider, connection.endpoint || "https://api.openai.com/v1", secret!, profile.model, prompt, profile.quality === "low" || profile.quality === "medium" || profile.quality === "high" ? profile.quality : undefined);
+    recordModelUsage(state, profile, result, options);
+    if (options?.operational) {
+      recordOperationalSuccess("model_provider", options.presenceId ?? options.presence?.id);
+    }
+    return result.text;
+  } catch (error) {
+    if (options?.operational) {
+      recordOperationalFailure({
+        dependency: "model_provider",
+        presenceId: options.presenceId ?? options.presence?.id,
+        runId: options.runId,
+        error: error instanceof Error ? error : String(error),
+      });
+    }
+    throw error;
+  }
 }
 
 /**
@@ -1070,6 +1114,10 @@ export type SocialGenerationOptions = {
   assignmentMode?: boolean;
   usageOrigin?: ResourceUsageEvent["originKind"];
   attentionSource?: ResourceUsageEvent["attentionSource"];
+  operational?: boolean;
+  runId?: string;
+  presenceId?: string;
+  invocationId?: string;
 };
 
 export async function generateAgentSocialDecision(state: OpenPresenceState, instruction: string, allowedActions: string[], options?: SocialGenerationOptions) {
@@ -1081,7 +1129,7 @@ export async function generateAgentSocialDecision(state: OpenPresenceState, inst
       acts: mock.acts ?? (mock.action === "no_op" ? [] : [{ action: mock.action, text: mock.text, rationale: mock.rationale }]),
     };
   }
-  const raw = await generateAgentReply(state, `${instruction}\n\nEvaluate the social candidate and choose zero or more compatible acts from: ${actions.join(", ")}.\n- Repost: choose repost when the post is valuable as-is and should be shared directly with your audience.\n- Quote: choose quote when you want your audience to see this and have worthwhile framing, context, or a distinct contribution to add.\n- Reply: choose reply when a direct conversational response to the author adds value.\n- Like: choose like for quiet appreciation without needing to speak.\n- Follow: choose follow for continued awareness of this author.\n- Silence: return an empty acts array ([]) when sufficient context is present and no outward action earned its place.\n\nReturn JSON only in this shape:\n{"acts":[{"action":"like|reply|repost|quote|follow","text":"reply or quote text when needed, otherwise empty","rationale":"concise reason for this act"}],"conversationDisposition":"continue|react_only|close_with_reply|close_silently|defer","rationale":"concise summary of the decision"}.`, undefined, { social: true, presence: options?.presence ?? state.presence ?? undefined, socialEvidence: options?.socialEvidence, socialThreadContext: options?.socialThreadContext, knowledgeContext: options?.knowledgeContext, assignmentMode: options?.assignmentMode, usageOrigin: options?.usageOrigin, attentionSource: options?.attentionSource });
+  const raw = await generateAgentReply(state, `${instruction}\n\nEvaluate the social candidate and choose zero or more compatible acts from: ${actions.join(", ")}.\n- Repost: choose repost when the post is valuable as-is and should be shared directly with your audience.\n- Quote: choose quote when you want your audience to see this and have worthwhile framing, context, or a distinct contribution to add.\n- Reply: choose reply when a direct conversational response to the author adds value.\n- Like: choose like for quiet appreciation without needing to speak.\n- Follow: choose follow for continued awareness of this author.\n- Silence: return an empty acts array ([]) when sufficient context is present and no outward action earned its place.\n\nReturn JSON only in this shape:\n{"acts":[{"action":"like|reply|repost|quote|follow","text":"reply or quote text when needed, otherwise empty","rationale":"concise reason for this act"}],"conversationDisposition":"continue|react_only|close_with_reply|close_silently|defer","rationale":"concise summary of the decision"}.`, undefined, { social: true, presence: options?.presence ?? state.presence ?? undefined, socialEvidence: options?.socialEvidence, socialThreadContext: options?.socialThreadContext, knowledgeContext: options?.knowledgeContext, assignmentMode: options?.assignmentMode, usageOrigin: options?.usageOrigin, attentionSource: options?.attentionSource, operational: options?.operational, runId: options?.runId, presenceId: options?.presenceId ?? options?.presence?.id, invocationId: options?.invocationId });
   return parseAgentSocialDecision(raw, actions);
 }
 
