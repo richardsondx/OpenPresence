@@ -1790,20 +1790,26 @@ function AgentWorkspaceShell({
   const presenceBridge = presence.channel !== "x" ? state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline") : undefined;
   const presenceBridgeStatus = presenceBridge ? bridgeAdapterStatus(presenceBridge) : undefined;
   const [showPresenceModal, setShowPresenceModal] = useState(false);
+  const isPresenceView = presenceNavItems.some(({ id }) => id === view) || view === "calendar";
+  const contextIdentity = isPresenceView && presence
+    ? { name: presence.name, accent: presence.accent }
+    : { name: agent.name, accent: agent.accent };
   const pageLabel =
     view === "brain"
       ? "Manage Agent"
       : view === "presence"
-        ? "Presence settings"
+        ? "Settings"
       : view === "usage"
         ? "Usage"
       : view === "live"
-          ? "Activity"
-            : view === "feed"
-              ? "Feed"
-            : view === "growth"
-              ? "Growth"
-        : view[0].toUpperCase() + view.slice(1);
+        ? "Activity"
+      : view === "feed"
+        ? "Feed"
+      : view === "growth"
+        ? "Growth"
+      : view === "playground"
+        ? "Playground"
+      : view[0].toUpperCase() + view.slice(1);
   const pendingExecutionCount = state.executions.filter(
     (item) =>
       item.presenceId === presence.id && item.status === "awaiting-review",
@@ -1884,8 +1890,8 @@ function AgentWorkspaceShell({
             />
           </div>
           <div className="topbar-context">
-            <PresenceGlyph accent={agent.accent} />
-            <span>{agent.name}</span>
+            <PresenceGlyph accent={contextIdentity.accent} />
+            <span>{contextIdentity.name}</span>
             <ChevronRight size={14} />
             <strong>{pageLabel}</strong>
           </div>
@@ -2040,6 +2046,10 @@ function LegacyAppShell({
   const presence = state.presence!;
   const operationalHealth = useOperationalHealth(presence.id);
   const [showPresenceModal, setShowPresenceModal] = useState(false);
+  const isPresenceView = presenceNavItems.some(({ id }) => id === view) || view === "calendar";
+  const contextIdentity = isPresenceView && presence
+    ? { name: presence.name, accent: presence.accent }
+    : { name: agent.name, accent: agent.accent };
   const pageLabel =
     view === "brain"
       ? "Brain"
@@ -2150,8 +2160,8 @@ function LegacyAppShell({
             <span>OpenPresence</span>
           </div>
           <div className="topbar-context">
-            <PresenceGlyph accent={agent.accent} />
-            <span>{agent.name}</span>
+            <PresenceGlyph accent={contextIdentity.accent} />
+            <span>{contextIdentity.name}</span>
             <ChevronRight size={14} />
             <strong>{pageLabel}</strong>
           </div>
