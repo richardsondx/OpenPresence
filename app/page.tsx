@@ -10839,12 +10839,6 @@ function HistoryCard({ item, state, onSelect, compact = false }: { item: PublicH
   </button>;
 }
 
-function historyHourWindow(history: PublicHistoryItem[]) {
-  const activeHours = history.map((item) => new Date(historyDisplayAt(item)).getHours());
-  if (!activeHours.length) return { start: 0, end: 0 };
-  return { start: Math.max(0, Math.min(...activeHours) - 1), end: Math.min(24, Math.max(...activeHours) + 2) };
-}
-
 function WeekHistory({ anchor, history, state, presenceName, onSelect }: { anchor: Date; history: PublicHistoryItem[]; state: OpenPresenceState; presenceName: string; onSelect: (item: PublicHistoryItem) => void }) {
   const start = new Date(anchor);
   const day = start.getDay();
@@ -10857,18 +10851,27 @@ function WeekHistory({ anchor, history, state, presenceName, onSelect }: { ancho
     const timestamp = new Date(historyDisplayAt(item));
     return timestamp >= start && timestamp < end;
   });
-  const hourWindow = historyHourWindow(weekItems);
-  const hours = Array.from({ length: hourWindow.end - hourWindow.start }, (_, index) => hourWindow.start + index);
-  const gridHeight = hours.length * 56;
-  const gridRows = `repeat(${hours.length}, 56px)`;
   if (!weekItems.length) return <div className="history-calendar-empty">No public activity in this week.</div>;
+  const hours = Array.from(
+    new Set(weekItems.map((item) => new Date(historyDisplayAt(item)).getHours()))
+  ).sort((a, b) => a - b);
   return <div className="history-week" aria-label={`Weekly public history for ${presenceName}`}>
     <div className="history-week-grid">
       <div className="history-week-header"><span>Local time</span>{days.map((date) => <span key={date.toISOString()}>{date.toLocaleDateString("en", { weekday: "short" })}<small>{date.getDate()}</small></span>)}</div>
-      <div className="history-week-body" style={{ height: gridHeight }}><div className="history-time-rail" style={{ gridTemplateRows: gridRows }}>{hours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>{days.map((date) => {
-        const dayItems = weekItems.filter((item) => new Date(historyDisplayAt(item)).toDateString() === date.toDateString());
-        return <div className="history-day-column" style={{ gridTemplateRows: gridRows, height: gridHeight }} key={date.toISOString()}>{hours.map((hour) => <div className="history-hour-cell" key={hour} />)}{dayItems.map((item) => { const timestamp = new Date(historyDisplayAt(item)); const top = Math.max(2, ((timestamp.getHours() + timestamp.getMinutes() / 60 - hourWindow.start) * 56)); return <div key={item.id} className="history-positioned-card" style={{ top }}><HistoryCard item={item} state={state} onSelect={onSelect} compact /></div>; })}</div>;
-      })}</div>
+      <div className="history-week-body" style={{ ["--row-count" as string]: hours.length }}>
+        <div className="history-time-rail">{hours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>
+        {days.map((date) => {
+          const dayItems = weekItems.filter((item) => new Date(historyDisplayAt(item)).toDateString() === date.toDateString());
+          return <div className="history-day-column" key={date.toISOString()}>
+            {hours.map((hour) => {
+              const hourItems = dayItems.filter((item) => new Date(historyDisplayAt(item)).getHours() === hour);
+              return <div className="history-hour-cell" key={hour}>
+                {hourItems.map((item) => <HistoryCard key={item.id} item={item} state={state} onSelect={onSelect} compact />)}
+              </div>;
+            })}
+          </div>;
+        })}
+      </div>
     </div>
   </div>;
 }
@@ -10882,9 +10885,31 @@ function MonthHistory({ anchor, history, state, onSelect }: { anchor: Date; hist
 
 function DayHistory({ date, history, state, onSelect }: { date: Date; history: PublicHistoryItem[]; state: OpenPresenceState; onSelect: (item: PublicHistoryItem) => void }) {
   const dayItems = history.filter((item) => new Date(historyDisplayAt(item)).toDateString() === date.toDateString());
-  const hourWindow = historyHourWindow(dayItems);
-  const hours = Array.from({ length: hourWindow.end - hourWindow.start }, (_, index) => hourWindow.start + index);
-  return <div className="history-day"><div className="history-day-header"><SectionEyebrow>{date.toLocaleDateString("en", { weekday: "long" })}</SectionEyebrow><h2>{date.toLocaleDateString("en", { month: "long", day: "numeric", year: "numeric" })}</h2><p>Public history appears here.</p></div>{dayItems.length ? <div className="history-day-timeline">{hours.map((hour) => <div className="history-timeline-row" key={hour}><span>{String(hour).padStart(2, "0")}:00</span><div>{dayItems.filter((item) => new Date(historyDisplayAt(item)).getHours() === hour).map((item) => <HistoryCard key={item.id} item={item} state={state} onSelect={onSelect} />)}</div></div>)}</div> : <div className="history-calendar-empty">No public activity on this day.</div>}</div>;
+  if (!dayItems.length) return <div className="history-day"><div className="history-day-header"><SectionEyebrow>{date.toLocaleDateString("en", { weekday: "long" })}</SectionEyebrow><h2>{date.toLocaleDateString("en", { month: "long", day: "numeric", year: "numeric" })}</h2><p>Public history appears here.</p></div><div className="history-calendar-empty">No public activity on this day.</div></div>;
+  const hours = Array.from(
+    new Set(dayItems.map((item) => new Date(historyDisplayAt(item)).getHours()))
+  ).sort((a, b) => a - b);
+  return <div className="history-day">
+    <div className="history-day-header">
+      <SectionEyebrow>{date.toLocaleDateString("en", { weekday: "long" })}</SectionEyebrow>
+      <h2>{date.toLocaleDateString("en", { month: "long", day: "numeric", year: "numeric" })}</h2>
+      <p>Public history appears here.</p>
+    </div>
+    <div className="history-day-timeline">
+      {hours.map((hour) => (
+        <div className="history-timeline-row" key={hour}>
+          <span>{String(hour).padStart(2, "0")}:00</span>
+          <div>
+            {dayItems
+              .filter((item) => new Date(historyDisplayAt(item)).getHours() === hour)
+              .map((item) => (
+                <HistoryCard key={item.id} item={item} state={state} onSelect={onSelect} />
+              ))}
+          </div>
+        </div>
+      ))}
+    </div>
+  </div>;
 }
 
 function PublicHistoryInspector({ item, state, mutate, index, total, onNavigate, onClose, onActivity }: { item: PublicHistoryItem; state: OpenPresenceState; mutate: Mutate; index: number; total: number; onNavigate: (offset: number) => void; onClose: () => void; onActivity: () => void }) {

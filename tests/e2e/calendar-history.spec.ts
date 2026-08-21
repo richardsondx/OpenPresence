@@ -43,7 +43,7 @@ test("Feed explains why a Sandbox expression has no live X destination", async (
   await page.getByRole("button", { name: "Feed", exact: true }).click();
   await expect(page.locator(".feed-item").first()).toBeVisible();
   await page.locator(".feed-item").first().click();
-  await expect(page.getByText("Sandbox rehearsal only. This expression has no live X URL.", { exact: true })).toBeVisible();
+  await expect(page.getByText("Sandbox rehearsal only. This expression has no live destination.", { exact: true })).toBeVisible();
   await expect(page.getByRole("link", { name: "Open on X" })).toHaveCount(0);
 });
 
