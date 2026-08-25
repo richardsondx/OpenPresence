@@ -19,6 +19,18 @@ describe("public Presence expression boundary", () => {
     expect(publicExpressionText(plannerReply)).toBe("First sentence.\n\nSecond sentence.");
   });
 
+  it("extracts the reply from an unwrapped planner decision", () => {
+    const plannerReply = [
+      'conversationDisposition: "close_with_reply"',
+      'speechAct: "casual_check_in"',
+      'rationale: "A brief warm update keeps the exchange natural."',
+      'reply: "Still good—curious, a little hungry, and waiting for the next interesting idea."',
+    ].join("\n");
+
+    expect(publicExpressionLeakageReason(plannerReply)).toBeTruthy();
+    expect(publicExpressionText(plannerReply)).toBe("Still good—curious, a little hungry, and waiting for the next interesting idea.");
+  });
+
   it("removes silent decisions instead of rendering internal metadata", () => {
     const noOp = '{"conversationDisposition":"close_silently","action":"no_op","rationale":"The statement is complete and does not open a useful exchange."}';
     expect(publicExpressionText(noOp)).toBe("");

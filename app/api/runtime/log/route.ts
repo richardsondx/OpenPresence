@@ -4,9 +4,9 @@ import {
   listRecoveryIncidents,
   listRecoveryAttempts,
   listScheduledWakes,
-  readState,
+  readRuntimeAuditProjection,
 } from "@/lib/db";
-import type { OperationalRun, RecoveryIncident, RecoveryAttempt, SocialDecision, Execution, Outcome, MirrorObject, ResourceUsageEvent } from "@/lib/types";
+import type { OperationalRun, RecoveryIncident, RecoveryAttempt, SocialDecision, Execution, Outcome, MirrorObject, ResourceUsageEvent, AttentionEpisode } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
 
@@ -16,6 +16,8 @@ export interface CorrelatedAuditRecordDTO {
   id: string;
   runId?: string;
   invocationId?: string;
+  attentionEpisodeId?: string;
+  attentionEpisode?: Pick<AttentionEpisode, "id" | "status" | "stage" | "startedAt" | "updatedAt" | "summary" | "fetchedCount" | "newCount" | "changedCount" | "knownCount" | "consideredCount" | "closeAttentionCount" | "noOpCount" | "actionCounts" | "verifiedOutcomeCount" | "pendingExecutionCount" | "failedExecutionCount" | "resourceUsage">;
   timestamp: string;
   stage: string;
   title: string;
@@ -112,7 +114,7 @@ export async function GET(request: Request) {
   const pageSize = Math.min(100, Math.max(10, Number.parseInt(searchParams.get("pageSize") ?? "50", 10) || 50));
   const sinceTime = since ? new Date(since).getTime() : 0;
 
-  const state = readState();
+  const state = readRuntimeAuditProjection(presenceId);
   const runs = listOperationalRuns(presenceId);
   const allIncidents = listRecoveryIncidents(presenceId);
   const mirrorObjects = state.mirrorObjects.filter((m) => !presenceId || m.presenceId === presenceId);
@@ -121,6 +123,32 @@ export async function GET(request: Request) {
   const executions = state.executions.filter((e) => !presenceId || e.presenceId === presenceId);
   const outcomes = state.outcomes.filter((o) => !presenceId || o.presenceId === presenceId);
   const usageEvents = state.resourceUsageEvents.filter((u) => !presenceId || u.presenceId === presenceId);
+  const attentionEpisodes = (state.attentionEpisodes ?? []).filter((episode) => !presenceId || episode.presenceId === presenceId);
+  const attentionEpisodeById = new Map(attentionEpisodes.map((episode) => [episode.id, episode]));
+  const attentionEpisodeFor = (id?: string) => {
+    const episode = id ? attentionEpisodeById.get(id) : undefined;
+    if (!episode) return undefined;
+    return {
+      id: episode.id,
+      status: episode.status,
+      stage: episode.stage,
+      startedAt: episode.startedAt,
+      updatedAt: episode.updatedAt,
+      summary: episode.summary,
+      fetchedCount: episode.fetchedCount,
+      newCount: episode.newCount,
+      changedCount: episode.changedCount,
+      knownCount: episode.knownCount,
+      consideredCount: episode.consideredCount,
+      closeAttentionCount: episode.closeAttentionCount,
+      noOpCount: episode.noOpCount,
+      actionCounts: episode.actionCounts,
+      verifiedOutcomeCount: episode.verifiedOutcomeCount,
+      pendingExecutionCount: episode.pendingExecutionCount,
+      failedExecutionCount: episode.failedExecutionCount,
+      resourceUsage: episode.resourceUsage,
+    } satisfies CorrelatedAuditRecordDTO["attentionEpisode"];
+  };
 
   // Correlation used to scan every decision/execution/usage collection for
   // every run. That made the forensic surface progressively slower as the
@@ -131,8 +159,8 @@ export async function GET(request: Request) {
   const executionsByRun = new Map<string, Execution[]>();
   const executionsByInvocation = new Map<string, Execution[]>();
   const executionsByIntent = new Map<string, Execution[]>();
-  const usageByRun = new Map<string, ResourceUsageEvent>();
-  const usageByInvocation = new Map<string, ResourceUsageEvent>();
+  const usageByRun = new Map<string, ResourceUsageEvent[]>();
+  const usageByInvocation = new Map<string, ResourceUsageEvent[]>();
   const outcomesByExecution = new Map<string, Outcome>();
   const outcomesByIntent = new Map<string, Outcome>();
   const append = <T>(map: Map<string, T[]>, key: string | undefined, value: T) => {
@@ -152,8 +180,21 @@ export async function GET(request: Request) {
     append(executionsByIntent, execution.socialIntentId, execution);
   }
   for (const usage of usageEvents) {
-    if (usage.runId) usageByRun.set(usage.runId, usage);
-    if (usage.invocationId) usageByInvocation.set(usage.invocationId, usage);
+    // Channel reads/writes and model calls share one durable usage ledger, but
+    // only model events belong in the model telemetry panel. The old code
+    // picked the last event for a run, which made Native X appear as the model
+    // provider and reported a misleading zero-token request.
+    if (usage.category !== "model") continue;
+    if (usage.runId) {
+      const events = usageByRun.get(usage.runId) ?? [];
+      events.push(usage);
+      usageByRun.set(usage.runId, events);
+    }
+    if (usage.invocationId) {
+      const events = usageByInvocation.get(usage.invocationId) ?? [];
+      events.push(usage);
+      usageByInvocation.set(usage.invocationId, events);
+    }
   }
   for (const outcome of outcomes) {
     if (outcome.executionId) outcomesByExecution.set(outcome.executionId, outcome);
@@ -188,7 +229,9 @@ export async function GET(request: Request) {
     for (const e of matchedExecutions) coveredExecutionIds.add(e.id);
 
     // Correlate Model Telemetry
-    const matchedUsage = usageByRun.get(run.id) ?? (run.invocationId ? usageByInvocation.get(run.invocationId) : undefined);
+    const matchedUsageEvents = usageByRun.get(run.id) ?? (run.invocationId ? usageByInvocation.get(run.invocationId) : undefined) ?? [];
+    const matchedUsage = matchedUsageEvents[matchedUsageEvents.length - 1];
+    const modelProfile = state.modelProfiles[0];
 
     // Correlate Outcome
     const matchedOutcome = matchedExecutions.map((e) => outcomesByExecution.get(e.id)).find(Boolean)
@@ -240,19 +283,28 @@ export async function GET(request: Request) {
       id: `audit:run:${run.id}`,
       runId: run.id,
       invocationId: run.invocationId,
+      attentionEpisodeId: run.attentionEpisodeId,
+      attentionEpisode: attentionEpisodeFor(run.attentionEpisodeId),
       timestamp,
       stage: run.stage,
       title: `${run.kind.toUpperCase()} Run · ${run.stage}`,
-      status: run.state,
+      status: run.metadata?.degraded ? "completed_with_degradation" : run.state,
       facets,
       traceCompleteness,
       focalCandidate,
       modelTelemetry: matchedUsage ? {
         provider: matchedUsage.provider,
         model: matchedUsage.model,
-        totalTokens: matchedUsage.usage.totalTokens ?? (matchedUsage.usage.inputTokens ?? 0) + (matchedUsage.usage.outputTokens ?? 0),
-        requests: matchedUsage.usage.requests ?? 1,
+        totalTokens: matchedUsageEvents.every((event) => event.usage.totalTokens === undefined && event.usage.inputTokens === undefined && event.usage.outputTokens === undefined)
+          ? undefined
+          : matchedUsageEvents.reduce((sum, event) => sum + (event.usage.totalTokens ?? (event.usage.inputTokens ?? 0) + (event.usage.outputTokens ?? 0)), 0),
+        requests: matchedUsageEvents.reduce((sum, event) => sum + (event.usage.requests ?? 1), 0),
         category: matchedUsage.category,
+      } : matchedIncident?.rootCauseKey.startsWith("model_provider.") && modelProfile ? {
+        provider: modelProfile.provider,
+        model: modelProfile.model,
+        requests: 1,
+        category: "model",
       } : undefined,
       decisions: matchedDecisions.map((d) => ({
         id: d.id,
@@ -306,6 +358,7 @@ export async function GET(request: Request) {
       displayMetadata: {
         kind: run.kind,
         attemptCount: run.attemptCount,
+        retryReason: run.retryReason ?? null,
         recoveryCount: run.recoveryCount,
         leaseOwner: run.leaseOwner ?? null,
       },
@@ -389,6 +442,8 @@ export async function GET(request: Request) {
       id: `audit:dec:${d.id}`,
       runId: d.plannerRunId ?? d.runId,
       invocationId: d.invocationId,
+      attentionEpisodeId: d.attentionEpisodeId,
+      attentionEpisode: attentionEpisodeFor(d.attentionEpisodeId),
       timestamp,
       stage: "decision",
       title: `Social Decision · ${d.decision}`,
@@ -430,6 +485,8 @@ export async function GET(request: Request) {
       id: `audit:exe:${e.id}`,
       runId: e.runId,
       invocationId: e.invocationId,
+      attentionEpisodeId: e.attentionEpisodeId,
+      attentionEpisode: attentionEpisodeFor(e.attentionEpisodeId),
       timestamp,
       stage: "execution",
       title: `Execution · ${e.affordance} -> ${e.status}`,
@@ -499,6 +556,7 @@ export async function GET(request: Request) {
     page,
     pageSize,
     pageCount: Math.max(1, Math.ceil(totalRecords / pageSize)),
+    attentionEpisodes: attentionEpisodes.map((episode) => attentionEpisodeFor(episode.id)),
     records: filteredRecords.slice(start, start + pageSize),
   });
 }

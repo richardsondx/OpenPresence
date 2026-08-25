@@ -2,23 +2,18 @@ import crypto from "node:crypto";
 import { NextResponse } from "next/server";
 import { z } from "zod";
 import { readState, WorkspaceConflictError, writeState } from "@/lib/db";
-import { disconnectNativeX, normalizeHandle, saveNativeXCredentials, testXCredentials, upsertNativeXConnection } from "@/lib/x";
+import { disconnectNativeX, mergeXCredentials, normalizeHandle, readNativeXCredentials, saveNativeXCredentials, testXCredentials, upsertNativeXConnection } from "@/lib/x";
 import { reconcileNativeX } from "@/lib/native-x";
 import { stateForContext } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
 
 const credentials = z.object({
-  apiKey: z.string().trim().min(1).max(500),
-  apiSecret: z.string().trim().min(1).max(500),
+  apiKey: z.string().trim().max(500).optional().or(z.literal("")),
+  apiSecret: z.string().trim().max(500).optional().or(z.literal("")),
   bearerToken: z.string().trim().max(2000).optional().or(z.literal("")),
   accessToken: z.string().trim().max(2000).optional().or(z.literal("")),
   accessTokenSecret: z.string().trim().max(2000).optional().or(z.literal("")),
-}).superRefine((value, context) => {
-  const hasAccessToken = Boolean(value.accessToken);
-  const hasAccessTokenSecret = Boolean(value.accessTokenSecret);
-  if (hasAccessToken !== hasAccessTokenSecret) context.addIssue({ code: z.ZodIssueCode.custom, path: [hasAccessToken ? "accessTokenSecret" : "accessToken"], message: "Provide both user access token fields for write access." });
-  if (!value.bearerToken && !hasAccessToken) context.addIssue({ code: z.ZodIssueCode.custom, path: ["bearerToken"], message: "Add a Bearer Token for read access, or user access tokens for read + write access." });
 });
 const input = z.discriminatedUnion("action", [
   z.object({ action: z.literal("test"), presenceId: z.string().min(1), credentials }),
@@ -43,13 +38,21 @@ export async function POST(request: Request) {
       writeState(next);
       return NextResponse.json({ state: next });
     }
-    const cleanCredentials = Object.fromEntries(Object.entries(parsed.credentials).filter(([, value]) => value)) as typeof parsed.credentials;
+    const existing = state.nativeConnections.find((item) => item.presenceId === parsed.presenceId && item.kind === "x");
+    // Editing intentionally uses blank fields. They mean “keep the encrypted
+    // value already stored”, never “erase this credential”.
+    const storedCredentials = existing ? readNativeXCredentials(existing.id) : undefined;
+    const cleanCredentials = mergeXCredentials(storedCredentials, parsed.credentials);
+    const hasAccessToken = Boolean(cleanCredentials.accessToken);
+    const hasAccessTokenSecret = Boolean(cleanCredentials.accessTokenSecret);
+    if (!cleanCredentials.apiKey || !cleanCredentials.apiSecret) throw new Error("Add the API key and API secret, or leave the saved values unchanged.");
+    if (hasAccessToken !== hasAccessTokenSecret) throw new Error("Provide both user access token fields for write access.");
+    if (!cleanCredentials.bearerToken && !hasAccessToken) throw new Error("Add a Bearer Token for read access, or user access tokens for read + write access.");
     const result = await testXCredentials(cleanCredentials, presence.handle);
     if (result.access === "read-write" && normalizeHandle(result.account.username) !== normalizeHandle(presence.handle)) {
       throw new Error(`ACCOUNT_MISMATCH: X authenticated @${result.account.username}, but this Presence expects @${normalizeHandle(presence.handle)}. Credentials were not saved.`);
     }
     if (parsed.action === "test") return NextResponse.json({ result });
-    const existing = state.nativeConnections.find((item) => item.presenceId === parsed.presenceId && item.kind === "x");
     const connectionId = existing?.id ?? `native_x_${crypto.randomUUID()}`;
     saveNativeXCredentials(connectionId, cleanCredentials);
     const connected = upsertNativeXConnection(state, { presenceId: parsed.presenceId, id: connectionId, ...result });

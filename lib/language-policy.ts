@@ -17,18 +17,28 @@ export function languagesMatch(expected: unknown, observed: unknown): boolean {
   return Boolean(expectedBase && observedBase && expectedBase === observedBase);
 }
 
-/** X uses `zxx` for posts with no linguistic content, commonly image-only posts. */
-export function languageEligibleForObservation(expected: unknown, observed: unknown, text?: string, hasVisualAsset = false): boolean {
-  if (languagesMatch(expected, observed)) return true;
-  if (languageBase(expected) !== "en" || !hasVisualAsset || typeof observed !== "string") return false;
-  const raw = observed.trim().toLocaleLowerCase().replaceAll("_", "-");
-  if (!raw || !["zxx", "und"].includes(raw)) return false;
-  const meaningfulText = (text ?? "")
+function meaningfulLanguageText(text: string | undefined): string {
+  return (text ?? "")
     .replace(/https?:\/\/\S+/gi, "")
     .replace(/[@#][\p{L}\p{N}_-]+/gu, "")
     .replace(/[\p{P}\p{S}\p{N}_\s]/gu, "")
     .trim();
-  return meaningfulText.length === 0;
+}
+
+/**
+ * X uses `zxx` for posts with no linguistic content, commonly image-only
+ * posts. Its `qme` label is also used for mention/link-only post shells. A
+ * provider label alone is not enough to admit a target: the observed text
+ * must actually contain no language-bearing content.
+ */
+export function languageEligibleForObservation(expected: unknown, observed: unknown, text?: string, hasVisualAsset = false): boolean {
+  if (languagesMatch(expected, observed)) return true;
+  if (languageBase(expected) !== "en" || typeof observed !== "string") return false;
+  const raw = observed.trim().toLocaleLowerCase().replaceAll("_", "-");
+  if (!raw || !["zxx", "und", "qme"].includes(raw)) return false;
+  // qme describes a non-linguistic/link-only shell even when X does not
+  // provide a media attachment. Keep zxx/und conservative for general feeds.
+  return meaningfulLanguageText(text).length === 0 && (raw === "qme" || hasVisualAsset);
 }
 
 export function normalizedObservedLanguage(value: unknown): string | undefined {

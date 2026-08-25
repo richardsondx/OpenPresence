@@ -1,5 +1,6 @@
 import { getDependencyHealth, readStateForContext } from "./db";
 import { derivePresenceCapabilityManifest } from "./runtime";
+import { bridgeExecutionStatus } from "./bridge-contract";
 import type { Presence, SocialIntent } from "./types";
 
 export type ExecutionRoute = "native_x" | "user_attached_bridge" | "blocked";
@@ -50,9 +51,11 @@ export function routeExecutionIntent(input: {
   const capability = manifest.items.find((item) => item.capability === affordance || item.capability === normalizedAffordance);
 
   const browserLearned = (presence.browserAccess?.learnedFallbacks ?? []).some((item) => item.action === affordance || item.action === normalizedAffordance);
-  const browserBridge = state.bridges.find((bridge) => bridge.presenceId === presenceId && bridge.name.startsWith("OpenPresence Chrome · ") && bridge.state !== "offline");
+  const browserBridge = state.bridges.find((bridge) => bridge.presenceId === presenceId && bridge.name.startsWith("OpenPresence Chrome · ") && bridgeExecutionStatus(bridge) === "connected");
 
-  if (browserLearned && browserBridge) {
+  const bridgeHealth = getDependencyHealth("user_attached_bridge", presenceId);
+  const bridgeHealthy = !bridgeHealth || bridgeHealth.state === "healthy";
+  if (browserLearned && browserBridge && bridgeHealthy) {
     return {
       route: "user_attached_bridge",
       reason: `The native connector previously rejected ${affordance}; using the learned browser capability for this action.`,
@@ -84,8 +87,6 @@ export function routeExecutionIntent(input: {
   }
 
   // 3. A browser-only action can use the browser capability when configured.
-  const bridgeHealth = getDependencyHealth("user_attached_bridge", presenceId);
-  const bridgeHealthy = !bridgeHealth || bridgeHealth.state === "healthy";
   if (capability?.provider === "Browser Bridge" && browserBridge && bridgeHealthy) {
     return {
       route: "user_attached_bridge",

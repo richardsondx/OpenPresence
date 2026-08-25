@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { addSandboxEvent, applyOperation, assignmentIsOpen, assignmentIsSatisfied, cleanSandboxDraft, cleanUserFacingAssignmentInstruction, compileAssignmentInstruction, compilePresenceContext, compileWatch, completeNativeExecution, createAgent, deliverSandboxExecution, defaultPublishingInitiative, defaultSelfDirectedAttentionPolicy, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingProgress, deriveSelfDirectedDiscoveryPlan, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, formXActionIntent, identityLeakageReason, inferExplicitDurableContext, inferPresenceIdentityChange, initialState, isActivityDecisionEvent, isExplicitGhostModeRequest, isExplicitXPostRequest, isMentionRestrictedError, isTeachProposalConfirmation, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, publicHistoryMatchesPresence, recordAttentionTestDecision, recordNativeMirror, recordNativeObservation, recordPublicFooting, recordResourceUsageEvent, recordSocialDecision, recordStandingIntentNoOp, recordVerifiedChromeReply, recordVerifiedXReply, rerouteExecutionToBridge, startAttentionTest, startPlaygroundSession, stateForContext } from "../lib/runtime";
+import { expireQueuedDeliveryWindows } from "../lib/temporal";
 import { acknowledgeExecution, claimExecutions, createBridgeWithKey, heartbeatBridge, ingestEvents, removeBridge, revokeBridge } from "../lib/bridge";
 import { readBridgeById, readBridgeCredentialMetadata, readState, readStateVersion, writeState } from "../lib/db";
 import { nextObservationAt } from "../lib/native-x";
@@ -13,6 +14,11 @@ describe("Capability trials", () => {
     expect(trial).toMatchObject({ capability: "repost", environment: "live", status: "preflight", executionIsolation: { mode: "auto", presenceWide: false } });
     expect(state.assignments.find((item) => item.id === trial.assignmentId)).toMatchObject({ origin: "capability_trial", deliverable: { type: "repost", quantity: 1 }, status: "draft" });
     expect(state.presence?.execution.repost).not.toBe("auto");
+  });
+
+  it("retains an operator-selected observed candidate for a bounded live proof", () => {
+    const state = applyOperation(createAgent(input), { type: "createCapabilityTrial", capability: "quote", candidateId: "post-observed-1", environment: "live", executionMode: "auto" });
+    expect(state.capabilityTrials[0]).toMatchObject({ capability: "quote", candidateId: "post-observed-1" });
   });
 
   it.each([
@@ -55,9 +61,46 @@ describe("Capability trials", () => {
     const repaired = normalizeState(state);
     expect(repaired.assignments.find((item) => item.id === assignment.id)).toMatchObject({ status: "expired_incomplete", lastOutcome: { class: "incomplete", message: "No qualified candidate." } });
   });
+
+  it("cannot leave a resource-blocked trial discovering after its Assignment is terminal", () => {
+    const state = applyOperation(createAgent(input), { type: "createCapabilityTrial", capability: "like", environment: "live", executionMode: "auto" });
+    const trial = state.capabilityTrials[0]!;
+    trial.status = "discovering";
+    const assignment = state.assignments.find((item) => item.id === trial.assignmentId)!;
+    assignment.status = "expired_incomplete";
+    assignment.lastOutcome = { class: "incomplete", message: "The bounded trial could not read X because the provider resource quota was exhausted.", at: new Date().toISOString() };
+    const repaired = normalizeState(state);
+    expect(repaired.capabilityTrials.find((item) => item.id === trial.id)).toMatchObject({ status: "failed", result: "BLOCKED_RESOURCE" });
+  });
 });
 
 describe("Chrome delivery reconciliation", () => {
+  it("expires queued delivery windows without requiring a Bridge claim", () => {
+    let state = applyOperation(createAgent(input), { type: "setPresence", patch: { execution: { reply: "auto" } } });
+    state = formXReplyIntent(state, "This action must not remain queued forever.", "target-post-expiry");
+    const execution = state.executions[0]!;
+    const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId)!;
+    intent.validity.expiresAt = "2026-08-23T00:00:00.000Z";
+    execution.status = "queued";
+
+    expect(expireQueuedDeliveryWindows(state, new Date("2026-08-24T00:00:00.000Z"))).toBe(1);
+    expect(execution).toMatchObject({ status: "expired", failure: { code: "INTENT_EXPIRED_BEFORE_CLAIM", retryable: false } });
+    expect(intent.state).toBe("expired");
+    expect(state.actions.find((item) => item.executionId === execution.id)?.status).toBe("skipped");
+  });
+
+  it("closes active delivery records whose Assignment was lost during restore", () => {
+    let state = applyOperation(createAgent(input), { type: "setPresence", patch: { execution: { reply: "auto" } } });
+    state = formXReplyIntent(state, "This delivery belongs to an Assignment that no longer exists.", "target-post-orphan");
+    const execution = state.executions[0]!;
+    execution.assignmentId = "assignment-lost-during-restore";
+    execution.status = "queued";
+    const normalized = normalizeState(state);
+    const repaired = normalized.executions.find((item) => item.id === execution.id)!;
+    expect(repaired).toMatchObject({ status: "expired", failure: { code: "ORPHANED_ASSIGNMENT", retryable: false } });
+    expect(normalized.socialIntents.find((item) => item.id === execution.socialIntentId)?.state).toBe("expired");
+  });
+
   it("keeps a direct Agent-selected Sandbox attention decision durable and idempotent", () => {
     let state = applyOperation(createAgent(input), { type: "setPresence", patch: { connectionMode: "sandbox", execution: { like: "auto" } } });
     state = startAttentionTest(state, { presenceId: state.presence!.id, mode: "sandbox", confirmed: true });
@@ -172,9 +215,9 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.agentWorkspaces.some((workspace) => workspace.agent?.name === "Atlas")).toBe(false);
   });
 
-  it("defaults self-directed attention off and derives a Presence-scoped plan from meaning", () => {
+  it("makes self-directed attention available by default and derives a Presence-scoped plan from meaning", () => {
     const state = createAgent(input);
-    expect(defaultSelfDirectedAttentionPolicy()).toMatchObject({ enabled: false, intensity: "balanced", mediaUnderstanding: "when_needed", growthTargets: { quoteOrRepostPerDay: 2, followsPerDay: 3 } });
+    expect(defaultSelfDirectedAttentionPolicy()).toMatchObject({ enabled: true, intensity: "balanced", mediaUnderstanding: "when_needed", budget: { maxChannelReadsPerDay: 60, maxModelCallsPerDay: 40 } });
     state.presence!.brief = { ...state.presence!.brief, primaryTerritory: ["AI agents"], adjacentTerritory: ["founder questions"] };
     state.presences = [state.presence!];
     const plan = deriveSelfDirectedDiscoveryPlan(state, state.presence!.id);
@@ -374,6 +417,7 @@ describe("OpenPresence runtime boundaries", () => {
   it("keeps Presence Chat session memory separate from durable Agent state", () => {
     let state = createAgent(input);
     const presenceId = state.presence!.id;
+    state.presence!.execution.quote = "auto";
     const originalFiles = state.files.map((file) => `${file.kind}:${file.content}`).join("\n");
     state = applyOperation(state, { type: "newPresenceChatSession", presenceId });
     const session = state.presenceChatSessions[0]!;
@@ -408,6 +452,7 @@ describe("OpenPresence runtime boundaries", () => {
     const state = createAgent(input);
     expect(state.toolBindings.map((binding) => binding.toolId)).toEqual([
       "web.search",
+      "evidence.search",
       "asset.inspect",
       "chart.render",
       "channel.execute",
@@ -947,13 +992,26 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.events[0]?.title).toBe("Retry requested");
   });
 
-  it("keeps the Social Mirror connected when delivery is blocked by X billing", () => {
+  it("keeps the Social Mirror connected and pauses the presence when delivery is blocked by X billing", () => {
     let state = createAgent(input);
     state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "jenny_ai", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
     state = markNativeConnectionNeedsAttention(state, state.presence!.id, "X has no API credits remaining for this app.");
     expect(state.nativeConnections[0]?.status).toBe("connected");
     expect(state.nativeConnections[0]?.deliveryError).toContain("no API credits");
     expect(state.nativeConnections[0]?.healthMessage).toBeUndefined();
+    expect(state.presence?.status).toBe("paused");
+  });
+
+  it("normalizes a live presence to paused when its native X connection has exhausted credits", () => {
+    const state = createAgent(input);
+    state.presence!.status = "live";
+    state.presence!.environment = "live";
+    state.presences[0]!.status = "live";
+    state.presences[0]!.environment = "live";
+    state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", deliveryError: "X has no API credits remaining for this app.", account: { id: "account-1", username: "jenny_ai", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    const normalized = normalizeState(state);
+    expect(normalized.presence?.status).toBe("paused");
+    expect(normalized.presences[0]?.status).toBe("paused");
   });
 
   it("keeps the native connection healthy when X rejects a reply target", () => {
@@ -965,7 +1023,7 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.nativeConnections[0]?.healthMessage).toBeUndefined();
   });
 
-  it("keeps quote actions on the native X route until that exact action learns a browser fallback", () => {
+  it("does not hand X an ineligible quote target, while eligible quotes keep their route", () => {
     let state = createAgent(input);
     state.presence!.execution.quote = "auto";
     state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "jenny_ai", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
@@ -974,13 +1032,13 @@ describe("OpenPresence runtime boundaries", () => {
     state = recordNativeMirror(state, { connectionId: "native-x", presenceId: state.presence!.id, post: { id: "mentioned-post", text: "Hey @jenny_ai what do you think?", authorId: "author-99", authorUsername: "third_party", authorName: "Third Party" } });
 
     const unmentionedQuote = formXActionIntent(state, { affordance: "x.quote", target: { type: "x.post", id: "unmentioned-post" }, text: "A quote on unmentioned post." });
-    expect(unmentionedQuote.executions[0]?.connector).toBe("native");
-    expect(unmentionedQuote.executions[0]?.bridgeId).toBeUndefined();
+    expect(unmentionedQuote.executions).toHaveLength(0);
 
     const mentionedQuote = formXActionIntent(state, { affordance: "x.quote", target: { type: "x.post", id: "mentioned-post" }, text: "A quote on mentioned post." });
     expect(mentionedQuote.executions[0]?.connector).toBe("native");
 
-    const learned = rerouteExecutionToBridge(unmentionedQuote, unmentionedQuote.executions[0]!.id, "The native API rejected this quote action.");
+    const unknownQuote = formXActionIntent(state, { affordance: "x.quote", target: { type: "x.post", id: "unknown-post" }, text: "A later quote after learning." });
+    const learned = rerouteExecutionToBridge(unknownQuote, unknownQuote.executions[0]!.id, "The native API rejected this quote action.");
     const nextAttempt = formXActionIntent(learned, { affordance: "x.quote", target: { type: "x.post", id: "mentioned-post" }, text: "A later quote after learning." });
     expect(nextAttempt.executions[0]?.connector).toBe("bridge");
     expect(nextAttempt.presence?.browserAccess?.learnedFallbacks?.[0]?.action).toBe("x.quote");
@@ -1244,6 +1302,39 @@ describe("OpenPresence runtime boundaries", () => {
     expect(derivePublicHistory(state, presenceId)).toEqual([expect.objectContaining({ kind: "quote", parentExternalRef: target })]);
   });
 
+  it("does not regress a verified native quote to reply when X reports reply_to lineage", () => {
+    let state = createAgent(input);
+    const presenceId = state.presence!.id;
+    state.presence!.execution.quote = "auto";
+    state.nativeConnections = [{ id: "native-quote-reconcile", presenceId, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "jenny_ai", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    state = recordNativeMirror(state, { connectionId: "native-quote-reconcile", presenceId, post: { id: "quote-target-reconcile", text: "Hey @jenny_ai, a target worth adding context to.", authorId: "author-1", authorUsername: "source_author", authorName: "Source Author" } });
+    state = formXActionIntent(state, { affordance: "x.quote", target: { type: "x.post", id: "quote-target-reconcile" }, text: "A useful distinction." });
+    const execution = state.executions[0]!;
+    execution.status = "succeeded";
+    execution.externalRef = { type: "x.post", id: "quote-created-reconcile" };
+    state = recordNativeMirror(state, { connectionId: "native-quote-reconcile", presenceId, own: true, post: { id: "quote-created-reconcile", text: "A useful distinction.", parentId: "quote-target-reconcile", referencedPosts: [{ type: "replied_to", id: "quote-target-reconcile" }], authorId: "account-1", authorUsername: "jenny_ai", authorName: "Genny" } });
+    expect(state.mirrorObjects.find((item) => item.originExecutionId === execution.id)).toMatchObject({ objectType: "quote", parentExternalRef: { type: "x.post", id: "quote-target-reconcile" } });
+  });
+
+  it("repairs a persisted quote classification at the read boundary after reconciliation", () => {
+    const state = createAgent(input);
+    const presenceId = state.presence!.id;
+    state.executions.unshift({ id: "quote-read-repair", socialIntentId: "intent-read-repair", presenceId, affordance: "x.quote", mode: "auto", status: "succeeded", attempts: 1, connector: "bridge", target: { type: "x.post", id: "target-read-repair" }, externalRef: { type: "x.post", id: "created-read-repair" }, idempotencyKey: "quote-read-repair", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), environment: "live", source: "agent" });
+    state.mirrorObjects.unshift({ id: "mirror-read-repair", bridgeId: "native:x", presenceId, channelId: "x", externalRef: { type: "x.post", id: "created-read-repair" }, parentExternalRef: { type: "x.post", id: "target-read-repair" }, objectType: "reply", originExecutionId: "quote-read-repair", author: { displayName: "Genny", handle: state.presence!.handle }, content: { text: "A useful distinction." }, occurredAt: new Date().toISOString(), observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", environment: "live" });
+    const repaired = normalizeState(state);
+    expect(repaired.mirrorObjects[0]).toMatchObject({ objectType: "quote", referencedExternalRefs: [{ type: "x.post", id: "target-read-repair" }] });
+    expect(derivePublicHistory(repaired, presenceId)[0]).toMatchObject({ kind: "quote" });
+  });
+
+  it("rehydrates a verified native repost into the Social Mirror after restart", () => {
+    const state = createAgent(input);
+    const presenceId = state.presence!.id;
+    state.executions.unshift({ id: "repost-rehydrate", socialIntentId: "intent-repost-rehydrate", presenceId, affordance: "x.repost", mode: "auto", status: "succeeded", attempts: 1, connector: "native", target: { type: "x.post", id: "target-repost-rehydrate" }, externalRef: { type: "x.repost", id: "target-repost-rehydrate" }, idempotencyKey: "repost-rehydrate", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), executedAt: new Date().toISOString(), environment: "live", source: "agent" });
+    const repaired = normalizeState(state);
+    expect(repaired.mirrorObjects.find((item) => item.originExecutionId === "repost-rehydrate")).toMatchObject({ objectType: "repost", externalRef: { type: "x.repost", id: "target-repost-rehydrate" } });
+    expect(derivePublicHistory(repaired, presenceId)[0]).toMatchObject({ kind: "repost" });
+  });
+
   it("retains a deleted X post with its original URL and explicit availability state", () => {
     const state = createAgent(input);
     state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "hourandcode", name: "Jenny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
@@ -1279,17 +1370,17 @@ describe("OpenPresence runtime boundaries", () => {
     state.presences = state.presences.map((presence) => presence.id === presenceId ? { ...presence, connectionMode: "bridge", status: "live" as const } : presence);
     state.bridges = [{ id: "legacy-x-bridge", presenceId, channelId: "x", name: "OpenPresence Chrome", kind: "bridge", state: "online", adapterStatus: "connected", lastHeartbeatAt: heartbeat, lastSeenAt: heartbeat, capabilities: { inbound: true, reconcile: true, affordances: ["post", "reply", "repost", "quote", "like", "message"], formats: ["x.post", "x.media-post", "x.thread"], metrics: ["replies", "reactions", "posts"] }, createdAt: heartbeat, updatedAt: heartbeat }];
     const manifest = derivePresenceCapabilityManifest(state, presenceId);
-    expect(manifest.items.find((item) => item.capability === "reply")).toMatchObject({ availability: "available", provider: "Browser Bridge", canExecute: true });
-    expect(manifest.items.find((item) => item.capability === "follow")).toMatchObject({ availability: "available", provider: "Browser Bridge", canExecute: true });
-    expect(manifest.items.find((item) => item.capability === "follower_measurement")).toMatchObject({ availability: "available", provider: "Browser Bridge" });
-    expect(manifest.items.find((item) => item.capability === "post_performance")).toMatchObject({ availability: "available", provider: "Browser Bridge" });
-    expect(manifest.items.find((item) => item.capability === "image")).toMatchObject({ availability: "unavailable", canExecute: false });
-    expect(manifest.items.find((item) => item.capability === "video")).toMatchObject({ availability: "unavailable", canExecute: false });
-    const previouslyShipped = { ...state, bridges: [{ ...state.bridges[0], id: "previously-shipped-chrome", presenceId, channelId: "x" as const, name: "OpenPresence Chrome · Jenny", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: heartbeat, capabilities: { inbound: true, reconcile: true, affordances: ["post", "reply", "repost", "quote", "like", "message", "follow"], formats: ["x.post", "x.media-post", "x.thread", "x.reply"], metrics: ["replies", "reactions", "posts", "followers", "public_metrics"], assetKinds: ["image", "video"] as ("image" | "video")[] } }] };
+    expect(manifest.items.find((item) => item.capability === "reply")).toMatchObject({ availability: "temporarily-unavailable", canExecute: false });
+    expect(manifest.items.find((item) => item.capability === "follow")).toMatchObject({ availability: "temporarily-unavailable", canExecute: false });
+    expect(manifest.items.find((item) => item.capability === "follower_measurement")).toMatchObject({ availability: "temporarily-unavailable" });
+    expect(manifest.items.find((item) => item.capability === "post_performance")).toMatchObject({ availability: "temporarily-unavailable" });
+    expect(manifest.items.find((item) => item.capability === "image")).toMatchObject({ availability: "temporarily-unavailable", canExecute: false });
+    expect(manifest.items.find((item) => item.capability === "video")).toMatchObject({ availability: "temporarily-unavailable", canExecute: false });
+    const previouslyShipped = { ...state, bridges: [{ ...state.bridges[0], id: "previously-shipped-chrome", presenceId, channelId: "x" as const, name: "OpenPresence Chrome · Jenny", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: heartbeat, accountIdentity: { username: state.presence!.handle.replace(/^@/, ""), status: "verified" as const, observedAt: heartbeat }, capabilities: { inbound: true, reconcile: true, affordances: ["post", "reply", "repost", "quote", "like", "message", "follow"], formats: ["x.post", "x.media-post", "x.thread", "x.reply"], metrics: ["replies", "reactions", "posts", "followers", "public_metrics"], assetKinds: ["image", "video"] as ("image" | "video")[] } }] };
     const migrated = derivePresenceCapabilityManifest(previouslyShipped, presenceId);
     expect(migrated.items.find((item) => item.capability === "follow")).toMatchObject({ availability: "available", provider: "Browser Bridge", canExecute: true });
     expect(migrated.items.find((item) => item.capability === "reply")).toMatchObject({ availability: "available", provider: "Browser Bridge", canExecute: true });
-    const narrow = { ...state, bridges: [{ ...state.bridges[0], name: "OpenPresence Chrome", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: ["followers", "public_metrics"] } }] };
+    const narrow = { ...previouslyShipped, bridges: [{ ...previouslyShipped.bridges[0], name: "OpenPresence Chrome", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: ["followers", "public_metrics"] } }] };
     expect(derivePresenceCapabilityManifest(narrow, presenceId).items.find((item) => item.capability === "like")).toMatchObject({ availability: "available", provider: "Browser Bridge", canExecute: true });
     const created = applyOperation(state, { type: "createAssignment", presenceId, environment: "live", instruction: "Grow this Presence toward 100,000 followers." });
     expect(created.agentRequests.filter((request) => request.kind === "capability")).toHaveLength(0);

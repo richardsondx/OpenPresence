@@ -3,13 +3,16 @@ const sessionStorageKey = "openpresenceChromeSessions";
 const heartbeatAlarmName = "openpresence-heartbeat";
 const verificationAlarmName = "openpresence-verification";
 const verificationStorageKey = "openpresenceVerificationJobs";
+const reconnectPresenceKey = "openpresenceReconnectPresenceId";
 // The Bridge lease is 120 seconds. Give a tab a small grace period, then
 // requeue work that was claimed by a content script that disappeared during
 // an X navigation or service-worker restart.
 const activeExecutionWatchdogMs = 135_000;
+const bridgeHeartbeatFreshMs = 90_000;
 let lastConfig;
 const seenEvents = new Set();
 const claimRuns = new Map();
+const sessionStartRuns = new Map();
 const claimRetryTimers = new Map();
 const activeExecutionWatchdogs = new Map();
 const verificationTimers = new Map();
@@ -62,19 +65,41 @@ async function bridgeRequest(session, path, options = {}) {
 }
 
 function sendStatus(status) {
-  chrome.tabs.query({ url: ["http://localhost:3015/*", "http://127.0.0.1:3015/*"] }).then((tabs) => tabs.forEach((tab) => chrome.tabs.sendMessage(tab.id, { type: "OPENPRESENCE_EXTENSION_STATUS", status }).catch(() => {})));
+  chrome.tabs.query({ url: ["http://localhost:3015/*", "http://127.0.0.1:3015/*"] }).then((tabs) => {
+    // The status is useful in the controlled channel tab too. Keep it scoped
+    // to the relevant Presence so one Bridge cannot make another look healthy.
+    const controlledTabIds = [...sessions.values()]
+      .filter((session) => !status.presenceId || session.presence.id === status.presenceId)
+      .map((session) => session.tabId);
+    const tabIds = new Set([...tabs.map((tab) => tab.id), ...controlledTabIds].filter(Boolean));
+    return Promise.all([...tabIds].map((tabId) => chrome.tabs.sendMessage(tabId, { type: "OPENPRESENCE_EXTENSION_STATUS", status }).catch(() => {})));
+  });
 }
 
 function publicSessionStatus(session) {
+  const heartbeatFresh = session.lastHeartbeatAt && Date.now() - session.lastHeartbeatAt <= bridgeHeartbeatFreshMs && session.lastHeartbeatOk !== false;
+  const identityReady = session.lastIdentityStatus === "verified";
   return {
-    state: "connected",
+    state: heartbeatFresh ? (identityReady ? "connected" : "identity_required") : "stale",
     presenceId: session.presence.id,
     presenceName: session.presence.name,
     presenceHandle: session.presence.handle,
     tabId: session.tabId,
     windowId: session.windowId,
     identityStatus: session.lastIdentityStatus,
+    heartbeatAt: session.lastHeartbeatAt,
+    message: !heartbeatFresh
+      ? (session.lastHeartbeatError || "The OpenPresence app has not acknowledged the Bridge heartbeat recently.")
+      : identityReady
+        ? undefined
+        : session.lastIdentityStatus === "mismatch"
+          ? `Sign in to X as ${session.presence.handle} before delivery.`
+          : `Verify the signed-in X account as ${session.presence.handle} before delivery.`,
   };
+}
+
+function sendSessionStatus(session) {
+  sendStatus({ ...publicSessionStatus(session), presenceName: session.presence.name, tabId: session.tabId });
 }
 
 async function popupStatus(presenceId) {
@@ -102,8 +127,72 @@ function sendSessionContext(session) {
   return chrome.tabs.sendMessage(session.tabId, { type: "OPENPRESENCE_SESSION_CONTEXT", expectedHandle: session.presence.handle, presenceName: session.presence.name }).catch(() => {});
 }
 
+function sendSessionContextToTab(session, tabId) {
+  return chrome.tabs.sendMessage(tabId, { type: "OPENPRESENCE_SESSION_CONTEXT", expectedHandle: session.presence.handle, presenceName: session.presence.name }).catch(() => {});
+}
+
 function requestIdentity(session, claimAfterVerification = true) {
-  return chrome.tabs.sendMessage(session.tabId, { type: "OPENPRESENCE_REQUEST_IDENTITY", expectedHandle: session.presence.handle, claimAfterVerification }).catch(() => {});
+  const message = {
+    type: "OPENPRESENCE_REQUEST_IDENTITY",
+    expectedHandle: session.presence.handle,
+    presenceName: session.presence.name,
+    claimAfterVerification,
+  };
+  // X is a single signed-in browser session, but its SPA regularly replaces
+  // the tab that was persisted when the Bridge was opened. Ask every X tab in
+  // the controlled window so a freshly mounted content script can re-establish
+  // identity without requiring the operator to close and reopen Chrome.
+  return chrome.tabs.query({ windowId: session.windowId, url: ["https://x.com/*", "https://*.x.com/*"] })
+    .then((tabs) => {
+      const tabIds = new Set([session.tabId, ...tabs.map((tab) => tab.id)].filter(Boolean));
+      return Promise.all([...tabIds].map((tabId) => chrome.tabs.sendMessage(tabId, message).catch(() => undefined)))
+        .then(async (responses) => {
+          if (responses.some((response) => response?.ok)) return responses;
+          // A persisted session can outlive the content script after an
+          // unpacked-extension reload. Re-mount the controlled tab so the
+          // identity check cannot remain stuck at "unknown" forever.
+          if (session.lastIdentityProbeAt && Date.now() - session.lastIdentityProbeAt < 15_000) return responses;
+          session.lastIdentityProbeAt = Date.now();
+          const tab = await chrome.tabs.get(session.tabId).catch(() => undefined);
+          if (tab && isXTab(tab)) await chrome.tabs.reload(session.tabId).catch(() => {});
+          return responses;
+        });
+    })
+    .catch(() => undefined);
+}
+
+function isXTab(tab) {
+  try {
+    const hostname = new URL(tab?.url || "").hostname.toLowerCase();
+    return hostname === "x.com" || hostname.endsWith(".x.com");
+  } catch {
+    return false;
+  }
+}
+
+async function probeVisibleXAccount(tabId) {
+  try {
+    const [{ result }] = await chrome.scripting.executeScript({
+      target: { tabId },
+      func: () => {
+        const fromText = (value) => String(value || "").match(/@([a-z0-9_]{1,30})/i)?.[1]?.toLowerCase() || null;
+        const switcher = document.querySelector('[data-testid="SideNav_AccountSwitcher_Button"], [data-testid*="AccountSwitcher"]');
+        const fromSwitcher = fromText(switcher?.innerText);
+        if (fromSwitcher) return fromSwitcher;
+        const profile = document.querySelector('[data-testid="AppTabBar_Profile_Link"]');
+        return fromText(profile?.getAttribute("href")?.replace(/^\//, ""));
+      },
+    });
+    return typeof result === "string" ? result : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+async function probeAndReportIdentity(session, tabId = session.tabId, claimAfterVerification = true) {
+  const username = await probeVisibleXAccount(tabId);
+  if (username) await reportIdentity(session, username, claimAfterVerification);
+  return username;
 }
 
 async function updateBadge() {
@@ -189,15 +278,15 @@ async function reportIdentity(session, username, claimAfterVerification = true) 
   // X can briefly expose neither the account switcher nor the profile link
   // while its SPA is navigating. Do not overwrite a previously verified
   // identity with an empty value during that loading window.
-  if (typeof username !== "string" || !username.trim()) return undefined;
+  if ((typeof username !== "string" || !username.trim()) && session.lastIdentityStatus === "verified") return undefined;
   try {
     const result = await bridgeRequest(session, "/api/bridge/v1/identity", { method: "POST", body: JSON.stringify({ executorId: session.executorId, username }) });
     session.lastIdentityStatus = result.identity?.status;
     if (result.identity?.status === "verified") {
-      sendStatus({ state: "connected", presenceId: session.presence.id, presenceName: session.presence.name, tabId: session.tabId });
+      sendSessionStatus(session);
       if (claimAfterVerification) await claim(session);
     } else {
-      sendStatus({ state: "error", presenceId: session.presence.id, message: result.identity?.message || `The controlled tab must be signed in as ${session.presence.handle}.` });
+      sendSessionStatus(session);
     }
     return result;
   } catch (error) {
@@ -234,11 +323,11 @@ async function restoreSessions() {
   await Promise.all([...sessions.values()].map(async (session) => {
     const connected = await heartbeat(session);
     if (!connected) return;
-    sendStatus({ state: "connected", presenceId: session.presence.id, presenceName: session.presence.name, tabId: session.tabId });
+    sendSessionStatus(session);
     // A service worker can wake after work was queued. Reconcile the queue
     // immediately instead of waiting for the next alarm tick.
-    await claim(session);
     await requestMetrics(session);
+    if (!session.activeExecutionId) await claim(session);
   }));
 }
 
@@ -268,9 +357,8 @@ async function startSession(presenceId) {
     const connected = await heartbeat(current);
     if (connected) {
       if (current.windowId) await chrome.windows.update(current.windowId, { focused: true });
-      sendSessionContext(current);
-      sendStatus({ state: "connected", presenceId: current.presence.id, presenceName: current.presence.name, tabId: current.tabId });
-      await claim(current);
+      await sendSessionContext(current);
+      sendSessionStatus(current);
       return current;
     }
 
@@ -298,11 +386,36 @@ async function startSession(presenceId) {
   // after the content script is ready instead of relying on that event race.
   await waitForTabComplete(tab.id);
   await sendSessionContext(session);
+  // MV3 service workers can restart while the X content script is mounting.
+  // Ask the controlled tab for its visible account as a fallback, so an
+  // unpacked-extension reload cannot strand a correct session at "unknown".
+  await probeAndReportIdentity(session, tab.id);
   await updateBadge();
-  sendStatus({ state: "connected", presenceId, presenceName: presence.name, tabId: tab.id });
-  await claim(session);
+  sendSessionStatus(session);
   await requestMetrics(session);
   return session;
+}
+
+function restoreConfiguredSessions(config) {
+  const configured = [config?.selected, ...(Array.isArray(config?.presences) ? config.presences : [])]
+    .filter((presence) => presence?.id && presence.browserAccess?.enabled)
+    .filter((presence, index, list) => list.findIndex((item) => item.id === presence.id) === index);
+  for (const presence of configured) {
+    if (sessions.has(presence.id) || sessionStartRuns.has(presence.id)) continue;
+    const run = startSession(presence.id)
+      .catch((error) => sendStatus({ state: "error", presenceId: presence.id, message: error instanceof Error ? error.message : "The configured Chrome session could not be restored." }))
+      .finally(() => sessionStartRuns.delete(presence.id));
+    sessionStartRuns.set(presence.id, run);
+  }
+}
+
+async function restoreLastConfiguredSession() {
+  const stored = await chrome.storage.local.get(reconnectPresenceKey);
+  const presenceId = stored[reconnectPresenceKey];
+  if (!presenceId) return;
+  const config = lastConfig || await fetchConfigFromApp();
+  const presence = config?.presences?.find((item) => item.id === presenceId) || config?.selected;
+  if (presence?.id === presenceId && presence.browserAccess?.enabled) restoreConfiguredSessions({ ...config, selected: presence });
 }
 
 async function stopSession(presenceId) {
@@ -340,12 +453,20 @@ async function heartbeat(session) {
     if (session.activeExecutionId && (!session.activeExecutionStartedAt || Date.now() - session.activeExecutionStartedAt >= activeExecutionWatchdogMs)) {
       session.activeExecutionId = undefined;
       session.activeExecutionStartedAt = undefined;
+      session.activeExecution = undefined;
       await persistSessions();
     }
     await bridgeRequest(session, "/api/bridge/v1/heartbeat", { method: "POST", body: JSON.stringify({ executorId: session.executorId }) });
+    session.lastHeartbeatAt = Date.now();
+    session.lastHeartbeatOk = true;
+    session.lastHeartbeatError = undefined;
+    await persistSessions();
     await requestIdentity(session);
     return true;
   } catch (error) {
+    session.lastHeartbeatOk = false;
+    session.lastHeartbeatError = error instanceof Error ? error.message : "The OpenPresence app did not acknowledge the Bridge heartbeat.";
+    await persistSessions();
     sendStatus({ state: "error", presenceId: session.presence.id, message: error.message });
     return false;
   }
@@ -359,16 +480,21 @@ async function claim(session) {
   // has returned an outcome.
   if (existing) return existing;
   if (session.activeExecutionId) {
-    if (session.activeExecutionStartedAt && Date.now() - session.activeExecutionStartedAt < activeExecutionWatchdogMs) return;
-    // The local execution watchdog is deliberately conservative: by this
-    // point the server lease has expired or is about to expire, so releasing
-    // the local guard is safer than blocking every later reply indefinitely.
-    const watchdog = activeExecutionWatchdogs.get(session.presence.id);
-    if (watchdog) clearTimeout(watchdog);
-    activeExecutionWatchdogs.delete(session.presence.id);
-    session.activeExecutionId = undefined;
-    session.activeExecutionStartedAt = undefined;
-    await persistSessions();
+    if (!session.activeExecutionStartedAt || Date.now() - session.activeExecutionStartedAt >= activeExecutionWatchdogMs) {
+      // The local execution watchdog is deliberately conservative: by this
+      // point the server lease has expired or is about to expire, so release
+      // the local guard. For a fresh local guard we still poll the server;
+      // claimExecutions is authoritative and refuses a second claim while a
+      // valid lease exists, but can recover when the server-side execution
+      // was cancelled/expired during a worker restart.
+      const watchdog = activeExecutionWatchdogs.get(session.presence.id);
+      if (watchdog) clearTimeout(watchdog);
+      activeExecutionWatchdogs.delete(session.presence.id);
+      session.activeExecutionId = undefined;
+      session.activeExecutionStartedAt = undefined;
+      session.activeExecution = undefined;
+      await persistSessions();
+    }
   }
   const run = (async () => {
     try {
@@ -379,6 +505,10 @@ async function claim(session) {
       for (const execution of claimed) {
         session.activeExecutionId = execution.id;
         session.activeExecutionStartedAt = Date.now();
+        // X may open a quote/reply composer in a new tab. Keep the claimed
+        // payload in the service worker because tab-scoped sessionStorage is
+        // not shared with that new document.
+        session.activeExecution = execution;
         await persistSessions();
         armActiveExecutionWatchdog(session, execution.id);
 
@@ -501,6 +631,7 @@ function releaseActiveExecution(session, executionId) {
   activeExecutionWatchdogs.delete(session.presence.id);
   session.activeExecutionId = undefined;
   session.activeExecutionStartedAt = undefined;
+  session.activeExecution = undefined;
   void persistSessions();
 }
 
@@ -515,6 +646,7 @@ function armActiveExecutionWatchdog(session, executionId) {
     // execution; never synthesize success for a target we could not verify.
     session.activeExecutionId = undefined;
     session.activeExecutionStartedAt = undefined;
+    session.activeExecution = undefined;
     void persistSessions();
     setTimeout(() => {
       if (sessions.get(session.presence.id) === session) void claim(session);
@@ -527,9 +659,17 @@ async function verifySubmittedExecution(session, result, attempt = 0) {
   if (!result.executionId) return;
   const executionPath = `/api/bridge/v1/executions/${encodeURIComponent(result.executionId)}/verify`;
   try {
+    // When the composer settles without rendering the newly-created object,
+    // channel-x returns the target post as a verification hint. That is not
+    // the quote/reply's external ID; passing it as candidateExternalRef makes
+    // the API verifier look for the target itself forever. Let the server
+    // search by verified author, parent, and approved text in this fallback.
+    const candidateExternalRef = result.externalRef?.type === "x.post"
+      ? undefined
+      : result.externalRef;
     const response = await bridgeRequest(session, executionPath, {
       method: "POST",
-      body: JSON.stringify({ executorId: session.executorId, candidateExternalRef: result.externalRef, observedAt: new Date().toISOString() })
+      body: JSON.stringify({ executorId: session.executorId, candidateExternalRef, observedAt: new Date().toISOString() })
     });
     if (response.verified || response.execution?.status === "succeeded") {
       await clearVerificationJob(result.executionId);
@@ -571,7 +711,15 @@ async function verifySubmittedExecution(session, result, attempt = 0) {
       verificationTimers.set(result.executionId, timer);
     } else {
       await clearVerificationJob(result.executionId);
-      sendStatus({ state: "error", presenceId: session.presence.id, message: error.message || "X API verification could not be completed." });
+      const note = "Chrome reported submission, but OpenPresence could not prove the matching public X object after bounded verification retries. The action was closed without counting delivery.";
+      try {
+        await bridgeRequest(session, `${executionPath}/close`, {
+          method: "POST",
+          body: JSON.stringify({ executorId: session.executorId, note }),
+        });
+      } catch (closeError) {
+        sendStatus({ state: "error", presenceId: session.presence.id, message: closeError.message || error.message || "X API verification could not be completed." });
+      }
       releaseActiveExecution(session, result.executionId);
       setTimeout(() => void claim(session), 2_000);
     }
@@ -612,6 +760,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
       if (message?.type === "OPENPRESENCE_APP_STATE") {
         lastConfig = message.config;
         await chrome.storage.session.set({ openpresenceConfig: lastConfig });
+        if (lastConfig?.selected?.id && lastConfig.selected.browserAccess?.enabled) {
+          await chrome.storage.local.set({ [reconnectPresenceKey]: lastConfig.selected.id });
+        }
+        // Browser hands are an operator-enabled capability. Restore the
+        // controlled session after an MV3 worker/extension reload instead of
+        // leaving a healthy-looking Bridge stale until a manual click.
+        restoreConfiguredSessions(lastConfig);
         sendResponse({ ok: true });
         return;
       }
@@ -627,19 +782,40 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         return;
       }
       if (message?.type === "OPENPRESENCE_STOP_CHROME") {
+        await chrome.storage.local.remove(reconnectPresenceKey);
         await stopSession(message.presenceId);
         sendResponse({ ok: true, status: await popupStatus(message.presenceId) });
         return;
       }
-      const execContext = sender.tab?.id ? executionTabs.get(sender.tab.id) : undefined;
-      const session = execContext?.session || [...sessions.values()].find((item) => item.tabId === sender.tab?.id);
+      // Execution tabs are rebound during X navigation and after an MV3
+      // service-worker restart. There is no separate executionTabs registry;
+      // resolve the session from the sender's live tab, then fall back to the
+      // controlled window for identity/readiness messages.
+      let session = [...sessions.values()].find((item) => item.tabId === sender.tab?.id);
+      // Identity is observational and can be reported by any X tab in the
+      // controlled window. The persisted execution tab is not authoritative:
+      // X navigation and extension reloads can leave a newer tab carrying the
+      // live account controls while the old tab ID remains in the session.
+      if (!session && message?.type === "OPENPRESENCE_ACCOUNT_IDENTITY" && sender.tab && isXTab(sender.tab)) {
+        session = [...sessions.values()].find((item) => item.windowId === sender.tab.windowId);
+      }
+      if (!session && message?.type === "OPENPRESENCE_CHANNEL_READY" && sender.tab && isXTab(sender.tab)) {
+        session = [...sessions.values()].find((item) => item.windowId === sender.tab.windowId);
+      }
       if (!session) { sendResponse({ ok: false, error: "The controlled Chrome session is no longer active." }); return; }
+      if (message?.type === "OPENPRESENCE_CHANNEL_READY" && sender.tab?.id) {
+        // X can mount its content script after the one initial context send.
+        // Rebind the live X tab before it reports account identity.
+        session.tabId = sender.tab.id;
+        await persistSessions();
+        await sendSessionContextToTab(session, sender.tab.id);
+      }
       if (message?.type === "OPENPRESENCE_OBSERVATION") await ingest(session, message.observation);
       if (message?.type === "OPENPRESENCE_ACCOUNT_IDENTITY") await reportIdentity(session, message.username, message.claimAfterVerification !== false);
       if (message?.type === "OPENPRESENCE_METRICS") {
         try {
           await reportMetrics(session, message.metrics);
-          sendStatus({ state: "connected", presenceId: session.presence.id, presenceName: session.presence.name, tabId: session.tabId });
+          sendSessionStatus(session);
         } catch (error) {
           sendStatus({ state: "error", presenceId: session.presence.id, message: error.message || "The channel metrics could not be saved." });
         }
@@ -661,13 +837,31 @@ chrome.tabs.onRemoved.addListener((tabId) => {
 
 chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
   if (changeInfo.status !== "complete") return;
-  const session = [...sessions.values()].find((item) => item.tabId === tabId);
-  if (session) {
+  void chrome.tabs.get(tabId).then((tab) => {
+    const session = [...sessions.values()].find((item) => item.tabId === tabId
+      || (item.activeExecutionId && item.windowId === tab.windowId));
+    if (!session) return;
+    if (session.activeExecutionId && session.activeExecution?.id === session.activeExecutionId && tabId !== session.tabId) {
+      // Rebind to the newly-created X composer and deliver the same claimed
+      // execution. The content script will finish the approved action and
+      // report the result through the normal acknowledgement path.
+      session.tabId = tabId;
+      void persistSessions();
+      sendSessionContext(session);
+      chrome.tabs.sendMessage(tabId, {
+        type: "OPENPRESENCE_EXECUTE",
+        execution: session.activeExecution,
+        expectedHandle: session.presence.handle,
+        presenceName: session.presence.name,
+        dedicatedTab: false,
+      }).catch(() => {});
+      return;
+    }
     sendSessionContext(session);
     // The channel content script is now ready to receive an autonomous
     // execution. This keeps the queue moving without a manual reply click.
     if (!session.activeExecutionId) void claim(session);
-  }
+  }).catch(() => {});
 });
 
 chrome.tabs.onActivated.addListener(({ tabId }) => {
@@ -682,13 +876,17 @@ chrome.alarms.onAlarm.addListener((alarm) => {
   }
   if (alarm.name !== heartbeatAlarmName) return;
   void restoreSessions().then(() => Promise.all([...sessions.values()].map(async (session) => {
-    await heartbeat(session);
-    await claim(session);
+    const connected = await heartbeat(session);
+    // Heartbeats are also the Bridge's durable queue wake-up. Without this
+    // claim, work queued after the tab opened can remain queued indefinitely
+    // while the Bridge still appears online and verified.
+    if (connected && !session.activeExecutionId) await claim(session);
     if (!session.lastMetricsAt || Date.now() - session.lastMetricsAt >= 15 * 60_000) await requestMetrics(session);
   })).then(() => processVerificationJobs()));
 });
 chrome.runtime.onInstalled.addListener(() => { void ensureHeartbeatAlarm(); });
-chrome.runtime.onStartup.addListener(() => { void ensureHeartbeatAlarm(); });
+chrome.runtime.onStartup.addListener(() => { void ensureHeartbeatAlarm(); void restoreLastConfiguredSession(); });
 void ensureHeartbeatAlarm();
 void restoreSessions();
+void restoreLastConfiguredSession();
 void updateBadge();

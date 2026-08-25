@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { createAgent, deliverSandboxExecution, formSandboxIntent, normalizeState, recordVerifiedFollow, startPlaygroundSession } from "../lib/runtime";
-import { isPlaceholderIdentity, deriveIdentityHydrationState, extractIdentityHydrationLeads, resolveCanonicalPerson, createRememberedPerson } from "../lib/network-memory";
+import { isPlaceholderIdentity, deriveIdentityHydrationState, extractIdentityHydrationLeads, resolveCanonicalPerson, createRememberedPerson, peopleForPresence } from "../lib/network-memory";
 import { routeExecutionIntent } from "../lib/execution-router";
 import type { Presence, SocialIntent } from "../lib/types";
 
@@ -56,7 +56,7 @@ describe("Channel, Environment, Access, Capability Taxonomy", () => {
   });
 
   it("X channel body-switch invariance: Disconnecting Native X keeps Channel=X, Environment=Live", () => {
-    let state = createAgent({ name: "Genny", description: "Test", mode: "agent", handle: "genny", accent: "#D68754" });
+    const state = createAgent({ name: "Genny", description: "Test", mode: "agent", handle: "genny", accent: "#D68754" });
     state.presence = { ...state.presence!, environment: "live", connectionMode: "native" };
     const presence = state.presence;
     expect(presence.channel).toBe("x");
@@ -71,7 +71,7 @@ describe("Channel, Environment, Access, Capability Taxonomy", () => {
   });
 
   it("Taxonomy isolation: Sandbox is an Environment, never an AccessBinding; Chrome/Bridge are Access, never Channels", () => {
-    let state = createAgent({ name: "Genny", description: "Test", mode: "agent", handle: "genny", accent: "#D68754" });
+    const state = createAgent({ name: "Genny", description: "Test", mode: "agent", handle: "genny", accent: "#D68754" });
     const presence = state.presence!;
 
     // Assert that accessBindings only contains transport connectors
@@ -120,6 +120,8 @@ describe("Person Identity & Hydration Provenance", () => {
   it("Field-level evidence is preserved and placeholder value does not overwrite known real identity", () => {
     let state = createAgent({ name: "Genny", description: "Test", mode: "agent", handle: "genny", accent: "#D68754" });
     const presenceId = state.presence!.id;
+    state.presence = { ...state.presence!, environment: "live" };
+    state.presences = state.presences.map((item) => item.id === presenceId ? state.presence! : item);
 
     // First, remember person with real name and handle
     const initial = createRememberedPerson({
@@ -153,5 +155,52 @@ describe("Person Identity & Hydration Provenance", () => {
     expect(resolvedAfter.rawHandle).toBe("DrStarHeartsong");
     expect(resolvedAfter.hydrationState).toBe("hydrated");
   });
-});
 
+  it("does not resolve a Person through another Presence or environment", () => {
+    const state = createAgent({ name: "Genny", description: "Test", mode: "agent", handle: "genny", accent: "#D68754" });
+    const livePresenceId = state.presence!.id;
+    const person = createRememberedPerson({ agentId: state.agent!.id, presenceId: livePresenceId, channel: "x", externalActorId: "actor_live", displayName: "Live X Person", handle: "live_x", sourceEnvironment: "live", source: "operator" }, state.people, state.personIdentities, state.relationships);
+    state.people = [person.person];
+    state.personIdentities = [
+      { ...person.identity, sourcePresenceId: "presence_sandbox", sourceEnvironment: "sandbox", handle: "sandbox_person", displayName: "Sandbox Person" },
+    ];
+    const resolved = resolveCanonicalPerson(state, person.person.id, livePresenceId);
+    expect(resolved.displayName).toBe("Live X Person");
+    expect(resolved.rawHandle).toBeUndefined();
+  });
+
+  it("collapses duplicate internal records onto one external X identity", () => {
+    const state = createAgent({ name: "Genny", description: "Test", mode: "agent", handle: "genny", accent: "#D68754" });
+    const presence = { ...state.presence!, environment: "live" as const, channel: "x" as const };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    const canonical = createRememberedPerson({
+      agentId: state.agent!.id,
+      presenceId: presence.id,
+      channel: "x",
+      externalActorId: "1766194375044804608",
+      displayName: "Boardy",
+      handle: "boardyai",
+      avatarUrl: "https://pbs.twimg.com/profile_images/boardy.jpg",
+      sourceEnvironment: "live",
+      source: "operator",
+    }, state.people, state.personIdentities, state.relationships);
+    const duplicatePerson = { ...canonical.person, id: "actor_boardy_sandbox_copy" };
+    const duplicateIdentity = { ...canonical.identity, id: "identity_actor_boardy_sandbox_copy", personId: duplicatePerson.id };
+    const duplicateRelationship = { ...canonical.relationship, id: "relationship_actor_boardy_sandbox_copy", personId: duplicatePerson.id };
+    state.people = [canonical.person, duplicatePerson];
+    state.personIdentities = [canonical.identity, duplicateIdentity];
+    state.relationships = [canonical.relationship, duplicateRelationship];
+
+    const visible = peopleForPresence(state, presence);
+
+    expect(visible).toHaveLength(1);
+    expect(visible[0]?.id).toBe(canonical.person.id);
+  });
+
+  it("does not crash when a lightweight browser projection omits identity arrays", () => {
+    const state = createAgent({ name: "Genny", description: "Test", mode: "agent", handle: "genny", accent: "#D68754" });
+    const partial = { ...state, personIdentities: undefined, relationships: undefined } as typeof state;
+    expect(() => peopleForPresence(partial, state.presence!)).not.toThrow();
+  });
+});

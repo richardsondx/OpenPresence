@@ -1197,7 +1197,7 @@ test("Activity and Calendar stay scoped to the Presence identity", async ({ page
   await page.getByRole("button", { name: "Save name" }).click();
 
   await navigate(page, "Activity");
-  await expect(page.getByRole("heading", { name: "Genny, right now." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Genny at a glance" })).toBeVisible();
   await expect(page.getByText("@jenny_ai", { exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: /Manage Jenny/ })).toHaveCount(0);
 

@@ -27,7 +27,7 @@ export function relationshipVisibilityForMirror(object: MirrorObject): Relations
 }
 
 export function relationshipIdentity(state: OpenPresenceState, channel: string, externalActorId: string, sourcePresenceId?: string, sourceEnvironment?: PresenceEnvironment) {
-  return state.personIdentities.find((identity) => identity.channel === channel
+  return (state.personIdentities ?? []).find((identity) => identity.channel === channel
     && identity.externalActorId === externalActorId
     && (!sourcePresenceId || identity.sourcePresenceId === sourcePresenceId)
     && (!sourceEnvironment || (identity.sourceEnvironment ?? "live") === sourceEnvironment));
@@ -35,6 +35,61 @@ export function relationshipIdentity(state: OpenPresenceState, channel: string, 
 
 export function relationshipForPerson(state: OpenPresenceState, personId: string) {
   return state.relationships.find((relationship) => relationship.personId === personId);
+}
+
+/**
+ * Return one remembered person per channel identity in a Presence scope.
+ *
+ * Restored workspaces can contain both the canonical Person record and legacy
+ * Sandbox actor records for the same real X account. Those records are useful
+ * for replay history, but they must not become duplicate relationship cards.
+ * Prefer the record with relationship context, then a stable non-actor Person
+ * record, then the most complete/recent identity.
+ */
+export function peopleForPresence(state: OpenPresenceState, presence: Presence): Person[] {
+  const environment = presence.environment ?? "live";
+  const scopedIdentities = (state.personIdentities ?? []).filter((identity) =>
+    identity.sourcePresenceId === presence.id
+    && (identity.sourceEnvironment ?? "live") === environment
+    && identity.channel === presence.channel
+    && Boolean(identity.externalActorId),
+  );
+  const identityByPersonId = new Map<string, PersonIdentity>();
+  for (const identity of scopedIdentities) {
+    if (!identityByPersonId.has(identity.personId)) identityByPersonId.set(identity.personId, identity);
+  }
+
+  const groups = new Map<string, Array<{ person: Person; identity: PersonIdentity }>>();
+  for (const person of state.people) {
+    if (person.memoryState !== "active") continue;
+    const identity = identityByPersonId.get(person.id);
+    if (!identity) continue;
+    const key = `${identity.channel}:${identity.externalActorId}`;
+    const group = groups.get(key) ?? [];
+    group.push({ person, identity });
+    groups.set(key, group);
+  }
+
+  const relationshipRank = (personId: string) => {
+    const relationship = (state.relationships ?? []).find((item) => item.personId === personId);
+    return relationship?.state === "active" ? 1 : 0;
+  };
+  const identityRank = (identity: PersonIdentity) => (
+    (identity.avatarUrl ? 4 : 0)
+    + (identity.hydrationState === "hydrated" ? 2 : identity.hydrationState === "partial" ? 1 : 0)
+    + (identity.verificationMethod === "connector_verified" ? 2 : 0)
+  );
+  const timestampRank = (value?: string | null) => value ? new Date(value).getTime() || 0 : 0;
+
+  return [...groups.values()].map((candidates) => candidates.sort((left, right) =>
+    relationshipRank(right.person.id) - relationshipRank(left.person.id)
+    || Number(!/^actor_/.test(right.person.id)) - Number(!/^actor_/.test(left.person.id))
+    || identityRank(right.identity) - identityRank(left.identity)
+    || timestampRank(right.person.updatedAt) - timestampRank(left.person.updatedAt)
+    || timestampRank(right.identity.lastHydratedAt) - timestampRank(left.identity.lastHydratedAt)
+    || timestampRank(left.person.createdAt) - timestampRank(right.person.createdAt)
+    || left.person.id.localeCompare(right.person.id),
+  )[0]!.person).sort((left, right) => timestampRank(right.updatedAt) - timestampRank(left.updatedAt) || left.id.localeCompare(right.id));
 }
 
 export function personForMirrorAuthor(state: OpenPresenceState, object: MirrorObject) {
@@ -181,12 +236,15 @@ export function resolveCanonicalPerson(
   const activePresence = state.presences.find((p) => p.id === activePresenceId) ?? state.presence;
   const targetEnv = activePresence?.environment ?? "live";
 
+  // Identity is Presence- and environment-scoped. Falling back to an
+  // identity from another Presence/world can make a remembered X person
+  // appear as a sandbox placeholder (or vice versa).
   const identity = state.personIdentities.find(
     (item) =>
       item.personId === personId &&
       (!activePresenceId || item.sourcePresenceId === activePresenceId) &&
       (item.sourceEnvironment ?? "live") === targetEnv
-  ) ?? state.personIdentities.find((item) => item.personId === personId);
+  );
 
   const actorId = identity?.externalActorId;
   const matchingMirror = actorId
@@ -368,4 +426,3 @@ export function actorToNetworkCandidate(state: OpenPresenceState, presence: Pres
 export function factForCorrection(relationshipId: string, statement: string, visibility: RelationshipVisibility, sourcePresenceId: string): RelationshipFact {
   return { id: `relationship-fact_${Math.random().toString(36).slice(2, 10)}`, relationshipId, statement: statement.trim(), epistemicKind: "operator_provided", confidence: "high", provenanceRefs: [{ kind: "operator_input", id: `operator_${Math.random().toString(36).slice(2, 10)}`, sourcePresenceId, observedAt: now() }], visibility, validFrom: now(), createdAt: now() };
 }
-

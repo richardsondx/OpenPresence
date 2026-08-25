@@ -9,15 +9,20 @@ test("Activity surfaces Genny's self-directed attention", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny at a glance", exact: true })).toBeVisible();
 
   await page.route("**/api/state**", async (route) => {
     if (route.request().method() !== "GET" || new URL(route.request().url()).pathname !== "/api/state") return route.continue();
-    const response = await route.fetch();
+    const response = await route.fetch({ headers: { "if-none-match": "" } });
     if (response.status() !== 200 || !response.headers()["content-type"]?.includes("application/json")) return route.fulfill({ response });
     const body = await response.json();
     const presenceId = body.presence.id;
     const now = new Date().toISOString();
+    body.resourceUsageEvents = [
+      { id: "activity-read-usage", agentId: body.agent.id, presenceId, invocationId: "activity-read", originKind: "self_directed_discovery", attentionSource: "self_directed_discovery", category: "channel_read", provider: "x", usage: { requests: 4 }, createdAt: now },
+      { id: "activity-model-usage", agentId: body.agent.id, presenceId, invocationId: "activity-model", originKind: "self_directed_discovery", attentionSource: "self_directed_discovery", category: "model", provider: "openai", usage: { requests: 2 }, createdAt: now },
+      { id: "activity-inbound-usage", agentId: body.agent.id, presenceId, invocationId: "activity-inbound", originKind: "inbound_social", attentionSource: "inbound_social", category: "channel_read", provider: "x", usage: { requests: 9 }, createdAt: now },
+    ];
     body.events.unshift(
       { id: "self-directed-activity-look", type: "system", title: "Genny looked around X", detail: "Genny followed its current interests across AI agents.", time: now, tone: "positive", presenceId },
       { id: "self-directed-activity-held", type: "system", title: "Self-directed opportunity held", detail: "Nothing in the candidate earned an outward act.", time: now, tone: "quiet", presenceId },
@@ -27,9 +32,100 @@ test("Activity surfaces Genny's self-directed attention", async ({ page }) => {
 
   await page.reload();
   await expect(page.locator(".activity-page")).toBeVisible();
+  const glance = page.getByRole("region", { name: "Today at a glance" });
+  await expect(glance).toBeVisible();
+  await expect(glance).toContainText("4");
+  await expect(glance).toContainText("Discovery reads");
+  await expect(glance).toContainText("/ 60 used");
+  await expect(glance).toContainText("2");
+  await expect(glance).toContainText("/ 40 used");
+  await expect(glance).toContainText("Background monitoring: 9 inbound reads");
+  await expect(page.getByTestId("activity-verified-activity")).toContainText("Today only · all counts are verified outcomes.");
+  await expect(page.getByTestId("activity-upcoming")).toHaveCount(0);
+  await expect(page.getByTestId("activity-verified-activity")).toContainText("did today");
+  const rightNow = page.getByTestId("right-now-status");
+  await expect(rightNow.getByRole("button", { name: "View details", exact: true })).toBeVisible();
+  await rightNow.getByRole("button", { name: "View details", exact: true }).click();
+  await expect(rightNow.getByRole("button", { name: "Hide details", exact: true })).toBeVisible();
+  await expect(page.locator(".activity-right-now-container")).toContainText("Current Focus");
+  await rightNow.getByRole("button", { name: "Hide details", exact: true }).click();
+  await expect(page.locator(".activity-right-now-container")).toHaveCount(0);
+  await page.locator("details.activity-history-details > summary").click();
   const activity = page.locator(".activity-log");
   await expect(activity.locator(".event-title").filter({ hasText: "Genny looked around X" })).toBeVisible();
   await expect(activity.locator(".event-title").filter({ hasText: "Self-directed opportunity held" })).toBeVisible();
+});
+
+test("Activity keeps the current social attempt separate from its ongoing assignment", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Agent name").fill("Jenny");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  await expect(page.getByRole("heading", { name: "Jenny at a glance", exact: true })).toBeVisible();
+
+  await page.route("**/api/state**", async (route) => {
+    if (route.request().method() !== "GET" || new URL(route.request().url()).pathname !== "/api/state") return route.continue();
+    const response = await route.fetch({ headers: { "if-none-match": "" } });
+    if (response.status() !== 200 || !response.headers()["content-type"]?.includes("application/json")) return route.fulfill({ response });
+    const body = await response.json();
+    const presenceId = body.presence.id;
+    const assignmentId = "ongoing-presence-assignment";
+    const nowDate = new Date();
+    const now = nowDate.toISOString();
+    const today = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"][nowDate.getUTCDay()];
+    const dueTime = `${String(nowDate.getUTCHours()).padStart(2, "0")}:${String(nowDate.getUTCMinutes()).padStart(2, "0")}`;
+    body.presence.environment = "live";
+    const listedPresence = body.presences?.find((item: { id: string }) => item.id === presenceId);
+    if (listedPresence) listedPresence.environment = "live";
+    body.assignments.unshift({
+      id: assignmentId,
+      agentId: body.agent.id,
+      presenceId,
+      channelId: "x",
+      environment: "live",
+      title: "Maintain original presence",
+      instruction: "Maintain a useful original presence when there is something worth publishing.",
+      deliverable: { type: "original_publication", quantity: 1, quantityMode: "at_least" },
+      executionPolicy: { usePresenceEnvelope: true },
+      schedule: { day: today, time: dueTime, executionWindow: `${dueTime}–23:59` },
+      status: "active",
+      progress: { required: 0, verified: 9 },
+      rejectedCandidates: 0,
+      systemFailures: 0,
+      work: { phase: "candidate_review", attempts: 2, maxAttempts: 4, storiesResearched: 2 },
+      storyResearch: [{
+        query: "ai agents",
+        resultCount: 10,
+        sources: Array.from({ length: 8 }, (_, index) => ({ title: `Source post ${index + 1}`, url: `https://x.com/i/web/status/${index + 1}`, publisher: "X" })),
+        at: now,
+      }],
+      createdAt: now,
+      updatedAt: now,
+    });
+    body.assignmentRuns = body.assignmentRuns.filter((run: { assignmentId: string }) => run.assignmentId !== assignmentId);
+    await route.fulfill({ status: 200, contentType: "application/json", body: JSON.stringify(body) });
+  });
+
+  await page.reload();
+  const now = page.getByTestId("right-now-status");
+  await expect(now).toContainText("Waiting to choose an angle for the next original post");
+  await expect(now).toContainText("Genny is not choosing right now.");
+  await expect(now).toContainText("Next: The next work cycle will search or review source posts.");
+  await expect(now.locator(".working-now-progress")).toContainText("Choosing");
+  await expect(now.locator(".working-now-progress")).toContainText("Publishing");
+  await expect(now.locator(".working-now-progress")).toContainText("Confirmed");
+  await expect(now.getByRole("progressbar", { name: "Estimated assignment progress" })).toBeVisible();
+  await expect(now.locator(".working-now-timing-copy")).toContainText("Not running now");
+  await expect(now.locator(".working-now-timing-copy")).toContainText("Waiting for the next work cycle");
+  await expect(now.locator(".working-now-selection-evidence")).toContainText("Not choosing right now");
+  await expect(now.locator(".working-now-selection-evidence")).toContainText("10 found in the latest search");
+  await expect(now.locator(".working-now-selection-evidence")).toContainText("8 supplied together for judgment");
+  await expect(now.locator(".working-now-selection-evidence")).toContainText("2 of 4 angle attempts used");
+  await expect(page.locator(".working-now-ongoing-goal")).toContainText("Ongoing goal: Maintain original presence · 9 posts published so far");
+  await expect(now.getByRole("button", { name: "View details", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("region", { name: "Current focus details" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "View schedule", exact: true })).toBeVisible();
+  await expect(page.locator(".now-assignment-banner").filter({ hasText: "Maintain original presence" })).toHaveCount(0);
+  await expect(page.getByText("OBSERVE & SOURCE", { exact: false })).toHaveCount(0);
 });
 
 test("Activity keeps durable Assignments visible before any delivery exists", async ({ page }) => {

@@ -67,6 +67,31 @@ export function classifyFailureRootCause(
     };
   }
 
+  // A missing provider credential is deterministic configuration state, not a
+  // transient outage. Retrying it on every attention wake burns budget and
+  // makes the Presence appear stalled instead of giving the operator one
+  // actionable boundary.
+  if (dependency === "model_provider" && /no api key|api key is stored|not connected|needs-configuration|no model is selected|provider access/i.test(lower)) {
+    return {
+      rootCauseKey: "model_provider.credentials_missing",
+      safeSummary: "The selected AI provider is not configured. Open Brain → Provider access and save a valid key or choose a connected local model.",
+      retryable: false,
+      requiresOperator: true,
+      requiresAuth: true,
+    };
+  }
+
+  // Credits / Billing exhaustion
+  if (/no api credits|credits depleted|credit balance|credits remaining|billing and usage|quota exhausted/i.test(lower)) {
+    return {
+      rootCauseKey: `${dependency}.credits_exhausted`,
+      safeSummary: `${dependency === "native_x" ? "X API" : "Provider"} credits are exhausted. Add credits or choose an API plan to continue.`,
+      retryable: false,
+      requiresOperator: true,
+      requiresAuth: false,
+    };
+  }
+
   // Rate limits / 429
   if (/rate limit|429|too many requests|quota/i.test(lower)) {
     return {
@@ -101,7 +126,7 @@ export function classifyFailureRootCause(
   }
 
   // Duplicate content
-  if (/duplicate content|duplicate.*tweet/i.test(lower)) {
+  if (/duplicate content|duplicate.*tweet|already said that/i.test(lower)) {
     return {
       rootCauseKey: `${dependency}.duplicate_content`,
       safeSummary: "Action rejected as duplicate public content.",
@@ -164,6 +189,11 @@ export function recordOperationalFailure(input: {
     };
   }
 
+  const bridgeWindowStartedAt = typeof health.metadata?.failureWindowStartedAt === "string" ? health.metadata.failureWindowStartedAt : undefined;
+  if (input.dependency === "user_attached_bridge" && (!bridgeWindowStartedAt || Date.now() - new Date(bridgeWindowStartedAt).getTime() > 15 * 60_000)) {
+    health.consecutiveFailures = 0;
+    health.metadata = { ...(health.metadata ?? {}), failureWindowStartedAt: nowIso };
+  }
   health.consecutiveFailures += 1;
   health.lastFailureAt = nowIso;
 
@@ -195,6 +225,16 @@ export function recordOperationalFailure(input: {
     if (input.runId && !incident.affectedRunIds.includes(input.runId)) {
       incident.affectedRunIds.push(input.runId);
     }
+    // An existing incident may have been opened as recoverable and later
+    // receive a provider response that requires operator action (for example
+    // exhausted credits). Preserve the strongest current boundary instead of
+    // leaving the incident in `recovering` with a stale retry timestamp.
+    if (classification.requiresOperator) {
+      incident.state = "needs_operator";
+      incident.operatorActionRequired = true;
+      incident.requiresAuth = classification.requiresAuth;
+      delete incident.nextAttemptAt;
+    }
   }
 
   // 3. Check recovery budget & circuit breakers
@@ -211,6 +251,14 @@ export function recordOperationalFailure(input: {
     incident.state = "waiting";
     incident.nextAttemptAt = resetAt;
     if (input.runId) scheduleProviderResetWake(input.runId, resetAt, input.presenceId, { incidentId: incident.id });
+  } else if (input.dependency === "user_attached_bridge" && health.consecutiveFailures >= 3) {
+    circuitOpen = true;
+    const retryAt = new Date(Date.now() + 15 * 60_000).toISOString();
+    health.state = "circuit_open";
+    health.circuitUntil = retryAt;
+    incident.state = "waiting";
+    incident.nextAttemptAt = retryAt;
+    incident.safeSummary = "The browser delivery route failed to claim or complete three equivalent actions within 15 minutes. New work for that route is paused until fresh liveness and verified identity are observed.";
   } else if (incident.recoveryAttempts >= budget.maxAttempts) {
     // Exhaustion is a human boundary, not an invitation to retry forever.
     circuitOpen = true;
@@ -232,7 +280,7 @@ export function recordOperationalFailure(input: {
     const run = getOperationalRun(input.runId);
     if (run) {
       run.incidentId = incident.id;
-      run.state = classification.requiresOperator || circuitOpen ? "needs_operator" : quotaWaiting ? "waiting" : "recovering";
+      run.state = classification.requiresOperator ? "needs_operator" : circuitOpen || quotaWaiting ? "waiting" : "recovering";
       run.stage = `incident_${classification.rootCauseKey}`;
       run.lastProgressAt = nowIso;
       upsertOperationalRun(run);

@@ -60,11 +60,11 @@ The full product and UX north star is [OpenPresence Vision & Platform Philosophy
 git clone https://github.com/richardsondx/OpenPresence.git
 cd OpenPresence
 pnpm install
-cp .env.example .env.local
+cp .env.example .env
 pnpm dev
 ~~~
 
-Open [http://localhost:3015](http://localhost:3015). The local launcher uses the populated Genny workspace snapshot when it is present, so the default server opens with the main meaning files and Genny Agent. Set `OPENPRESENCE_DB_PATH` to use another local SQLite database explicitly.
+Open [http://localhost:3015](http://localhost:3015). The local launcher loads `.env` before selecting a database, validates the SQLite file, and checks the selected Agent/Presence identity against `data/openpresence-db.json`. The default points to the canonical multi-Agent Example Agent workspace; set it to another existing SQLite database only when intentionally running another workspace. A missing or empty database fails closed; set `OPENPRESENCE_ALLOW_DATABASE_INIT=1` only when intentionally creating a new workspace.
 
 For a production-style local run:
 
@@ -122,7 +122,7 @@ Other useful environment variables:
 | <code>OPENPRESENCE_AI_MOCK=1</code> | Use deterministic AI replies in local tests only. |
 | <code>OPENPRESENCE_TEST_MODE=1</code> | Enable test-only state reset behavior. Never use in production. |
 
-Never commit <code>.env.local</code>, <code>data/.secret-key</code>, SQLite databases, API keys, or channel credentials.
+Never commit <code>.env</code>, <code>.env.local</code>, <code>data/.secret-key</code>, SQLite databases, API keys, or channel credentials.
 
 ## Architecture
 

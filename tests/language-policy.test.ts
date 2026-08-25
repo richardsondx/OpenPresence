@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { containsLiteral, effectiveLanguagePolicy, languagesMatch, mergeLanguagePolicies, presenceLanguageGuidance, validateLanguage } from "../lib/language-policy";
+import { containsLiteral, effectiveLanguagePolicy, languageEligibleForObservation, languagesMatch, mergeLanguagePolicies, presenceLanguageGuidance, validateLanguage } from "../lib/language-policy";
 import { isCognitionEligibleMirrorObject } from "../lib/social-context";
 import { addSandboxEvent, applyOperation, completeNativeExecution, createAgent, deliverSandboxExecution, formChatPostIntent, formSandboxIntent, recordNativeMirror, startPlaygroundSession, targetLanguageValidationForAction } from "../lib/runtime";
 
@@ -56,6 +56,22 @@ describe("Language & phrasing policy", () => {
     expect(targetLanguageValidationForAction(state, { presenceId: state.presence!.id, target, environment: "sandbox", sessionId: session.id })).toMatchObject({ valid: false, expected: "en", observed: "pt" });
   });
 
+  it("treats X qme mention/link shells as language-neutral only without text", () => {
+    expect(languageEligibleForObservation("en", "qme", "@jenny_ai https://t.co/example")).toBe(true);
+    expect(languageEligibleForObservation("en", "qme", "bonjour https://t.co/example")).toBe(false);
+  });
+
+  it("does not block a live reply to a language-neutral X target", () => {
+    let state = createAgent(input);
+    state = recordNativeMirror(state, {
+      connectionId: "operator-link",
+      presenceId: state.presence!.id,
+      post: { id: "link-shell", text: "@jenny_ai https://t.co/example", language: "qme" },
+    }, { explicitOperatorEvidence: true });
+    const target = state.mirrorObjects[0]!.externalRef;
+    expect(targetLanguageValidationForAction(state, { presenceId: state.presence!.id, target, environment: "live" })).toMatchObject({ valid: true, expected: "en" });
+  });
+
   it("blocks a targeted Sandbox interaction when the observed post is not in the Presence language", () => {
     let state = createAgent(input);
     state = startPlaygroundSession(state, state.presence!.id, "fresh");
@@ -89,6 +105,13 @@ describe("Language & phrasing policy", () => {
     const state = createAgent(input);
     const next = recordNativeMirror(state, { connectionId: "connection-1", presenceId: state.presence!.id, post: { id: "pt-post", text: "Uma publicação", language: "pt-BR" } });
     expect(next.mirrorObjects).toHaveLength(0);
+  });
+
+  it("keeps explicit operator evidence inspectable without changing its provider language", () => {
+    const state = createAgent(input);
+    const next = recordNativeMirror(state, { connectionId: "operator-link", presenceId: state.presence!.id, post: { id: "operator-post", text: "lmao pic.twitter.com/example", language: "ht" } }, { explicitOperatorEvidence: true });
+    expect(next.mirrorObjects).toHaveLength(1);
+    expect(next.mirrorObjects[0]).toMatchObject({ externalRef: { id: "operator-post" }, language: "ht" });
   });
 
   it("does not admit unknown-language world objects to cognition", () => {

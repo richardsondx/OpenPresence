@@ -4,11 +4,23 @@ import crypto from "node:crypto";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { sql } from "drizzle-orm";
-import { initialState, normalizeState, stateForAgent, stateForContext } from "./runtime";
-import type { AgentWorkspaceSnapshot, Bridge, BridgeAdapterStatus, BrowserBody, DependencyHealth, DependencyHealthKind, DependencyHealthState, JsonValue, OpenPresenceState, OperationalRun, OperationalRunState, ProcessHeartbeat, RecoveryAttempt, RecoveryIncident, RecoveryIncidentState, ScheduledWake } from "./types";
+import { initialState, normalizeState, preflightAssignment, stateForAgent, stateForContext } from "./runtime";
+import type { AgentWorkspaceSnapshot, AttentionScope, AttentionTrigger, Bridge, BridgeAdapterStatus, BrowserBody, DependencyHealth, DependencyHealthKind, DependencyHealthState, JsonValue, MirrorEvent, OpenPresenceState, OperationalRun, OperationalRunState, ProcessHeartbeat, RecoveryAttempt, RecoveryIncident, RecoveryIncidentState, ScheduledWake } from "./types";
 
 const dataDir = path.join(process.cwd(), "data");
 fs.mkdirSync(dataDir, { recursive: true });
+const dbSelectionManifestPath = path.join(dataDir, "openpresence-db.json");
+const explicitDbPath = process.env.OPENPRESENCE_DB_PATH?.trim();
+let selectionManifest: { dbPath?: string; agentId?: string; presenceId?: string; handle?: string } | undefined;
+let manifestDbPath: string | undefined;
+if (fs.existsSync(dbSelectionManifestPath)) {
+  try {
+    selectionManifest = JSON.parse(fs.readFileSync(dbSelectionManifestPath, "utf8")) as typeof selectionManifest;
+    if (!explicitDbPath && selectionManifest?.dbPath) manifestDbPath = path.resolve(process.cwd(), selectionManifest.dbPath);
+  } catch (error) {
+    throw new Error(`Invalid ${dbSelectionManifestPath}: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
 const preferredDbPath = path.join(dataDir, "openpresence-genny-restored-full-v2.db");
 const restoredDefaultPath = path.join(dataDir, "openpresence-genny-restored-safe.db");
 const defaultDbPath = fs.existsSync(preferredDbPath)
@@ -16,17 +28,60 @@ const defaultDbPath = fs.existsSync(preferredDbPath)
   : fs.existsSync(restoredDefaultPath)
     ? restoredDefaultPath
     : path.join(dataDir, "openpresence.db");
-const sqlite = new Database(process.env.OPENPRESENCE_DB_PATH ?? defaultDbPath);
-sqlite.pragma("journal_mode = WAL");
-// Chrome Bridge heartbeats and the Presence worker can touch the same local
-// database concurrently. Wait briefly for the writer instead of surfacing a
-// transient SQLITE_BUSY as a hung or failed interface request.
-sqlite.pragma("busy_timeout = 5000");
+if (manifestDbPath && !fs.existsSync(manifestDbPath)) {
+  throw new Error(`Configured OpenPresence database does not exist: ${manifestDbPath}. Set OPENPRESENCE_DB_PATH explicitly or restore that file; OpenPresence will not fall back to another workspace.`);
+}
+export const resolvedDbPath = path.resolve(explicitDbPath || manifestDbPath || defaultDbPath);
+export const dbSelectionSource = explicitDbPath ? "OPENPRESENCE_DB_PATH" : manifestDbPath ? "data/openpresence-db.json" : "legacy filename fallback";
+const isTestDatabaseRuntime = process.env.OPENPRESENCE_TEST_MODE === "1" || process.env.VITEST === "true";
+const allowDatabaseInitialization = process.env.OPENPRESENCE_ALLOW_DATABASE_INIT === "1";
+if (!fs.existsSync(resolvedDbPath) && !isTestDatabaseRuntime && !allowDatabaseInitialization) {
+  throw new Error(`OpenPresence database ${resolvedDbPath} does not exist. Refusing to create a blank workspace; restore the database or set OPENPRESENCE_ALLOW_DATABASE_INIT=1 for an intentional first-run initialization.`);
+}
+if (fs.existsSync(resolvedDbPath)) {
+  const stat = fs.statSync(resolvedDbPath);
+  if (stat.size === 0 && !isTestDatabaseRuntime && !allowDatabaseInitialization) {
+    throw new Error(`OpenPresence database ${resolvedDbPath} is empty. Refusing to open it because SQLite would create a fresh workspace and make existing data appear lost.`);
+  }
+  if (stat.size > 0) {
+    const descriptor = fs.openSync(resolvedDbPath, "r");
+    const headerBuffer = Buffer.alloc(16);
+    try { fs.readSync(descriptor, headerBuffer, 0, 16, 0); } finally { fs.closeSync(descriptor); }
+    const header = headerBuffer.toString("utf8");
+    if (header !== "SQLite format 3\u0000") throw new Error(`OpenPresence database ${resolvedDbPath} is not a valid SQLite file. Refusing to start.`);
+  }
+}
+// Next dev compiles route handlers into separate server bundles. Without a
+// process-wide pool, every bundle constructs its own better-sqlite3 handle for
+// the same file; hot compilation can then open and retire handles while Bridge
+// ingestion and autonomy are writing. On macOS this eventually produced
+// SQLITE_IOERR_SHORT_READ and corrupt b-trees. One Node process must own one
+// SQLite handle per canonical database path.
+type SqliteHandle = InstanceType<typeof Database>;
+const sqlitePoolOwner = globalThis as typeof globalThis & {
+  __openPresenceSqliteByPath?: Map<string, SqliteHandle>;
+};
+const sqlitePool = sqlitePoolOwner.__openPresenceSqliteByPath ?? new Map<string, SqliteHandle>();
+sqlitePoolOwner.__openPresenceSqliteByPath = sqlitePool;
+const sqlite = (() => {
+  const existing = sqlitePool.get(resolvedDbPath);
+  if (existing) return existing;
+  const created = new Database(resolvedDbPath);
+  created.pragma("journal_mode = WAL");
+  // Chrome Bridge heartbeats and the Presence worker can touch the same local
+  // database concurrently. Wait briefly for the writer instead of surfacing a
+  // transient SQLITE_BUSY as a hung or failed interface request.
+  created.pragma("busy_timeout = 5000");
+  sqlitePool.set(resolvedDbPath, created);
+  return created;
+})();
 const db = drizzle(sqlite);
 
 type StateContext = { agentId?: string | null; presenceId?: string | null };
 type StateCache = { updatedAt: string; state: OpenPresenceState };
 let stateCache: StateCache | undefined;
+type HotStateCache = { token: string; snapshot: OpenPresenceState; state: OpenPresenceState };
+let hotStateCache: HotStateCache | undefined;
 
 type UsageWorkspace = Pick<OpenPresenceState, "agent" | "presences" | "resourceUsageEvents">;
 
@@ -64,18 +119,61 @@ export function readUsageWorkspaces(): UsageWorkspace[] {
 db.run(sql`CREATE TABLE IF NOT EXISTS app_state (id INTEGER PRIMARY KEY CHECK (id = 1), payload TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 sqlite.exec("CREATE TABLE IF NOT EXISTS agent_workspaces (agent_id TEXT PRIMARY KEY, payload TEXT NOT NULL, updated_at TEXT NOT NULL)");
 sqlite.exec("CREATE TABLE IF NOT EXISTS agent_workspace_revisions (agent_id TEXT PRIMARY KEY, revision INTEGER NOT NULL DEFAULT 0, updated_at TEXT NOT NULL)");
+const manifestMatchesSelectedDb = Boolean(
+  selectionManifest?.dbPath
+  && path.resolve(process.cwd(), selectionManifest.dbPath) === resolvedDbPath,
+);
+if (manifestMatchesSelectedDb && selectionManifest?.agentId && selectionManifest.presenceId) {
+  const row = sqlite.prepare("SELECT payload FROM app_state WHERE id = 1").get() as { payload?: string } | undefined;
+  if (!row?.payload) throw new Error(`Configured OpenPresence database ${resolvedDbPath} has no durable app_state snapshot. Refusing to initialize a blank workspace.`);
+  try {
+    const state = JSON.parse(row.payload) as { agent?: { id?: string }; presences?: Array<{ id?: string; handle?: string }> };
+    const presence = state.presences?.find((candidate) => candidate.id === selectionManifest?.presenceId);
+    if (state.agent?.id !== selectionManifest.agentId || !presence || (selectionManifest.handle && presence.handle !== selectionManifest.handle)) {
+      throw new Error(`Configured database identity does not match ${dbSelectionManifestPath}. Expected Agent ${selectionManifest.agentId}, Presence ${selectionManifest.presenceId}, handle ${selectionManifest.handle ?? "(unspecified)"}; loaded Agent ${state.agent?.id ?? "(missing)"}, Presence ${presence?.id ?? "(missing)"}, handle ${presence?.handle ?? "(missing)"}. Refusing to start against the wrong workspace.`);
+    }
+  } catch (error) {
+    if (error instanceof Error && error.message.startsWith("Configured database identity")) throw error;
+    throw new Error(`Configured OpenPresence database ${resolvedDbPath} has an unreadable identity snapshot. Refusing to start. ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+// Older local snapshots duplicated every Agent workspace inside app_state.
+// Remove that compatibility-only key once, after confirming the durable
+// workspace directory exists; hot reads must never run json_remove over the
+// whole snapshot.
+const durableWorkspaceCount = (sqlite.prepare("SELECT COUNT(*) AS count FROM agent_workspaces").get() as { count?: number } | undefined)?.count ?? 0;
+sqlite.prepare(`UPDATE app_state
+  SET payload = json_remove(payload, '$.agentWorkspaces')
+  WHERE id = 1
+    AND json_type(payload, '$.agentWorkspaces') = 'array'
+    AND (json_array_length(payload, '$.agentWorkspaces') = 0 OR ? > 0)`).run(durableWorkspaceCount);
 // Bridge liveness is high-frequency operational telemetry. Keep it separate
 // from the monolithic Agent workspace so a five-second heartbeat does not
 // rewrite the full compatibility snapshot or advance workspace state.
 sqlite.exec("CREATE TABLE IF NOT EXISTS bridge_health (bridge_id TEXT PRIMARY KEY, state TEXT NOT NULL, adapter_status TEXT NOT NULL, last_heartbeat_at TEXT, last_seen_at TEXT, last_sync_at TEXT, updated_at TEXT NOT NULL)");
+// Account identity is a security-critical browser observation. Keep it out of
+// the monolithic workspace so an older cognition write cannot erase a newer
+// verified account binding.
+sqlite.exec("CREATE TABLE IF NOT EXISTS bridge_identity (bridge_id TEXT PRIMARY KEY, executor_id TEXT NOT NULL, username TEXT, status TEXT NOT NULL, message TEXT, observed_at TEXT NOT NULL, updated_at TEXT NOT NULL)");
 sqlite.exec("INSERT INTO agent_workspace_revisions (agent_id, revision, updated_at) SELECT agent_id, 0, updated_at FROM agent_workspaces WHERE agent_id NOT IN (SELECT agent_id FROM agent_workspace_revisions)");
 const normalizedTables = [
-  "agents", "agent_files", "provider_connections", "asset_provider_connections", "agent_model_profiles", "agent_tool_bindings", "presences", "execution_envelopes", "conversations", "presence_chat_sessions", "messages", "change_sets", "standing_intents", "publishing_plans", "social_intents", "executions", "outcomes", "publications", "asset_usages", "source_evidence", "claim_grounding", "library_sources", "assets", "assignment_runs", "skills", "agent_skills", "content_drops", "channel_definitions", "native_channel_connections", "bridges", "mirror_objects", "mirror_events", "bridge_sync", "conversation_episodes", "assignment_contributions", "people", "person_identities", "relationships", "relationship_facts", "relationship_open_loops", "recommendation_records", "introduction_records", "scenarios", "scenario_versions", "scenario_runs", "scenario_run_provenance", "scenario_evaluations",
+  "agents", "agent_files", "provider_connections", "asset_provider_connections", "agent_model_profiles", "agent_tool_bindings", "presences", "execution_envelopes", "conversations", "presence_chat_sessions", "messages", "change_sets", "standing_intents", "publishing_plans", "social_intents", "executions", "outcomes", "publications", "asset_usages", "source_evidence", "claim_grounding", "library_sources", "assets", "assignment_runs", "skills", "agent_skills", "content_drops", "channel_definitions", "native_channel_connections", "bridges", "mirror_objects", "mirror_events", "bridge_sync", "conversation_episodes", "assignment_contributions", "people", "person_identities", "relationships", "relationship_facts", "relationship_open_loops", "recommendation_records", "introduction_records", "scenarios", "scenario_versions", "scenario_runs", "scenario_run_provenance", "scenario_evaluations", "attention_episodes",
   "operational_runs", "scheduled_wakes", "dependency_health", "recovery_incidents", "recovery_attempts", "browser_bodies",
 ];
 for (const table of normalizedTables) {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY, agent_id TEXT, parent_id TEXT, payload TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 }
+
+// Mirror history is already durably indexed in `mirror_events`. Keeping the
+// full append-only log inside app_state made every small autonomy write
+// stringify tens of megabytes and block the request-serving event loop.
+try {
+  const mirrorHistoryCount = (sqlite.prepare("SELECT COUNT(*) AS count FROM mirror_events").get() as { count?: number } | undefined)?.count ?? 0;
+  if (mirrorHistoryCount > 0) {
+    sqlite.prepare("UPDATE app_state SET payload = json_remove(payload, '$.mirrorEvents') WHERE id = 1 AND json_type(payload, '$.mirrorEvents') = 'array'").run();
+    sqlite.prepare("UPDATE agent_workspaces SET payload = json_remove(payload, '$.mirrorEvents') WHERE json_type(payload, '$.mirrorEvents') = 'array'").run();
+  }
+} catch { /* Older/test databases may not have JSON1 or mirror history yet. */ }
 
 // Operational autonomy indexed tables & high-frequency models (Phase 1)
 sqlite.exec("CREATE TABLE IF NOT EXISTS operational_runs_idx (id TEXT PRIMARY KEY, presence_id TEXT, execution_id TEXT, state TEXT NOT NULL, stage TEXT NOT NULL, lease_owner TEXT, lease_expires_at TEXT, eligible_at TEXT, next_wake_at TEXT, last_progress_at TEXT, last_heartbeat_at TEXT, payload TEXT NOT NULL, updated_at TEXT NOT NULL)");
@@ -104,6 +202,8 @@ export function readBridgeById(bridgeId: string): Bridge | undefined {
     const bridge = JSON.parse(row.payload) as Record<string, unknown> & { id?: string; state?: string; updatedAt?: string };
     const health = sqlite.prepare("SELECT state, adapter_status, last_heartbeat_at, last_seen_at, last_sync_at, updated_at FROM bridge_health WHERE bridge_id = ?").get(bridgeId) as { state: string; adapter_status: string; last_heartbeat_at?: string; last_seen_at?: string; last_sync_at?: string; updated_at: string } | undefined;
     if (health && (!bridge.updatedAt || health.updated_at > bridge.updatedAt)) Object.assign(bridge, { state: health.state, adapterStatus: health.adapter_status, lastHeartbeatAt: health.last_heartbeat_at, lastSeenAt: health.last_seen_at, lastSyncAt: health.last_sync_at, updatedAt: health.updated_at });
+    const identity = readBridgeIdentity(bridgeId);
+    if (identity) bridge.accountIdentity = identity;
     return bridge as unknown as Bridge;
   } catch { return undefined; }
 }
@@ -113,6 +213,32 @@ function hydrateBridgeCredentials(state: OpenPresenceState): OpenPresenceState {
     const metadata = readBridgeCredentialMetadata(bridge.id);
     return metadata ? { ...bridge, ...metadata } : bridge;
   }) };
+}
+
+const mirrorEventReadWindow = 5_000;
+function hydrateMirrorEvents(state: OpenPresenceState): OpenPresenceState {
+  try {
+    const rows = sqlite.prepare("SELECT payload FROM mirror_events ORDER BY rowid ASC LIMIT ?").all(mirrorEventReadWindow) as Array<{ payload?: string }>;
+    const events = rows.flatMap((row) => {
+      try { return row.payload ? [JSON.parse(row.payload) as MirrorEvent] : []; } catch { return []; }
+    });
+    return events.length ? { ...state, mirrorEvents: events } : state;
+  } catch {
+    return state;
+  }
+}
+
+function readBridgeIdentity(bridgeId: string): Bridge["accountIdentity"] | undefined {
+  const row = sqlite.prepare("SELECT username, status, message, observed_at FROM bridge_identity WHERE bridge_id = ?").get(bridgeId) as { username?: string | null; status: string; message?: string | null; observed_at: string } | undefined;
+  if (!row) return undefined;
+  return { username: row.username ?? undefined, status: row.status as NonNullable<Bridge["accountIdentity"]>["status"], message: row.message ?? undefined, observedAt: row.observed_at };
+}
+
+function hydrateBridgeIdentity(state: OpenPresenceState): OpenPresenceState {
+  const rows = sqlite.prepare("SELECT bridge_id, username, status, message, observed_at FROM bridge_identity").all() as Array<{ bridge_id: string; username?: string | null; status: string; message?: string | null; observed_at: string }>;
+  if (!rows.length) return state;
+  const identities = new Map(rows.map((row) => [row.bridge_id, { username: row.username ?? undefined, status: row.status as NonNullable<Bridge["accountIdentity"]>["status"], message: row.message ?? undefined, observedAt: row.observed_at }]));
+  return { ...state, bridges: state.bridges.map((bridge) => identities.has(bridge.id) ? { ...bridge, accountIdentity: identities.get(bridge.id) } : bridge) };
 }
 
 /**
@@ -131,9 +257,9 @@ function hydrateBridgeHealth(state: OpenPresenceState): OpenPresenceState {
     last_sync_at?: string | null;
     updated_at: string;
   }>;
-  if (!rows.length) return state;
+  if (!rows.length) return hydrateBridgeIdentity(state);
   const health = new Map(rows.map((row) => [row.bridge_id, row]));
-  return {
+  return hydrateBridgeIdentity({
     ...state,
     bridges: state.bridges.map((bridge) => {
       const live = health.get(bridge.id);
@@ -148,15 +274,19 @@ function hydrateBridgeHealth(state: OpenPresenceState): OpenPresenceState {
         updatedAt: live.updated_at || bridge.updatedAt,
       };
     }),
-  };
+  });
 }
 
 function snapshotWorkspace(state: OpenPresenceState): AgentWorkspaceSnapshot {
-  const workspace = JSON.parse(JSON.stringify(state)) as Partial<OpenPresenceState>;
+  // Avoid cloning the full multi-Agent directory just to persist the active
+  // workspace. The directory is already stored separately in
+  // `agent_workspaces` and was the main source of multi-second writes.
+  const workspace = { ...state } as Partial<OpenPresenceState>;
   delete workspace.agents;
   delete workspace.activeAgentId;
   delete workspace.agentWorkspaces;
-  return workspace as AgentWorkspaceSnapshot;
+  delete workspace.mirrorEvents;
+  return JSON.parse(JSON.stringify(workspace)) as AgentWorkspaceSnapshot;
 }
 
 function hydrateAgentWorkspaces(state: OpenPresenceState): OpenPresenceState {
@@ -166,6 +296,10 @@ function hydrateAgentWorkspaces(state: OpenPresenceState): OpenPresenceState {
   const revisions = new Map(revisionRows.map((row) => [row.agent_id, row.revision]));
   const stored = new Map<string, AgentWorkspaceSnapshot>();
   for (const row of rows) {
+    // The compatibility app_state already contains the active workspace. Do
+    // not parse and retain a second 20 MB copy of that same snapshot on every
+    // cold read; only hydrate other Agents for the switcher.
+    if (row.agent_id === state.activeAgentId) continue;
     try { stored.set(row.agent_id, { ...(JSON.parse(row.payload) as AgentWorkspaceSnapshot), workspaceRevision: revisions.get(row.agent_id) ?? 0 }); } catch { /* retain the compatibility snapshot below */ }
   }
   const snapshots = state.agentWorkspaces.map((workspace) => workspace.agent?.id ? stored.get(workspace.agent.id) ?? workspace : workspace);
@@ -212,12 +346,23 @@ function hydrateOperationalState(state: OpenPresenceState): OpenPresenceState {
 
   let operationalRuns = state.operationalRuns;
   try {
-    const opRows = sqlite.prepare("SELECT payload FROM operational_runs_idx ORDER BY updated_at DESC").all() as Array<{ payload: string }>;
+    // The durable index is the source of truth, but the browser does not need
+    // thousands of terminal scheduler records on every Activity read. Keep
+    // active/recovering runs plus a bounded recent window for progressive
+    // disclosure; direct run lookups and listOperationalRuns remain complete.
+    const operationalRunCutoff = new Date(Date.now() - 7 * 24 * 60 * 60_000).toISOString();
+    const opRows = sqlite.prepare("SELECT payload FROM operational_runs_idx WHERE state NOT IN ('succeeded', 'failed', 'cancelled') OR updated_at >= ? ORDER BY updated_at DESC LIMIT 300").all(operationalRunCutoff) as Array<{ payload: string }>;
     if (opRows.length > 0) {
       operationalRuns = opRows.flatMap((r) => {
         try { return [JSON.parse(r.payload) as OperationalRun]; } catch { return []; }
       });
     }
+  } catch { /* retain compatibility when table not available */ }
+
+  let scheduledWakes = state.scheduledWakes;
+  try {
+    const wakeRows = sqlite.prepare("SELECT id, presence_id, wake_at, kind, target_id, state, payload, updated_at, created_at FROM scheduled_wakes_idx WHERE state = 'pending' ORDER BY wake_at ASC LIMIT 300").all() as Array<{ id: string; presence_id?: string | null; wake_at: string; kind: string; target_id?: string | null; state: string; payload?: string | null; updated_at: string; created_at?: string | null }>;
+    scheduledWakes = wakeRows.map((row) => ({ id: row.id, presenceId: row.presence_id ?? undefined, wakeAt: row.wake_at, kind: row.kind as ScheduledWake["kind"], targetId: row.target_id ?? undefined, state: row.state as ScheduledWake["state"], payload: row.payload ? JSON.parse(row.payload) as Record<string, JsonValue> : undefined, createdAt: row.created_at ?? row.updated_at, updatedAt: row.updated_at }));
   } catch { /* retain compatibility when table not available */ }
 
   let dependencyHealth = state.dependencyHealth;
@@ -253,6 +398,7 @@ function hydrateOperationalState(state: OpenPresenceState): OpenPresenceState {
     recoveryIncidents: recoveryIncidents ?? [],
     recoveryAttempts: recoveryAttempts ?? [],
     operationalRuns: operationalRuns ?? [],
+    scheduledWakes: scheduledWakes ?? [],
     dependencyHealth: dependencyHealth ?? [],
   };
 }
@@ -271,8 +417,27 @@ export function readStateVersion() {
 export function readStateReadToken() {
   const workspace = readStateVersion();
   const health = sqlite.prepare("SELECT MAX(updated_at) AS updated_at FROM bridge_health").get() as { updated_at?: string | null } | undefined;
+  const identity = sqlite.prepare("SELECT MAX(updated_at) AS updated_at FROM bridge_identity").get() as { updated_at?: string | null } | undefined;
   const incident = sqlite.prepare("SELECT MAX(updated_at) AS updated_at FROM recovery_incidents_live").get() as { updated_at?: string | null } | undefined;
-  return `${workspace}:${health?.updated_at ?? "empty"}:${incident?.updated_at ?? "empty"}`;
+  const run = sqlite.prepare("SELECT MAX(updated_at) AS updated_at FROM operational_runs_idx").get() as { updated_at?: string | null } | undefined;
+  const wake = sqlite.prepare("SELECT MAX(updated_at) AS updated_at FROM scheduled_wakes_idx").get() as { updated_at?: string | null } | undefined;
+  const dependency = sqlite.prepare("SELECT MAX(updated_at) AS updated_at FROM dependency_health_live").get() as { updated_at?: string | null } | undefined;
+  return `${workspace}:${health?.updated_at ?? "empty"}:${identity?.updated_at ?? "empty"}:${incident?.updated_at ?? "empty"}:${run?.updated_at ?? "empty"}:${wake?.updated_at ?? "empty"}:${dependency?.updated_at ?? "empty"}`;
+}
+
+export function writeBridgeIdentity(input: { bridgeId: string; executorId: string; username?: string; status: NonNullable<Bridge["accountIdentity"]>["status"]; message?: string; observedAt: string }) {
+  sqlite.prepare(`INSERT INTO bridge_identity (bridge_id, executor_id, username, status, message, observed_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(bridge_id) DO UPDATE SET executor_id = excluded.executor_id, username = excluded.username,
+      status = excluded.status, message = excluded.message, observed_at = excluded.observed_at, updated_at = excluded.updated_at`).run(
+    input.bridgeId, input.executorId, input.username ?? null, input.status, input.message ?? null, input.observedAt, input.observedAt,
+  );
+  stateCache = undefined;
+}
+
+export function deleteBridgeIdentity(bridgeId: string) {
+  sqlite.prepare("DELETE FROM bridge_identity WHERE bridge_id = ?").run(bridgeId);
+  stateCache = undefined;
 }
 
 export function writeBridgeHeartbeat(input: { bridgeId: string; state: string; adapterStatus: string; lastHeartbeatAt: string; lastSeenAt: string }) {
@@ -303,6 +468,41 @@ export function readBridgeHealthForPresence(presenceId: string) {
 }
 
 /**
+ * Read only the fields the browser adapter needs to discover its Presence.
+ * The adapter polls this endpoint frequently; normalizing the complete Agent
+ * workspace here turns a liveness check into a multi-megabyte CPU/memory job.
+ */
+export function readBrowserPresenceConfig(context: StateContext = {}) {
+  // The browser bridge polls this path while an X tab is live. Do not use a
+  // JSON extraction on the 40+ MB workspace snapshot here: SQLite has to
+  // parse that whole document before returning a few Presence fields, which
+  // can delay a heartbeat long enough to manufacture a "Connection stale"
+  // state. Presences are already durably indexed for exactly this purpose.
+  const rows = context.presenceId
+    ? sqlite.prepare(`SELECT payload FROM presences WHERE id = ?${context.agentId ? " AND agent_id = ?" : ""} LIMIT 1`)
+      .all(...(context.agentId ? [context.presenceId, context.agentId] : [context.presenceId])) as Array<{ payload?: string }>
+    : context.agentId
+      ? sqlite.prepare("SELECT payload FROM presences WHERE agent_id = ? ORDER BY updated_at DESC").all(context.agentId) as Array<{ payload?: string }>
+      : sqlite.prepare("SELECT payload FROM presences WHERE json_extract(payload, '$.browserAccess.enabled') = 1 ORDER BY updated_at DESC").all() as Array<{ payload?: string }>;
+  let presences: Array<Record<string, unknown>> = [];
+  try {
+    presences = rows.flatMap((row) => {
+      if (!row.payload) return [];
+      const parsed = JSON.parse(row.payload) as unknown;
+      return parsed && typeof parsed === "object" ? [parsed as Record<string, unknown>] : [];
+    });
+  } catch {
+    // A malformed compatibility projection must not take down the Bridge.
+  }
+  const enabled = presences.filter((presence) => (presence.browserAccess as { enabled?: boolean } | undefined)?.enabled === true);
+  const selected = context.presenceId ? presences[0] : enabled[0];
+  return {
+    activePresenceId: typeof selected?.id === "string" ? selected.id : null,
+    presences: context.presenceId ? presences : enabled,
+  };
+}
+
+/**
  * Read the normalized state owned by this process. Callers must treat this as
  * immutable; mutating callers should use readState() or stateForContext().
  * The cache is invalidated by writeState, avoiding a full JSON parse and
@@ -311,6 +511,10 @@ export function readBridgeHealthForPresence(presenceId: string) {
 export function readStateSnapshot(): OpenPresenceState {
   const row = sqlite.prepare("SELECT payload, updated_at FROM app_state WHERE id = 1").get() as { payload?: string; updated_at?: string } | undefined;
   if (!row?.payload) {
+    const storedAgents = (sqlite.prepare("SELECT COUNT(*) AS count FROM agents").get() as { count?: number } | undefined)?.count ?? 0;
+    if (storedAgents > 0) {
+      throw new Error(`OpenPresence database ${resolvedDbPath} has normalized records but no app_state snapshot. Refusing to reset the workspace.`);
+    }
     const state = initialState();
     writeState(state);
     return readStateSnapshot();
@@ -318,13 +522,11 @@ export function readStateSnapshot(): OpenPresenceState {
   const cachedState = stateCache;
   if (cachedState && cachedState.updatedAt === row.updated_at) return cachedState.state;
   try {
-    const state = hydrateBridgeCredentials(hydrateAgentWorkspaces(normalizeState(JSON.parse(row.payload) as OpenPresenceState)));
+    const state = hydrateBridgeCredentials(hydrateAgentWorkspaces(hydrateMirrorEvents(normalizeState(JSON.parse(row.payload) as OpenPresenceState))));
     stateCache = { updatedAt: row.updated_at ?? "", state };
     return state;
-  } catch {
-    const state = initialState();
-    writeState(state);
-    return readStateSnapshot();
+  } catch (error) {
+    throw new Error(`OpenPresence database ${resolvedDbPath} contains an unreadable app_state snapshot. Refusing to replace it with an empty workspace. Restore a backup before continuing. ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -334,15 +536,168 @@ export function readState(): OpenPresenceState {
 
 /** Materialize a mutable context from the cached state with one clone. */
 export function readStateForContext(context: StateContext): OpenPresenceState {
-  return stateForContext(hydrateOperationalState(hydrateBridgeHealth(readStateSnapshot())), context);
+  const scoped = readStateSnapshotForContext(context);
+  // Browser-facing mutations do not need the Agent directory snapshots. Keep
+  // those durable rows server-side so POST responses stay small too.
+  return JSON.parse(JSON.stringify({ ...scoped, agentWorkspaces: [] })) as OpenPresenceState;
 }
 
 /** Read-only context projection for GET responses; unchanged active reads share the cache. */
 export function readStateSnapshotForContext(context: StateContext): OpenPresenceState {
-  const state = hydrateOperationalState(hydrateBridgeHealth(readStateSnapshot()));
-  const activeAgentMatches = !context.agentId || context.agentId === state.activeAgentId;
-  const activePresenceMatches = !context.presenceId || context.presenceId === state.activePresenceId;
-  return activeAgentMatches && activePresenceMatches ? state : stateForContext(state, context);
+  // Read the requested Agent workspace directly instead of hydrating the
+  // compatibility row's historical Agent directory. This is the hot path for
+  // Activity, health, and browser configuration requests.
+  const row = sqlite.prepare("SELECT payload, updated_at FROM app_state WHERE id = 1").get() as { payload?: string; updated_at?: string } | undefined;
+  if (!row?.payload) return readStateSnapshot();
+  try {
+    const compact = JSON.parse(row.payload) as OpenPresenceState;
+    const requestedAgentId = context.agentId ?? compact.activeAgentId ?? undefined;
+    const workspaceRow = requestedAgentId
+      ? sqlite.prepare("SELECT payload FROM agent_workspaces WHERE agent_id = ?").get(requestedAgentId) as { payload?: string } | undefined
+      : undefined;
+    const workspace = workspaceRow?.payload ? JSON.parse(workspaceRow.payload) as Partial<OpenPresenceState> : undefined;
+    const scopedInput = workspace
+      ? { ...compact, ...workspace, agents: compact.agents, activeAgentId: workspace.agent?.id ?? requestedAgentId, agentWorkspaces: [workspace] }
+      : { ...compact, agentWorkspaces: [] };
+    const scoped = hydrateMirrorEvents(normalizeState(scopedInput as OpenPresenceState));
+    return stateForContext(hydrateOperationalState(hydrateBridgeHealth(scoped)), context.presenceId ? { presenceId: context.presenceId } : {});
+  } catch (error) {
+    throw new Error(`OpenPresence database ${resolvedDbPath} contains an unreadable scoped workspace snapshot. ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/**
+ * Read-only hot-path view for health and browser GETs. The returned object is
+ * backed by the in-process snapshot cache and must not be mutated. Mutating
+ * callers should continue using readStateSnapshotForContext/readStateForContext.
+ */
+export function readStateViewForContext(context: StateContext): OpenPresenceState {
+  const snapshot = readStateSnapshot();
+  const hotToken = readStateReadToken();
+  const hydratedHotState = hotStateCache?.snapshot === snapshot && hotStateCache.token === hotToken
+    ? hotStateCache.state
+    : hydrateOperationalState(hydrateBridgeHealth(snapshot));
+  if (hotStateCache?.snapshot !== snapshot || hotStateCache.token !== hotToken) {
+    hotStateCache = { token: hotToken, snapshot, state: hydratedHotState };
+  }
+  const requestedAgentId = context.agentId ?? snapshot.activeAgentId ?? undefined;
+  const targetPresenceId = context.presenceId ?? snapshot.activePresenceId ?? undefined;
+  // Preflight is a read projection of connector and authority state. Refresh
+  // only the Presence visible to this browser request; doing this for every
+  // Assignment during global normalization can multiply a large restored
+  // workspace and exhaust the Node heap.
+  const refreshVisibleAssignmentPreflights = (source: OpenPresenceState) => {
+    const assignments = source.assignments.map((assignment) => {
+      if (targetPresenceId && assignment.presenceId !== targetPresenceId) return assignment;
+      // Completed/cancelled history is immutable from the Activity reader's
+      // point of view. Re-running capability readiness for hundreds of old
+      // Assignments on every heartbeat was the dominant allocation source in
+      // the hot read path. Active/due work still gets a fresh preflight.
+      if (["completed", "cancelled"].includes(assignment.status)) return assignment;
+      const reviewedRevision = assignment.preflight?.reviewedRevision;
+      if (reviewedRevision !== undefined && reviewedRevision === (assignment.revision ?? 0)) return assignment;
+      return {
+        ...assignment,
+        preflight: preflightAssignment(source, assignment, assignment.executionPolicy.delegationPolicy),
+      };
+    });
+    return assignments.some((assignment, index) => assignment !== source.assignments[index])
+      ? { ...source, assignments }
+      : source;
+  };
+  // The common browser path addresses the active Agent. `stateForContext`
+  // defensively deep-clones and normalizes the entire workspace, which is
+  // appropriate for mutations but catastrophic for a polling GET over a
+  // 20 MB compatibility snapshot. Read-only Activity/health consumers can
+  // share the cached immutable snapshot and only replace the active Presence
+  // pointers when a Presence was explicitly requested.
+  if (!context.agentId || context.agentId === snapshot.activeAgentId) {
+    if (!context.presenceId || snapshot.presences.some((presence) => presence.id === context.presenceId)) {
+      if (!context.presenceId || snapshot.activePresenceId === context.presenceId) return refreshVisibleAssignmentPreflights(hydratedHotState);
+      return refreshVisibleAssignmentPreflights({
+        ...hydratedHotState,
+        activePresenceId: context.presenceId,
+        presence: hydratedHotState.presences.find((presence) => presence.id === context.presenceId) ?? hydratedHotState.presence,
+      });
+    }
+  }
+  const workspace = requestedAgentId && requestedAgentId !== snapshot.activeAgentId
+    ? snapshot.agentWorkspaces.find((item) => item.agent?.id === requestedAgentId)
+    : undefined;
+  let scoped = workspace
+    ? { ...snapshot, ...workspace, agents: snapshot.agents, activeAgentId: workspace.agent?.id ?? requestedAgentId ?? null, agentWorkspaces: snapshot.agentWorkspaces }
+    : snapshot;
+  if (context.presenceId && scoped.presences.some((presence) => presence.id === context.presenceId) && scoped.activePresenceId !== context.presenceId) {
+    scoped = { ...scoped, activePresenceId: context.presenceId, presence: scoped.presences.find((presence) => presence.id === context.presenceId) ?? null };
+  }
+  return refreshVisibleAssignmentPreflights({
+    ...hydratedHotState,
+    ...scoped,
+  });
+}
+
+/**
+ * Minimal read model for liveness/health decisions. Health checks must never
+ * parse the 20 MB compatibility workspace (and then clone/normalize it) just
+ * to answer whether a Presence, X connection, or queued bridge execution is
+ * usable. Keep this projection on the indexed domain rows and the small
+ * assignments slice instead.
+ */
+export function readRuntimeHealthProjection(presenceId?: string) {
+  // The compatibility snapshot remains authoritative, but it is already
+  // parsed and cached by readStateSnapshot(). Calling SQLite json_extract on
+  // the full app_state payload here made every health poll scan ~43 MB and
+  // caused the Node process to spend most of its time in JSON1 parsing/GC.
+  // Use the cached canonical arrays; the cache invalidates on canonical writes
+  // and the indexed tables continue to supply high-frequency health records.
+  const snapshot = readStateSnapshot();
+  const presences = (presenceId
+    ? snapshot.presences.filter((presence) => presence.id === presenceId)
+    : snapshot.presences);
+  const nativeConnections = snapshot.nativeConnections.filter((item) => !presenceId || item.presenceId === presenceId);
+  const executions = snapshot.executions.filter((item) => !presenceId || item.presenceId === presenceId);
+  const assignments = snapshot.assignments.filter((item) => !presenceId || item.presenceId === presenceId);
+  return { presences, nativeConnections, executions, assignments };
+}
+
+/** Cheap, read-only projection used by the Technical Audit ledger. */
+export function readRuntimeAuditProjection(presenceId?: string) {
+  const parseRows = <T>(rows: Array<{ payload?: string }>) => rows.flatMap((row) => {
+    if (!row.payload) return [];
+    try { return [JSON.parse(row.payload) as T]; } catch { return []; }
+  });
+  const parseJsonEach = <T>(path: string) => {
+    const rows = sqlite.prepare("SELECT value FROM json_each((SELECT payload FROM app_state WHERE id = 1), ?)").all(path) as Array<{ value?: string }>;
+    return rows.flatMap((row) => {
+      if (!row.value) return [];
+      try { return [JSON.parse(row.value) as T]; } catch { return []; }
+    });
+  };
+  const filterPresence = <T extends { presenceId?: string }>(items: T[]) => items.filter((item) => !presenceId || item.presenceId === presenceId);
+  const readNormalizedOrCompatibility = <T extends { presenceId?: string }>(table: string, jsonPath: string, whereSql?: string, whereArgs: string[] = []) => {
+    // The compatibility snapshot is authoritative. Normalized tables may be
+    // briefly behind because their rebuild is debounced; an audit view must
+    // never make a durable execution or outcome disappear during that gap.
+    const canonicalType = sqlite.prepare("SELECT json_type(payload, ?) AS type FROM app_state WHERE id = 1").get(jsonPath) as { type?: string | null } | undefined;
+    if (canonicalType?.type === "array") return filterPresence(parseJsonEach<T>(jsonPath));
+    const rows = sqlite.prepare(whereSql ? `SELECT payload FROM ${table} WHERE ${whereSql}` : `SELECT payload FROM ${table}`).all(...whereArgs) as Array<{ payload?: string }>;
+    const normalized = filterPresence(parseRows<T>(rows));
+    // Normalized writes are intentionally debounced so a high-frequency
+    // state mutation cannot rebuild every audit table inline. During that
+    // short projection window, fall back to the authoritative compatibility
+    // snapshot instead of making a just-created decision/execution invisible
+    // to the forensic ledger.
+    return normalized;
+  };
+  return {
+    mirrorObjects: filterPresence(parseRows<OpenPresenceState["mirrorObjects"][number]>(sqlite.prepare("SELECT payload FROM mirror_objects").all() as Array<{ payload?: string }>)),
+    socialDecisions: filterPresence(parseJsonEach<OpenPresenceState["socialDecisions"][number]>("$.socialDecisions")),
+    executions: readNormalizedOrCompatibility<OpenPresenceState["executions"][number]>("executions", "$.executions", presenceId ? "json_extract(payload, '$.presenceId') = ?" : undefined, presenceId ? [presenceId] : []),
+    outcomes: readNormalizedOrCompatibility<OpenPresenceState["outcomes"][number]>("outcomes", "$.outcomes"),
+    resourceUsageEvents: filterPresence(parseJsonEach<OpenPresenceState["resourceUsageEvents"][number]>("$.resourceUsageEvents")),
+    attentionEpisodes: filterPresence(parseJsonEach<NonNullable<OpenPresenceState["attentionEpisodes"]>[number]>("$.attentionEpisodes")),
+    modelProfiles: parseRows<OpenPresenceState["modelProfiles"][number]>(sqlite.prepare("SELECT payload FROM agent_model_profiles").all() as Array<{ payload?: string }>),
+  };
 }
 
 export function readStateForAgent(agentId?: string | null): OpenPresenceState {
@@ -433,6 +788,7 @@ function entityRows(state: OpenPresenceState): Record<string, { id: string; agen
     scenario_run_provenance: state.scenarioRunProvenance.map((item) => ({ id: item.id, agentId: item.agentId, parentId: item.scenarioId, payload: item })),
     scenario_evaluations: state.scenarioEvaluations.map((item) => ({ id: item.id, parentId: item.runId, payload: item })),
     operational_runs: (state.operationalRuns ?? []).map((item) => ({ id: item.id, agentId, parentId: item.presenceId, payload: item })),
+    attention_episodes: (state.attentionEpisodes ?? []).map((item) => ({ id: item.id, agentId, parentId: item.presenceId, payload: item })),
     scheduled_wakes: (state.scheduledWakes ?? []).map((item) => ({ id: item.id, agentId, parentId: item.presenceId, payload: item })),
     dependency_health: (state.dependencyHealth ?? []).map((item) => ({ id: item.id, agentId, parentId: item.presenceId, payload: item })),
     recovery_incidents: (state.recoveryIncidents ?? []).map((item) => ({ id: item.id, agentId, parentId: item.presenceId, payload: item })),
@@ -463,6 +819,14 @@ function writeNormalized(state: OpenPresenceState) {
   const timestamp = new Date().toISOString();
   const transaction = sqlite.transaction(() => {
     for (const table of normalizedTables) {
+      if (table === "mirror_events") {
+        // `mirror_events` is append-only history. The compatibility workspace
+        // intentionally hydrates only a recent cognition window, so a
+        // normalized projection refresh must never delete older rows.
+        const insertMirrorEvent = sqlite.prepare("INSERT OR REPLACE INTO mirror_events (id, agent_id, parent_id, payload, updated_at) VALUES (?, ?, ?, ?, ?)");
+        for (const row of rowsByTable.get(table)?.values() ?? []) insertMirrorEvent.run(row.id, row.agentId ?? null, row.parentId ?? null, JSON.stringify(row.payload), timestamp);
+        continue;
+      }
       sqlite.prepare(`DELETE FROM ${table}`).run();
       const insert = sqlite.prepare(`INSERT INTO ${table} (id, agent_id, parent_id, payload, updated_at) VALUES (?, ?, ?, ?, ?)`);
       for (const row of rowsByTable.get(table)?.values() ?? []) insert.run(row.id, row.agentId ?? null, row.parentId ?? null, JSON.stringify(row.payload), timestamp);
@@ -471,13 +835,67 @@ function writeNormalized(state: OpenPresenceState) {
   transaction();
 }
 
+/**
+ * Bridge credentials and connector routes use the indexed bridge table for a
+ * cheap lookup. Keep only that small projection current on canonical writes;
+ * the rest of the normalized model remains an opt-in derived projection.
+ */
+function writeActiveBridgeProjection(state: OpenPresenceState, timestamp: string) {
+  const presenceIds = state.presences.map((presence) => presence.id);
+  if (presenceIds.length > 0) {
+    sqlite.prepare(`DELETE FROM bridges WHERE parent_id IN (${presenceIds.map(() => "?").join(",")})`).run(...presenceIds);
+  }
+  const insert = sqlite.prepare("INSERT OR REPLACE INTO bridges (id, agent_id, parent_id, payload, updated_at) VALUES (?, ?, ?, ?, ?)");
+  for (const bridge of state.bridges) {
+    insert.run(bridge.id, state.agent?.id ?? null, bridge.presenceId ?? null, JSON.stringify(bridge), timestamp);
+  }
+}
+
+// The JSON compatibility snapshot is the authoritative write model. The
+// normalized tables are a derived projection used by indexed readers and
+// migrations; rebuilding every table after every UI heartbeat made a harmless
+// state change hold SQLite's writer lock and the Node event loop for seconds.
+// Projection sync is therefore opt-in for maintenance/migration callers.
+let normalizedSyncPending: OpenPresenceState | undefined;
+let normalizedSyncTimer: ReturnType<typeof setTimeout> | undefined;
+let normalizedSyncInFlight = false;
+
+function flushNormalizedSync() {
+  normalizedSyncTimer = undefined;
+  const pending = normalizedSyncPending;
+  normalizedSyncPending = undefined;
+  if (!pending) return;
+  normalizedSyncInFlight = true;
+  try {
+    writeNormalized(pending);
+  } catch (error) {
+    // Projection lag is recoverable; the canonical app_state write already
+    // succeeded and the next state mutation will retry the projection.
+    console.warn("OpenPresence normalized projection deferred", error instanceof Error ? error.message : String(error));
+  } finally {
+    normalizedSyncInFlight = false;
+    if (normalizedSyncPending && !normalizedSyncTimer) {
+      normalizedSyncTimer = setTimeout(flushNormalizedSync, 250);
+      if (typeof normalizedSyncTimer.unref === "function") normalizedSyncTimer.unref();
+    }
+  }
+}
+
+function scheduleNormalizedSync(state: OpenPresenceState) {
+  normalizedSyncPending = state;
+  if (normalizedSyncTimer || normalizedSyncInFlight) return;
+  normalizedSyncTimer = setTimeout(flushNormalizedSync, 250);
+  if (typeof normalizedSyncTimer.unref === "function") normalizedSyncTimer.unref();
+}
+
 export function writeState(state: OpenPresenceState, options?: { advanceWorkspaceRevision?: boolean; syncNormalized?: boolean; persistAgentWorkspaces?: boolean; force?: boolean }) {
   const normalized = normalizeState(state);
   const agentId = normalized.agent?.id;
   const advanceWorkspaceRevision = options?.advanceWorkspaceRevision !== false;
-  const syncNormalized = options?.syncNormalized !== false;
+  const syncNormalized = options?.syncNormalized === true;
   const expectedRevision = typeof state.workspaceRevision === "number" ? state.workspaceRevision : undefined;
   const persistedAt = new Date().toISOString();
+  let compatibilityPayload = "";
   sqlite.transaction(() => {
     let actualRevision = 0;
     if (agentId) {
@@ -486,7 +904,15 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
       if (expectedRevision !== undefined && expectedRevision !== actualRevision && !options?.force) throw new WorkspaceConflictError(agentId, expectedRevision, actualRevision);
       normalized.workspaceRevision = advanceWorkspaceRevision ? actualRevision + 1 : actualRevision;
     }
-    sqlite.prepare("INSERT INTO app_state (id, payload, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at").run(JSON.stringify(normalized), persistedAt);
+    // `agent_workspaces` is the durable directory for non-active Agents. Do
+    // not duplicate all of those snapshots inside the compatibility row:
+    // Activity and health reads would otherwise parse tens of megabytes just
+    // to render one Presence.
+    const compatibilityState = { ...normalized } as Partial<OpenPresenceState>;
+    delete compatibilityState.agentWorkspaces;
+    delete compatibilityState.mirrorEvents;
+    compatibilityPayload = JSON.stringify(compatibilityState);
+    sqlite.prepare("INSERT INTO app_state (id, payload, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at").run(compatibilityPayload, persistedAt);
     if (!agentId) {
       sqlite.prepare("DELETE FROM agent_workspaces").run();
       sqlite.prepare("DELETE FROM agent_workspace_revisions").run();
@@ -513,12 +939,13 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
         sqlite.prepare("DELETE FROM agent_workspace_revisions WHERE agent_id = ?").run(row.agent_id);
       }
     }
+    writeActiveBridgeProjection(normalized, persistedAt);
   })();
   stateCache = undefined;
   // Keep direct in-process callers aligned with the durable token as well;
   // API callers still receive the same token in the JSON response/header.
   state.workspaceRevision = normalized.workspaceRevision;
-  if (syncNormalized) writeNormalized(normalized);
+  if (syncNormalized) scheduleNormalizedSync(normalized);
 }
 
 function hashBridgeKey(key: string) { return crypto.createHash("sha256").update(key).digest("hex"); }
@@ -653,15 +1080,42 @@ export function claimOperationalRunLease(runId: string, leaseOwner: string, dura
   const nowIso = now.toISOString();
   const expiresAt = new Date(now.getTime() + durationMs).toISOString();
   return sqlite.transaction(() => {
-    const row = sqlite.prepare("SELECT payload FROM operational_runs_idx WHERE id = ? AND (lease_owner IS NULL OR lease_owner = ? OR lease_expires_at < ?)").get(runId, leaseOwner, nowIso) as { payload?: string } | undefined;
+    const row = sqlite.prepare("SELECT payload FROM operational_runs_idx WHERE id = ? AND (lease_owner IS NULL OR lease_expires_at < ?)").get(runId, nowIso) as { payload?: string } | undefined;
     if (!row?.payload) return false;
     const run = JSON.parse(row.payload) as OperationalRun;
     run.leaseOwner = leaseOwner;
     run.leaseExpiresAt = expiresAt;
     run.lastHeartbeatAt = nowIso;
-    sqlite.prepare(`UPDATE operational_runs_idx SET lease_owner = ?, lease_expires_at = ?, last_heartbeat_at = ?, payload = ?, updated_at = ? WHERE id = ? AND (lease_owner IS NULL OR lease_owner = ? OR lease_expires_at < ?)`)
-      .run(leaseOwner, expiresAt, nowIso, JSON.stringify(run), nowIso, runId, leaseOwner, nowIso);
-    return true;
+    const result = sqlite.prepare(`UPDATE operational_runs_idx SET lease_owner = ?, lease_expires_at = ?, last_heartbeat_at = ?, payload = ?, updated_at = ? WHERE id = ? AND (lease_owner IS NULL OR lease_expires_at < ?)`)
+      .run(leaseOwner, expiresAt, nowIso, JSON.stringify(run), nowIso, runId, nowIso);
+    return result.changes === 1;
+  })();
+}
+
+/**
+ * Renew a claimed run without pretending that a long network/model call made
+ * logical progress. The scheduler uses lastProgressAt for stale detection;
+ * this heartbeat only keeps the lease alive while the worker is still
+ * executing. That separation prevents both duplicate workers and false
+ * "stalled" recoveries.
+ */
+export function heartbeatOperationalRunLease(runId: string, leaseOwner: string, durationMs = 120000): boolean {
+  const now = new Date();
+  const nowIso = now.toISOString();
+  const expiresAt = new Date(now.getTime() + durationMs).toISOString();
+  return sqlite.transaction(() => {
+    const row = sqlite.prepare("SELECT payload FROM operational_runs_idx WHERE id = ? AND lease_owner = ?").get(runId, leaseOwner) as { payload?: string } | undefined;
+    if (!row?.payload) return false;
+    let run: OperationalRun;
+    try { run = JSON.parse(row.payload) as OperationalRun; } catch { return false; }
+    run.lastHeartbeatAt = nowIso;
+    run.leaseExpiresAt = expiresAt;
+    const result = sqlite.prepare(`
+      UPDATE operational_runs_idx
+      SET lease_expires_at = ?, last_heartbeat_at = ?, payload = ?, updated_at = ?
+      WHERE id = ? AND lease_owner = ?
+    `).run(expiresAt, nowIso, JSON.stringify(run), nowIso, runId, leaseOwner);
+    return result.changes === 1;
   })();
 }
 
@@ -680,12 +1134,16 @@ export function releaseOperationalRunLease(runId: string, leaseOwner: string): b
 }
 
 export function reclaimExpiredLeases(nowIso = new Date().toISOString()): number {
-  const result = sqlite.prepare(`
-    UPDATE operational_runs_idx
-    SET lease_owner = NULL, lease_expires_at = NULL, updated_at = ?
-    WHERE lease_owner IS NOT NULL AND lease_expires_at < ?
-  `).run(nowIso, nowIso);
-  return result.changes;
+  const expired = sqlite.prepare("SELECT id, payload FROM operational_runs_idx WHERE lease_owner IS NOT NULL AND lease_expires_at < ?").all(nowIso) as Array<{ id: string; payload: string }>;
+  if (!expired.length) return 0;
+  const update = sqlite.prepare("UPDATE operational_runs_idx SET lease_owner = NULL, lease_expires_at = NULL, payload = ?, updated_at = ? WHERE id = ? AND lease_expires_at < ?");
+  return sqlite.transaction(() => expired.reduce((count, row) => {
+    let payload: OperationalRun;
+    try { payload = JSON.parse(row.payload) as OperationalRun; } catch { return count; }
+    delete payload.leaseOwner;
+    delete payload.leaseExpiresAt;
+    return count + update.run(JSON.stringify(payload), nowIso, row.id, nowIso).changes;
+  }, 0))();
 }
 
 export function upsertScheduledWake(wake: ScheduledWake): void {
@@ -713,6 +1171,75 @@ export function upsertScheduledWake(wake: ScheduledWake): void {
     timestamp,
     wake.createdAt,
   );
+}
+
+const attentionScopeRank: Record<AttentionScope, number> = {
+  observe_inbound: 0,
+  recovery: 1,
+  assignment: 2,
+  broad: 3,
+};
+
+/**
+ * Atomically merge one attention signal into the single pending wake for a
+ * Presence. A dispatched row may be reused as the one follow-up wake while an
+ * Attention run is already past its coalescing stages.
+ */
+export function mergeAttentionWake(input: {
+  presenceId: string;
+  trigger: AttentionTrigger;
+  scope: AttentionScope;
+  requestedAt: string;
+  signalId: string;
+}): ScheduledWake {
+  const id = `wake_attention_${input.presenceId}`;
+  return sqlite.transaction(() => {
+    const existing = sqlite.prepare("SELECT wake_at, state, payload, updated_at, created_at FROM scheduled_wakes_idx WHERE id = ?").get(id) as {
+      wake_at: string;
+      state: ScheduledWake["state"];
+      payload?: string | null;
+      updated_at: string;
+      created_at?: string | null;
+    } | undefined;
+    // A dispatched row is only an identity slot for the next follow-up. Its
+    // delivered triggers belong to the prior run and must not leak into the
+    // next episode.
+    const payload = existing?.state === "pending" && existing.payload ? JSON.parse(existing.payload) as { triggers?: AttentionTrigger[]; scope?: AttentionScope; signalIds?: string[] } : {};
+    const priorScope = payload.scope ?? "observe_inbound";
+    const scope = attentionScopeRank[input.scope] > attentionScopeRank[priorScope] ? input.scope : priorScope;
+    const wakeAt = existing?.state === "pending" && existing.wake_at < input.requestedAt ? existing.wake_at : input.requestedAt;
+    const nowIso = new Date().toISOString();
+    const nextPayload = {
+      triggers: [...new Set([...(payload.triggers ?? []), input.trigger])],
+      scope,
+      signalIds: [...new Set([...(payload.signalIds ?? []), input.signalId])].slice(-100),
+    };
+    const wake: ScheduledWake = {
+      id,
+      presenceId: input.presenceId,
+      wakeAt,
+      kind: "attention",
+      targetId: input.presenceId,
+      payload: nextPayload,
+      state: "pending",
+      createdAt: existing?.state === "pending" ? existing.created_at ?? nowIso : nowIso,
+      updatedAt: nowIso,
+    };
+    sqlite.prepare(`
+      INSERT INTO scheduled_wakes_idx (id, presence_id, wake_at, kind, target_id, state, payload, updated_at, created_at)
+      VALUES (?, ?, ?, 'attention', ?, 'pending', ?, ?, ?)
+      ON CONFLICT(id) DO UPDATE SET
+        presence_id = excluded.presence_id,
+        wake_at = excluded.wake_at,
+        kind = excluded.kind,
+        target_id = excluded.target_id,
+        state = excluded.state,
+        payload = excluded.payload,
+        updated_at = excluded.updated_at,
+        created_at = COALESCE(scheduled_wakes_idx.created_at, excluded.created_at)
+    `).run(id, input.presenceId, wakeAt, input.presenceId, JSON.stringify(nextPayload), nowIso, wake.createdAt);
+    return wake;
+  })();
 }
 
 export function getDueScheduledWakes(nowIso = new Date().toISOString()): ScheduledWake[] {

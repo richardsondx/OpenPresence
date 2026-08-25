@@ -1,11 +1,49 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { claimExecutions, createBridgeWithKey, failExecution, ingestEvents, reportBridgeIdentity } from "../lib/bridge";
+import { claimExecutions, closeChromeVerification, createBridgeWithKey, failExecution, ingestEvents, recordVerifiedBridgeReaction, reportBridgeIdentity } from "../lib/bridge";
 import { applyOperation, createAgent, formXReplyIntent } from "../lib/runtime";
-import { readState, writeState } from "../lib/db";
+import { readState, WorkspaceConflictError, writeState } from "../lib/db";
+import type { Execution } from "../lib/types";
 
 afterEach(() => vi.unstubAllEnvs());
 
 describe("Bridge browser retry lifecycle", () => {
+  it("settles a verified Assignment quote and mirror object", () => {
+    let state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    state.presence!.environment = "live";
+    state.presence!.connectionMode = "bridge";
+    state.presences = state.presences.map((presence) => presence.id === state.presence!.id ? { ...presence, environment: "live", connectionMode: "bridge" } : presence);
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["quote"], formats: ["x.quote"], metrics: [] } } });
+    state = applyOperation(bridgeResult.state, { type: "createAssignment", presenceId: state.presence!.id, environment: "live", instruction: "Quote one worthwhile public post with a distinct contribution.", objective: "education" });
+    const assignment = state.assignments[0]!;
+    state = applyOperation(state, { type: "activateAssignment", id: assignment.id });
+    const executionId = "execution-assignment-quote";
+    const target = { type: "x.post", id: "target-quote" } as const;
+    state.mirrorObjects.unshift({ id: "mirror-quote", bridgeId: bridgeResult.bridge!.id, presenceId: state.presence!.id, channelId: "x", externalRef: { type: "x.post", id: "published-quote" }, parentExternalRef: target, objectType: "reply", author: { displayName: "Genny", handle: "example_agent" }, content: { text: "A distinct contribution." }, visibility: "public", shareability: "presence-only", occurredAt: new Date().toISOString(), observedAt: new Date().toISOString(), environment: "live", source: "native" });
+    state.executions.unshift({ id: executionId, socialIntentId: "intent-assignment-quote", presenceId: state.presence!.id, affordance: "x.quote", mode: "auto", status: "verification-pending", attempts: 1, connector: "bridge", bridgeId: bridgeResult.bridge!.id, target, assignmentId: assignment.id, publication: { id: "publication-assignment-quote", format: "x.quote", payload: { text: "A distinct contribution." }, assetIds: [], links: [], createdAt: new Date().toISOString(), environment: "live" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString(), environment: "live" } as unknown as Execution);
+    const verified = recordVerifiedBridgeReaction(state, executionId, { type: "x.post", id: "published-quote" });
+    const settled = verified.assignments.find((item) => item.id === assignment.id)!;
+    const mirror = verified.mirrorObjects.find((item) => item.id === "mirror-quote")!;
+    expect(verified.executions.find((item) => item.id === executionId)?.status).toBe("succeeded");
+    expect(settled.status).toBe("completed");
+    expect(settled.progress.verified).toBe(1);
+    expect(mirror.objectType).toBe("quote");
+    expect(mirror.originExecutionId).toBe(executionId);
+  });
+
+  it("preserves a newer verified browser identity across a stale workspace write", () => {
+    const state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["quote"], formats: ["x.quote"], metrics: [] } } });
+    const staleWorkspace = readState();
+    const bridge = staleWorkspace.bridges.find((item) => item.id === bridgeResult.bridge?.id)!;
+
+    reportBridgeIdentity(bridge, { executorId: "chrome-test", username: "example_agent" });
+    const staleBridge = staleWorkspace.bridges.find((item) => item.id === bridge.id)!;
+    staleBridge.accountIdentity = undefined;
+    expect(() => writeState(staleWorkspace)).toThrow(WorkspaceConflictError);
+
+    expect(readState().bridges.find((item) => item.id === bridge.id)?.accountIdentity).toMatchObject({ status: "verified", username: "example_agent" });
+  });
+
   it("waits for a fresh verified account before claiming live Chrome work", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("OPENPRESENCE_TEST_MODE", "0");
@@ -167,7 +205,7 @@ describe("Bridge browser retry lifecycle", () => {
     expect(retriedExecution.publication?.publicExpression?.safetyStatus).toBe("sealed");
   });
 
-  it("strictly serializes executions and holds queued actions while an execution is in verification", () => {
+  it("serializes active browser work without letting passive verification block the queue", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("OPENPRESENCE_TEST_MODE", "0");
     vi.stubEnv("OPENPRESENCE_AI_MOCK", "0");
@@ -205,19 +243,52 @@ describe("Bridge browser retry lifecycle", () => {
     exec1.status = "verification-pending";
     writeState(state);
 
-    // While execution 1 is verification-pending, second claim attempt STILL returns empty
+    // Verification is now a passive, durable reconciliation state. It has
+    // released the browser lease, so unrelated queued work can proceed while
+    // execution 1 remains excluded from the claim candidates.
     const thirdClaimWhilePending = claimExecutions(bridge, { executorId: "chrome-test", limit: 1 });
-    expect(thirdClaimWhilePending.executions).toHaveLength(0);
+    expect(thirdClaimWhilePending.executions).toHaveLength(1);
+    expect(thirdClaimWhilePending.executions[0]?.publication?.publicExpression?.text).toBe("Second reply queued.");
+    expect(thirdClaimWhilePending.executions[0]?.id).not.toBe(firstClaim.executions[0]?.id);
 
-    // Simulate execution 1 succeeding
+    // The original execution can still reconcile independently afterward.
     state = readState();
     const exec1Success = state.executions.find((item) => item.id === firstClaim.executions[0]!.id)!;
     exec1Success.status = "succeeded";
     writeState(state);
 
-    // Now execution 2 is claimed cleanly
+    // Execution 2 is already leased, so no duplicate is returned.
     const finalClaim = claimExecutions(bridge, { executorId: "chrome-test", limit: 1 });
-    expect(finalClaim.executions).toHaveLength(1);
-    expect(finalClaim.executions[0]?.publication?.publicExpression?.text).toBe("Second reply queued.");
+    expect(finalClaim.executions).toHaveLength(0);
+  });
+
+  it("closes an unverified browser submission without counting delivery", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("OPENPRESENCE_TEST_MODE", "0");
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "0");
+
+    let state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    state.presence!.environment = "live";
+    state.presence!.connectionMode = "bridge";
+    state.presences = state.presences.map((presence) => presence.id === state.presence!.id ? { ...presence, environment: "live", connectionMode: "bridge" } : presence);
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });
+    state = applyOperation(bridgeResult.state, { type: "setPresence", patch: { execution: { reply: "auto" } } });
+    state = formXReplyIntent(state, "A submission with no authoritative proof.", "target-post-close");
+    writeState(state);
+    let bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge?.id)!;
+    reportBridgeIdentity(bridge, { executorId: "chrome-test", username: "example_agent" });
+    ingestEvents(readState().bridges.find((item) => item.id === bridge.id)!, { events: [{ sourceEventId: "close-target", event: "created", object: { externalRef: { type: "x.post", id: "target-post-close" }, objectType: "post", language: "en", author: { displayName: "Target" }, content: { text: "Target" }, visibility: "public", shareability: "presence-only" } }] });
+    bridge = readState().bridges.find((item) => item.id === bridge.id)!;
+    const claimed = claimExecutions(bridge, { executorId: "chrome-test", limit: 1 });
+    const executionId = claimed.executions[0]!.id;
+    const pending = readState();
+    pending.executions.find((item) => item.id === executionId)!.status = "verification-pending";
+    writeState(pending);
+
+    const closed = closeChromeVerification(readState().bridges.find((item) => item.id === bridge.id)!, executionId, { executorId: "chrome-test", note: "No matching public object after bounded verification." });
+    expect(closed.execution.status).toBe("verification-closed");
+    expect(closed.execution.externalRef).toBeUndefined();
+    expect(closed.execution.failure?.reviewDisposition).toBe("operator_action_required");
+    expect(closed.execution.failure?.reviewNote).toContain("No matching public object");
   });
 });

@@ -1,9 +1,10 @@
 import crypto from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readChannelSecret, readProviderSecret, readState, shouldRecordNativeOperationalFailure, writeState } from "../lib/db";
-import { findVerifiedXReply, matchesXReply, normalizeXText, readRecentXPosts, readXPostsByIds } from "../lib/x";
+import { findVerifiedXQuote, findVerifiedXReply, matchesXQuote, matchesXReply, mergeXCredentials, normalizeXText, readRecentXPosts, readXPostsByIds } from "../lib/x";
 import { applyOperation, createAgent, derivePublicHistory, recordNativeMirror, recordPublicFooting, settleCapabilityTrialNoOpportunity } from "../lib/runtime";
 import { hydrateNativeXThreadContext } from "../lib/native-x";
+import { xCreditsExhausted } from "../lib/x-credits";
 import { generateAgentReply } from "../lib/ai";
 import { POST } from "../app/api/x/manage/route";
 import { POST as statePost } from "../app/api/state/route";
@@ -21,6 +22,11 @@ beforeEach(() => {
 });
 
 describe("native X connection", () => {
+  it("preserves encrypted credentials when edit fields are left blank", () => {
+    expect(mergeXCredentials({ apiKey: "saved-key", apiSecret: "saved-secret", bearerToken: "saved-bearer" }, { apiKey: "" })).toEqual({ apiKey: "saved-key", apiSecret: "saved-secret", bearerToken: "saved-bearer" });
+    expect(mergeXCredentials({ apiKey: "saved-key", apiSecret: "saved-secret", bearerToken: "saved-bearer" }, { bearerToken: "replacement" })).toEqual({ apiKey: "saved-key", apiSecret: "saved-secret", bearerToken: "replacement" });
+  });
+
   it("does not classify workspace revision contention as a native X outage", () => {
     const conflict = new WorkspaceConflictError("agent-test", 4, 5);
     expect(shouldRecordNativeOperationalFailure(conflict)).toBe(false);
@@ -408,6 +414,21 @@ describe("native X connection", () => {
     vi.unstubAllGlobals();
   });
 
+  it("reconciles an exact observed own reply after its delivery acknowledgement was lost", () => {
+    const state = createAgent({ name: "Reconcile Reply", description: "Test", audience: "Builders", mode: "agent", handle: "@reconcile_reply", accent: "#777777" });
+    const presenceId = state.presence!.id;
+    const createdAt = "2026-08-25T20:12:52.000Z";
+    state.socialIntents.unshift({ id: "intent_lost_ack", agentId: state.agent!.id, presenceId, affordance: "x.reply", target: { type: "x.post", id: "parent-post" }, publicationId: "publication_lost_ack", priority: 60, validity: {}, state: "active", formedAt: createdAt, updatedAt: createdAt });
+    state.executions.unshift({ id: "execution_lost_ack", socialIntentId: "intent_lost_ack", presenceId, affordance: "x.reply", mode: "auto", status: "blocked", attempts: 0, connector: "native", target: { type: "x.post", id: "parent-post" }, idempotencyKey: "lost-ack", publication: { id: "publication_lost_ack", format: "x.reply", payload: { text: "A truthful exact reply." }, assetIds: [], links: [], createdAt, environment: "live" }, createdAt, updatedAt: createdAt, failure: { code: "MISSING_PERMIT", message: "Acknowledgement was lost.", retryable: false } });
+    state.actions.unshift({ id: "action_lost_ack", intent: "reply", target: "parent-post", summary: "A truthful exact reply.", status: "failed", reason: "Acknowledgement was lost.", createdAt, socialIntentId: "intent_lost_ack", executionId: "execution_lost_ack" });
+
+    const reconciled = recordNativeMirror(state, { connectionId: "native-reconcile", presenceId, own: true, post: { id: "public-reply", parentId: "parent-post", text: "@someone A truthful exact reply.", createdAt: "2026-08-25T20:16:16.000Z", authorUsername: "reconcile_reply" } });
+    expect(reconciled.executions[0]).toMatchObject({ id: "execution_lost_ack", status: "succeeded", externalRef: { type: "x.reply", id: "public-reply" } });
+    expect(reconciled.outcomes.some((outcome) => outcome.executionId === "execution_lost_ack" && outcome.evidence.some((evidence) => evidence.id === "public-reply"))).toBe(true);
+    expect(reconciled.actions[0]).toMatchObject({ status: "executed" });
+    expect(reconciled.mirrorObjects.find((object) => object.externalRef.id === "public-reply")?.originExecutionId).toBe("execution_lost_ack");
+  });
+
   it("evaluates a Calendar intention with the Agent before native X delivery", async () => {
     const presenceId = readState().presence?.id;
     const save = await POST(new Request("http://localhost/api/x/manage", { method: "POST", body: JSON.stringify({ action: "save", presenceId, credentials: { apiKey: "test_api", apiSecret: "test_secret", accessToken: "test_access", accessTokenSecret: "test_access_secret" } }), headers: { "content-type": "application/json" } }));
@@ -567,6 +588,43 @@ describe("native X connection", () => {
     vi.unstubAllGlobals();
   });
 
+  it("makes a manual credit check reach X even when the prior credit error paused the Presence", async () => {
+    const presenceId = readState().presence!.id;
+    const saved = await POST(new Request("http://localhost/api/x/manage", {
+      method: "POST",
+      body: JSON.stringify({ action: "save", presenceId, credentials: { apiKey: "test_api", apiSecret: "test_secret", accessToken: "test_access", accessTokenSecret: "test_access_secret" } }),
+      headers: { "content-type": "application/json" },
+    }));
+    const savedState = (await saved.json()).state;
+    const stale = {
+      ...savedState,
+      presence: { ...savedState.presence, status: "paused" },
+      presences: savedState.presences.map((item: { id: string }) => item.id === presenceId ? { ...item, status: "paused" } : item),
+      nativeConnections: savedState.nativeConnections.map((item: { presenceId: string; kind: string }) => item.presenceId === presenceId && item.kind === "x"
+        ? { ...item, deliveryError: "X has no API credits remaining for this app.", observation: { status: "error", error: "X has no API credits remaining for this app." } }
+        : item),
+    };
+    writeState(stale);
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    const fetchMock = vi.fn().mockResolvedValueOnce(new Response(JSON.stringify({ data: { id: "mock-x-user", username: "jenny_ai", name: "Jenny" } }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+
+    const response = await statePost(new Request("http://localhost/api/state", {
+      method: "POST",
+      body: JSON.stringify({ type: "syncNativeX", presenceId, manual: true }),
+      headers: { "content-type": "application/json" },
+    }));
+    const body = await response.json();
+    const connection = body.nativeConnections.find((item: { presenceId: string; kind: string }) => item.presenceId === presenceId && item.kind === "x");
+    expect(response.status).toBe(200);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    expect(connection.observation.status).toBe("stale");
+    expect(xCreditsExhausted(connection)).toBe(false);
+    expect(body.presence.status).toBe("live");
+    expect(body.events.some((event: { title: string }) => event.title === "X connection restored")).toBe(true);
+    vi.unstubAllGlobals();
+  });
+
   it("blocks live writing before a test runtime can contact X", async () => {
     const presenceId = readState().presence?.id;
     const save = await POST(new Request("http://localhost/api/x/manage", { method: "POST", body: JSON.stringify({ action: "save", presenceId, credentials: { apiKey: "test_api", apiSecret: "test_secret", accessToken: "test_access", accessTokenSecret: "test_access_secret" } }), headers: { "content-type": "application/json" } }));
@@ -621,6 +679,21 @@ describe("native X connection", () => {
     expect(matchesXReply(post, { targetId: "other-post", text: post.text, handle: "@example_agent" })).toBe(false);
     expect(matchesXReply(post, { targetId: "boardy-post-1", text: post.text, handle: "@another-account" })).toBe(false);
     expect(matchesXReply(post, { targetId: "boardy-post-1", text: "A different reply", handle: "@example_agent" })).toBe(false);
+  });
+
+  it("matches and finds a Chrome-submitted quote only by exact author, text, and quoted target", async () => {
+    const post = { id: "quote-1", text: "The missing constraint is accountability.", authorUsername: "example_agent", referencedPosts: [{ type: "quoted" as const, id: "target-1" }] };
+    expect(matchesXQuote(post, { targetId: "target-1", text: post.text, handle: "@example_agent" })).toBe(true);
+    expect(matchesXQuote(post, { targetId: "target-2", text: post.text, handle: "@example_agent" })).toBe(false);
+
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    vi.stubGlobal("fetch", vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: [{ id: "quote-from-search", text: post.text, author_id: "genny-id", referenced_tweets: [{ type: "quoted", id: "target-1" }] }],
+      includes: { users: [{ id: "genny-id", username: "example_agent", name: "Genny" }] },
+    }), { status: 200, headers: { "content-type": "application/json" } })));
+    const result = await findVerifiedXQuote({ apiKey: "api", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" }, { targetId: "target-1", text: post.text, handle: "@example_agent" });
+    expect(result?.id).toBe("quote-from-search");
+    vi.unstubAllGlobals();
   });
 
   it("can verify through recent search when the browser did not expose a candidate id", async () => {

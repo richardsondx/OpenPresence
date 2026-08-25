@@ -75,10 +75,11 @@ async function load() {
     return;
   }
   const connected = current?.state === "connected";
-  render(`${presence.name} ${presence.handle || ""}\n${connected ? "Connected to the controlled Chrome session." : "Ready to open a grouped, visible Chrome session."}`, "ready");
+  const identityRequired = current?.state === "identity_required";
+  render(`${presence.name} ${presence.handle || ""}\n${connected ? "Connected and account verified. Browser actions are available." : identityRequired ? `Connected, but account verification is required. X must be signed in as ${presence.handle || "the configured account"}.` : "Ready to connect. Click Open controlled Chrome to start the session."}`, identityRequired ? "error" : "ready");
   openButton.disabled = false;
-  stopButton.disabled = !connected;
-  openButton.textContent = connected ? "Focus controlled Chrome" : "Open controlled Chrome";
+  stopButton.disabled = !(connected || identityRequired);
+  openButton.textContent = connected || identityRequired ? "Focus controlled Chrome" : "Open controlled Chrome";
   openButton.onclick = async () => {
     openButton.disabled = true;
     render(`${connected ? "Focusing" : "Opening"} Chrome for ${presence.name}…`, "ready");

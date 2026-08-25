@@ -230,6 +230,8 @@ describe("Autonomous Resilience, System Log Projection & Dynamic Freshness", () 
     expect(run.state).toBe("queued");
     expect(run.stage).toBe("manual_check");
     expect(run.presenceId).toBe(presenceId);
+    expect(run.attemptCount).toBe(0);
+    expect(run.retryReason).toBeUndefined();
   });
 
   it("fails an abandoned Assignment run only after its grace period and preserves live workers", () => {
@@ -257,7 +259,7 @@ describe("Autonomous Resilience, System Log Projection & Dynamic Freshness", () 
       leaseExpiresAt: new Date(timestamp - 1).toISOString(),
       heartbeatAt: new Date(timestamp - assignmentWorkerStaleAfterMs - 1).toISOString(),
       currentStage: "researching" as const,
-      attempts: 0,
+      attempts: 3,
       maxAttempts: 4,
       rejectedCandidates: 0,
       createdAt: new Date(timestamp - assignmentWorkerStaleAfterMs - 10_000).toISOString(),
@@ -276,13 +278,13 @@ describe("Autonomous Resilience, System Log Projection & Dynamic Freshness", () 
 
   it("calculates self-directed attention presets with bounded, realistic budgets", () => {
     const balanced = defaultSelfDirectedAttentionPolicy("balanced");
-    expect(balanced.enabled).toBe(false);
+    expect(balanced.enabled).toBe(true);
     expect(balanced.intensity).toBe("balanced");
-    expect(balanced.budget?.maxChannelReadsPerDay).toBe(25);
+    expect(balanced.budget?.maxChannelReadsPerDay).toBe(60);
     expect(balanced.budget?.maxModelCallsPerDay).toBe(40);
 
     const curious = defaultSelfDirectedAttentionPolicy("curious");
-    expect(curious.budget?.maxChannelReadsPerDay).toBe(60);
-    expect(curious.budget?.maxModelCallsPerDay).toBe(100);
+    expect(curious.budget?.maxChannelReadsPerDay).toBe(150);
+    expect(curious.budget?.maxModelCallsPerDay).toBe(90);
   });
 });

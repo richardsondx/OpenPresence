@@ -19,8 +19,11 @@ test("Calendar Week mode visualizes Assignment timing without pretending to show
   await expect(page.getByRole("region", { name: "Weekly schedule" })).toBeVisible();
   await expect(page.getByText("When Jenny can notice and act")).toBeVisible();
   await expect(page.getByText("Tue", { exact: true }).last()).toBeVisible();
-  await expect(page.getByRole("button", { name: /Open Assignment Teach one useful idea.*Tuesday at 08:00/ })).toBeVisible();
-  await expect(page.getByText("shape when", { exact: false })).toBeVisible();
+  const assignmentCard = page.getByRole("button", { name: /Open Assignment Teach one useful idea.*Tuesday at 08:00/ });
+  await expect(assignmentCard).toBeVisible();
+  await expect(assignmentCard).not.toHaveClass(/processing/);
+  await expect(assignmentCard).toContainText("Not started");
+  await expect(page.locator(".week-calendar-toolbar").getByText("shape when", { exact: false })).toBeVisible();
   await page.getByRole("button", { name: "List", exact: true }).click();
-  await expect(page.getByRole("heading", { name: "Assignments" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: /What Jenny may work on/ })).toBeVisible();
 });

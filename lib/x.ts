@@ -13,6 +13,13 @@ export interface XCredentials {
   accessTokenSecret?: string;
 }
 
+export function mergeXCredentials(stored: XCredentials | undefined, submitted: Partial<XCredentials>): XCredentials {
+  return {
+    ...(stored ?? {}),
+    ...Object.fromEntries(Object.entries(submitted).filter(([, value]) => Boolean(value))),
+  } as XCredentials;
+}
+
 export interface XAccount { id: string; username: string; name: string; profileImageUrl?: string; followers?: number; following?: number; }
 interface XAccountResponse { id: string; username: string; name: string; profile_image_url?: string; public_metrics?: { followers_count?: number; following_count?: number; } }
 export interface XReferencedPost { type: "replied_to" | "quoted" | "retweeted"; id: string; }
@@ -29,6 +36,13 @@ export interface XRecentPost {
   conversationId?: string;
   parentId?: string;
   referencedPosts?: XReferencedPost[];
+  /**
+   * Target post cards rendered by the public X page. Some X surfaces expose
+   * quote-card lineage as `reply_to` in the API payload; retaining the public
+   * card IDs lets the verifier reconcile that provider inconsistency without
+   * counting an unrelated post.
+   */
+  publicTargetIds?: string[];
   media?: XMediaAttachment[];
 }
 
@@ -84,17 +98,22 @@ export async function readPublicXPostByUrl(value: string): Promise<XRecentPost> 
       .find((candidate) => /^(?:January|February|March|April|May|June|July|August|September|October|November|December)\s+\d{1,2},\s+\d{4}$/i.test(candidate));
     const createdAt = dateText ? new Date(`${dateText} UTC`).toISOString() : undefined;
     let media: XMediaAttachment[] | undefined;
+    let publicTargets: string[] | undefined;
     try {
       const pageResponse = await fetch(canonicalUrl, { headers: { Accept: "text/html", "User-Agent": "OpenPresence/1.0" }, signal: controller.signal });
       if (pageResponse.ok) {
         const page = await pageResponse.text();
-        const mediaUrls = [...new Set([...page.matchAll(/https:\/\/pbs\.twimg\.com\/(?:media|amplify_video_thumb|ext_tw_video_thumb)\/[^"'\\s<]+/gi)].map((match) => decodeHtml(match[0])))].slice(0, 4);
+        const publicTargetIds = [...new Set([...page.matchAll(/data-href=["']\/[^/"']+\/(?:status|statuses)\/(\d+)["']/gi)]
+          .map((match) => match[1])
+          .filter((id): id is string => Boolean(id) && id !== postId))];
+        const mediaUrls = [...new Set([...page.matchAll(/https:\/\/pbs\.twimg\.com\/(?:media|amplify_video_thumb|ext_tw_video_thumb)\/[^"'\s<]+/gi)].map((match) => decodeHtml(match[0])))].slice(0, 4);
         media = mediaUrls.map((url, index) => ({ mediaKey: `${postId}-public-${index}`, type: /(?:amplify_video_thumb|ext_tw_video_thumb)/i.test(url) ? "video" : /\.gif(?:[?:]|$)/i.test(url) ? "animated_gif" : "photo", url }));
+        if (publicTargetIds.length) publicTargets = publicTargetIds;
       }
     } catch {
       // The oEmbed payload remains valid text evidence when the public page is unavailable.
     }
-    return { id: postId, text, language, createdAt, authorUsername, authorName: payload.author_name, conversationId: postId, media: media?.length ? media : undefined };
+    return { id: postId, text, language, createdAt, authorUsername, authorName: payload.author_name, conversationId: postId, publicTargetIds: publicTargets?.length ? publicTargets : undefined, media: media?.length ? media : undefined };
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("X ")) throw error;
     throw new Error("X could not read that public post right now. Check the URL or try again.");
@@ -454,6 +473,12 @@ export function matchesXReply(post: XRecentPost, input: { targetId: string; text
     && normalizeXText(post.text) === normalizeXText(input.text);
 }
 
+export function matchesXQuote(post: XRecentPost, input: { targetId: string; text: string; handle: string }) {
+  return post.referencedPosts?.some((reference) => reference.type === "quoted" && reference.id === input.targetId) === true
+    && normalizeHandle(post.authorUsername ?? "") === normalizeHandle(input.handle)
+    && normalizeXText(post.text) === normalizeXText(input.text);
+}
+
 /**
  * Verify a browser-submitted reply using X's public API. The browser is only
  * the writer; the API response is the authoritative delivery evidence.
@@ -465,6 +490,34 @@ export async function findVerifiedXReply(credentials: XCredentials, input: { tar
   }
   const posts = await searchRecentXPosts(credentials, `conversation_id:${input.targetId} from:${normalizeHandle(input.handle)} -is:retweet`, 100);
   return posts.find((post) => matchesXReply(post, input));
+}
+
+/** Verify a browser-submitted quote by exact author, text, and quoted target. */
+export async function findVerifiedXQuote(credentials: XCredentials, input: { targetId: string; text: string; handle: string; candidateId?: string }) {
+  if (input.candidateId) {
+    const candidate = (await readXPostsByIds(credentials, [input.candidateId])).find((post) => matchesXQuote(post, input));
+    if (candidate) return candidate;
+
+    // The public X surface used by OpenPresence can render a quote card while
+    // its API payload labels the same target as `reply_to`. Treat that as a
+    // provider reconciliation case only when the public page independently
+    // shows the exact target card and the authored text/account still match.
+    // This is deliberately limited to the browser's candidate ID; it cannot
+    // turn an arbitrary search result into a quote.
+    try {
+      const publicCandidate = await readPublicXPostByUrl(`https://x.com/${normalizeHandle(input.handle)}/status/${input.candidateId}`);
+      if (normalizeHandle(publicCandidate.authorUsername ?? "") === normalizeHandle(input.handle)
+        && normalizeXText(publicCandidate.text) === normalizeXText(input.text)
+        && publicCandidate.publicTargetIds?.includes(input.targetId)) {
+        return { ...publicCandidate, referencedPosts: [{ type: "quoted", id: input.targetId }] };
+      }
+    } catch {
+      // Keep the API search path authoritative when the public page is not
+      // reachable or does not contain a target card.
+    }
+  }
+  const posts = await searchRecentXPosts(credentials, `from:${normalizeHandle(input.handle)} -is:retweet`, 100);
+  return posts.find((post) => matchesXQuote(post, input));
 }
 
 export async function readXPublicationMetrics(credentials: XCredentials, ids: string[]): Promise<XPublicationMetrics[]> {

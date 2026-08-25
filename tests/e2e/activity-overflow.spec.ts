@@ -7,7 +7,7 @@ test("Activity stays within the viewport at responsive widths", async ({ page, r
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny at a glance" })).toBeVisible();
   await page.getByRole("button", { name: "Activity", exact: true }).click();
   await expect(page.locator(".activity-page")).toBeVisible();
 

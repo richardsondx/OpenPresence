@@ -83,12 +83,55 @@ describe("Agent Knowledge", () => {
   it("keeps style guidance internal and reports provenance and conflicts", () => {
     let state = fixture().state;
     state = applyOperation(state, { type: "createKnowledgeDocument", name: "Genny Conversation Style Guide", content: "## Replies\n\nUse one sentence per line and stop after the useful move.", sourceType: "markdown" });
+    const styleDocument = state.knowledgeDocuments.find((document) => document.name === "Genny Conversation Style Guide")!;
     state = applyOperation(state, { type: "createKnowledgeDocument", name: "Claim A", content: "The limit is 10%." });
     state = applyOperation(state, { type: "createKnowledgeDocument", name: "Claim B", content: "The limit is 20%." });
     state = applyOperation(state, { type: "setKnowledgeAccess", presenceId: state.presence!.id, maximumUse: "internal" });
+    state = applyOperation(state, { type: "setMindFileKnowledgeBinding", fileKind: "TASTE", knowledgeDocumentId: styleDocument.id, enabled: true });
     const compiled = compileKnowledgeContext(state, { presenceId: state.presence!.id, query: "limit percentage", purpose: "social_planning" });
     expect(compiled.packet.styleEvidence).toEqual(expect.arrayContaining([expect.objectContaining({ documentName: "Genny Conversation Style Guide", effectiveUse: "internal" })]));
     expect(compiled.packet.unresolvedConflicts).toEqual(expect.arrayContaining([expect.stringContaining("conflicting numeric claims")]));
+  });
+
+  it("injects only explicitly bound Knowledge into the selected meaning file", () => {
+    const fixtureData = fixture();
+    let state = applyOperation(fixtureData.state, { type: "createKnowledgeDocument", name: "WRITTING_STYLE.md", content: "Replies should stay compact and never use em dashes.", sourceType: "markdown" });
+    const document = state.knowledgeDocuments[0]!;
+    state = applyOperation(state, { type: "setKnowledgeAccess", presenceId: fixtureData.presenceId, maximumUse: "internal" });
+    state = applyOperation(state, { type: "setMindFileKnowledgeBinding", fileKind: "TASTE", knowledgeDocumentId: document.id, enabled: true });
+    const compiled = compileKnowledgeContext(state, { presenceId: fixtureData.presenceId, query: "unrelated topic", purpose: "social_planning" });
+
+    expect(compiled.packet.mindFileEvidence?.TASTE).toEqual(expect.arrayContaining([expect.objectContaining({ documentName: "WRITTING_STYLE.md" })]));
+    expect(compiled.packet.mindFileEvidence?.BRAIN ?? []).toHaveLength(0);
+    expect(compiled.state.knowledgeCitations.some((citation) => citation.usage === "constraint" && citation.knowledgeDocumentId === document.id)).toBe(true);
+  });
+
+  it("keeps an attached conversation policy out of CHAT until the Presence is authorized, then supplies the complete policy", () => {
+    const fixtureData = fixture();
+    const policy = [
+      "PROFILE TYPE: CONVERSATION. This profile controls social turns.",
+      "## Conversation policy",
+      "Make the social move immediately legible, then stop when the point is complete.",
+      "## Response behavior",
+      "Choose the smallest natural move that fits the context.",
+      "## Boundaries",
+      "Never turn a reply into a lecture when one sentence resolves the turn.",
+    ].join("\n\n");
+    let state = applyOperation(fixtureData.state, { type: "createKnowledgeDocument", name: "WRITTING_STYLE.md", content: policy, sourceType: "markdown" });
+    const document = state.knowledgeDocuments[0]!;
+    state = applyOperation(state, { type: "setMindFileKnowledgeBinding", fileKind: "TASTE", knowledgeDocumentId: document.id, enabled: true });
+
+    const unavailable = compileKnowledgeContext(state, { presenceId: fixtureData.presenceId, query: "a light conversational post", purpose: "social_planning" });
+    expect(unavailable.packet.styleEvidence).toHaveLength(0);
+    expect(unavailable.packet.mindFileEvidence?.TASTE ?? []).toHaveLength(0);
+
+    state = applyOperation(state, { type: "setKnowledgeAccess", presenceId: fixtureData.presenceId, maximumUse: "internal" });
+    const available = compileKnowledgeContext(state, { presenceId: fixtureData.presenceId, query: "a light conversational post", purpose: "social_planning" });
+    const suppliedPolicy = available.packet.styleEvidence.map((evidence) => evidence.excerpt).join("\n\n");
+    expect(suppliedPolicy).toContain("PROFILE TYPE: CONVERSATION");
+    expect(suppliedPolicy).toContain("Choose the smallest natural move");
+    expect(suppliedPolicy).toContain("Never turn a reply into a lecture");
+    expect(available.state.knowledgeCitations.filter((citation) => citation.retrievalRunId === available.packet.retrievalRunId && citation.usage === "constraint")).toHaveLength(4);
   });
 
   it("does not retrieve archived or superseded material", () => {
@@ -103,4 +146,3 @@ describe("Agent Knowledge", () => {
     expect(searchKnowledge(state, { presenceId: fixtureData.presenceId, query: "protect private material" }).result.results).toHaveLength(0);
   });
 });
-

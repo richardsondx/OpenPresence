@@ -59,6 +59,7 @@ export function reconsiderAffectedRuns(input: {
     // 3. Still relevant: return to queued for execution
     run.state = "queued";
     run.stage = "reconsidered_after_recovery";
+    run.retryReason = "The run remained relevant after recovery reconsideration.";
     run.lastProgressAt = now.toISOString();
     delete run.incidentId;
     delete run.blockedReason;

@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { readState } from "@/lib/db";
-import { stateForContext } from "@/lib/runtime";
+import { readBrowserPresenceConfig } from "@/lib/db";
 import type { Presence } from "@/lib/types";
 
 export const dynamic = "force-dynamic";
@@ -34,8 +33,14 @@ function safePresence(presence: Presence) {
 }
 
 export async function GET(request: Request) {
-  const state = stateForContext(readState(), contextFromRequest(request));
-  const enabled = state.presences.filter((presence) => presence.browserAccess?.enabled === true).map(safePresence);
-  const selected = state.presence && state.presence.browserAccess?.enabled === true ? safePresence(state.presence) : undefined;
-  return NextResponse.json({ version: 1, appOrigin: new URL(request.url).origin, activePresenceId: state.activePresenceId, selected, presences: enabled });
+  const context = contextFromRequest(request);
+  const config = readBrowserPresenceConfig(context);
+  const enabled = config.presences.filter((presence) => (presence.browserAccess as { enabled?: boolean } | undefined)?.enabled === true).map((presence) => safePresence(presence as unknown as Presence));
+  // Match the previous scoped-state contract: an explicit Presence in the
+  // request wins over the workspace's active Presence. Without this, a
+  // second Presence can silently receive the wrong browser session config.
+  const selectedId = context.presenceId ?? config.activePresenceId;
+  const selectedRaw = config.presences.find((presence) => presence.id === selectedId);
+  const selected = selectedRaw && (selectedRaw.browserAccess as { enabled?: boolean } | undefined)?.enabled === true ? safePresence(selectedRaw as unknown as Presence) : undefined;
+  return NextResponse.json({ version: 1, appOrigin: new URL(request.url).origin, activePresenceId: selectedId, selected, presences: enabled });
 }

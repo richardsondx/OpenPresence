@@ -17,5 +17,5 @@ export function runtimeTimeoutForOperation(operationType?: string | null) {
 }
 
 export function runtimeTimeoutMessage() {
-  return "The operation is taking longer than expected. Open Activity to verify its state before trying again.";
+  return "Check now did not return before the request timed out. It may still be queued or running; Activity will verify its state and show whether it is queued, running, complete, or failed before you try again.";
 }

@@ -2,21 +2,214 @@ import {
   claimOperationalRunLease,
   claimDueScheduledWakes,
   getOperationalRun,
+  getRecoveryIncident,
   listOperationalRuns,
   listScheduledWakes,
+  mergeAttentionWake,
   readState,
+  readStateViewForContext,
   reclaimExpiredLeases,
   recordProcessHeartbeat,
   releaseOperationalRunLease,
   upsertOperationalRun,
   upsertScheduledWake,
+  writeState,
 } from "./db";
+import { attentionRequestFromWake, attentionRunAcceptsSignal, mergeAttentionRequests, requestAttention } from "./attention-coordinator";
+import { settleAttentionResponsibility } from "./attention-responsibility";
+import { bridgeExecutionStatus } from "./bridge-contract";
+import { scheduledAssignmentIsDue } from "./runtime";
 import type {
   JsonValue,
+  Execution,
+  OpenPresenceState,
   OperationalRun,
   ScheduledWake,
   ScheduledWakeKind,
 } from "./types";
+
+/** Close stale pre-dispatch work even when no Bridge can perform claim-time expiry. */
+export function expireQueuedDeliveryWindows(source: OpenPresenceState, now = new Date()): number {
+  const nowMs = now.getTime();
+  const nowIso = now.toISOString();
+  const preDispatchStatuses = new Set<Execution["status"]>(["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued"]);
+  let expired = 0;
+  const affectedAttentionRunIds = new Set<string>();
+  for (const execution of source.executions ?? []) {
+    if (!preDispatchStatuses.has(execution.status)) continue;
+    const intent = source.socialIntents?.find((item) => item.id === execution.socialIntentId);
+    const expiresAt = intent?.validity?.expiresAt;
+    if (!expiresAt || new Date(expiresAt).getTime() > nowMs) continue;
+    execution.status = "expired";
+    delete execution.lease;
+    delete execution.permit;
+    execution.failure = {
+      ...execution.failure,
+      code: "INTENT_EXPIRED_BEFORE_CLAIM",
+      message: "The delivery window expired before an authorized connector claimed this action.",
+      retryable: false,
+      reviewedAt: execution.failure?.reviewedAt ?? nowIso,
+      reviewDisposition: "stale",
+      reviewNote: "Closed automatically before any external write was attempted.",
+    };
+    execution.reviewReason = "The Social Intent expired while waiting for a connector; no external delivery was attempted.";
+    execution.updatedAt = nowIso;
+    if (intent) {
+      intent.state = "expired";
+      intent.updatedAt = nowIso;
+    }
+    const action = source.actions?.find((item) => item.executionId === execution.id);
+    if (action) {
+      action.status = "skipped";
+      action.reason = "The delivery window expired before a connector claimed this action; no external write was attempted.";
+    }
+    if (execution.runId) affectedAttentionRunIds.add(execution.runId);
+    else if (execution.attentionEpisodeId) {
+      const linkedRun = listOperationalRuns(execution.presenceId).find((run) => run.kind === "attention" && run.attentionEpisodeId === execution.attentionEpisodeId);
+      if (linkedRun) affectedAttentionRunIds.add(linkedRun.id);
+    }
+    if (execution.connector === "bridge") {
+      recordOperationalFailure({
+        dependency: "user_attached_bridge",
+        presenceId: execution.presenceId,
+        runId: execution.runId,
+        error: "Browser delivery claim expired before the authorized route completed the action.",
+      });
+    }
+    expired += 1;
+  }
+  for (const runId of affectedAttentionRunIds) {
+    const run = getOperationalRun(runId);
+    if (!run?.attentionEpisodeId || run.kind !== "attention") continue;
+    const settled = settleAttentionResponsibility(source, run, run.attentionEpisodeId);
+    source.attentionEpisodes = settled.state.attentionEpisodes;
+    upsertOperationalRun(settled.run);
+  }
+  return expired;
+}
+
+/** Assignment work is owned by AssignmentRun, never generic Attention. */
+export function repairMissingAssignmentWakes(state: OpenPresenceState, now = new Date()): number {
+  return dueLiveAssignmentsWithoutWorkers(state, now).length;
+}
+
+const assignmentDispatchesInFlight = new Set<string>();
+
+export function dueLiveAssignmentsWithoutWorkers(state: OpenPresenceState, now = new Date()) {
+  return state.assignments.filter((assignment) => {
+    const presence = state.presences.find((item) => item.id === assignment.presenceId);
+    if (!presence || presence.status !== "live" || assignment.environment === "sandbox") return false;
+    if (!["accepted", "planning", "active", "working", "awaiting_execution"].includes(assignment.status)) return false;
+    const work = assignment.work;
+    const quietBudgetExhausted = Boolean(work?.maxAttempts && work.attempts >= work.maxAttempts && ["action_no_op", "candidate_rejected"].includes(assignment.lastOutcome?.class ?? ""));
+    if (quietBudgetExhausted || work?.maxAttempts && work.attempts >= work.maxAttempts) return false;
+    const isDue = Boolean(assignment.nextDueAt && new Date(assignment.nextDueAt).getTime() <= now.getTime()) || scheduledAssignmentIsDue(assignment, now);
+    if (!isDue) return false;
+    return !(state.assignmentRuns ?? []).some((run) => run.assignmentId === assignment.id && ["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"].includes(run.status));
+  });
+}
+
+/**
+ * Bridge the durable scheduler to the server-owned Assignment worker entry
+ * point. The POST immediately persists AssignmentRun before returning, so a
+ * process loss is recoverable and repeated sweeps are deduplicated by both
+ * this in-process fence and the durable active-run check above.
+ */
+export function dispatchDueAssignmentWorkers(state: OpenPresenceState, now = new Date()): number {
+  let dispatched = 0;
+  const port = process.env.OPENPRESENCE_PORT || "3015";
+  const origin = process.env.OPENPRESENCE_INTERNAL_ORIGIN || `http://127.0.0.1:${port}`;
+  for (const assignment of dueLiveAssignmentsWithoutWorkers(state, now)) {
+    if (!assignment.presenceId || assignmentDispatchesInFlight.has(assignment.id)) continue;
+    assignmentDispatchesInFlight.add(assignment.id);
+    dispatched += 1;
+    setImmediate(() => {
+      void fetch(`${origin}/api/state`, {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-openpresence-internal-dispatch": "assignment" },
+        body: JSON.stringify({ type: "runLiveAssignment", assignmentId: assignment.id, presenceId: assignment.presenceId }),
+      }).then(async (response) => {
+        if (!response.ok) throw new Error(`Assignment worker dispatch returned HTTP ${response.status}.`);
+        await response.body?.cancel();
+      }).catch(() => {
+        // nextDueAt remains durable; the next bounded sweep retries safely.
+      }).finally(() => assignmentDispatchesInFlight.delete(assignment.id));
+    });
+  }
+  return dispatched;
+}
+
+/** Restore a lost live Chat wake without ever waking a paused Presence. */
+export function repairMissingOperatorNudgeWakes(state: OpenPresenceState, now = new Date()): number {
+  let repaired = 0;
+  for (const presence of state.presences.filter((item) => item.status === "live")) {
+    const hasQueuedNudge = (state.operatorNudges ?? []).some((nudge) => nudge.presenceId === presence.id && ["queued", "acknowledged"].includes(nudge.status));
+    if (!hasQueuedNudge) continue;
+    const hasNudgeWake = listScheduledWakes(presence.id).some((wake) => wake.state === "pending" && ((wake.payload as { triggers?: string[] } | undefined)?.triggers ?? []).includes("operator_nudge"));
+    // A waiting Attention run owns delivery/verification continuity, but it
+    // has no cognition worker. It must not block the next queued Chat note.
+    const hasNudgeRun = listOperationalRuns(presence.id, ["queued", "running", "recovering", "delivery_uncertain", "reconciling"])
+      .some((run) => run.kind === "attention" && run.attention?.triggers.includes("operator_nudge"));
+    if (hasNudgeWake || hasNudgeRun) continue;
+    requestAttention(presence.id, "operator_nudge", now.toISOString(), "broad");
+    repaired += 1;
+  }
+  return repaired;
+}
+
+/**
+ * Close a Bridge action that cannot make progress because its adapter stopped
+ * checking in. An unclaimed action must never hold an Attention run forever;
+ * this records a truthful terminal failure and leaves the operator a durable
+ * reason to reconnect/retry the connector.
+ */
+export function closeStaleBridgeExecutions(source: OpenPresenceState, now = new Date(), claimWindowMs = 120_000): number {
+  const nowMs = now.getTime();
+  const pendingStatuses = new Set<Execution["status"]>(["awaiting-connector", "queued"]);
+  const bridges = new Map((source.bridges ?? []).map((bridge) => [bridge.id, bridge]));
+  const affectedAttentionRunIds = new Set<string>();
+  let closed = 0;
+  for (const execution of source.executions ?? []) {
+    if (!execution.bridgeId || !pendingStatuses.has(execution.status)) continue;
+    const bridge = bridges.get(execution.bridgeId);
+    if (!bridge || bridgeExecutionStatus(bridge, nowMs) === "connected") continue;
+    const formedAt = new Date(execution.updatedAt ?? execution.createdAt).getTime();
+    if (!Number.isFinite(formedAt) || nowMs - formedAt < claimWindowMs) continue;
+    execution.status = "failed";
+    delete execution.lease;
+    delete execution.permit;
+    execution.failure = {
+      code: "BRIDGE_NOT_CHECKED_IN",
+      message: "The authorized browser connector did not check in before the bounded delivery window closed; no external write was attempted.",
+      retryable: true,
+      reviewedAt: now.toISOString(),
+      reviewDisposition: "stale",
+      reviewNote: "Reconnect the Bridge and retry this action after confirming the expected account.",
+    };
+    execution.reviewReason = "The Bridge was stale before it claimed this action; no public delivery is counted.";
+    execution.updatedAt = now.toISOString();
+    const intent = source.socialIntents?.find((item) => item.id === execution.socialIntentId);
+    if (intent) {
+      intent.state = "expired";
+      intent.updatedAt = now.toISOString();
+    }
+    const action = source.actions?.find((item) => item.executionId === execution.id);
+    if (action) {
+      action.status = "failed";
+      action.reason = "The browser connector did not check in before the bounded delivery window closed; no external write was attempted.";
+    }
+    if (execution.runId) affectedAttentionRunIds.add(execution.runId);
+    closed += 1;
+  }
+  for (const runId of affectedAttentionRunIds) {
+    const run = getOperationalRun(runId);
+    if (!run?.attentionEpisodeId || run.kind !== "attention") continue;
+    const settled = settleAttentionResponsibility(source, run, run.attentionEpisodeId);
+    source.attentionEpisodes = settled.state.attentionEpisodes;
+    upsertOperationalRun(settled.run);
+  }
+  return closed;
+}
 
 // ============================================================================
 // Stage-Specific Expected Durations (Seconds)
@@ -32,9 +225,21 @@ export const STAGE_EXPECTED_DURATIONS_SECONDS: Record<string, number> = {
   "browser.verify_sent": 60,
 
   // Native API stages
+  "native.observe": 180,
   "native.post": 30,
   "native.verify": 45,
   "native.hydrate": 60,
+
+  // Autonomous orchestration stages. These are bounded, but deliberately
+  // longer than a single provider request because an observation can include
+  // several reads, hydration, and a pulse in one leased run.
+  "runtime.pulse": 180,
+  "discovery.search": 180,
+  "discovery.triage": 120,
+  "discovery.decide": 120,
+  "woken_from_observation": 240,
+  "woken_from_attention": 240,
+  "woken_from_self_directed_discovery": 240,
 
   // State machine & recovery stages
   "recovering.probe": 20,
@@ -222,15 +427,45 @@ export function runOperationalSweep(now = new Date()): SweepResult {
   // Repair the migration gap where self-directed attention had a persisted
   // nextEligibleAt but no durable wake. Without this repair, Auto can be
   // enabled forever while the temporal engine has nothing to dispatch.
-  const state = readState();
-  for (const presence of state.presences.filter((item) => item.status === "live" && item.selfDirectedAttention?.enabled)) {
+  // The normal sweep is read-only. Avoid deep-cloning the entire compatibility
+  // snapshot every five seconds; only materialize mutable state when there is
+  // an expired queued execution that actually requires a write.
+  const stateView = readStateViewForContext({});
+  const preDispatchStatuses = new Set<Execution["status"]>(["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued"]);
+  const hasExpiredQueuedExecution = (stateView.executions ?? []).some((execution) => {
+    if (!preDispatchStatuses.has(execution.status)) return false;
+    const intent = stateView.socialIntents?.find((item) => item.id === execution.socialIntentId);
+    const expiresAt = intent?.validity?.expiresAt;
+    return Boolean(expiresAt && new Date(expiresAt).getTime() <= now.getTime());
+  });
+  const hasStaleBridgeExecution = (stateView.executions ?? []).some((execution) => {
+    if (!execution.bridgeId || !["awaiting-connector", "queued"].includes(execution.status)) return false;
+    const bridge = stateView.bridges.find((item) => item.id === execution.bridgeId);
+    if (!bridge || bridgeExecutionStatus(bridge, now.getTime()) === "connected") return false;
+    const formedAt = new Date(execution.updatedAt ?? execution.createdAt).getTime();
+    return Number.isFinite(formedAt) && now.getTime() - formedAt >= 120_000;
+  });
+  const state = hasExpiredQueuedExecution || hasStaleBridgeExecution ? readState() : stateView;
+  // A disconnected Bridge cannot perform claim-time expiry. Close stale
+  // pre-dispatch intents here so the queue has a bounded lifetime and never
+  // presents an undeliverable action as permanently in flight.
+  const expiredQueuedExecutions = hasExpiredQueuedExecution ? expireQueuedDeliveryWindows(state, now) : 0;
+  const staleBridgeExecutions = hasStaleBridgeExecution ? closeStaleBridgeExecutions(state, now) : 0;
+  if (expiredQueuedExecutions > 0 || staleBridgeExecutions > 0) {
+    writeState(state, { advanceWorkspaceRevision: false });
+  }
+  dispatchDueAssignmentWorkers(state, now);
+  repairMissingOperatorNudgeWakes(state, now);
+  for (const presence of state.presences.filter((item) => item.status === "live")) {
     const nextEligibleAt = presence.selfDirectedAttention?.nextEligibleAt;
-    if (nextEligibleAt && new Date(nextEligibleAt).getTime() > now.getTime()) continue;
     const hasPendingAttentionWake = listScheduledWakes(presence.id).some((wake) => wake.state === "pending" && (wake.kind === "attention" || wake.kind === "self_directed_discovery"));
-    const hasAttentionRun = listOperationalRuns(presence.id, ["queued", "running"]).some((run) => run.kind === "discovery");
-    if (!hasPendingAttentionWake && !hasAttentionRun) {
-      upsertScheduledWake({ id: `wake_attention_${presence.id}`, presenceId: presence.id, wakeAt: nowIso, kind: "attention", targetId: presence.id, state: "pending", createdAt: nowIso, updatedAt: nowIso });
+    const hasAttentionRun = listOperationalRuns(presence.id, ["queued", "running", "recovering", "delivery_uncertain", "reconciling"])
+      .some((run) => run.kind === "attention");
+    if (nextEligibleAt && new Date(nextEligibleAt).getTime() > now.getTime()) {
+      if (!hasPendingAttentionWake && !hasAttentionRun) requestAttention(presence.id, "self_directed", nextEligibleAt, "broad");
+      continue;
     }
+    if (!hasPendingAttentionWake && !hasAttentionRun) requestAttention(presence.id, "self_directed", nowIso, "broad");
   }
 
   // 1. Reclaim expired leases
@@ -244,16 +479,37 @@ export function runOperationalSweep(now = new Date()): SweepResult {
     dispatchedWakes.push(wake);
 
     // If wake is an autonomous observation or attention wake
-    if (wake.kind === "observation" || (wake.kind as string) === "attention" || (wake.kind as string) === "self_directed_discovery") {
+    if (wake.kind === "observation" || wake.kind === "attention" || wake.kind === "self_directed_discovery") {
       const presenceId = wake.presenceId ?? "global";
-      const kind = wake.kind === "observation" ? "observation" : "discovery";
-      const existingRuns = listOperationalRuns(presenceId, ["queued", "running"]);
-      const alreadyRunning = existingRuns.some((r) => r.kind === kind);
-
-      if (!alreadyRunning) {
-        const { run } = queueAutonomyRun(presenceId, kind, {
-          stage: `woken_from_${wake.kind}`,
+      const presence = state.presences.find((item) => item.id === presenceId);
+      // A historical timer may become due after the operator pauses. Claim it
+      // without invoking cognition; an explicit Wake creates a fresh signal.
+      if (presence?.status === "paused") continue;
+      const request = attentionRequestFromWake(wake);
+      // Blocked and needs-operator runs are terminal records, not live work.
+      // Let a later independent pulse get its own run instead of endlessly
+      // recycling the due wake behind historical blocked work.
+      // Delivery/verification can outlive the bounded cognition pass. Keep
+      // that responsibility durable on its original run, but do not present
+      // it as a worker that can consume a new attention signal.
+      const existingRun = listOperationalRuns(presenceId).find((run) => run.kind === "attention" && ["queued", "running", "recovering", "delivery_uncertain", "reconciling"].includes(run.state));
+      if (existingRun) {
+        if (attentionRunAcceptsSignal(existingRun)) {
+          existingRun.attention = mergeAttentionRequests(existingRun.attention, request);
+          upsertOperationalRun(existingRun);
+        } else {
+          for (const [index, trigger] of request.triggers.entries()) {
+            mergeAttentionWake({ presenceId, trigger, scope: request.scope, requestedAt: request.requestedAt, signalId: request.signalIds[index] ?? request.signalIds[0] ?? wake.id });
+          }
+        }
+      } else {
+        const runId = `op_run_attention_${presenceId}_${Date.parse(wake.updatedAt) || Date.now()}`;
+        const { run } = queueAutonomyRun(presenceId, "attention", {
+          runId,
+          attention: request,
+          stage: "queued",
           sourceRef: wake.id,
+          metadata: { source: request.triggers.includes("operator_check") ? "operator" : "scheduler" },
         });
         dispatchAutonomyWorker(run.id);
       }
@@ -271,8 +527,42 @@ export function runOperationalSweep(now = new Date()): SweepResult {
     }
   }
 
+  // A recovery attempt can be left queued after a process restart between the
+  // incident transition and its dispatch. Without this sweep, the run is
+  // neither active nor attached to a pending wake and the health panel stays
+  // in RECOVERING forever. Dispatch only eligible queued work; the durable
+  // lease remains the final duplicate-work guard.
+  for (const run of listOperationalRuns(undefined, ["queued"])) {
+    if (run.eligibleAt && new Date(run.eligibleAt).getTime() > now.getTime()) continue;
+    dispatchAutonomyWorker(run.id);
+  }
+
+  // A process can stop after persisting `running` but before its lease owner
+  // is written/renewed. Such an orphan is not a provider incident and must
+  // not age into a user-visible RECOVERY cycle. Requeue only autonomous
+  // cognition runs with no lease and an old heartbeat; delivery-uncertain
+  // work remains conservative because replaying a write could duplicate it.
+  for (const run of listOperationalRuns(undefined, ["running", "reconciling"])) {
+    if (!["observation", "discovery", "attention"].includes(run.kind) || run.leaseOwner) continue;
+    const lastHeartbeatMs = new Date(run.lastHeartbeatAt ?? run.lastProgressAt ?? run.startedAt ?? run.createdAt).getTime();
+    if (Number.isFinite(lastHeartbeatMs) && now.getTime() - lastHeartbeatMs < 120_000) continue;
+    run.state = "queued";
+    run.stage = "requeued_after_process_restart";
+    run.retryReason = "The previous worker stopped before completing the autonomous run.";
+    run.lastProgressAt = nowIso;
+    run.lastHeartbeatAt = nowIso;
+    run.eligibleAt = nowIso;
+    delete run.incidentId;
+    delete run.leaseExpiresAt;
+    upsertOperationalRun(run);
+    dispatchAutonomyWorker(run.id);
+  }
+
   // 3. Scan active runs for staleness
-  const activeRuns = listOperationalRuns(undefined, ["running", "recovering", "reconciling", "delivery_uncertain"]);
+  // Recovery states are controlled by their incident cooldown below. They
+  // are not fresh work stages and must never be treated as a second stale
+  // run; doing so recursively inflated one incident until operator action.
+  const activeRuns = listOperationalRuns(undefined, ["running", "reconciling", "delivery_uncertain"]);
   const staleRunsDetected: OperationalRun[] = [];
 
   for (const run of activeRuns) {
@@ -295,12 +585,45 @@ export function runOperationalSweep(now = new Date()): SweepResult {
         outcome: "failed",
         error: evaluation.reason,
       });
-
-      run.state = incident.state === "needs_operator" ? "needs_operator" : "recovering";
-      run.stage = `stale_recovery_${run.stage}`;
+      const updatedIncident = getRecoveryIncident(incident.id);
+      if (updatedIncident?.state === "needs_operator") {
+        run.state = "needs_operator";
+        run.stage = `stale_recovery_${run.stage}`;
+      } else {
+        run.state = "recovering";
+        run.stage = `stale_recovery_${run.stage}`;
+      }
+      run.retryReason = evaluation.reason ?? "The autonomous run exceeded its expected stage duration.";
       run.lastProgressAt = nowIso;
+      // Fence the worker that stopped making logical progress. The lease is
+      // no longer allowed to keep a stale run looking active while recovery
+      // schedules the next bounded attempt.
+      delete run.leaseOwner;
+      delete run.leaseExpiresAt;
       upsertOperationalRun(run);
     }
+  }
+
+  // Resume ordinary recoverable work after its bounded cooldown. A recovery
+  // record is a pause between attempts, not a terminal state and not a stage
+  // that should itself age into another incident.
+  for (const run of listOperationalRuns(undefined, ["recovering"])) {
+    const incident = run.incidentId ? getRecoveryIncident(run.incidentId) : undefined;
+    if (incident?.state === "needs_operator") {
+      run.state = "needs_operator";
+      upsertOperationalRun(run);
+      continue;
+    }
+    if (incident?.nextAttemptAt && new Date(incident.nextAttemptAt).getTime() > now.getTime()) continue;
+    run.state = "queued";
+    run.stage = `recovery_retry_${run.kind}`;
+    run.retryReason = incident?.safeSummary ?? "Retrying after bounded runtime recovery.";
+    run.lastProgressAt = nowIso;
+    delete run.incidentId;
+    delete run.leaseOwner;
+    delete run.leaseExpiresAt;
+    upsertOperationalRun(run);
+    dispatchAutonomyWorker(run.id);
   }
 
   return {
@@ -318,10 +641,21 @@ export function startTemporalEngine(intervalMs = 5_000): () => void {
   if (temporalTimer) return () => stopTemporalEngine();
   runOperationalSweep();
   recordProcessHeartbeat("scheduler", "scheduler");
+  recordProcessHeartbeat("runtime", "runtime");
   temporalTimer = setInterval(() => {
+    const sweepStartedAt = Date.now();
     try {
       const sweep = runOperationalSweep();
-      recordProcessHeartbeat("scheduler", "scheduler", { staleRuns: sweep.staleRunsDetected.length, dispatchedWakes: sweep.dispatchedWakes.length });
+      const memory = process.memoryUsage();
+      const telemetry = {
+        staleRuns: sweep.staleRunsDetected.length,
+        dispatchedWakes: sweep.dispatchedWakes.length,
+        sweepDurationMs: Date.now() - sweepStartedAt,
+        heapUsedMb: Math.round(memory.heapUsed / 1024 / 1024),
+        rssMb: Math.round(memory.rss / 1024 / 1024),
+      };
+      recordProcessHeartbeat("scheduler", "scheduler", telemetry);
+      recordProcessHeartbeat("runtime", "runtime", telemetry);
     } catch { /* The supervisor owns process-level failure. */ }
   }, intervalMs);
   if (typeof temporalTimer.unref === "function") temporalTimer.unref();

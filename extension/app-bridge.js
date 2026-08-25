@@ -15,12 +15,27 @@
   const contextQuery = new URLSearchParams();
   if (context.searchParams.get("agentId")) contextQuery.set("agentId", context.searchParams.get("agentId"));
   if (context.searchParams.get("presenceId")) contextQuery.set("presenceId", context.searchParams.get("presenceId"));
+  let reconnectRequested = false;
 
   async function sync() {
     try {
       const suffix = contextQuery.toString();
       const response = await fetch(`/api/browser/config${suffix ? `?${suffix}` : ""}`, { cache: "no-store" });
-      if (response.ok) await sendMessage({ type: "OPENPRESENCE_APP_STATE", config: await response.json() });
+      if (response.ok) {
+        const config = await response.json();
+        await sendMessage({ type: "OPENPRESENCE_APP_STATE", config });
+        const presence = config?.selected;
+        if (presence?.id && presence.browserAccess?.enabled && !reconnectRequested) {
+          const bridgeResponse = await fetch(`/api/bridge/status?presenceId=${encodeURIComponent(presence.id)}`, { cache: "no-store" }).catch(() => undefined);
+          const bridgeData = bridgeResponse?.ok ? await bridgeResponse.json().catch(() => ({})) : {};
+          const connected = bridgeData?.bridges?.some((bridge) => ["online", "degraded"].includes(bridge.state) && bridge.adapterStatus === "connected");
+          if (!connected) {
+            reconnectRequested = true;
+            const result = await sendMessage({ type: "OPENPRESENCE_OPEN_CHROME", presenceId: presence.id });
+            if (result?.ok === false) reconnectRequested = false;
+          }
+        }
+      }
     } catch { /* The app may be restarting; the next poll will recover. */ }
   }
 

@@ -9,6 +9,7 @@ import type {
   KnowledgeSourceType,
   KnowledgeUse,
   KnowledgeVersion,
+  FileKind,
   OpenPresenceState,
   PresenceKnowledgeAccess,
 } from "./types";
@@ -170,6 +171,7 @@ function uniqueDocumentNames(documents: KnowledgeDocument[]) {
 /** Idempotently projects legacy Collection/Item payloads into Agent-owned documents. */
 export function migrateKnowledgeState(source: OpenPresenceState): OpenPresenceState {
   const state = clone(source);
+  state.mindFileKnowledgeBindings = state.mindFileKnowledgeBindings ?? [];
   const existing = state.knowledgeDocuments ?? [];
   const migrated = uniqueDocumentNames([...existing, ...legacyDocuments(state).filter((legacy) => !existing.some((document) => document.id === legacy.id))]);
   state.knowledgeDocuments = migrated;
@@ -204,9 +206,22 @@ function evidenceFor(state: OpenPresenceState, presenceId: string, segment: Know
   return { agentId: document.agentId, documentId: document.id, documentName: document.name, versionId: version.id, versionNumber: version.versionNumber, segmentId: segment.id, headingPath: segment.headingPath, pageNumber: segment.pageNumber, textRange: segment.textRange, excerpt: segment.text, effectiveUse, sourceType: document.sourceType, reviewAfter: document.reviewAfter, collectionId: document.legacyCollectionId, collectionName: document.legacyCollectionName, itemId: document.id, itemTitle: document.name };
 }
 
-function isStyleReference(document: KnowledgeDocument) {
-  const label = `${document.name} ${document.legacyCollectionName ?? ""}`.toLowerCase();
-  return document.role === "reference" && /\b(?:style|voice|tone|writing)\b/.test(label) && /\b(?:conversation|social|reply)\b/.test(label);
+function boundMindFileEvidence(state: OpenPresenceState, presenceId: string): Partial<Record<FileKind, KnowledgeEvidence[]>> {
+  const bindings = (state.mindFileKnowledgeBindings ?? []).filter((binding) => binding.agentId === state.agent?.id && binding.enabled);
+  const grouped: Partial<Record<FileKind, KnowledgeEvidence[]>> = {};
+  for (const binding of bindings) {
+    const document = state.knowledgeDocuments.find((candidate) => candidate.id === binding.knowledgeDocumentId && candidate.agentId === state.agent?.id && candidate.status === "active");
+    if (!document || effectivePresenceKnowledgeUse(state, presenceId, document) === "none" || !document.currentVersionId) continue;
+    const version = state.knowledgeVersions.find((candidate) => candidate.id === document.currentVersionId && candidate.parseStatus === "ready");
+    if (!version) continue;
+    const evidence = state.knowledgeSegments
+      .filter((segment) => segment.knowledgeVersionId === version.id && segment.indexStatus === "ready")
+      .slice(0, 32)
+      .map((segment) => evidenceFor(state, presenceId, segment, version))
+      .filter((item): item is KnowledgeEvidence => Boolean(item));
+    if (evidence.length) grouped[binding.fileKind] = [...(grouped[binding.fileKind] ?? []), ...evidence];
+  }
+  return grouped;
 }
 
 function conflictMessages(results: KnowledgeEvidence[]) {
@@ -259,15 +274,17 @@ export function searchKnowledge(source: OpenPresenceState, input: KnowledgeSearc
 
 export function compileKnowledgeContext(source: OpenPresenceState, input: KnowledgeSearchInput): { state: OpenPresenceState; packet: KnowledgeContextPacket } {
   const searched = searchKnowledge(source, input);
-  const styleEvidence = input.purpose === "social_planning" ? searched.state.knowledgeSegments.map((segment) => {
-    const version = searched.state.knowledgeVersions.find((candidate) => candidate.id === segment.knowledgeVersionId);
-    const document = version && searched.state.knowledgeDocuments.find((candidate) => candidate.id === version.itemId);
-    if (!version || !document || !isStyleReference(document) || effectivePresenceKnowledgeUse(searched.state, input.presenceId, document) === "none") return undefined;
-    return evidenceFor(searched.state, input.presenceId, segment, version);
-  }).filter((item): item is KnowledgeEvidence => Boolean(item)).slice(0, 24) : [];
+  const mindFileEvidence = boundMindFileEvidence(searched.state, input.presenceId);
+  const styleEvidence = input.purpose === "social_planning" ? (mindFileEvidence.TASTE ?? []).slice(0, 24) : [];
   const styleSegmentIds = new Set(styleEvidence.map((item) => item.segmentId));
-  const packet: KnowledgeContextPacket = { retrievalRunId: searched.result.retrievalRunId, publicEvidence: searched.result.results.filter((result) => result.effectiveUse === "public" && !styleSegmentIds.has(result.segmentId)), restrictedEvidence: searched.result.results.filter((result) => result.effectiveUse === "internal" && !styleSegmentIds.has(result.segmentId)), styleEvidence, ...(searched.result.unresolvedConflicts ? { unresolvedConflicts: searched.result.unresolvedConflicts } : {}), ...(searched.result.missingEvidence ? { missingEvidence: searched.result.missingEvidence } : {}), ...(searched.result.staleWarnings ? { staleWarnings: searched.result.staleWarnings } : {}) };
+  const packet: KnowledgeContextPacket = { retrievalRunId: searched.result.retrievalRunId, publicEvidence: searched.result.results.filter((result) => result.effectiveUse === "public" && !styleSegmentIds.has(result.segmentId)), restrictedEvidence: searched.result.results.filter((result) => result.effectiveUse === "internal" && !styleSegmentIds.has(result.segmentId)), styleEvidence, mindFileEvidence, ...(searched.result.unresolvedConflicts ? { unresolvedConflicts: searched.result.unresolvedConflicts } : {}), ...(searched.result.missingEvidence ? { missingEvidence: searched.result.missingEvidence } : {}), ...(searched.result.staleWarnings ? { staleWarnings: searched.result.staleWarnings } : {}) };
+  const boundEvidence = Object.values(mindFileEvidence).flatMap((items) => items ?? []);
   const reliedOn = new Set(searched.result.results.map((result) => result.segmentId));
+  for (const result of boundEvidence) {
+    if (!searched.state.knowledgeCitations.some((citation) => citation.retrievalRunId === packet.retrievalRunId && citation.knowledgeSegmentId === result.segmentId)) {
+      searched.state.knowledgeCitations.unshift({ id: id("knowledge-citation"), retrievalRunId: packet.retrievalRunId, knowledgeDocumentId: result.documentId, knowledgeItemId: result.documentId, knowledgeVersionId: result.versionId, knowledgeSegmentId: result.segmentId, usage: "constraint", createdAt: now() });
+    }
+  }
   searched.state.knowledgeCitations = searched.state.knowledgeCitations.map((citation) => citation.retrievalRunId === packet.retrievalRunId && reliedOn.has(citation.knowledgeSegmentId) ? { ...citation, usage: "relied_on" as const } : citation);
   return { state: searched.state, packet };
 }
@@ -342,6 +359,18 @@ export function setKnowledgeAccess(source: OpenPresenceState, input: { presenceI
   const current = state.presenceKnowledgeAccess.find((access) => access.agentId === state.agent?.id && access.presenceId === input.presenceId);
   const next: PresenceKnowledgeAccess = { id: current?.id ?? id("knowledge-access"), agentId: state.agent.id, presenceId: input.presenceId, maximumUse: enabled ? input.maximumUse : "none", enabled, createdAt: current?.createdAt ?? timestamp, updatedAt: timestamp };
   state.presenceKnowledgeAccess = [next, ...state.presenceKnowledgeAccess.filter((access) => access.id !== next.id)];
+  return state;
+}
+
+export function setMindFileKnowledgeBinding(source: OpenPresenceState, input: { fileKind: FileKind; knowledgeDocumentId: string; enabled: boolean }) {
+  const state = migrateKnowledgeState(source);
+  if (!state.agent?.id) throw new Error("Create an Agent before configuring meaning-file Knowledge.");
+  const document = state.knowledgeDocuments.find((candidate) => candidate.id === input.knowledgeDocumentId && candidate.agentId === state.agent?.id && candidate.status === "active");
+  if (!document) throw new Error("That Knowledge document is not available in this Agent.");
+  const timestamp = now();
+  const current = (state.mindFileKnowledgeBindings ?? []).find((binding) => binding.agentId === state.agent?.id && binding.fileKind === input.fileKind && binding.knowledgeDocumentId === input.knowledgeDocumentId);
+  const next = { id: current?.id ?? id("mind-file-knowledge"), agentId: state.agent.id, fileKind: input.fileKind, knowledgeDocumentId: input.knowledgeDocumentId, enabled: input.enabled, createdAt: current?.createdAt ?? timestamp, updatedAt: timestamp };
+  state.mindFileKnowledgeBindings = [next, ...(state.mindFileKnowledgeBindings ?? []).filter((binding) => binding.id !== next.id)];
   return state;
 }
 

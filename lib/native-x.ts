@@ -1,10 +1,11 @@
 import { randomUUID } from "node:crypto";
 import { readNativeXCredentials, readRecentXMentions, readRecentXPosts, readXAudienceSnapshot, readXPublicationMetrics, readXPostsByIds, type XRecentPost } from "./x";
-import { applyOperation, intervalForPresence, markNativeConnectionNeedsAttention, recordNativeMirror, recordNativeMirrorDeletion, recordNativeObservation, recordPublicFooting, recordResourceUsageEvent, recordRuntimeEvent } from "./runtime";
+import { applyOperation, intervalForPresence, markNativeConnectionNeedsAttention, recordNativeMirrors, recordNativeMirrorDeletion, recordNativeObservation, recordPublicFooting, recordResourceUsageEvent, recordRuntimeEvent } from "./runtime";
 import { normalizeHandle } from "./x";
 import { languagesMatch } from "./language-policy";
 import type { EntityRef, MirrorObject, OpenPresenceState, Presence, PresenceQuietHours } from "./types";
 import { hydrateThreadContext } from "./thread-context";
+import { xCreditsExhausted } from "./x-credits";
 
 export const intervalFor = intervalForPresence;
 
@@ -74,6 +75,7 @@ export async function hydrateNativeXThreadContext(
     attentionSource?: import("./types").ResourceUsageEvent["attentionSource"];
     invocationId?: string;
     runId?: string;
+    attentionEpisodeId?: string;
   },
 ): Promise<OpenPresenceState> {
   if (!observedObject.parentExternalRef) return source;
@@ -92,7 +94,7 @@ export async function hydrateNativeXThreadContext(
     fetchObjects: async (refs: EntityRef[]) => {
       const targetRefs = refs.filter((ref) => ref.type === "x.post");
       if (!targetRefs.length) return [];
-      next = recordResourceUsageEvent(next, {
+    next = recordResourceUsageEvent(next, {
         presenceId,
         invocationId: options?.invocationId ?? `hydrate:${randomUUID()}`,
         runId: options?.runId,
@@ -101,17 +103,17 @@ export async function hydrateNativeXThreadContext(
         category: "hydration",
         provider: "x",
         usage: { requests: 1 },
+        attentionEpisodeId: options?.attentionEpisodeId,
       });
       const posts = await readXPostsByIds(credentials, targetRefs.map((ref) => ref.id));
       for (const post of posts) fetchedPosts.set(post.id, post);
       return posts.map((post) => xPostMirrorObject(post, presenceId, connection.id));
     },
   });
-  for (const object of hydrated.objects) {
+  next = recordNativeMirrors(next, hydrated.objects.flatMap((object) => {
     const sourcePost = fetchedPosts.get(object.externalRef.id);
-    if (!sourcePost) continue;
-    next = recordNativeMirror(next, { connectionId: connection.id, presenceId, post: sourcePost });
-  }
+    return sourcePost ? [{ connectionId: connection.id, presenceId, post: sourcePost }] : [];
+  }), { attentionEpisodeId: options?.attentionEpisodeId, attentionRunId: options?.runId, attentionInvocationId: options?.invocationId });
   return next;
 }
 
@@ -129,7 +131,7 @@ export const nextObservationAt = (presence: Presence | undefined, from = Date.no
   return candidate.toISOString();
 };
 
-export async function reconcileNativeX(source: OpenPresenceState, presenceId: string): Promise<OpenPresenceState> {
+export async function reconcileNativeX(source: OpenPresenceState, presenceId: string, options?: { runId?: string; invocationId?: string; attentionEpisodeId?: string }): Promise<OpenPresenceState> {
   let next = recordNativeObservation(source, presenceId, {
     ...(source.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x")?.observation ?? {}),
     status: "syncing",
@@ -170,7 +172,7 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
       readRecentXPosts(credentials, accountId),
       readRecentXMentions(credentials, accountId),
     ]);
-    next = recordResourceUsageEvent(next, { presenceId, invocationId: `x-reconcile:${randomUUID()}`, originKind: "inbound_social", attentionSource: "inbound_social", category: "channel_read", provider: "x", usage: { requests: 2 } });
+    next = recordResourceUsageEvent(next, { presenceId, invocationId: options?.invocationId ?? `x-reconcile:${randomUUID()}`, runId: options?.runId, originKind: "inbound_social", attentionSource: "inbound_social", category: "channel_read", provider: "x", usage: { requests: 2 }, attentionEpisodeId: options?.attentionEpisodeId });
     if (postsResult.status === "rejected") throw postsResult.reason;
 
     const posts = postsResult.value;
@@ -179,18 +181,20 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
     const hasGrowthAssignment = next.assignments.some((assignment) => assignment.presenceId === presenceId && assignment.successEvidence?.metric === "followers" && assignment.status !== "cancelled");
     if (hasGrowthAssignment) {
       try {
-        next = recordResourceUsageEvent(next, { presenceId, invocationId: `x-reconcile:${randomUUID()}`, originKind: "other", attentionSource: "inbound_social", category: "channel_read", provider: "x", usage: { requests: 1 } });
+        next = recordResourceUsageEvent(next, { presenceId, invocationId: `x-reconcile:${randomUUID()}`, runId: options?.runId, originKind: "other", attentionSource: "inbound_social", category: "channel_read", provider: "x", usage: { requests: 1 }, attentionEpisodeId: options?.attentionEpisodeId });
         const audience = await readXAudienceSnapshot(credentials, accountId);
         if (audience) next = applyOperation(next, { type: "recordAudienceSnapshot", presenceId, followers: audience.followers, following: audience.following, source: "native", observedAt: audience.observedAt });
       } catch (error) {
         next = recordRuntimeEvent(next, presenceId, "Audience measurement unavailable", error instanceof Error ? error.message : "X did not return follower metrics.", "warning");
       }
     }
-    for (const post of posts) next = recordNativeMirror(next, { connectionId: connection.id, presenceId, own: true, post });
-    for (const post of mentions) next = recordNativeMirror(next, { connectionId: connection.id, presenceId, post });
+    next = recordNativeMirrors(next, [
+      ...posts.map((post) => ({ connectionId: connection.id, presenceId, own: true, post })),
+      ...mentions.map((post) => ({ connectionId: connection.id, presenceId, post })),
+    ], { attentionEpisodeId: options?.attentionEpisodeId, attentionRunId: options?.runId, attentionInvocationId: options?.invocationId });
     if (hasGrowthAssignment) try {
       const ownMirrorObjects = next.mirrorObjects.filter((item) => item.presenceId === presenceId && item.actorPresenceId === presenceId && item.environment === "live" && !item.archived && item.externalRef.type === "x.post").slice(0, 100);
-      next = recordResourceUsageEvent(next, { presenceId, invocationId: `x-reconcile:${randomUUID()}`, originKind: "other", attentionSource: "inbound_social", category: "channel_read", provider: "x", usage: { requests: 1 } });
+      next = recordResourceUsageEvent(next, { presenceId, invocationId: `x-reconcile:${randomUUID()}`, runId: options?.runId, originKind: "other", attentionSource: "inbound_social", category: "channel_read", provider: "x", usage: { requests: 1 }, attentionEpisodeId: options?.attentionEpisodeId });
       const metrics = await readXPublicationMetrics(credentials, ownMirrorObjects.map((item) => item.externalRef.id));
       for (const metric of metrics) {
         const mirror = ownMirrorObjects.find((item) => item.externalRef.id === metric.id);
@@ -211,7 +215,7 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
       try {
         const stillVisible: XRecentPost[] = [];
         for (let offset = 0; offset < missingOwnPostIds.length; offset += 100) {
-          next = recordResourceUsageEvent(next, { presenceId, invocationId: `x-reconcile:${randomUUID()}`, originKind: "other", attentionSource: "inbound_social", category: "channel_read", provider: "x", usage: { requests: 1 } });
+          next = recordResourceUsageEvent(next, { presenceId, invocationId: `x-reconcile:${randomUUID()}`, runId: options?.runId, originKind: "other", attentionSource: "inbound_social", category: "channel_read", provider: "x", usage: { requests: 1 }, attentionEpisodeId: options?.attentionEpisodeId });
           stillVisible.push(...await readXPostsByIds(credentials, missingOwnPostIds.slice(offset, offset + 100)));
         }
         const stillVisibleIds = new Set(stillVisible.map((post) => post.id));
@@ -221,17 +225,12 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
         next = recordRuntimeEvent(next, presenceId, "Deleted-post check unavailable", error instanceof Error ? error.message : "X did not confirm whether missing posts were deleted.", "warning");
       }
     }
-    // Eagerly make the public ancestry available before Pulse runs during replies.
-    // The hydrator is bounded and idempotent, so a later lazy check is cheap.
-    for (const mention of mentions) {
-      const observed = next.mirrorObjects.find((item) => item.externalRef.type === "x.post" && item.externalRef.id === mention.id);
-      if (!observed?.parentExternalRef) continue;
-      try {
-        next = await hydrateNativeXThreadContext(next, presenceId, observed, { originKind: "inbound_social", attentionSource: "inbound_social" });
-      } catch (error) {
-        next = recordRuntimeEvent(next, presenceId, "Thread context partially available", error instanceof Error ? error.message : "X did not return all referenced public context.", "warning", { sourceObjectId: observed.id });
-      }
-    }
+    // Do not hydrate every mention during the observation critical path.
+    // X can return up to 100 mentions, and each ancestry request has its own
+    // bounded connector timeout. Hydrating them serially turned one healthy
+    // read into an unbounded multi-minute stage and made the watchdog report
+    // a false runtime stall. Attention Pulse hydrates only the first eligible
+    // inbound mention when cognition actually needs thread context.
     next = recordPublicFooting(next, presenceId, {
       postsPublished: posts.length,
       recentPostIds: posts.map((post) => post.id),
@@ -278,6 +277,9 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
       error: message,
       nextObservationAt: new Date(Date.now() + 60_000).toISOString(),
     });
+    if (xCreditsExhausted({ healthMessage: message, deliveryError: message, observation: { error: message } })) {
+      next = markNativeConnectionNeedsAttention(next, presenceId, message);
+    }
     return recordRuntimeEvent(next, presenceId, "X observation failed", message, "warning");
   }
 }

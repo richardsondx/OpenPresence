@@ -17,6 +17,7 @@ const INTERNAL_DECISION_KEYS = new Set([
   "visualBrief",
   "visual_brief",
 ]);
+const PUBLIC_OUTPUT_KEYS = new Set(["text", "reply", "draft", "content"]);
 
 /** Apply the Presence's canonical public-post line format after model output. */
 export function formatOneSentencePerLine(value?: string) {
@@ -79,6 +80,22 @@ function looseJsonString(text: string, field: string): string | undefined {
   return raw.replace(/\\n/g, "\n").replace(/\\"/g, '"');
 }
 
+function loosePlannerFields(text: string): Record<string, string> {
+  const fields: Record<string, string> = {};
+  const fieldPattern = [...new Set([...INTERNAL_DECISION_KEYS, ...PUBLIC_OUTPUT_KEYS])].map((field) => field.replace(/[.*+?^${}()|[\]\\]/g, "\\$&")).join("|");
+  const pattern = new RegExp(`^\\s*["']?(${fieldPattern})["']?\\s*:\\s*(.*)$`, "i");
+  for (const line of text.split(/\r?\n/)) {
+    const match = pattern.exec(line);
+    if (!match) continue;
+    let value = match[2].trim();
+    if ((value.startsWith('"') && value.endsWith('"')) || (value.startsWith("'") && value.endsWith("'"))) {
+      value = value.slice(1, -1).replace(/\\n/g, "\n").replace(/\\"/g, '"').replace(/\\'/g, "'");
+    }
+    fields[match[1]] = value;
+  }
+  return fields;
+}
+
 /**
  * Convert a planner-shaped model response into only its public wording.
  * Planner metadata is private cognition and must never be stored or rendered
@@ -89,9 +106,10 @@ export function publicExpressionText(text: string): string {
   if (!publicExpressionLeakageReason(text)) return text;
   const parsed = parsedObject(text);
   if (!parsed) {
-    const action = /\"action\"\s*:\s*\"([^\"]+)\"/i.exec(text)?.[1]?.trim().toLowerCase();
-    if (!action || ["no_op", "noop", "none", "silence", "skip"].includes(action)) return "";
-    return looseJsonString(text, "text") ?? looseJsonString(text, "reply") ?? "";
+    const looseFields = loosePlannerFields(text);
+    const action = /\"action\"\s*:\s*\"([^\"]+)\"/i.exec(text)?.[1]?.trim().toLowerCase() ?? looseFields.action?.trim().toLowerCase();
+    if (action && ["no_op", "noop", "none", "silence", "skip"].includes(action)) return "";
+    return looseJsonString(text, "text") ?? looseJsonString(text, "reply") ?? looseFields.text ?? looseFields.reply ?? "";
   }
 
   const rawActs = Array.isArray(parsed.acts) ? parsed.acts : [];
@@ -137,8 +155,10 @@ export function publicExpressionLeakageReason(text?: string): string | undefined
   if (!text) return undefined;
   const parsed = parsedObject(text);
   const keys = parsed ? Object.keys(parsed).filter((key) => INTERNAL_DECISION_KEYS.has(key)) : [];
+  const looseFields = parsed ? [] : Object.keys(loosePlannerFields(text)).filter((key) => INTERNAL_DECISION_KEYS.has(key));
   const hasDisposition = keys.includes("conversationDisposition") || keys.includes("conversation_disposition");
-  const hasDecisionShape = keys.includes("action") || hasDisposition || keys.length >= 2;
+  const hasLooseDisposition = looseFields.includes("conversationDisposition") || looseFields.includes("conversation_disposition");
+  const hasDecisionShape = keys.includes("action") || hasDisposition || keys.length >= 2 || looseFields.includes("action") || hasLooseDisposition || looseFields.length >= 2;
   const hasPlannerKeySyntax = /\"(?:action|conversationDisposition|conversation_disposition|rationale|speechAct|recommendedAction)\"\s*:/i.test(text) && /[{}]/.test(text);
   return hasDecisionShape || hasPlannerKeySyntax
     ? "The candidate is an internal Social Planner decision object, not public expression text."

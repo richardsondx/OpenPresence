@@ -28,10 +28,26 @@ describe("operator-supplied X posts", () => {
       if (String(input).includes("publish.x.com")) {
         return new Response(JSON.stringify({ author_name: "Reads with Ravi", author_url: "https://x.com/readswithravi", html: "<blockquote><p lang=\"zxx\"><a href=\"https://t.co/image\">pic.twitter.com/image</a></p><a>August 16, 2026</a></blockquote>" }), { status: 200, headers: { "content-type": "application/json" } });
       }
-      return new Response('<meta property="og:image" content="https://pbs.twimg.com/media/HPyaWjXWMAANcj0.jpg:large"><img src="https://pbs.twimg.com/profile_images/avatar.jpg">', { status: 200, headers: { "content-type": "text/html" } });
+      return new Response('<meta property="og:image" content="https://pbs.twimg.com/media/HQlf-c1XcAAhsQP?format=webp&amp;name=small"><img src="https://pbs.twimg.com/profile_images/avatar.jpg">', { status: 200, headers: { "content-type": "text/html" } });
     }));
     await expect(readPublicXPostByUrl("https://x.com/readswithravi/status/2089076729654767825")).resolves.toMatchObject({
-      media: [{ type: "photo", url: "https://pbs.twimg.com/media/HPyaWjXWMAANcj0.jpg:large" }],
+      media: [{ type: "photo", url: "https://pbs.twimg.com/media/HQlf-c1XcAAhsQP?format=webp&name=small" }],
+    });
+  });
+
+  it("records public target cards for provider lineage reconciliation", async () => {
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL) => {
+      if (String(input).includes("publish.x.com")) {
+        return new Response(JSON.stringify({
+          author_name: "Genny",
+          author_url: "https://x.com/example_agent",
+          html: "<blockquote><p lang=\"en\">A useful quote.</p><a>August 25, 2026</a></blockquote>",
+        }), { status: 200, headers: { "content-type": "application/json" } });
+      }
+      return new Response('<div data-href="/boardyai/status/2089431100980682909"></div><div data-href="/example_agent/status/2092177859288666350"></div>', { status: 200, headers: { "content-type": "text/html" } });
+    }));
+    await expect(readPublicXPostByUrl("https://x.com/example_agent/status/2092177859288666350")).resolves.toMatchObject({
+      publicTargetIds: ["2089431100980682909"],
     });
   });
 

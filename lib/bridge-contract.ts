@@ -44,6 +44,29 @@ export function bridgeAdapterStatus(bridge: Pick<Bridge, "state" | "lastHeartbea
   return "waiting";
 }
 
+/**
+ * Liveness and execution identity are deliberately separate signals. A
+ * browser can heartbeat while X is signed into a different account, so a
+ * heartbeat alone must never make a live delivery route executable.
+ */
+export function bridgeIdentityReady(bridge: Pick<Bridge, "kind" | "accountIdentity">): boolean {
+  return bridge.kind !== "bridge" || bridge.accountIdentity?.status === "verified";
+}
+
+/** The status users and schedulers should use when deciding whether work can run. */
+export function bridgeExecutionStatus(
+  bridge: Pick<Bridge, "kind" | "state" | "lastHeartbeatAt" | "lastSeenAt" | "accountIdentity">,
+  now = Date.now(),
+): BridgeAdapterStatus {
+  const liveness = bridgeAdapterStatus(bridge, now);
+  return liveness === "connected" && bridgeIdentityReady(bridge) ? "connected" : liveness === "connected" ? "waiting" : liveness;
+}
+
+export function bridgeExecutionStatusLabel(bridge: Pick<Bridge, "kind" | "state" | "lastHeartbeatAt" | "lastSeenAt" | "accountIdentity">, now = Date.now()) {
+  if (bridgeAdapterStatus(bridge, now) === "connected" && !bridgeIdentityReady(bridge)) return "Account verification required";
+  return bridgeAdapterStatusLabel(bridgeExecutionStatus(bridge, now));
+}
+
 export function bridgeAdapterStatusLabel(status: BridgeAdapterStatus) {
   switch (status) {
     case "connected": return "Adapter connected";

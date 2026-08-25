@@ -80,3 +80,18 @@ test("Agent is an account-style selector in the sidebar footer", async ({ page }
   await agentSwitcher.click();
   await expect(page.getByRole("menu", { name: "Your Agents" })).toBeVisible();
 });
+
+test("Growth waits for the full workspace when opened from compact Activity state", async ({ page }) => {
+  const pageErrors: Error[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error));
+  await createAgent(page);
+
+  const navigation = test.info().project.name === "mobile"
+    ? page.locator(".mobile-nav")
+    : page.locator(".sidebar");
+  await navigation.getByRole("button", { name: "Growth", exact: true }).click();
+
+  await expect(page).toHaveURL(/\/growth/);
+  await expect(page.getByRole("heading", { name: "Growth", exact: true })).toBeVisible();
+  expect(pageErrors).toEqual([]);
+});

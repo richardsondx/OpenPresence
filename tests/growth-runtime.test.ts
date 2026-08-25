@@ -9,10 +9,10 @@ function fixture(): OpenPresenceState {
 }
 
 describe("continuous growth responsibility", () => {
-  it("shortens bounded attention cadence while a configured growth target is unmet", () => {
+  it("derives attention cadence from intensity rather than social-action targets", () => {
     const now = Date.parse("2026-08-21T05:00:00.000Z");
-    expect(nextSelfDirectedAttentionAt({ intensity: "curious", now, verifiedQuoteOrRepostsToday: 0, quoteOrRepostTarget: 2, verifiedFollowsToday: 0, followsTarget: 3 })).toBe("2026-08-21T05:20:00.000Z");
-    expect(nextSelfDirectedAttentionAt({ intensity: "curious", now, verifiedQuoteOrRepostsToday: 2, quoteOrRepostTarget: 2, verifiedFollowsToday: 3, followsTarget: 3 })).toBe("2026-08-21T06:00:00.000Z");
+    expect(nextSelfDirectedAttentionAt({ intensity: "curious", now })).toBe("2026-08-21T06:00:00.000Z");
+    expect(nextSelfDirectedAttentionAt({ intensity: "quiet", now })).toBe("2026-08-21T11:00:00.000Z");
   });
 
   it("hands discovery to a healthy Bridge when Native X needs attention", () => {
@@ -148,7 +148,7 @@ describe("continuous growth responsibility", () => {
     const state = fixture();
     const presenceId = state.presence!.id;
     const heartbeat = new Date().toISOString();
-    const next = { ...state, bridges: [{ id: "bridge-x", presenceId, channelId: "x", name: "X Browser Bridge", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: heartbeat, capabilities: { inbound: true, reconcile: true, affordances: ["post", "reply", "like", "repost", "quote", "follow"], formats: ["x.post", "x.media-post", "x.reply"], metrics: ["followers", "public_metrics"], assetKinds: ["image", "video"] as ("image" | "video")[] }, createdAt: heartbeat, updatedAt: heartbeat }] };
+    const next = { ...state, bridges: [{ id: "bridge-x", presenceId, channelId: "x", name: "X Browser Bridge", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: heartbeat, accountIdentity: { username: "genny", status: "verified" as const, observedAt: heartbeat }, capabilities: { inbound: true, reconcile: true, affordances: ["post", "reply", "like", "repost", "quote", "follow"], formats: ["x.post", "x.media-post", "x.reply"], metrics: ["followers", "public_metrics"], assetKinds: ["image", "video"] as ("image" | "video")[] }, createdAt: heartbeat, updatedAt: heartbeat }] };
     const manifest = derivePresenceCapabilityManifest(next, presenceId);
     expect(manifest.items.find((item) => item.capability === "follow")).toMatchObject({ availability: "available", provider: "Browser Bridge", canExecute: true, canVerify: true });
     expect(manifest.items.find((item) => item.capability === "follower_measurement")).toMatchObject({ availability: "available", provider: "Browser Bridge", canObserve: true });
@@ -181,12 +181,32 @@ describe("continuous growth responsibility", () => {
       presence,
       presences: [presence],
       nativeConnections: [{ id: "native-x", presenceId: presence.id, channelId: "x" as const, kind: "x" as const, status: "connected" as const, access: "read-write" as const, deliveryError: "X has no API credits remaining for this app.", account: { id: "account-1", username: "genny", name: "Genny" }, createdAt: now, updatedAt: now }],
-      bridges: [{ id: "bridge-x", presenceId: presence.id, channelId: "x" as const, name: "OpenPresence Chrome", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: now, capabilities: { inbound: true, reconcile: true, affordances: ["post", "reply", "like", "repost", "quote", "follow"], formats: ["x.post", "x.reply", "x.like", "x.repost", "x.quote", "x.follow"], metrics: ["followers", "public_metrics"] }, createdAt: now, updatedAt: now }],
+      bridges: [{ id: "bridge-x", presenceId: presence.id, channelId: "x" as const, name: "OpenPresence Chrome", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: now, accountIdentity: { username: "genny", status: "verified" as const, observedAt: now }, capabilities: { inbound: true, reconcile: true, affordances: ["post", "reply", "like", "repost", "quote", "follow"], formats: ["x.post", "x.reply", "x.like", "x.repost", "x.quote", "x.follow"], metrics: ["followers", "public_metrics"] }, createdAt: now, updatedAt: now }],
     };
     const manifest = derivePresenceCapabilityManifest(next, presence.id);
     for (const capability of ["post", "repost", "quote", "follow"]) {
       expect(manifest.items.find((item) => item.capability === capability)).toMatchObject({ availability: "available", provider: "Browser Bridge", canExecute: true, requiresBrowser: true });
     }
+  });
+
+  it("projects a learned quote fallback through the actual verified browser route", () => {
+    const state = fixture();
+    const now = new Date().toISOString();
+    const presence = { ...state.presence!, browserAccess: { enabled: true, learnedFallbacks: [{ action: "x.quote", reason: "Native X rejected quote access.", learnedAt: now }] } };
+    const bridge = { id: "bridge-x", presenceId: presence.id, channelId: "x" as const, name: "OpenPresence Chrome", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: now, accountIdentity: { username: "genny", status: "verified" as const, observedAt: now }, capabilities: { inbound: true, reconcile: true, affordances: ["quote"], formats: ["x.quote"], metrics: [] }, createdAt: now, updatedAt: now };
+    const native = { id: "native-x", presenceId: presence.id, channelId: "x" as const, kind: "x" as const, status: "connected" as const, access: "read-write" as const, account: { id: "account-1", username: "genny", name: "Genny" }, createdAt: now, updatedAt: now };
+    const manifest = derivePresenceCapabilityManifest({ ...state, presence, presences: [presence], bridges: [bridge], nativeConnections: [native] }, presence.id);
+    expect(manifest.items.find((item) => item.capability === "quote")).toMatchObject({ availability: "available", provider: "Browser Bridge", requiresBrowser: true, canExecute: true });
+  });
+
+  it("withholds learned quote fallback from cognition until browser identity is verified", () => {
+    const state = fixture();
+    const now = new Date().toISOString();
+    const presence = { ...state.presence!, browserAccess: { enabled: true, learnedFallbacks: [{ action: "x.quote", reason: "Native X rejected quote access.", learnedAt: now }] } };
+    const bridge = { id: "bridge-x", presenceId: presence.id, channelId: "x" as const, name: "OpenPresence Chrome", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: now, capabilities: { inbound: true, reconcile: true, affordances: ["quote"], formats: ["x.quote"], metrics: [] }, createdAt: now, updatedAt: now };
+    const native = { id: "native-x", presenceId: presence.id, channelId: "x" as const, kind: "x" as const, status: "connected" as const, access: "read-write" as const, account: { id: "account-1", username: "genny", name: "Genny" }, createdAt: now, updatedAt: now };
+    const manifest = derivePresenceCapabilityManifest({ ...state, presence, presences: [presence], bridges: [bridge], nativeConnections: [native] }, presence.id);
+    expect(manifest.items.find((item) => item.capability === "quote")).toMatchObject({ availability: "temporarily-unavailable", canExecute: false });
   });
 
   it("routes recurring Native Growth through self-directed attention when Chrome is connected", () => {
@@ -197,15 +217,15 @@ describe("continuous growth responsibility", () => {
       ...state,
       presence,
       presences: [presence],
-      bridges: [{ id: "bridge-x", presenceId: presence.id, channelId: "x" as const, name: "OpenPresence Chrome", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: now, capabilities: { inbound: true, reconcile: true, affordances: ["post", "quote", "repost", "follow"], formats: ["x.post", "x.quote", "x.repost", "x.follow"], metrics: [] }, createdAt: now, updatedAt: now }],
+      bridges: [{ id: "bridge-x", presenceId: presence.id, channelId: "x" as const, name: "OpenPresence Chrome", kind: "bridge" as const, state: "online" as const, adapterStatus: "connected" as const, lastHeartbeatAt: now, accountIdentity: { username: "genny", status: "verified" as const, observedAt: now }, capabilities: { inbound: true, reconcile: true, affordances: ["post", "quote", "repost", "follow"], formats: ["x.post", "x.quote", "x.repost", "x.follow"], metrics: [] }, createdAt: now, updatedAt: now }],
     };
-    expect(recurringAttentionOperation(next, presence)).toEqual({ type: "runAttentionWorker" });
+    expect(recurringAttentionOperation(next, presence)).toMatchObject({ type: "runAttentionWorker", presenceId: presence.id, scheduled: true });
   });
 
   it("keeps Native Pulse for a readable Presence without a connected Chrome body", () => {
     const state = fixture();
     const presence = { ...state.presence!, connectionMode: "native" as const, selfDirectedAttention: { ...state.presence!.selfDirectedAttention!, enabled: true } };
-    expect(recurringAttentionOperation({ ...state, presence, presences: [presence], bridges: [] }, presence)).toEqual({ type: "runPulse", presenceId: presence.id });
+    expect(recurringAttentionOperation({ ...state, presence, presences: [presence], bridges: [] }, presence)).toMatchObject({ type: "runPulse", presenceId: presence.id, scheduled: true });
   });
 
   it("turns fresh Bridge observations into bounded discovery leads without judging them", () => {

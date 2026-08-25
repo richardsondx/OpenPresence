@@ -3,7 +3,7 @@
   "name": "OpenPresence",
   "version": "0.1.0",
   "description": "Give an OpenPresence Presence visible, accountable browser hands.",
-  "permissions": ["alarms", "storage", "tabs", "tabGroups"],
+  "permissions": ["alarms", "scripting", "storage", "tabs", "tabGroups"],
   "host_permissions": [
     "http://localhost:3015/*",
     "http://127.0.0.1:3015/*",

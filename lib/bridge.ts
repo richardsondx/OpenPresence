@@ -1,8 +1,8 @@
 import { z } from "zod";
-import { applyOperation, blockExecutionForLanguage, blockExecutionForTargetLanguage, curateRelationshipFromMirror, ensureCapabilityRequests, languageValidationForExecution, recordVerifiedCapabilityTrial, recordVerifiedFollow, targetLanguageValidationForExecution } from "./runtime";
-import { authenticateBridgeKey, deleteBridgeCredential, issueBridgeKey, readBridgeById, readBridgeCredentialMetadata, readStateForBridge, revokeBridgeKey, writeBridgeHeartbeat, writeState } from "./db";
+import { applyOperation, assignmentIsSatisfied, blockExecutionForLanguage, blockExecutionForTargetLanguage, curateRelationshipFromMirror, ensureCapabilityRequests, languageValidationForExecution, recordVerifiedCapabilityTrial, recordVerifiedFollow, settleCapabilityTrialVerificationFailure, targetLanguageValidationForExecution } from "./runtime";
+import { authenticateBridgeKey, deleteBridgeCredential, deleteBridgeIdentity, issueBridgeKey, readBridgeById, readBridgeCredentialMetadata, readStateForBridge, revokeBridgeKey, writeBridgeHeartbeat, writeBridgeIdentity, writeState } from "./db";
 import type { Bridge, Execution, LiveEvent, MirrorObject, OpenPresenceState, Outcome } from "./types";
-import { bridgeAdapterStatus } from "./bridge-contract";
+import { bridgeAdapterStatus, bridgeIdentityReady } from "./bridge-contract";
 
 // Chrome refreshes the signed-in identity on its own cadence. Keep the
 // verified identity valid across a model-generation + browser-delivery turn;
@@ -11,7 +11,9 @@ const BRIDGE_IDENTITY_MAX_AGE_MS = 1_800_000;
 import { PublicationSecurityError, sealExecutionForDelivery, verifyExecutionPermit } from "./publication-security";
 import { cleanMirrorText, normalizeMirrorAuthor } from "./mirror-content";
 import { languagesMatch } from "./language-policy";
-import { findVerifiedXReply, readNativeXCredentials } from "./x";
+import { findVerifiedXQuote, findVerifiedXReply, readNativeXCredentials } from "./x";
+import { settleAttentionForExecution } from "./attention-responsibility";
+import { requestAttention } from "./attention-coordinator";
 
 const entityRef = z.object({ type: z.string().min(1).max(80), id: z.string().min(1).max(240) });
 const author = z.object({ externalRef: entityRef.optional(), displayName: z.string().min(1).max(160), handle: z.string().max(160).optional(), avatarUrl: z.string().url().max(2_000).optional() }).optional();
@@ -25,6 +27,7 @@ export const identityInput = z.object({ executorId: z.string().min(1).max(160), 
 export const ackInput = z.object({ executorId: z.string().min(1).max(160), externalRef: entityRef, observedAt: z.string().datetime().optional() });
 export const failInput = z.object({ executorId: z.string().min(1).max(160), code: z.string().max(80).optional(), message: z.string().min(1).max(1_000), retryable: z.boolean().default(false) });
 export const verifyInput = z.object({ executorId: z.string().min(1).max(160), candidateExternalRef: entityRef.optional(), observedAt: z.string().datetime().optional() });
+export const closeVerificationInput = z.object({ executorId: z.string().min(1).max(160), note: z.string().trim().min(1).max(1_000) });
 export const outcomeInput = z.object({ executionId: z.string().min(1), status: z.enum(["succeeded", "failed", "unknown"]), metrics: z.record(z.number()).default({}), evidence: z.array(entityRef).default([]) });
 export const metricsInput = z.object({ audience: z.object({ followers: z.number().int().min(0), following: z.number().int().min(0).optional(), observedAt: z.string().datetime().optional() }).optional(), publications: z.array(z.object({ externalRef: entityRef, publicationAgeSeconds: z.number().int().min(0), metrics: z.object({ impressions: z.number().int().min(0).optional(), likes: z.number().int().min(0).optional(), replies: z.number().int().min(0).optional(), reposts: z.number().int().min(0).optional(), quotes: z.number().int().min(0).optional() }) })).max(100).default([]) });
 
@@ -60,13 +63,14 @@ export function rotateBridgeKey(source: OpenPresenceState, bridgeId: string) {
   if (!bridge) return { state: source, key: undefined };
   const next = applyOperation(source, { type: "rotateBridgeKey", id: bridgeId });
   const key = issueBridgeKey(bridgeId);
+  deleteBridgeIdentity(bridgeId);
   const updated = next.bridges.find((item) => item.id === bridgeId);
-  if (updated) { updated.credentialId = bridgeId; updated.keyPrefix = key.slice(0, 12); }
+  if (updated) { updated.credentialId = bridgeId; updated.keyPrefix = key.slice(0, 12); updated.accountIdentity = undefined; }
   writeState(next);
   return { state: next, key };
 }
 
-export function revokeBridge(source: OpenPresenceState, bridgeId: string) { const next = applyOperation(source, { type: "revokeBridge", id: bridgeId }); revokeBridgeKey(bridgeId); const metadata = readBridgeCredentialMetadata(bridgeId); const revoked = next.bridges.find((bridge) => bridge.id === bridgeId); if (metadata && revoked) Object.assign(revoked, metadata); writeState(next); return next; }
+export function revokeBridge(source: OpenPresenceState, bridgeId: string) { const next = applyOperation(source, { type: "revokeBridge", id: bridgeId }); revokeBridgeKey(bridgeId); deleteBridgeIdentity(bridgeId); const metadata = readBridgeCredentialMetadata(bridgeId); const revoked = next.bridges.find((bridge) => bridge.id === bridgeId); if (metadata && revoked) Object.assign(revoked, metadata); if (revoked) revoked.accountIdentity = undefined; writeState(next); return next; }
 
 export function removeBridge(source: OpenPresenceState, bridgeId: string) {
   const bridge = source.bridges.find((item) => item.id === bridgeId);
@@ -74,12 +78,18 @@ export function removeBridge(source: OpenPresenceState, bridgeId: string) {
   if (bridge.state !== "offline") throw new Error("Disconnect the Bridge before removing it.");
   const next = applyOperation(source, { type: "removeBridge", id: bridgeId });
   deleteBridgeCredential(bridgeId);
+  deleteBridgeIdentity(bridgeId);
   writeState(next);
   return next;
 }
 
 function touchBridge(state: OpenPresenceState, bridge: Bridge, synced = false) {
-  const now = timestamp(); bridge.state = "online"; bridge.adapterStatus = "connected"; bridge.lastSeenAt = now; if (synced) bridge.lastSyncAt = now; bridge.updatedAt = now;
+  const now = timestamp();
+  bridge.state = bridge.kind === "bridge" && !bridgeIdentityReady(bridge) ? "degraded" : "online";
+  bridge.adapterStatus = "connected";
+  bridge.lastSeenAt = now;
+  if (synced) bridge.lastSyncAt = now;
+  bridge.updatedAt = now;
   const sync = state.bridgeSync.find((item) => item.bridgeId === bridge.id) ?? ({ bridgeId: bridge.id, status: "idle" } as OpenPresenceState["bridgeSync"][number]);
   sync.status = "healthy"; sync.lastSyncAt = synced ? now : sync.lastSyncAt; sync.error = undefined; if (!state.bridgeSync.some((item) => item.bridgeId === bridge.id)) state.bridgeSync.unshift(sync);
 }
@@ -110,8 +120,12 @@ export function reportBridgeIdentity(bridge: Bridge, input: z.infer<typeof ident
     : status === "unknown"
       ? `The controlled browser did not expose a verifiable signed-in account. Expected @${expected}.`
       : undefined;
-  current.accountIdentity = { username: actual || undefined, status, message, observedAt: timestamp() };
-  current.updatedAt = timestamp();
+  const observedAt = timestamp();
+  current.accountIdentity = { username: actual || undefined, status, message, observedAt };
+  current.updatedAt = observedAt;
+  // Persist the account binding independently before any large workspace
+  // mutation. Subsequent stale runtime snapshots are overlaid with this row.
+  writeBridgeIdentity({ bridgeId: current.id, executorId: input.executorId, username: actual || undefined, status, message, observedAt });
   if (status === "mismatch") {
     current.state = "degraded";
     const sync = state.bridgeSync.find((item) => item.bridgeId === current.id);
@@ -120,9 +134,28 @@ export function reportBridgeIdentity(bridge: Bridge, input: z.infer<typeof ident
     current.state = "online";
     const sync = state.bridgeSync.find((item) => item.bridgeId === current.id);
     if (sync) { sync.status = "healthy"; sync.error = undefined; }
+    // Work held behind identity verification is not stale work. Re-open its
+    // delivery window when the expected account becomes available so the
+    // adapter can claim it without operator babysitting or a false expiry.
+    const renewal = new Date(Date.now() + 45 * 60 * 1000).toISOString();
+    for (const execution of state.executions) {
+      if (execution.bridgeId !== current.id || execution.environment !== "live" || !["queued", "awaiting-connector"].includes(execution.status)) continue;
+      const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
+      if (intent && execution.deliveryHold?.reason === "bridge_identity" && intent.validity.expiresAt && new Date(intent.validity.expiresAt).getTime() <= Date.now()) {
+        intent.validity.expiresAt = renewal;
+        intent.state = "active";
+      }
+      if (execution.status === "awaiting-connector") execution.status = "queued";
+      execution.connector = "bridge";
+      delete execution.deliveryHold;
+      execution.updatedAt = timestamp();
+    }
   }
   state.events.unshift(bridgeEvent(state, status === "verified" ? "Browser account verified" : "Browser account check failed", message ?? `The controlled channel account matches @${expected}.`, status === "verified" ? "positive" : "warning"));
-  writeState(state, { advanceWorkspaceRevision: false, syncNormalized: false });
+  // Identity changes are infrequent security state, not heartbeat telemetry.
+  // Advance the revision so an older attention run must merge/retry instead of
+  // overwriting resumed executions or the verified account event.
+  writeState(state, { syncNormalized: false });
   return { state, identity: current.accountIdentity, expectedHandle: presence?.handle };
 }
 
@@ -136,7 +169,9 @@ export function heartbeatBridge(bridge: Bridge, executorId: string) {
   bridge.adapterStatus = "connected";
   bridge.lastHeartbeatAt = now;
   bridge.lastSeenAt = now;
-  bridge.state = "online";
+  // Preserve a failed or unknown account check. Heartbeats prove the
+  // adapter process is alive; they do not prove which X account is active.
+  bridge.state = bridge.kind === "bridge" && bridge.state === "degraded" && !bridgeIdentityReady(bridge) ? "degraded" : "online";
   bridge.updatedAt = now;
   writeBridgeHeartbeat({ bridgeId: bridge.id, state: bridge.state, adapterStatus: bridge.adapterStatus, lastHeartbeatAt: now, lastSeenAt: now });
   return { bridge, status: bridgeAdapterStatus(bridge) };
@@ -178,19 +213,25 @@ function recordVerifiedBridgeAttention(state: OpenPresenceState, bridge: Bridge,
 
 export function ingestEvents(bridge: Bridge, payload: z.infer<typeof eventsInput>) {
   const state = readStateForBridge(bridge.id); const current = state.bridges.find((item) => item.id === bridge.id); if (!current) throw new Error("Bridge not found");
+  let receivedInbound = false;
   for (const item of payload.events) {
     if (state.mirrorEvents.some((event) => event.bridgeId === bridge.id && event.sourceEventId === item.sourceEventId)) continue;
     const presence = state.presences.find((candidate) => candidate.id === current.presenceId) ?? state.presence;
     const observedLanguage = item.object.language ?? item.object.content?.language;
     if (observedLanguage !== undefined && !languagesMatch(presence?.language, observedLanguage)) continue;
     const object = upsertObject(state, current, { ...item.object, actorPresenceId: observedActorPresenceId(presence, item.object) }, item.sourceEventId, item.event === "deleted");
+    if (item.event !== "deleted" && object.actorPresenceId !== bridge.presenceId) receivedInbound = true;
     const curationTarget = object.actorPresenceId === bridge.presenceId && object.parentExternalRef
       ? state.mirrorObjects.find((item) => item.externalRef.type === object.parentExternalRef?.type && item.externalRef.id === object.parentExternalRef?.id)
       : object;
     Object.assign(state, curateRelationshipFromMirror(state, curationTarget ?? object, bridge.presenceId));
     state.mirrorEvents.unshift({ id: localId("mirr_evt"), bridgeId: bridge.id, presenceId: bridge.presenceId, sourceEventId: item.sourceEventId, event: item.event, externalRef: item.object.externalRef, object, receivedAt: timestamp() });
   }
-  touchBridge(state, state.bridges.find((item) => item.id === bridge.id) ?? current); state.events.unshift(bridgeEvent(state, "Mirror updated", `${payload.events.length} external event${payload.events.length === 1 ? "" : "s"} received.`)); writeState(state); return state;
+  touchBridge(state, state.bridges.find((item) => item.id === bridge.id) ?? current); state.events.unshift(bridgeEvent(state, "Mirror updated", `${payload.events.length} external event${payload.events.length === 1 ? "" : "s"} received.`)); writeState(state);
+  const presence = state.presences.find((item) => item.id === bridge.presenceId) ?? state.presence;
+  // Inbound activity wakes a Resting Presence, never one the operator paused.
+  if (receivedInbound && presence?.status === "live") requestAttention(bridge.presenceId, "inbound_event", new Date().toISOString(), "observe_inbound");
+  return state;
 }
 
 export function reconcileBridge(bridge: Bridge, payload: z.infer<typeof reconcileInput>) {
@@ -221,7 +262,19 @@ export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput
   const identityFresh = current.accountIdentity?.status === "verified"
     && (Date.now() - new Date(current.accountIdentity.observedAt).getTime() <= BRIDGE_IDENTITY_MAX_AGE_MS
       || (current.lastHeartbeatAt !== undefined && Date.now() - new Date(current.lastHeartbeatAt).getTime() <= 120_000));
-  if (liveWork && !identityFresh) return { state, executions: [], retryAfterIdentity: true };
+  if (liveWork && !identityFresh) {
+    let held = false;
+    for (const execution of state.executions) {
+      if (execution.bridgeId !== bridge.id || execution.status !== "queued" || execution.environment !== "live") continue;
+      if (!execution.deliveryHold) {
+        execution.deliveryHold = { reason: "bridge_identity", at: timestamp() };
+        execution.updatedAt = timestamp();
+        held = true;
+      }
+    }
+    if (held) writeState(state, { advanceWorkspaceRevision: false, syncNormalized: false });
+    return { state, executions: [], retryAfterIdentity: true };
+  }
   for (const execution of state.executions) {
     if (execution.bridgeId !== bridge.id || execution.status !== "claimed" || !execution.lease?.expiresAt) continue;
     if (new Date(execution.lease.expiresAt).getTime() <= now) {
@@ -239,7 +292,7 @@ export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput
   }
   const hasActiveExecution = state.executions.some((execution) =>
     execution.bridgeId === bridge.id
-    && (execution.status === "claimed" || execution.status === "verification-pending")
+    && execution.status === "claimed"
   );
   if (hasActiveExecution) return { state, executions: [], retryAfterIdentity: false };
 
@@ -324,6 +377,7 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
     execution.lease = undefined;
     execution.updatedAt = timestamp();
     state.events.unshift(bridgeEvent(state, "Bridge acknowledgement blocked", execution.failure.message, "warning", execution.id));
+    state = settleAttentionForExecution(state, execution);
     writeState(state);
     return { state, execution };
   }
@@ -335,6 +389,7 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
       execution.updatedAt = timestamp();
       state.events.unshift(bridgeEvent(state, "Live publication blocked", "The Bridge acknowledgement did not match a valid sealed Public Expression.", "warning", execution.id));
       touchBridge(state, bridge);
+      state = settleAttentionForExecution(state, execution);
       writeState(state);
       return { state, execution };
     }
@@ -346,6 +401,7 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
     execution.updatedAt = timestamp();
     state.events.unshift(bridgeEvent(state, "Target language blocked delivery", execution.failure.message, "warning", execution.id));
     touchBridge(state, bridge);
+    state = settleAttentionForExecution(state, execution);
     writeState(state);
     return { state, execution };
   }
@@ -356,11 +412,12 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
     execution.updatedAt = timestamp();
     state.events.unshift(bridgeEvent(state, "Language policy blocked delivery", execution.failure.message, "warning", execution.id));
     touchBridge(state, bridge);
+    state = settleAttentionForExecution(state, execution);
     writeState(state);
     return { state, execution };
   }
   execution.status = "succeeded"; execution.externalRef = input.externalRef; execution.executedAt = input.observedAt ?? timestamp(); execution.updatedAt = timestamp(); execution.lease = undefined;
-  const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, status: "succeeded", observedAt: timestamp(), metrics: {}, evidence: [input.externalRef] }; state.outcomes.unshift(outcome); recordVerifiedCapabilityTrial(state, execution, outcome);
+  const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, attentionEpisodeId: execution.attentionEpisodeId, status: "succeeded", observedAt: timestamp(), metrics: {}, evidence: [input.externalRef] }; state.outcomes.unshift(outcome); recordVerifiedCapabilityTrial(state, execution, outcome);
   recordVerifiedBridgeAttention(state, bridge, execution, input.externalRef);
   const action = state.actions.find((item) => item.executionId === execution.id);
   if (action) { action.status = "executed"; action.outcomeId = outcome.id; }
@@ -371,7 +428,7 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
     apiVerifiedReply ? "The X API confirmed the exact public reply from the expected account." : "The external executor acknowledged the action.",
     "positive",
     execution.id,
-  )); touchBridge(state, bridge); writeState(state); return { state, execution };
+  )); touchBridge(state, bridge); state = settleAttentionForExecution(state, execution); writeState(state); return { state, execution };
 }
 
 /**
@@ -381,7 +438,7 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
  * provider evidence authorizes the later verification transition.
  */
 export function recordVerifiedBridgeReaction(source: OpenPresenceState, executionId: string, externalRef: import("./types").EntityRef) {
-  const state = JSON.parse(JSON.stringify(source)) as OpenPresenceState;
+  let state = JSON.parse(JSON.stringify(source)) as OpenPresenceState;
   const execution = state.executions.find((item) => item.id === executionId && item.connector === "bridge");
   if (!execution || !["x.quote", "x.repost", "quote", "repost"].includes(execution.affordance)) return state;
   if (execution.status === "succeeded") return state;
@@ -395,18 +452,42 @@ export function recordVerifiedBridgeReaction(source: OpenPresenceState, executio
   execution.failure = undefined;
   execution.reviewReason = undefined;
   execution.lease = undefined;
-  const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, status: "succeeded", observedAt: verifiedAt, metrics: {}, evidence: [externalRef], environment: execution.environment, sessionId: execution.sessionId, conversationEpisodeId: execution.conversationEpisodeId };
+  const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, attentionEpisodeId: execution.attentionEpisodeId, status: "succeeded", observedAt: verifiedAt, metrics: {}, evidence: [externalRef], environment: execution.environment, sessionId: execution.sessionId, conversationEpisodeId: execution.conversationEpisodeId };
   state.outcomes.unshift(outcome);
+  const mirror = state.mirrorObjects.find((item) => item.externalRef.type === externalRef.type && item.externalRef.id === externalRef.id && item.presenceId === execution.presenceId);
+  if (mirror) {
+    mirror.objectType = execution.affordance === "x.quote" || execution.affordance === "quote" ? "quote" : "repost";
+    mirror.originExecutionId = execution.id;
+    mirror.actorPresenceId = execution.presenceId;
+    mirror.assignmentId = execution.assignmentId;
+    if (execution.affordance === "x.quote" || execution.affordance === "quote") {
+      mirror.parentExternalRef = mirror.parentExternalRef ?? execution.target;
+      mirror.referencedExternalRefs = mirror.referencedExternalRefs?.length ? mirror.referencedExternalRefs : execution.target ? [execution.target] : mirror.referencedExternalRefs;
+    }
+  }
+  if (execution.assignmentId) {
+    const assignment = state.assignments.find((item) => item.id === execution.assignmentId);
+    if (assignment) {
+      assignment.progress.verified = Math.max(assignment.progress.verified, 1);
+      const complete = assignmentIsSatisfied(assignment, state);
+      assignment.status = complete ? "completed" : "active";
+      assignment.work = { ...(assignment.work ?? { phase: "publishing", attempts: 0, maxAttempts: 4, storiesResearched: 0 }), phase: complete ? "completed" : "candidate_review" };
+      assignment.lastOutcome = { class: complete ? "assignment_completed" : "incomplete", message: complete ? `Verified ${execution.affordance.replace(/^x\./, "")} satisfied the requested Assignment.` : "Verified social action recorded; more work remains.", at: verifiedAt };
+      assignment.updatedAt = verifiedAt;
+      state.events.unshift(bridgeEvent(state, complete ? "Assignment complete" : "Assignment progress updated", `${assignment.progress.verified} / ${assignment.progress.required} verified ${assignment.deliverable.type} delivered.`, "positive", execution.id));
+    }
+  }
   recordVerifiedCapabilityTrial(state, execution, outcome);
   recordVerifiedBridgeAttention(state, bridge, execution, externalRef);
   const action = state.actions.find((item) => item.executionId === execution.id);
   if (action) { action.status = "executed"; action.outcomeId = outcome.id; }
   state.events.unshift(bridgeEvent(state, "Chrome reaction verified on X", "The X API confirmed the authored Bridge reaction and its public target lineage.", "positive", execution.id));
+  state = settleAttentionForExecution(state, execution);
   return state;
 }
 
 export function failExecution(bridge: Bridge, executionId: string, input: z.infer<typeof failInput>) {
-  const state = readStateForBridge(bridge.id); const execution = leasedExecution(state, bridge, executionId, input.executorId); execution.failure = { code: input.code, message: input.message, retryable: input.retryable }; execution.lease = undefined;
+  let state = readStateForBridge(bridge.id); const execution = leasedExecution(state, bridge, executionId, input.executorId); execution.failure = { code: input.code, message: input.message, retryable: input.retryable }; execution.lease = undefined;
   const retrying = input.retryable && execution.attempts < 5;
   if (retrying) {
     // Claiming seals a live Public Expression. A retryable browser failure is
@@ -417,7 +498,7 @@ export function failExecution(bridge: Bridge, executionId: string, input: z.infe
     if (publicExpression) execution.publication = { ...execution.publication!, publicExpression: { ...publicExpression, safetyStatus: "candidate", payloadHash: undefined } };
     execution.permit = undefined;
   }
-  execution.status = retrying ? "queued" : "failed"; execution.updatedAt = timestamp(); state.events.unshift(bridgeEvent(state, "Bridge execution failed", input.message, input.retryable ? "warning" : "neutral", execution.id)); touchBridge(state, bridge); writeState(state); return { state, execution };
+  execution.status = retrying ? "queued" : "failed"; execution.updatedAt = timestamp(); state.events.unshift(bridgeEvent(state, "Bridge execution failed", input.message, input.retryable ? "warning" : "neutral", execution.id)); touchBridge(state, bridge); state = settleAttentionForExecution(state, execution); writeState(state); return { state, execution };
 }
 
 function leaveExecutionVerificationPending(bridge: Bridge, state: OpenPresenceState, execution: Execution, message: string, input: z.infer<typeof verifyInput>, options: { code?: string; retryable?: boolean } = {}) {
@@ -436,7 +517,7 @@ function leaveExecutionVerificationPending(bridge: Bridge, state: OpenPresenceSt
 }
 
 /**
- * Reconcile a Chrome-written X reply through the official X API. DOM
+ * Reconcile a Chrome-written X reply or quote through the official X API. DOM
  * visibility is intentionally only a submission hint: X's API must confirm
  * the exact author, parent post, and text before OpenPresence counts success.
  */
@@ -449,8 +530,9 @@ export async function verifyChromeExecution(bridge: Bridge, executionId: string,
     || execution.status === "verification-pending"
     || (execution.status === "failed" && ["RESULT_NOT_VERIFIED", "X_API_VERIFICATION_PENDING"].includes(execution.failure?.code ?? ""));
   if (!canVerify) throw new Error("Execution is not waiting for X verification");
-  if (execution.affordance !== "reply" && execution.affordance !== "x.reply") throw new Error("Only X replies submitted through Chrome can be API-verified");
-  if (execution.target?.type !== "x.post" || !execution.target.id) throw new Error("The Chrome reply has no target X post");
+  const action = execution.affordance.replace(/^x\./, "");
+  if (action !== "reply" && action !== "quote") throw new Error("Only X replies and quotes submitted through Chrome can be API-verified");
+  if (execution.target?.type !== "x.post" || !execution.target.id) throw new Error(`The Chrome ${action} has no target X post`);
 
   const presence = state.presences.find((item) => item.id === execution.presenceId) ?? state.presence;
   // The native X connection is the API credential source, not the browser
@@ -467,12 +549,15 @@ export async function verifyChromeExecution(bridge: Bridge, executionId: string,
   const text = typeof execution.publication?.publicExpression?.text === "string" ? execution.publication.publicExpression.text : payloadText;
   const handle = connection?.account?.username ?? presence?.handle;
   if (!credentials || !handle || !text) {
-    return leaveExecutionVerificationPending(bridge, state, execution, "Chrome submitted the reply, but the connected X API cannot yet verify the account, credentials, or approved text.", input);
+    return leaveExecutionVerificationPending(bridge, state, execution, `Chrome submitted the ${action}, but the connected X API cannot yet verify the account, credentials, or approved text.`, input);
   }
 
-  let verifiedReply;
+  let verifiedPost;
   try {
-    verifiedReply = await findVerifiedXReply(credentials, { targetId: execution.target.id, text, handle, candidateId: input.candidateExternalRef?.type === "x.reply" ? input.candidateExternalRef.id : undefined });
+    const candidateId = input.candidateExternalRef?.id;
+    verifiedPost = action === "quote"
+      ? await findVerifiedXQuote(credentials, { targetId: execution.target.id, text, handle, candidateId })
+      : await findVerifiedXReply(credentials, { targetId: execution.target.id, text, handle, candidateId });
   } catch (error) {
     state = readStateForBridge(bridge.id);
     const latest = state.executions.find((item) => item.id === executionId && item.bridgeId === bridge.id);
@@ -480,14 +565,14 @@ export async function verifyChromeExecution(bridge: Bridge, executionId: string,
     const message = error instanceof Error ? error.message : "X did not return a verification response.";
     const creditsExhausted = /no api credits|credits remaining|billing and usage|quota exhausted/i.test(message);
     return leaveExecutionVerificationPending(bridge, state, latest, creditsExhausted
-      ? "Chrome submitted the reply, but X API verification is paused because the X API has no credits remaining. Restore X API access before checking this outcome again."
-      : `Chrome submitted the reply, but X API verification is temporarily unavailable: ${message}`, input, creditsExhausted ? { code: "X_API_CREDITS_EXHAUSTED", retryable: false } : undefined);
+      ? `Chrome submitted the ${action}, but X API verification is paused because the X API has no credits remaining. Restore X API access before checking this outcome again.`
+      : `Chrome submitted the ${action}, but X API verification is temporarily unavailable: ${message}`, input, creditsExhausted ? { code: "X_API_CREDITS_EXHAUSTED", retryable: false } : undefined);
   }
-  if (!verifiedReply) {
+  if (!verifiedPost) {
     state = readStateForBridge(bridge.id);
     const latest = state.executions.find((item) => item.id === executionId && item.bridgeId === bridge.id);
     if (!latest) throw new Error("Execution not found");
-    return leaveExecutionVerificationPending(bridge, state, latest, "Chrome submitted the reply. OpenPresence is waiting for X to return the matching public reply through the API.", input);
+    return leaveExecutionVerificationPending(bridge, state, latest, `Chrome submitted the ${action}. OpenPresence is waiting for X to return the matching public ${action} through the API.`, input);
   }
 
   // Reuse the existing acknowledgement security boundary. For a later retry,
@@ -502,11 +587,44 @@ export async function verifyChromeExecution(bridge: Bridge, executionId: string,
     latest.updatedAt = timestamp();
     writeState(state);
   }
-  const result = acknowledgeExecution(bridge, executionId, { executorId: input.executorId, externalRef: { type: "x.reply", id: verifiedReply.id }, observedAt: input.observedAt ?? timestamp() }, { apiVerified: true });
+  const result = acknowledgeExecution(bridge, executionId, { executorId: input.executorId, externalRef: { type: action === "quote" ? "x.post" : "x.reply", id: verifiedPost.id }, observedAt: input.observedAt ?? timestamp() }, { apiVerified: true });
   return { ...result, verified: true };
 }
 
-export function reportOutcome(bridge: Bridge, input: z.infer<typeof outcomeInput>) { const state = readStateForBridge(bridge.id); const execution = state.executions.find((item) => item.id === input.executionId && item.bridgeId === bridge.id); if (!execution) throw new Error("Execution not found"); const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, status: input.status, observedAt: timestamp(), metrics: input.metrics, evidence: input.evidence }; state.outcomes.unshift(outcome); touchBridge(state, bridge); writeState(state); return { state, outcome }; }
+/**
+ * End a bounded browser-verification retry loop without inferring delivery.
+ * A verification-pending execution has deliberately released its lease, so
+ * the ordinary fail endpoint cannot close it after a service-worker restart.
+ */
+export function closeChromeVerification(bridge: Bridge, executionId: string, input: z.infer<typeof closeVerificationInput>) {
+  const state = readStateForBridge(bridge.id);
+  const execution = state.executions.find((item) => item.id === executionId && item.bridgeId === bridge.id);
+  if (!execution) throw new Error("Execution not found");
+  if (execution.status !== "verification-pending") throw new Error("Execution is not waiting for X verification");
+  execution.status = "verification-closed";
+  execution.failure = {
+    ...execution.failure,
+    code: execution.failure?.code ?? "X_API_VERIFICATION_TIMEOUT",
+    message: execution.failure?.message ?? "The browser reported submission, but OpenPresence could not prove a public X object.",
+    reviewedAt: timestamp(),
+    reviewDisposition: "operator_action_required",
+    reviewNote: input.note,
+  };
+  execution.reviewReason = input.note;
+  execution.lease = undefined;
+  execution.permit = undefined;
+  execution.updatedAt = timestamp();
+  const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
+  if (intent?.state === "active") { intent.state = "expired"; intent.updatedAt = timestamp(); }
+  const action = state.actions.find((item) => item.executionId === execution.id);
+  if (action) { action.status = "skipped"; action.reason = input.note; }
+  if (execution.capabilityTrialId) settleCapabilityTrialVerificationFailure(state, execution.capabilityTrialId, input.note);
+  state.events.unshift(bridgeEvent(state, "Unverified X outcome closed", input.note, "warning", execution.id));
+  writeState(state);
+  return { state, execution };
+}
+
+export function reportOutcome(bridge: Bridge, input: z.infer<typeof outcomeInput>) { const state = readStateForBridge(bridge.id); const execution = state.executions.find((item) => item.id === input.executionId && item.bridgeId === bridge.id); if (!execution) throw new Error("Execution not found"); const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, attentionEpisodeId: execution.attentionEpisodeId, status: input.status, observedAt: timestamp(), metrics: input.metrics, evidence: input.evidence }; state.outcomes.unshift(outcome); touchBridge(state, bridge); writeState(state); return { state, outcome }; }
 
 export function reportMetrics(bridge: Bridge, input: z.infer<typeof metricsInput>) {
   let state = readStateForBridge(bridge.id);

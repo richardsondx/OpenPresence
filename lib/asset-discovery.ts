@@ -1,5 +1,5 @@
 import crypto from "node:crypto";
-import { fetchPublicAsset, fetchPublicAssetPreview, isPublicHttpUrl } from "./asset-store";
+import { fetchPublicAsset, fetchPublicAssetPreview, isPublicHttpUrl, putAssetBytes } from "./asset-store";
 import { inferAssetSemanticKind } from "./visual-fit";
 import type { Asset, AssetCandidate, AssetDiscoveryProvider, AssetSemanticKind, SourceEvidence } from "./types";
 
@@ -109,9 +109,112 @@ export class TavilyAssetDiscoveryProvider implements AssetDiscoveryProvider {
   }
 }
 
+type EvidenceVisualSearchResult = {
+  id?: unknown;
+  title?: unknown;
+  document?: unknown;
+  shortDocument?: unknown;
+  publisher?: unknown;
+  sourceUrl?: unknown;
+  visualUrl?: unknown;
+  sourceAssetUrl?: unknown;
+  description?: unknown;
+  sourceCaption?: unknown;
+  publishedAt?: unknown;
+  date?: unknown;
+  corpus?: unknown;
+  type?: unknown;
+  chartKind?: unknown;
+  metadata?: { agent?: { queryHints?: { keywords?: unknown[] }; provenance?: unknown } };
+};
+
+function evidenceVisualEndpoint(value?: string) {
+  const endpoint = value?.trim() || process.env.EVIDENCE_VISUAL_URL?.trim() || "http://127.0.0.1:8787";
+  return endpoint.replace(/\/+$/, "");
+}
+
+function evidenceVisualCandidate(query: string, endpoint: string, item: EvidenceVisualSearchResult, index: number): AssetCandidate | undefined {
+  const id = text(item.id);
+  const sourcePageUrl = text(item.sourceUrl);
+  if (!id || !sourcePageUrl) return undefined;
+  const mediaCandidates = [text(item.visualUrl), text(item.sourceAssetUrl)].filter((value): value is string => Boolean(value) && value !== sourcePageUrl);
+  const mediaUrl = mediaCandidates[0] ?? `${endpoint}/v1/assets/${encodeURIComponent(id)}/content`;
+  const title = text(item.title) ?? text(item.document) ?? `EvidenceVisual result ${index + 1}`;
+  const description = text(item.description) ?? text(item.sourceCaption) ?? text(item.shortDocument);
+  const rawType = `${text(item.type) ?? ""} ${text(item.chartKind) ?? ""}`.toLowerCase();
+  const candidate: AssetCandidate = {
+    id: `evidence_${id}`,
+    query,
+    name: title,
+    mediaUrl,
+    sourcePageUrl,
+    title,
+    description,
+    publisher: text(item.publisher),
+    publishedAt: text(item.publishedAt) ?? text(item.date),
+    provider: "evidence-visual",
+    relevance: undefined,
+    semanticKind: /chart|graph|figure|plot|series|table/.test(rawType) ? "chart" : undefined,
+    underlyingDataSource: text(item.metadata?.agent?.provenance),
+    isThumbnail: false,
+  };
+  candidate.searchMetadataSemanticHint = inferAssetSemanticKind(candidate);
+  return candidate;
+}
+
+export class EvidenceVisualAssetDiscoveryProvider implements AssetDiscoveryProvider {
+  readonly id = "evidence-visual";
+  private static readonly REQUEST_TIMEOUT_MS = 15_000;
+  private readonly endpoint: string;
+  constructor(endpoint?: string, private readonly corpus?: string) {
+    this.endpoint = evidenceVisualEndpoint(endpoint);
+  }
+
+  async searchAssets(request: { query: string; semanticKind?: AssetSemanticKind; limit?: number }) {
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), EvidenceVisualAssetDiscoveryProvider.REQUEST_TIMEOUT_MS);
+    try {
+      const response = await fetch(`${this.endpoint}/v1/search`, {
+        method: "POST",
+        headers: { "content-type": "application/json", accept: "application/json" },
+        body: JSON.stringify({ query: request.query, corpus: this.corpus || "all", candidateLimit: Math.min(request.limit ?? 8, 20) }),
+        signal: controller.signal,
+      });
+      const body = await response.json().catch(() => undefined) as { results?: unknown[]; error?: { message?: string }; message?: string } | undefined;
+      if (!response.ok) throw new Error(body?.error?.message || body?.message || `EvidenceVisual search failed with HTTP ${response.status}.`);
+      return (body?.results ?? []).flatMap((item, index) => evidenceVisualCandidate(request.query, this.endpoint, item as EvidenceVisualSearchResult, index) ?? []).slice(0, request.limit ?? 8);
+    } catch (error) {
+      if (error instanceof Error && error.name === "AbortError") throw new Error(`EvidenceVisual search timed out after ${EvidenceVisualAssetDiscoveryProvider.REQUEST_TIMEOUT_MS / 1000} seconds.`);
+      throw error;
+    } finally {
+      clearTimeout(timeout);
+    }
+  }
+}
+
+async function fetchEvidenceVisualAsset(url: string) {
+  const parsed = new URL(url);
+  if (!parsed.pathname.startsWith("/v1/assets/") || !["localhost", "127.0.0.1", "::1"].includes(parsed.hostname)) {
+    throw new Error("EvidenceVisual returned an asset URL outside its configured local API.");
+  }
+  const controller = new AbortController();
+  const timer = setTimeout(() => controller.abort(), 15_000);
+  try {
+    const response = await fetch(parsed, { signal: controller.signal });
+    if (!response.ok) throw new Error(`EvidenceVisual asset content returned HTTP ${response.status}.`);
+    const bytes = Buffer.from(await response.arrayBuffer());
+    const mimeType = response.headers.get("content-type")?.split(";")[0]?.trim() || "application/octet-stream";
+    return putAssetBytes(bytes, { mimeType });
+  } finally {
+    clearTimeout(timer);
+  }
+}
+
 export async function materializeCandidate(candidate: AssetCandidate, input: { agentId: string; presenceId?: string; sessionId?: string; environment?: "sandbox" | "live"; origin?: Asset["provenance"]["origin"]; semanticKind?: AssetSemanticKind }): Promise<{ asset: Asset; sourceEvidence?: SourceEvidence }> {
   if (!candidate.mediaUrl) throw new Error("The candidate has no media URL to fetch.");
-  const stored = await fetchPublicAsset(candidate.mediaUrl);
+  const stored = candidate.provider === "evidence-visual" && /^https?:\/\/[^/]+\/v1\/assets\/[^/]+\/content(?:$|\?)/.test(candidate.mediaUrl)
+    ? await fetchEvidenceVisualAsset(candidate.mediaUrl)
+    : await fetchPublicAsset(candidate.mediaUrl);
   const retrievedAt = new Date().toISOString();
   const sourceEvidence: SourceEvidence | undefined = candidate.sourcePageUrl ? { id: `source_${crypto.randomUUID()}`, canonicalUrl: candidate.sourcePageUrl, publisher: candidate.publisher, author: candidate.author, publishedAt: candidate.publishedAt, retrievedAt, acquisitionProvider: candidate.provider, title: candidate.title, excerpt: candidate.description, assetIds: [], assetPublisher: candidate.assetPublisher ?? candidate.publisher, underlyingDataSource: candidate.underlyingDataSource, lineage: { assetUrl: candidate.mediaUrl, sourcePageUrl: candidate.sourcePageUrl, dataSourceUrl: candidate.underlyingDataSource, relationship: candidate.underlyingDataSource ? "secondary_visualization" : "unknown" } } : undefined;
   const asset: Asset = { id: `asset_${crypto.randomUUID()}`, agentId: input.agentId, presenceId: input.presenceId, sessionId: input.sessionId, type: stored.mimeType === "image/gif" ? "gif" : stored.mimeType.startsWith("video/") ? "video" : "image", mediaKind: stored.mimeType === "image/gif" ? "gif" : stored.mimeType.startsWith("video/") ? "video" : "image", semanticKind: input.semanticKind, storage: stored, status: "ready", nature: "observed", rights: { status: "unknown" }, provenance: { origin: input.origin ?? "discovered", sourceUrl: candidate.mediaUrl, sourcePageUrl: candidate.sourcePageUrl, canonicalSourcePage: candidate.sourcePageUrl, publisher: candidate.assetPublisher ?? candidate.publisher, author: candidate.author, publishedAt: candidate.publishedAt, retrievedAt, acquisitionProvider: candidate.provider, importedAt: retrievedAt, sourceIdentityStatus: candidate.sourcePageUrl ? "unknown" : "unknown" }, description: candidate.title ?? candidate.name, visibility: "public", shareability: "presence-only", environment: input.environment ?? "sandbox", createdAt: retrievedAt, updatedAt: retrievedAt };

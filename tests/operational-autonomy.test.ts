@@ -12,6 +12,7 @@ import {
   releaseOperationalRunLease,
   upsertBrowserBody,
   upsertDependencyHealth,
+  upsertRecoveryIncident,
   upsertOperationalRun,
   upsertScheduledWake,
 } from "../lib/db";
@@ -27,11 +28,13 @@ import { compileOperationalContext } from "../lib/operational-context";
 import { reconsiderAffectedRuns } from "../lib/recovery-reconsideration";
 import {
   calculateStaleAt,
+  closeStaleBridgeExecutions,
   evaluateOperationalRunProgress,
   runOperationalSweep,
   scheduleRetryWake,
   scheduleWake,
 } from "../lib/temporal";
+import { initialState } from "../lib/runtime";
 import type {
   Execution,
   MirrorObject,
@@ -46,6 +49,16 @@ import {
 
 describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () => {
   const presenceId = "presence_test_1";
+
+  it("fences a second worker invocation even when it targets the same run in the same process", () => {
+    const runId = `run_lease_fence_${Date.now()}_${Math.random()}`;
+    upsertOperationalRun({ id: runId, presenceId, kind: "attention", state: "queued", stage: "queued", createdAt: new Date().toISOString(), attemptCount: 0, recoveryCount: 0 });
+    expect(claimOperationalRunLease(runId, `${runId}:invocation-a`)).toBe(true);
+    expect(claimOperationalRunLease(runId, `${runId}:invocation-b`)).toBe(false);
+    expect(releaseOperationalRunLease(runId, `${runId}:invocation-a`)).toBe(true);
+    expect(claimOperationalRunLease(runId, `${runId}:invocation-b`)).toBe(true);
+    expect(releaseOperationalRunLease(runId, `${runId}:invocation-b`)).toBe(true);
+  });
 
   // Invariant 1: Time and Durable Wakes
   it("Invariant 1 & 5: Time is deterministic; stuck is derived from stage-specific elapsed time", () => {
@@ -106,6 +119,49 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
     expect(updated?.stage).toBe("woken_from_retry");
   });
 
+  it("Invariant: an unclaimed Bridge action closes truthfully instead of holding attention forever", () => {
+    const now = new Date("2026-08-25T06:20:00.000Z");
+    const staleHeartbeat = new Date(now.getTime() - 3 * 60_000).toISOString();
+    const source = initialState();
+    source.presence = { ...source.presence!, id: presenceId, status: "live" as const, channel: "x" as const };
+    source.presences = [source.presence];
+    source.bridges = [{
+      id: "bridge_stale_delivery",
+      presenceId,
+      channelId: "x",
+      name: "Stale Chrome Bridge",
+      kind: "bridge",
+      state: "online",
+      adapterStatus: "connected",
+      lastHeartbeatAt: staleHeartbeat,
+      accountIdentity: { username: "example_agent", status: "verified", observedAt: staleHeartbeat },
+      capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] },
+      createdAt: staleHeartbeat,
+      updatedAt: staleHeartbeat,
+    }];
+    source.socialIntents = [{ id: "intent_stale_delivery", presenceId, affordance: "x.reply", state: "ready", createdAt: staleHeartbeat, updatedAt: staleHeartbeat } as never];
+    source.executions = [{
+      id: "execution_stale_delivery",
+      socialIntentId: "intent_stale_delivery",
+      presenceId,
+      affordance: "x.reply",
+      mode: "auto",
+      status: "queued",
+      attempts: 0,
+      bridgeId: "bridge_stale_delivery",
+      connector: "bridge",
+      idempotencyKey: "stale-delivery-key",
+      createdAt: staleHeartbeat,
+      updatedAt: staleHeartbeat,
+    }];
+
+    expect(closeStaleBridgeExecutions(source, now)).toBe(1);
+    expect(source.executions[0].status).toBe("failed");
+    expect(source.executions[0].failure).toMatchObject({ code: "BRIDGE_NOT_CHECKED_IN", retryable: true });
+    expect(source.executions[0].failure?.message).toContain("no external write was attempted");
+    expect(source.executions[0].externalRef).toBeUndefined();
+  });
+
   // Invariant 7: Failures sharing a root cause are one incident
   it("Invariant 7: Multiple related failures aggregate into a single incident with recovery budget", () => {
     const err = "Chrome extension composer input failed";
@@ -119,6 +175,31 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
     expect(f3.incident.affectedRunIds).toContain("run_2");
     expect(f3.incident.affectedRunIds).toContain("run_3");
     expect(f3.incident.rootCauseKey).toBe("browser.composer_unavailable");
+  });
+
+  it("Invariant: deterministic model configuration failures stop retrying and require one actionable setup step", () => {
+    const classification = classifyFailureRootCause(
+      "Openai is selected but no API key is stored. Open Brain → Provider access and save the key.",
+      "model_provider",
+    );
+    expect(classification.rootCauseKey).toBe("model_provider.credentials_missing");
+    expect(classification.retryable).toBe(false);
+    expect(classification.requiresOperator).toBe(true);
+  });
+
+  it("Invariant: an existing recovery incident escalates immediately when credits become operator-blocked", () => {
+    const uniquePresence = `presence_credit_escalation_${Date.now()}`;
+    const first = recordOperationalFailure({ dependency: "runtime", presenceId: uniquePresence, runId: "run_credit_1", error: "X has no API credits remaining. Add credits or choose an API plan to continue." });
+    first.incident.state = "recovering";
+    first.incident.operatorActionRequired = false;
+    first.incident.nextAttemptAt = new Date(Date.now() + 60_000).toISOString();
+    upsertRecoveryIncident(first.incident);
+
+    const second = recordOperationalFailure({ dependency: "runtime", presenceId: uniquePresence, runId: "run_credit_2", error: "X has no API credits remaining. Add credits or choose an API plan to continue." });
+    expect(second.incident.id).toBe(first.incident.id);
+    expect(second.incident.state).toBe("needs_operator");
+    expect(second.incident.operatorActionRequired).toBe(true);
+    expect(second.incident.nextAttemptAt).toBeUndefined();
   });
 
   // Invariant 9: Strict Native-First Routing & 429 Quota Invariant

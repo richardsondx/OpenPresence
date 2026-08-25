@@ -1,46 +1,38 @@
 (function () {
-  try {
-    const suppressScript = document.createElement("script");
-    suppressScript.textContent = `
-      try {
-        const origEventTargetAdd = typeof EventTarget !== "undefined" && EventTarget.prototype ? EventTarget.prototype.addEventListener : null;
-        const origWinAdd = window.addEventListener;
-        const internalHandler = (e) => { try { e.stopImmediatePropagation(); e.stopPropagation(); delete e.returnValue; } catch {} };
-        if (origEventTargetAdd) { try { origEventTargetAdd.call(window, "beforeunload", internalHandler, true); } catch {} }
-        else if (origWinAdd) { try { origWinAdd.call(window, "beforeunload", internalHandler, true); } catch {} }
-        if (origEventTargetAdd) {
-          EventTarget.prototype.addEventListener = function(t, l, o) {
-            if (typeof t === "string" && (t.toLowerCase() === "beforeunload" || t.toLowerCase() === "pagehide")) return;
-            return origEventTargetAdd.apply(this, arguments);
-          };
-        }
-        if (origWinAdd) {
-          window.addEventListener = function(t, l, o) {
-            if (typeof t === "string" && (t.toLowerCase() === "beforeunload" || t.toLowerCase() === "pagehide")) return;
-            return origWinAdd.apply(this, arguments);
-          };
-        }
-        try { Object.defineProperty(window, "onbeforeunload", { get: () => null, set: () => {}, configurable: true }); } catch {}
-        if (typeof BeforeUnloadEvent !== "undefined" && BeforeUnloadEvent.prototype) {
-          try { Object.defineProperty(BeforeUnloadEvent.prototype, "returnValue", { get: () => undefined, set: () => {}, configurable: true }); } catch {}
-        }
-      } catch {}
-    `;
-    (document.head || document.documentElement).appendChild(suppressScript);
-    suppressScript.remove();
-  } catch {}
-
+  // beforeunload suppression is installed by suppress-beforeunload.js in the
+  // manifest's MAIN/document_start content script. Do not inject inline code:
+  // X's CSP correctly blocks it.
   let sessionState = "observing";
+  let connectionState = "unknown";
   let expectedHandle = "";
   let presenceName = "Waiting for Presence";
   let activeExecutionId = null;
   let metricsInFlight = false;
   const overlay = document.createElement("div");
   overlay.id = "openpresence-browser-overlay";
-  overlay.attachShadow({ mode: "open" }).innerHTML = `<style>:host{all:initial}.wrap{position:fixed;z-index:2147483647;right:16px;bottom:16px;display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid rgba(213,146,103,.65);border-radius:999px;background:rgba(255,250,246,.96);box-shadow:0 5px 24px rgba(39,25,17,.14);color:#332a25;font:12px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.mark{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#c77d50;color:#fff;font-weight:700}.dot{width:7px;height:7px;border-radius:50%;background:#73a879}.text{max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.label{display:block;color:#766b63;font-size:10px;margin-top:2px}</style><div class="wrap"><span class="mark">◉</span><span class="text"><b id="name">OpenPresence</b><span class="label" id="state">Observing · browser hands ready</span></span><span class="dot"></span></div>`;
+  overlay.attachShadow({ mode: "open" }).innerHTML = `<style>:host{all:initial}.wrap{position:fixed;z-index:2147483647;right:16px;bottom:16px;display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid rgba(213,146,103,.65);border-radius:999px;background:rgba(255,250,246,.96);box-shadow:0 5px 24px rgba(39,25,17,.14);color:#332a25;font:12px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.mark{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#c77d50;color:#fff;font-weight:700}.dot{width:7px;height:7px;border-radius:50%;background:#9b8d82}.text{max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.label{display:block;color:#766b63;font-size:10px;margin-top:2px}</style><div class="wrap"><span class="mark">◉</span><span class="text"><b id="name">OpenPresence</b><span class="label" id="state">Checking connection</span></span><span class="dot" id="connection-dot"></span></div>`;
   document.documentElement.appendChild(overlay);
-  const stateLabel = () => overlay.shadowRoot.getElementById("state").textContent = `${sessionState[0].toUpperCase()}${sessionState.slice(1)} · ${presenceName}`;
+  const stateLabel = () => {
+    const connectionLabels = {
+      connected: "connected",
+      identity_required: "verify account",
+      stale: "Connection stale",
+      error: "Connection error",
+      stopped: "Agent disconnected",
+      disabled: "Chrome hands off",
+      unconfigured: "Not connected",
+      ready: "Ready to connect",
+      unknown: "Checking connection",
+    };
+    const activityLabels = { waiting: "Account check", preparing: "Preparing", acting: "Delivering", verifying: "Verifying" };
+    const connection = connectionLabels[connectionState] || connectionLabels.unknown;
+    const activity = sessionState === "observing" ? "" : ` · ${activityLabels[sessionState] || "Working"}`;
+    overlay.shadowRoot.getElementById("state").textContent = `${connection}${activity} · ${presenceName}`;
+    const dot = overlay.shadowRoot.getElementById("connection-dot");
+    dot.style.background = connectionState === "connected" ? "#73a879" : connectionState === "identity_required" || connectionState === "stale" ? "#c99556" : "#9b8d82";
+  };
   const setState = (value) => { sessionState = value; stateLabel(); };
+  const setConnectionState = (value) => { connectionState = value || "unknown"; stateLabel(); };
   // Keep the channel usable while the unpacked extension is reloading or
   // when execution.js was attached in a different isolated-world context.
   // A missing runtime bridge must not silently suppress account identity,
@@ -194,17 +186,32 @@
 
   let lastIdentityReport = "";
   let lastIdentityReportAt = 0;
-  function reportAccountIdentity(claimAfterVerification = true) {
-    const account = verifyAccount();
+  let identityReportInFlight = false;
+  async function reportAccountIdentity(claimAfterVerification = true) {
+    if (identityReportInFlight) return;
+    identityReportInFlight = true;
+    let account = verifyAccount();
+    // X mounts the account menu/profile link after the initial document. Give
+    // the page a bounded opportunity to expose it before reporting unknown;
+    // otherwise a normal SPA mount is indistinguishable from a bad login.
+    if (!account.username && expectedHandle) {
+      account = await waitFor(() => {
+        const next = verifyAccount();
+        return next.username ? next : undefined;
+      }, 10_000) || account;
+    }
     // During an X SPA navigation the account controls may not have mounted
     // yet. Unknown is a loading state, not proof that the wrong account is
     // signed in; preserve the last verified identity until X exposes one.
-    if (!account.username) return;
-    const identity = account.username || `unknown:${account.message || "unverified"}`;
-    if (identity === lastIdentityReport && Date.now() - lastIdentityReportAt < 15_000) return;
-    lastIdentityReport = identity;
-    lastIdentityReportAt = Date.now();
-    sendMessage({ type: "OPENPRESENCE_ACCOUNT_IDENTITY", username: account.username, claimAfterVerification });
+    try {
+      const identity = account.username || `unknown:${account.message || "unverified"}`;
+      if (identity === lastIdentityReport && Date.now() - lastIdentityReportAt < 15_000) return;
+      lastIdentityReport = identity;
+      lastIdentityReportAt = Date.now();
+      await sendMessage({ type: "OPENPRESENCE_ACCOUNT_IDENTITY", username: account.username, claimAfterVerification });
+    } finally {
+      identityReportInFlight = false;
+    }
   }
 
   function visiblePosts() {
@@ -220,7 +227,11 @@
   }
 
   function isEnglishPost(post) {
-    return typeof post.language === "string" && /^(?:en|eng)(?:-|$)/i.test(post.language.trim());
+    // X often omits `lang` from timeline tweetText nodes. Unknown language is
+    // not proof of non-English content: sending the observation lets the
+    // server's Presence language policy decide, while filtering unknown posts
+    // here silently produced zero Bridge observations on real X timelines.
+    return !post.language || /^(?:en|eng)(?:-|$)/i.test(post.language.trim());
   }
 
   async function waitFor(predicate, timeout = 8_000) {
@@ -340,7 +351,13 @@
       setState("observing");
       return { executionId: execution.id, ok: true, externalRef };
     }
-    let composer = (pendingStage === "composer" || pendingStage === "reply-composer")
+    // X may open a fresh /compose/post tab for Quote/Reply. That new tab does
+    // not inherit the target tab's sessionStorage stage, but its URL is an
+    // authoritative indication that the approved composer is already open.
+    // Recognize both signals so a claimed execution is never stranded in a
+    // dedicated composer tab after the Bridge rebinds it.
+    const composerUrl = window.location.pathname.includes("/compose/post");
+    let composer = (pendingStage === "composer" || pendingStage === "reply-composer" || composerUrl)
       ? await waitFor(() => document.querySelector('[data-testid="tweetTextarea_0"]'), 20_000)
       : null;
     let target = composer || affordance === "post" ? null : visiblePosts().find((post) => post.id === targetId);
@@ -496,7 +513,11 @@
     for (const post of visiblePosts().filter(isEnglishPost).slice(0, 12)) sendMessage({ type: "OPENPRESENCE_OBSERVATION", observation: { sourceEventId: `x:${post.id}`, externalRef: { type: "x.post", id: post.id }, object: { externalRef: { type: "x.post", id: post.id }, objectType: "post", language: post.language, author: { displayName: post.displayName, handle: post.handle }, content: post.text ? { text: post.text, language: post.language } : undefined, visibility: "public", shareability: "presence-only" } } });
   }
 
-  chrome.runtime.onMessage.addListener((message) => {
+  chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {
+    if (message?.type === "OPENPRESENCE_EXTENSION_STATUS") {
+      presenceName = message.status?.presenceName || presenceName;
+      setConnectionState(message.status?.state);
+    }
     if (message?.type === "OPENPRESENCE_EXECUTE") {
       if (activeExecutionId === message.execution?.id) return;
       activeExecutionId = message.execution?.id || null;
@@ -513,7 +534,19 @@
       stateLabel();
       reportAccountIdentity();
     }
-    if (message?.type === "OPENPRESENCE_REQUEST_IDENTITY") reportAccountIdentity(message.claimAfterVerification !== false);
+    if (message?.type === "OPENPRESENCE_REQUEST_IDENTITY") {
+      // A newly mounted X tab may receive an identity probe before the
+      // session-context message reaches it (or after the service worker has
+      // recovered a different tab in the controlled window). Carry the
+      // Presence binding on the probe itself so this tab can verify the
+      // visible account instead of truthfully reporting an avoidable
+      // "unknown" identity.
+      expectedHandle = message.expectedHandle || expectedHandle;
+      presenceName = message.presenceName || presenceName;
+      stateLabel();
+      void reportAccountIdentity(message.claimAfterVerification !== false);
+      sendResponse({ ok: true });
+    }
     if (message?.type === "OPENPRESENCE_REQUEST_METRICS") void collectMetrics();
   });
   const pendingMetrics = sessionStorage.getItem("openpresence-pending-metrics");
@@ -544,6 +577,9 @@
     }
   }, true);
   setState("observing");
+  // A session-context message may have been sent before this script mounted.
+  // Announce readiness so the background binds this actual X tab reliably.
+  void sendMessage({ type: "OPENPRESENCE_CHANNEL_READY" });
   window.setTimeout(reportAccountIdentity, 1_000);
   window.setInterval(scan, 6_000);
   window.setTimeout(scan, 2_000);
