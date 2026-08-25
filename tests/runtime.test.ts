@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addSandboxEvent, applyOperation, assignmentIsOpen, assignmentIsSatisfied, cleanSandboxDraft, cleanUserFacingAssignmentInstruction, compileAssignmentInstruction, compilePresenceContext, compileWatch, completeNativeExecution, createAgent, deliverSandboxExecution, defaultPublishingInitiative, defaultSelfDirectedAttentionPolicy, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingProgress, deriveSelfDirectedDiscoveryPlan, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, formXActionIntent, identityLeakageReason, inferExplicitDurableContext, inferPresenceIdentityChange, initialState, isActivityDecisionEvent, isExplicitGhostModeRequest, isExplicitXPostRequest, isMentionRestrictedError, isTeachProposalConfirmation, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, publicHistoryMatchesPresence, recordAttentionTestDecision, recordNativeMirror, recordNativeObservation, recordPublicFooting, recordResourceUsageEvent, recordSocialDecision, recordStandingIntentNoOp, recordVerifiedChromeReply, recordVerifiedXReply, rerouteExecutionToBridge, startAttentionTest, startPlaygroundSession, stateForContext } from "../lib/runtime";
+import { addSandboxEvent, applyOperation, assignmentIsOpen, assignmentIsSatisfied, cleanSandboxDraft, cleanUserFacingAssignmentInstruction, compileAssignmentInstruction, compilePresenceContext, compileWatch, completeNativeExecution, createAgent, deliverSandboxExecution, defaultPublishingInitiative, defaultSelfDirectedAttentionPolicy, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingProgress, deriveSelfDirectedDiscoveryPlan, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, formXActionIntent, identityLeakageReason, inferExplicitDurableContext, inferPresenceIdentityChange, initialState, isActivityDecisionEvent, isExplicitGhostModeRequest, isExplicitXPostRequest, isMentionRestrictedError, isTeachProposalConfirmation, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, publicHistoryMatchesPresence, publicSelfGuidance, recordAttentionTestDecision, recordNativeMirror, recordNativeObservation, recordPublicFooting, recordResourceUsageEvent, recordSocialDecision, recordStandingIntentNoOp, recordVerifiedChromeReply, recordVerifiedXReply, rerouteExecutionToBridge, startAttentionTest, startPlaygroundSession, stateForContext } from "../lib/runtime";
 import { expireQueuedDeliveryWindows } from "../lib/temporal";
 import { acknowledgeExecution, claimExecutions, createBridgeWithKey, heartbeatBridge, ingestEvents, removeBridge, revokeBridge } from "../lib/bridge";
 import { readBridgeById, readBridgeCredentialMetadata, readState, readStateVersion, writeState } from "../lib/db";
@@ -603,6 +603,16 @@ describe("OpenPresence runtime boundaries", () => {
     expect(identityLeakageReason(state, presence, "OpenAI could build a better model by measuring recovery, not just benchmark peaks.")).toBeUndefined();
     expect(identityLeakageReason(state, presence, "I use the current model provider and exact model behind this account.")).toContain("implementation details");
     expect(identityLeakageReason(state, presence, "This account uses OpenAI and runs on the selected model.")).toContain("implementation details");
+  });
+
+  it("keeps an Agent-owned Presence's public aliases in first person", () => {
+    const state = createAgent({ name: "Genny", description: "Make useful founder observations.", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    const guidance = publicSelfGuidance(state.presence!);
+
+    expect(guidance).toContain("This Agent-owned Presence is you, not another person");
+    expect(guidance).toContain("Genny and @example_agent are your own public name and account");
+    expect(guidance).toContain("use first person (I/me/my)");
+    expect(guidance).toContain("never switch to third person to comment on yourself");
   });
 
   it("counts only verified Sandbox Mirror publications toward an Assignment", () => {
