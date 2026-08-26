@@ -275,7 +275,13 @@ export function searchKnowledge(source: OpenPresenceState, input: KnowledgeSearc
 export function compileKnowledgeContext(source: OpenPresenceState, input: KnowledgeSearchInput): { state: OpenPresenceState; packet: KnowledgeContextPacket } {
   const searched = searchKnowledge(source, input);
   const mindFileEvidence = boundMindFileEvidence(searched.state, input.presenceId);
-  const styleEvidence = input.purpose === "social_planning" ? (mindFileEvidence.TASTE ?? []).slice(0, 24) : [];
+  // Rehearsal and live social planning share the same meaning-file path. In
+  // this workspace the conversation StylePrint is bound to BRAIN.md while
+  // the prose writing guide is bound to TASTE.md, so both bindings are style
+  // evidence rather than unrelated default Knowledge.
+  const styleEvidence = input.purpose === "social_planning"
+    ? [...(mindFileEvidence.BRAIN ?? []), ...(mindFileEvidence.TASTE ?? [])].slice(0, 32)
+    : [];
   const styleSegmentIds = new Set(styleEvidence.map((item) => item.segmentId));
   const packet: KnowledgeContextPacket = { retrievalRunId: searched.result.retrievalRunId, publicEvidence: searched.result.results.filter((result) => result.effectiveUse === "public" && !styleSegmentIds.has(result.segmentId)), restrictedEvidence: searched.result.results.filter((result) => result.effectiveUse === "internal" && !styleSegmentIds.has(result.segmentId)), styleEvidence, mindFileEvidence, ...(searched.result.unresolvedConflicts ? { unresolvedConflicts: searched.result.unresolvedConflicts } : {}), ...(searched.result.missingEvidence ? { missingEvidence: searched.result.missingEvidence } : {}), ...(searched.result.staleWarnings ? { staleWarnings: searched.result.staleWarnings } : {}) };
   const boundEvidence = Object.values(mindFileEvidence).flatMap((items) => items ?? []);

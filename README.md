@@ -101,6 +101,8 @@ The connection is tested against the account before activation. Posts, replies, 
 
 Community Bridges and Manual Relay remain separate fallback connectors. A revoked Bridge exposes safe credential metadata, never the secret itself, and can be removed from the interface. See the [Bridge adapter contract](docs/bridge-adapter.md) for the guided external browser-agent setup, lifecycle endpoints, and troubleshooting.
 
+For multiple live social accounts, use **Set up dedicated Chrome** in Presence Settings. OpenPresence launches real Chrome with one persistent `user-data-dir` per Presence, so cookies, local storage, extension state, and the signed-in social identity cannot be shared accidentally between Presences. Install the unpacked extension once in each dedicated browser profile during local development; the extension continues to own the existing observation, execution, account-verification, and outcome-verification path.
+
 ## Secrets and local data
 
 Set <code>OPENPRESENCE_SECRET_KEY</code> before storing credentials in a production deployment:

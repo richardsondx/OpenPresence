@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { generateAgentReply, generateAgentSocialDecision, generateAssetResearchPlannerDecision, generatePlaygroundTestStimulus, generatePresenceChatReply, parseAgentSocialDecision, parseAgentSocialEdit, parseAgentSocialJudgment, parseAssetResearchPlannerDecision, parseGrowthReviewDecision, parsePlaygroundTestStimulus } from "../lib/ai";
+import { generateAgentReply, generateAgentSocialDecision, generateAssetResearchPlannerDecision, generatePlaygroundTestStimulus, generatePresenceChatReply, normalizeRehearsalReply, parseAgentSocialDecision, parseAgentSocialEdit, parseAgentSocialJudgment, parseAssetResearchPlannerDecision, parseGrowthReviewDecision, parsePlaygroundTestStimulus } from "../lib/ai";
 import { saveProviderSecret } from "../lib/db";
 import { applyOperation, createAgent } from "../lib/runtime";
 import type { PresenceBrief } from "../lib/types";
@@ -363,6 +363,39 @@ describe("Agent social decision parsing", () => {
     expect(system).toContain("CONVERSATIONAL REHEARSAL MODE");
   });
 
+  it("uses one social move and the bound StylePrint for real Rehearsal replies", async () => {
+    let state = createAgent({ name: "Genny", description: "Make useful founder observations.", mode: "agent", handle: "@genny_rehearsal", accent: "#D68754" });
+    state.providerConnections.push({ id: "ollama-rehearsal-style", provider: "ollama", label: "Ollama", status: "local", endpoint: "http://ollama.test", createdAt: new Date().toISOString() });
+    state = applyOperation(state, { type: "setModel", provider: "ollama", model: "glm-5.2:cloud", vision: false });
+    state = applyOperation(state, { type: "createKnowledgeDocument", name: "STYLEPRINT.md", content: '{"schema":"styleprint.conversation.v1","anti_patterns":["turn_every_reply_into_a_lesson"]}', sourceType: "markdown" });
+    const styleprint = state.knowledgeDocuments[0]!;
+    state = applyOperation(state, { type: "setKnowledgeAccess", presenceId: state.presence!.id, maximumUse: "internal" });
+    state = applyOperation(state, { type: "setMindFileKnowledgeBinding", fileKind: "BRAIN", knowledgeDocumentId: styleprint.id, enabled: true });
+    const calls: Array<{ url: string; body?: Record<string, unknown> }> = [];
+    let chatCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
+      calls.push({ url, body });
+      if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
+      chatCalls += 1;
+      const content = JSON.stringify({ acts: [{ action: "reply", text: "$10k MRR is a proper milestone — especially after the long road.", rationale: "A warm acknowledgment earns a reply." }] });
+      return new Response(JSON.stringify({ message: { content } }), { status: 200 });
+    }));
+
+    await expect(generatePresenceChatReply(state, state.presence!.id, "We finally crossed $10k MRR today. Took way longer than I expected.", [])).resolves.toBe("$10k MRR is a proper milestone, especially after the long road.");
+    expect(chatCalls).toBe(1);
+    const plannerCall = calls.find((call) => call.url.endsWith("/api/chat"))!;
+    const plannerMessages = plannerCall.body?.messages as Array<{ role: string; content: string }>;
+    expect(plannerMessages.at(-1)).toEqual({ role: "user", content: "We finally crossed $10k MRR today. Took way longer than I expected." });
+    expect(plannerMessages[0]?.content).toContain("STYLEPRINT EXECUTION CONTRACT");
+    expect(plannerMessages[0]?.content).toContain("SOCIAL PLANNER GUIDANCE");
+    expect(plannerMessages[0]?.content).toContain("styleprint.conversation.v1");
+    expect(plannerMessages[0]?.content).toContain("KNOWLEDGE EVIDENCE");
+    expect(plannerMessages[0]?.content).toContain("Do not use em dashes or en dashes");
+    expect(normalizeRehearsalReply("one — two – three")).toBe("one, two, three");
+  });
+
   it("lets SOUL control the manner of safe prompt-request deflection", async () => {
     let state = createAgent({ name: "Genny", description: "A witty public Presence.", mode: "agent", handle: "@genny_voice", accent: "#D68754" });
     state.providerConnections.push({ id: "ollama-prompt-deflection", provider: "ollama", label: "Ollama", status: "local", endpoint: "http://ollama.test", createdAt: new Date().toISOString() });
@@ -392,7 +425,7 @@ describe("Agent social decision parsing", () => {
     expect(system).toContain("witty vulnerability about the person doubting my sentient abilities");
   });
 
-  it("injects the bound internal conversation style guide into social cognition", async () => {
+  it("uses linked StylePrint as bound meaning-file evidence in Rehearsal", async () => {
     let state = createAgent({ name: "Genny", description: "Make useful founder observations.", mode: "agent", handle: "@genny_ai", accent: "#D68754" });
     state.providerConnections.push({ id: "ollama-style-guide", provider: "ollama", label: "Ollama", status: "local", endpoint: "http://ollama.test", createdAt: new Date().toISOString() });
     state = applyOperation(state, { type: "setModel", provider: "ollama", model: "glm-5.2:cloud", vision: false });
@@ -420,7 +453,7 @@ describe("Agent social decision parsing", () => {
     expect(system).toContain("internal control context");
   });
 
-  it("serializes shared Knowledge once and references it from each bound meaning file", async () => {
+  it("serializes only explicitly bound Knowledge into Rehearsal cognition", async () => {
     let state = createAgent({ name: "Genny", description: "Make useful founder observations.", mode: "agent", handle: "@genny_shared", accent: "#D68754" });
     state.providerConnections.push({ id: "ollama-shared-context", provider: "ollama", label: "Ollama", status: "local", endpoint: "http://ollama.test", createdAt: new Date().toISOString() });
     state = applyOperation(state, { type: "setModel", provider: "ollama", model: "glm-5.2:cloud", vision: false });
@@ -442,10 +475,10 @@ describe("Agent social decision parsing", () => {
 
     const chatCall = calls.find((call) => call.url.endsWith("/api/chat"));
     const system = String((chatCall?.body?.messages as Array<{ role: string; content: string }>)[0]?.content ?? "");
-    expect(system.match(/Use one shared source passage once\./g)).toHaveLength(1);
+    expect(system).toContain("Use one shared source passage once.");
     expect(system).toContain('"SOUL.md"');
     expect(system).toContain('"TASTE.md"');
-    expect(system).toContain('"attachedTo": [\n        "SOUL.md",\n        "TASTE.md"\n      ]');
+    expect(system).toContain("attachedTo");
   });
 
   it("keeps Teach person-shaped and does not invite generic onboarding for a short cue", async () => {

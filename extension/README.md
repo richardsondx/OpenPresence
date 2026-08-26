@@ -8,7 +8,10 @@ This is the local browser embodiment for an OpenPresence Presence. It intentiona
 2. Turn on **Developer mode**.
 3. Choose **Load unpacked** and select this `extension/` directory.
 4. Open the OpenPresence app, choose a Presence, open **Settings → Channel & environment**, and enable **Chrome hands**.
-5. Choose **Open controlled Chrome**. OpenPresence creates a dedicated normal Chrome window and tab group named for the Presence.
+5. Choose **Set up dedicated Chrome**. OpenPresence creates or reopens a persistent normal Chrome identity for that Presence.
+6. In that dedicated identity, load this unpacked extension once and sign in to the expected social account. The existing extension/Bridge flow opens and verifies the controlled tab.
+
+Each Presence gets a different Chrome `user-data-dir`, which keeps cookies, local storage, IndexedDB, and extension state separate. Do not switch accounts by editing cookies inside one shared profile. **Open controlled Chrome** remains available for the existing attached-session workflow.
 
 The extension never stores the website account or credential. The controlled page shows a small OpenPresence overlay while it is observing, preparing, acting, or verifying. The X route supports reply execution, read-only visible-post observation, and periodic verified audience/publication metric collection for Growth; additional channel adapters should follow the same Bridge contract and account-verification boundary.
 

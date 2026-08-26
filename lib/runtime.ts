@@ -2914,6 +2914,157 @@ function normalizeAssignment(input: Assignment): Assignment {
   };
 }
 
+type LegacyAssignmentRecord = Partial<Assignment> & {
+  assignmentId?: string;
+  presence?: string;
+  label?: string;
+  day?: string;
+  time?: string;
+  objective?: string;
+  mode?: import("./types").ExecutionMode;
+  enabled?: boolean;
+  executionWindow?: string;
+  standingIntentId?: string;
+};
+
+function isLegacyAssignmentRecord(input: LegacyAssignmentRecord) {
+  return !input.presenceId
+    || !input.environment
+    || !input.status
+    || Boolean(input.presence || input.day || input.time || input.executionWindow);
+}
+
+/**
+ * Calendar records were historically stored as `CalendarSlot`-shaped objects
+ * in the assignments collection. Keep those records, but give them the
+ * canonical Assignment identity used by the current Schedule and run ledger.
+ * This is deliberately deterministic: a read/refresh must never manufacture
+ * a new Assignment or leave a calendar link dangling.
+ */
+function canonicalizeLegacyAssignment(source: OpenPresenceState, input: LegacyAssignmentRecord, slot?: CalendarSlot): Assignment {
+  const presenceId = input.presenceId ?? input.presence ?? slot?.presence;
+  const presence = source.presences.find((item) => item.id === presenceId) ?? source.presence;
+  if (!presence || !source.agent) throw new Error("Cannot repair an Assignment without its owning Agent and Presence.");
+  const instruction = (input.instruction ?? input.label ?? input.objective ?? slot?.instruction ?? slot?.label ?? "Evaluate a useful idea for the audience").trim();
+  const schedule = input.schedule ?? (input.day || input.time || slot ? {
+    day: input.day ?? slot?.day ?? "Monday",
+    time: input.time ?? slot?.time ?? "08:00",
+    executionWindow: input.executionWindow ?? slot?.executionWindow ?? "08:00–11:00",
+  } : undefined);
+  const environment = input.environment ?? presence.environment ?? "sandbox";
+  const delegationPolicy = input.executionPolicy?.delegationPolicy ?? "keep_moving";
+  const compiled = compileAssignmentInstruction(source, instruction, presence.id, environment, input.sessionId, schedule, delegationPolicy, input.objective);
+  const canonicalId = input.assignmentId ?? slot?.assignmentId ?? input.id ?? compiled.id;
+  const status = input.status ?? (input.enabled === false || slot?.enabled === false ? "paused" : input.mode === "auto" || slot?.mode === "auto" ? "active" : "draft");
+  const createdAt = input.createdAt ?? input.updatedAt ?? slot?.lastEvaluatedAt ?? compiled.createdAt;
+  const updatedAt = input.updatedAt ?? input.createdAt ?? slot?.lastEvaluatedAt ?? createdAt;
+  return {
+    ...compiled,
+    ...input,
+    id: canonicalId,
+    agentId: input.agentId ?? source.agent.id,
+    presenceId: presence.id,
+    channelId: input.channelId ?? presence.channel,
+    environment,
+    title: input.title ?? instruction,
+    origin: input.origin ?? (schedule ? "schedule" : "manual"),
+    activation: schedule ? { type: "scheduled", recurrence: input.recurrence ?? compiled.recurrence, deadline: input.timeframe?.deadline } : input.activation ?? { type: "manual" },
+    instruction,
+    deliverable: { ...compiled.deliverable, ...(input.deliverable ?? {}) },
+    quantityPolicy: input.quantityPolicy ?? compiled.quantityPolicy,
+    schedule,
+    executionPolicy: input.executionPolicy ?? compiled.executionPolicy,
+    status,
+    progress: { ...compiled.progress, ...(input.progress ?? {}) },
+    createdAt,
+    updatedAt,
+  };
+}
+
+function canonicalizeAssignmentRecords(source: OpenPresenceState, rawAssignments: Assignment[], calendar: CalendarSlot[]) {
+  const repaired: Assignment[] = [];
+  const byId = new Map<string, Assignment>();
+  const legacyInputs = rawAssignments as unknown as LegacyAssignmentRecord[];
+  for (const input of legacyInputs) {
+    const matchingSlot = calendar.find((slot) => slot.id === input.id
+      || slot.assignmentId === input.id
+      || (slot.presence === (input.presenceId ?? input.presence)
+        && slot.instruction === input.instruction
+        && slot.day === input.day
+        && slot.time === input.time));
+    const candidate = isLegacyAssignmentRecord(input)
+      ? canonicalizeLegacyAssignment(source, input, matchingSlot)
+      : normalizeAssignment(input as Assignment);
+    const existing = byId.get(candidate.id);
+    if (existing) {
+      // Prefer the already-canonical record's lifecycle, progress, and audit
+      // history; only fill missing durable fields from the legacy projection.
+      Object.assign(existing, {
+        ...candidate,
+        id: existing.id,
+        status: existing.status,
+        progress: existing.progress,
+        work: existing.work ?? candidate.work,
+        attemptHistory: existing.attemptHistory?.length ? existing.attemptHistory : candidate.attemptHistory,
+        storyResearch: existing.storyResearch?.length ? existing.storyResearch : candidate.storyResearch,
+        createdAt: existing.createdAt,
+        updatedAt: existing.updatedAt,
+      });
+      continue;
+    }
+    byId.set(candidate.id, candidate);
+    repaired.push(candidate);
+  }
+  for (const slot of calendar) {
+    if (!slot.enabled) continue;
+    let assignment = slot.assignmentId ? byId.get(slot.assignmentId) : undefined;
+    if (!assignment) {
+      assignment = repaired.find((item) => item.presenceId === slot.presence
+        && item.instruction === slot.instruction
+        && item.schedule?.day === slot.day
+        && item.schedule?.time === slot.time);
+    }
+    if (!assignment) {
+      assignment = canonicalizeLegacyAssignment(source, slot as unknown as LegacyAssignmentRecord, slot);
+      byId.set(assignment.id, assignment);
+      repaired.push(assignment);
+    }
+    slot.assignmentId = assignment.id;
+  }
+  return repaired;
+}
+
+const assignmentStatuses = new Set(["draft", "accepted", "planning", "active", "working", "awaiting_execution", "awaiting_review", "needs_operator", "paused", "blocked", "completed", "completed_with_adaptation", "failed", "expired_incomplete", "cancelled"]);
+
+export function assignmentPersistenceIssues(state: OpenPresenceState) {
+  const issues: string[] = [];
+  const agentId = state.agent?.id;
+  const presenceIds = new Set(state.presences.map((presence) => presence.id));
+  const assignmentIds = new Set<string>();
+  for (const assignment of state.assignments) {
+    if (!assignment.id) issues.push("an Assignment is missing its id");
+    if (assignmentIds.has(assignment.id)) issues.push(`Assignment ${assignment.id} is duplicated`);
+    assignmentIds.add(assignment.id);
+    if (!agentId || assignment.agentId !== agentId) issues.push(`Assignment ${assignment.id} is not owned by the active Agent`);
+    if (!presenceIds.has(assignment.presenceId)) issues.push(`Assignment ${assignment.id} points to a missing Presence`);
+    if (!(assignment.environment === "sandbox" || assignment.environment === "live")) issues.push(`Assignment ${assignment.id} has no valid environment`);
+    if (!assignment.instruction?.trim()) issues.push(`Assignment ${assignment.id} has no instruction`);
+    if (!assignment.deliverable || !assignment.executionPolicy) issues.push(`Assignment ${assignment.id} is missing its execution contract`);
+    if (!assignmentStatuses.has(assignment.status)) issues.push(`Assignment ${assignment.id} has an invalid status`);
+    if (!Number.isFinite(assignment.progress?.required) || !Number.isFinite(assignment.progress?.verified)) issues.push(`Assignment ${assignment.id} has invalid progress`);
+    if (!assignment.createdAt || !assignment.updatedAt) issues.push(`Assignment ${assignment.id} is missing audit timestamps`);
+  }
+  for (const slot of state.calendar) {
+    if (slot.assignmentId && !assignmentIds.has(slot.assignmentId)) issues.push(`Calendar slot ${slot.id} points to missing Assignment ${slot.assignmentId}`);
+  }
+  return issues;
+}
+
+export function assertAssignmentPersistenceInvariant(state: OpenPresenceState) {
+  const issues = assignmentPersistenceIssues(state);
+  if (issues.length) throw new Error(`Assignment persistence invariant failed; refusing to save: ${issues.slice(0, 8).join("; ")}`);
+}
+
 /** Repair legacy X mirrors that lost reply provenance at ingestion. */
 function repairNativeReplyClassifications(state: OpenPresenceState) {
   const executions = new Map(state.executions.map((execution) => [execution.id, execution] as const));
@@ -3062,7 +3213,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
     if (!builtin || definition.id !== "x") return definition;
     return { ...definition, affordances: [...builtin.affordances.filter((item) => !definition.affordances.some((current) => current.id === item.id)), ...definition.affordances], supportedAssetKinds: [...new Set([...(builtin.supportedAssetKinds ?? []), ...(definition.supportedAssetKinds ?? [])])] };
   });
-  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], workspaceRevision: state.workspaceRevision, presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], operatorConversations: state.operatorConversations ?? [], operatorNudges: state.operatorNudges ?? [], agentRequests: (state.agentRequests ?? []).filter((request) => request.kind !== "capability"), capabilityChangeEvents: state.capabilityChangeEvents ?? [], calendar, assignments: (state.assignments ?? []).map((assignment) => normalizeAssignment(assignment)), assignmentRuns: state.assignmentRuns ?? [], growthReviews: state.growthReviews ?? [], growthRevisions: state.growthRevisions ?? [], growthEvidenceSnapshots: state.growthEvidenceSnapshots ?? [], growthFileVersions: state.growthFileVersions ?? [], audienceSnapshots: state.audienceSnapshots ?? [], publicationMetricSnapshots: state.publicationMetricSnapshots ?? [], watches: state.watches ?? [], explorations: state.explorations ?? [], discoveryPlans: state.discoveryPlans ?? [], explorationSessions: state.explorationSessions ?? [], explorationFindings: state.explorationFindings ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, assetProviderConnections: state.assetProviderConnections ?? [], toolBindings: toolBindings.map((binding) => ({ ...binding, enabled: binding.enabled !== false })), changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], operatorDirectives: state.operatorDirectives ?? [], socialDecisions: state.socialDecisions ?? [], resourceUsageEvents: state.resourceUsageEvents ?? [], attentionEpisodes: state.attentionEpisodes ?? [], socialIntents: state.socialIntents ?? [], executions: (state.executions ?? []).map((execution) => {
+  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], workspaceRevision: state.workspaceRevision, presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], operatorConversations: state.operatorConversations ?? [], operatorNudges: state.operatorNudges ?? [], agentRequests: (state.agentRequests ?? []).filter((request) => request.kind !== "capability"), capabilityChangeEvents: state.capabilityChangeEvents ?? [], calendar, assignments: [] as Assignment[], assignmentRuns: state.assignmentRuns ?? [], growthReviews: state.growthReviews ?? [], growthRevisions: state.growthRevisions ?? [], growthEvidenceSnapshots: state.growthEvidenceSnapshots ?? [], growthFileVersions: state.growthFileVersions ?? [], audienceSnapshots: state.audienceSnapshots ?? [], publicationMetricSnapshots: state.publicationMetricSnapshots ?? [], watches: state.watches ?? [], explorations: state.explorations ?? [], discoveryPlans: state.discoveryPlans ?? [], explorationSessions: state.explorationSessions ?? [], explorationFindings: state.explorationFindings ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, assetProviderConnections: state.assetProviderConnections ?? [], toolBindings: toolBindings.map((binding) => ({ ...binding, enabled: binding.enabled !== false })), changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], operatorDirectives: state.operatorDirectives ?? [], socialDecisions: state.socialDecisions ?? [], resourceUsageEvents: state.resourceUsageEvents ?? [], attentionEpisodes: state.attentionEpisodes ?? [], socialIntents: state.socialIntents ?? [], executions: (state.executions ?? []).map((execution) => {
     const repaired = repairLegacyXVerificationStatus(execution);
     if (repaired !== execution) return repaired;
     if (execution.failure && isTerminalDuplicateExecution(execution)) {
@@ -3081,6 +3232,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
     rightsAssessments: state.rightsAssessments ?? [],
     editorialDecisions: state.editorialDecisions ?? [],
     publicationPackages: state.publicationPackages ?? [] };
+  normalized.assignments = canonicalizeAssignmentRecords(normalized, state.assignments ?? [], normalized.calendar);
   const assignmentIds = new Set(normalized.assignments.map((assignment) => assignment.id));
   // Older records could retain `active` after a model/provider failure even
   // though their durable AssignmentRun had already terminated. Repair that
@@ -3142,18 +3294,9 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
     return { ...run, status: "published" as const, currentStage: "completed" as const, lastError: undefined };
   });
   reconcileLiveAssignmentRuns(normalized);
-  for (const slot of normalized.calendar) {
-    if (!slot.enabled || slot.assignmentId) continue;
-    const existing = normalized.assignments.find((assignment) => assignment.origin === "schedule" && assignment.presenceId === slot.presence && assignment.instruction === slot.instruction && assignment.schedule?.day === slot.day && assignment.schedule?.time === slot.time);
-    if (existing) {
-      slot.assignmentId = existing.id;
-      continue;
-    }
-    const migrated = compileAssignmentInstruction(normalized, slot.instruction, slot.presence, normalized.presences.find((item) => item.id === slot.presence)?.environment ?? "sandbox", undefined, { day: slot.day, time: slot.time, executionWindow: slot.executionWindow });
-    migrated.origin = "schedule";
-    normalized.assignments.unshift(migrated);
-    slot.assignmentId = migrated.id;
-  }
+  // `canonicalizeAssignmentRecords` repairs both old slot-shaped Assignment
+  // rows and dangling calendar assignmentId links before this boundary can
+  // expose an empty Schedule or persist a reduced workspace.
   migrateLegacyOperatorDirectives(normalized);
   normalized.bridges = (state.bridges ?? []).map(migrateLegacyXBrowserBridge);
   normalized.mirrorObjects = repairNativeReplyClassifications({ ...normalized, mirrorObjects: (state.mirrorObjects ?? []).map(normalizeMirrorObject) });

@@ -1,11 +1,46 @@
 import { describe, expect, it } from "vitest";
-import { applyOperation, assignmentIsCurrentlyProcessing, assignmentProgressLabel, compileAssignmentInstruction, createAgent, normalizeState, preflightAssignment } from "../lib/runtime";
+import { applyOperation, assertAssignmentPersistenceInvariant, assignmentIsCurrentlyProcessing, assignmentProgressLabel, compileAssignmentInstruction, createAgent, normalizeState, preflightAssignment } from "../lib/runtime";
 import { evaluateExecutionReadiness } from "../lib/execution-readiness";
 import { classifyLiveAssignmentRun, liveAssignmentRunStage, reconcileLiveAssignmentRuns } from "../lib/live-assignment-run";
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
 describe("canonical Assignment domain", () => {
+  it("repairs legacy slot-shaped records without losing their calendar-linked identity", () => {
+    const state = createAgent(input);
+    const presence = state.presence!;
+    const legacy = {
+      id: "slot_legacy_assignment",
+      label: "Notice one useful pattern in founder conversations",
+      instruction: "Notice one useful pattern in founder conversations",
+      day: "Tuesday",
+      time: "08:00",
+      objective: "audience_growth",
+      presence: presence.id,
+      mode: "auto" as const,
+      enabled: true,
+      executionWindow: "08:00–11:00",
+    };
+    const normalized = normalizeState({
+      ...state,
+      assignments: [legacy] as never,
+      calendar: [{ ...legacy, assignmentId: "assignment_historical_link" }],
+    });
+    const assignment = normalized.assignments[0]!;
+    expect(assignment.id).toBe("assignment_historical_link");
+    expect(assignment.presenceId).toBe(presence.id);
+    expect(assignment.environment).toBe(presence.environment ?? "sandbox");
+    expect(assignment.schedule).toMatchObject({ day: "Tuesday", time: "08:00", executionWindow: "08:00–11:00" });
+    expect(assignment.activation?.type).toBe("scheduled");
+    expect(normalized.calendar[0]?.assignmentId).toBe(assignment.id);
+  });
+
+  it("fails closed when a workspace still contains an unowned Assignment", () => {
+    const state = createAgent(input);
+    const assignment = compileAssignmentInstruction(state, "Publish one useful lesson about persistent agents.", state.presence!.id, "sandbox");
+    expect(() => assertAssignmentPersistenceInvariant({ ...state, assignments: [{ ...assignment, presenceId: "presence_missing" }] })).toThrow(/refusing to save/);
+  });
+
   it("compiles one clear completion contract without exposing Consider vs Assign", () => {
     const state = createAgent(input);
     const assignment = compileAssignmentInstruction(state, "Publish one useful lesson about persistent agents Tuesday morning.", state.presence!.id, "sandbox", undefined, { day: "Tuesday", time: "08:00", executionWindow: "08:00–11:00" });

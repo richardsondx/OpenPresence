@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { z } from "zod";
 import { createBridgeWithKey, rotateBridgeKey } from "@/lib/bridge";
 import { chromeBrowserBridgeCapabilities } from "@/lib/bridge-contract";
-import { readState, writeState } from "@/lib/db";
+import { getBrowserBody, readState, upsertBrowserBody, writeState } from "@/lib/db";
 import { stateForContext } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
@@ -42,6 +42,13 @@ export async function POST(request: Request) {
       }
     }
     if (!result.key || !result.state.bridges.some((bridge) => bridge.presenceId === presence.id)) return NextResponse.json({ error: "The Chrome bridge could not be prepared." }, { status: 500 });
+    const browserBody = getBrowserBody(presence.id);
+    if (browserBody?.mode === "managed") {
+      browserBody.state = "healthy";
+      browserBody.lastHealthyAt = new Date().toISOString();
+      browserBody.updatedAt = new Date().toISOString();
+      upsertBrowserBody(browserBody);
+    }
     return NextResponse.json({
       version: 1,
       executorId: parsed.executorId,

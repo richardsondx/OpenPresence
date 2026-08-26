@@ -519,6 +519,7 @@ fieldset { border: none; padding: 0; margin: 0 0 26px; }
 /* Chat context workspace: history stays in the left navigation; this panel explains the active conversation. */
 .chat-layout.context-open { max-width: none; grid-template-columns: minmax(0, 1fr) minmax(250px, 300px); gap: clamp(28px, 4vw, 58px); }
 .chat-layout.context-collapsed { max-width: none; grid-template-columns: minmax(0, 1fr); }
+.chat-layout.rehearsal-chat-layout { max-width: none; grid-template-columns: minmax(0, 1fr); gap: 0; }
 .chat-layout .chat-thread { max-width: none; }
 .context-toggle { position: fixed; z-index: 20; top: 20px; right: 20px; width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); color: var(--muted); }
 .context-toggle:hover { color: var(--ink); border-color: #c8c0b5; background: white; }
@@ -1130,6 +1131,7 @@ fieldset { border: none; padding: 0; margin: 0 0 26px; }
 .schedule-layer-toolbar + .add-slot-form { margin-top: 0; }
 .schedule-list { display: grid; gap: 16px; margin-top: 18px; }.schedule-list-header { display: flex; align-items: flex-end; justify-content: space-between; gap: 22px; padding: 18px 0 2px; border-top: 2px solid var(--ink); }.schedule-list-header h2 { margin: 7px 0 5px; font-size: 22px; letter-spacing: -.05em; }.schedule-list-header p { max-width: 680px; margin: 0; color: var(--muted); font-size: 11px; line-height: 1.45; }.schedule-list-legend { justify-content: flex-end; max-width: 430px; }.schedule-list-rows { display: grid; gap: 9px; }.schedule-list-row { display: grid; grid-template-columns: 5px minmax(0, 1fr) auto; align-items: start; gap: 12px; width: 100%; padding: 13px 14px 13px 10px; border: 1px solid var(--line); border-left: 1px solid var(--line); border-radius: 7px; background: #fffdfa; color: var(--ink); text-align: left; }.schedule-list-row-mark { width: 5px; min-height: 58px; border-radius: 4px; background: #b9aa9b; }.schedule-list-row-copy { display: grid; gap: 5px; min-width: 0; }.schedule-list-row-kicker { display: flex; align-items: center; flex-wrap: wrap; gap: 8px; color: var(--muted); font: 9px "DM Mono", monospace; letter-spacing: .05em; text-transform: uppercase; }.schedule-list-row-kicker strong { color: var(--ink); }.schedule-list-row-kicker span { padding: 2px 5px; border-radius: 999px; background: #f1ebe4; color: var(--muted); }.schedule-list-row h3 { margin: 0; font-size: 12px; line-height: 1.4; overflow-wrap: anywhere; }.schedule-list-row small { color: var(--muted); font-size: 10px; line-height: 1.4; }.schedule-list-row-assignment { cursor: pointer; }.schedule-list-row-assignment:hover { border-color: #d4b29b; background: #fff8f2; }.schedule-list-row-assignment:focus-visible { outline: 2px solid #d88b57; outline-offset: 2px; }.schedule-list-row-assignment .schedule-list-row-kicker span { background: rgba(255,255,255,.62); }.schedule-list-row-plan { border-color: #b8a9dd; background: repeating-linear-gradient(-45deg, rgba(250,248,255,.95), rgba(250,248,255,.95) 8px, rgba(246,242,255,.95) 8px, rgba(246,242,255,.95) 16px); }.schedule-list-row-plan .schedule-list-row-mark { background: #8068b2; }.schedule-list-row-plan .schedule-list-row-kicker strong, .schedule-list-row-plan h3 { color: #65528e; }.schedule-list-row-plan .schedule-list-row-kicker span { background: rgba(255,255,255,.64); color: #74698b; }.schedule-list-row-assignment .schedule-list-row-mark { background: #d68754; }.schedule-list-row-assignment.objective-audience-growth .schedule-list-row-mark { background: #e5a276; }.schedule-list-row-assignment.objective-education .schedule-list-row-mark { background: #88bf91; }.schedule-list-row-assignment.objective-relationship .schedule-list-row-mark { background: #9a8bd4; }.schedule-list-row-assignment.objective-reflection .schedule-list-row-mark { background: #7eafc7; }.schedule-list-row-assignment.objective-audience-growth { border-color: #e5a276; background: #fff8f3; }.schedule-list-row-assignment.objective-education { border-color: #88bf91; background: #f4faf5; }.schedule-list-row-assignment.objective-relationship { border-color: #9a8bd4; background: #faf8ff; }.schedule-list-row-assignment.objective-reflection { border-color: #7eafc7; background: #f4f9fc; }
 .week-calendar-compact-mode .week-grid-scroll { display: none; }
+.schedule-list-header-controls { display: grid; justify-items: end; gap: 7px; flex: 0 0 auto; }.schedule-day-filter-label { color: var(--muted); font: 9px "DM Mono", monospace; letter-spacing: .05em; text-transform: uppercase; }.schedule-day-filter { justify-content: flex-end; }.schedule-day-filter button { min-width: 30px; padding-inline: 7px; }
 .week-calendar-compact { display: none; overflow: hidden; border: 1px solid var(--line); border-radius: 9px; background: #fffdfa; }
 .week-calendar-compact-mode .week-calendar-compact { display: grid; }
 .compact-calendar-day { display: grid; grid-template-columns: 145px minmax(0, 1fr); border-bottom: 1px solid var(--line); }
@@ -4254,6 +4256,8 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
   .publishing-plan-schedule-details summary small { text-align: left; }
   .publishing-plan-schedule-window-list > div > div { align-items: flex-start; flex-direction: column; gap: 4px; }
   .schedule-list-header { align-items: flex-start; flex-direction: column; }
+  .schedule-list-header-controls { align-self: stretch; justify-items: start; }
+  .schedule-day-filter { justify-content: flex-start; max-width: 100%; }
   .schedule-list-legend { justify-content: flex-start; max-width: none; }
   .schedule-list-row { padding: 11px 10px 11px 8px; }
 }
@@ -5559,8 +5563,12 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .operator-chat-copy-button { display: inline-grid; place-items: center; width: 28px; height: 28px; padding: 0; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: transparent; cursor: pointer; transition: .18s ease; }
 .operator-chat-copy-button:hover:not(:disabled) { border-color: #c8c0b5; color: var(--ink); background: white; }
 .operator-chat-copy-button:disabled { opacity: .45; cursor: not-allowed; }
+.rehearsal-copy-button { display: inline-grid; place-items: center; width: 34px; height: 34px; padding: 0; border: 1px solid var(--line); border-radius: 7px; color: var(--muted); background: transparent; cursor: pointer; transition: .18s ease; }
+.rehearsal-copy-button:hover:not(:disabled) { border-color: #c8c0b5; color: var(--ink); background: white; }
+.rehearsal-copy-button:disabled { opacity: .45; cursor: not-allowed; }
 .chat-heading .page-heading-title-row h1 { margin: 2px 0 4px; }
 .operator-chat-page .operator-chat-composer textarea { width: auto; min-height: 38px; max-height: 140px; height: 38px; resize: none; overflow-y: auto; border: 0; border-radius: 0; padding: 9px 0 6px; font-family: inherit; font-size: 13px; line-height: 1.4; }
 .operator-chat-context-copy { margin: 8px 0 0; color: var(--muted); font-size: 11px; line-height: 1.6; }
 .presence-chat-page .composer-hint { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+.presence-chat-page .chat-composer textarea { min-height: 38px; height: 38px; }
 @media (max-width: 760px) { .activity-now-step-list { margin-left: 0; } .operator-chat-message { max-width: 92%; } .operator-chat-history { padding-right: 0; } }

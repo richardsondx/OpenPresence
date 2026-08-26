@@ -2,23 +2,15 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { execSync } from "node:child_process";
+import { getPresenceProfileDir } from "./browser-profile";
 import { getBrowserBody, upsertBrowserBody } from "./db";
 import { logRecoveryAttempt, recordOperationalSuccess } from "./incident-engine";
 import { reconsiderAffectedRuns } from "./recovery-reconsideration";
 import type { BrowserBody } from "./types";
 
-type BrowserEvaluate = <T>(fn: (...args: unknown[]) => T, ...args: unknown[]) => Promise<T>;
+export { getPresenceProfileDir } from "./browser-profile";
 
-export function getPresenceProfileDir(presenceId: string): string {
-  const baseDir = process.env.OPENPRESENCE_DATA_DIR
-    ? path.join(process.env.OPENPRESENCE_DATA_DIR, "browser-profiles")
-    : process.platform === "darwin"
-      ? path.join(os.homedir(), "Library", "Application Support", "OpenPresence", "browser-profiles")
-      : path.join(process.cwd(), "data", "browser-profiles");
-  const profileDir = path.join(baseDir, presenceId);
-  fs.mkdirSync(profileDir, { recursive: true });
-  return profileDir;
-}
+type BrowserEvaluate = <T>(fn: (...args: unknown[]) => T, ...args: unknown[]) => Promise<T>;
 
 interface ActiveBrowserSession {
   context: {

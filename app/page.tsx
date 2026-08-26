@@ -127,6 +127,7 @@ import type {
   View,
   OperationalHealthSnapshot,
   AttentionEpisode,
+  BrowserBody,
   CurationSourceConfig,
   CurationSourceKind,
 } from "@/lib/types";
@@ -1886,6 +1887,7 @@ function AgentWorkspaceShell({
   const presenceBridge = presence.channel !== "x" ? state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline") : undefined;
   const presenceBridgeStatus = presenceBridge ? bridgeExecutionStatus(presenceBridge) : undefined;
   const [showPresenceModal, setShowPresenceModal] = useState(false);
+  const [rehearsalCopied, setRehearsalCopied] = useState(false);
   const isPresenceView = presenceNavItems.some(({ id }) => id === view) || view === "calendar";
   const contextIdentity = isPresenceView && presence
     ? { name: presence.name, accent: presence.accent }
@@ -1913,6 +1915,38 @@ function AgentWorkspaceShell({
   const pendingAgentChangeCount = state.proposals.filter(
     (item) => item.status === "pending",
   ).length;
+  const rehearsalSession = (state.presenceChatSessions ?? []).find((item) => item.presenceId === presence.id);
+  const rehearsalHasTranscript = Boolean(rehearsalSession?.messages.some((item) => item.role === "user" || item.role === "presence" && !item.operatorFeedback));
+  const copyRehearsal = async () => {
+    const transcript = (rehearsalSession?.messages ?? [])
+      .filter((item) => item.role === "user" || item.role === "presence" && !item.operatorFeedback)
+      .map((item) => `${item.role === "presence" ? presence.name : "You"} · ${formatTime(item.timestamp)}\n${item.role === "presence" ? publicExpressionText(item.content) : item.content}`)
+      .join("\n\n");
+    if (!transcript) return;
+    const fallbackCopy = () => {
+      const fallback = document.createElement("textarea");
+      fallback.value = transcript;
+      fallback.setAttribute("readonly", "");
+      fallback.style.position = "fixed";
+      fallback.style.opacity = "0";
+      document.body.appendChild(fallback);
+      fallback.select();
+      const copied = document.execCommand("copy");
+      fallback.remove();
+      if (!copied) throw new Error("Clipboard copy was not available.");
+    };
+    try {
+      if (navigator.clipboard?.writeText) {
+        try { await navigator.clipboard.writeText(transcript); } catch { fallbackCopy(); }
+      } else {
+        fallbackCopy();
+      }
+      setRehearsalCopied(true);
+      window.setTimeout(() => setRehearsalCopied(false), 1800);
+    } catch {
+      setRehearsalCopied(false);
+    }
+  };
   return (
     <main className="app-shell">
       <aside className="sidebar">
@@ -2011,6 +2045,17 @@ function AgentWorkspaceShell({
             </span>
           </div>}
           {view === "rehearsal" && <div className="topbar-actions">
+            <button
+              type="button"
+              className="rehearsal-copy-button"
+              aria-label={rehearsalCopied ? "Rehearsal copied" : "Copy rehearsal"}
+              title={rehearsalCopied ? "Rehearsal copied" : "Copy rehearsal"}
+              onClick={() => void copyRehearsal()}
+              disabled={!rehearsalHasTranscript}
+            >
+              {rehearsalCopied ? <Check size={16} /> : <Copy size={16} />}
+              <span className="sr-only">{rehearsalCopied ? "Rehearsal copied" : "Copy rehearsal"}</span>
+            </button>
             <Button
               variant="secondary"
               onClick={() => void mutate({ type: "newPresenceChatSession", presenceId: presence.id })}
@@ -6836,7 +6881,6 @@ function PresenceChatView({
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState<SandboxAssetInput[]>([]);
   const [link, setLink] = useState("");
-  const [contextOpen, setContextOpen] = useState(true);
   const [sending, setSending] = useState(false);
   const [pendingMessage, setPendingMessage] = useState<string | null>(null);
   const [askingToReplyFor, setAskingToReplyFor] = useState<string | null>(null);
@@ -6847,11 +6891,6 @@ function PresenceChatView({
   const historyEndRef = useRef<HTMLDivElement>(null);
   const composerInputRef = useRef<HTMLTextAreaElement>(null);
   const presence = state.presence ?? state.presences[0]!;
-  const activeKnowledgeDocuments = (state.knowledgeDocuments ?? []).filter((document) => document.agentId === state.agent?.id && document.status === "active");
-  const mindFileKnowledgeBindings = state.mindFileKnowledgeBindings ?? [];
-  const linkedKnowledgeDocuments = activeKnowledgeDocuments.filter((document) => mindFileKnowledgeBindings.some((binding) => binding.agentId === state.agent?.id && ["BRAIN", "SOUL", "MISSION", "TASTE", "PULSE"].includes(binding.fileKind) && binding.knowledgeDocumentId === document.id && binding.enabled));
-  const presenceKnowledgeAccess = (state.presenceKnowledgeAccess ?? []).find((access) => access.agentId === state.agent?.id && access.presenceId === presence.id);
-  const knowledgeAccessEnabled = Boolean(presenceKnowledgeAccess?.enabled && presenceKnowledgeAccess.maximumUse !== "none");
   // The Activity projection intentionally omits chat history. When navigation
   // moves from Live to Chat, the component can render once before the full
   // workspace refresh completes, so treat this collection as temporarily
@@ -6904,7 +6943,7 @@ function PresenceChatView({
     const input = composerInputRef.current;
     if (!input) return;
     input.style.height = "auto";
-    input.style.height = `${Math.min(Math.max(input.scrollHeight, 90), 240)}px`;
+    input.style.height = `${Math.min(Math.max(input.scrollHeight, 38), 240)}px`;
   }, [message, composerMode]);
   const askAgentToReply = async (targetMessageId: string) => {
     if (!session || sending || askingToReplyFor) return;
@@ -6984,11 +7023,8 @@ function PresenceChatView({
   };
   return (
     <div className="page page-chat presence-chat-page">
-      <button type="button" className="context-toggle" aria-label={contextOpen ? "Hide context sidebar" : "Show context sidebar"} aria-expanded={contextOpen} title={contextOpen ? "Hide context sidebar" : "Show context sidebar"} aria-controls="rehearsal-context-sidebar" onClick={() => setContextOpen((open) => !open)}>
-        {contextOpen ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}
-      </button>
       <PageHeader className="chat-heading" eyebrow="Private social rehearsal" title={`Rehearse with ${presence.name}`} description={`Try posts and replies inside ${presence.name}’s channel context. Nothing here publishes or silently teaches the Agent.`} />
-      <div className={`chat-layout ${contextOpen ? "context-open" : "context-collapsed"}`}>
+      <div className="chat-layout rehearsal-chat-layout">
         <section className="chat-thread">
           <div className="chat-history">
             {messages.length === 0 && !pendingMessage ? (
@@ -7107,128 +7143,100 @@ function PresenceChatView({
             {composerMode === "reply" ? "Enter to add your reply" : "Enter to add the post"} <span>·</span> Shift + Enter for a new line <span>·</span> Private rehearsal · nothing publishes or teaches the Agent
           </div>
         </section>
-        {contextOpen && <aside id="rehearsal-context-sidebar" className="chat-context-sidebar chat-aside context-panel presence-chat-aside">
-          <div className="presence-context-heading">
-            <SectionEyebrow>Feed context</SectionEyebrow>
-            <span className="presence-context-scope">{channelLabel(presence.channel, state.channelDefinitions)} · {presence.handle}</span>
+        {false && <>
+        <div className="presence-chat-brief-header">
+          <div>
+            <SectionEyebrow>Presence brief</SectionEyebrow>
+            <h4>Brief rehearsal</h4>
           </div>
-          <h3>{presence.name} as encountered in public</h3>
-          <div className="presence-chat-boundary"><span className="status-dot" /><span>Private thread · not published</span></div>
-          <div className="presence-context-note"><Info size={14} /><p>{presence.name} is responding from the selected channel context, relationships, and perception when needed. Use Teach for durable changes.</p></div>
-          <section className="presence-chat-context-proof" aria-label="Rehearsal context">
-            <SectionEyebrow>Runtime context</SectionEyebrow>
-            <strong>{knowledgeAccessEnabled && linkedKnowledgeDocuments.length ? "Linked Knowledge available" : "Meaning files only"}</strong>
-            <p>{knowledgeAccessEnabled
-              ? linkedKnowledgeDocuments.length
-                ? `${linkedKnowledgeDocuments.map((document) => document.name).join(", ")} is available through the linked meaning files.`
-                : "No Knowledge document is linked to the meaning files used for social turns."
-              : linkedKnowledgeDocuments.length
-                ? `${linkedKnowledgeDocuments.map((document) => document.name).join(", ")} is linked, but this Presence cannot retrieve it yet. Enable Knowledge access in Presence settings.`
-                : "No Knowledge document is linked to the meaning files used for social turns."}</p>
-            {!knowledgeAccessEnabled && linkedKnowledgeDocuments.length > 0 && (
-              <button
-                type="button"
-                className="presence-chat-context-action"
-                onClick={() => void mutate({ type: "setKnowledgeAccess", presenceId: presence.id, maximumUse: "internal", enabled: true })}
-              >
-                Enable internal Knowledge for {presence.name}
-              </button>
-            )}
-          </section>
+          <span className={briefPreviewActive ? "brief-preview-badge active" : "brief-preview-badge"}>
+            {briefPreviewActive ? "Preview active" : "Durable"}
+          </span>
+        </div>
 
-          {false && <section className="presence-chat-brief-section" aria-label="Presence brief rehearsal">
-            <div className="presence-chat-brief-header">
-              <div>
-                <SectionEyebrow>Presence brief</SectionEyebrow>
-                <h4>Brief rehearsal</h4>
-              </div>
-              <span className={briefPreviewActive ? "brief-preview-badge active" : "brief-preview-badge"}>
-                {briefPreviewActive ? "Preview active" : "Durable"}
-              </span>
-            </div>
-
-            <div className="presence-brief-compact-summary">
-              <div className="brief-compact-row">
-                <span className="brief-compact-label">Purpose</span>
-                <p>{activeBrief.purpose}</p>
-              </div>
-              <div className="brief-compact-row">
-                <span className="brief-compact-label">Audience</span>
-                <p>{activeBrief.audience}</p>
-              </div>
-              <div className="brief-compact-row">
-                <span className="brief-compact-label">Known for</span>
-                <div className="brief-compact-chips">
-                  {activeBrief.primaryTerritory?.length ? (
-                    activeBrief.primaryTerritory.map((item) => <span key={item} className="brief-chip">{item}</span>)
-                  ) : (
-                    <em>Not narrowed yet</em>
-                  )}
-                </div>
-              </div>
-              {activeBrief.adjacentTerritory?.length ? (
-                <div className="brief-compact-row">
-                  <span className="brief-compact-label">Adjacent</span>
-                  <div className="brief-compact-chips">
-                    {activeBrief.adjacentTerritory.map((item) => <span key={item} className="brief-chip adjacent">{item}</span>)}
-                  </div>
-                </div>
-              ) : null}
-              {activeBrief.boundaries?.length ? (
-                <div className="brief-compact-row">
-                  <span className="brief-compact-label">Keep out</span>
-                  <div className="brief-compact-chips">
-                    {activeBrief.boundaries.map((item) => <span key={item} className="brief-chip boundary">{item}</span>)}
-                  </div>
-                </div>
-              ) : null}
-            </div>
-
-            <div className="presence-brief-sidebar-actions">
-              <Button type="button" variant="secondary" onClick={openBriefModal}>
-                <Pencil size={13} /> {briefPreviewActive ? "Edit preview" : "Edit brief"}
-              </Button>
-              {briefPreviewActive && (
-                <>
-                  <Button
-                    type="button"
-                    variant="primary"
-                    onClick={async () => {
-                      if (!briefPreviewDraft) return;
-                      await mutate({
-                        type: "setPresence",
-                        patch: {
-                          brief: {
-                            purpose: briefPreviewDraft.purpose.trim(),
-                            audience: briefPreviewDraft.audience.trim(),
-                            primaryTerritory: briefPreviewDraft.primaryTerritory?.map((item) => item.trim()).filter(Boolean) ?? [],
-                            adjacentTerritory: briefPreviewDraft.adjacentTerritory?.map((item) => item.trim()).filter(Boolean) ?? [],
-                            boundaries: briefPreviewDraft.boundaries?.map((item) => item.trim()).filter(Boolean) ?? [],
-                          },
-                        },
-                      });
-                      setBriefPreviewDraft(null);
-                    }}
-                  >
-                    <Check size={13} /> Save to Presence
-                  </Button>
-                  <Button
-                    type="button"
-                    variant="ghost"
-                    onClick={() => {
-                      setBriefPreviewDraft(null);
-                    }}
-                  >
-                    Reset
-                  </Button>
-                </>
+        <div className="presence-brief-compact-summary">
+          <div className="brief-compact-row">
+            <span className="brief-compact-label">Purpose</span>
+            <p>{activeBrief.purpose}</p>
+          </div>
+          <div className="brief-compact-row">
+            <span className="brief-compact-label">Audience</span>
+            <p>{activeBrief.audience}</p>
+          </div>
+          <div className="brief-compact-row">
+            <span className="brief-compact-label">Known for</span>
+            <div className="brief-compact-chips">
+              {activeBrief.primaryTerritory?.length ? (
+                activeBrief.primaryTerritory.map((item) => <span key={item} className="brief-chip">{item}</span>)
+              ) : (
+                <em>Not narrowed yet</em>
               )}
             </div>
-            {briefPreviewActive && (
-              <small className="brief-preview-note">Previewing temporary brief in chat. Click &ldquo;Save to Presence&rdquo; to persist to {presence.name}.</small>
-            )}
-          </section>}
-        </aside>}
+          </div>
+          {activeBrief.adjacentTerritory?.length ? (
+            <div className="brief-compact-row">
+              <span className="brief-compact-label">Adjacent</span>
+              <div className="brief-compact-chips">
+                {activeBrief.adjacentTerritory.map((item) => <span key={item} className="brief-chip adjacent">{item}</span>)}
+              </div>
+            </div>
+          ) : null}
+          {activeBrief.boundaries?.length ? (
+            <div className="brief-compact-row">
+              <span className="brief-compact-label">Keep out</span>
+              <div className="brief-compact-chips">
+                {activeBrief.boundaries.map((item) => <span key={item} className="brief-chip boundary">{item}</span>)}
+              </div>
+            </div>
+          ) : null}
+        </div>
+
+        <div className="presence-brief-sidebar-actions">
+          <Button type="button" variant="secondary" onClick={openBriefModal}>
+            <Pencil size={13} /> {briefPreviewActive ? "Edit preview" : "Edit brief"}
+          </Button>
+          {briefPreviewActive && (
+            <>
+              <Button
+                type="button"
+                variant="primary"
+                onClick={async () => {
+                  if (!briefPreviewDraft) return;
+                  await mutate({
+                    type: "setPresence",
+                    patch: {
+                      brief: {
+                        purpose: briefPreviewDraft.purpose.trim(),
+                        audience: briefPreviewDraft.audience.trim(),
+                        primaryTerritory: briefPreviewDraft.primaryTerritory?.map((item) => item.trim()).filter(Boolean) ?? [],
+                        adjacentTerritory: briefPreviewDraft.adjacentTerritory?.map((item) => item.trim()).filter(Boolean) ?? [],
+                        boundaries: briefPreviewDraft.boundaries?.map((item) => item.trim()).filter(Boolean) ?? [],
+                      },
+                    },
+                  });
+                  setBriefPreviewDraft(null);
+                }}
+              >
+                <Check size={13} /> Save to Presence
+              </Button>
+              <Button
+                type="button"
+                variant="ghost"
+                onClick={() => {
+                  setBriefPreviewDraft(null);
+                }}
+              >
+                Reset
+              </Button>
+            </>
+          )}
+        </div>
+        {briefPreviewActive && (
+          <small className="brief-preview-note">Previewing temporary brief in chat. Click &ldquo;Save to Presence&rdquo; to persist to {presence.name}.</small>
+        )}
+      </>}
+
+        {/* Rehearsal intentionally stays focused on the meaning files and social thread. */}
       </div>
 
       {briefModalOpen && (
@@ -12137,6 +12145,17 @@ function ExecutionLedger({
 }
 
 const calendarWeekDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const scheduleDayFilters = [
+  { value: "Monday", label: "M" },
+  { value: "Tuesday", label: "T" },
+  { value: "Wednesday", label: "W" },
+  { value: "Thursday", label: "TH" },
+  { value: "Friday", label: "F" },
+  { value: "Saturday", label: "S" },
+  { value: "Sunday", label: "Su" },
+  { value: "all", label: "ALL" },
+] as const;
+type ScheduleDayFilter = (typeof scheduleDayFilters)[number]["value"];
 const calendarHours = Array.from({ length: 24 }, (_, index) => index);
 const objectiveLabel = (objective: string) => objective.replaceAll("_", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 const objectiveTone = (objective: string) => objective.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "other";
@@ -13788,6 +13807,7 @@ function ScheduleView({
   const [considerationStart, setConsiderationStart] = useState("08:00");
   const [considerationEnd, setConsiderationEnd] = useState("11:00");
   const [viewMode, setViewMode] = useState<"list" | "week">("list");
+  const [scheduleDayFilter, setScheduleDayFilter] = useState<ScheduleDayFilter>("all");
   const [compactSchedule, setCompactSchedule] = useState(true);
   const [calendarLayers, setCalendarLayers] = useState<ScheduleLayerVisibility>({ plan: true, intents: false, assignments: true });
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null);
@@ -14132,7 +14152,7 @@ function ScheduleView({
       {viewMode === "week" ? (
         <WeekCalendar slots={visibleSlots} assignments={visibleAssignments} publishingPlan={publishingPlan} layers={calendarLayers} compact={compactSchedule} onToggleCompact={() => setCompactSchedule((current) => !current)} state={state} presenceName={presenceName} runningLiveAssignmentId={runningLiveAssignmentId} onEdit={beginEdit} onAssignment={openAssignment} onAdd={() => setShowForm(true)} onResetLayers={() => setCalendarLayers({ plan: true, intents: false, assignments: true })} />
       ) : (
-        <ScheduleList assignments={visibleAssignments} publishingPlan={publishingPlan} layers={calendarLayers} presenceName={presenceName} state={state} runningLiveAssignmentId={runningLiveAssignmentId} onAssignment={openAssignment} onAdd={() => setShowForm(true)} onResetLayers={() => setCalendarLayers({ plan: true, intents: false, assignments: true })} />
+        <ScheduleList assignments={visibleAssignments} publishingPlan={publishingPlan} layers={calendarLayers} presenceName={presenceName} state={state} runningLiveAssignmentId={runningLiveAssignmentId} dayFilter={scheduleDayFilter} onDayFilterChange={setScheduleDayFilter} onAssignment={openAssignment} onAdd={() => setShowForm(true)} onResetLayers={() => setCalendarLayers({ plan: true, intents: false, assignments: true })} />
       )}
     </div>
   );
@@ -14145,6 +14165,8 @@ function ScheduleList({
   presenceName,
   state,
   runningLiveAssignmentId,
+  dayFilter,
+  onDayFilterChange,
   onAssignment,
   onAdd,
   onResetLayers,
@@ -14155,12 +14177,18 @@ function ScheduleList({
   presenceName: string;
   state: OpenPresenceState;
   runningLiveAssignmentId?: string | null;
+  dayFilter: ScheduleDayFilter;
+  onDayFilterChange: (filter: ScheduleDayFilter) => void;
   onAssignment: (assignment: Assignment) => void;
   onAdd: () => void;
   onResetLayers: () => void;
 }) {
   const scheduledAssignments = assignments.filter((assignment) => assignmentIsOpen(assignment));
-  const hasItems = layers.assignments && scheduledAssignments.length > 0;
+  const filteredAssignments = dayFilter === "all"
+    ? scheduledAssignments
+    : scheduledAssignments.filter((assignment) => assignment.schedule?.day === dayFilter);
+  const selectedDayLabel = scheduleDayFilters.find((item) => item.value === dayFilter)?.value;
+  const hasItems = layers.assignments && filteredAssignments.length > 0;
   return <section className="schedule-list" aria-label="Schedule list">
     <div className="schedule-list-header">
       <div>
@@ -14168,10 +14196,16 @@ function ScheduleList({
         <h2>Scheduled responsibilities</h2>
         <p>Assignments with a specific outcome. Genny&apos;s publishing plan is summarized above.</p>
       </div>
-      <ScheduleLegend layers={{ ...layers, plan: false }} />
+      <div className="schedule-list-header-controls">
+        <div className="schedule-day-filter-label">Show days</div>
+        <div className="feed-filter schedule-day-filter" role="group" aria-label="Scheduled responsibility filter">
+          {scheduleDayFilters.map((item) => <button type="button" key={item.value} className={dayFilter === item.value ? "active" : ""} aria-pressed={dayFilter === item.value} aria-label={item.value === "all" ? "Show all scheduled items" : `Show ${item.value.slice(0, 3)} scheduled items`} title={item.value === "all" ? "Show all days" : `Show ${item.value}`} onClick={() => onDayFilterChange(item.value)}>{item.label}</button>)}
+        </div>
+        <ScheduleLegend layers={{ ...layers, plan: false }} />
+      </div>
     </div>
-    {!hasItems ? <EmptyState title={layers.assignments ? "No scheduled responsibilities" : "Assignments are hidden"} body={layers.assignments ? `Genny's publishing plan is above. Add an Assignment only when you want a specific outcome pursued.` : "Turn on Assignments above to see scheduled responsibilities."} action={layers.assignments ? <Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add assignment</Button> : <Button onClick={onResetLayers} variant="secondary">Show assignments</Button>} /> : <div className="schedule-list-rows">
-      {layers.assignments && scheduledAssignments.map((assignment) => {
+    {!hasItems ? <EmptyState title={!layers.assignments ? "Assignments are hidden" : dayFilter !== "all" ? `No responsibilities on ${selectedDayLabel}` : "No scheduled responsibilities"} body={!layers.assignments ? "Turn on Assignments above to see scheduled responsibilities." : dayFilter !== "all" ? "Try another day or show all scheduled responsibilities." : `Genny's publishing plan is above. Add an Assignment only when you want a specific outcome pursued.`} action={!layers.assignments ? <Button onClick={onResetLayers} variant="secondary">Show assignments</Button> : dayFilter !== "all" ? <Button onClick={() => onDayFilterChange("all")} variant="secondary">Show all days</Button> : <Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add assignment</Button>} /> : <div className="schedule-list-rows">
+      {layers.assignments && filteredAssignments.map((assignment) => {
         const objective = assignmentObjective(assignment);
         const timing = assignment.activation?.type === "continuous" ? "Continuous responsibility" : assignment.schedule ? `${assignment.schedule.day} · ${assignment.schedule.time}–${splitConsiderationWindow(assignment.schedule.executionWindow, assignment.schedule.time).end}` : "Unscheduled · ready to start";
         const proc = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId);
@@ -16186,7 +16220,10 @@ function ChromeConnectionPanel({
   refreshState: () => Promise<OpenPresenceState>;
 }) {
   const [refreshing, setRefreshing] = useState(false);
+  const [launchingDedicated, setLaunchingDedicated] = useState(false);
+  const [launchFeedback, setLaunchFeedback] = useState<{ tone: "success" | "error"; message: string } | null>(null);
   const extensionEnabled = presence.browserAccess?.enabled === true;
+  const browserBody = state.browserBodies?.find((body) => body.presenceId === presence.id) as BrowserBody | undefined;
   const activeBridge = state.bridges.find((item) => item.presenceId === presence.id && item.name.startsWith("OpenPresence Chrome · ") && item.state !== "offline");
   const connected = Boolean(activeBridge && bridgeExecutionStatus(activeBridge) === "connected");
   const identityMismatch = activeBridge?.accountIdentity?.status === "mismatch";
@@ -16203,6 +16240,30 @@ function ChromeConnectionPanel({
             ? "Disconnected"
             : "Ready to connect";
   const openControlledChrome = () => window.postMessage({ source: "openpresence", type: "OPENPRESENCE_OPEN_CHROME", presenceId: presence.id }, "*");
+  const openDedicatedChrome = async () => {
+    setLaunchingDedicated(true);
+    setLaunchFeedback(null);
+    try {
+      const response = await fetch("/api/browser/launch", {
+        method: "POST",
+        headers: { "content-type": "application/json", "x-openpresence-agent-id": state.agent?.id ?? "", "x-openpresence-presence-id": presence.id },
+        body: JSON.stringify({ presenceId: presence.id }),
+      });
+      const payload = await response.json().catch(() => ({}));
+      if (!response.ok) throw new Error(payload.error || "The dedicated Chrome browser could not be opened.");
+      const launchMessage = payload.result?.reused ? "The dedicated browser is already open." : "Dedicated Chrome opened. Install the extension in that profile once, then sign in to the expected X account.";
+      setLaunchFeedback({ tone: "success", message: launchMessage });
+      try {
+        await refreshState();
+      } catch (refreshError) {
+        setLaunchFeedback({ tone: "success", message: `${launchMessage} Status refresh was unavailable${refreshError instanceof Error ? `: ${refreshError.message}` : "."}` });
+      }
+    } catch (error) {
+      setLaunchFeedback({ tone: "error", message: error instanceof Error ? error.message : "The dedicated Chrome browser could not be opened." });
+    } finally {
+      setLaunchingDedicated(false);
+    }
+  };
   const refresh = async () => {
     setRefreshing(true);
     try { await refreshState(); } finally { setRefreshing(false); }
@@ -16219,8 +16280,10 @@ function ChromeConnectionPanel({
       </div>
       <div className="chrome-connection-controls">
         <label className="toggle-row"><input type="checkbox" aria-label={`Enable Chrome for ${presence.name}`} checked={extensionEnabled} onChange={(event) => void mutate({ type: "setPresenceBrowserAccess", presenceId: presence.id, enabled: event.target.checked })} /><span className="toggle-track" aria-hidden="true"><span /></span><span>{extensionEnabled ? "Enabled" : "Disabled"}</span></label>
+        <Button type="button" variant="primary" disabled={!extensionEnabled || launchingDedicated} onClick={() => void openDedicatedChrome()}><Globe2 size={14} /> {launchingDedicated ? "Opening dedicated Chrome…" : browserBody?.profileDir ? "Open dedicated Chrome" : "Set up dedicated Chrome"}</Button>
         <Button type="button" variant="secondary" disabled={!extensionEnabled} onClick={openControlledChrome}><PlugZap size={14} /> Open controlled Chrome</Button>
       </div>
+      {launchFeedback && <div className={`connection-feedback ${launchFeedback.tone === "error" ? "is-error" : "is-success"}`} role={launchFeedback.tone === "error" ? "alert" : "status"}>{launchFeedback.message}</div>}
       <div className="chrome-connection-status" role="status">
         <span className={`live-pill ${connected && !identityMismatch && !identityUnknown ? "" : "paused"}`}><span className="status-dot" /> {status}</span>
         <span className="chrome-connection-status-copy">{!extensionEnabled ? "Enable browser hands for this Presence when an action needs them." : identityMismatch ? `${activeBridge?.accountIdentity?.message ?? `X is signed in to the wrong account.`} No live work can be claimed until ${presence.handle} is signed in.` : identityUnknown ? `${activeBridge?.accountIdentity?.message ?? `The controlled browser is live, but ${presence.handle} has not been verified.`} Delivery will resume automatically after account verification.` : connected ? `The controlled browser is connected as ${presence.handle} and ready when a browser fallback is learned or needed.` : activeBridge?.lastHeartbeatAt ? `The server last received a Chrome heartbeat at ${formatTime(activeBridge.lastHeartbeatAt)}. This session is disconnected or stale; open controlled Chrome to reconnect it.` : activeBridge ? "A controlled session is registered, but the server has not received a heartbeat. Open controlled Chrome to reconnect it." : "Chrome hands are enabled, but no controlled Chrome session is open. Click Open controlled Chrome to connect."}</span>
@@ -16230,10 +16293,11 @@ function ChromeConnectionPanel({
       <details className="chrome-extension-setup">
         <summary>Chrome extension setup & help</summary>
         <ol>
+          <li>Use <strong>Set up dedicated Chrome</strong> to give this Presence its own persistent browser identity and cookie store.</li>
           <li>Open <code>chrome://extensions</code> in your Chrome browser.</li>
           <li>Turn on <strong>Developer mode</strong> in the top right corner.</li>
           <li>Click <strong>Load unpacked</strong> and select the <code>extension</code> directory from this OpenPresence installation.</li>
-          <li>Click the OpenPresence extension icon in your browser toolbar, and click <strong>Open controlled Chrome</strong> above to launch your signed-in tab.</li>
+          <li>Install the extension in the dedicated browser profile once, then sign in to X as <code>{presence.handle}</code>. The existing extension will open and verify the controlled X tab.</li>
         </ol>
       </details>
     </div>

@@ -361,6 +361,37 @@ function persistExplorationState(base: OpenPresenceState, candidate: OpenPresenc
 }
 
 /**
+ * Persist a Rehearsal reply without replaying model cognition when another
+ * tab or worker advances the workspace while the provider is thinking.
+ * Rehearsal is an interactive diagnostic surface, so a write conflict must
+ * merge the already-selected social act instead of asking the model again.
+ */
+function persistPresenceChatReply(candidate: OpenPresenceState, presenceId: string, sessionId: string, targetMessageId: string) {
+  let pending = candidate;
+  for (let attempt = 0; attempt < 5; attempt += 1) {
+    try {
+      writeState(pending);
+      return pending;
+    } catch (error) {
+      if (!(error instanceof WorkspaceConflictError) || attempt === 4) throw error;
+      const latest = readStateForContext({ agentId: candidate.agent?.id, presenceId });
+      const latestSession = latest.presenceChatSessions.find((item) => item.id === sessionId && item.presenceId === presenceId);
+      if (!latestSession) throw error;
+      // A retry can arrive after the first write already succeeded. Treat the
+      // operation as idempotent and never append a second generated reply.
+      if (latestSession.messages.some((item) => item.role === "presence" && item.replyToMessageId === targetMessageId)) return latest;
+      const candidateSession = pending.presenceChatSessions.find((item) => item.id === sessionId && item.presenceId === presenceId);
+      const pendingMessages = candidateSession?.messages.filter((item) => item.role === "presence" && item.replyToMessageId === targetMessageId) ?? [];
+      if (!pendingMessages.length) return latest;
+      latestSession.messages.push(...pendingMessages);
+      latestSession.updatedAt = new Date().toISOString();
+      pending = latest;
+    }
+  }
+  return pending;
+}
+
+/**
  * Browser-independent Attention Worker slice for Explorations. Discovery and
  * triage are durable state transitions; only an Exploration linked to the
  * canonical Assignment may continue into Social Planner cognition.
@@ -3795,6 +3826,7 @@ function validateRequestLineage(state: OpenPresenceState, parsed: RuntimeOperati
 }
 
 export async function GET(request: Request) {
+  try {
   const url = new URL(request.url);
   const requestedAgentId = url.searchParams.get("agentId") || process.env.OPENPRESENCE_DEFAULT_AGENT_ID;
   const requestedPresenceId = url.searchParams.get("presenceId");
@@ -3856,6 +3888,10 @@ export async function GET(request: Request) {
     ? activityProjection(contextualState)
     : { ...contextualState, responseProjection: "full" as const, agentWorkspaces: [], mirrorEvents: [] };
   return NextResponse.json({ ...browserState, runtimeIdentity: { dbPath: resolvedDbPath, dbSelectionSource, agentId: contextualState.agent?.id ?? null, presenceId: contextualState.presence?.id ?? null, handle: contextualState.presence?.handle ?? null } }, { headers: { ETag: etag, "Cache-Control": "no-cache" } });
+  } catch (error) {
+    console.error("OpenPresence state read failed; no workspace data was changed", error);
+    return NextResponse.json({ error: "The workspace could not be read safely. No data was changed." }, { status: 503 });
+  }
 }
 
 export async function POST(request: Request) {
@@ -5141,10 +5177,8 @@ export async function POST(request: Request) {
       }
       const history = session.messages.slice(0, -1).filter((message) => !message.operatorFeedback).map((message) => ({ role: message.role, content: message.content }));
       const replyContext = replyTarget ? JSON.stringify({ role: replyTarget.role, content: replyTarget.content }, null, 2) : undefined;
-      const knowledge = compileKnowledgeContext(next, { presenceId: presence.id, query: parsed.content, purpose: "social_planning" });
-      next = knowledge.state;
       let runtimeError: string | undefined;
-      const reply = await generatePresenceChatReply(next, presence.id, parsed.content, history, socialEvidence, replyContext, parsed.briefOverride, knowledge.packet).catch((error: unknown) => {
+      const reply = await generatePresenceChatReply(next, presence.id, parsed.content, history, socialEvidence, replyContext, parsed.briefOverride).catch((error: unknown) => {
         const message = error instanceof Error ? error.message : "The selected Presence runtime could not answer.";
         console.warn("Presence Chat runtime unavailable", message);
         runtimeError = message;
@@ -5187,11 +5221,9 @@ export async function POST(request: Request) {
         .map((item) => ({ role: item.role, content: item.content }));
       const object = next.mirrorObjects.find((item) => item.id === `presence-chat-object:${target.id}`);
       const socialEvidence = object ? cognitionSafeAssetSummary(next.assets, next.perceptions, object) : "";
-      const knowledge = compileKnowledgeContext(next, { presenceId: presence.id, query: target.content, purpose: "social_planning" });
-      next = knowledge.state;
       const replyContext = JSON.stringify({ role: target.role, content: target.content }, null, 2);
       let runtimeError: string | undefined;
-      const reply = await generatePresenceChatReply(next, presence.id, target.content, history, socialEvidence, replyContext, parsed.briefOverride, knowledge.packet).catch((error: unknown) => {
+      const reply = await generatePresenceChatReply(next, presence.id, target.content, history, socialEvidence, replyContext, parsed.briefOverride).catch((error: unknown) => {
         const message = error instanceof Error ? error.message : "The selected Presence runtime could not answer.";
         console.warn("Presence Chat runtime unavailable", message);
         runtimeError = message;
@@ -5216,8 +5248,8 @@ export async function POST(request: Request) {
         }
       }
       updatedSession.updatedAt = new Date().toISOString();
-      writeState(next);
-      return stateResponse(request, next);
+      const persisted = persistPresenceChatReply(next, presence.id, session.id, target.id);
+      return stateResponse(request, persisted);
     }
     if (parsed.type === "reviewGrowth") {
       const presence = current.presences.find((item) => item.id === (parsed.presenceId ?? current.activePresenceId)) ?? current.presence;

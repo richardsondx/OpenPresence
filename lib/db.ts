@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { sql } from "drizzle-orm";
-import { initialState, normalizeState, preflightAssignment, stateForAgent, stateForContext } from "./runtime";
+import { assertAssignmentPersistenceInvariant, initialState, normalizeState, preflightAssignment, stateForAgent, stateForContext } from "./runtime";
 import type { AgentWorkspaceSnapshot, AttentionScope, AttentionTrigger, Bridge, BridgeAdapterStatus, BrowserBody, DependencyHealth, DependencyHealthKind, DependencyHealthState, JsonValue, MirrorEvent, OpenPresenceState, OperationalRun, OperationalRunState, ProcessHeartbeat, RecoveryAttempt, RecoveryIncident, RecoveryIncidentState, ScheduledWake } from "./types";
 
 const dataDir = path.join(process.cwd(), "data");
@@ -128,9 +128,29 @@ if (manifestMatchesSelectedDb && selectionManifest?.agentId && selectionManifest
   if (!row?.payload) throw new Error(`Configured OpenPresence database ${resolvedDbPath} has no durable app_state snapshot. Refusing to initialize a blank workspace.`);
   try {
     const state = JSON.parse(row.payload) as { agent?: { id?: string }; presences?: Array<{ id?: string; handle?: string }> };
-    const presence = state.presences?.find((candidate) => candidate.id === selectionManifest?.presenceId);
-    if (state.agent?.id !== selectionManifest.agentId || !presence || (selectionManifest.handle && presence.handle !== selectionManifest.handle)) {
-      throw new Error(`Configured database identity does not match ${dbSelectionManifestPath}. Expected Agent ${selectionManifest.agentId}, Presence ${selectionManifest.presenceId}, handle ${selectionManifest.handle ?? "(unspecified)"}; loaded Agent ${state.agent?.id ?? "(missing)"}, Presence ${presence?.id ?? "(missing)"}, handle ${presence?.handle ?? "(missing)"}. Refusing to start against the wrong workspace.`);
+    // The compatibility app_state snapshot may have a different Agent active
+    // than the manifest-selected Agent. Validate the configured scope against
+    // the normalized ownership indexes first so multi-Agent workspaces remain
+    // selectable without weakening the wrong-database protection.
+    let configuredAgentId = state.agent?.id;
+    let configuredPresenceId: string | undefined;
+    let configuredHandle: string | undefined;
+    try {
+      const agentRow = sqlite.prepare("SELECT id FROM agents WHERE id = ?").get(selectionManifest.agentId) as { id?: string } | undefined;
+      const presenceRow = sqlite.prepare("SELECT id, agent_id, payload FROM presences WHERE id = ?").get(selectionManifest.presenceId) as { id?: string; agent_id?: string; payload?: string } | undefined;
+      if (agentRow?.id && presenceRow?.id && presenceRow.agent_id === selectionManifest.agentId) {
+        configuredAgentId = agentRow.id;
+        configuredPresenceId = presenceRow.id;
+        try { configuredHandle = (JSON.parse(presenceRow.payload ?? "{}") as { handle?: string }).handle; } catch { /* use the fallback snapshot below */ }
+      }
+    } catch { /* Older databases may not have normalized identity indexes yet. */ }
+    if (!configuredPresenceId) {
+      const presence = state.presences?.find((candidate) => candidate.id === selectionManifest?.presenceId);
+      configuredPresenceId = presence?.id;
+      configuredHandle = presence?.handle;
+    }
+    if (configuredAgentId !== selectionManifest.agentId || configuredPresenceId !== selectionManifest.presenceId || (selectionManifest.handle && configuredHandle !== selectionManifest.handle)) {
+      throw new Error(`Configured database identity does not match ${dbSelectionManifestPath}. Expected Agent ${selectionManifest.agentId}, Presence ${selectionManifest.presenceId}, handle ${selectionManifest.handle ?? "(unspecified)"}; loaded Agent ${configuredAgentId ?? "(missing)"}, Presence ${configuredPresenceId ?? "(missing)"}, handle ${configuredHandle ?? "(missing)"}. Refusing to start against the wrong workspace.`);
     }
   } catch (error) {
     if (error instanceof Error && error.message.startsWith("Configured database identity")) throw error;
@@ -309,6 +329,37 @@ function hydrateAgentWorkspaces(state: OpenPresenceState): OpenPresenceState {
   return { ...state, workspaceRevision: state.activeAgentId ? revisions.get(state.activeAgentId) ?? state.workspaceRevision ?? 0 : state.workspaceRevision, agentWorkspaces: snapshots };
 }
 
+type BrowserBodyRow = {
+  presence_id: string;
+  mode: string;
+  ownership: string;
+  state: string;
+  expected_identity?: string | null;
+  verified_identity?: string | null;
+  last_healthy_at?: string | null;
+  profile_dir?: string | null;
+  updated_at: string;
+};
+
+function browserBodyFromRow(row: BrowserBodyRow): BrowserBody {
+  const isManaged = row.mode === "managed";
+  return {
+    presenceId: row.presence_id,
+    mode: row.mode as BrowserBody["mode"],
+    ownership: row.ownership as BrowserBody["ownership"],
+    state: row.state as BrowserBody["state"],
+    canOpenTabs: true,
+    canCloseOwnedTabs: true,
+    canRestartBrowser: isManaged,
+    canRestoreSession: isManaged,
+    expectedIdentity: row.expected_identity ?? undefined,
+    verifiedIdentity: row.verified_identity ?? undefined,
+    lastHealthyAt: row.last_healthy_at ?? undefined,
+    profileDir: row.profile_dir ?? undefined,
+    updatedAt: row.updated_at,
+  };
+}
+
 function hydrateOperationalState(state: OpenPresenceState): OpenPresenceState {
   let recoveryIncidents = state.recoveryIncidents;
   try {
@@ -343,6 +394,12 @@ function hydrateOperationalState(state: OpenPresenceState): OpenPresenceState {
       }));
     }
   } catch { /* retain compatibility when table not available */ }
+
+  let browserBodies = state.browserBodies;
+  try {
+    const bodyRows = sqlite.prepare("SELECT presence_id, mode, ownership, state, expected_identity, verified_identity, last_healthy_at, profile_dir, updated_at FROM body_sessions").all() as BrowserBodyRow[];
+    if (bodyRows.length > 0) browserBodies = bodyRows.map(browserBodyFromRow);
+  } catch { /* retain compatibility when the body index is unavailable */ }
 
   let operationalRuns = state.operationalRuns;
   try {
@@ -400,6 +457,7 @@ function hydrateOperationalState(state: OpenPresenceState): OpenPresenceState {
     operationalRuns: operationalRuns ?? [],
     scheduledWakes: scheduledWakes ?? [],
     dependencyHealth: dependencyHealth ?? [],
+    browserBodies: browserBodies ?? [],
   };
 }
 
@@ -890,6 +948,10 @@ function scheduleNormalizedSync(state: OpenPresenceState) {
 
 export function writeState(state: OpenPresenceState, options?: { advanceWorkspaceRevision?: boolean; syncNormalized?: boolean; persistAgentWorkspaces?: boolean; force?: boolean }) {
   const normalized = normalizeState(state);
+  // Never overwrite a durable workspace with a partial or unlinked Assignment
+  // collection. Known legacy records are repaired by normalizeState; anything
+  // still invalid fails closed before SQLite is touched.
+  assertAssignmentPersistenceInvariant(normalized);
   const agentId = normalized.agent?.id;
   const advanceWorkspaceRevision = options?.advanceWorkspaceRevision !== false;
   const syncNormalized = options?.syncNormalized === true;
@@ -1547,34 +1609,8 @@ export function upsertBrowserBody(body: BrowserBody): void {
 }
 
 export function getBrowserBody(presenceId: string): BrowserBody | undefined {
-  const row = sqlite.prepare("SELECT presence_id, mode, ownership, state, expected_identity, verified_identity, last_healthy_at, profile_dir, updated_at FROM body_sessions WHERE presence_id = ?").get(presenceId) as {
-    presence_id: string;
-    mode: string;
-    ownership: string;
-    state: string;
-    expected_identity?: string | null;
-    verified_identity?: string | null;
-    last_healthy_at?: string | null;
-    profile_dir?: string | null;
-    updated_at: string;
-  } | undefined;
-  if (!row) return undefined;
-  const isManaged = row.mode === "managed";
-  return {
-    presenceId: row.presence_id,
-    mode: row.mode as BrowserBody["mode"],
-    ownership: row.ownership as BrowserBody["ownership"],
-    state: row.state as BrowserBody["state"],
-    canOpenTabs: true,
-    canCloseOwnedTabs: true,
-    canRestartBrowser: isManaged,
-    canRestoreSession: isManaged,
-    expectedIdentity: row.expected_identity ?? undefined,
-    verifiedIdentity: row.verified_identity ?? undefined,
-    lastHealthyAt: row.last_healthy_at ?? undefined,
-    profileDir: row.profile_dir ?? undefined,
-    updatedAt: row.updated_at,
-  };
+  const row = sqlite.prepare("SELECT presence_id, mode, ownership, state, expected_identity, verified_identity, last_healthy_at, profile_dir, updated_at FROM body_sessions WHERE presence_id = ?").get(presenceId) as BrowserBodyRow | undefined;
+  return row ? browserBodyFromRow(row) : undefined;
 }
 
 export function recordProcessHeartbeat(processId: string, processType: ProcessHeartbeat["processType"], metadata?: Record<string, JsonValue>): void {
