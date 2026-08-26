@@ -22,7 +22,7 @@ import {
 function mergeAutonomyState(base: OpenPresenceState, candidate: OpenPresenceState, latest: OpenPresenceState): OpenPresenceState {
   const merged = JSON.parse(JSON.stringify(latest)) as OpenPresenceState;
   const collectionKeys = [
-    "presences", "nativeConnections", "events", "mirrorObjects", "socialDecisions", "socialIntents", "executions", "outcomes", "publications", "actions", "assignments", "relationships", "relationshipFacts", "relationshipOpenLoops", "people", "personIdentities", "resourceUsageEvents", "operationalRuns", "scheduledWakes", "capabilityTrials", "discoveryPlans", "explorationSessions", "explorationFindings", "attentionEpisodes", "operatorConversations", "operatorNudges",
+    "presences", "nativeConnections", "events", "mirrorObjects", "socialDecisions", "socialIntents", "executions", "outcomes", "publications", "actions", "assignments", "relationships", "relationshipFacts", "relationshipOpenLoops", "people", "personIdentities", "resourceUsageEvents", "operationalRuns", "scheduledWakes", "capabilityTrials", "discoveryPlans", "explorationSessions", "explorationFindings", "attentionEpisodes", "operatorConversations", "operatorNudges", "publishingPlans",
   ] as const;
   for (const key of collectionKeys) {
     const baseItems = (base[key] ?? []) as Array<{ id: string }>;
@@ -72,6 +72,7 @@ import {
   nativeConnectionCanObserve,
   nextUtcMidnightIso,
   publicSelfGuidance,
+  publishingPlanNeedsReassessment,
   recordCapabilityFeedback,
   recordNativeMirror,
   recordResourceUsageEvent,
@@ -98,6 +99,7 @@ import { requestAttentionCapacity } from "./attention-governor";
 import { requestAttention } from "./attention-coordinator";
 import { settleAttentionResponsibility } from "./attention-responsibility";
 import { settleNudgeForEpisode, startQueuedNudge } from "./operator-chat";
+import { reassessPublishingPlan } from "./publishing-plan-reassessment";
 import { cognitionSafeAssetSummary, hasUsablePerception } from "./perception";
 import { inspectSandboxObject } from "./perception-runtime";
 import type {
@@ -813,6 +815,15 @@ export async function runAutonomousAttention(
   options?: { runId?: string; invocationId?: string; attentionEpisodeId?: string; forceEligibility?: boolean },
 ): Promise<OpenPresenceState> {
   const before = readStateSnapshotForContext({ presenceId });
+  const planNeed = publishingPlanNeedsReassessment(before, presenceId);
+  const planToProcess = planNeed.kind === "reassess_plan" ? planNeed.plan : undefined;
+  if (planNeed.kind === "reassess_plan" || planNeed.kind === "create_plan") {
+    // Plan maintenance is an independent responsibility. A transient native
+    // observation failure must not prevent a due working plan from rolling
+    // forward, so persist it before entering the channel-observation path.
+    const reassessed = await reassessPublishingPlan(before, presenceId, planToProcess ? { expectedPlanId: planToProcess.id, expectedRevision: planToProcess.revision } : undefined);
+    await writeStateWithRetry(before, reassessed);
+  }
   const activeNudge = (before.operatorNudges ?? []).find((item) => item.presenceId === presenceId && item.status === "working" && (!options?.attentionEpisodeId || item.attentionEpisodeIds.includes(options.attentionEpisodeId)));
   let hydrationFailures: string[] = [];
   if (activeNudge?.sourceUrls.length) {

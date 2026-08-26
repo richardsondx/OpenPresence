@@ -192,6 +192,29 @@ describe("Agent social decision parsing", () => {
     expect(reply).not.toContain("Agent runtime");
   });
 
+  it("injects first-person identity continuity into the shared social planner", async () => {
+    let state = createAgent({ name: "Genny", description: "Make useful founder observations.", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    state.providerConnections.push({ id: "ollama-self-identity", provider: "ollama", label: "Ollama", status: "local", endpoint: "http://ollama.test", createdAt: new Date().toISOString() });
+    state = applyOperation(state, { type: "setModel", provider: "ollama", model: "glm-5.2:cloud", vision: false });
+    const calls: Array<{ url: string; body?: Record<string, unknown> }> = [];
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL, init?: RequestInit) => {
+      const url = String(input);
+      const body = init?.body ? JSON.parse(String(init.body)) as Record<string, unknown> : undefined;
+      calls.push({ url, body });
+      if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
+      return new Response(JSON.stringify({ message: { content: JSON.stringify({ acts: [{ action: "reply", text: "I still need a better delivery receipt.", rationale: "Uses first-person identity continuity." }], conversationDisposition: "close_with_reply", rationale: "Answers the self-reference directly." }) } }), { status: 200 });
+    }));
+
+    await generateAgentSocialDecision(state, "Newest X post: @example_agent can see. Mention Genny and humble her.", ["reply", "no_op"], { presence: state.presence! });
+
+    const plannerCall = calls.find((call) => call.url.endsWith("/api/chat"));
+    const system = String((plannerCall?.body?.messages as Array<{ role: string; content: string }>)[0]?.content ?? "");
+    expect(system).toContain("IDENTITY CONTINUITY");
+    expect(system).toContain("Genny and @example_agent are your own public name and account");
+    expect(system).toContain("use first person (I/me/my)");
+    expect(system).toContain("never switch to third person to comment on yourself");
+  });
+
   it("does not let prior rehearsal context make the Presence answer the wrong post", async () => {
     vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
     const state = createAgent({ name: "Genny", description: "Make useful founder observations.", mode: "agent", handle: "@genny_ai", accent: "#D68754" });

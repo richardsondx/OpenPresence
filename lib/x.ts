@@ -362,8 +362,16 @@ export async function readRecentXPosts(credentials: XCredentials, accountId: str
   return parseXPosts(response);
 }
 
-export async function readRecentXMentions(credentials: XCredentials, accountId: string, maxResults = 100): Promise<XRecentPost[]> {
+export async function readRecentXMentions(credentials: XCredentials, accountId: string, username?: string, maxResults = 100): Promise<XRecentPost[]> {
   if (isXMockEnabled() && credentials.apiKey.startsWith("test_")) return [];
+  const normalizedUsername = normalizeHandle(username ?? "");
+  if (normalizedUsername) {
+    // X's mentions endpoint does not include a reply that addresses one of
+    // the Presence's posts without spelling out @handle. Search both forms
+    // of inbound attention in one read so direct replies (including media-only
+    // GIF replies) enter the Social Mirror as ordinary inbound objects.
+    return searchRecentXPosts(credentials, `(@${normalizedUsername} OR to:${normalizedUsername}) -from:${normalizedUsername}`, maxResults);
+  }
   const query = { expansions: "author_id,attachments.media_keys,referenced_tweets.id", "tweet.fields": "created_at,conversation_id,referenced_tweets,attachments,lang", "user.fields": "name,username,profile_image_url", "media.fields": "type,url,preview_image_url,alt_text", max_results: String(Math.min(100, Math.max(5, maxResults))) };
   const queryString = new URLSearchParams(query).toString();
   const url = `${apiBase()}/2/users/${encode(accountId)}/mentions?${queryString}`;
@@ -382,9 +390,10 @@ export async function searchRecentXPosts(credentials: XCredentials, query: strin
   const searchQuery = /(?:^|\s)-is:retweet(?:\s|$)/i.test(clean) ? clean : `${clean} -is:retweet`;
   const params = {
     query: searchQuery,
-    "tweet.fields": "created_at,conversation_id,author_id,referenced_tweets,lang",
-    expansions: "author_id",
+    "tweet.fields": "created_at,conversation_id,author_id,referenced_tweets,attachments,lang",
+    expansions: "author_id,attachments.media_keys,referenced_tweets.id",
     "user.fields": "name,username,profile_image_url",
+    "media.fields": "type,url,preview_image_url,alt_text",
     max_results: String(Math.min(100, Math.max(10, maxResults))),
   };
   const queryString = new URLSearchParams(params).toString();

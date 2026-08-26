@@ -86,7 +86,7 @@ function channelDefinition(state: OpenPresenceState, channel: ChannelId): Channe
 function channelCapabilities(state: OpenPresenceState, channel: ChannelId) { return channelDefinition(state, channel)?.affordances ?? CHANNEL_CAPABILITIES[channel as keyof typeof CHANNEL_CAPABILITIES] ?? []; }
 
 const fileMeta: Record<FileKind, Pick<AgentFile, "title" | "subtitle" | "protected">> = {
-  BRAIN: { title: "How I think", subtitle: "Judgment before activity.", protected: true }, SOUL: { title: "Who I am", subtitle: "A character with a point of view.", protected: true }, MISSION: { title: "What I am here to do", subtitle: "A direction, not a dashboard target.", protected: true }, TASTE: { title: "What I consider good", subtitle: "The filter behind every public action.", protected: true }, MEMORY: { title: "What I should remember", subtitle: "Durable context and relationships.", protected: false }, GROWTH: { title: "What results have taught me", subtitle: "Evidence changes strategy, not identity.", protected: false }, PULSE: { title: "What keeps me active", subtitle: "Standing attention without hidden scheduler state.", protected: true }, PRESENCE: { title: "What role I inhabit here", subtitle: "A situated social self, not just a channel.", protected: true },
+  BRAIN: { title: "How I think", subtitle: "How I think", protected: true }, SOUL: { title: "Who I am", subtitle: "Who I am", protected: true }, MISSION: { title: "What I am here to do", subtitle: "What I am here to do", protected: true }, TASTE: { title: "What I consider good", subtitle: "What I consider good", protected: true }, MEMORY: { title: "What I should remember", subtitle: "What I should remember", protected: false }, GROWTH: { title: "What results have taught me", subtitle: "What results have taught me", protected: false }, PULSE: { title: "What keeps me active", subtitle: "What keeps me active", protected: true }, PRESENCE: { title: "What role I inhabit here", subtitle: "A situated social self, not just a channel.", protected: true },
 };
 
 export function defaultPresenceBrief(agent?: Pick<Agent, "description" | "audience" | "topics">): PresenceBrief {
@@ -666,6 +666,13 @@ function planEnvironmentFor(presence: Presence) {
   return presence.environment === "sandbox" ? "sandbox" as const : "live" as const;
 }
 
+function publishingPlanPriority(plan: PublishingPlan) {
+  // A failed planning attempt can remain beside the last usable plan. Keep
+  // that diagnostic record visible in history, but never let it replace an
+  // active plan in the operator-facing projection or worker lookup.
+  return plan.status === "active" ? 1 : 0;
+}
+
 export function derivePublishingPlanProjection(source: OpenPresenceState, presenceId?: string, at: string | number | Date = new Date()): PublishingPlan | undefined {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presences.find((item) => item.id === (presenceId ?? state.activePresenceId)) ?? state.presence;
@@ -673,7 +680,7 @@ export function derivePublishingPlanProjection(source: OpenPresenceState, presen
   const environment = planEnvironmentFor(presence);
   const plan = [...state.publishingPlans]
     .filter((item) => item.presenceId === presence.id && item.environment === environment && item.status !== "superseded")
-    .sort((left, right) => right.revision - left.revision || right.updatedAt.localeCompare(left.updatedAt))[0];
+    .sort((left, right) => publishingPlanPriority(right) - publishingPlanPriority(left) || right.revision - left.revision || right.updatedAt.localeCompare(left.updatedAt))[0];
   if (!plan) return undefined;
   const atMs = at instanceof Date ? at.getTime() : typeof at === "number" ? at : new Date(at).getTime();
   const verifiedOriginals = derivePublicHistory(state, presence.id).filter((item) => item.kind === "post" && !item.parentExternalRef && item.environment === environment && new Date(item.occurredAt).getTime() >= new Date(plan.horizonStart).getTime() && new Date(item.occurredAt).getTime() <= new Date(plan.horizonEnd).getTime()).length;
@@ -684,7 +691,7 @@ export function derivePublishingPlanProjection(source: OpenPresenceState, presen
 function activePublishingPlanFor(source: OpenPresenceState, presenceId: string, environment: PresenceEnvironment) {
   return [...source.publishingPlans]
     .filter((item) => item.presenceId === presenceId && item.environment === environment && item.status !== "superseded")
-    .sort((left, right) => right.revision - left.revision || right.updatedAt.localeCompare(left.updatedAt))[0];
+    .sort((left, right) => publishingPlanPriority(right) - publishingPlanPriority(left) || right.revision - left.revision || right.updatedAt.localeCompare(left.updatedAt))[0];
 }
 
 /** Return durable plan windows that became eligible during a persisted time advance. */
@@ -815,10 +822,22 @@ export function recordPublishingPlanFailure(source: OpenPresenceState, presenceI
   const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   if (!presence || presence.publishingInitiative.mode === "off") return state;
   const timestamp = now();
-  const prior = state.publishingPlans.find((item) => item.presenceId === presence.id && item.environment === planEnvironmentFor(presence) && item.status !== "superseded");
+  const prior = state.publishingPlans
+    .filter((item) => item.presenceId === presence.id && item.environment === planEnvironmentFor(presence) && item.status !== "superseded")
+    .sort((left, right) => publishingPlanPriority(right) - publishingPlanPriority(left) || right.revision - left.revision)[0];
   if (prior) {
-    prior.status = "blocked";
-    prior.rationaleSummary = message.slice(0, 500);
+    // A failed successor attempt must not discard the last usable plan. Keep
+    // that plan active and report the failure as an event; only an already
+    // non-active record should become blocked.
+    if (prior.status !== "active") {
+      prior.status = "blocked";
+      prior.rationaleSummary = message.slice(0, 500);
+    } else {
+      // Keep a failed due checkpoint from hot-looping the planner every
+      // scheduler sweep. The existing active plan remains authoritative while
+      // the next attempt is deferred to a bounded retry window.
+      prior.nextReassessmentAt = new Date(new Date(timestamp).getTime() + 15 * 60_000).toISOString();
+    }
     prior.updatedAt = timestamp;
   }
   state.events.unshift(event("system", "Publishing plan unavailable", `${presence.name} could not complete the latest planning pass. ${message}`, "warning", { presenceId }));
@@ -3159,10 +3178,11 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   normalized.personIdentities = normalizePersonIdentityScopes(normalized);
   normalized.publishingPlans = state.publishingPlans ?? [];
   normalized.files = (state.files ?? []).map((file) => {
+    const metadata = fileMeta[file.kind];
     if (file.kind === "TASTE" && !file.content.includes("Affordance standards")) {
-      return { ...file, content: fileContent("TASTE", { name: normalized.agent?.name ?? "Jenny", description: normalized.agent?.description ?? "", audience: normalized.agent?.audience ?? "", mode: normalized.presence?.mode ?? "agent", handle: normalized.presence?.handle ?? "@genny", accent: normalized.agent?.accent ?? "#D68754" }, normalized.presence ?? undefined), updatedAt: now() };
+      return { ...file, ...(metadata ?? {}), content: fileContent("TASTE", { name: normalized.agent?.name ?? "Jenny", description: normalized.agent?.description ?? "", audience: normalized.agent?.audience ?? "", mode: normalized.presence?.mode ?? "agent", handle: normalized.presence?.handle ?? "@genny", accent: normalized.agent?.accent ?? "#D68754" }, normalized.presence ?? undefined), updatedAt: now() };
     }
-    return file;
+    return metadata ? { ...file, ...metadata } : file;
   });
   if (normalized.agent && normalized.scenarios.length === 0) {
     const builtins = builtinScenarioDefinitions(normalized.agent.id, normalized.presence?.channel ?? "x");

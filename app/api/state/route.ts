@@ -41,6 +41,7 @@ import { putDataUrl } from "@/lib/asset-store";
 import { bridgeExecutionStatus } from "@/lib/bridge-contract";
 import { routeExecutionIntent } from "@/lib/execution-router";
 import { recordVerifiedBridgeReaction } from "@/lib/bridge";
+import { reassessPublishingPlan } from "@/lib/publishing-plan-reassessment";
 import { nextSelfDirectedAttentionAt, selectBridgeDiscoveryCandidates, selectGrowthDiscoverySource } from "@/lib/growth-scheduler";
 import { recoverStaleAssignmentRuns } from "@/lib/assignment-recovery";
 import { classifyLiveAssignmentRun, liveAssignmentRunStage, reconcileLiveAssignmentRuns } from "@/lib/live-assignment-run";
@@ -177,22 +178,7 @@ async function runPublishingPlanReassessment(source: OpenPresenceState, presence
     }
   }
   try {
-    const draft = await generatePublishingPlan(source);
-    let next = replacePublishingPlan(source, {
-      presenceId: target.id,
-      draft,
-      modelProvider: source.modelProfiles.find((profile) => profile.agentId === source.agent?.id)?.provider,
-      modelId: source.modelProfiles.find((profile) => profile.agentId === source.agent?.id)?.model,
-      expectedPlanId: guard?.expectedPlanId,
-      expectedRevision: guard?.expectedRevision,
-    });
-    const updatedPlan = next.publishingPlans.find((item) => item.presenceId === target.id && item.environment === environment && item.status === "active");
-    const nextTimeLabel = updatedPlan?.nextReassessmentAt ? new Date(updatedPlan.nextReassessmentAt).toLocaleTimeString("en-US", { hour: "numeric", minute: "2-digit" }) : "later";
-    const windowCount = updatedPlan?.windows?.length ?? 0;
-    const summary = windowCount === 0
-      ? `${target.name} completed a plan reassessment · resting with 0 publication windows · next review at ${nextTimeLabel}.`
-      : `${target.name} updated its publishing plan (Revision ${updatedPlan?.revision}) · ${windowCount} consideration window${windowCount === 1 ? "" : "s"} · next review at ${nextTimeLabel}.`;
-    next = recordRuntimeEvent(next, target.id, "Plan reassessed", summary, "positive");
+    const next = await reassessPublishingPlan(source, presenceId, guard);
     return next;
   } catch (error) {
     const message = error instanceof Error ? error.message : "The Publishing Planner was unavailable.";
@@ -1056,6 +1042,7 @@ async function runScheduledLiveAssignments(source: OpenPresenceState, presenceId
     if (execution?.status === "failed") {
       currentAssignment.lastOutcome = { class: "delivery_failed", message: execution.failure?.message ?? "X rejected reply delivery.", at: new Date().toISOString() };
     } else if (execution?.status === "succeeded") {
+      currentAssignment.work = { ...(currentAssignment.work ?? assignmentWorkDefaults(currentAssignment)), blockedReason: undefined };
       currentAssignment.lastOutcome = { class: "assignment_completed", message: "Reply delivered to connector; awaiting Social Mirror verification.", at: new Date().toISOString() };
     }
     return recordRuntimeEvent(next, presenceId, execution?.status === "succeeded" ? "Reply delivered" : execution?.status === "failed" ? "Reply delivery failed" : "Reply queued", execution?.status === "succeeded" ? `${presence.name} sent the reply. Awaiting verification in the Social Mirror.` : execution?.status === "failed" ? "The connector rejected the reply." : "Reply is queued for delivery.", execution?.status === "failed" ? "warning" : "positive");
@@ -1211,6 +1198,9 @@ function queueLiveAssignmentRun(source: OpenPresenceState, assignmentId: string,
     attempts: attempt,
     maxAttempts: work.maxAttempts,
     rejectedCandidates: assignment.rejectedCandidates,
+    startedAt: timestamp,
+    heartbeatAt: timestamp,
+    lastProgressAt: timestamp,
     createdAt: timestamp,
     updatedAt: timestamp,
   };

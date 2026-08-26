@@ -170,7 +170,7 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
     ]);
     const [postsResult, mentionsResult] = await Promise.allSettled([
       readRecentXPosts(credentials, accountId),
-      readRecentXMentions(credentials, accountId),
+      readRecentXMentions(credentials, accountId, connectedHandle ?? configuredHandle),
     ]);
     next = recordResourceUsageEvent(next, { presenceId, invocationId: options?.invocationId ?? `x-reconcile:${randomUUID()}`, runId: options?.runId, originKind: "inbound_social", attentionSource: "inbound_social", category: "channel_read", provider: "x", usage: { requests: 2 }, attentionEpisodeId: options?.attentionEpisodeId });
     if (postsResult.status === "rejected") throw postsResult.reason;

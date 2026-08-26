@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readChannelSecret, readProviderSecret, readState, shouldRecordNativeOperationalFailure, writeState } from "../lib/db";
-import { findVerifiedXQuote, findVerifiedXReply, matchesXQuote, matchesXReply, mergeXCredentials, normalizeXText, readRecentXPosts, readXPostsByIds } from "../lib/x";
+import { findVerifiedXQuote, findVerifiedXReply, matchesXQuote, matchesXReply, mergeXCredentials, normalizeXText, readRecentXMentions, readRecentXPosts, readXPostsByIds } from "../lib/x";
 import { applyOperation, createAgent, derivePublicHistory, recordNativeMirror, recordPublicFooting, settleCapabilityTrialNoOpportunity } from "../lib/runtime";
 import { hydrateNativeXThreadContext } from "../lib/native-x";
 import { xCreditsExhausted } from "../lib/x-credits";
@@ -22,6 +22,35 @@ beforeEach(() => {
 });
 
 describe("native X connection", () => {
+  it("reads direct replies to the Presence's posts, including media-only GIF replies", async () => {
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: [{
+        id: "gif-reply-1",
+        text: "",
+        lang: "zxx",
+        created_at: "2026-08-25T12:00:00.000Z",
+        author_id: "person-1",
+        conversation_id: "post-1",
+        referenced_tweets: [{ type: "replied_to", id: "post-1" }],
+        attachments: { media_keys: ["media-gif-1"] },
+      }],
+      includes: {
+        users: [{ id: "person-1", username: "richardsondx", name: "Alex" }],
+        media: [{ media_key: "media-gif-1", type: "animated_gif", preview_image_url: "https://pbs.twimg.com/tweet_video_thumb/gif-reply-1.jpg" }],
+      },
+    }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const replies = await readRecentXMentions({ apiKey: "api", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" }, "account-1", "example_agent");
+      expect(String(fetchMock.mock.calls[0]?.[0])).toContain("/2/tweets/search/recent?");
+      expect(String(fetchMock.mock.calls[0]?.[0])).toContain("to%3Aexample_agent");
+      expect(replies[0]).toMatchObject({ id: "gif-reply-1", text: "", parentId: "post-1", media: [{ type: "animated_gif", previewImageUrl: "https://pbs.twimg.com/tweet_video_thumb/gif-reply-1.jpg" }] });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("preserves encrypted credentials when edit fields are left blank", () => {
     expect(mergeXCredentials({ apiKey: "saved-key", apiSecret: "saved-secret", bearerToken: "saved-bearer" }, { apiKey: "" })).toEqual({ apiKey: "saved-key", apiSecret: "saved-secret", bearerToken: "saved-bearer" });
     expect(mergeXCredentials({ apiKey: "saved-key", apiSecret: "saved-secret", bearerToken: "saved-bearer" }, { bearerToken: "replacement" })).toEqual({ apiKey: "saved-key", apiSecret: "saved-secret", bearerToken: "replacement" });

@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { writeState } from "../lib/db";
+import { readState, writeState } from "../lib/db";
+import { dispatchAutonomyWorker, queueAutonomyRun } from "../lib/autonomy-worker";
 import { POST as statePost } from "../app/api/state/route";
-import { applyOperation, compileAgendaWork, createAgent, derivePublicHistory, derivePublishingPlanProjection, normalizeState, replacePublishingPlan, startPlaygroundSession } from "../lib/runtime";
+import { applyOperation, compileAgendaWork, createAgent, derivePublicHistory, derivePublishingPlanProjection, normalizeState, recordPublishingPlanFailure, replacePublishingPlan, startPlaygroundSession } from "../lib/runtime";
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
@@ -85,6 +86,41 @@ describe("Publishing Plan", () => {
     expect(state.publishingPlans.filter((plan) => plan.presenceId === firstPresenceId && plan.status === "superseded")).toHaveLength(1);
     expect(derivePublishingPlanProjection(state, second.id)).toBeUndefined();
     expect(normalizeState(state).publishingPlans).toHaveLength(2);
+  });
+
+  it("keeps an active plan ahead of a newer stale blocked planning attempt", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { connectionMode: "native" } });
+    const presence = state.presence!;
+    const activeDraft = planWindow(new Date().toISOString(), "Continue the current useful thread.");
+    state = replacePublishingPlan(state, { presenceId: presence.id, environment: "live", draft: activeDraft });
+    const activePlan = state.publishingPlans[0]!;
+    state.publishingPlans.unshift({
+      ...activePlan,
+      id: "publishing-plan-stale-blocked",
+      status: "blocked",
+      revision: activePlan.revision + 1,
+      rationaleSummary: "Openai is selected but no API key is stored.",
+      updatedAt: new Date(Date.now() + 1_000).toISOString(),
+    });
+
+    const projected = derivePublishingPlanProjection(state, presence.id);
+
+    expect(projected).toMatchObject({ id: activePlan.id, status: "active" });
+    expect(projected?.rationaleSummary).toBe(activePlan.rationaleSummary);
+  });
+
+  it("keeps the last usable plan active when a successor planner attempt fails", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { connectionMode: "native", publishingInitiative: { ...state.presence!.publishingInitiative, mode: "adaptive" } } });
+    const presence = state.presence!;
+    state = replacePublishingPlan(state, { presenceId: presence.id, environment: "live", draft: { horizonStart: new Date(Date.now() - 86_400_000).toISOString(), horizonEnd: new Date(Date.now() + 86_400_000).toISOString(), windows: [], rationaleSummary: "A usable plan." } });
+
+    const failed = recordPublishingPlanFailure(state, presence.id, "The planner provider was temporarily unavailable.");
+
+    expect(failed.publishingPlans[0]).toMatchObject({ status: "active", rationaleSummary: "A usable plan." });
+    expect(new Date(failed.publishingPlans[0]!.nextReassessmentAt!).getTime()).toBeGreaterThan(Date.now());
+    expect(failed.events[0]).toMatchObject({ title: "Publishing plan unavailable" });
   });
 
   it("wakes a due window and proves original publication through Mirror and Feed", async () => {
@@ -180,7 +216,9 @@ describe("Publishing Plan", () => {
     });
 
     writeState(state);
-    const afterWake = await stateOperation({ type: "wakePresence", presenceId: presence.id });
+    await stateOperation({ type: "wakePresence", presenceId: presence.id });
+    await new Promise((resolve) => setTimeout(resolve, 100));
+    const afterWake = readState();
     const activePlan = afterWake.publishingPlans.find((item: { status: string }) => item.status === "active");
     const supersededPlan = afterWake.publishingPlans.find((item: { id: string }) => item.id === initialPlanId);
 
@@ -192,6 +230,34 @@ describe("Publishing Plan", () => {
       supersededBy: activePlan.id,
     });
     expect(supersededPlan.supersededAt).toBeDefined();
+  });
+
+  it("reassesses a due plan in the durable native Attention worker", async () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { connectionMode: "native", publishingInitiative: { ...state.presence!.publishingInitiative, mode: "adaptive" } } });
+    const presence = state.presence!;
+    state = replacePublishingPlan(state, {
+      presenceId: presence.id,
+      environment: "live",
+      draft: {
+        horizonStart: new Date(Date.now() - 86_400_000).toISOString(),
+        horizonEnd: new Date(Date.now() - 3_600_000).toISOString(),
+        nextReassessmentAt: new Date(Date.now() - 3_600_000).toISOString(),
+        windows: [],
+        rationaleSummary: "Prior plan has concluded.",
+      },
+    });
+    const initialPlan = state.publishingPlans[0]!;
+    writeState(state);
+
+    const queued = queueAutonomyRun(presence.id, "attention", { metadata: { source: "scheduler" } });
+    await dispatchAutonomyWorker(queued.run.id);
+    const after = readState();
+    const activePlan = after.publishingPlans.find((item) => item.status === "active");
+    const supersededPlan = after.publishingPlans.find((item) => item.id === initialPlan.id);
+
+    expect(activePlan).toMatchObject({ revision: 2, status: "active" });
+    expect(supersededPlan).toMatchObject({ status: "superseded", supersededBy: activePlan!.id });
   });
 
   it("guarantees atomic compare-and-swap idempotency under concurrent reassessment calls", () => {

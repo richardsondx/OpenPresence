@@ -393,6 +393,23 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.files.find((file) => file.kind === "TASTE")?.protected).toBe(true);
   });
 
+  it("migrates legacy meaning-file subtitles when an existing workspace is read", () => {
+    const state = createAgent(input);
+    state.files = state.files.map((file) => ({ ...file, subtitle: `Legacy ${file.kind} subtitle` }));
+
+    const normalized = normalizeState(state);
+    expect(normalized.files.map((file) => file.subtitle)).toEqual([
+      "How I think",
+      "Who I am",
+      "What I am here to do",
+      "What I consider good",
+      "What I should remember",
+      "What results have taught me",
+      "What keeps me active",
+      "A situated social self, not just a channel.",
+    ]);
+  });
+
   it("defaults new Agents to OpenAI GPT 5.6 Luna at medium reasoning", () => {
     const state = createAgent(input);
     expect(state.modelProfiles[0]).toMatchObject({ provider: "openai", model: "gpt-5.6-luna", quality: "medium" });

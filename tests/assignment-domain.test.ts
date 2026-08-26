@@ -252,6 +252,47 @@ describe("canonical Assignment domain", () => {
     expect(later.assignments.find((item) => item.id === assignment.id)?.nextDueAt).toBe(recoveredAssignment.nextDueAt);
   });
 
+  it("does not attach an old unbound execution to a new Assignment run", () => {
+    const state = createAgent(input);
+    const assignment = applyOperation(state, { type: "createAssignment", instruction: "Publish one useful lesson about persistent agents.", presenceId: state.presence!.id, environment: "live" }).assignments[0]!;
+    const runCreatedAt = "2026-08-26T00:00:00.000Z";
+    state.assignmentRuns = [{
+      id: "assignment-run:retry",
+      assignmentId: assignment.id,
+      agentId: assignment.agentId,
+      presenceId: assignment.presenceId,
+      sessionId: "live:test",
+      status: "queued",
+      currentStage: "researching",
+      attempts: 2,
+      maxAttempts: 4,
+      rejectedCandidates: 0,
+      createdAt: runCreatedAt,
+      updatedAt: runCreatedAt,
+    }];
+    state.executions = [{
+      id: "execution:old",
+      socialIntentId: "intent:old",
+      presenceId: assignment.presenceId,
+      assignmentId: assignment.id,
+      affordance: "x.reply",
+      mode: "auto",
+      status: "blocked",
+      attempts: 0,
+      connector: "native",
+      idempotencyKey: "old",
+      failure: { code: "TARGET_LANGUAGE_MISMATCH", message: "old failure", retryable: false },
+      createdAt: "2026-08-25T23:18:09.930Z",
+      updatedAt: "2026-08-25T23:18:10.053Z",
+      environment: "live",
+    }];
+
+    const normalized = normalizeState(state);
+    expect(normalized.assignmentRuns?.[0]?.status).toBe("queued");
+    expect(normalized.assignmentRuns?.[0]?.lastError).toBeUndefined();
+    expect(normalized.assignmentRuns?.[0]?.completedAt).toBeUndefined();
+  });
+
   it("does not reactivate a reviewed non-retryable delivery failure", () => {
     let state = createAgent(input);
     state = applyOperation(state, { type: "createAssignment", instruction: "Publish one useful lesson about persistent agents.", presenceId: state.presence!.id, environment: "live", schedule: { day: "Saturday", time: "07:00", executionWindow: "07:00–10:00" } });

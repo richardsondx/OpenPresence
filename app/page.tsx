@@ -811,6 +811,7 @@ export default function Home() {
   const playgroundStartInFlight = useRef<string | null>(null);
   const playgroundClockSyncInFlight = useRef<string | null>(null);
   const refreshStateInFlight = useRef<{ projection: "activity" | "full"; request: Promise<OpenPresenceState> } | null>(null);
+  const refreshStateRef = useRef<(() => Promise<OpenPresenceState>) | null>(null);
   const rememberStateResponse = useCallback((response: Response) => {
     const etag = response.headers.get("etag");
     if (etag) stateEtag.current = etag;
@@ -982,6 +983,9 @@ export default function Home() {
       if (refreshStateInFlight.current?.request === request) refreshStateInFlight.current = null;
     }
   }
+  useEffect(() => {
+    refreshStateRef.current = refreshState;
+  }, [refreshState]);
   // Activity is a live operational surface. A completed worker must be able
   // to move the operator out of an old "choosing" card without requiring a
   // second click or a full-page reload. Keep this deliberately slow and
@@ -994,6 +998,15 @@ export default function Home() {
     }, 15_000);
     return () => window.clearInterval(timer);
   }, [view, state?.onboarded, state?.presence?.status]);
+  // Schedule is also a live operational surface: a background reassessment
+  // must replace a due plan on screen without requiring navigation or reload.
+  useEffect(() => {
+    if (view !== "schedule" || !state?.onboarded || !state?.presence) return;
+    const timer = window.setInterval(() => {
+      if (refreshStateRef.current) void refreshStateRef.current().catch(() => undefined);
+    }, 15_000);
+    return () => window.clearInterval(timer);
+  }, [view, state?.onboarded, state?.activePresenceId, state?.presence?.id]);
   function openView(nextView: View) {
     setView(nextView);
     if (typeof window !== "undefined") {
@@ -12667,7 +12680,11 @@ function PublishingPlanScheduleSummary({ plan, presenceName }: { plan: Publishin
   // The plan is useful context, not a second schedule to read through. Start
   // with the decision that matters and reveal working detail only on request.
   const [expanded, setExpanded] = useState(false);
-  const [now] = useState(() => Date.now());
+  const [now, setNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
   const activeWindow = plan.windows.find((window) => window.status === "active") ?? plan.windows.find((window) => window.status === "future");
   const formatPlanDateTime = (value: string) => new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: plan.timezone }).format(new Date(value));
   const formatPlanDate = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: plan.timezone }).format(new Date(value));

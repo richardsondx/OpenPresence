@@ -54,7 +54,11 @@ export function settleTerminalDuplicateAssignment(source: OpenPresenceState, ass
 }
 
 function executionForRun(state: OpenPresenceState, run: AssignmentRun) {
-  const startedAt = run.startedAt ? Date.parse(run.startedAt) : Number.NEGATIVE_INFINITY;
+  // Unbound legacy executions may only be associated with a run created at
+  // or after the run's own durable start. Treating a missing start as
+  // -Infinity made every retry inherit the first historical execution for
+  // the Assignment and immediately re-fail with its stale error.
+  const startedAt = Date.parse(run.startedAt ?? run.createdAt);
   return state.executions
     .filter((execution) => {
       if (execution.assignmentId !== run.assignmentId) return false;

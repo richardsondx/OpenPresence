@@ -461,6 +461,17 @@ export function runOperationalSweep(now = new Date()): SweepResult {
     const hasPendingAttentionWake = listScheduledWakes(presence.id).some((wake) => wake.state === "pending" && (wake.kind === "attention" || wake.kind === "self_directed_discovery"));
     const hasAttentionRun = listOperationalRuns(presence.id, ["queued", "running", "recovering", "delivery_uncertain", "reconciling"])
       .some((run) => run.kind === "attention");
+    const planCandidates = state.publishingPlans.filter((plan) => plan.presenceId === presence.id && plan.environment === (presence.environment === "sandbox" ? "sandbox" : "live") && plan.status !== "superseded");
+    const activePlan = planCandidates.filter((plan) => plan.status === "active").sort((left, right) => right.revision - left.revision)[0];
+    const planDue = Boolean(activePlan && ((activePlan.nextReassessmentAt && new Date(activePlan.nextReassessmentAt).getTime() <= now.getTime()) || (activePlan.horizonEnd && new Date(activePlan.horizonEnd).getTime() <= now.getTime())));
+    const planMissing = planCandidates.length === 0 && presence.publishingInitiative.mode !== "off";
+    if (planDue || planMissing) {
+      // Plan maintenance is due independently of the self-directed cadence.
+      // Move the shared attention wake to now even when discovery is cooling
+      // down, so a visible "Due now" state cannot wait behind that cooldown.
+      if (!hasAttentionRun) requestAttention(presence.id, "self_directed", nowIso, "broad");
+      continue;
+    }
     if (nextEligibleAt && new Date(nextEligibleAt).getTime() > now.getTime()) {
       if (!hasPendingAttentionWake && !hasAttentionRun) requestAttention(presence.id, "self_directed", nextEligibleAt, "broad");
       continue;
