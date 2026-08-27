@@ -48,6 +48,18 @@ describe("Conversation Episodes", () => {
     expect(episode.closedAt).toBeDefined();
   });
 
+  it("keeps an explicitly continuing exchange eligible after reply verification", () => {
+    const state = initialState();
+    const object = mirror("external-continue", undefined, "A question worth answering.");
+    state.mirrorObjects = [object];
+    const episode = createConversationEpisode(state, object);
+    state.conversationEpisodes.push(episode);
+    applyConversationDisposition(state, episode.id, "continue", "There is still a useful opening.", "intent-continue");
+    settleConversationClosure(state, episode.id, "verified", "The reply was observed.");
+    expect(episode.status).toBe("active");
+    expect(episode.closedAt).toBeUndefined();
+  });
+
   it("keeps generic acknowledgments closed while allowing substantive reopening", () => {
     const state = initialState();
     const first = mirror("external-1", undefined, "A real question.");

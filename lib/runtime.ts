@@ -1,4 +1,4 @@
-import type { ActionRecord, ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, AgendaHorizon, AgendaItem, AgendaCompilation, AgendaWorkItem, AgendaWatchingItem, Asset, Assignment, AssignmentDelegationPolicy, AssignmentPlan, AssignmentPreflight, AssignmentQuantityMode, AssignmentReadinessCheck, AssignmentRun, AttentionTest, AttentionTestMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, ExplorationBrief, ExplorationFinding, ExplorationSession, ExplorationSessionStatus, FileKind, FileProposal, GhostProfile, GhostRepresentation, JsonValue, LiveEvent, MirrorObject, OpenPresenceState, Operation, OperatorDirective, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, ResourceUsageEvent, RuntimeScope, SandboxAssetInput, SelfDirectedAttentionPolicy, SocialAssetKind, SocialDecision, SocialDecisionConfidence, SocialDecisionKind, SocialIntent, SocialOrigin, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, LanguagePolicy, Scenario, ScenarioStimulus, ScenarioStimulusRequirements, ScenarioVersion, ScenarioRun, ScenarioRunProvenance, ScenarioRunEvaluation, StructuralFinding, PublishingInitiative, PublishingInitiativeProgress, PublishingPlan, PublishingPlanDraft, PublishingPlanWorkEvent, PresenceCapability, PresenceCapabilityManifest, PublicationMetricSnapshot, PresenceAudienceSnapshot, CapabilityTrial } from "./types";
+import type { ActionRecord, ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, AgendaHorizon, AgendaItem, AgendaCompilation, AgendaWorkItem, AgendaWatchingItem, Asset, Assignment, AssignmentDelegationPolicy, AssignmentPlan, AssignmentPreflight, AssignmentQuantityMode, AssignmentReadinessCheck, AssignmentRun, AttentionTest, AttentionTestMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, ExplorationBrief, ExplorationFinding, ExplorationSession, ExplorationSessionStatus, FileKind, FileProposal, GhostProfile, GhostRepresentation, JsonValue, LiveEvent, MirrorObject, OpenPresenceState, Operation, OperatorDirective, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, ResourceUsageEvent, RuntimeScope, SandboxAssetInput, SelfDirectedAttentionPolicy, SocialAssetKind, SocialDecision, SocialDecisionConfidence, SocialDecisionKind, SocialIntent, SocialOrigin, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, PublicRequestType, PublicRequestDisposition, PresenceRequestPolicy, DelegationGrant, RelationshipPolicy, RelationshipLearningMode, RelationshipEngagementMode, LanguagePolicy, Scenario, ScenarioStimulus, ScenarioStimulusRequirements, ScenarioVersion, ScenarioRun, ScenarioRunProvenance, ScenarioRunEvaluation, StructuralFinding, PublishingInitiative, PublishingInitiativeProgress, PublishingPlan, PublishingPlanDraft, PublishingPlanWorkEvent, PresenceCapability, PresenceCapabilityManifest, PublicationMetricSnapshot, PresenceAudienceSnapshot, CapabilityTrial } from "./types";
 import { AGENT_CAPABILITY_DEFINITIONS, CHANNEL_CAPABILITIES, CHANNEL_EXTENSIONS, simulationForChannel } from "./types";
 import { buildScenarioFromPrompt, builtinScenarioDefinitions, repairScenarioStimuli, scenarioFromImport, stableHash, validateScenarioFidelity } from "./scenarios";
 import { DEFAULT_PRESENCE_LANGUAGE, effectiveLanguagePolicy, EMPTY_LANGUAGE_POLICY, languageEligibleForObservation, languagesMatch, normalizeLanguagePolicy, normalizePresenceLanguage, normalizedObservedLanguage, validateLanguage } from "./language-policy";
@@ -6,9 +6,9 @@ import { createAssetPerception, createUninterpretedPerception, hasUsablePercepti
 import { epistemicState } from "./asset-intelligence";
 import { isTestRuntime } from "./test-runtime";
 import { createRememberedPerson, deriveIdentityHydrationState, evidenceRefFromMirror, factForCorrection, isPlaceholderIdentity, normalizePersonIdentityScopes, relationshipCurationEligible, relationshipForPerson } from "./network-memory";
-import { ensureConversationEpisode, settleConversationClosure, updateConversationEpisodeFromMirror } from "./conversation-episodes";
+import { applyConversationDisposition, conversationDispositionForAction, ensureConversationEpisode, settleConversationClosure, updateConversationEpisodeFromMirror } from "./conversation-episodes";
 import { createPublicExpressionCandidate, PublicationSecurityError, verifyExecutionPermit } from "./publication-security";
-import { formatOneSentencePerLine, publicExpressionLeakageReason } from "./public-expression";
+import { formatOneSentencePerLine, formatPublicExpression, publicExpressionLeakageReason } from "./public-expression";
 import { normalizeMirrorObject } from "./mirror-content";
 import { bridgeExecutionStatus, chromeBrowserBridgeCapabilities } from "./bridge-contract";
 import type { RelationshipVisibility } from "./types";
@@ -17,11 +17,20 @@ import { evaluateExecutionReadiness } from "./execution-readiness";
 import { xCreditsExhausted } from "./x-credits";
 import { getDefaultCurationSources, seedDefaultEditorialReferences } from "./editorial-curation";
 import { isTerminalDuplicateExecution, reconcileLiveAssignmentRuns, settleTerminalDuplicateAssignment } from "./live-assignment-run";
+import { BUILTIN_CONVERSATION_STYLES, DEFAULT_CONVERSATION_STYLE_ID } from "./conversation-styles";
+import { defaultAvatarLook } from "./avatars";
 
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
 const channelName = (channel: ChannelId) => channel === "x" ? "X" : channel === "linkedin" ? "LinkedIn" : channel === "substack" ? "Substack" : channel;
 const providerName = (provider: import("./types").ModelProvider) => provider === "openai" ? "OpenAI" : provider === "openrouter" ? "OpenRouter" : provider === "ollama" ? "Ollama" : provider === "anthropic" ? "Anthropic" : provider === "gemini" ? "Gemini" : provider === "custom" ? "Custom" : provider;
+
+// These records were generated by an old recovery script that incorrectly
+// promoted every active relationship into a Watch. They are migration debris,
+// not operator-authored attention, and must never re-enter live cognition.
+function isRecoveredRelationshipWatch(watch: Watch) {
+  return watch.id.startsWith("watch_recovered_relationship_");
+}
 
 /** Calculate the observation and attention interval in milliseconds for a Presence. */
 export const intervalForPresence = (presence: Presence | undefined) => {
@@ -129,7 +138,7 @@ const fileContent = (kind: FileKind, input: CreateAgentInput, presence?: Presenc
 };
 
 export function initialState(): OpenPresenceState {
-  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], operatorConversations: [], operatorNudges: [], agentRequests: [], capabilityChangeEvents: [], events: [], socialDecisions: [], resourceUsageEvents: [], attentionEpisodes: [], calendar: [], assignments: [], growthReviews: [], growthRevisions: [], growthEvidenceSnapshots: [], growthFileVersions: [], audienceSnapshots: [], publicationMetricSnapshots: [], watches: [], explorations: [], discoveryPlans: [], explorationSessions: [], explorationFindings: [], actions: [], publishingPlans: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], assetProviderConnections: [], toolBindings: [], changeSets: [], standingIntents: [], operatorDirectives: [], socialIntents: [], executions: [], outcomes: [], attentionTests: [], capabilityTrials: [], publications: [], assetUsages: [], sourceEvidence: [], claimGrounding: [], preferenceEvidence: [], originalPostRehearsals: [], librarySources: [], assets: [], perceptions: [], assetResearchSessions: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], conversationEpisodes: [], assignmentContributions: [], people: [], personIdentities: [], relationships: [], relationshipFacts: [], relationshipOpenLoops: [], recommendationRecords: [], introductionRecords: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], scenarios: [], scenarioVersions: [], scenarioRuns: [], scenarioRunProvenance: [], scenarioEvaluations: [], knowledgeDocuments: [], knowledgeVersions: [], knowledgeSegments: [], presenceKnowledgeAccess: [], mindFileKnowledgeBindings: [], knowledgeRetrievalRuns: [], knowledgeCitations: [], knowledgeCollections: [], knowledgeItems: [], presenceKnowledgeBindings: [], operationalRuns: [], scheduledWakes: [], dependencyHealth: [], recoveryIncidents: [], recoveryAttempts: [], browserBodies: [], editorialOpportunities: [], editorialFeedbackEvents: [], editorialReferences: [], sourceAssets: [], mediaPerceptions: [], verificationRecords: [], rightsAssessments: [], editorialDecisions: [], publicationPackages: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
+  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], operatorConversations: [], operatorNudges: [], agentRequests: [], capabilityChangeEvents: [], events: [], socialDecisions: [], resourceUsageEvents: [], attentionEpisodes: [], calendar: [], assignments: [], growthReviews: [], growthRevisions: [], growthEvidenceSnapshots: [], growthFileVersions: [], audienceSnapshots: [], publicationMetricSnapshots: [], watches: [], watchSignals: [], relationshipPolicies: [], presenceRequestPolicies: [], delegationGrants: [], publicRequests: [], explorations: [], discoveryPlans: [], explorationSessions: [], explorationFindings: [], actions: [], publishingPlans: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], assetProviderConnections: [], toolBindings: [], changeSets: [], standingIntents: [], operatorDirectives: [], socialIntents: [], executions: [], outcomes: [], attentionTests: [], capabilityTrials: [], publications: [], assetUsages: [], sourceEvidence: [], claimGrounding: [], preferenceEvidence: [], originalPostRehearsals: [], librarySources: [], assets: [], perceptions: [], assetResearchSessions: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], conversationEpisodes: [], assignmentContributions: [], people: [], personIdentities: [], relationships: [], relationshipFacts: [], relationshipOpenLoops: [], recommendationRecords: [], introductionRecords: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], scenarios: [], scenarioVersions: [], scenarioRuns: [], scenarioRunProvenance: [], scenarioEvaluations: [], knowledgeDocuments: [], knowledgeVersions: [], knowledgeSegments: [], presenceKnowledgeAccess: [], mindFileKnowledgeBindings: [], knowledgeRetrievalRuns: [], knowledgeCitations: [], knowledgeCollections: [], knowledgeItems: [], presenceKnowledgeBindings: [], conversationStyles: [], operationalRuns: [], scheduledWakes: [], dependencyHealth: [], recoveryIncidents: [], recoveryAttempts: [], browserBodies: [], editorialOpportunities: [], editorialFeedbackEvents: [], editorialReferences: [], sourceAssets: [], mediaPerceptions: [], verificationRecords: [], rightsAssessments: [], editorialDecisions: [], publicationPackages: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
 }
 
 export const SELF_DIRECTED_ATTENTION_PRESETS: Record<
@@ -406,6 +415,7 @@ function event(type: LiveEvent["type"], title: string, detail: string, tone: Liv
 export interface SocialDecisionInput {
   decision: SocialDecisionKind;
   acts?: Array<{ decision: Exclude<SocialDecisionKind, "no_op" | "original_post">; text?: string; rationale?: string }>;
+  conversationDisposition?: import("./types").ConversationDisposition;
   focalMirrorObjectIds?: string[];
   origin?: SocialOrigin;
   summary?: string;
@@ -438,6 +448,7 @@ function createSocialDecision(state: OpenPresenceState, input: SocialDecisionInp
     origin: input.origin,
     decision: input.decision,
     acts: input.acts?.length ? input.acts.map((act) => ({ decision: act.decision, text: act.text?.trim() || undefined, rationale: act.rationale?.trim() || undefined })) : undefined,
+    conversationDisposition: input.conversationDisposition,
     operatorReaction: input.operatorReaction?.trim() || undefined,
     summary: input.summary?.trim() || `The Presence selected ${socialDecisionLabel(input.decision)} from the available channel context.`,
     influences: [...new Set((input.influences ?? ["Mission", "Taste", "Current social context"]).map((value) => value.trim()).filter(Boolean))].slice(0, 5),
@@ -1920,6 +1931,9 @@ export function identityLeakageReason(state: OpenPresenceState, presence: Presen
   return implementationTerms && new RegExp(implementationTerms, "i").test(text) ? "This Ghost draft includes implementation details that are not approved for public disclosure." : undefined;
 }
 
+function defaultPresenceRequestPolicy(presenceId: string, updatedAt = now()): import("./types").PresenceRequestPolicy {
+  return { presenceId, access: "nobody", allowedRequestTypes: ["answer", "research", "recommendation"], requireDirectAddress: true, acceptance: "operator_review", impactLimit: "low", updatedAt };
+}
 function makeEnvelope(presenceId: string, capabilities: { id: string }[], execution: Record<string, import("./types").ExecutionMode>): ExecutionEnvelope { return { presenceId, affordances: Object.fromEntries(capabilities.map((item) => [item.id, { mode: execution[item.id] ?? "off" }])), pacingProfile: "recommended", accountProtection: "guidance" }; }
 function makePresence(input: CreatePresenceInput, displayName = input.name?.trim() || input.handle, definition?: ChannelDefinition, brief = defaultPresenceBrief()): Presence {
   const presenceId = id("presence");
@@ -1930,7 +1944,7 @@ function makePresence(input: CreatePresenceInput, displayName = input.name?.trim
   const context: PresenceContext = { presenceId, channel: input.channel, publicIdentity: { displayName: name, handle: input.handle.trim(), mode: input.mode }, publicSelf, brief, audienceContext: brief.audience, voiceAdaptation: `Adapt the Agent's point of view to ${channelName(input.channel)} without flattening it.`, availableAffordances: capabilities.map((item) => item.id) };
   const connectionMode: PresenceConnectionMode = input.connectionMode ?? (input.channel === "x" ? "native" : "bridge");
   const publishingInitiative = defaultPublishingInitiative();
-  const presence = { id: presenceId, channel: input.channel, name, handle: input.handle.trim(), mode: input.mode, status: "live" as const, accent: input.accent, capabilities, execution, executionEnvelope: makeEnvelope(presenceId, capabilities, execution), context, brief, publicSelf, mediaPerceptionPolicy: input.mode === "ghost" ? "review-uncertain" as const : "use-judgment" as const, language: DEFAULT_PRESENCE_LANGUAGE, languagePolicy: { ...EMPTY_LANGUAGE_POLICY }, ghostProfile: input.mode === "ghost" ? defaultGhostProfile() : undefined, pacing: "recommended" as const, attentionIntervalMinutes: 5, quietHours: { enabled: false, start: "22:00", end: "07:00" }, publishingInitiative, selfDirectedAttention: defaultSelfDirectedAttentionPolicy(), accountHealth: "healthy" as const, environment: connectionMode === "sandbox" ? "sandbox" as const : "live" as const, connectionMode, browserAccess: { enabled: false } };
+  const presence = { id: presenceId, channel: input.channel, name, handle: input.handle.trim(), mode: input.mode, status: "live" as const, accent: input.accent, avatarLook: input.avatarLook ?? defaultAvatarLook(input.channel), capabilities, execution, executionEnvelope: makeEnvelope(presenceId, capabilities, execution), context, brief, publicSelf, mediaPerceptionPolicy: input.mode === "ghost" ? "review-uncertain" as const : "use-judgment" as const, language: DEFAULT_PRESENCE_LANGUAGE, languagePolicy: { ...EMPTY_LANGUAGE_POLICY }, ghostProfile: input.mode === "ghost" ? defaultGhostProfile() : undefined, pacing: "recommended" as const, attentionIntervalMinutes: 5, quietHours: { enabled: false, start: "22:00", end: "07:00" }, publishingInitiative, selfDirectedAttention: defaultSelfDirectedAttentionPolicy(), requestPolicy: defaultPresenceRequestPolicy(presenceId), accountHealth: "healthy" as const, environment: connectionMode === "sandbox" ? "sandbox" as const : "live" as const, connectionMode, browserAccess: { enabled: false }, conversationStyleId: DEFAULT_CONVERSATION_STYLE_ID };
   presence.context = compilePresenceContext(presence);
   return presence;
 }
@@ -1956,7 +1970,7 @@ function defaultSkills(): import("./types").Skill[] {
 }
 
 export function createAgent(input: CreateAgentInput): OpenPresenceState {
-  const agent = { id: id("agent"), name: input.name.trim(), description: input.description.trim(), audience: input.audience?.trim() || "builders and curious operators", topics: ["AI agents", "software", "useful ideas"], accent: input.accent, glyph: "◉", languagePolicy: { ...EMPTY_LANGUAGE_POLICY } };
+  const agent = { id: id("agent"), name: input.name.trim(), description: input.description.trim(), audience: input.audience?.trim() || "builders and curious operators", topics: ["AI agents", "software", "useful ideas"], accent: input.accent, glyph: "◉", languagePolicy: { ...EMPTY_LANGUAGE_POLICY }, conversationStyleId: DEFAULT_CONVERSATION_STYLE_ID };
   const definitions = builtinChannelDefinitions();
   const presence = makePresence({ channel: "x", handle: input.handle.trim() || `@${agent.name.toLowerCase().replace(/[^a-z0-9]/g, "")}`, mode: input.mode, accent: input.accent, connectionMode: "sandbox" }, agent.name, definitions[0], defaultPresenceBrief(agent));
   const conversation = makeConversation();
@@ -2226,7 +2240,129 @@ export function compileWatch(agentId: string, presenceId: string, channel: Chann
     : kind === "opportunity" ? "Opportunity watch" : clean.length > 56 ? `${clean.slice(0, 56).trim()}…` : clean;
   const source = creator && channel === "x" ? "automatic" as const : "manual" as const;
   const timestamp = now();
-  return { id: id("watch"), agentId, presenceId, channel, kind, title, query: clean, purpose: purpose?.trim() || undefined, observation: { status: source === "automatic" ? "watching" : "manual", source, observedCount: 0, baseline: "not-started" }, createdAt: timestamp, updatedAt: timestamp };
+  const handle = creator ? clean.replace(/^https?:\/\/(?:www\.)?(?:x\.com|twitter\.com)\//i, "").replace(/^@/, "").replace(/\/$/, "") : undefined;
+  return { id: id("watch"), agentId, presenceId, channel, kind, title, query: clean, purpose: purpose?.trim() || undefined, target: creator ? { channel, handle, identityStatus: "unresolved" } : undefined, state: "active", sources: creator ? ["posts", "replies", "mentions"] : undefined, observation: { status: source === "automatic" ? "watching" : "manual", source, observedCount: 0, baseline: "not-started" }, createdAt: timestamp, updatedAt: timestamp };
+}
+
+function watchHandle(watch: Watch) {
+  if (watch.target?.handle) return normalizeHandleForComparison(watch.target.handle);
+  if (watch.kind !== "creator") return undefined;
+  const raw = watch.query.replace(/^https?:\/\/(?:www\.)?(?:x\.com|twitter\.com)\//i, "").replace(/^@/, "").replace(/\/$/, "");
+  return /^[A-Za-z0-9_]{2,30}$/.test(raw) ? raw.toLowerCase() : undefined;
+}
+
+function requestTypeForText(text: string): PublicRequestType | undefined {
+  const lower = text.toLowerCase();
+  if (/\b(introduce|introduction|connect me with|put me in touch)\b/.test(lower)) return "introduction";
+  if (/\b(find someone|know anyone|recommend|good fit|candidate|who would be a good)\b/.test(lower)) return "recommendation";
+  if (/\b(research|look up|find out|investigate|analy[sz]e|compare)\b/.test(lower)) return "research";
+  if (/\b(write|draft|create)\b.{0,30}\b(post|thread|content|article)\b/.test(lower)) return "content";
+  if (/\b(can you|could you|would you|do you know|what is|how do|where can)\b/.test(lower)) return "answer";
+  return undefined;
+}
+
+function requestAddressesPresence(text: string, handle: string) {
+  const normalized = normalizeHandleForComparison(handle);
+  return Boolean(normalized && new RegExp(`(?:^|\\s|^)@${normalized}(?=\\b|\\W|$)`, "i").test(text));
+}
+
+function defaultRequestPolicyForPresence(presence: Presence): PresenceRequestPolicy {
+  return presence.requestPolicy ?? defaultPresenceRequestPolicy(presence.id);
+}
+
+function matchingDelegationGrant(state: OpenPresenceState, presence: Presence, mirror: MirrorObject) {
+  const actorId = mirror.author?.externalRef?.id;
+  const person = actorId ? state.personIdentities.find((identity) => identity.channel === mirror.channelId && identity.externalActorId === actorId && identity.sourcePresenceId === presence.id)?.personId : undefined;
+  return (state.delegationGrants ?? []).find((grant) => grant.enabled && !grant.revokedAt && grant.presenceId === presence.id && grant.channel === mirror.channelId && ((actorId && grant.externalActorId === actorId) || (person && grant.personId === person)));
+}
+
+export function relationshipPolicyFromWatchPurpose(purpose: string | undefined): Pick<RelationshipPolicy, "learning" | "engagement" | "rhythm"> | undefined {
+  const text = purpose?.toLowerCase().trim();
+  if (!text) return undefined;
+  // “Insights”, “perspective”, and “macro” describe the contribution we may
+  // make in a social exchange; they do not mean that the Watch is learning
+  // from the person. Learning must be explicitly requested by the operator.
+  const learning: RelationshipLearningMode = /\b(?:learn|study|understand|extract(?:ing)?\s+(?:a\s+)?lesson|take\s+(?:a\s+)?lesson)\b/.test(text) ? "selective" : "off";
+  const engagement: RelationshipEngagementMode = /\b(?:regular|maintain|friend|grow|laugh|interact|engage|respond|reply|conversation|mention|joke|humou?r|challenge|support|build)\b/.test(text)
+    ? /regular|maintain|friend|grow/.test(text) ? "maintain_relationship" : "when_worthwhile"
+    : "observe_only";
+  return { learning, engagement, rhythm: engagement === "maintain_relationship" ? "regular" : "light" };
+}
+
+export function recordWatchSignals(source: OpenPresenceState, mirrors: MirrorObject[], nextObservationAt?: string) {
+  const state = source;
+  for (const mirror of mirrors) {
+    const watches = state.watches.filter((watch) => watch.presenceId === mirror.presenceId && (watch.state ?? "active") === "active" && watch.kind === "creator" && (watch.target?.channel ?? watch.channel) === mirror.channelId);
+    for (const watch of watches) {
+      const handle = watchHandle(watch);
+      const matches = Boolean(
+        (watch.target?.externalActorId && mirror.author?.externalRef?.id === watch.target.externalActorId)
+        || (handle && normalizeHandleForComparison(mirror.author?.handle) === handle),
+      );
+      if (!matches) continue;
+      let personId = watch.target?.personId;
+      const actorId = mirror.author?.externalRef?.id;
+      if (state.agent && actorId && mirror.author?.externalRef?.type) {
+        const remembered = createRememberedPerson({ agentId: state.agent.id, presenceId: mirror.presenceId, channel: mirror.channelId, externalActorId: actorId, displayName: mirror.author.displayName, handle: mirror.author.handle, avatarUrl: mirror.author.avatarUrl, sourceEnvironment: mirror.environment, source: "watched" }, state.people, state.personIdentities, state.relationships);
+        personId = remembered.person.id;
+        state.people = [remembered.person, ...state.people.filter((item) => item.id !== remembered.person.id)];
+        state.personIdentities = [remembered.identity, ...state.personIdentities.filter((item) => item.id !== remembered.identity.id && !(item.channel === remembered.identity.channel && item.externalActorId === remembered.identity.externalActorId && item.sourcePresenceId === remembered.identity.sourcePresenceId && (item.sourceEnvironment ?? "live") === (remembered.identity.sourceEnvironment ?? "live")))];
+        state.relationships = [remembered.relationship, ...state.relationships.filter((item) => item.id !== remembered.relationship.id)];
+        const configured = relationshipPolicyFromWatchPurpose(watch.purpose);
+        if (configured) {
+          const timestamp = now();
+          const existing = state.relationshipPolicies.find((item) => item.presenceId === mirror.presenceId && item.personId === personId);
+          state.relationshipPolicies = [{ id: existing?.id ?? id("relationship-policy"), agentId: state.agent.id, presenceId: mirror.presenceId, personId, ...configured, sourceDescription: watch.purpose, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp }, ...state.relationshipPolicies.filter((item) => item.id !== (existing?.id ?? ""))];
+        }
+      }
+      watch.target = { ...(watch.target ?? { channel: mirror.channelId, identityStatus: "unresolved" }), channel: mirror.channelId, personId, externalActorId: actorId ?? watch.target?.externalActorId, handle: mirror.author?.handle ?? handle, identityStatus: actorId ? "verified" : watch.target?.identityStatus ?? "unresolved" };
+      if (!state.watchSignals.some((signal) => signal.watchId === watch.id && signal.mirrorObjectId === mirror.id)) {
+        const timestamp = now();
+        state.watchSignals.unshift({ id: id("watch-signal"), watchId: watch.id, personId, presenceId: mirror.presenceId, mirrorObjectId: mirror.id, signalType: "new_content", disposition: "pending", createdAt: timestamp, updatedAt: timestamp });
+        watch.observation.observedCount += 1;
+      }
+      const observedAt = mirror.observedAt ?? now();
+      watch.observation.status = "watching";
+      watch.observation.source = "automatic";
+      watch.observation.baseline = watch.observation.observedCount > 0 ? "ready" : "building";
+      watch.observation.lastObservedAt = observedAt;
+      watch.lastObservedAt = observedAt;
+      watch.nextObservationAt = nextObservationAt;
+      watch.updatedAt = now();
+    }
+  }
+  return state;
+}
+
+export function recordPublicRequestsFromMirrors(source: OpenPresenceState, mirrors: MirrorObject[]) {
+  const state = source;
+  for (const mirror of mirrors) {
+    const presence = state.presences.find((item) => item.id === mirror.presenceId) ?? state.presence;
+    if (!presence || mirror.actorPresenceId === presence.id || mirror.channelId !== presence.channel || !mirror.author?.externalRef?.id) continue;
+    const text = mirror.content?.text?.trim() ?? "";
+    const requestType = requestTypeForText(text);
+    if (!requestType || !requestAddressesPresence(text, presence.handle)) continue;
+    if (state.publicRequests.some((request) => request.sourceMirrorObjectId === mirror.id)) continue;
+    const timestamp = now();
+    const policy = defaultRequestPolicyForPresence(presence);
+    const grant = matchingDelegationGrant(state, presence, mirror);
+    const allowedTypes = grant?.allowedRequestTypes ?? policy.allowedRequestTypes;
+    const directAddressed = requestAddressesPresence(text, presence.handle);
+    const eligible = !directAddressed && policy.requireDirectAddress
+      ? "addressing_required" as const
+      : !grant && policy.access === "nobody"
+        ? "not_allowed" as const
+        : !grant && policy.access === "allowlist"
+          ? "not_allowed" as const
+          : !allowedTypes.includes(requestType)
+            ? "unsupported" as const
+            : "eligible" as const;
+    const disposition: PublicRequestDisposition = eligible === "eligible" ? (grant?.acceptance ?? policy.acceptance) === "operator_review" ? "needs_operator_review" : "considering" : "ignored";
+    const identity = state.personIdentities.find((item) => item.channel === mirror.channelId && item.externalActorId === mirror.author?.externalRef?.id && item.sourcePresenceId === presence.id);
+    state.publicRequests.unshift({ id: id("public-request"), agentId: state.agent?.id ?? "", presenceId: presence.id, channel: mirror.channelId, sourceMirrorObjectId: mirror.id, requesterPersonId: identity?.personId, requesterExternalActorId: mirror.author.externalRef.id, requestType, text, eligibility: eligible, disposition, policySource: grant ? "person_grant" : "presence", policyRevisionAtEvaluation: policy.updatedAt, decisionReason: eligible === "eligible" ? "The request matches the effective Presence request policy and is ready for Agent or operator judgment." : "The request was observed but is not authorized for this Presence.", createdAt: timestamp, updatedAt: timestamp });
+    state.events.unshift(event("decision", eligible === "eligible" ? "Public request received" : "Public request not accepted", eligible === "eligible" ? `${presence.name} received a ${requestType} request and will consider whether to accept responsibility.` : `${presence.name} observed a request that is not authorized by the current Requests policy.`, eligible === "eligible" ? "positive" : "quiet", { presenceId: presence.id, sourceObjectId: mirror.id }));
+  }
+  return state;
 }
 
 function explorationTitle(brief: string) {
@@ -3167,7 +3303,7 @@ function repairOrphanedAssignmentExecution(execution: Execution, assignmentIds: 
 
 function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   const state = raw as OpenPresenceState & { presences?: Presence[]; conversations?: import("./types").Conversation[]; activeConversationId?: string | null; activePresenceId?: string | null; presenceChatSessions?: import("./types").PresenceChatSession[] };
-  const agents = (state.agents?.length ? state.agents : state.agent ? [state.agent] : []).map((agent) => ({ ...agent, languagePolicy: normalizeLanguagePolicy((agent as Agent & { languagePolicy?: LanguagePolicy }).languagePolicy) }));
+  const agents = (state.agents?.length ? state.agents : state.agent ? [state.agent] : []).map((agent) => ({ ...agent, conversationStyleId: agent.conversationStyleId ?? DEFAULT_CONVERSATION_STYLE_ID, languagePolicy: normalizeLanguagePolicy((agent as Agent & { languagePolicy?: LanguagePolicy }).languagePolicy) }));
   const activeAgentId = state.activeAgentId ?? state.agent?.id ?? agents[0]?.id ?? null;
   const activeAgent = agents.find((item) => item.id === activeAgentId) ?? agents[0];
   const fallbackBrief = defaultPresenceBrief(activeAgent);
@@ -3185,6 +3321,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   }));
   const activeConversationId = state.activeConversationId ?? conversations[0]?.id ?? null;
   const calendar = (state.calendar ?? []).map((slot) => ({ ...slot, instruction: slot.instruction || slot.label || "Evaluate a useful idea for the audience", executionWindow: slot.executionWindow || "08:00–11:00" }));
+  const watches = (state.watches ?? []).filter((watch) => !isRecoveredRelationshipWatch(watch));
   const base = initialState();
   const existingSkills = (state.skills ?? []).map((skill) => ({ ...skill, name: skill.name ?? skill.id.replaceAll("-", " ") }));
   const skills = [...defaultSkills().filter((skill) => !existingSkills.some((item) => item.id === skill.id)), ...existingSkills];
@@ -3200,7 +3337,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
     }
   }
   const normalizedPresences = presences.map((item) => {
-    const migrated = { ...migrateBuiltInXCapabilities(item), languagePolicy: normalizeLanguagePolicy((item as Presence & { languagePolicy?: LanguagePolicy }).languagePolicy) };
+    const migrated = { ...migrateBuiltInXCapabilities(item), conversationStyleId: item.conversationStyleId ?? DEFAULT_CONVERSATION_STYLE_ID, languagePolicy: normalizeLanguagePolicy((item as Presence & { languagePolicy?: LanguagePolicy }).languagePolicy), requestPolicy: item.requestPolicy ?? defaultPresenceRequestPolicy(item.id) };
     const nativeConn = (state.nativeConnections ?? []).find((c) => c.presenceId === item.id && (c.kind === "x" || c.channelId === "x"));
     if (migrated.status === "live" && migrated.channel === "x" && migrated.environment !== "sandbox" && xCreditsExhausted(nativeConn)) {
       return { ...migrated, status: "paused" as const };
@@ -3213,7 +3350,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
     if (!builtin || definition.id !== "x") return definition;
     return { ...definition, affordances: [...builtin.affordances.filter((item) => !definition.affordances.some((current) => current.id === item.id)), ...definition.affordances], supportedAssetKinds: [...new Set([...(builtin.supportedAssetKinds ?? []), ...(definition.supportedAssetKinds ?? [])])] };
   });
-  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], workspaceRevision: state.workspaceRevision, presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], operatorConversations: state.operatorConversations ?? [], operatorNudges: state.operatorNudges ?? [], agentRequests: (state.agentRequests ?? []).filter((request) => request.kind !== "capability"), capabilityChangeEvents: state.capabilityChangeEvents ?? [], calendar, assignments: [] as Assignment[], assignmentRuns: state.assignmentRuns ?? [], growthReviews: state.growthReviews ?? [], growthRevisions: state.growthRevisions ?? [], growthEvidenceSnapshots: state.growthEvidenceSnapshots ?? [], growthFileVersions: state.growthFileVersions ?? [], audienceSnapshots: state.audienceSnapshots ?? [], publicationMetricSnapshots: state.publicationMetricSnapshots ?? [], watches: state.watches ?? [], explorations: state.explorations ?? [], discoveryPlans: state.discoveryPlans ?? [], explorationSessions: state.explorationSessions ?? [], explorationFindings: state.explorationFindings ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, assetProviderConnections: state.assetProviderConnections ?? [], toolBindings: toolBindings.map((binding) => ({ ...binding, enabled: binding.enabled !== false })), changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], operatorDirectives: state.operatorDirectives ?? [], socialDecisions: state.socialDecisions ?? [], resourceUsageEvents: state.resourceUsageEvents ?? [], attentionEpisodes: state.attentionEpisodes ?? [], socialIntents: state.socialIntents ?? [], executions: (state.executions ?? []).map((execution) => {
+  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], workspaceRevision: state.workspaceRevision, presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], operatorConversations: state.operatorConversations ?? [], operatorNudges: state.operatorNudges ?? [], agentRequests: (state.agentRequests ?? []).filter((request) => request.kind !== "capability"), capabilityChangeEvents: state.capabilityChangeEvents ?? [], calendar, assignments: [] as Assignment[], assignmentRuns: state.assignmentRuns ?? [], growthReviews: state.growthReviews ?? [], growthRevisions: state.growthRevisions ?? [], growthEvidenceSnapshots: state.growthEvidenceSnapshots ?? [], growthFileVersions: state.growthFileVersions ?? [], audienceSnapshots: state.audienceSnapshots ?? [], publicationMetricSnapshots: state.publicationMetricSnapshots ?? [], watches, watchSignals: state.watchSignals ?? [], relationshipPolicies: state.relationshipPolicies ?? [], presenceRequestPolicies: state.presenceRequestPolicies ?? [], delegationGrants: state.delegationGrants ?? [], publicRequests: state.publicRequests ?? [], explorations: state.explorations ?? [], discoveryPlans: state.discoveryPlans ?? [], explorationSessions: state.explorationSessions ?? [], explorationFindings: state.explorationFindings ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, assetProviderConnections: state.assetProviderConnections ?? [], toolBindings: toolBindings.map((binding) => ({ ...binding, enabled: binding.enabled !== false })), changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], operatorDirectives: state.operatorDirectives ?? [], socialDecisions: state.socialDecisions ?? [], resourceUsageEvents: state.resourceUsageEvents ?? [], attentionEpisodes: state.attentionEpisodes ?? [], socialIntents: state.socialIntents ?? [], executions: (state.executions ?? []).map((execution) => {
     const repaired = repairLegacyXVerificationStatus(execution);
     if (repaired !== execution) return repaired;
     if (execution.failure && isTerminalDuplicateExecution(execution)) {
@@ -3221,7 +3358,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
     }
     return execution;
   }), outcomes: state.outcomes ?? [], attentionTests: state.attentionTests ?? [], capabilityTrials: state.capabilityTrials ?? [], publications: state.publications ?? [], assetUsages: state.assetUsages ?? [], sourceEvidence: state.sourceEvidence ?? [], claimGrounding: state.claimGrounding ?? [], preferenceEvidence: state.preferenceEvidence ?? [], originalPostRehearsals: state.originalPostRehearsals ?? [], librarySources: state.librarySources ?? [], assets: state.assets ?? [], perceptions: state.perceptions ?? [], assetResearchSessions: state.assetResearchSessions ?? [], skills, agentSkills, contentDrops: state.contentDrops ?? [], channelDefinitions, nativeConnections: state.nativeConnections ?? [], bridges: state.bridges ?? [], mirrorObjects: state.mirrorObjects ?? [], mirrorEvents: state.mirrorEvents ?? [], bridgeSync: state.bridgeSync ?? [], conversationEpisodes: state.conversationEpisodes ?? [], assignmentContributions: state.assignmentContributions ?? [], people: state.people ?? [], personIdentities: state.personIdentities ?? [], relationships: state.relationships ?? [], relationshipFacts: state.relationshipFacts ?? [], relationshipOpenLoops: state.relationshipOpenLoops ?? [], recommendationRecords: state.recommendationRecords ?? [], introductionRecords: state.introductionRecords ?? [], sandboxEnvironments: state.sandboxEnvironments ?? [], playgroundSessions: (state.playgroundSessions ?? []).map((session) => ({ ...session, virtualTimeMode: session.virtualTimeMode ?? "realtime", worldRevision: session.worldRevision ?? 1 })), sandboxActors: state.sandboxActors ?? [], networkSearches: state.networkSearches ?? [], networkIntroductions: state.networkIntroductions ?? [], scenarios: state.scenarios ?? [], scenarioVersions: state.scenarioVersions ?? [], scenarioRuns: state.scenarioRuns ?? [], scenarioRunProvenance: state.scenarioRunProvenance ?? [], scenarioEvaluations: state.scenarioEvaluations ?? [], knowledgeDocuments: state.knowledgeDocuments ?? [], knowledgeVersions: state.knowledgeVersions ?? [], knowledgeSegments: state.knowledgeSegments ?? [], presenceKnowledgeAccess: state.presenceKnowledgeAccess ?? [], mindFileKnowledgeBindings: state.mindFileKnowledgeBindings ?? [], knowledgeRetrievalRuns: state.knowledgeRetrievalRuns ?? [], knowledgeCitations: state.knowledgeCitations ?? [], knowledgeCollections: state.knowledgeCollections ?? [], knowledgeItems: state.knowledgeItems ?? [], presenceKnowledgeBindings: state.presenceKnowledgeBindings ?? [], operationalRuns: state.operationalRuns ?? [], scheduledWakes: state.scheduledWakes ?? [], dependencyHealth: state.dependencyHealth ?? [], recoveryIncidents: state.recoveryIncidents ?? [], recoveryAttempts: state.recoveryAttempts ?? [], browserBodies: state.browserBodies ?? [],
-    editorialOpportunities: state.editorialOpportunities ?? [],
+    conversationStyles: state.conversationStyles ?? [], editorialOpportunities: state.editorialOpportunities ?? [],
     editorialFeedbackEvents: state.editorialFeedbackEvents ?? [],
     editorialReferences: state.editorialReferences && state.editorialReferences.length > 0
       ? state.editorialReferences
@@ -5122,7 +5259,7 @@ function migrateLegacyXBrowserBridge(bridge: Bridge): Bridge {
 
 function makePublication(state: OpenPresenceState, text: string, format: string, source: "agent_model" | "operator_manual" | "operational" = "operational", assetIds: string[] = []): Publication {
   const presence = state.presence;
-  const formattedText = formatOneSentencePerLine(text);
+  const formattedText = formatPublicExpression(text, format);
   const publication: Publication = { id: id("publication"), format, payload: { text: formattedText }, assetIds: [...assetIds], links: [], publicExpression: presence ? createPublicExpressionCandidate({ state, presence, affordance: format, text: formattedText, source, mediaIds: assetIds }) : undefined, createdAt: now(), environment: presence?.environment ?? "live" };
   state.publications.unshift(publication);
   return publication;
@@ -5308,6 +5445,15 @@ export function formXReplyIntent(source: OpenPresenceState, text: string, parent
   state.socialIntents.unshift(socialIntent);
   const socialDecision = decisionInput ? createSocialDecision(state, { ...decisionInput, focalMirrorObjectIds: decisionInput.focalMirrorObjectIds ?? (parentObject ? [parentObject.id] : []), origin: decisionInput.origin ?? origin }, socialIntent.id) : undefined;
   if (socialDecision) state.socialDecisions.unshift(socialDecision);
+  if (conversationEpisodeId) {
+    applyConversationDisposition(
+      state,
+      conversationEpisodeId,
+      conversationDispositionForAction("reply", decisionInput?.conversationDisposition),
+      decisionInput?.summary,
+      socialIntent.id,
+    );
+  }
   const mode = presence.execution.reply ?? "off";
   if (mode === "off") {
     state.actions.unshift({ id: id("act"), intent: "reply", target: parentId, summary: text.trim(), status: "skipped", reason: "Replies are off in the Presence execution envelope.", createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id });
@@ -5907,14 +6053,113 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     state.events.unshift(event("decision", "Assignment started", `${assignment.progress.required} verified ${assignment.deliverable.type === "original_publication" ? "publications" : assignment.deliverable.type} expected. The Agent owns how to fulfill the Assignment; verified Sandbox output owns progress.`, "positive", { presenceId: assignment.presenceId, sessionId: operation.sessionId }));
     return state;
   }
+  if (operation.type === "setRelationshipPolicy") {
+    const presence = state.presences.find((item) => item.id === operation.presenceId);
+    const person = state.people.find((item) => item.id === operation.personId);
+    if (!state.agent || !presence || !person || person.agentId !== state.agent.id) return state;
+    const timestamp = now();
+    const existing = state.relationshipPolicies.find((item) => item.presenceId === presence.id && item.personId === person.id);
+    const policy: RelationshipPolicy = { id: existing?.id ?? id("relationship-policy"), agentId: state.agent.id, presenceId: presence.id, personId: person.id, learning: operation.learning, engagement: operation.engagement, rhythm: operation.rhythm, sourceDescription: operation.sourceDescription?.trim() || existing?.sourceDescription, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp };
+    state.relationshipPolicies = [policy, ...state.relationshipPolicies.filter((item) => item.id !== policy.id)];
+    state.events.unshift(event("system", "Relationship policy updated", `${person.displayName} is now configured for ${operation.engagement.replaceAll("_", " ")}. Learning is ${operation.learning}.`, "positive", { presenceId: presence.id }));
+    return state;
+  }
+  if (operation.type === "setPresenceRequestPolicy") {
+    const presence = state.presences.find((item) => item.id === operation.presenceId);
+    if (!presence) return state;
+    const timestamp = now();
+    const policy: PresenceRequestPolicy = { presenceId: presence.id, ...operation.policy, allowedRequestTypes: [...new Set(operation.policy.allowedRequestTypes)], updatedAt: timestamp };
+    presence.requestPolicy = policy;
+    state.presenceRequestPolicies = [policy, ...state.presenceRequestPolicies.filter((item) => item.presenceId !== presence.id)];
+    state.events.unshift(event("system", "Request policy updated", policy.access === "nobody" ? `${presence.name} will not accept public requests unless you explicitly enable them.` : `${presence.name} may now consider ${policy.access === "anyone" ? "direct public" : "allowlisted"} requests.`, policy.access === "nobody" ? "quiet" : "warning", { presenceId: presence.id }));
+    return state;
+  }
+  if (operation.type === "createDelegationGrant") {
+    const presence = state.presences.find((item) => item.id === operation.presenceId);
+    if (!state.agent || !presence || (!operation.personId && !operation.externalActorId)) return state;
+    const timestamp = now();
+    const grant: DelegationGrant = { id: id("delegation-grant"), agentId: state.agent.id, presenceId: presence.id, personId: operation.personId, externalActorId: operation.externalActorId?.trim() || undefined, channel: operation.channel ?? presence.channel, allowedRequestTypes: [...new Set(operation.allowedRequestTypes)], enabled: true, acceptance: operation.acceptance ?? "operator_review", impactLimit: operation.impactLimit ?? "low", createdBy: "operator", createdAt: timestamp, updatedAt: timestamp };
+    state.delegationGrants.unshift(grant);
+    state.events.unshift(event("system", "Trusted requester added", "This person or account may submit the explicitly allowed request types for consideration. Watching and request access remain separate.", "positive", { presenceId: presence.id }));
+    return state;
+  }
+  if (operation.type === "revokeDelegationGrant") {
+    const grant = state.delegationGrants.find((item) => item.id === operation.id);
+    if (!grant) return state;
+    grant.enabled = false;
+    grant.revokedAt = now();
+    grant.updatedAt = grant.revokedAt;
+    state.events.unshift(event("system", "Trusted requester removed", "Future public requests from this grant will no longer be eligible for consideration.", "quiet", { presenceId: grant.presenceId }));
+    return state;
+  }
+  if (operation.type === "decidePublicRequest") {
+    const request = state.publicRequests.find((item) => item.id === operation.id);
+    const presence = request ? state.presences.find((item) => item.id === request.presenceId) : undefined;
+    const mirror = request ? state.mirrorObjects.find((item) => item.id === request.sourceMirrorObjectId) : undefined;
+    if (!request || !presence || !mirror) return state;
+    if (operation.disposition !== "accepted") {
+      request.disposition = operation.disposition;
+      request.updatedAt = now();
+      request.decisionReason = operation.disposition === "needs_clarification" ? "The request needs a narrower question before Genny can accept responsibility." : "The request was considered and did not become an Assignment.";
+      return state;
+    }
+    if (request.eligibility !== "eligible" || request.assignmentId) return state;
+    const assignment = compileAssignmentInstruction(state, `Answer the public request from ${mirror.author?.displayName ?? "the requester"}: ${request.text}`, presence.id, presence.environment ?? "live", undefined, undefined, "keep_moving");
+    assignment.origin = "public_request";
+    assignment.createdBy = "agent";
+    assignment.target = { mirrorObjectId: mirror.id, relationshipId: request.requesterPersonId };
+    assignment.deliverable = { type: "reply", quantity: 1, quantityMode: "exact" };
+    assignment.quantityPolicy = { quantity: 1, mode: "exact", period: "assignment" };
+    assignment.activation = { type: "attention_source", sourceIds: [request.id], startsAt: now() };
+    assignment.preflight = preflightAssignment(state, assignment, "keep_moving");
+    assignment.status = ["ready", "ready_with_assumptions"].includes(assignment.preflight.status) ? "active" : "needs_operator";
+    state.assignments.unshift(assignment);
+    request.disposition = "accepted";
+    request.assignmentId = assignment.id;
+    request.updatedAt = now();
+    state.events.unshift(event("decision", "Public request accepted", `${presence.name} accepted responsibility for the request. Public execution still follows the Presence's existing execution settings.`, "positive", { presenceId: presence.id, sourceObjectId: mirror.id }));
+    return state;
+  }
   if (operation.type === "createWatch") {
     const query = operation.query.trim();
     const presence = state.presences.find((item) => item.id === operation.presenceId) ?? state.presence;
     if (!state.agent || !presence || !query) return state;
     const watch = compileWatch(state.agent.id, presence.id, presence.channel, query, operation.purpose);
+    const requestedHandle = watch.target?.handle ? normalizeHandleForComparison(watch.target.handle) : undefined;
+    const knownIdentity = requestedHandle ? state.personIdentities.find((identity) => identity.channel === presence.channel && identity.sourcePresenceId === presence.id && normalizeHandleForComparison(identity.handle) === requestedHandle) : undefined;
+    if (knownIdentity) watch.target = { ...(watch.target ?? { channel: presence.channel, identityStatus: "unresolved" }), channel: presence.channel, personId: knownIdentity.personId, externalActorId: knownIdentity.externalActorId, handle: knownIdentity.handle ?? requestedHandle, identityStatus: "verified" };
     if (state.watches.some((item) => item.presenceId === watch.presenceId && item.query.toLowerCase() === watch.query.toLowerCase())) return state;
     state.watches.unshift(watch);
     state.events.unshift(event("system", "Watch added", `${watch.title} is now part of ${presence.name}'s attention. Observation is ${watch.observation.status === "manual" ? "waiting for a source" : "available automatically"}.`, "positive", { presenceId: presence.id }));
+    return state;
+  }
+  if (operation.type === "updateWatch") {
+    const watch = state.watches.find((item) => item.id === operation.id && item.agentId === state.agent?.id);
+    const presence = watch ? state.presences.find((item) => item.id === watch.presenceId) ?? state.presence : undefined;
+    const query = operation.query.trim();
+    if (!watch || !presence || !query) return state;
+    const compiled = compileWatch(state.agent!.id, presence.id, presence.channel, query, operation.purpose);
+    const requestedHandle = compiled.target?.handle ? normalizeHandleForComparison(compiled.target.handle) : undefined;
+    const knownIdentity = requestedHandle ? state.personIdentities.find((identity) => identity.channel === presence.channel && identity.sourcePresenceId === presence.id && normalizeHandleForComparison(identity.handle) === requestedHandle) : undefined;
+    if (knownIdentity && compiled.target) compiled.target = { ...compiled.target, personId: knownIdentity.personId, externalActorId: knownIdentity.externalActorId, handle: knownIdentity.handle ?? requestedHandle, identityStatus: "verified" };
+    const targetChanged = watch.kind !== compiled.kind || watch.query.toLowerCase() !== compiled.query.toLowerCase() || watch.target?.externalActorId !== compiled.target?.externalActorId || normalizeHandleForComparison(watch.target?.handle) !== normalizeHandleForComparison(compiled.target?.handle);
+    const updated: Watch = { ...watch, title: compiled.title, kind: compiled.kind, query: compiled.query, purpose: compiled.purpose, target: compiled.target, state: watch.state ?? "active", sources: compiled.sources, updatedAt: now() };
+    if (targetChanged) {
+      updated.observation = { ...compiled.observation };
+      updated.lastObservedAt = undefined;
+      updated.nextObservationAt = undefined;
+    }
+    state.watches = state.watches.map((item) => item.id === watch.id ? updated : item);
+    if (updated.target?.personId && state.agent) {
+      const configured = relationshipPolicyFromWatchPurpose(updated.purpose);
+      const existing = state.relationshipPolicies.find((item) => item.presenceId === updated.presenceId && item.personId === updated.target?.personId);
+      if (configured) {
+        const timestamp = now();
+        const policy: RelationshipPolicy = { id: existing?.id ?? id("relationship-policy"), agentId: state.agent.id, presenceId: updated.presenceId, personId: updated.target.personId, ...configured, sourceDescription: updated.purpose, createdAt: existing?.createdAt ?? timestamp, updatedAt: timestamp };
+        state.relationshipPolicies = [policy, ...state.relationshipPolicies.filter((item) => item.id !== policy.id)];
+      }
+    }
+    state.events.unshift(event("system", "Watch updated", `${updated.title} remains part of ${presence.name}'s attention with its revised instructions. Existing observations remain in history; new observations use the updated Watch.`, "positive", { presenceId: presence.id }));
     return state;
   }
   if (operation.type === "deleteWatch") {
@@ -6283,9 +6528,18 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     case "setAgentAccent": {
       if (!state.agents.some((item) => item.id === operation.agentId) || !/^#[0-9a-fA-F]{6}$/.test(operation.accent)) return state;
       state.agents = state.agents.map((item) => item.id === operation.agentId ? { ...item, accent: operation.accent } : item);
-      if (state.agent?.id === operation.agentId) state.agent = { ...state.agent, accent: operation.accent };
+      if (state.agent?.id === operation.agentId) {
+        state.agent = { ...state.agent, accent: operation.accent };
+        state.presences = state.presences.map((presence) => ({ ...presence, accent: operation.accent }));
+        state.presence = state.presence ? { ...state.presence, accent: operation.accent } : state.presence;
+      }
       state.agentWorkspaces = state.agentWorkspaces.map((workspace) => workspace.agent?.id === operation.agentId
-        ? { ...workspace, agent: workspace.agent ? { ...workspace.agent, accent: operation.accent } : workspace.agent }
+        ? {
+          ...workspace,
+          agent: workspace.agent ? { ...workspace.agent, accent: operation.accent } : workspace.agent,
+          presences: workspace.presences.map((presence) => ({ ...presence, accent: operation.accent })),
+          presence: workspace.presence ? { ...workspace.presence, accent: operation.accent } : workspace.presence,
+        }
         : workspace);
       return state;
     }
@@ -6298,7 +6552,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       state.events.unshift(event("system", "Agent name updated", `${previous} is now ${name}. Agent-wide meaning files were left unchanged for your review.`, "positive"));
       return state;
     }
-    case "createPresence": { if (!state.agent) return state; const definition = state.channelDefinitions.find((item) => item.id === operation.input.channel) ?? operation.input.channelDefinition; if (operation.input.channelDefinition && !state.channelDefinitions.some((item) => item.id === operation.input.channelDefinition!.id)) state.channelDefinitions.push(operation.input.channelDefinition); const created = makePresence(operation.input, operation.input.name?.trim() || operation.input.handle, definition, defaultPresenceBrief(state.agent)); state.presences.push(created); state.sandboxEnvironments.push(makeSandboxEnvironment(created)); state.presence = created; state.activePresenceId = created.id; state.events.unshift(event("system", `${channelName(created.channel)} Presence added`, `${created.handle} is ready as ${created.mode === "ghost" ? "a Ghost Presence" : "an agent-owned Presence"}.`, "positive", { presenceId: created.id })); return state; }
+    case "createPresence": { if (!state.agent) return state; const definition = state.channelDefinitions.find((item) => item.id === operation.input.channel) ?? operation.input.channelDefinition; if (operation.input.channelDefinition && !state.channelDefinitions.some((item) => item.id === operation.input.channelDefinition!.id)) state.channelDefinitions.push(operation.input.channelDefinition); const created = makePresence({ ...operation.input, accent: state.agent.accent }, operation.input.name?.trim() || operation.input.handle, definition, defaultPresenceBrief(state.agent)); state.presences.push(created); state.sandboxEnvironments.push(makeSandboxEnvironment(created)); state.presence = created; state.activePresenceId = created.id; state.events.unshift(event("system", `${channelName(created.channel)} Presence added`, `${created.handle} is ready as ${created.mode === "ghost" ? "a Ghost Presence" : "an agent-owned Presence"}.`, "positive", { presenceId: created.id })); return state; }
     case "deletePresence": {
       const target = state.presences.find((item) => item.id === operation.presenceId);
       if (!target) throw new Error("That Presence no longer exists.");
@@ -6608,6 +6862,31 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     case "recordPreferenceEvidence": return state;
     case "approveSandboxIntroduction":
     case "declineSandboxIntroduction": return state;
+    case "saveConversationStyle": {
+      if (!state.agent || !state.presences.some((presence) => presence.id === operation.presenceId)) return state;
+      const styles = state.conversationStyles ?? (state.conversationStyles = []);
+      const saved = { ...operation.style, source: "custom" as const, channel: operation.style.channel || "x", updatedAt: now() };
+      const existing = styles.findIndex((style) => style.id === saved.id);
+      if (existing >= 0) styles[existing] = saved;
+      else styles.unshift(saved);
+      const presence = state.presences.find((item) => item.id === operation.presenceId)!;
+      presence.conversationStyleId = saved.id;
+      state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+      if (state.presence?.id === presence.id) state.presence = presence;
+      state.events.unshift(event("system", "Conversational style saved", `${saved.name} is now active for ${presence.name}.`, "positive", { presenceId: presence.id }));
+      return state;
+    }
+    case "setConversationStyle": {
+      if (!state.agent) return state;
+      const presence = state.presences.find((item) => item.id === operation.presenceId);
+      const valid = BUILTIN_CONVERSATION_STYLES.some((style) => style.id === operation.styleId) || (state.conversationStyles ?? []).some((style) => style.id === operation.styleId && style.source === "custom");
+      if (!presence || !valid) return state;
+      presence.conversationStyleId = operation.styleId;
+      state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+      if (state.presence?.id === presence.id) state.presence = presence;
+      state.events.unshift(event("system", "Conversational style changed", "The Presence will use the selected style on its next social turn.", "positive", { presenceId: presence.id }));
+      return state;
+    }
     case "setPresence": { if (state.presence) { const patch = operation.patch as typeof operation.patch & { publicSelf?: PublicSelf }; const requestedConnectionMode = patch.connectionMode ?? state.presence.connectionMode ?? (state.presence.environment === "sandbox" ? "sandbox" : state.presence.channel === "x" ? "native" : "bridge"); const connectionMode = requestedConnectionMode === "native" && state.presence.channel !== "x" ? "bridge" as const : requestedConnectionMode; const name = patch.name?.trim() || state.presence.name; const mode = patch.mode ?? state.presence.mode; const posture = patch.publicSelf?.posture ?? state.presence.publicSelf?.posture; const compatiblePostures = mode === "ghost" ? ["representational", "open-about-assistance"] : ["contextual", "ai-forward", "private"]; const publicSelf = { ...(patch.publicSelf ?? state.presence.publicSelf ?? defaultPublicSelf(name, mode)), displayName: name, posture: compatiblePostures.includes(posture as never) ? posture! : defaultPublicSelf(name, mode).posture }; const mediaPerceptionPolicy = patch.mediaPerceptionPolicy ?? state.presence.mediaPerceptionPolicy ?? (mode === "ghost" ? "review-uncertain" as const : "use-judgment" as const); const ghostProfile = normalizeGhostProfile(patch.ghostProfile ?? state.presence.ghostProfile ?? (mode === "ghost" ? defaultGhostProfile() : undefined)); const publishingInitiative = normalizePublishingInitiative(patch.publishingInitiative ?? state.presence.publishingInitiative); const updated = { ...state.presence, ...patch, publishingInitiative: patch.publishingInitiative ? { ...publishingInitiative, updatedAt: now() } : publishingInitiative, mediaPerceptionPolicy, publicSelf, connectionMode, environment: connectionMode === "sandbox" ? "sandbox" as const : "live" as const, name, mode, ghostProfile, execution: patch.execution ? { ...state.presence.execution, ...patch.execution } : state.presence.execution }; const priorHandle = state.presence.handle.trim().replace(/^@/, "").toLowerCase(); const nextHandle = updated.handle.trim().replace(/^@/, "").toLowerCase(); const identityChanged = state.presence.channel === "x" && priorHandle !== nextHandle; updated.executionEnvelope = { ...state.presence.executionEnvelope, affordances: Object.fromEntries(channelCapabilities(state, updated.channel).map((item) => [item.id, { mode: updated.execution[item.id] ?? "off" }])) }; updated.context = compilePresenceContext(updated); if (patch.brief) recordChangeSet(state, "Update Presence Brief", [{ path: `presences.${updated.id}.brief`, action: "update", before: state.presence.brief as unknown as JsonValue, after: updated.brief as unknown as JsonValue }]); state.presence = updated; state.presences = state.presences.map((item) => item.id === updated.id ? updated : item); if (identityChanged) { const message = `The X identity changed to @${nextHandle}. Reconnect and verify this account before observing or acting.`; state.nativeConnections = state.nativeConnections.map((connection) => connection.presenceId === updated.id && connection.kind === "x" ? { ...connection, status: "needs-attention" as const, healthMessage: message, observation: { ...connection.observation, status: "error" as const, error: message } } : connection); state.bridges = state.bridges.map((bridge) => bridge.presenceId === updated.id && bridge.channelId === "x" ? { ...bridge, accountIdentity: bridge.accountIdentity ? { ...bridge.accountIdentity, status: "mismatch" as const } : undefined } : bridge); } if (connectionMode === "native" && updated.channel === "x") { rebindQueuedExecutionsForNativeRoute(state, updated); unblockNativeExecutions(state, updated); } if (patch.publishingInitiative) { const linked = syncPublishingInitiativeAssignment(state, updated.id); state.assignments = linked.assignments; state.presences = linked.presences; state.presence = linked.presence; } const presenceFile = state.files.find((file) => file.kind === "PRESENCE"); if (presenceFile && state.agent) { presenceFile.content = fileContent("PRESENCE", { name: state.agent.name, description: state.agent.description, audience: state.agent.audience, mode, handle: updated.handle, accent: state.agent.accent }, state.presence ?? updated); presenceFile.revision += 1; presenceFile.updatedAt = now(); } } state.events.unshift(event("system", "Presence settings updated", state.presence?.status === "paused" ? "All external actions are paused." : "The new execution envelope is active.", state.presence?.status === "paused" ? "warning" : "positive", { presenceId: state.presence?.id })); return state; }
   }
   return state;

@@ -487,7 +487,7 @@ export interface ProcessHeartbeat {
 
 export type AssignmentDelegationPolicy = "keep_moving" | "ask_before_change" | "stop_on_deviation";
 export type AssignmentQuantityMode = "target" | "at_least" | "exact" | "at_most" | "minimum" | "maximum";
-export type AssignmentOrigin = "schedule" | "exploration" | "watchlist" | "publishing_initiative" | "teach" | "manual" | "system" | "capability_trial";
+export type AssignmentOrigin = "schedule" | "exploration" | "watchlist" | "public_request" | "publishing_initiative" | "teach" | "manual" | "system" | "capability_trial";
 export type AssignmentMetricComparator = ">=" | ">" | "=" | "<" | "<=";
 export interface AssignmentMetricThreshold { metric: string; comparator: AssignmentMetricComparator; value: number; label?: string; }
 export interface AssignmentPlan {
@@ -620,6 +620,54 @@ export interface AgentRequest {
   createdAt: string;
   updatedAt: string;
   resolvedAt?: string;
+}
+export type PresenceRequestAccess = "nobody" | "allowlist" | "anyone";
+export type PublicRequestType = "answer" | "research" | "recommendation" | "introduction" | "content" | "other";
+export type PublicRequestEligibility = "eligible" | "not_allowed" | "identity_unverified" | "addressing_required" | "unsupported";
+export type PublicRequestDisposition = "pending" | "considering" | "needs_operator_review" | "accepted" | "declined" | "ignored" | "needs_clarification";
+export interface PresenceRequestPolicy {
+  presenceId: string;
+  access: PresenceRequestAccess;
+  allowedRequestTypes: PublicRequestType[];
+  requireDirectAddress: boolean;
+  acceptance: "operator_review" | "agent_autonomous";
+  impactLimit: "low" | "moderate";
+  updatedAt: string;
+}
+export interface DelegationGrant {
+  id: string;
+  agentId: string;
+  presenceId: string;
+  personId?: string;
+  externalActorId?: string;
+  channel: ChannelId;
+  allowedRequestTypes: PublicRequestType[];
+  enabled: boolean;
+  acceptance: "operator_review" | "agent_autonomous";
+  impactLimit: "low" | "moderate";
+  createdBy: "operator";
+  createdAt: string;
+  updatedAt: string;
+  revokedAt?: string;
+}
+export interface PublicRequest {
+  id: string;
+  agentId: string;
+  presenceId: string;
+  channel: ChannelId;
+  sourceMirrorObjectId: string;
+  requesterPersonId?: string;
+  requesterExternalActorId?: string;
+  requestType: PublicRequestType;
+  text: string;
+  eligibility: PublicRequestEligibility;
+  disposition: PublicRequestDisposition;
+  policySource?: "presence" | "person_grant";
+  policyRevisionAtEvaluation?: string;
+  decisionReason?: string;
+  assignmentId?: string;
+  createdAt: string;
+  updatedAt: string;
 }
 export interface CapabilityChangeEvent {
   id: string;
@@ -881,6 +929,21 @@ export interface Relationship {
   lastMeaningfulInteractionAt?: string;
   state: RelationshipMemoryState;
   forgottenAt?: string;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type RelationshipLearningMode = "off" | "selective";
+export type RelationshipEngagementMode = "observe_only" | "when_worthwhile" | "maintain_relationship";
+export interface RelationshipPolicy {
+  id: string;
+  agentId: string;
+  presenceId: string;
+  personId: string;
+  learning: RelationshipLearningMode;
+  engagement: RelationshipEngagementMode;
+  rhythm?: "light" | "regular";
+  sourceDescription?: string;
   createdAt: string;
   updatedAt: string;
 }
@@ -1192,7 +1255,10 @@ export interface AgentFile { kind: FileKind; title: string; subtitle: string; co
 export interface FileProposal { id: string; file: FileKind; title: string; reason: string; current: string; proposed: string; status: "pending" | "approved" | "rejected"; createdAt: string; changeSetId?: string; target?: { type: "presence_identity"; presenceId: string; name: string }; }
 export type PresenceLanguage = "en";
 export interface LanguagePolicy { avoid: string[]; prohibited: string[]; }
-export interface Agent { id: string; name: string; description: string; audience: string; topics: string[]; accent: string; glyph: string; languagePolicy: LanguagePolicy; resourceBudget?: ResourceBudget; }
+export interface ConversationStylePreview { id: string; label: string; input: string; reply: string; }
+export interface ConversationStyleDefinition { corePrinciple: string; conversationSignature: string; postMoves?: string[]; replyMoves?: string[]; acknowledgmentMoves?: string[]; disagreementMoves?: string[]; humorMoves?: string[]; questionMoves?: string[]; closureMoves?: string[]; languageTexture?: string[]; formatting?: string[]; antiPatterns?: string[]; boundaries?: string[]; }
+export interface ConversationStyleProfile { id: string; name: string; description: string; source: "built_in" | "custom"; channel: ChannelId; schema: "taste.conversation_style.v1"; style: ConversationStyleDefinition; previews: ConversationStylePreview[]; createdAt?: string; updatedAt?: string; }
+export interface Agent { id: string; name: string; description: string; audience: string; topics: string[]; accent: string; glyph: string; languagePolicy: LanguagePolicy; resourceBudget?: ResourceBudget; conversationStyleId?: string; }
 
 export interface ModelRuntimeCapabilities { vision: boolean; toolCalling: boolean; structuredOutput: boolean; streaming: boolean; }
 export type ModelProvider = "openai" | "anthropic" | "gemini" | "openrouter" | "ollama" | "custom";
@@ -1506,7 +1572,7 @@ export interface PublishingPlanDraft {
   replanSignals?: string[];
   growthRevisionRef?: string;
 }
-export type SocialOriginKind = "publishing_initiative" | "assignment" | "capability_trial" | "standing_intent" | "exploration" | "inbound_social" | "operator" | "teach" | "other";
+export type SocialOriginKind = "publishing_initiative" | "assignment" | "capability_trial" | "standing_intent" | "exploration" | "watchlist" | "public_request" | "inbound_social" | "operator" | "teach" | "other";
 export interface SocialOrigin {
   kind: SocialOriginKind | "self_directed_discovery";
   refId?: string;
@@ -1613,7 +1679,7 @@ export interface AssignmentPreflight {
 }
 export type PresencePacing = "recommended" | "gentle" | "custom";
 export interface PresenceQuietHours { enabled: boolean; start: string; end: string; }
-export interface Presence { id: string; channel: ChannelId; name: string; handle: string; mode: PresenceMode; status: "live" | "paused" | "disconnected"; accent: string; capabilities: ChannelCapability[]; execution: Record<string, ExecutionMode>; executionEnvelope: ExecutionEnvelope; context: PresenceContext; brief: PresenceBrief; publicSelf: PublicSelf; mediaPerceptionPolicy: MediaPerceptionPolicy; evidencePolicy?: "use-judgment" | "review-uncertain" | "always-review"; language?: PresenceLanguage; languagePolicy: LanguagePolicy; ghostProfile?: GhostProfile; pacing: PresencePacing; attentionIntervalMinutes: number; nextExecutionCheckAt?: string; quietHours: PresenceQuietHours; publishingInitiative: PublishingInitiative; selfDirectedAttention?: SelfDirectedAttentionPolicy; accountHealth: "healthy" | "elevated"; environment?: PresenceEnvironment; destination?: PresenceDestination; accessBindings?: AccessBinding[]; connectionMode?: PresenceConnectionMode; browserAccess?: PresenceBrowserAccess; growthEvidenceWatermark?: number; lastTriagedEvidenceWatermark?: number; activeGrowthRevisionRef?: string; curationSources?: CurationSourceConfig[]; }
+export interface Presence { id: string; channel: ChannelId; name: string; handle: string; mode: PresenceMode; status: "live" | "paused" | "disconnected"; accent: string; avatarLook?: import("./avatars").AvatarLook; capabilities: ChannelCapability[]; execution: Record<string, ExecutionMode>; executionEnvelope: ExecutionEnvelope; context: PresenceContext; brief: PresenceBrief; publicSelf: PublicSelf; mediaPerceptionPolicy: MediaPerceptionPolicy; evidencePolicy?: "use-judgment" | "review-uncertain" | "always-review"; language?: PresenceLanguage; languagePolicy: LanguagePolicy; ghostProfile?: GhostProfile; pacing: PresencePacing; attentionIntervalMinutes: number; nextExecutionCheckAt?: string; quietHours: PresenceQuietHours; publishingInitiative: PublishingInitiative; selfDirectedAttention?: SelfDirectedAttentionPolicy; requestPolicy?: PresenceRequestPolicy; accountHealth: "healthy" | "elevated"; environment?: PresenceEnvironment; destination?: PresenceDestination; accessBindings?: AccessBinding[]; connectionMode?: PresenceConnectionMode; browserAccess?: PresenceBrowserAccess; growthEvidenceWatermark?: number; lastTriagedEvidenceWatermark?: number; activeGrowthRevisionRef?: string; curationSources?: CurationSourceConfig[]; conversationStyleId?: string; }
 
 export interface ChatMessage { id: string; role: "agent" | "operator"; content: string; timestamp: string; change?: string; }
 export interface Conversation { id: string; title: string; createdAt: string; updatedAt: string; messages: ChatMessage[]; }
@@ -2138,6 +2204,23 @@ export interface ContentDrop { id: string; agentId: string; origin: string; brie
 
 export type WatchKind = "creator" | "topic" | "opportunity";
 export type WatchObservationStatus = "watching" | "manual" | "stale";
+export type WatchState = "active" | "paused";
+export type WatchSource = "posts" | "replies" | "mentions";
+export type WatchSignalType = "new_content" | "direct_address" | "relationship_event";
+export type WatchSignalDisposition = "pending" | "considered" | "remembered" | "social_opportunity" | "assignment_created" | "dismissed";
+export interface WatchSignal {
+  id: string;
+  watchId: string;
+  personId?: string;
+  presenceId: string;
+  mirrorObjectId: string;
+  signalType: WatchSignalType;
+  disposition: WatchSignalDisposition;
+  createdAt: string;
+  updatedAt: string;
+  decisionId?: string;
+  assignmentId?: string;
+}
 export interface Watch {
   id: string;
   agentId: string;
@@ -2147,6 +2230,11 @@ export interface Watch {
   title: string;
   query: string;
   purpose?: string;
+  target?: { personId?: string; channel: ChannelId; externalActorId?: string; handle?: string; identityStatus: "unresolved" | "verified" };
+  state?: WatchState;
+  sources?: WatchSource[];
+  lastObservedAt?: string;
+  nextObservationAt?: string;
   observation: {
     status: WatchObservationStatus;
     source: "automatic" | "manual";
@@ -2320,7 +2408,8 @@ export interface AgentWorkspaceSnapshot {
   onboarded: boolean; agent: Agent | null; presence: Presence | null; presences: Presence[]; activePresenceId: string | null;
   files: AgentFile[]; proposals: FileProposal[]; messages: ChatMessage[]; conversations: Conversation[]; activeConversationId: string | null; presenceChatSessions: PresenceChatSession[]; operatorConversations?: OperatorConversation[]; operatorNudges?: OperatorNudge[]; agentRequests: AgentRequest[]; capabilityChangeEvents: CapabilityChangeEvent[];
   events: LiveEvent[]; socialDecisions: SocialDecision[]; resourceUsageEvents: ResourceUsageEvent[]; calendar: CalendarSlot[]; assignments: Assignment[]; growthReviews: GrowthReview[]; growthFileVersions: GrowthFileVersion[]; growthRevisions?: GrowthRevision[]; growthEvidenceSnapshots?: GrowthEvidenceSnapshot[]; audienceSnapshots: PresenceAudienceSnapshot[]; publicationMetricSnapshots: PublicationMetricSnapshot[]; watches: Watch[]; explorations: ExplorationBrief[]; discoveryPlans: DiscoveryPlan[]; explorationSessions: ExplorationSession[]; explorationFindings: ExplorationFinding[]; actions: ActionRecord[]; publishingPlans: PublishingPlan[]; metrics: { qualifiedFollows: number; conversations: number; opportunitiesIgnored: number; audienceHealth: number };
-  modelProfiles: AgentModelProfile[]; providerConnections: ProviderConnection[]; assetProviderConnections: AssetProviderConnection[]; toolBindings: AgentToolBinding[]; changeSets: ChangeSet[]; standingIntents: StandingIntent[]; operatorDirectives: OperatorDirective[]; socialIntents: SocialIntent[]; executions: Execution[]; outcomes: Outcome[]; attentionTests: AttentionTest[]; capabilityTrials: CapabilityTrial[]; publications: Publication[]; assetUsages: AssetUsage[]; sourceEvidence: SourceEvidence[]; claimGrounding: ClaimGrounding[]; preferenceEvidence: PreferenceEvidence[]; originalPostRehearsals: OriginalPostRehearsalAttempt[]; librarySources: LibrarySource[]; assets: Asset[]; perceptions: AssetPerception[]; assetResearchSessions: AssetResearchSession[]; skills: Skill[]; agentSkills: AgentSkill[]; contentDrops: ContentDrop[]; channelDefinitions: ChannelDefinition[]; nativeConnections: NativeChannelConnection[]; bridges: Bridge[]; mirrorObjects: MirrorObject[]; mirrorEvents: MirrorEvent[]; bridgeSync: BridgeSyncState[]; conversationEpisodes: ConversationEpisode[]; assignmentContributions: AssignmentContribution[]; people: Person[]; personIdentities: PersonIdentity[]; relationships: Relationship[]; relationshipFacts: RelationshipFact[]; relationshipOpenLoops: RelationshipOpenLoop[]; recommendationRecords: RecommendationRecord[]; introductionRecords: IntroductionRecord[]; sandboxEnvironments: SandboxEnvironment[]; playgroundSessions: PlaygroundSession[]; sandboxActors: SandboxActor[]; networkSearches: SandboxNetworkSearch[]; networkIntroductions: SandboxNetworkIntroduction[]; scenarios: Scenario[]; scenarioVersions: ScenarioVersion[]; scenarioRuns: ScenarioRun[]; scenarioRunProvenance: ScenarioRunProvenance[]; scenarioEvaluations: ScenarioRunEvaluation[]; knowledgeDocuments: KnowledgeDocument[]; knowledgeVersions: KnowledgeVersion[]; knowledgeSegments: KnowledgeSegment[]; presenceKnowledgeAccess: PresenceKnowledgeAccess[]; mindFileKnowledgeBindings?: MindFileKnowledgeBinding[]; knowledgeRetrievalRuns: KnowledgeRetrievalRun[]; knowledgeCitations: KnowledgeCitation[]; knowledgeCollections?: KnowledgeCollection[]; knowledgeItems?: KnowledgeItem[]; presenceKnowledgeBindings?: PresenceKnowledgeBinding[];
+  modelProfiles: AgentModelProfile[]; providerConnections: ProviderConnection[]; assetProviderConnections: AssetProviderConnection[]; toolBindings: AgentToolBinding[]; changeSets: ChangeSet[]; standingIntents: StandingIntent[]; operatorDirectives: OperatorDirective[]; socialIntents: SocialIntent[]; executions: Execution[]; outcomes: Outcome[]; attentionTests: AttentionTest[]; capabilityTrials: CapabilityTrial[]; publications: Publication[]; assetUsages: AssetUsage[]; sourceEvidence: SourceEvidence[]; claimGrounding: ClaimGrounding[]; preferenceEvidence: PreferenceEvidence[]; originalPostRehearsals: OriginalPostRehearsalAttempt[]; librarySources: LibrarySource[]; assets: Asset[]; perceptions: AssetPerception[]; assetResearchSessions: AssetResearchSession[]; skills: Skill[]; agentSkills: AgentSkill[]; contentDrops: ContentDrop[]; channelDefinitions: ChannelDefinition[]; nativeConnections: NativeChannelConnection[]; bridges: Bridge[]; mirrorObjects: MirrorObject[]; mirrorEvents: MirrorEvent[]; bridgeSync: BridgeSyncState[]; conversationEpisodes: ConversationEpisode[]; assignmentContributions: AssignmentContribution[]; people: Person[]; personIdentities: PersonIdentity[]; relationships: Relationship[]; relationshipFacts: RelationshipFact[]; relationshipOpenLoops: RelationshipOpenLoop[]; recommendationRecords: RecommendationRecord[]; introductionRecords: IntroductionRecord[]; watchSignals: WatchSignal[]; relationshipPolicies: RelationshipPolicy[]; presenceRequestPolicies: PresenceRequestPolicy[]; delegationGrants: DelegationGrant[]; publicRequests: PublicRequest[]; sandboxEnvironments: SandboxEnvironment[]; playgroundSessions: PlaygroundSession[]; sandboxActors: SandboxActor[]; networkSearches: SandboxNetworkSearch[]; networkIntroductions: SandboxNetworkIntroduction[]; scenarios: Scenario[]; scenarioVersions: ScenarioVersion[]; scenarioRuns: ScenarioRun[]; scenarioRunProvenance: ScenarioRunProvenance[]; scenarioEvaluations: ScenarioRunEvaluation[]; knowledgeDocuments: KnowledgeDocument[]; knowledgeVersions: KnowledgeVersion[]; knowledgeSegments: KnowledgeSegment[]; presenceKnowledgeAccess: PresenceKnowledgeAccess[]; mindFileKnowledgeBindings?: MindFileKnowledgeBinding[]; knowledgeRetrievalRuns: KnowledgeRetrievalRun[]; knowledgeCitations: KnowledgeCitation[]; knowledgeCollections?: KnowledgeCollection[]; knowledgeItems?: KnowledgeItem[]; presenceKnowledgeBindings?: PresenceKnowledgeBinding[];
+  conversationStyles?: ConversationStyleProfile[];
   operationalRuns?: OperationalRun[]; attentionEpisodes?: AttentionEpisode[]; scheduledWakes?: ScheduledWake[]; dependencyHealth?: DependencyHealth[]; recoveryIncidents?: RecoveryIncident[]; recoveryAttempts?: RecoveryAttempt[]; browserBodies?: BrowserBody[];
   editorialOpportunities?: EditorialOpportunity[]; editorialFeedbackEvents?: EditorialFeedbackEvent[]; editorialReferences?: EditorialReference[]; sourceAssets?: SourceAsset[]; mediaPerceptions?: MediaPerception[]; verificationRecords?: VerificationRecord[]; rightsAssessments?: RightsAssessment[]; editorialDecisions?: EditorialDecision[]; publicationPackages?: PublicationPackage[];
   workspaceRevision?: number;
@@ -2353,7 +2442,7 @@ export type KnowledgeOperation =
   | { type: "setKnowledgeBinding"; presenceId: string; collectionId: string; maximumUse: KnowledgeUse; enabled?: boolean }
   | { type: "archiveKnowledgeItem"; itemId: string }
   | { type: "archiveKnowledgeCollection"; collectionId: string };
-export interface CreatePresenceInput { channel: ChannelId; name?: string; handle: string; mode: PresenceMode; accent: string; channelDefinition?: ChannelDefinition; connectionMode?: PresenceConnectionMode; }
+export interface CreatePresenceInput { channel: ChannelId; name?: string; handle: string; mode: PresenceMode; accent: string; avatarLook?: import("./avatars").AvatarLook; channelDefinition?: ChannelDefinition; connectionMode?: PresenceConnectionMode; }
 export type AssignmentOperation =
   | { type: "createAssignment"; instruction: string; presenceId?: string; sessionId?: string; environment?: PresenceEnvironment; schedule?: { day: string; time: string; executionWindow: string }; objective?: string; delegationPolicy?: AssignmentDelegationPolicy }
   | { type: "activateAssignment"; id: string; delegationPolicy?: AssignmentDelegationPolicy }
@@ -2429,6 +2518,14 @@ export type AttentionControlOperation =
   | { type: "resumeAttention"; presenceId?: string }
   | { type: "resetAttentionBudget"; presenceId?: string };
 
+export type WatchRequestOperation =
+  | { type: "updateWatch"; id: string; query: string; purpose?: string }
+  | { type: "setRelationshipPolicy"; presenceId: string; personId: string; learning: RelationshipLearningMode; engagement: RelationshipEngagementMode; rhythm?: "light" | "regular"; sourceDescription?: string }
+  | { type: "setPresenceRequestPolicy"; presenceId: string; policy: Omit<PresenceRequestPolicy, "presenceId" | "updatedAt"> }
+  | { type: "createDelegationGrant"; presenceId: string; personId?: string; externalActorId?: string; channel?: ChannelId; allowedRequestTypes: PublicRequestType[]; acceptance?: "operator_review" | "agent_autonomous"; impactLimit?: "low" | "moderate" }
+  | { type: "revokeDelegationGrant"; id: string }
+  | { type: "decidePublicRequest"; id: string; disposition: Exclude<PublicRequestDisposition, "pending" | "considering" | "needs_operator_review"> };
+
 export type PlaygroundStimulusTarget = "quote" | "repost" | "like" | "reply" | "silence";
 export type PresenceChatRehearsalOperation =
   | { type: "sendPresenceChatMessage"; presenceId: string; sessionId: string; content: string; attachments?: SandboxAssetInput[]; replyToMessageId?: string; briefOverride?: PresenceBrief; respond?: boolean }
@@ -2457,13 +2554,18 @@ export type CurationOperation =
   | { type: "testTasteProposal"; presenceId: string; proposedTaste: string }
   | { type: "configureCurationSources"; presenceId: string; sources: CurationSourceConfig[] };
 
-export type Operation = AssignmentOperation | CapabilityTrialOperation | LanguagePolicyOperation | ScenarioOperation | PublishingPlanOperation | GrowthOperation | AgentRequestOperation | FailureReviewOperation | ExplorationOperation | OperationalOperation | AttentionControlOperation
+export type ConversationStyleOperation =
+  | { type: "saveConversationStyle"; presenceId: string; style: ConversationStyleProfile }
+  | { type: "setConversationStyle"; presenceId: string; styleId: string };
+
+export type Operation = AssignmentOperation | CapabilityTrialOperation | LanguagePolicyOperation | ScenarioOperation | PublishingPlanOperation | GrowthOperation | AgentRequestOperation | FailureReviewOperation | ExplorationOperation | OperationalOperation | AttentionControlOperation | WatchRequestOperation
   | BrowserOperation
   | ObservabilityOperation
   | LegacyLanguageOperation
   | PresenceChatRehearsalOperation
   | OperatorConversationOperation
   | KnowledgeOperation
+  | ConversationStyleOperation
   | CurationOperation
   | { type: "removeSandboxObject"; sessionId: string; objectId: string }
   | { type: "cancelExecution"; id: string }
@@ -2474,4 +2576,4 @@ export type Operation = AssignmentOperation | CapabilityTrialOperation | Languag
   | { type: "removeLegacyCalendarEntries" }
   | { type: "askPresenceToIgnore"; presenceId: string; objectId: string; sessionId?: string }
   | { type: "generatePlaygroundStimulus"; sessionId: string; presenceId?: string; targetAffordance: PlaygroundStimulusTarget; topic?: string }
-  | { type: "reset" } | { type: "createAgent"; input: CreateAgentInput } | { type: "createAdditionalAgent"; input: CreateAgentInput } | { type: "selectAgent"; id: string } | { type: "deleteAgent"; confirmationName: string } | { type: "setAgentAccent"; agentId: string; accent: string } | { type: "renameAgent"; name: string } | { type: "createPresence"; input: CreatePresenceInput } | { type: "deletePresence"; presenceId: string; confirmationName: string } | { type: "createChannel"; definition: ChannelDefinition } | { type: "updateChannel"; definition: ChannelDefinition } | { type: "createBridge"; input: { presenceId: string; name: string; kind: ConnectorKind; capabilities: ConnectorCapabilities } } | { type: "rotateBridgeKey"; id: string } | { type: "revokeBridge"; id: string } | { type: "removeBridge"; id: string } | { type: "markManualExecution"; id: string; externalRef: EntityRef } | { type: "retryExecution"; id: string } | { type: "reconcileXDeliveries"; presenceId?: string; retryMissing?: boolean } | { type: "selectPresence"; id: string } | { type: "selectConversation"; id: string } | { type: "newConversation" } | { type: "sendMessage"; content: string; conversationId?: string } | { type: "newPresenceChatSession"; presenceId: string } | { type: "sendPresenceChatMessage"; presenceId: string; sessionId: string; content: string; attachments?: SandboxAssetInput[]; replyToMessageId?: string; briefOverride?: PresenceBrief } | { type: "saveFile"; kind: FileKind; content: string } | { type: "resolveProposal"; id: string; decision: "approve" | "reject" } | { type: "addSlot"; instruction: string; day: string; time: string; objective: string; executionWindow: string; presenceId?: string } | { type: "editSlot"; id: string; instruction: string; day: string; time: string; objective: string; executionWindow: string; presenceId?: string } | { type: "runNow"; instruction: string; presenceId?: string } | { type: "createWatch"; query: string; purpose?: string; presenceId?: string } | { type: "deleteWatch"; id: string } | { type: "rememberPerson"; personId?: string; presenceId?: string; channel?: ChannelId; externalActorId: string; displayName: string; handle?: string; profileUrl?: string; source?: "operator" | "current-context" | "watched" } | { type: "forgetRelationship"; relationshipId: string } | { type: "restoreRelationship"; relationshipId: string } | { type: "correctRelationshipFact"; factId?: string; relationshipId: string; statement: string; visibility?: RelationshipVisibility } | { type: "createIntroductionRecord"; presenceId?: string; requesterPersonId?: string; requesterActorId?: string; candidatePersonId?: string; candidateActorId?: string; sourceIntentIds?: string[] } | { type: "respondIntroductionConsent"; id: string; party: "requester" | "candidate"; consent: boolean } | { type: "createSkill"; name: string; description: string } | { type: "editSkill"; id: string; name: string; description: string } | { type: "configureProvider"; provider: ModelProvider; label: string; endpoint?: string; hasSecret?: boolean; secret?: string } | { type: "configureAssetProvider"; provider: AssetProviderConnection["provider"]; label: string; endpoint?: string; hasSecret?: boolean; secret?: string; createdAt?: string } | { type: "disconnectAssetProvider"; provider: AssetProviderConnection["provider"] } | { type: "wakePresence"; presenceId?: string } | { type: "runPulse"; presenceId?: string } | { type: "syncNativeX"; presenceId?: string } | { type: "setModel"; model: string; provider?: ModelProvider; quality?: ModelQuality; vision?: boolean } | { type: "runSlot"; id: string; scheduled?: boolean } | { type: "approveExecution"; id: string } | { type: "executeIntent"; id: string } | { type: "confirmAutoMode"; presenceId: string; capabilities: string[]; executionIds: string[] } | { type: "approveSandboxIntroduction"; id: string } | { type: "declineSandboxIntroduction"; id: string } | { type: "setPresence"; patch: Partial<Pick<Presence, "name" | "handle" | "mode" | "status" | "pacing" | "attentionIntervalMinutes" | "quietHours" | "publishingInitiative" | "execution" | "ghostProfile" | "connectionMode" | "brief" | "publicSelf" | "mediaPerceptionPolicy" | "language" | "selfDirectedAttention" | "curationSources">> } | { type: "startPlayground"; presenceId?: string; source?: "fresh" | "scenario" | "replay" } | { type: "syncPlaygroundTime"; sessionId: string } | { type: "resetPlayground"; sessionId: string } | { type: "inspectMirrorMedia"; presenceId: string; objectId: string } | { type: "inspectSandboxMedia"; sessionId: string; objectId: string } | { type: "addSandboxEvent"; sessionId: string; kind?: string; actionId?: string; actorId?: string; actorName?: string; actorHandle?: string; profile?: SandboxActorProfile; targetExternalRef?: EntityRef; parentExternalRef?: EntityRef; observeOnly?: boolean } | { type: "advanceSandboxTime"; sessionId: string; minutes: number } | { type: "runSandboxPulse"; sessionId: string } | { type: "considerOriginalPublication"; sessionId: string; inspiration?: string } | { type: "recordPreferenceEvidence"; sessionId: string; attemptId: string; reaction: PreferenceReaction; reasons?: PreferenceReason[]; note?: string };
+  | { type: "reset" } | { type: "createAgent"; input: CreateAgentInput } | { type: "createAdditionalAgent"; input: CreateAgentInput } | { type: "selectAgent"; id: string } | { type: "deleteAgent"; confirmationName: string } | { type: "setAgentAccent"; agentId: string; accent: string } | { type: "renameAgent"; name: string } | { type: "createPresence"; input: CreatePresenceInput } | { type: "deletePresence"; presenceId: string; confirmationName: string } | { type: "createChannel"; definition: ChannelDefinition } | { type: "updateChannel"; definition: ChannelDefinition } | { type: "createBridge"; input: { presenceId: string; name: string; kind: ConnectorKind; capabilities: ConnectorCapabilities } } | { type: "rotateBridgeKey"; id: string } | { type: "revokeBridge"; id: string } | { type: "removeBridge"; id: string } | { type: "markManualExecution"; id: string; externalRef: EntityRef } | { type: "retryExecution"; id: string } | { type: "reconcileXDeliveries"; presenceId?: string; retryMissing?: boolean } | { type: "selectPresence"; id: string } | { type: "selectConversation"; id: string } | { type: "newConversation" } | { type: "sendMessage"; content: string; conversationId?: string } | { type: "newPresenceChatSession"; presenceId: string } | { type: "sendPresenceChatMessage"; presenceId: string; sessionId: string; content: string; attachments?: SandboxAssetInput[]; replyToMessageId?: string; briefOverride?: PresenceBrief } | { type: "saveFile"; kind: FileKind; content: string } | { type: "resolveProposal"; id: string; decision: "approve" | "reject" } | { type: "addSlot"; instruction: string; day: string; time: string; objective: string; executionWindow: string; presenceId?: string } | { type: "editSlot"; id: string; instruction: string; day: string; time: string; objective: string; executionWindow: string; presenceId?: string } | { type: "runNow"; instruction: string; presenceId?: string } | { type: "createWatch"; query: string; purpose?: string; presenceId?: string } | { type: "deleteWatch"; id: string } | { type: "rememberPerson"; personId?: string; presenceId?: string; channel?: ChannelId; externalActorId: string; displayName: string; handle?: string; profileUrl?: string; source?: "operator" | "current-context" | "watched" } | { type: "forgetRelationship"; relationshipId: string } | { type: "restoreRelationship"; relationshipId: string } | { type: "correctRelationshipFact"; factId?: string; relationshipId: string; statement: string; visibility?: RelationshipVisibility } | { type: "createIntroductionRecord"; presenceId?: string; requesterPersonId?: string; requesterActorId?: string; candidatePersonId?: string; candidateActorId?: string; sourceIntentIds?: string[] } | { type: "respondIntroductionConsent"; id: string; party: "requester" | "candidate"; consent: boolean } | { type: "createSkill"; name: string; description: string } | { type: "editSkill"; id: string; name: string; description: string } | { type: "configureProvider"; provider: ModelProvider; label: string; endpoint?: string; hasSecret?: boolean; secret?: string } | { type: "configureAssetProvider"; provider: AssetProviderConnection["provider"]; label: string; endpoint?: string; hasSecret?: boolean; secret?: string } | { type: "disconnectAssetProvider"; provider: AssetProviderConnection["provider"] } | { type: "wakePresence"; presenceId?: string } | { type: "runPulse"; presenceId?: string } | { type: "syncNativeX"; presenceId?: string } | { type: "setModel"; model: string; provider?: ModelProvider; quality?: ModelQuality; vision?: boolean } | { type: "runSlot"; id: string; scheduled?: boolean } | { type: "approveExecution"; id: string } | { type: "executeIntent"; id: string } | { type: "confirmAutoMode"; presenceId: string; capabilities: string[]; executionIds: string[] } | { type: "approveSandboxIntroduction"; id: string } | { type: "declineSandboxIntroduction"; id: string } | { type: "setPresence"; patch: Partial<Pick<Presence, "name" | "handle" | "mode" | "status" | "avatarLook" | "pacing" | "attentionIntervalMinutes" | "quietHours" | "publishingInitiative" | "execution" | "ghostProfile" | "connectionMode" | "brief" | "publicSelf" | "mediaPerceptionPolicy" | "language" | "selfDirectedAttention" | "curationSources">> } | { type: "startPlayground"; presenceId?: string; source?: "fresh" | "scenario" | "replay" } | { type: "syncPlaygroundTime"; sessionId: string } | { type: "resetPlayground"; sessionId: string } | { type: "inspectMirrorMedia"; presenceId: string; objectId: string } | { type: "inspectSandboxMedia"; sessionId: string; objectId: string } | { type: "addSandboxEvent"; sessionId: string; kind?: string; actionId?: string; actorId?: string; actorName?: string; actorHandle?: string; profile?: SandboxActorProfile; targetExternalRef?: EntityRef; parentExternalRef?: EntityRef; observeOnly?: boolean } | { type: "advanceSandboxTime"; sessionId: string; minutes: number } | { type: "runSandboxPulse"; sessionId: string } | { type: "considerOriginalPublication"; sessionId: string; inspiration?: string } | { type: "recordPreferenceEvidence"; sessionId: string; attemptId: string; reaction: PreferenceReaction; reasons?: PreferenceReason[]; note?: string };

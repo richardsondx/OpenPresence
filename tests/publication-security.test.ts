@@ -55,6 +55,19 @@ describe("publication security boundary", () => {
     expect(() => verifyExecutionPermit(execution)).toThrow(/PAYLOAD_MUTATION/);
   });
 
+  it("preserves conversational paragraph flow for a reply expression", () => {
+    vi.stubEnv("NODE_ENV", "test");
+    const state = createAgent({ name: "Ada", description: "A production agent", mode: "agent", handle: "@ada", accent: "#D68754" });
+    const expression = createPublicExpressionCandidate({
+      state,
+      presence: { ...state.presence!, environment: "live" },
+      affordance: "x.reply",
+      text: "A warm opening. A useful thought.\n\nOne playful closer.",
+      source: "agent_model",
+    });
+    expect(expression.text).toBe("A warm opening. A useful thought.\n\nOne playful closer.");
+  });
+
   it("rejects operational or planner artifacts even in a production process", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("OPENPRESENCE_TEST_MODE", "0");

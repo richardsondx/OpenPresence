@@ -503,7 +503,13 @@ export function runOperationalSweep(now = new Date()): SweepResult {
       // Delivery/verification can outlive the bounded cognition pass. Keep
       // that responsibility durable on its original run, but do not present
       // it as a worker that can consume a new attention signal.
-      const existingRun = listOperationalRuns(presenceId).find((run) => run.kind === "attention" && ["queued", "running", "recovering", "delivery_uncertain", "reconciling"].includes(run.state));
+      const existingRun = listOperationalRuns(presenceId).find((run) => run.kind === "attention" && (
+        ["queued", "running", "recovering", "delivery_uncertain", "reconciling"].includes(run.state)
+        // Delivery/verification is still part of the prior attention pass.
+        // Keep the next wake durable instead of starting a second cognition
+        // pass that can re-select the same WatchSignal.
+        || (run.state === "waiting" && ["delivering", "verifying"].includes(run.stage))
+      ));
       if (existingRun) {
         if (attentionRunAcceptsSignal(existingRun)) {
           existingRun.attention = mergeAttentionRequests(existingRun.attention, request);

@@ -174,6 +174,19 @@ export function settleConversationClosure(state: OpenPresenceState, episodeId: s
   if (!episode) return;
   episode.updatedAt = nowIso();
   if (outcome === "verified") {
+    // A verified reply is not automatically the end of an episode. The
+    // planner's explicit disposition distinguishes “continue” from a final
+    // close, so preserve an active episode when another turn may still add
+    // value. Legacy replies without a disposition retain the old close-on-
+    // verification behavior.
+    if (episode.lastDisposition === "continue") {
+      episode.status = "active";
+      episode.closedAt = undefined;
+      episode.closureReason = undefined;
+      episode.nextEligibleAt = undefined;
+      episode.eligibilityReason = undefined;
+      return;
+    }
     episode.status = "closed";
     episode.closedAt = episode.updatedAt;
     episode.closureReason = reason?.trim() || "The closing social act was verified in the Social Mirror.";

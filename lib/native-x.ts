@@ -1,6 +1,6 @@
 import { randomUUID } from "node:crypto";
-import { readNativeXCredentials, readRecentXMentions, readRecentXPosts, readXAudienceSnapshot, readXPublicationMetrics, readXPostsByIds, type XRecentPost } from "./x";
-import { applyOperation, intervalForPresence, markNativeConnectionNeedsAttention, recordNativeMirrors, recordNativeMirrorDeletion, recordNativeObservation, recordPublicFooting, recordResourceUsageEvent, recordRuntimeEvent } from "./runtime";
+import { readNativeXCredentials, readRecentXMentions, readRecentXPosts, readXAudienceSnapshot, readXPublicationMetrics, readXPostsByIds, searchRecentXPosts, type XRecentPost } from "./x";
+import { applyOperation, intervalForPresence, markNativeConnectionNeedsAttention, recordNativeMirrors, recordNativeMirrorDeletion, recordNativeObservation, recordPublicFooting, recordResourceUsageEvent, recordRuntimeEvent, recordPublicRequestsFromMirrors, recordWatchSignals } from "./runtime";
 import { normalizeHandle } from "./x";
 import { languagesMatch } from "./language-policy";
 import type { EntityRef, MirrorObject, OpenPresenceState, Presence, PresenceQuietHours } from "./types";
@@ -131,6 +131,31 @@ export const nextObservationAt = (presence: Presence | undefined, from = Date.no
   return candidate.toISOString();
 };
 
+function watchHandleForX(watch: OpenPresenceState["watches"][number]) {
+  const direct = watch.target?.handle?.replace(/^@/, "").trim();
+  if (direct) return direct.toLowerCase();
+  if (watch.kind !== "creator") return undefined;
+  const raw = watch.query.replace(/^https?:\/\/(?:www\.)?(?:x\.com|twitter\.com)\//i, "").replace(/^@/, "").replace(/\/$/, "").trim();
+  return /^[A-Za-z0-9_]{2,30}$/.test(raw) ? raw.toLowerCase() : undefined;
+}
+
+function sharedWatchQueries(watches: OpenPresenceState["watches"]) {
+  const handles = [...new Set(watches.map(watchHandleForX).filter((handle): handle is string => Boolean(handle)))];
+  const batches: string[][] = [];
+  let batch: string[] = [];
+  for (const handle of handles) {
+    const candidate = [...batch, handle];
+    if (batch.length && `(from:${candidate.join(" OR from:")})`.length > 420) {
+      batches.push(batch);
+      batch = [handle];
+    } else {
+      batch = candidate;
+    }
+  }
+  if (batch.length) batches.push(batch);
+  return batches.map((handlesInBatch) => `(${handlesInBatch.map((handle) => `from:${handle}`).join(" OR ")}) -is:retweet`);
+}
+
 export async function reconcileNativeX(source: OpenPresenceState, presenceId: string, options?: { runId?: string; invocationId?: string; attentionEpisodeId?: string }): Promise<OpenPresenceState> {
   let next = recordNativeObservation(source, presenceId, {
     ...(source.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x")?.observation ?? {}),
@@ -177,6 +202,16 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
 
     const posts = postsResult.value;
     const mentions = mentionsResult.status === "fulfilled" ? mentionsResult.value : [];
+    const activeWatches = next.watches.filter((watch) => watch.presenceId === presenceId && (watch.state ?? "active") === "active" && watch.observation.status === "watching" && watch.channel === "x");
+    const watchPosts: XRecentPost[] = [];
+    for (const query of sharedWatchQueries(activeWatches)) {
+      try {
+        next = recordResourceUsageEvent(next, { presenceId, invocationId: options?.invocationId ?? `watchlist:${randomUUID()}`, runId: options?.runId, originKind: "watchlist", originId: activeWatches.map((watch) => watch.id).join(","), attentionSource: "watchlist", category: "channel_read", provider: "x", action: "watchlist_search", usage: { requests: 1 }, attentionEpisodeId: options?.attentionEpisodeId });
+        watchPosts.push(...await searchRecentXPosts(credentials, query, 25));
+      } catch (error) {
+        next = recordRuntimeEvent(next, presenceId, "Watchlist observation limited", error instanceof Error ? error.message : "X did not return the watched account's recent posts.", "warning");
+      }
+    }
     const observedAt = new Date().toISOString();
     const hasGrowthAssignment = next.assignments.some((assignment) => assignment.presenceId === presenceId && assignment.successEvidence?.metric === "followers" && assignment.status !== "cancelled");
     if (hasGrowthAssignment) {
@@ -191,7 +226,12 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
     next = recordNativeMirrors(next, [
       ...posts.map((post) => ({ connectionId: connection.id, presenceId, own: true, post })),
       ...mentions.map((post) => ({ connectionId: connection.id, presenceId, post })),
+      ...watchPosts.map((post) => ({ connectionId: connection.id, presenceId, post })),
     ], { attentionEpisodeId: options?.attentionEpisodeId, attentionRunId: options?.runId, attentionInvocationId: options?.invocationId });
+    const watchedMirrorObjects = next.mirrorObjects.filter((object) => object.presenceId === presenceId && watchPosts.some((post) => post.id === object.externalRef.id));
+    next = recordWatchSignals(next, watchedMirrorObjects, nextObservationAt(targetPresence ?? undefined));
+    const inboundMirrorObjects = next.mirrorObjects.filter((object) => object.presenceId === presenceId && mentions.some((post) => post.id === object.externalRef.id));
+    next = recordPublicRequestsFromMirrors(next, inboundMirrorObjects);
     if (hasGrowthAssignment) try {
       const ownMirrorObjects = next.mirrorObjects.filter((item) => item.presenceId === presenceId && item.actorPresenceId === presenceId && item.environment === "live" && !item.archived && item.externalRef.type === "x.post").slice(0, 100);
       next = recordResourceUsageEvent(next, { presenceId, invocationId: `x-reconcile:${randomUUID()}`, runId: options?.runId, originKind: "other", attentionSource: "inbound_social", category: "channel_read", provider: "x", usage: { requests: 1 }, attentionEpisodeId: options?.attentionEpisodeId });

@@ -55,6 +55,12 @@ export function formatReplyText(value: string) {
     .join("\n\n");
 }
 
+/** Choose the public shape from the social affordance, not from the caller. */
+export function formatPublicExpression(value: string, affordance?: string) {
+  const conversational = affordance?.endsWith(".reply") || affordance?.endsWith(".quote");
+  return conversational ? formatReplyText(value) : formatOneSentencePerLine(value);
+}
+
 function parsedObject(text?: string): Record<string, unknown> | undefined {
   if (!text) return undefined;
   const normalized = text.trim().replace(/^```(?:json)?\s*/i, "").replace(/\s*```$/, "").trim();

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addSandboxEvent, applyOperation, assignmentIsOpen, assignmentIsSatisfied, cleanSandboxDraft, cleanUserFacingAssignmentInstruction, compileAssignmentInstruction, compilePresenceContext, compileWatch, completeNativeExecution, createAgent, deliverSandboxExecution, defaultPublishingInitiative, defaultSelfDirectedAttentionPolicy, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingProgress, deriveSelfDirectedDiscoveryPlan, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, formXActionIntent, identityLeakageReason, inferExplicitDurableContext, inferPresenceIdentityChange, initialState, isActivityDecisionEvent, isExplicitGhostModeRequest, isExplicitXPostRequest, isMentionRestrictedError, isTeachProposalConfirmation, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, publicHistoryMatchesPresence, publicSelfGuidance, recordAttentionTestDecision, recordNativeMirror, recordNativeObservation, recordPublicFooting, recordResourceUsageEvent, recordSocialDecision, recordStandingIntentNoOp, recordVerifiedChromeReply, recordVerifiedXReply, rerouteExecutionToBridge, startAttentionTest, startPlaygroundSession, stateForContext } from "../lib/runtime";
+import { addSandboxEvent, applyOperation, assignmentIsOpen, assignmentIsSatisfied, cleanSandboxDraft, cleanUserFacingAssignmentInstruction, compileAssignmentInstruction, compilePresenceContext, compileWatch, completeNativeExecution, createAgent, deliverSandboxExecution, defaultPublishingInitiative, defaultSelfDirectedAttentionPolicy, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingProgress, deriveSelfDirectedDiscoveryPlan, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, formXActionIntent, identityLeakageReason, inferExplicitDurableContext, inferPresenceIdentityChange, initialState, isActivityDecisionEvent, isExplicitGhostModeRequest, isExplicitXPostRequest, isMentionRestrictedError, isTeachProposalConfirmation, markInboundJudged, markNativeConnectionNeedsAttention, normalizeState, publicHistoryMatchesPresence, publicSelfGuidance, recordAttentionTestDecision, recordNativeMirror, recordNativeObservation, recordPublicFooting, recordPublicRequestsFromMirrors, recordResourceUsageEvent, recordSocialDecision, recordStandingIntentNoOp, recordVerifiedChromeReply, recordVerifiedXReply, recordWatchSignals, relationshipPolicyFromWatchPurpose, rerouteExecutionToBridge, startAttentionTest, startPlaygroundSession, stateForContext } from "../lib/runtime";
 import { expireQueuedDeliveryWindows } from "../lib/temporal";
 import { acknowledgeExecution, claimExecutions, createBridgeWithKey, heartbeatBridge, ingestEvents, removeBridge, revokeBridge } from "../lib/bridge";
 import { readBridgeById, readBridgeCredentialMetadata, readState, readStateVersion, writeState } from "../lib/db";
@@ -350,8 +350,51 @@ describe("OpenPresence runtime boundaries", () => {
     expect(added.watches[0]?.agentId).toBe(state.agent!.id);
     expect(added.watches[0]?.presenceId).toBe(state.presence!.id);
     expect(added.agent?.name).toBe("Jenny");
-    const removed = applyOperation(added, { type: "deleteWatch", id: added.watches[0]!.id });
+    const watchId = added.watches[0]!.id;
+    const edited = applyOperation(added, { type: "updateWatch", id: watchId, query: "@new_creator", purpose: "Interact regularly when useful." });
+    expect(edited.watches[0]).toMatchObject({ id: watchId, query: "@new_creator", title: "@new_creator", purpose: "Interact regularly when useful.", kind: "creator" });
+    expect(edited.watches[0]?.createdAt).toBe(added.watches[0]?.createdAt);
+    expect(edited.watches[0]?.observation.observedCount).toBe(0);
+    const removed = applyOperation(edited, { type: "deleteWatch", id: watchId });
     expect(removed.watches).toHaveLength(0);
+
+    const recovered = { ...compileWatch(state.agent!.id, state.presence!.id, "x", "@sandbox_person"), id: "watch_recovered_relationship_test" };
+    const explicit = { ...compileWatch(state.agent!.id, state.presence!.id, "x", "@operator_person"), id: "watch_operator_test" };
+    const normalized = normalizeState({ ...state, watches: [recovered, explicit] });
+    expect(normalized.watches.map((watch) => watch.id)).toEqual(["watch_operator_test"]);
+  });
+
+  it("defaults public Requests to nobody and keeps that separate from Watching", () => {
+    const state = createAgent(input);
+    const presence = state.presence!;
+    expect(presence.requestPolicy).toMatchObject({ access: "nobody", acceptance: "operator_review" });
+    const watched = applyOperation(state, { type: "createWatch", query: "@source_author", purpose: "Learn from useful insights and interact when worthwhile", presenceId: presence.id });
+    const withMirror = recordNativeMirror(watched, { connectionId: "native-request-test", presenceId: presence.id, post: { id: "watched-post-1", text: "A useful observation.", authorId: "author-1", authorUsername: "source_author", authorName: "Source Author" } });
+    const observedMirror = withMirror.mirrorObjects.find((item) => item.externalRef.id === "watched-post-1")!;
+    const observed = recordWatchSignals(withMirror, [observedMirror]);
+    expect(observed.watchSignals).toHaveLength(1);
+    expect(observed.watches[0]?.target).toMatchObject({ externalActorId: "author-1", handle: "source_author", identityStatus: "verified" });
+    expect(observed.relationshipPolicies[0]).toMatchObject({ learning: "selective", engagement: "when_worthwhile" });
+
+    const requestState = recordNativeMirror(observed, { connectionId: "native-request-test", presenceId: presence.id, post: { id: "request-post-1", text: "Hey @jenny_ai, can you find someone who would be a good fit for this?", authorId: "requester-1", authorUsername: "requester", authorName: "Requester" } });
+    const requestMirror = requestState.mirrorObjects.find((item) => item.externalRef.id === "request-post-1")!;
+    const denied = recordPublicRequestsFromMirrors(requestState, [requestMirror]);
+    expect(denied.publicRequests[0]).toMatchObject({ eligibility: "not_allowed", disposition: "ignored" });
+    expect(denied.assignments).toHaveLength(0);
+
+    const enabled = applyOperation(denied, { type: "setPresenceRequestPolicy", presenceId: presence.id, policy: { access: "anyone", allowedRequestTypes: ["recommendation"], requireDirectAddress: true, acceptance: "operator_review", impactLimit: "low" } });
+    const secondRequestState = recordNativeMirror(enabled, { connectionId: "native-request-test", presenceId: presence.id, post: { id: "request-post-2", text: "Hey @jenny_ai, can you recommend someone who would be a good fit?", authorId: "requester-2", authorUsername: "requester_two", authorName: "Requester Two" } });
+    const secondRequestMirror = secondRequestState.mirrorObjects.find((item) => item.externalRef.id === "request-post-2")!;
+    const eligible = recordPublicRequestsFromMirrors(secondRequestState, [secondRequestMirror]);
+    expect(eligible.publicRequests[0]).toMatchObject({ eligibility: "eligible", disposition: "needs_operator_review" });
+    const accepted = applyOperation(eligible, { type: "decidePublicRequest", id: eligible.publicRequests[0]!.id, disposition: "accepted" });
+    expect(accepted.assignments[0]).toMatchObject({ origin: "public_request", target: { mirrorObjectId: secondRequestMirror.id } });
+    expect(accepted.publicRequests[0]?.assignmentId).toBe(accepted.assignments[0]?.id);
+  });
+
+  it("treats explicit learning differently from social contribution language in Watch purposes", () => {
+    expect(relationshipPolicyFromWatchPurpose("Interact with his posts, add useful insights, and make people laugh.")).toMatchObject({ learning: "off", engagement: "when_worthwhile" });
+    expect(relationshipPolicyFromWatchPurpose("Learn selectively from their insights without copying their voice.")).toMatchObject({ learning: "selective", engagement: "observe_only" });
   });
 
   it("keeps browser hands separate from the Presence channel and native route", () => {

@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { formatOneSentencePerLine, formatReplyText } from "../lib/public-expression";
+import { formatOneSentencePerLine, formatPublicExpression, formatReplyText } from "../lib/public-expression";
 
 describe("one-sentence-per-line public formatting", () => {
   it("splits sentence boundaries inside a paragraph", () => {
@@ -20,5 +20,12 @@ describe("one-sentence-per-line public formatting", () => {
   it("preserves natural paragraph flow in replies and removes list markers", () => {
     expect(formatReplyText("First sentence. Second sentence.\n\n- **Task success:** finish the job.\n- **Intervention:** avoid repair."))
       .toBe("First sentence. Second sentence.\n\nTask success: finish the job.\n\nIntervention: avoid repair.");
+  });
+
+  it("uses conversational flow for replies and quotes while keeping standalone posts crisp", () => {
+    const text = "A warm opening. A useful thought.\n\nOne playful closer.";
+    expect(formatPublicExpression(text, "x.reply")).toBe(text);
+    expect(formatPublicExpression(text, "x.quote")).toBe(text);
+    expect(formatPublicExpression(text, "x.post")).toBe("A warm opening.\n\nA useful thought.\n\nOne playful closer.");
   });
 });

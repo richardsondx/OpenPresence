@@ -34,20 +34,22 @@ test("Publishing Plan exposes its exact pace and windows in Schedule", async ({ 
   expect(replanned.ok()).toBeTruthy();
   await page.reload();
   await page.getByRole("button", { name: "Schedule", exact: true }).click();
-  await expect(page.getByRole("region", { name: "Calendar layers" })).toContainText("Plan active");
+  await expect(page.getByRole("region", { name: "Calendar layers", exact: true })).toContainText("Plan active");
+  await expect(page.getByRole("region", { name: "Agent publishing plan" })).toHaveCount(0);
+  await page.getByRole("button", { name: /Genny's plan/ }).click();
   const plan = page.getByRole("region", { name: "Agent publishing plan" });
   await expect(plan).toBeVisible();
-  await expect(plan).toContainText("A publishing pace to work toward");
+  await expect(plan).toContainText(/A publishing pace to work toward|Work toward/);
   await expect(plan.getByRole("button", { name: "Expand plan" })).toBeVisible();
-  await expect(plan).toContainText("Chosen pace");
   await expect(plan).not.toContainText("Current work");
   await expect(plan).not.toContainText("Full consideration windows");
   await plan.getByRole("button", { name: "Expand plan" }).click();
   await expect(plan.getByRole("button", { name: "Minimize plan" })).toBeVisible();
+  await expect(plan).toContainText("Chosen pace");
   await expect(plan).toContainText("Current work");
   await expect(plan).toContainText("Full consideration windows");
-  await expect(page.getByText("The publishing plan shows flexible working windows underneath the Assignments", { exact: false })).toBeVisible();
-  await expect(page.getByRole("region", { name: "Calendar layers" }).getByText("Publishing plan", { exact: true })).toBeVisible();
+  await expect(page.getByText("Assignments are commitments. Use the optional Genny's plan layer", { exact: false })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Genny's plan/ })).toHaveAttribute("aria-pressed", "true");
 });
 
 test("switching Presence switches Playground world and rehearsal history", async ({ page, request }) => {
@@ -273,4 +275,3 @@ test("Playground renders discreet assignment mentions and supports minimizing", 
   await expect(page.locator(".assignment-progress-panel")).toHaveCount(0);
   await expect(page.locator(".playground-assignment-mention")).toBeVisible();
 });
-

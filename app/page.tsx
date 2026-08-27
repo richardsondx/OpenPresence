@@ -75,12 +75,13 @@ import { cleanMirrorText, normalizeMirrorAuthor } from "@/lib/mirror-content";
 import { languagesMatch } from "@/lib/language-policy";
 import { isCognitionEligibleMirrorObject } from "@/lib/social-context";
 import { peopleForPresence, resolveCanonicalPerson, isPlaceholderIdentity } from "@/lib/network-memory";
-import { assignmentIsCurrentlyProcessing, assignmentIsOpen, assignmentProgressLabel, audienceDeltas, capabilityProviderLabel, cleanUserFacingAssignmentInstruction, collapseAudienceSnapshots, compileAgendaWork, defaultSelfDirectedAttentionPolicy, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, intervalForPresence, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence, SELF_DIRECTED_ATTENTION_PRESETS } from "@/lib/runtime";
+import { assignmentIsCurrentlyProcessing, assignmentIsOpen, assignmentProgressLabel, audienceDeltas, capabilityProviderLabel, cleanUserFacingAssignmentInstruction, collapseAudienceSnapshots, compileAgendaWork, defaultSelfDirectedAttentionPolicy, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, intervalForPresence, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence, relationshipPolicyFromWatchPurpose, SELF_DIRECTED_ATTENTION_PRESETS } from "@/lib/runtime";
 import type {
   CalendarSlot,
   CapabilityTrialCapability,
   AttentionTest,
   AttentionTestMode,
+  Agent,
   Assignment,
   AssignmentRun,
   AssignmentStatus,
@@ -115,6 +116,10 @@ import type {
   Person,
   PersonIdentity,
   Presence,
+  PresenceRequestAccess,
+  PresenceRequestPolicy,
+  PublicRequest,
+  PublicRequestType,
   PresenceAudienceSnapshot,
   PublicationMetricSnapshot,
   SandboxActor,
@@ -130,6 +135,7 @@ import type {
   BrowserBody,
   CurationSourceConfig,
   CurationSourceKind,
+  ConversationStyleProfile,
 } from "@/lib/types";
 import { getDefaultCurationSources } from "@/lib/editorial-curation";
 import { publicExpressionText } from "@/lib/public-expression";
@@ -138,6 +144,8 @@ import { runtimeTimeoutForOperation, runtimeTimeoutMessage } from "@/lib/runtime
 import { deriveHistoricalGrowthContext } from "@/lib/growth-history";
 import { deriveActivityNow } from "@/lib/activity-now";
 import { operatorConversationActionEvents, type OperatorConversationActionEvent } from "@/lib/operator-chat-projection";
+import { conversationStyleGeneratorPrompt, conversationStylesFor, normalizeImportedConversationStyle } from "@/lib/conversation-styles";
+import { AVATAR_LOOK_LABELS, AVATAR_LOOKS, avatarAssetPath, presenceAvatarLook, type AvatarLook } from "@/lib/avatars";
 
 const PUBLIC_TECHNICAL_FACTS: { id: PublicTechnicalFact; label: string; detail: string }[] = [
   { id: "ai-presence", label: "This is an AI presence", detail: "Say so when the question makes it relevant." },
@@ -401,43 +409,6 @@ function XBrand() {
   );
 }
 
-function faviconUrl(domain: string) {
-  try {
-    const normalized = /^https?:\/\//i.test(domain) ? domain : `https://${domain}`;
-    const hostname = new URL(normalized).hostname;
-    return `https://www.google.com/s2/favicons?domain=${encodeURIComponent(hostname)}&sz=64`;
-  } catch {
-    return null;
-  }
-}
-
-function PresenceLogo({
-  channel,
-  definitions,
-  size = "normal",
-}: {
-  channel: ChannelId;
-  definitions?: ChannelDefinition[];
-  size?: "small" | "normal" | "large";
-}) {
-  const definition = definitions?.find((item) => item.id === channel);
-  const icon = definition?.icon ?? (channel === "x" ? "x" : "community");
-  const option = channelIconOptions.find((item) => item.id === icon);
-  const iconPixelSize = size === "large" ? 18 : size === "small" ? 12 : 14;
-  const fallback = icon === "x" ? <XBrand /> : option ? <option.icon size={iconPixelSize} strokeWidth={1.8} /> : <Globe2 size={iconPixelSize} strokeWidth={1.8} />;
-  const favicon = definition?.domain ? faviconUrl(definition.domain) : null;
-  return (
-    <span className={`presence-logo presence-logo-${size}`} aria-hidden="true">
-      <span className="presence-logo-fallback">{fallback}</span>
-      {favicon && (
-        // External favicon URLs are user-provided and cannot use Next Image's fixed domain allowlist.
-        // eslint-disable-next-line @next/next/no-img-element
-        <img src={favicon} alt="" onError={(event) => event.currentTarget.remove()} />
-      )}
-    </span>
-  );
-}
-
 async function readJsonResponse<T>(response: Response): Promise<T> {
   const contentType = response.headers.get("content-type") ?? "";
   if (!contentType.includes("application/json")) {
@@ -542,20 +513,27 @@ function modelDisplayName(model: OpenPresenceState["modelProfiles"][number] | un
 
 function PresenceGlyph({
   accent,
+  name = "Agent",
+  look = "core",
   size = "normal",
   pulse = false,
+  className = "",
 }: {
   accent: string;
+  name?: string;
+  look?: AvatarLook;
   size?: "normal" | "large";
   pulse?: boolean;
+  className?: string;
 }) {
   return (
     <div
-      className={`presence-glyph ${size === "large" ? "presence-glyph-large" : ""} ${pulse ? "is-pulsing" : ""}`}
+      className={`presence-glyph ${size === "large" ? "presence-glyph-large" : ""} ${pulse ? "is-pulsing" : ""} ${className}`}
       style={{ "--agent-accent": accent } as React.CSSProperties}
-      aria-hidden="true"
+      role="img"
+      aria-label={`${name} avatar`}
     >
-      <span>◉</span>
+      <img src={avatarAssetPath(accent, name, look)} alt="" draggable={false} />
     </div>
   );
 }
@@ -1444,7 +1422,7 @@ function AgentSwitcher({
 }) {
   const [open, setOpen] = useState(false);
   const [showCreate, setShowCreate] = useState(false);
-  const [editingAgentId, setEditingAgentId] = useState<string | null>(null);
+  const [avatarEditorAgentId, setAvatarEditorAgentId] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<React.CSSProperties | null>(null);
   const switcherRef = useRef<HTMLButtonElement>(null);
   const agent = state.agent!;
@@ -1455,7 +1433,7 @@ function AgentSwitcher({
       const anchor = switcherRef.current?.getBoundingClientRect();
       if (!anchor) return;
       const menuWidth = Math.min(250, window.innerWidth - 24);
-      const estimatedHeight = Math.min(520, 88 + agents.length * 52 + (editingAgentId ? 142 : 0));
+      const estimatedHeight = Math.min(520, 88 + agents.length * 52);
       const below = window.innerHeight - anchor.bottom;
       const top = below >= estimatedHeight + 8
         ? anchor.bottom + 8
@@ -1479,7 +1457,8 @@ function AgentSwitcher({
       window.removeEventListener("resize", updatePosition);
       window.removeEventListener("scroll", updatePosition, true);
     };
-  }, [agents.length, editingAgentId, open]);
+  }, [agents.length, open]);
+  const avatarEditorAgent = agents.find((item) => item.id === avatarEditorAgentId);
   return (
     <div className="agent-switcher-wrap">
       <button
@@ -1489,7 +1468,7 @@ function AgentSwitcher({
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <PresenceGlyph accent={agent.accent} />
+        <PresenceGlyph accent={agent.accent} name={agent.name} />
         <span>
           <strong>{agent.name}</strong>
         </span>
@@ -1508,13 +1487,15 @@ function AgentSwitcher({
               <div className="agent-menu-agent-row">
                 <button
                   type="button"
-                  className={`agent-menu-color-button ${editingAgentId === item.id ? "editing" : ""}`}
-                  aria-label={`Change ${item.name} color`}
-                  aria-expanded={editingAgentId === item.id}
-                  title="Change Agent color"
-                  onClick={() => setEditingAgentId((current) => current === item.id ? null : item.id)}
+                  className="agent-menu-color-button"
+                  aria-label={`Edit ${item.name} avatar`}
+                  title="Edit Agent avatar"
+                  onClick={() => {
+                    setOpen(false);
+                    setAvatarEditorAgentId(item.id);
+                  }}
                 >
-                  <PresenceGlyph accent={item.accent} />
+                  <PresenceGlyph accent={item.accent} name={item.name} />
                 </button>
                 <button
                   type="button"
@@ -1522,7 +1503,6 @@ function AgentSwitcher({
                   className={`agent-menu-item ${item.id === state.activeAgentId ? "active" : ""}`}
                   onClick={async () => {
                     await mutate({ type: "selectAgent", id: item.id });
-                    setEditingAgentId(null);
                     setOpen(false);
                   }}
                 >
@@ -1532,27 +1512,6 @@ function AgentSwitcher({
                   </span>
                 </button>
               </div>
-              {editingAgentId === item.id && (
-                <div className="agent-color-picker" role="group" aria-label={`Choose ${item.name} color`}>
-                  {agentAccentPalette.map((option) => (
-                    <button
-                      type="button"
-                      key={option.value}
-                      className={`agent-color-swatch ${item.accent.toLowerCase() === option.value.toLowerCase() ? "selected" : ""}`}
-                      aria-label={`${option.name} color`}
-                      title={`${option.name} · ${option.value}`}
-                      style={{ "--agent-swatch": option.value } as React.CSSProperties}
-                      onClick={async () => {
-                        await mutate({ type: "setAgentAccent", agentId: item.id, accent: option.value });
-                        setEditingAgentId(null);
-                      }}
-                    >
-                      <span aria-hidden="true" />
-                      {item.accent.toLowerCase() === option.value.toLowerCase() && <b aria-hidden="true">✓</b>}
-                    </button>
-                  ))}
-                </div>
-              )}
             </div>
           ))}
           {agents.length === 1 && (
@@ -1586,6 +1545,101 @@ function AgentSwitcher({
           />,
           document.body,
         )}
+      {avatarEditorAgent &&
+        typeof document !== "undefined" &&
+        createPortal(
+          <AgentAvatarEditorDialog
+            agent={avatarEditorAgent}
+            onClose={() => setAvatarEditorAgentId(null)}
+            onSave={async (accent) => {
+              const next = await mutate({ type: "setAgentAccent", agentId: avatarEditorAgent.id, accent });
+              if (next) setAvatarEditorAgentId(null);
+            }}
+          />,
+          document.body,
+        )}
+    </div>
+  );
+}
+
+function AgentAvatarEditorDialog({
+  agent,
+  onClose,
+  onSave,
+}: {
+  agent: Agent;
+  onClose: () => void;
+  onSave: (accent: string) => Promise<void>;
+}) {
+  const [accent, setAccent] = useState(agent.accent);
+  const [saving, setSaving] = useState(false);
+
+  useEffect(() => {
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    document.addEventListener("keydown", onKeyDown);
+    return () => document.removeEventListener("keydown", onKeyDown);
+  }, [onClose]);
+
+  const save = async () => {
+    setSaving(true);
+    await onSave(accent);
+    setSaving(false);
+  };
+
+  return (
+    <div className="modal-backdrop agent-avatar-modal-backdrop" role="presentation" onMouseDown={(event) => {
+      if (event.target === event.currentTarget) onClose();
+    }}>
+      <section className="agent-avatar-dialog" role="dialog" aria-modal="true" aria-labelledby="agent-avatar-dialog-title">
+        <div className="dialog-header">
+          <div>
+            <SectionEyebrow>Agent identity</SectionEyebrow>
+            <h2 id="agent-avatar-dialog-title">Edit {agent.name}&apos;s avatar</h2>
+          </div>
+          <button type="button" className="icon-button" aria-label="Close avatar editor" onClick={onClose}>
+            <X size={18} />
+          </button>
+        </div>
+        <div className="agent-avatar-editor-hero">
+          <div className="agent-avatar-preview" style={{ "--agent-accent": accent } as React.CSSProperties}>
+            <PresenceGlyph accent={accent} name={agent.name} size="large" />
+          </div>
+          <div>
+            <h3>{agent.name}</h3>
+            <p>Choose the identity color that carries across every Presence. Clothing and styling belong to each Presence separately.</p>
+          </div>
+        </div>
+        <fieldset className="agent-avatar-options">
+          <legend>Choose an identity color</legend>
+          <div className="agent-avatar-option-grid">
+            {agentAccentPalette.map((option) => {
+              const selected = accent.toLowerCase() === option.value.toLowerCase();
+              return (
+                <button
+                  type="button"
+                  key={option.value}
+                  className={`agent-avatar-option ${selected ? "selected" : ""}`}
+                  aria-label={`${option.name} identity color`}
+                  aria-pressed={selected}
+                  onClick={() => setAccent(option.value)}
+                >
+                  <span className="agent-avatar-option-art" style={{ "--agent-accent": option.value } as React.CSSProperties}>
+                    <PresenceGlyph accent={option.value} name={agent.name} />
+                  </span>
+                  <strong>{option.name}</strong>
+                  {selected && <b aria-hidden="true">Selected</b>}
+                </button>
+              );
+            })}
+          </div>
+        </fieldset>
+        <div className="dialog-actions">
+          <Button type="button" variant="ghost" onClick={onClose}>Cancel</Button>
+          <Button type="button" variant="primary" disabled={saving} onClick={() => void save()}>{saving ? "Saving…" : "Save avatar"}</Button>
+        </div>
+      </section>
     </div>
   );
 }
@@ -1610,8 +1664,8 @@ function PresenceSwitcher({
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
-        <span className="channel-badge" title={channelLabel(presence.channel, state.channelDefinitions)}>
-          <PresenceLogo channel={presence.channel} definitions={state.channelDefinitions} />
+        <span className="presence-avatar-badge">
+          <PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} />
         </span>
         <span>
           <strong>{presence.name}</strong>
@@ -1634,7 +1688,9 @@ function PresenceSwitcher({
                 setOpen(false);
               }}
             >
-              <span className="channel-badge" title={channelLabel(item.channel, state.channelDefinitions)}><PresenceLogo channel={item.channel} definitions={state.channelDefinitions} /></span>
+              <span className="presence-avatar-badge">
+                <PresenceGlyph accent={item.accent} name={item.name} look={presenceAvatarLook(item)} />
+              </span>
               <span>
                 <strong>{item.name}</strong>
                 <small>{channelLabel(item.channel, state.channelDefinitions)} · {item.mode === "ghost" ? "Ghost" : "Agent-owned"} · {item.environment === "sandbox" ? "Sandbox" : "Live"}</small>
@@ -2020,7 +2076,7 @@ function AgentWorkspaceShell({
             />
           </div>
           <div className="topbar-context">
-            <PresenceGlyph accent={contextIdentity.accent} />
+            <PresenceGlyph accent={contextIdentity.accent} name={contextIdentity.name} look={isPresenceView ? presenceAvatarLook(presence) : "core"} />
             <span>{contextIdentity.name}</span>
             <ChevronRight size={14} />
             <strong>{pageLabel}</strong>
@@ -2219,7 +2275,7 @@ function LegacyAppShell({
           aria-label={`Open agent workspace, ${agent.name}`}
           onClick={() => setView("brain")}
         >
-          <PresenceGlyph accent={agent.accent} />
+          <PresenceGlyph accent={agent.accent} name={agent.name} />
           <span>
             <strong>{agent.name}</strong>
           </span>
@@ -2234,8 +2290,8 @@ function LegacyAppShell({
               className={`presence-switcher ${item.id === presence.id ? "active" : ""}`}
               onClick={() => mutate({ type: "selectPresence", id: item.id })}
             >
-              <span className="channel-badge">
-                {channelLabel(item.channel, state.channelDefinitions)}
+              <span className="presence-nav-avatar">
+                <PresenceGlyph accent={item.accent} name={item.name} look={presenceAvatarLook(item)} />
               </span>
               <span>
                 <strong>{item.handle}</strong>
@@ -2302,7 +2358,7 @@ function LegacyAppShell({
             <span>OpenPresence</span>
           </div>
           <div className="topbar-context">
-            <PresenceGlyph accent={contextIdentity.accent} />
+            <PresenceGlyph accent={contextIdentity.accent} name={contextIdentity.name} look={isPresenceView ? presenceAvatarLook(presence) : "core"} />
             <span>{contextIdentity.name}</span>
             <ChevronRight size={14} />
             <strong>{pageLabel}</strong>
@@ -2440,6 +2496,7 @@ function AddPresenceDialog({
   const [presenceName, setPresenceName] = useState("");
   const [handle, setHandle] = useState("@jenny_ai");
   const [mode, setMode] = useState<PresenceMode>("agent");
+  const [avatarLook, setAvatarLook] = useState<AvatarLook>("core");
   const [submitting, setSubmitting] = useState(false);
   const [customName, setCustomName] = useState("Custom channel");
   const [customId, setCustomId] = useState("custom-channel");
@@ -2509,6 +2566,7 @@ function AddPresenceDialog({
       handle,
       mode,
       accent,
+      avatarLook,
       channelDefinition: definition,
       connectionMode,
     });
@@ -2674,6 +2732,25 @@ function AddPresenceDialog({
             placeholder="Jenny in this place"
           />
         </label>
+        <fieldset className="avatar-look-picker">
+          <legend>Presence look</legend>
+          <small className="muted">The Agent stays recognizable; this changes only the styling of this Presence.</small>
+          <div className="avatar-look-options">
+            {AVATAR_LOOKS.map((look) => (
+              <button
+                type="button"
+                key={look}
+                className={avatarLook === look ? "selected" : ""}
+                aria-label={`Use ${AVATAR_LOOK_LABELS[look]} avatar look`}
+                aria-pressed={avatarLook === look}
+                onClick={() => setAvatarLook(look)}
+              >
+                <PresenceGlyph accent={accent} name={agentName} look={look} />
+                <span>{AVATAR_LOOK_LABELS[look]}</span>
+              </button>
+            ))}
+          </div>
+        </fieldset>
         <label>
           {handleLabel}
           <input
@@ -4960,6 +5037,7 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
   const [rememberHandle, setRememberHandle] = useState("");
   const [rememberExternalId, setRememberExternalId] = useState("");
   const [correction, setCorrection] = useState("");
+  const [delegationBusy, setDelegationBusy] = useState(false);
   const [factPage, setFactPage] = useState(1);
   if (!presence) return null;
 
@@ -4998,9 +5076,13 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
   const selectedIdentity = selected ? state.personIdentities.find((identity) => identity.personId === selected.id && identity.sourcePresenceId === presence.id && (identity.sourceEnvironment ?? "live") === (presence.environment ?? "live")) : undefined;
   const selectedIsFollowed = selected ? isPersonFollowed(selected.id) : false;
   const selectedIsWatched = selected ? isPersonWatched(selected.id) : false;
+  const selectedWatch = selected ? state.watches.find((watch) => watch.presenceId === presence.id && watch.target?.personId === selected.id) : undefined;
   const selectedDisplayInfo = selected ? resolveCanonicalPerson(state, selected.id, presence.id) : { displayName: "Unknown account", handleLabel: "Profile details pending", rawHandle: undefined, avatarUrl: undefined, hydrationState: "unhydrated" as const, isPlaceholder: true };
+  const selectedDelegationGrant = selected ? state.delegationGrants.find((item) => item.presenceId === presence.id && item.personId === selected.id && item.enabled && !item.revokedAt) : undefined;
 
   const relationship = selected ? state.relationships.find((item) => item.personId === selected.id) : undefined;
+  const selectedRelationshipPolicy = selectedWatch ? watchRelationshipPolicy(selectedWatch, state) ?? watchPolicyFromPurpose(selectedWatch.purpose) : undefined;
+  const selectedRelationshipPlan = selectedWatch ? watchPlanSummary(selectedWatch, presence, selectedRelationshipPolicy) : undefined;
   const facts = relationship ? state.relationshipFacts.filter((fact) => fact.relationshipId === relationship.id && !fact.validTo && !state.relationshipFacts.some((newer) => newer.supersedesFactId === fact.id)) : [];
   const factPageCount = Math.max(1, Math.ceil(facts.length / PERSON_FACT_PAGE_SIZE));
   const visibleFactPage = Math.min(factPage, factPageCount);
@@ -5024,6 +5106,16 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
     if (!relationship || !correction.trim()) return;
     const next = await mutate({ type: "correctRelationshipFact", relationshipId: relationship.id, factId: facts[0]?.id, statement: correction.trim(), visibility: `presence:${presence.id}` });
     if (next) setCorrection("");
+  };
+  const toggleSelectedDelegation = async () => {
+    if (!selected || !selectedIdentity || delegationBusy) return;
+    setDelegationBusy(true);
+    try {
+      if (selectedDelegationGrant) await mutate({ type: "revokeDelegationGrant", id: selectedDelegationGrant.id });
+      else await mutate({ type: "createDelegationGrant", presenceId: presence.id, personId: selected.id, externalActorId: selectedIdentity.externalActorId, channel: presence.channel, allowedRequestTypes: REQUEST_TYPE_OPTIONS.map((item) => item.id), acceptance: "operator_review", impactLimit: "low" });
+    } finally {
+      setDelegationBusy(false);
+    }
   };
 
   return <div className="people-page">
@@ -5115,12 +5207,20 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
         </div>
       </div>
 
+      {selectedRelationshipPlan && <div className="person-inspector-section person-plan-section">
+        <SectionEyebrow>{presence.name}&apos;s current relationship plan</SectionEyebrow>
+        <p>{selectedRelationshipPlan.goal}</p>
+        <div className="person-plan-facts"><span><strong>Attention</strong>{selectedRelationshipPlan.attention}</span><span><strong>Relationship revisit</strong>{selectedRelationshipPlan.revisit}</span><span><strong>Learning</strong>{selectedRelationshipPlan.learning}</span><span><strong>Social action</strong>{selectedRelationshipPlan.action}</span></div>
+        <small className="person-plan-boundary">This is a flexible approach, not a scheduled obligation or a reply quota. {presence.name} can stay quiet when there is no worthwhile opening.</small>
+      </div>}
+
       <div className="person-inspector-section">
         <SectionEyebrow>What {presence.name} remembers</SectionEyebrow>
         {facts.length ? <><div className="person-facts-summary"><span>{facts.length} remembered fact{facts.length === 1 ? "" : "s"}</span><span>Showing {(visibleFactPage - 1) * PERSON_FACT_PAGE_SIZE + 1}–{Math.min(visibleFactPage * PERSON_FACT_PAGE_SIZE, facts.length)}</span></div><ul>{visibleFacts.map((fact) => <li key={fact.id}><span>{fact.statement}</span><small>{fact.epistemicKind.replaceAll("_", " ")} · {fact.provenanceRefs.map((ref) => ref.kind).join(", ")}</small></li>)}</ul>{factPageCount > 1 && <nav className="person-facts-pagination" aria-label={`${selected.displayName} remembered facts pages`}><button type="button" onClick={() => setFactPage((current) => Math.max(1, current - 1))} disabled={visibleFactPage <= 1}><ChevronLeft size={13} /> Newer</button><span aria-live="polite">Page {visibleFactPage} of {factPageCount}</span><button type="button" onClick={() => setFactPage((current) => Math.min(factPageCount, current + 1))} disabled={visibleFactPage >= factPageCount}>Older <ChevronRight size={13} /></button></nav>}</> : <p>No curated facts yet.</p>}
       </div>
       <div className="person-inspector-section"><SectionEyebrow>Open threads</SectionEyebrow>{loops.length ? <ul>{loops.map((loop) => <li key={loop.id}>{loop.description}</li>)}</ul> : <p>No open loops.</p>}</div>
       <div className="person-inspector-section"><SectionEyebrow>Recent interactions</SectionEyebrow>{recentHistory.length ? <div className="person-history">{recentHistory.map((item) => <article key={item.id}><small>{formatTime(item.occurredAt ?? item.observedAt)}</small><p>{item.content?.text ?? "[no text]"}</p></article>)}</div> : <p>No Mirror-backed interactions yet.</p>}</div>
+      <div className="person-inspector-section person-request-access-section"><SectionEyebrow>Public request access</SectionEyebrow><p>{selectedDelegationGrant ? "This person has an explicit delegation grant for the allowed request types." : "Watching and remembering this person does not allow them to ask the Presence to do work."}</p><Button variant="secondary" onClick={() => void toggleSelectedDelegation()} disabled={!selectedIdentity || delegationBusy}>{selectedDelegationGrant ? "Revoke request access" : "Allow this person to submit requests"}</Button><small>The grant is only considered when the Presence policy is set to People I allow. Requests still enter operator review.</small></div>
       <div className="person-inspector-actions"><Button variant="ghost" onClick={() => void mutate({ type: "forgetRelationship", relationshipId: relationship?.id })} disabled={!relationship}>Forget relationship</Button><Button variant="ghost" onClick={() => void mutate({ type: "createWatch", presenceId: presence.id, query: selectedIdentity?.handle ?? selected.displayName, purpose: "Keep this person in attention without treating Watching as relationship memory." })}>Watch</Button></div>
       {relationship && <div className="person-correction"><label>Correct memory<textarea aria-label="Correct relationship memory" value={correction} onChange={(event) => setCorrection(event.target.value)} placeholder="What should the Agent remember instead?" rows={3} /></label><Button variant="secondary" disabled={!correction.trim()} onClick={() => void correct()}><Pencil size={14} /> Save correction</Button></div>}
     </section>}</div>}
@@ -5196,8 +5296,8 @@ function watchObservationCopy(watch: Watch) {
   if (watch.observation.observedCount > 0) {
     const count = watch.observation.observedCount;
     return {
-      label: `${count} observation${count === 1 ? "" : "s"} recorded`,
-      detail: "Jenny has current material to consider from this Watch.",
+      label: `${count} new post${count === 1 ? "" : "s"} seen`,
+      detail: "The Watch has current material for Genny to consider.",
     };
   }
   if (watch.observation.source === "automatic") {
@@ -5210,6 +5310,191 @@ function watchObservationCopy(watch: Watch) {
     label: "Waiting for source material",
     detail: "This Watch is saved, but it needs connected or manually supplied material before Jenny can notice anything.",
   };
+}
+
+function watchRelationshipPolicy(watch: Watch, state: OpenPresenceState) {
+  const stored = watch.target?.personId
+    ? state.relationshipPolicies.find((item) => item.presenceId === watch.presenceId && item.personId === watch.target?.personId)
+    : undefined;
+  // Re-project legacy Watch-derived policies from the current operator text
+  // so an old “insight/perspective” heuristic cannot keep presenting a social
+  // Watch as learning-first. A separately authored relationship policy wins.
+  const inferred = relationshipPolicyFromWatchPurpose(watch.purpose);
+  if (stored?.sourceDescription && stored.sourceDescription !== watch.purpose) return stored;
+  return inferred ?? stored;
+}
+
+function watchPolicyFromPurpose(purpose?: string) {
+  return relationshipPolicyFromWatchPurpose(purpose);
+}
+
+function watchAudiencePhrase(presence: Presence) {
+  return presence.brief?.audience?.trim().replace(/[.!?]+$/, "") || "the Presence's audience";
+}
+
+function watchRelationshipPlan(watch: Watch, presence: Presence, policy?: { learning: "off" | "selective"; engagement: "observe_only" | "when_worthwhile" | "maintain_relationship"; rhythm?: "light" | "regular" }) {
+  const text = watch.purpose?.trim();
+  if (!text) {
+    return {
+      goal: "Stay aware of relevant activity and only act when the material earns attention.",
+      lookFor: "Relevant posts where Genny can make a useful contribution.",
+      whenEngaging: "Act only when there is a natural opening, then stop when the contribution is complete.",
+      learning: "Not the objective",
+      action: "Only when worthwhile",
+    };
+  }
+  const lower = text.toLowerCase();
+  const explicitLearning = /\b(?:learn|study|understand|extract(?:ing)?\s+(?:a\s+)?lesson|take\s+(?:a\s+)?lesson)\b/.test(lower);
+  const socialGoal = /\b(?:interact|engage|reply|respond|conversation|mention|joke|humou?r|laugh|friend|relationship|build|grow|maintain|support|challenge|attract|involve)\b/.test(lower);
+  const contribution = /\b(?:insight|perspective|macro|vc|angle|capabilit|strong offers?)\b/.test(lower);
+  const audience = watchAudiencePhrase(presence);
+
+  // Social/action language has priority. “Insight” and “perspective” are
+  // often the substance of a reply, not a request to study the author.
+  if (socialGoal) {
+    const goal = /target audience|attract|involve/.test(lower)
+      ? `Build a genuine relationship while creating conversations that attract ${audience}.`
+      : /joke|humou?r|laugh|friend/.test(lower)
+        ? "Build a genuine, playful relationship with room for useful challenge."
+        : "Build a genuine relationship through relevant interaction.";
+    const lookFor = /target audience|attract|involve/.test(lower)
+      ? `Posts likely to interest ${audience} where Genny can add insight, light humor, or naturally involve relevant people.`
+      : /challenge|support|defend|agree/.test(lower)
+        ? "Natural openings for humor, useful disagreement, or sincere support."
+        : contribution
+          ? "Relevant posts where Genny can add a distinct perspective without copying the person's voice."
+          : "Relevant posts where Genny can make a useful contribution or open a natural conversation.";
+    const whenEngaging = /conversation|continue|until|mention|involve/.test(lower)
+      ? "Prefer substantive replies and conversational threads. Mention others only when it improves the discussion, and stop when there is nothing worthwhile left to add."
+      : /challenge|support|defend|agree/.test(lower)
+        ? "Challenge playfully when there is a real counterpoint. Support them when agreement is sincere; avoid generic praise."
+        : "Add one useful contribution when it earns its place, then stop when the exchange is complete.";
+    return { goal, lookFor, whenEngaging, learning: "Use relationship context", action: "Only when worthwhile" };
+  }
+  if (explicitLearning) {
+    return {
+      goal: "Learn selectively from their ideas without copying their voice.",
+      lookFor: `Strong frameworks, examples, or ideas from ${watch.title} worth understanding.`,
+      whenEngaging: "Add a distinct insight when possible. Otherwise learn quietly without forcing an interaction.",
+      learning: "Selective",
+      action: "Rarely, when worthwhile",
+    };
+  }
+  return {
+    goal: "Stay aware of their activity and act only when a natural, useful opening appears.",
+    lookFor: "Relevant activity that gives Genny a concrete reason to contribute.",
+    whenEngaging: "Make the smallest useful contribution, or stay quiet.",
+    learning: "Not the objective",
+    action: "Only when worthwhile",
+  };
+}
+
+function watchAttentionCadence(presence: Presence) {
+  if (presence.status === "paused") return "Paused";
+  if (presence.pacing === "gentle") return "A few times a week";
+  if (presence.pacing === "custom") {
+    if (presence.attentionIntervalMinutes <= 15) return "Frequent";
+    if (presence.attentionIntervalMinutes <= 60) return "Daily";
+    if (presence.attentionIntervalMinutes <= 240) return "A few times a week";
+    return "Weekly";
+  }
+  return "Frequent";
+}
+
+function watchRelationshipCadence(policy?: { rhythm?: "light" | "regular" }) {
+  return policy?.rhythm === "regular" ? "Every 2–3 days" : policy?.rhythm === "light" ? "Weekly check-in" : "Not set";
+}
+
+function uniqueWatchSignals(state: OpenPresenceState, signals: OpenPresenceState["watchSignals"]) {
+  const dispositionRank: Record<string, number> = { pending: 0, dismissed: 1, considered: 2, remembered: 3, social_opportunity: 4, assignment_created: 5 };
+  const unique = new Map<string, OpenPresenceState["watchSignals"][number]>();
+  for (const signal of signals) {
+    const mirror = state.mirrorObjects.find((item) => item.id === signal.mirrorObjectId);
+    const externalId = mirror?.externalRef?.id ?? signal.mirrorObjectId;
+    const key = `${signal.watchId}:${externalId}`;
+    const prior = unique.get(key);
+    if (!prior || (dispositionRank[signal.disposition] ?? 0) > (dispositionRank[prior.disposition] ?? 0)) unique.set(key, signal);
+  }
+  return [...unique.values()];
+}
+
+function watchOutcomeSummary(state: OpenPresenceState, watch: Watch, presenceName: string) {
+  const signals = uniqueWatchSignals(state, state.watchSignals.filter((signal) => signal.watchId === watch.id));
+  const pendingSignalCount = signals.filter((signal) => signal.disposition === "pending").length;
+  const opportunityCount = signals.filter((signal) => signal.disposition === "social_opportunity").length;
+  const judgedCount = signals.filter((signal) => signal.disposition !== "pending").length;
+  const targetId = watch.target?.externalActorId;
+  const interactions = targetId
+    ? state.outcomes.filter((outcome) => outcome.presenceId === watch.presenceId && outcome.status === "succeeded" && state.executions.some((execution) => execution.id === outcome.executionId && execution.target?.id === targetId && ["x.reply", "x.comment", "x.quote", "x.repost", "x.like"].includes(execution.affordance))).length
+    : 0;
+  const seen = watch.observation.observedCount;
+  const attention = [
+    pendingSignalCount ? `${pendingSignalCount} waiting for judgment` : "",
+    opportunityCount ? `${opportunityCount} selected for possible action` : "",
+    !pendingSignalCount && !opportunityCount && judgedCount ? `${judgedCount} reviewed; no action selected` : "",
+    !pendingSignalCount && !judgedCount ? "nothing worth acting on yet" : "",
+  ].filter(Boolean).join(" · ");
+  return `${seen} new post${seen === 1 ? "" : "s"} · ${attention}${interactions ? ` · ${interactions} interaction${interactions === 1 ? "" : "s"}` : ""}`;
+}
+
+function watchPlanSummary(watch: Watch, presence: Presence, policy?: { learning: "off" | "selective"; engagement: "observe_only" | "when_worthwhile" | "maintain_relationship"; rhythm?: "light" | "regular" }) {
+  const inferred = policy ?? watchPolicyFromPurpose(watch.purpose);
+  const plan = watchRelationshipPlan(watch, presence, inferred);
+  return {
+    attention: watchAttentionCadence(presence),
+    revisit: watchRelationshipCadence(inferred),
+    ...plan,
+  };
+}
+
+const REQUEST_TYPE_OPTIONS: Array<{ id: PublicRequestType; label: string }> = [
+  { id: "answer", label: "Answers" },
+  { id: "research", label: "Research" },
+  { id: "recommendation", label: "Recommendations" },
+  { id: "introduction", label: "Introductions" },
+];
+
+function defaultVisibleRequestPolicy(presenceId: string): PresenceRequestPolicy {
+  return { presenceId, access: "nobody", allowedRequestTypes: ["answer", "research", "recommendation"], requireDirectAddress: true, acceptance: "operator_review", impactLimit: "low", updatedAt: new Date().toISOString() };
+}
+
+function requestStatusLabel(request: PublicRequest) {
+  if (request.eligibility !== "eligible") return "Not authorized";
+  if (request.disposition === "needs_operator_review") return "Needs your decision";
+  if (request.disposition === "accepted") return "Accepted";
+  if (request.disposition === "declined") return "Declined";
+  if (request.disposition === "needs_clarification") return "Needs clarification";
+  return "Considering";
+}
+
+function PresenceRequestPolicySettings({ presence, mutate }: { presence: Presence; mutate: Mutate }) {
+  const visiblePolicy = presence.requestPolicy ?? defaultVisibleRequestPolicy(presence.id);
+  const [requestAccess, setRequestAccess] = useState<PresenceRequestAccess>(visiblePolicy.access);
+  const [requestTypes, setRequestTypes] = useState<PublicRequestType[]>(visiblePolicy.allowedRequestTypes);
+  const [requestPolicyBusy, setRequestPolicyBusy] = useState(false);
+
+  useEffect(() => {
+    setRequestAccess(visiblePolicy.access);
+    setRequestTypes(visiblePolicy.allowedRequestTypes);
+  }, [visiblePolicy.access, visiblePolicy.allowedRequestTypes.join(",")]);
+
+  const saveRequestPolicy = async () => {
+    setRequestPolicyBusy(true);
+    try {
+      await mutate({ type: "setPresenceRequestPolicy", presenceId: presence.id, policy: { access: requestAccess, allowedRequestTypes: requestTypes, requireDirectAddress: true, acceptance: "operator_review", impactLimit: "low" } });
+    } finally {
+      setRequestPolicyBusy(false);
+    }
+  };
+
+  return <section className="watch-policy-panel presence-request-policy-panel" id="section-request-access" aria-label="Public request policy">
+    <div><SectionEyebrow>Public requests · Presence-scoped</SectionEyebrow><h2>Who is allowed to ask {presence.name} to do work?</h2><p>Watching someone never grants them authority. Requests are separate, and nobody can ask this Presence by default.</p></div>
+    <div className="watch-policy-options" role="group" aria-label="Who can send public requests">
+      {([ ["nobody", "Nobody", "Ignore public requests until you explicitly change this."], ["allowlist", "People I allow", "Only people with an explicit delegation grant can be considered."], ["anyone", "Anyone", "Directly addressed requests can enter review; acceptance is still separate."] ] as Array<[PresenceRequestAccess, string, string]>).map(([value, label, detail]) => <button type="button" key={value} className={requestAccess === value ? "selected" : ""} aria-pressed={requestAccess === value} onClick={() => setRequestAccess(value)}><strong>{label}</strong><span>{detail}</span></button>)}
+    </div>
+    <div className="watch-policy-row"><div><span className="form-label">Request types</span><div className="watch-policy-checks">{REQUEST_TYPE_OPTIONS.map((item) => <label key={item.id}><input type="checkbox" checked={requestTypes.includes(item.id)} onChange={(event) => setRequestTypes((current) => event.target.checked ? [...new Set([...current, item.id])] : current.filter((value) => value !== item.id))} /> {item.label}</label>)}</div></div><label><span className="form-label">Acceptance</span><select value="operator_review" disabled><option value="operator_review">Review before accepting</option></select></label><Button variant="primary" disabled={requestPolicyBusy || requestTypes.length === 0} onClick={() => void saveRequestPolicy()}>{requestPolicyBusy ? "Saving…" : "Save request policy"}</Button></div>
+    <small className="watch-policy-security"><ShieldCheck size={14} /> Current setting: <strong>{requestAccess === "nobody" ? "Nobody can ask" : requestAccess === "allowlist" ? "Only explicitly allowed people can ask" : "Anyone can submit a request for review"}</strong>. No setting here authorizes unrestricted execution.</small>
+  </section>;
 }
 
 function WatchingView({ state, mutate, refreshState, setView }: { state: OpenPresenceState; mutate: Mutate; refreshState: () => Promise<OpenPresenceState>; setView: (view: View) => void }) {
@@ -5226,6 +5511,9 @@ function WatchingView({ state, mutate, refreshState, setView }: { state: OpenPre
   const [reviewing, setReviewing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [busyWatchId, setBusyWatchId] = useState<string | null>(null);
+  const [editingWatchId, setEditingWatchId] = useState<string | null>(null);
+  const [editingWatchQuery, setEditingWatchQuery] = useState("");
+  const [editingWatchPurpose, setEditingWatchPurpose] = useState("");
   const [busyExplorationId, setBusyExplorationId] = useState<string | null>(null);
   const [objectiveDrafts, setObjectiveDrafts] = useState<Record<string, string>>({});
   const [selectedExplorationSessionId, setSelectedExplorationSessionId] = useState<string | null>(null);
@@ -5256,6 +5544,26 @@ function WatchingView({ state, mutate, refreshState, setView }: { state: OpenPre
       setBusyWatchId(null);
     }
   };
+  const beginEditWatch = (watch: Watch) => {
+    setEditingWatchId(watch.id);
+    setEditingWatchQuery(watch.query);
+    setEditingWatchPurpose(watch.purpose ?? "");
+  };
+  const cancelEditWatch = () => {
+    setEditingWatchId(null);
+    setEditingWatchQuery("");
+    setEditingWatchPurpose("");
+  };
+  const saveWatch = async () => {
+    if (!editingWatchId || editingWatchQuery.trim().length < 2 || busyWatchId) return;
+    setBusyWatchId(editingWatchId);
+    try {
+      const next = await mutate({ type: "updateWatch", id: editingWatchId, query: editingWatchQuery.trim(), purpose: editingWatchPurpose.trim() || undefined });
+      if (next) cancelEditWatch();
+    } finally {
+      setBusyWatchId(null);
+    }
+  };
   const startExploration = async () => {
     if (explorationBrief.trim().length < 8) return;
     setBusy(true);
@@ -5264,6 +5572,7 @@ function WatchingView({ state, mutate, refreshState, setView }: { state: OpenPre
       if (next) { setExplorationBrief(""); setReviewing(false); setTab("explorations"); }
     } finally { setBusy(false); }
   };
+  const presenceSignals = uniqueWatchSignals(state, state.watchSignals.filter((signal) => signal.presenceId === presence.id)).slice(0, 5);
   const selectedExploration = explorations.find((item) => item.id === selectedExplorationId) ?? explorations[0];
   const findings = selectedExploration ? state.explorationFindings.filter((item) => item.explorationId === selectedExploration.id && state.mirrorObjects.some((object) => object.id === item.mirrorObjectId && isCognitionEligibleMirrorObject(object, presence.language))).slice(0, 5) : [];
   const explorationSessions = selectedExploration ? state.explorationSessions.filter((item) => item.explorationId === selectedExploration.id).sort((a, b) => b.startedAt.localeCompare(a.startedAt)) : [];
@@ -5309,8 +5618,36 @@ function WatchingView({ state, mutate, refreshState, setView }: { state: OpenPre
     </div>
     {tab === "watchlist" && <>
       <div className="watchlist-toolbar"><div><SectionEyebrow>Known things</SectionEyebrow><h2>People and sources this Presence intentionally follows.</h2></div><Button variant="secondary" onClick={() => setReviewing((value) => !value)}>Add watch</Button></div>
+      <section className="watch-request-access-note" aria-label="Public request access">
+        <ShieldCheck size={17} aria-hidden="true" />
+        <div><SectionEyebrow>Public requests</SectionEyebrow><p>Request access is managed in Presence Settings. <strong>Nobody can ask by default.</strong></p></div>
+        <button type="button" className="inline-text-link" onClick={() => setView("presence")}>Open Presence Settings →</button>
+      </section>
       {reviewing && <section className="watch-composer" aria-label="Add a watch"><div><SectionEyebrow>New watch</SectionEyebrow><h2>What should {presence.name} notice?</h2><p>Describe a creator, source, or known conversation. This stays a Watchlist item, not a relationship memory.</p></div><label>Keep an eye on<textarea aria-label="What should this Presence watch?" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="@AlexHormozi or a known community" rows={3} /></label><label>Why should {presence.name} watch this? <span className="optional-label">Optional</span><input aria-label="Why should this Presence watch this?" value={purpose} onChange={(event) => setPurpose(event.target.value)} placeholder="Learn from strong offers without imitating the voice" /></label>{query.trim() && <div className="watch-review" aria-label="Watch review"><div><SectionEyebrow>Here&apos;s what {presence.name} will watch</SectionEyebrow><strong>{kindLabel}</strong><p>{preview.clean}</p></div><div><span>Use</span><strong>Notice relevant material</strong></div><div><span>Boundary</span><strong>Watching does not imitate identity or voice</strong></div><div><span>Source</span><strong>{preview.kind === "creator" && presence.channel === "x" ? "Automatic where available" : "Manual material or connected source"}</strong></div></div>}<div className="watch-form-actions"><Button variant="ghost" onClick={() => { setReviewing(false); setQuery(""); setPurpose(""); }}>Cancel</Button><Button variant="primary" disabled={busy || !preview.clean} onClick={() => void startWatching()}>{busy ? "Starting…" : "Start watching"}</Button></div></section>}
-      {watches.length ? <section className="watching-section"><div className="section-heading compact"><div><SectionEyebrow>Watchlist</SectionEyebrow><h2>{watches.length} {watches.length === 1 ? "watch" : "watches"}</h2></div></div><div className="watch-list">{watches.map((watch) => { const observationCopy = watchObservationCopy(watch); const removing = busyWatchId === watch.id; return <article className="watch-card" key={watch.id}><div className="watch-card-main"><div className="watch-card-icon"><Eye size={17} /></div><div><div className="watch-card-heading"><strong>{watch.title}</strong><span className={`watch-status watch-status-${watch.observation.status}`}><span className="status-dot" /> {watch.observation.status === "manual" ? "Manual source" : "Active watch"}</span></div><small>{watch.kind === "creator" ? "Creator" : watch.kind === "opportunity" ? "Opportunity" : "Topic or conversation"} · {channelLabel(watch.channel, state.channelDefinitions)}</small><p>{watch.purpose || watch.query}</p><div className="watch-observation-state"><strong>{observationCopy.label}</strong><span>{observationCopy.detail}</span></div></div></div><Button variant="ghost" aria-label={`Remove ${watch.title}`} onClick={() => void removeWatch(watch.id)} disabled={Boolean(busyWatchId)}>{removing ? "Removing…" : "Remove"}</Button></article>; })}</div></section> : <section className="watching-empty"><div className="watch-empty-mark"><Eye size={23} /></div><SectionEyebrow>Watchlist</SectionEyebrow><h2>No known things yet.</h2><p>Follow a specific person, account, or source here. Use an Exploration when the meaning matters more than who started the conversation.</p><Button variant="primary" onClick={() => setReviewing(true)}><Plus size={14} /> Add watch</Button></section>}
+      {watches.length ? <section className="watching-section"><div className="section-heading compact"><div><SectionEyebrow>Watchlist</SectionEyebrow><h2>{watches.length} {watches.length === 1 ? "watch" : "watches"}</h2></div></div><div className="watch-list">{watches.map((watch) => {
+        const observationCopy = watchObservationCopy(watch);
+        const removing = busyWatchId === watch.id;
+        const editing = editingWatchId === watch.id;
+        const policy = watchRelationshipPolicy(watch, state) ?? watchPolicyFromPurpose(watch.purpose);
+        const plan = watchPlanSummary(watch, presence, policy);
+        const targetLabel = watch.target?.handle ? `@${watch.target.handle.replace(/^@/, "")}` : watch.title;
+        return <article className="watch-card" key={watch.id}>
+          <div className="watch-card-main">
+            <div className="watch-card-icon"><Eye size={17} /></div>
+            <div>
+              <div className="watch-card-heading"><strong>{targetLabel}</strong><span className={`watch-status watch-status-${watch.observation.status}`}><span className="status-dot" /> {watch.state === "paused" ? "Paused" : watch.observation.status === "manual" ? "Manual source" : "Watching"}</span></div>
+              <small>{watch.kind === "creator" ? "Person / creator" : watch.kind === "opportunity" ? "Opportunity" : "Topic or conversation"} · {channelLabel(watch.channel, state.channelDefinitions)}{watch.target?.identityStatus === "verified" ? " · canonical Person linked" : " · awaiting identity link"}</small>
+              <div className="watch-card-intent"><SectionEyebrow>Relationship goal</SectionEyebrow><p>{plan.goal}</p></div>
+              <div className="watch-card-plan"><SectionEyebrow>{presence.name}&apos;s approach</SectionEyebrow><div className="watch-plan-guidance"><div><strong>Look for</strong><p>{plan.lookFor}</p></div><div><strong>When engaging</strong><p>{plan.whenEngaging}</p></div></div><div className="watch-card-plan-facts"><span><strong>Keep up with</strong>{plan.attention}</span><span><strong>Relationship</strong>{plan.revisit}</span><span><strong>Learning</strong>{plan.learning}</span><span><strong>Action</strong>{plan.action}</span></div></div>
+              <details className="watch-operator-instruction"><summary>Why?</summary><div className="watch-operator-instruction-body"><span>Operator instruction</span><p>{watch.purpose || watch.query}</p><span>Genny&apos;s interpretation</span><p>{plan.goal}</p></div></details>
+              <div className="watch-observation-state"><strong>{observationCopy.label}</strong><span>{watch.observation.observedCount > 0 ? watchOutcomeSummary(state, watch, presence.name) : observationCopy.detail}</span></div>
+              {editing && <div className="watch-edit-form" aria-label={`Edit ${watch.title}`}><label>What should this Watch follow?<textarea aria-label={`Edit what ${watch.title} follows`} value={editingWatchQuery} onChange={(event) => setEditingWatchQuery(event.target.value)} rows={2} /></label><label>What should {presence.name} do with what it notices? <span className="optional-label">Optional</span><textarea aria-label={`Edit instructions for ${watch.title}`} value={editingWatchPurpose} onChange={(event) => setEditingWatchPurpose(event.target.value)} rows={3} /></label><div className="watch-form-actions"><Button variant="ghost" onClick={cancelEditWatch}>Cancel</Button><Button variant="primary" disabled={busyWatchId === watch.id || editingWatchQuery.trim().length < 2} onClick={() => void saveWatch()}>{busyWatchId === watch.id ? "Saving…" : "Save changes"}</Button></div></div>}
+            </div>
+          </div>
+          <div className="watch-card-actions"><Button variant="ghost" onClick={() => setView("people")} disabled={!watch.target?.personId}>View person</Button><Button variant="secondary" aria-label={`Edit ${watch.title}`} onClick={() => beginEditWatch(watch)} disabled={Boolean(busyWatchId)}><Pencil size={14} /> {editing ? "Editing" : "Edit"}</Button><Button variant="ghost" aria-label={`Remove ${watch.title}`} onClick={() => void removeWatch(watch.id)} disabled={Boolean(busyWatchId)}>{removing ? "Removing…" : "Remove"}</Button></div>
+        </article>;
+      })}</div></section> : <section className="watching-empty"><div className="watch-empty-mark"><Eye size={23} /></div><SectionEyebrow>Watchlist</SectionEyebrow><h2>No known things yet.</h2><p>Follow a specific person, account, or source here. Use an Exploration when the meaning matters more than who started the conversation.</p><Button variant="primary" onClick={() => setReviewing(true)}><Plus size={14} /> Add watch</Button></section>}
+      {presenceSignals.length > 0 && <section className="watch-evidence-section"><SectionEyebrow>Recent watch signals</SectionEyebrow><h2>What the Watchlist noticed</h2>{presenceSignals.map((signal) => { const object = state.mirrorObjects.find((item) => item.id === signal.mirrorObjectId); return <article key={signal.id}><div><strong>{object?.author?.handle ? `@${object.author.handle}` : object?.author?.displayName ?? "Watched person"}</strong><small>{signal.signalType.replaceAll("_", " ")} · {signal.disposition}</small></div><p>{object?.content?.text ?? "A signal was recorded, but its source is no longer available."}</p></article>; })}</section>}
     </>}
     {tab === "explorations" && <>
       {reviewing && <section className="exploration-composer" aria-label="Create an Exploration"><div><SectionEyebrow>New Exploration</SectionEyebrow><h2>What should {presence.name} keep an eye on?</h2><p>Describe the conversations, problems, people, or developments that would be useful for {presence.name} to notice.</p></div><textarea aria-label="What should this Presence keep an eye on?" value={explorationBrief} onChange={(event) => setExplorationBrief(event.target.value)} placeholder="People struggling with agent infrastructure or asking how to deploy persistent agents." rows={4} />{explorationBrief.trim() && <div className="watch-review" aria-label="Exploration review"><div><SectionEyebrow>Genny understands this as</SectionEyebrow><p>{explorationInterpretation(explorationBrief)}</p></div><div><span>Use</span><strong>Discover social evidence</strong></div><div><span>Boundary</span><strong>Looking does not authorize speaking</strong></div><div><span>Scope</span><strong>{presence.name} · {channelLabel(presence.channel, state.channelDefinitions)}</strong></div></div>}<div className="watch-form-actions"><Button variant="ghost" onClick={() => { setReviewing(false); setExplorationBrief(""); }}>Cancel</Button><Button variant="primary" disabled={busy || explorationBrief.trim().length < 8} onClick={() => void startExploration()}>{busy ? "Starting…" : "Start exploring"}</Button></div></section>}
@@ -5691,7 +6028,7 @@ function UsageView({ state, setView, mutate }: { state: OpenPresenceState; setVi
         <article className="usage-metric-card"><span>Attention footprint</span><strong>{agents.length} <small>Agents</small></strong><p>{agents.reduce((count, agent) => count + agent.presences.length, 0)} Presences with ledger scope</p><em>{usageDate(agents[0]?.lastActivityAt)} most recent</em></article>
       </section>
       <section className="usage-panel usage-trend-panel" aria-labelledby="usage-trend-title"><div className="usage-panel-heading"><div><SectionEyebrow>Usage over time</SectionEyebrow><h2 id="usage-trend-title">How usage changes</h2><p>Compare model tokens and X requests across the selected period.</p><span className="usage-period-label">{usagePeriodLabel(daily)}</span></div><div className="usage-series-toggle" role="group" aria-label="Usage chart series"><button type="button" className={series === "tokens" ? "active" : ""} onClick={() => setSeries("tokens")}>Model tokens</button><button type="button" className={series === "x" ? "active" : ""} onClick={() => setSeries("x")}>X requests</button></div></div>{daily.length ? <div className="usage-chart" role="img" aria-label={`${series === "tokens" ? "Model tokens" : "X requests"} by day for ${usagePeriodLabel(daily)}`}>{daily.map((item) => { const value = series === "tokens" ? item.totalTokens : item.xRequests; return <div className="usage-bar-column" key={item.date} title={`${usageDayLabel(item.date)}: ${value.toLocaleString()} ${series === "tokens" ? "tokens" : "requests"}`}><div className={`usage-bar usage-bar-${series}${value === 0 ? " usage-bar-empty" : ""}`} style={{ height: `${value === 0 ? 0 : Math.max(3, value / maxSeries * 100)}%` }} /><small>{usageDayLabel(item.date)}</small></div>; })}</div> : <div className="usage-empty-inline">No recorded usage in this period. The first real provider call will create the first ledger entry.</div>}</section>
-      <section className="usage-panel" aria-labelledby="usage-agents-title"><div className="usage-panel-heading"><div><SectionEyebrow>Grouped by Agent</SectionEyebrow><h2 id="usage-agents-title">Which Agent is consuming attention?</h2><p>The Agent owns model usage. Expand one to see which Presence and attention source supplied the context.</p></div><span className="usage-scope-chip">{agentId === "all" ? "See all Agents" : "One Agent"}</span></div>{agents.length ? <div className="usage-agent-ledger">{agents.map((agent) => { const active = expanded === agent.id; const share = Math.max(3, (series === "tokens" ? agent.summary.totalTokens : agent.summary.xRequests) / maxAgentSpend * 100); return <article className={`usage-agent-row ${active ? "is-expanded" : ""}`} key={agent.id}><button type="button" className="usage-agent-summary" onClick={() => setExpanded(active ? null : agent.id)} aria-expanded={active}><span className="usage-agent-identity"><PresenceGlyph accent={agent.accent} /><span><strong>{agent.name}</strong><small>Agent · {usageDate(agent.lastActivityAt)}</small></span></span><span className="usage-share"><i style={{ width: `${share}%` }} /><small>{usageNumber(series === "tokens" ? agent.summary.totalTokens : agent.summary.xRequests)} {series === "tokens" ? "tokens" : "X requests"}</small></span><span className="usage-agent-stat"><strong>{usageNumber(agent.summary.xReads)}</strong><small>X reads</small></span><span className="usage-agent-stat"><strong>{usageNumber(agent.summary.reasoningTokens)}</strong><small>reasoning</small></span><ChevronDown size={16} className={active ? "usage-chevron open" : "usage-chevron"} /></button>{active && <div className="usage-agent-detail"><div className="usage-detail-facts"><div><span>Model calls</span><strong>{usageNumber(agent.summary.modelCalls)}</strong></div><div><span>Total tokens</span><strong>{usageNumber(agent.summary.totalTokens)}</strong></div><div><span>X reads / writes</span><strong>{usageNumber(agent.summary.xReads)} / {usageNumber(agent.summary.xWrites)}</strong></div><div><span>Coverage</span><strong>{agent.summary.reportedTokenEvents ? "Provider-reported" : "Request-only"}</strong></div></div><div className="usage-presence-list">{agent.presences.map((presence) => <div className="usage-presence-row" key={presence.id}><span><b style={{ background: presence.accent }} /> <strong>Presence · {presence.name}</strong><small>{presence.handle} · {channelLabel(presence.channel)}</small></span><span>{usageNumber(presence.summary.xReads)} reads · {usageNumber(presence.summary.xWrites)} writes</span><span>{usageNumber(presence.summary.reasoningTokens)} reasoning</span></div>)}</div><div className="usage-origin-list"><span className="usage-origin-heading">Attention sources</span>{agent.origins.slice(0, 5).map((origin) => <div key={origin.name}><strong>{usageOriginLabel(origin.name)}</strong><span>{usageNumber(origin.totalTokens)} tokens · {usageNumber(origin.xRequests)} X requests</span></div>)}</div></div>}</article>; })}</div> : <div className="usage-empty"><BarChart3 size={22} /><h3>No usage has been recorded yet</h3><p>This page does not invent sample spend. It will fill as Agents observe, reason, inspect media, and act through connected providers.</p></div>}</section>
+      <section className="usage-panel" aria-labelledby="usage-agents-title"><div className="usage-panel-heading"><div><SectionEyebrow>Grouped by Agent</SectionEyebrow><h2 id="usage-agents-title">Which Agent is consuming attention?</h2><p>The Agent owns model usage. Expand one to see which Presence and attention source supplied the context.</p></div><span className="usage-scope-chip">{agentId === "all" ? "See all Agents" : "One Agent"}</span></div>{agents.length ? <div className="usage-agent-ledger">{agents.map((agent) => { const active = expanded === agent.id; const share = Math.max(3, (series === "tokens" ? agent.summary.totalTokens : agent.summary.xRequests) / maxAgentSpend * 100); return <article className={`usage-agent-row ${active ? "is-expanded" : ""}`} key={agent.id}><button type="button" className="usage-agent-summary" onClick={() => setExpanded(active ? null : agent.id)} aria-expanded={active}><span className="usage-agent-identity"><PresenceGlyph accent={agent.accent} name={agent.name} /><span><strong>{agent.name}</strong><small>Agent · {usageDate(agent.lastActivityAt)}</small></span></span><span className="usage-share"><i style={{ width: `${share}%` }} /><small>{usageNumber(series === "tokens" ? agent.summary.totalTokens : agent.summary.xRequests)} {series === "tokens" ? "tokens" : "X requests"}</small></span><span className="usage-agent-stat"><strong>{usageNumber(agent.summary.xReads)}</strong><small>X reads</small></span><span className="usage-agent-stat"><strong>{usageNumber(agent.summary.reasoningTokens)}</strong><small>reasoning</small></span><ChevronDown size={16} className={active ? "usage-chevron open" : "usage-chevron"} /></button>{active && <div className="usage-agent-detail"><div className="usage-detail-facts"><div><span>Model calls</span><strong>{usageNumber(agent.summary.modelCalls)}</strong></div><div><span>Total tokens</span><strong>{usageNumber(agent.summary.totalTokens)}</strong></div><div><span>X reads / writes</span><strong>{usageNumber(agent.summary.xReads)} / {usageNumber(agent.summary.xWrites)}</strong></div><div><span>Coverage</span><strong>{agent.summary.reportedTokenEvents ? "Provider-reported" : "Request-only"}</strong></div></div><div className="usage-presence-list">{agent.presences.map((presence) => <div className="usage-presence-row" key={presence.id}><span><b style={{ background: presence.accent }} /> <strong>Presence · {presence.name}</strong><small>{presence.handle} · {channelLabel(presence.channel)}</small></span><span>{usageNumber(presence.summary.xReads)} reads · {usageNumber(presence.summary.xWrites)} writes</span><span>{usageNumber(presence.summary.reasoningTokens)} reasoning</span></div>)}</div><div className="usage-origin-list"><span className="usage-origin-heading">Attention sources</span>{agent.origins.slice(0, 5).map((origin) => <div key={origin.name}><strong>{usageOriginLabel(origin.name)}</strong><span>{usageNumber(origin.totalTokens)} tokens · {usageNumber(origin.xRequests)} X requests</span></div>)}</div></div>}</article>; })}</div> : <div className="usage-empty"><BarChart3 size={22} /><h3>No usage has been recorded yet</h3><p>This page does not invent sample spend. It will fill as Agents observe, reason, inspect media, and act through connected providers.</p></div>}</section>
       <section className="usage-panel usage-notes-panel" aria-labelledby="usage-notes-title"><div className="usage-panel-heading"><div><SectionEyebrow>Operator read</SectionEyebrow><h2 id="usage-notes-title">What you can change</h2></div></div><div className="usage-note-grid"><div><strong>Self-directed reads are an envelope, not a verdict.</strong><p>Adjust Presence attention intensity and daily ceilings when exploration is consuming more X activity than its evidence justifies.</p><Button variant="ghost" onClick={() => setView("presence")}>Open Presence attention</Button></div><div><strong>Reasoning cost follows context.</strong><p>Compare Agents and origins before changing models. Large input totals often mean the Agent is carrying a wide social or Knowledge context into each judgment.</p><Button variant="ghost" onClick={() => setView("brain")}>Open Agent model</Button></div><div><strong>Infrastructure can defer a run.</strong><p>Provider quota, rate limits, and missing usage metadata remain external facts. A deferred or request-only record is not the Agent deciding that nothing mattered.</p></div></div><details className="usage-disclosure"><summary>Data coverage and limits</summary><p>{payload.coverage.x.detail} {payload.coverage.model.detail}</p></details></section>
     </>}
     {!loading && !payload && !usageError && <div className="usage-empty usage-page-error"><BarChart3 size={22} /><h3>Usage could not be read</h3><p>The ledger endpoint did not return a usable snapshot. Try refreshing the page.</p></div>}
@@ -6325,7 +6662,7 @@ function TeachView({
                 <div key={item.id} className={`chat-message ${item.role}`}>
                   <div className="message-avatar">
                     {item.role === "agent" ? (
-                      <PresenceGlyph accent={agent.accent} />
+                      <PresenceGlyph accent={agent.accent} name={agent.name} />
                     ) : (
                       initials("You")
                     )}
@@ -6494,7 +6831,7 @@ function OldChatView({
             {messages.length === 0 ? (
               <div className="chat-blank">
                 <div className="blank-glyph">
-                  <PresenceGlyph accent={agent.accent} />
+                  <PresenceGlyph accent={agent.accent} name={agent.name} />
                 </div>
                 <h2>A mind becomes useful through conversation.</h2>
                 <p>
@@ -6526,7 +6863,7 @@ function OldChatView({
                 <div key={item.id} className={`chat-message ${item.role}`}>
                   <div className="message-avatar">
                     {item.role === "agent" ? (
-                      <PresenceGlyph accent={agent.accent} />
+                      <PresenceGlyph accent={agent.accent} name={agent.name} />
                     ) : (
                       initials("You")
                     )}
@@ -6735,7 +7072,6 @@ function OperatorChatView({ state, mutate, refreshState }: { state: OpenPresence
   }
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState<SandboxAssetInput[]>([]);
-  const [contextOpen, setContextOpen] = useState(true);
   const [sending, setSending] = useState(false);
   const [conversationCopied, setConversationCopied] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
@@ -6830,11 +7166,8 @@ function OperatorChatView({ state, mutate, refreshState }: { state: OpenPresence
     }
   };
   return <div className="page page-chat operator-chat-page">
-    <button type="button" className="context-toggle" aria-label={contextOpen ? "Hide context sidebar" : "Show context sidebar"} aria-expanded={contextOpen} title={contextOpen ? "Hide context sidebar" : "Show context sidebar"} aria-controls="operator-chat-context-sidebar" onClick={() => setContextOpen((open) => !open)}>
-      {contextOpen ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}
-    </button>
     <PageHeader className="chat-heading" eyebrow="Private operator conversation" title={`Chat with ${presence.name}`} titleAdornment={<button type="button" className="operator-chat-copy-button" aria-label={conversationCopied ? "Conversation copied" : "Copy conversation"} title={conversationCopied ? "Conversation copied" : "Copy conversation"} onClick={() => void copyConversation()}>{conversationCopied ? <Check size={16} /> : <Copy size={16} />}<span className="sr-only">{conversationCopied ? "Conversation copied" : "Copy conversation"}</span></button>} description="Share context, a link, or a thought. This is a nudge—not an obligation or a silent change to identity." />
-    <div className={`chat-layout ${contextOpen ? "context-open" : "context-collapsed"}`}>
+    <div className="chat-layout operator-chat-layout">
       <section className="chat-thread operator-chat-thread">
         {presence.status === "paused" && <div className="operator-chat-paused" role="status"><Pause size={15} /> {presence.name} is paused. Messages will be delivered and held without waking or invoking her.</div>}
         <div className="chat-history operator-chat-history" aria-live="polite">
@@ -6861,12 +7194,6 @@ function OperatorChatView({ state, mutate, refreshState }: { state: OpenPresence
         </form>
         <div className="composer-hint">Enter to send <span>·</span> Shift + Enter for a new line{presence.status === "paused" ? <><span>·</span> Queued until Wake</> : null}</div>
       </section>
-      {contextOpen && <aside id="operator-chat-context-sidebar" className="chat-context-sidebar operator-chat-aside" aria-label="Chat context sidebar">
-        <div className="context-sidebar-header"><div><SectionEyebrow>Conversation workspace</SectionEyebrow><h2>Private context</h2></div><span className="context-live-dot" aria-hidden="true" /></div>
-        <section className="context-section"><SectionEyebrow>Scope</SectionEyebrow><div className="context-scope"><strong>{presence.name}</strong><small>{channelLabel(presence.channel, state.channelDefinitions)} · {presence.handle}</small></div></section>
-        <section className="context-section"><SectionEyebrow>How this works</SectionEyebrow><p className="operator-chat-context-copy">Messages can guide the next attention pass. They do not silently rewrite Mission, Taste, or identity, and only “Create Assignment” makes a required deliverable.</p></section>
-        <div className="presence-chat-boundary"><span className="status-dot" /><span>Private thread · not published</span></div>
-      </aside>}
     </div>
   </div>;
 }
@@ -7040,7 +7367,7 @@ function PresenceChatView({
                 const target = item.replyToMessageId ? messages.find((message) => message.id === item.replyToMessageId) : undefined;
                 return <article key={item.id} className={`social-card presence-chat-card ${item.role === "presence" ? `agent-authored thread-reply-card${item.operatorFeedback ? " operator-feedback-card" : ""}` : ""}`}>
                   <div className="social-card-meta">
-                    {item.role === "presence" ? <PresenceGlyph accent={presence.accent} /> : <span className="actor-avatar">{initials("You")}</span>}
+                    {item.role === "presence" ? <PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} /> : <span className="actor-avatar">{initials("You")}</span>}
                     <span>
                       <strong>{item.role === "presence" ? presence.name : "You"}</strong>
                       <small>{item.role === "presence" ? item.operatorFeedback ? "Operator feedback" : "Genny · Reply" : item.replyToMessageId ? "@you · Reply as you" : "@you · Post"}</small>
@@ -7403,7 +7730,7 @@ function ChatThinkingMessage({ name, accent, feed = false }: { name: string; acc
   if (!feed) {
     return (
       <div className="chat-message agent chat-thinking-message" role="status" aria-live="polite">
-        <div className="message-avatar"><PresenceGlyph accent={accent} /></div>
+        <div className="message-avatar"><PresenceGlyph accent={accent} name={name} /></div>
         <div>
           <div className="message-meta">{name}<span>Now</span></div>
           <div className="thinking-copy">
@@ -7417,7 +7744,7 @@ function ChatThinkingMessage({ name, accent, feed = false }: { name: string; acc
   return (
     <article className="social-card presence-chat-card chat-thinking-message" role="status" aria-live="polite">
       <div className="social-card-meta">
-        <PresenceGlyph accent={accent} />
+        <PresenceGlyph accent={accent} name={name} />
         <span><strong>{name}</strong><small>Replying</small></span>
         <time>Now</time>
       </div>
@@ -7962,6 +8289,8 @@ function LiveView({
 }) {
   const selected = state.presence;
   const presenceName = selected?.name ?? "this Presence";
+  const publicRequests = selected ? (state.publicRequests ?? []).filter((request) => request.presenceId === selected.id).sort((left, right) => right.createdAt.localeCompare(left.createdAt)) : [];
+  const pendingPublicRequestCount = publicRequests.filter((request) => request.disposition === "needs_operator_review").length;
   const paused = selected?.status === "paused";
   const waking = pendingOperation === "wakePresence";
   const runtimeUnavailable = runtimeError === true;
@@ -8395,7 +8724,7 @@ function LiveView({
     ? (recentFailure.status === "expired" && expiredDeliveryIsRecoverable ? undefined : recentFailure)
     : undefined;
   const latestFailure = currentFailedExecution ? deliveryFailureExplanation(currentFailedExecution.failure, selected?.handle) : undefined;
-  const [activeSubtab, setActiveSubtab] = useState<"activity" | "queue" | "assignments" | "failures" | "system_log">(healthFocusKey ? "failures" : "activity");
+  const [activeSubtab, setActiveSubtab] = useState<"activity" | "queue" | "assignments" | "requests" | "failures" | "system_log">(healthFocusKey ? "failures" : "activity");
   const scopedAssignments = state.assignments.filter(
     (item) =>
       (!selected?.id || item.presenceId === selected.id) &&
@@ -9462,6 +9791,7 @@ function LiveView({
         <summary>More activity <span>Review, health, and technical detail</span></summary>
         <div className="activity-advanced-menu-actions">
           {activity.needsAttention.count > 0 && <button type="button" onClick={() => { setShowActivityDetails(true); setActiveSubtab("queue"); }}>Review pending <span>{activity.needsAttention.count}</span></button>}
+          <button type="button" onClick={() => { setShowActivityDetails(true); setActiveSubtab("requests"); }}><ShieldCheck size={13} /> Public requests <span>{pendingPublicRequestCount || publicRequests.length}</span></button>
           <button type="button" onClick={() => setView("schedule")}><Clock3 size={13} /> Schedule</button>
           <button type="button" onClick={() => { setShowActivityDetails(true); setActiveSubtab("failures"); }}><Activity size={13} /> Health details</button>
         </div>
@@ -9769,6 +10099,15 @@ function LiveView({
             mutate={mutate}
             fullWidth={true}
           />
+        </div>
+      )}
+
+      {activeSubtab === "requests" && (
+        <div className="activity-tab-content requests-tab-layout">
+          <section className="watch-evidence-section watch-request-inbox activity-request-inbox" aria-label="Public request inbox">
+            <div className="section-heading compact"><div><SectionEyebrow>Public request inbox</SectionEyebrow><h2>Requests received by {presenceName}</h2><p className="muted">Review actual requests here. Watchlist attention and request authority remain separate.</p></div><ShieldCheck size={17} /></div>
+            {publicRequests.length ? publicRequests.map((request) => <article key={request.id}><div><strong>@{request.requesterExternalActorId ?? "unknown"}</strong><small>{requestStatusLabel(request)} · {request.requestType}</small></div><p>{request.text}</p>{request.eligibility === "eligible" && request.disposition === "needs_operator_review" && <div className="watch-form-actions"><Button variant="primary" onClick={() => void mutate({ type: "decidePublicRequest", id: request.id, disposition: "accepted" })}>Accept as Assignment</Button><Button variant="ghost" onClick={() => void mutate({ type: "decidePublicRequest", id: request.id, disposition: "declined" })}>Decline</Button></div>}</article>) : <EmptyState title="No public requests yet" body="Requests will appear here when the connected channel supplies a direct request. Nobody can ask this Presence by default." />}
+          </section>
         </div>
       )}
 
@@ -12480,6 +12819,8 @@ function FeedHistory({ history, state, presenceName, onSelect }: { history: Publ
 
 function FeedItem({ item, state, presenceName, onSelect }: { item: PublicHistoryItem; state: OpenPresenceState; presenceName: string; onSelect: (item: PublicHistoryItem) => void }) {
   const presence = state.presences.find((candidate) => candidate.id === item.presenceId);
+  const authorName = presence?.name ?? presenceName;
+  const authorAccent = presence?.accent ?? "#D68754";
   const kindLabel = item.kind === "post" ? "Original" : item.kind[0].toUpperCase() + item.kind.slice(1);
   const assets = (item.assetIds ?? []).map((id) => state.assets.find((asset) => asset.id === id)).filter((asset): asset is OpenPresenceState["assets"][number] => Boolean(asset));
   const displayAt = historyDisplayAt(item);
@@ -12498,7 +12839,7 @@ function FeedItem({ item, state, presenceName, onSelect }: { item: PublicHistory
     const repostedPostAuthor = repostedPost?.author?.displayName ?? repostedPost?.author?.handle;
     return <article className={`feed-item-shell mirror-post ${isDeleted ? "feed-item-shell-deleted" : ""}`}>
       <button type="button" className={`feed-item feed-item-${item.kind}`} onClick={() => onSelect(item)}>
-        <span className="feed-item-header mirror-post-header"><ChannelAvatar className="feed-avatar mirror-avatar" avatarUrl={item.authorAvatarUrl} name={presence?.name ?? presenceName} /><span className="feed-item-identity mirror-post-author"><strong>{presence?.name ?? presenceName}</strong><small>{presence?.handle ?? ""} · {kindLabel}</small></span>{isDeleted && <span className="feed-item-availability feed-item-availability-deleted"><Trash2 size={11} /> Deleted on X</span>}<time dateTime={displayAt} title={historyTimeTitle(item)}>{formatRecentPostTimestamp(displayAt)}</time></span>
+        <span className="feed-item-header mirror-post-header"><PresenceGlyph className="presence-feed-avatar" accent={authorAccent} name={authorName} look={presence ? presenceAvatarLook(presence) : "core"} /><span className="feed-item-identity mirror-post-author"><strong>{authorName}</strong><small>{presence?.handle ?? ""} · {kindLabel}</small></span>{isDeleted && <span className="feed-item-availability feed-item-availability-deleted"><Trash2 size={11} /> Deleted on X</span>}<time dateTime={displayAt} title={historyTimeTitle(item)}>{formatRecentPostTimestamp(displayAt)}</time></span>
         {item.kind === "reply" || item.kind === "comment" ? <span className="feed-item-context">Replying in a public conversation</span> : null}
         {originLabel ? <span className="feed-item-context">{originLabel}</span> : null}
         {item.kind === "like" ? (
@@ -12541,8 +12882,9 @@ function HistoryCard({ item, state, onSelect, compact = false }: { item: PublicH
   const displayAt = historyDisplayAt(item);
   const channelTag = publicHistoryChannelTag(item, state.channelDefinitions);
   const isDeleted = item.availability === "deleted";
+  const presence = state.presences.find((candidate) => candidate.id === item.presenceId);
   return <button type="button" className={`history-card history-card-${item.kind} ${compact ? "compact" : ""}`} onClick={() => onSelect(item)}>
-    <span className="history-card-kicker"><span className="history-card-author"><ChannelAvatar className="history-card-avatar" avatarUrl={item.authorAvatarUrl} name={state.presences.find((presence) => presence.id === item.presenceId)?.name ?? "Presence"} /><strong>{label}</strong>{isDeleted && <span className="history-card-availability"><Trash2 size={10} /> Deleted</span>}</span><time dateTime={displayAt} title={historyTimeTitle(item)}>{formatRecentPostTimestamp(displayAt)}</time></span>
+    <span className="history-card-kicker"><span className="history-card-author"><PresenceGlyph className="presence-history-avatar" accent={presence?.accent ?? "#D68754"} name={presence?.name ?? "Presence"} look={presence ? presenceAvatarLook(presence) : "core"} /><strong>{label}</strong>{isDeleted && <span className="history-card-availability"><Trash2 size={10} /> Deleted</span>}</span><time dateTime={displayAt} title={historyTimeTitle(item)}>{formatRecentPostTimestamp(displayAt)}</time></span>
     {item.text ? <span className="history-card-text">{item.text}</span> : <span className="history-card-text quiet">{item.kind === "repost" ? "Passed along publicly" : item.kind === "like" ? "Liked publicly" : "Public expression"}</span>}
     <span className="history-card-footer"><span className="history-card-proof">{isDeleted ? "Deleted on X · retained in Social Mirror" : item.environment === "sandbox" ? "Verified in Sandbox Mirror · simulated only" : item.externalUrl ? "Verified on X" : "Verified in Social Mirror"}</span><span className="history-card-channel-badge" aria-label={`Channel: ${channelTag}`}><Badge size={11} aria-hidden="true" />{channelTag}</span></span>
   </button>;
@@ -12643,7 +12985,7 @@ function PublicHistoryInspector({ item, state, mutate, index, total, onNavigate,
       setPostIdCopied(false);
     }
   };
-  return <aside className="history-inspector" aria-label={`${kindLabel} details`}><div className="history-inspector-header"><div><SectionEyebrow>{kindLabel} details</SectionEyebrow><h2>{kindLabel}</h2><small title={historyTimeTitle(item)}>{formatHistoryTimestamp(displayAt)}{item.environment === "sandbox" ? " · Sandbox observed" : ""}</small></div><button type="button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button></div>{isDeleted && <div className="history-availability history-availability-deleted"><Trash2 size={14} /><span><strong>Deleted on X</strong><small>The original is retained here as verified history, but X no longer serves it.</small></span></div>}<div className="history-inspector-navigation" aria-label="Browse public posts"><span aria-live="polite"><strong>Post {position}</strong> of {total}</span><div><button type="button" aria-label="Previous post" disabled={index <= 0} onClick={() => onNavigate(-1)}><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /></button><button type="button" aria-label="Next post" disabled={index < 0 || index >= total - 1} onClick={() => onNavigate(1)}><ChevronRight size={14} /></button></div></div><div className="history-inspector-identity"><PresenceGlyph accent={presence?.accent ?? "#D68754"} /><span><strong>{presence?.name ?? "Presence"}</strong><small>{presence?.handle ?? ""}</small></span></div>{parent?.content?.text && <div className="history-parent-context"><SectionEyebrow>Context</SectionEyebrow><p>{parent.content.text}</p><small>{parent.author?.displayName ?? "Public conversation"}</small></div>}<p className="history-inspector-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : item.kind === "like" ? "Liked publicly." : "No text was returned by the channel.")}</p>{mirrorObject?.assetRefs?.length ? <MediaPerceptionDisclosure object={mirrorObject} state={state} mutate={mutate} presenceName={presence?.name ?? "this Presence"} /> : null}{itemAssets.length > 0 && <section className="history-provenance"><SectionEyebrow>Attached sources</SectionEyebrow>{itemAssets.map((asset) => <div key={asset.id}><a className="history-external-link" href={asset.provenance.sourcePageUrl ?? asset.provenance.sourceUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {asset.provenance.publisher ?? asset.description ?? "Open source"}</a><small>Origin: {asset.provenance.origin}. Source identity: {asset.provenance.sourceIdentityStatus ?? "unknown"}. Rights: {asset.rights?.status ?? "unknown"}.</small></div>)}</section>}<div className="history-proof">{isDeleted ? <Trash2 size={14} /> : <Check size={14} />}<span>{isDeleted ? "Deleted on X · retained in Social Mirror" : `Observed in Social Mirror · ${item.externalRef.type}`}</span><button type="button" className="history-copy-id" aria-label="Copy internal post ID" title="Copy internal post ID" onClick={() => void copyPostId()}><Copy size={12} /> {postIdCopied ? "Copied" : "Copy ID"}</button></div><section className="history-provenance"><SectionEyebrow>Provenance</SectionEyebrow><p>{originLabel}</p><p>{item.executionId ? "Published by OpenPresence and verified in the Social Mirror." : "Observed on the connected channel and attributed to this Presence."}</p>{item.origin?.planWindowId && <small>Plan window: {item.origin.planWindowId}</small>}{assignment && <p>Assignment output · {assignmentProgressLabel(assignment)}</p>}{mirrorObject?.environment === "sandbox" && <small>Simulated social reality · this expression has no live destination. Sandbox world time: {formatTime(item.occurredAt)}.</small>}</section><section className="history-outcome"><SectionEyebrow>Outcome</SectionEyebrow>{metrics.length ? <div className="history-outcome-grid">{metrics.map(([key, value]) => <div key={key}><strong>{value}</strong><small>{key.replaceAll("_", " ")}</small></div>)}</div> : <p>No channel outcome evidence is attached to this expression yet.</p>}</section><div className="history-inspector-actions">{item.externalUrl ? <a className="history-external-link" href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {isDeleted ? "Open original URL · deleted on X" : item.kind === "reply" || item.kind === "comment" ? "Open reply on X" : item.kind === "like" ? "Open liked post on X" : item.kind === "repost" ? "Open reposted post on X" : "Open original on X"}</a> : item.environment === "sandbox" && item.channel === "x" ? <p className="history-sandbox-note">Sandbox rehearsal only. This expression has no live destination.</p> : item.channel === "x" ? <p className="history-sandbox-note">X URL unavailable from the connected account.</p> : null}<Button variant="secondary" onClick={onActivity}><Activity size={14} /> View in Activity</Button></div></aside>;
+  return <aside className="history-inspector" aria-label={`${kindLabel} details`}><div className="history-inspector-header"><div><SectionEyebrow>{kindLabel} details</SectionEyebrow><h2>{kindLabel}</h2><small title={historyTimeTitle(item)}>{formatHistoryTimestamp(displayAt)}{item.environment === "sandbox" ? " · Sandbox observed" : ""}</small></div><button type="button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button></div>{isDeleted && <div className="history-availability history-availability-deleted"><Trash2 size={14} /><span><strong>Deleted on X</strong><small>The original is retained here as verified history, but X no longer serves it.</small></span></div>}<div className="history-inspector-navigation" aria-label="Browse public posts"><span aria-live="polite"><strong>Post {position}</strong> of {total}</span><div><button type="button" aria-label="Previous post" disabled={index <= 0} onClick={() => onNavigate(-1)}><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /></button><button type="button" aria-label="Next post" disabled={index < 0 || index >= total - 1} onClick={() => onNavigate(1)}><ChevronRight size={14} /></button></div></div><div className="history-inspector-identity"><PresenceGlyph accent={presence?.accent ?? "#D68754"} name={presence?.name ?? "Presence"} look={presence ? presenceAvatarLook(presence) : "core"} /><span><strong>{presence?.name ?? "Presence"}</strong><small>{presence?.handle ?? ""}</small></span></div>{parent?.content?.text && <div className="history-parent-context"><SectionEyebrow>Context</SectionEyebrow><p>{parent.content.text}</p><small>{parent.author?.displayName ?? "Public conversation"}</small></div>}<p className="history-inspector-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : item.kind === "like" ? "Liked publicly." : "No text was returned by the channel.")}</p>{mirrorObject?.assetRefs?.length ? <MediaPerceptionDisclosure object={mirrorObject} state={state} mutate={mutate} presenceName={presence?.name ?? "this Presence"} /> : null}{itemAssets.length > 0 && <section className="history-provenance"><SectionEyebrow>Attached sources</SectionEyebrow>{itemAssets.map((asset) => <div key={asset.id}><a className="history-external-link" href={asset.provenance.sourcePageUrl ?? asset.provenance.sourceUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {asset.provenance.publisher ?? asset.description ?? "Open source"}</a><small>Origin: {asset.provenance.origin}. Source identity: {asset.provenance.sourceIdentityStatus ?? "unknown"}. Rights: {asset.rights?.status ?? "unknown"}.</small></div>)}</section>}<div className="history-proof">{isDeleted ? <Trash2 size={14} /> : <Check size={14} />}<span>{isDeleted ? "Deleted on X · retained in Social Mirror" : `Observed in Social Mirror · ${item.externalRef.type}`}</span><button type="button" className="history-copy-id" aria-label="Copy internal post ID" title="Copy internal post ID" onClick={() => void copyPostId()}><Copy size={12} /> {postIdCopied ? "Copied" : "Copy ID"}</button></div><section className="history-provenance"><SectionEyebrow>Provenance</SectionEyebrow><p>{originLabel}</p><p>{item.executionId ? "Published by OpenPresence and verified in the Social Mirror." : "Observed on the connected channel and attributed to this Presence."}</p>{item.origin?.planWindowId && <small>Plan window: {item.origin.planWindowId}</small>}{assignment && <p>Assignment output · {assignmentProgressLabel(assignment)}</p>}{mirrorObject?.environment === "sandbox" && <small>Simulated social reality · this expression has no live destination. Sandbox world time: {formatTime(item.occurredAt)}.</small>}</section><section className="history-outcome"><SectionEyebrow>Outcome</SectionEyebrow>{metrics.length ? <div className="history-outcome-grid">{metrics.map(([key, value]) => <div key={key}><strong>{value}</strong><small>{key.replaceAll("_", " ")}</small></div>)}</div> : <p>No channel outcome evidence is attached to this expression yet.</p>}</section><div className="history-inspector-actions">{item.externalUrl ? <a className="history-external-link" href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {isDeleted ? "Open original URL · deleted on X" : item.kind === "reply" || item.kind === "comment" ? "Open reply on X" : item.kind === "like" ? "Open liked post on X" : item.kind === "repost" ? "Open reposted post on X" : "Open original on X"}</a> : item.environment === "sandbox" && item.channel === "x" ? <p className="history-sandbox-note">Sandbox rehearsal only. This expression has no live destination.</p> : item.channel === "x" ? <p className="history-sandbox-note">X URL unavailable from the connected account.</p> : null}<Button variant="secondary" onClick={onActivity}><Activity size={14} /> View in Activity</Button></div></aside>;
 }
 
 function ScheduleLayerToolbar({
@@ -12665,13 +13007,13 @@ function ScheduleLayerToolbar({
     <section className="schedule-layer-toolbar" aria-label="Calendar layers">
       <div className="schedule-layer-intro">
         <SectionEyebrow>Calendar layers</SectionEyebrow>
-        <p>Compare {presenceName}&apos;s flexible publishing plan with the Assignments that shape when the Presence can work toward an outcome.</p>
+        <p>Assignments are commitments. Use the optional Genny&apos;s plan layer to inspect flexible publishing and attention intentions.</p>
       </div>
       <div className="schedule-layer-controls">
-        {(["plan", "assignments"] as const).map((layer) => {
-          const labels = { plan: "Publishing plan", assignments: "Assignments" };
-          return <label className={`schedule-layer-toggle schedule-layer-toggle-${layer} ${layers[layer] ? "selected" : ""} ${layer === "plan" && !plan ? "unavailable" : ""}`} key={layer}>
-            <input type="checkbox" checked={layers[layer]} disabled={layer === "plan" && !plan} onChange={() => onToggle(layer)} />
+        {(["assignments"] as const).map((layer) => {
+          const labels = { assignments: "Assignments" };
+          return <label className={`schedule-layer-toggle schedule-layer-toggle-${layer} ${layers[layer] ? "selected" : ""}`} key={layer}>
+            <input type="checkbox" checked={layers[layer]} onChange={() => onToggle(layer)} />
             <span className="schedule-layer-mark" aria-hidden="true" />
             <span>{labels[layer]}</span>
           </label>;
@@ -12682,7 +13024,7 @@ function ScheduleLayerToolbar({
           <span className="schedule-plan-status">Plan {plan.status === "active" ? "active" : plan.status}</span>
           <Button type="button" variant="ghost" onClick={() => void mutate({ type: "replanPublishing", presenceId: plan.presenceId })}>Replan</Button>
         </> : <Button type="button" variant="ghost" onClick={() => void mutate({ type: "replanPublishing" })}>Create plan</Button>}
-        <Button type="button" variant="ghost" onClick={onReset}>Show all</Button>
+        <Button type="button" variant="ghost" onClick={onReset}>Show all layers</Button>
       </div>
     </section>
   );
@@ -12736,9 +13078,9 @@ function PublishingPlanScheduleSummary({ plan, presenceName }: { plan: Publishin
     <div className="publishing-plan-schedule-header">
       <div className="publishing-plan-schedule-header-main">
         <div className="publishing-plan-schedule-title-line">
-          <SectionEyebrow>{presenceName}&apos;s current plan</SectionEyebrow>
+          <SectionEyebrow>{presenceName}&apos;s flexible plan</SectionEyebrow>
           <span className="publishing-plan-schedule-pill">{plan.status === "active" ? "Active" : plan.status}</span>
-          <h2 className="publishing-plan-schedule-title">Publishing plan</h2>
+          <h2 className="publishing-plan-schedule-title">Genny&apos;s flexible plan</h2>
         </div>
         <p className="publishing-plan-schedule-rationale" title={plan.rationaleSummary ?? ""}>{plan.rationaleSummary ?? `${presenceName} is deciding what deserves to be published from the available evidence.`}</p>
       </div>
@@ -13809,7 +14151,7 @@ function ScheduleView({
   const [viewMode, setViewMode] = useState<"list" | "week">("list");
   const [scheduleDayFilter, setScheduleDayFilter] = useState<ScheduleDayFilter>("all");
   const [compactSchedule, setCompactSchedule] = useState(true);
-  const [calendarLayers, setCalendarLayers] = useState<ScheduleLayerVisibility>({ plan: true, intents: false, assignments: true });
+  const [calendarLayers, setCalendarLayers] = useState<ScheduleLayerVisibility>({ plan: false, intents: false, assignments: true });
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null);
   const [runningLiveAssignmentId, setRunningLiveAssignmentId] = useState<string | null>(null);
   const presenceId = state.activePresenceId ?? state.presence?.id ?? "";
@@ -13941,6 +14283,7 @@ function ScheduleView({
     scrollToInspector();
   };
   const selectedAssignment = visibleAssignments.find((assignment) => assignment.id === selectedAssignmentId) ?? null;
+  const resetCalendarLayers = () => setCalendarLayers({ plan: Boolean(publishingPlan), intents: false, assignments: true });
   const activateAssignment = async (assignment: Assignment) => {
     if (activatingId) return;
     setActivatingId(assignment.id);
@@ -13963,6 +14306,7 @@ function ScheduleView({
             <button type="button" aria-pressed={viewMode === "list"} className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}>List</button>
             <button type="button" aria-pressed={viewMode === "week"} className={viewMode === "week" ? "active" : ""} onClick={() => setViewMode("week")}>Week</button>
           </div>
+          <button type="button" className={`schedule-plan-header-toggle ${calendarLayers.plan ? "active" : ""} ${publishingPlan ? "" : "unavailable"}`} aria-pressed={calendarLayers.plan} disabled={!publishingPlan} onClick={() => setCalendarLayers((current) => ({ ...current, plan: !current.plan }))}>◇ Genny&apos;s plan</button>
           <Button variant="primary" onClick={() => { setShowForm(!showForm); if (showForm) resetForm(); }}>
             {showForm ? <X size={15} /> : <Plus size={15} />}{" "}
             {showForm ? "Close" : "Add assignment"}
@@ -13970,8 +14314,8 @@ function ScheduleView({
         </>}
       />
       <section className="schedule-plan-overview" aria-label={`${presenceName}'s plan and calendar layers`}>
-        <ScheduleLayerToolbar plan={publishingPlan} presenceName={presenceName} layers={calendarLayers} onToggle={toggleCalendarLayer} onReset={() => setCalendarLayers({ plan: true, intents: false, assignments: true })} mutate={mutate} />
-        {publishingPlan && <PublishingPlanScheduleSummary plan={publishingPlan} presenceName={presenceName} />}
+        <ScheduleLayerToolbar plan={publishingPlan} presenceName={presenceName} layers={calendarLayers} onToggle={toggleCalendarLayer} onReset={resetCalendarLayers} mutate={mutate} />
+        {publishingPlan && calendarLayers.plan && <PublishingPlanScheduleSummary plan={publishingPlan} presenceName={presenceName} />}
       </section>
       {processingAssignments.length > 0 && (
         <div className="schedule-live-progress-banner" role="status" aria-live="polite">
@@ -14150,9 +14494,9 @@ function ScheduleView({
         </aside>
       )}
       {viewMode === "week" ? (
-        <WeekCalendar slots={visibleSlots} assignments={visibleAssignments} publishingPlan={publishingPlan} layers={calendarLayers} compact={compactSchedule} onToggleCompact={() => setCompactSchedule((current) => !current)} state={state} presenceName={presenceName} runningLiveAssignmentId={runningLiveAssignmentId} onEdit={beginEdit} onAssignment={openAssignment} onAdd={() => setShowForm(true)} onResetLayers={() => setCalendarLayers({ plan: true, intents: false, assignments: true })} />
+        <WeekCalendar slots={visibleSlots} assignments={visibleAssignments} publishingPlan={publishingPlan} layers={calendarLayers} compact={compactSchedule} onToggleCompact={() => setCompactSchedule((current) => !current)} state={state} presenceName={presenceName} runningLiveAssignmentId={runningLiveAssignmentId} onEdit={beginEdit} onAssignment={openAssignment} onAdd={() => setShowForm(true)} onResetLayers={resetCalendarLayers} />
       ) : (
-        <ScheduleList assignments={visibleAssignments} publishingPlan={publishingPlan} layers={calendarLayers} presenceName={presenceName} state={state} runningLiveAssignmentId={runningLiveAssignmentId} dayFilter={scheduleDayFilter} onDayFilterChange={setScheduleDayFilter} onAssignment={openAssignment} onAdd={() => setShowForm(true)} onResetLayers={() => setCalendarLayers({ plan: true, intents: false, assignments: true })} />
+        <ScheduleList assignments={visibleAssignments} publishingPlan={publishingPlan} layers={calendarLayers} presenceName={presenceName} state={state} runningLiveAssignmentId={runningLiveAssignmentId} dayFilter={scheduleDayFilter} onDayFilterChange={setScheduleDayFilter} onAssignment={openAssignment} onAdd={() => setShowForm(true)} onResetLayers={resetCalendarLayers} />
       )}
     </div>
   );
@@ -14187,24 +14531,29 @@ function ScheduleList({
   const filteredAssignments = dayFilter === "all"
     ? scheduledAssignments
     : scheduledAssignments.filter((assignment) => assignment.schedule?.day === dayFilter);
+  const visiblePlanWindows = (publishingPlan?.windows ?? [])
+    .filter((window) => !["completed", "missed", "superseded"].includes(window.status))
+    .slice(0, 8);
   const selectedDayLabel = scheduleDayFilters.find((item) => item.value === dayFilter)?.value;
-  const hasItems = layers.assignments && filteredAssignments.length > 0;
+  const hasItems = (layers.assignments && filteredAssignments.length > 0) || (layers.plan && visiblePlanWindows.length > 0);
   return <section className="schedule-list" aria-label="Schedule list">
     <div className="schedule-list-header">
       <div>
         <SectionEyebrow>List schedule</SectionEyebrow>
         <h2>Scheduled responsibilities</h2>
-        <p>Assignments with a specific outcome. Genny&apos;s publishing plan is summarized above.</p>
+        <p>Assignments with a specific outcome. Genny&apos;s flexible plan is optional and hidden until you turn it on.</p>
       </div>
       <div className="schedule-list-header-controls">
         <div className="schedule-day-filter-label">Show days</div>
         <div className="feed-filter schedule-day-filter" role="group" aria-label="Scheduled responsibility filter">
           {scheduleDayFilters.map((item) => <button type="button" key={item.value} className={dayFilter === item.value ? "active" : ""} aria-pressed={dayFilter === item.value} aria-label={item.value === "all" ? "Show all scheduled items" : `Show ${item.value.slice(0, 3)} scheduled items`} title={item.value === "all" ? "Show all days" : `Show ${item.value}`} onClick={() => onDayFilterChange(item.value)}>{item.label}</button>)}
         </div>
-        <ScheduleLegend layers={{ ...layers, plan: false }} />
+        <ScheduleLegend layers={layers} />
       </div>
     </div>
-    {!hasItems ? <EmptyState title={!layers.assignments ? "Assignments are hidden" : dayFilter !== "all" ? `No responsibilities on ${selectedDayLabel}` : "No scheduled responsibilities"} body={!layers.assignments ? "Turn on Assignments above to see scheduled responsibilities." : dayFilter !== "all" ? "Try another day or show all scheduled responsibilities." : `Genny's publishing plan is above. Add an Assignment only when you want a specific outcome pursued.`} action={!layers.assignments ? <Button onClick={onResetLayers} variant="secondary">Show assignments</Button> : dayFilter !== "all" ? <Button onClick={() => onDayFilterChange("all")} variant="secondary">Show all days</Button> : <Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add assignment</Button>} /> : <div className="schedule-list-rows">
+    {!hasItems ? <EmptyState title={!layers.assignments ? "Assignments are hidden" : dayFilter !== "all" ? `No responsibilities on ${selectedDayLabel}` : "No scheduled responsibilities"} body={!layers.assignments ? "Turn on Assignments above to see scheduled responsibilities." : dayFilter !== "all" ? "Try another day or show all scheduled responsibilities." : "Add an Assignment only when you want a specific outcome pursued."} action={!layers.assignments ? <Button onClick={onResetLayers} variant="secondary">Show assignments</Button> : dayFilter !== "all" ? <Button onClick={() => onDayFilterChange("all")} variant="secondary">Show all days</Button> : <Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add assignment</Button>} /> : <>
+      {layers.plan && visiblePlanWindows.length > 0 && <section className="schedule-flexible-plan-list" aria-label="Genny's flexible plan"><div className="schedule-flexible-plan-heading"><div><SectionEyebrow>Genny&apos;s flexible plan</SectionEyebrow><h3>Intentions, not commitments</h3></div><span>Optional layer</span></div>{visiblePlanWindows.map((window) => { const position = publishingWindowCalendarPosition(window, publishingPlan?.timezone); return <article className="schedule-flexible-plan-row" key={window.id}><span className="schedule-flexible-plan-mark" /><div><div className="schedule-list-row-kicker"><strong>{position.day} · {position.startTime}</strong><span>Flexible</span></div><h3>{window.purpose}</h3><small>{window.summary} · {window.status.replaceAll("_", " ")}</small></div></article>; })}</section>}
+      <div className="schedule-list-rows">
       {layers.assignments && filteredAssignments.map((assignment) => {
         const objective = assignmentObjective(assignment);
         const timing = assignment.activation?.type === "continuous" ? "Continuous responsibility" : assignment.schedule ? `${assignment.schedule.day} · ${assignment.schedule.time}–${splitConsiderationWindow(assignment.schedule.executionWindow, assignment.schedule.time).end}` : "Unscheduled · ready to start";
@@ -14215,7 +14564,7 @@ function ScheduleList({
           <div className="schedule-list-row-copy">
             <div className="schedule-list-row-kicker">
               <strong>Scheduled work</strong>
-              <span className="schedule-objective-badge">Objective · {objectiveLabel(objective)}</span>
+              <span className="schedule-objective-badge">{objectiveLabel(objective)}</span>
               {proc.isProcessing && <span className="schedule-processing-badge"><LoaderCircle size={9} className="spin" /> Working now · {proc.phaseLabel}</span>}
             </div>
             <h3>{cleanUserFacingAssignmentInstruction(assignment.instruction)}</h3>
@@ -14224,7 +14573,7 @@ function ScheduleList({
           <ChevronRight size={16} aria-hidden="true" />
         </button>;
       })}
-    </div>}
+    </div></>}
   </section>;
 }
 
@@ -14347,7 +14696,7 @@ function WeekCalendar({
       <div>
         <div className="compact-calendar-item-header">
           <strong>{item.title}</strong>
-          <span className="compact-calendar-objective">Objective · {objectiveLabel(objective)}</span>
+          <span className="compact-calendar-objective">{objectiveLabel(objective)}</span>
         </div>
         <small>{item.detail}</small>
         {item.isProcessing ? (
@@ -14379,7 +14728,7 @@ function WeekCalendar({
           <ScheduleLegend plan={publishingPlan} layers={layers} />
         </div>
       </div>
-      {!hasItems ? <EmptyState title={hasAnyItems ? "Nothing shown on this calendar" : "Nothing scheduled for this Presence"} body={hasAnyItems ? "Turn on a calendar layer to compare the Presence plan or Assignments." : `Add an Assignment to see when ${presenceName} is expected to work during the week.`} action={hasAnyItems ? <Button onClick={onResetLayers} variant="secondary">Show all layers</Button> : <Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add assignment</Button>} /> : <div className="week-grid-scroll"><div className="week-grid" style={{ "--week-grid-height": `${gridHeight}px` } as React.CSSProperties}><div className="week-grid-header"><span className="week-time-header">Local time</span>{calendarWeekDays.map((day) => <span key={day}>{day.slice(0, 3)}<small>{day}</small></span>)}</div><div className="week-grid-body"><div className="week-time-rail">{calendarHours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>{calendarWeekDays.map((day) => <div className="week-day-column" key={day}>{calendarHours.map((hour) => <div className="week-hour-cell" key={hour} />)}{layers.plan && (dayPlanWindows.get(day) ?? []).map((window) => { const style = blockStyle(window.startMinutes, window.endMinutes, 42); return <div className={`week-plan-window week-plan-window-${window.status}`} key={window.id} style={style} title={`${window.purpose} window · ${window.summary}`}><span className="week-plan-window-time">{window.startTime}–{window.endTime}</span><strong>Plan · {window.purpose}</strong><small>{window.summary}</small></div>; })}{layers.intents && (daySlots.get(day) ?? []).map((slot) => { const style = blockStyle(timeToMinutes(slot.time), timeToMinutes(splitConsiderationWindow(slot.executionWindow, slot.time).end), 54); const target = state.presences.find((item) => item.id === slot.presence); return <button type="button" key={slot.id} className={`week-intent objective-${objectiveTone(slot.objective)}`} style={style} onClick={() => onEdit(slot)} aria-label={`Edit ${slot.label}, ${slot.day} at ${slot.time}`} title={`${slot.label} · ${slot.day} ${slot.time} · ${considerationSummary(slot.time, slot.executionWindow)}`}><span className="week-intent-time">{slot.time}</span><strong>{slot.label}</strong><small>{target?.name ?? presenceName} · {objectiveLabel(slot.objective)}</small><em>{slot.mode === "auto" ? "Auto" : "Review"}</em></button>; })}{layers.assignments && (dayAssignments.get(day) ?? []).map((assignment) => { const schedule = assignment.schedule!; const objective = assignmentObjective(assignment); const style = blockStyle(timeToMinutes(schedule.time), timeToMinutes(splitConsiderationWindow(schedule.executionWindow, schedule.time).end), 58); const proc = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId); const status = proc.isProcessing ? `Processing (${proc.phaseLabel})` : assignment.status === "draft" ? "Not started" : assignment.status.replaceAll("_", " "); const progress = assignmentScheduleProgress(assignment); return <button type="button" key={assignment.id} className={`week-assignment${proc.isProcessing ? " is-processing week-assignment-processing" : ""}`} style={style} onClick={() => onAssignment(assignment)} aria-label={`Open Assignment ${assignment.instruction}, ${schedule.day} at ${schedule.time}`} title={`Open Assignment details · ${assignment.instruction} · ${schedule.day} ${schedule.time}`} aria-busy={proc.isProcessing}><span className="week-intent-time">{schedule.time}</span><strong>Assignment</strong><span className="week-assignment-objective">Objective · {objectiveLabel(objective)}</span><small>{assignment.instruction}</small>{proc.isProcessing ? <em className="week-assignment-processing-tag"><LoaderCircle size={8} className="spin" /> {progress} · {proc.phaseLabel}…</em> : <em>{progress} · {status}</em>}</button>; })}</div>)}</div></div></div>}
+      {!hasItems ? <EmptyState title={hasAnyItems ? "Nothing shown on this calendar" : "Nothing scheduled for this Presence"} body={hasAnyItems ? "Turn on a calendar layer to compare the Presence plan or Assignments." : `Add an Assignment to see when ${presenceName} is expected to work during the week.`} action={hasAnyItems ? <Button onClick={onResetLayers} variant="secondary">Show all layers</Button> : <Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add assignment</Button>} /> : <div className="week-grid-scroll"><div className="week-grid" style={{ "--week-grid-height": `${gridHeight}px` } as React.CSSProperties}><div className="week-grid-header"><span className="week-time-header">Local time</span>{calendarWeekDays.map((day) => <span key={day}>{day.slice(0, 3)}<small>{day}</small></span>)}</div><div className="week-grid-body"><div className="week-time-rail">{calendarHours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>{calendarWeekDays.map((day) => <div className="week-day-column" key={day}>{calendarHours.map((hour) => <div className="week-hour-cell" key={hour} />)}{layers.plan && (dayPlanWindows.get(day) ?? []).map((window) => { const style = blockStyle(window.startMinutes, window.endMinutes, 42); return <div className={`week-plan-window week-plan-window-${window.status}`} key={window.id} style={style} title={`${window.purpose} window · ${window.summary}`}><span className="week-plan-window-time">{window.startTime}–{window.endTime}</span><strong>Plan · {window.purpose}</strong><small>{window.summary}</small></div>; })}{layers.intents && (daySlots.get(day) ?? []).map((slot) => { const style = blockStyle(timeToMinutes(slot.time), timeToMinutes(splitConsiderationWindow(slot.executionWindow, slot.time).end), 54); const target = state.presences.find((item) => item.id === slot.presence); return <button type="button" key={slot.id} className={`week-intent objective-${objectiveTone(slot.objective)}`} style={style} onClick={() => onEdit(slot)} aria-label={`Edit ${slot.label}, ${slot.day} at ${slot.time}`} title={`${slot.label} · ${slot.day} ${slot.time} · ${considerationSummary(slot.time, slot.executionWindow)}`}><span className="week-intent-time">{slot.time}</span><strong>{slot.label}</strong><small>{target?.name ?? presenceName} · {objectiveLabel(slot.objective)}</small><em>{slot.mode === "auto" ? "Auto" : "Review"}</em></button>; })}{layers.assignments && (dayAssignments.get(day) ?? []).map((assignment) => { const schedule = assignment.schedule!; const objective = assignmentObjective(assignment); const style = blockStyle(timeToMinutes(schedule.time), timeToMinutes(splitConsiderationWindow(schedule.executionWindow, schedule.time).end), 58); const proc = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId); const status = proc.isProcessing ? `Processing (${proc.phaseLabel})` : assignment.status === "draft" ? "Not started" : assignment.status.replaceAll("_", " "); const progress = assignmentScheduleProgress(assignment); return <button type="button" key={assignment.id} className={`week-assignment${proc.isProcessing ? " is-processing week-assignment-processing" : ""}`} style={style} onClick={() => onAssignment(assignment)} aria-label={`Open Assignment ${assignment.instruction}, ${schedule.day} at ${schedule.time}`} title={`Open Assignment details · ${assignment.instruction} · ${schedule.day} ${schedule.time}`} aria-busy={proc.isProcessing}><span className="week-intent-time">{schedule.time}</span><strong>Assignment</strong><span className="week-assignment-objective">{objectiveLabel(objective)}</span><small>{assignment.instruction}</small>{proc.isProcessing ? <em className="week-assignment-processing-tag"><LoaderCircle size={8} className="spin" /> {progress} · {proc.phaseLabel}…</em> : <em>{progress} · {status}</em>}</button>; })}</div>)}</div></div></div>}
       {hasItems && <div className="week-calendar-compact" aria-label="Compact weekly schedule">{compactDays.map(({ day, items }) => <section className="compact-calendar-day" key={day}><div className="compact-calendar-day-label"><strong>{day.slice(0, 3)}</strong><span>{day}</span></div><div className="compact-calendar-items">{items.map(renderCompactItem)}</div></section>)}</div>}
     </section>
   );
@@ -14914,6 +15263,49 @@ function ProposalRow({
   );
 }
 
+function ConversationStyleSettings({ presence, state, mutate, setView }: { presence: Presence; state: OpenPresenceState; mutate: Mutate; setView?: (view: View) => void }) {
+  const styles = conversationStylesFor(state);
+  const active = styles.find((style) => style.id === presence.conversationStyleId) ?? styles[0]!;
+  const [selectedId, setSelectedId] = useState(active.id);
+  const [caseIndex, setCaseIndex] = useState(0);
+  const [feedback, setFeedback] = useState("");
+  const fileRef = useRef<HTMLInputElement>(null);
+  const selected = styles.find((style) => style.id === selectedId) ?? active;
+  useEffect(() => { setSelectedId(active.id); }, [active.id]);
+  const choose = (style: ConversationStyleProfile) => { setSelectedId(style.id); setCaseIndex(0); setFeedback(""); };
+  const useStyle = async () => { const saved = await mutate({ type: "setConversationStyle", presenceId: presence.id, styleId: selected.id }); setFeedback(saved ? `${selected.name} is now active for ${presence.name}.` : "Couldn’t save this style yet."); };
+  const importStyle = (file: File) => {
+    const reader = new FileReader();
+    reader.onload = async () => {
+      try {
+        const imported = normalizeImportedConversationStyle(JSON.parse(String(reader.result)));
+        const saved = await mutate({ type: "saveConversationStyle", presenceId: presence.id, style: imported });
+        if (saved) { setSelectedId(imported.id); setFeedback(`${imported.name} was imported and is now active.`); }
+        else setFeedback("Couldn’t save this StylePrint yet.");
+      } catch (error) { setFeedback(error instanceof Error ? error.message : "That file is not a supported StylePrint JSON file."); }
+    };
+    reader.readAsText(file);
+  };
+  const copyPrompt = async () => { await navigator.clipboard?.writeText(conversationStyleGeneratorPrompt); setFeedback("Generator prompt copied."); };
+  const preview = selected.previews[caseIndex % selected.previews.length]!;
+  return <section className="settings-card conversation-style-card" id="section-style" aria-labelledby="conversation-style-title">
+    <div className="section-heading compact"><div><SectionEyebrow>Conversational style</SectionEyebrow><h2 id="conversation-style-title">How should {presence.name} sound?</h2></div><Sparkles size={17} /></div>
+    <p className="muted">Choose a written voice for social turns. It changes expression, not the Agent’s meaning, judgment, permissions, or facts. Browse the same everyday moments so the difference is easy to feel.</p>
+    <div className="conversation-style-picker" role="list" aria-label="Conversational styles">
+      {styles.map((style) => <button type="button" key={style.id} className={`conversation-style-option ${style.id === selected.id ? "selected" : ""}`} onClick={() => choose(style)} role="listitem" aria-pressed={style.id === selected.id}><span className="conversation-style-orbit">{style.name.slice(0, 1)}</span><span><strong>{style.name}</strong><small>{style.description}</small></span></button>)}
+    </div>
+    <div className="conversation-style-preview">
+      <div className="conversation-style-preview-header"><div><span className="style-preview-kicker">Preview this style · X</span><h3>{selected.name}</h3><p>{selected.description}</p></div><span className="conversation-style-status">{selected.id === active.id ? "Active" : "Preview"}</span></div>
+      <div className="conversation-style-case-tabs">{selected.previews.map((item, index) => <button type="button" key={item.id} className={index === caseIndex ? "selected" : ""} onClick={() => setCaseIndex(index)}>{item.label}</button>)}</div>
+      <div className="conversation-style-message"><span>Someone says</span><p>{preview.input}</p></div>
+      <div className="conversation-style-reply"><span>{presence.name} replies</span><p>{preview.reply}</p></div>
+      <div className="conversation-style-actions"><button type="button" className="button button-secondary" onClick={() => setCaseIndex((index) => (index + 1) % selected.previews.length)}><RotateCcw size={14} /> Try another example</button><button type="button" className="button button-primary" onClick={() => void useStyle()}><Check size={14} /> Use this style</button>{setView && <button type="button" className="button button-quiet" onClick={() => setView("rehearsal")}>Preview as {presence.name}</button>}</div>
+    </div>
+    <div className="conversation-style-custom"><div><SectionEyebrow>Custom alternative</SectionEyebrow><h3>Use your own written voice</h3><p className="muted">Ask an external AI agent to create a StylePrint from your own X posts or email, then import the JSON here. We keep it as expression guidance, separate from Knowledge.</p></div><div className="conversation-style-custom-actions"><button type="button" className="button button-secondary" onClick={() => void copyPrompt()}><Copy size={14} /> Copy generator prompt</button><button type="button" className="button button-secondary" onClick={() => fileRef.current?.click()}><FileText size={14} /> Import StylePrint</button><input ref={fileRef} hidden type="file" accept=".json,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) importStyle(file); event.target.value = ""; }} /></div></div>
+    {feedback && <p className="conversation-style-feedback" role="status">{feedback}</p>}
+  </section>;
+}
+
 function PresenceView({
   state,
   mutate,
@@ -15191,7 +15583,7 @@ function PresenceView({
       <div className="compact-presence-header" style={{ "--agent-accent": presence.accent } as React.CSSProperties}>
         <div className="presence-overview-left">
           <div className="presence-header-avatar">
-            <PresenceLogo channel={presence.channel} definitions={state.channelDefinitions} size="small" />
+            <PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} />
           </div>
           <div className="presence-header-info">
             <div className="presence-header-name-line">
@@ -15238,8 +15630,14 @@ function PresenceView({
               <button type="button" className={`settings-nav-item ${activeNav === "identity" ? "active" : ""}`} onClick={() => scrollToSection("section-identity", "identity")}>
                 <span className="nav-icon">👤</span> Identity & Public Self
               </button>
+              <button type="button" className={`settings-nav-item ${activeNav === "style" ? "active" : ""}`} onClick={() => scrollToSection("section-style", "style")}>
+                <span className="nav-icon">✨</span> Conversational Style
+              </button>
               <button type="button" className={`settings-nav-item ${activeNav === "access" ? "active" : ""}`} onClick={() => scrollToSection("section-access", "access")}>
                 <span className="nav-icon">🌐</span> Channel & Access
+              </button>
+              <button type="button" className={`settings-nav-item ${activeNav === "request-access" ? "active" : ""}`} onClick={() => scrollToSection("section-request-access", "request-access")}>
+                <span className="nav-icon">🛡️</span> Public Request Access
               </button>
               <button type="button" className={`settings-nav-item ${activeNav === "brief" ? "active" : ""}`} onClick={() => scrollToSection("section-brief", "brief")}>
                 <span className="nav-icon">🎯</span> Presence Brief
@@ -15335,7 +15733,30 @@ function PresenceView({
                 <small>Ghost · extends my identity</small>
               </button>
             </div>
+            <div className="presence-avatar-setting">
+              <div>
+                <strong>Presence look</strong>
+                <small>Styling changes here; {agentName}&apos;s identity color stays consistent.</small>
+              </div>
+              <div className="avatar-look-options avatar-look-options-inline">
+                {AVATAR_LOOKS.map((look) => (
+                  <button
+                    type="button"
+                    key={look}
+                    className={presenceAvatarLook(presence) === look ? "selected" : ""}
+                    aria-label={`Use ${AVATAR_LOOK_LABELS[look]} avatar look`}
+                    aria-pressed={presenceAvatarLook(presence) === look}
+                    onClick={() => void mutate({ type: "setPresence", patch: { avatarLook: look } })}
+                  >
+                    <PresenceGlyph accent={presence.accent} name={presence.name} look={look} />
+                    <span>{AVATAR_LOOK_LABELS[look]}</span>
+                  </button>
+                ))}
+              </div>
+            </div>
           </section>
+
+          <ConversationStyleSettings presence={presence} state={state} mutate={mutate} setView={setView} />
 
           <section className="settings-card public-self-card">
             <div className="section-heading compact">
@@ -15596,6 +16017,8 @@ function PresenceView({
               </div>
             )}
           </section>
+
+          <PresenceRequestPolicySettings presence={presence} mutate={mutate} />
 
           {/* Content & Discovery Sources */}
           <section className="settings-card sources-settings-card" id="section-sources">

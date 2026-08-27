@@ -5,15 +5,18 @@ test.beforeEach(async ({ request }) => {
   expect(response.ok()).toBeTruthy();
 });
 
-test("Schedule keeps the Agent plan visible and shows live Assignment work", async ({ page }) => {
+test("Schedule keeps flexible Agent plans optional and shows live Assignment work", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
   await page.getByRole("button", { name: "Schedule", exact: true }).click();
 
   await page.getByRole("button", { name: "Create plan", exact: true }).click();
   const plan = page.getByRole("region", { name: "Agent publishing plan" });
+  await expect(plan).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "◇ Genny's plan", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "◇ Genny's plan", exact: true }).click();
   await expect(plan).toBeVisible();
-  await expect(page.getByText(/current plan/i).first()).toBeVisible();
+  await expect(page.getByText(/flexible plan/i).first()).toBeVisible();
   await expect(plan.getByRole("button", { name: "Expand plan", exact: true })).toBeVisible();
   await expect(page.getByRole("region", { name: "Schedule list" }).getByText("Publishing window", { exact: true })).toHaveCount(0);
 
