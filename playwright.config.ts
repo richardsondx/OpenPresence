@@ -12,7 +12,7 @@ export default defineConfig({
     screenshot: "only-on-failure",
   },
   webServer: {
-    command: `OPENPRESENCE_DB_PATH=${testDbPath} OPENPRESENCE_TEST_MODE=1 OPENPRESENCE_X_API_MOCK=1 OPENPRESENCE_AI_MOCK=1 pnpm exec next dev -p ${testPort}`,
+    command: `OPENPRESENCE_DB_PATH=${testDbPath} OPENPRESENCE_TEST_MODE=1 OPENPRESENCE_X_API_MOCK=1 OPENPRESENCE_AI_MOCK=1 OPENPRESENCE_PORT=${testPort} pnpm dev`,
     url: `http://localhost:${testPort}`,
     reuseExistingServer: false,
     timeout: 120_000,

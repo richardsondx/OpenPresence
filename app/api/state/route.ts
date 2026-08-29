@@ -89,6 +89,7 @@ const activityProjectionKeys = new Set<keyof OpenPresenceState>([
   "publishingPlans", "growthRevisions", "growthFileVersions",
   "operatorConversations", "operatorNudges",
   "operatorDirectives", "explorations", "watches", "capabilityTrials", "explorationFindings", "explorationSessions", "calendar",
+  "publicRequests", "publicationMetricSnapshots",
   // People is a first-class operator surface. Keep its relationship inputs in
   // the browser projection; otherwise PeopleView receives a typed-but-partial
   // state object and can crash while resolving remembered identities.
@@ -103,29 +104,95 @@ const activityProjectionKeys = new Set<keyof OpenPresenceState>([
 function activityProjection(state: OpenPresenceState): OpenPresenceState {
   const projection = Object.fromEntries(Object.entries(state).filter(([key]) => activityProjectionKeys.has(key as keyof OpenPresenceState))) as OpenPresenceState;
   projection.responseProjection = "activity";
-  const limits: Partial<Record<keyof OpenPresenceState, number>> = {
-    actions: 80,
-    events: 120,
-    socialIntents: 80,
-    executions: 80,
-    outcomes: 80,
-    publications: 80,
-    operationalRuns: 80,
-    attentionEpisodes: 60,
-    resourceUsageEvents: 300,
-    mirrorObjects: 120,
-    playgroundSessions: 40,
+  const presenceId = state.presence?.id ?? state.activePresenceId ?? undefined;
+  const latestTimestamp = (item: Record<string, unknown>) => ["updatedAt", "time", "occurredAt", "observedAt", "createdAt"]
+    .map((key) => typeof item[key] === "string" ? item[key] as string : undefined)
+    .find((value): value is string => Boolean(value)) ?? "";
+  const scopedRecent = <T>(items: T[] | undefined, limit: number, keep?: (item: T) => boolean) => {
+    const scoped = (items ?? []).filter((item) => !presenceId || (item as { presenceId?: string }).presenceId === presenceId);
+    const pinned = keep ? scoped.filter(keep) : [];
+    const recent = scoped
+      .filter((item) => !keep?.(item))
+      .sort((left, right) => latestTimestamp(right as Record<string, unknown>).localeCompare(latestTimestamp(left as Record<string, unknown>)))
+      .slice(0, Math.max(0, limit - pinned.length));
+    return [...pinned, ...recent];
   };
-  for (const [key, limit] of Object.entries(limits) as Array<[keyof OpenPresenceState, number]>) {
-    const value = projection[key];
-    if (Array.isArray(value)) projection[key] = value.slice(0, limit) as never;
-  }
-  const targetMirrorIds = new Set(state.assignments.map((assignment) => assignment.target?.mirrorObjectId).filter((id): id is string => Boolean(id)));
-  if (Array.isArray(projection.mirrorObjects)) {
-    const targetObjects = state.mirrorObjects.filter((object) => targetMirrorIds.has(object.id));
-    const recentObjects = state.mirrorObjects.filter((object) => !targetMirrorIds.has(object.id)).slice(0, 120);
-    projection.mirrorObjects = [...targetObjects, ...recentObjects] as never;
-  }
+  const activeRun = (run: { state?: string }) => ["queued", "running", "waiting", "recovering", "delivery_uncertain", "reconciling", "blocked", "needs_operator"].includes(run.state ?? "");
+  const activeAttentionRunIds = new Set((state.operationalRuns ?? [])
+    .filter((run) => run.kind === "attention" && activeRun(run))
+    .map((run) => run.id));
+  const activeEpisode = (episode: { status?: string; runIds?: string[] }) =>
+    ["running", "waiting"].includes(episode.status ?? "")
+    && (episode.runIds ?? []).some((runId) => activeAttentionRunIds.has(runId));
+  const activeAssignment = (assignment: { status?: string }) => ["accepted", "planning", "active", "working", "awaiting_execution", "awaiting_review", "needs_operator", "blocked"].includes(assignment.status ?? "");
+
+  // Activity is a Presence-scoped operational view. Keep the durable records
+  // needed to explain the current pass and recent outcomes, but do not send
+  // Agent-wide relationship/history stores or every old episode to the browser.
+  const compactAssignment = (assignment: OpenPresenceState["assignments"][number]) => {
+    const compact = { ...assignment };
+    // Research history is useful when opening a current Assignment, but it
+    // is not part of the Activity timeline. Keep only a tiny current slice so
+    // one old research transcript cannot dominate every heartbeat response.
+    compact.storyResearch = activeAssignment(assignment) ? assignment.storyResearch?.slice(-3) : [];
+    compact.planHistory = activeAssignment(assignment) ? assignment.planHistory?.slice(-3) : [];
+    compact.attemptHistory = assignment.attemptHistory?.slice(-8);
+    return compact;
+  };
+  projection.assignments = scopedRecent(state.assignments, 24, activeAssignment).map(compactAssignment) as never;
+  projection.assignmentRuns = scopedRecent(state.assignmentRuns, 60) as never;
+  projection.actions = scopedRecent(state.actions, 60) as never;
+  projection.events = scopedRecent(state.events, 120) as never;
+  const executionIsInFlight = (execution: OpenPresenceState["executions"][number]) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"].includes(execution.status);
+  projection.executions = scopedRecent(state.executions, 60, executionIsInFlight).map((execution) => {
+    const compact = { ...execution };
+    // Execution permits are server authorization material, not browser read
+    // model data. Older terminal publication payloads are likewise not
+    // needed to render the Activity heartbeat and can be reloaded by a
+    // dedicated detail view if that surface needs them later.
+    delete compact.permit;
+    if (!executionIsInFlight(execution)) delete compact.publication;
+    return compact;
+  }) as never;
+  projection.outcomes = scopedRecent(state.outcomes, 80) as never;
+  projection.publications = scopedRecent(state.publications, 60) as never;
+  projection.socialIntents = scopedRecent(state.socialIntents, 60) as never;
+  projection.socialDecisions = scopedRecent(state.socialDecisions, 60) as never;
+  projection.attentionEpisodes = scopedRecent(state.attentionEpisodes, 16, activeEpisode).map((episode) => ({
+    ...episode,
+    mirrorObjectIds: [],
+    newMirrorObjectIds: [],
+    changedMirrorObjectIds: [],
+    socialDecisionIds: [],
+    socialIntentIds: [],
+    executionIds: [],
+    outcomeIds: [],
+    runIds: episode.runIds?.slice(-8) ?? [],
+    steps: episode.steps?.slice(-8) ?? [],
+  })) as never;
+  projection.resourceUsageEvents = [];
+  projection.operationalRuns = scopedRecent(state.operationalRuns, 60, activeRun) as never;
+  projection.scheduledWakes = scopedRecent(state.scheduledWakes, 50) as never;
+  projection.publicRequests = scopedRecent(state.publicRequests, 30) as never;
+  projection.publicationMetricSnapshots = scopedRecent(state.publicationMetricSnapshots, 50) as never;
+  projection.playgroundSessions = scopedRecent((state.playgroundSessions ?? []).filter((session) => session.status !== "completed"), 12) as never;
+  projection.explorationFindings = scopedRecent(state.explorationFindings, 50) as never;
+  projection.explorationSessions = scopedRecent(state.explorationSessions, 30) as never;
+  projection.publishingPlans = scopedRecent(state.publishingPlans, 6).map((plan) => ({ ...plan, windows: plan.windows.slice(0, 24), workHistory: plan.workHistory?.slice(-24) })) as never;
+  projection.operatorConversations = [];
+  projection.standingIntents = (state.standingIntents ?? []).slice(0, 40) as never;
+  projection.calendar = (state.calendar ?? []).filter((slot) => !presenceId || slot.presence === presenceId) as never;
+  projection.people = [];
+  projection.personIdentities = [];
+  projection.relationships = [];
+  projection.relationshipFacts = [];
+  projection.relationshipOpenLoops = [];
+
+  const targetMirrorIds = new Set((projection.assignments ?? []).map((assignment) => assignment.target?.mirrorObjectId).filter((id): id is string => Boolean(id)));
+  const scopedMirrors = state.mirrorObjects.filter((object) => !presenceId || object.presenceId === presenceId);
+  const targetObjects = scopedMirrors.filter((object) => targetMirrorIds.has(object.id));
+  const recentObjects = scopedMirrors.filter((object) => !targetMirrorIds.has(object.id)).slice(0, 120);
+  projection.mirrorObjects = [...targetObjects, ...recentObjects] as never;
   // Resource usage is intentionally truncated below to keep Activity quick.
   // Budget totals must nevertheless be computed from the complete active-day
   // ledger, otherwise a refresh can display a different budget after older
@@ -4411,6 +4478,7 @@ const operation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("workAssignment"), id: z.string().min(1), sessionId: z.string().min(1) }),
   z.object({ type: z.literal("runLiveAssignment"), assignmentId: z.string().min(1), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("startAssignmentPursuit"), assignmentId: z.string().min(1), presenceId: z.string().min(1).optional(), startsAt: z.string().datetime().optional(), deadlineAt: z.string().datetime(), maxVerifiedActions: z.number().int().min(1).max(100), actionCaps: z.record(z.enum(["reply", "quote", "repost", "like", "follow"]), z.number().int().min(0).max(100)).optional(), maxActionsPerHour: z.number().int().min(1).max(100).optional(), maxActionsPerPerson: z.number().int().min(1).max(100).optional(), maxActionsPerConversation: z.number().int().min(1).max(100).optional(), resourceBudget: z.object({ maxChannelReads: z.number().int().min(1).max(10000).optional(), maxHydrations: z.number().int().min(1).max(10000).optional(), maxModelCalls: z.number().int().min(1).max(10000).optional(), maxVisionCalls: z.number().int().min(1).max(10000).optional(), maxEstimatedCostCents: z.number().int().min(1).max(1000000).optional() }).optional() }),
+  z.object({ type: z.literal("scaleAssignmentPursuit"), id: z.string().min(1), maxVerifiedActions: z.number().int().min(1).max(100), maxActionsPerHour: z.number().int().min(1).max(100).optional(), resourceBudget: z.object({ maxChannelReads: z.number().int().min(1).max(10000).optional(), maxHydrations: z.number().int().min(1).max(10000).optional(), maxModelCalls: z.number().int().min(1).max(10000).optional(), maxVisionCalls: z.number().int().min(1).max(10000).optional(), maxEstimatedCostCents: z.number().int().min(1).max(1000000).optional() }).optional() }),
   z.object({ type: z.literal("pauseAssignmentPursuit"), id: z.string().min(1) }),
   z.object({ type: z.literal("resumeAssignmentPursuit"), id: z.string().min(1) }),
   z.object({ type: z.literal("cancelAssignmentPursuit"), id: z.string().min(1) }),
@@ -4482,14 +4550,18 @@ function validateRequestLineage(state: OpenPresenceState, parsed: RuntimeOperati
   const session = usesPlaygroundSession && candidate.sessionId ? state.playgroundSessions.find((item) => item.id === candidate.sessionId) : undefined;
   if (usesPlaygroundSession && candidate.sessionId && !session) throw new Error("That Playground session does not belong to the requested Agent workspace.");
   if (session && candidate.presenceId && session.presenceId !== candidate.presenceId) throw new Error("The Playground session and Presence do not share the same durable scope.");
-  if (["startAssignment", "workAssignment", "pauseAssignment", "resumeAssignment", "cancelAssignment", "startAssignmentPursuit"].includes(parsed.type)) {
-    const assignmentId = parsed.type === "startAssignmentPursuit" ? parsed.assignmentId : (parsed as { id: string }).id;
+  if (["startAssignment", "workAssignment", "pauseAssignment", "resumeAssignment", "cancelAssignment", "startAssignmentPursuit", "scaleAssignmentPursuit"].includes(parsed.type)) {
+    const assignmentId = parsed.type === "startAssignmentPursuit"
+      ? parsed.assignmentId
+      : parsed.type === "scaleAssignmentPursuit"
+        ? state.assignmentPursuitWindows?.find((item) => item.id === parsed.id)?.assignmentId
+        : (parsed as { id: string }).id;
     const assignment = state.assignments.find((item) => item.id === assignmentId);
     if (!assignment) throw new Error("That Assignment does not belong to the requested Agent workspace.");
     if (candidate.presenceId && assignment.presenceId && assignment.presenceId !== candidate.presenceId) throw new Error("The Assignment and Presence do not share the same durable scope.");
     if (session && assignment.sessionId && assignment.sessionId !== session.id) throw new Error("The Assignment and Playground session do not share the same durable scope.");
   }
-  if (["pauseAssignmentPursuit", "resumeAssignmentPursuit", "cancelAssignmentPursuit"].includes(parsed.type)) {
+  if (["pauseAssignmentPursuit", "resumeAssignmentPursuit", "cancelAssignmentPursuit", "scaleAssignmentPursuit"].includes(parsed.type)) {
     const pursuit = state.assignmentPursuitWindows?.find((item) => item.id === (parsed as { id: string }).id);
     if (!pursuit) throw new Error("That distribution push does not belong to the requested Agent workspace.");
     if (candidate.presenceId && pursuit.presenceId !== candidate.presenceId) throw new Error("The distribution push and Presence do not share the same durable scope.");
@@ -5631,6 +5703,18 @@ export async function POST(request: Request) {
       writeState(next);
       if (queued.run.id) void dispatchLiveAssignmentWorker(queued.run.id);
       return stateResponse(request, next, { runId: queued.run.id });
+    }
+    if (parsed.type === "scaleAssignmentPursuit") {
+      let next = applyOperation(current, parsed);
+      const window = next.assignmentPursuitWindows?.find((item) => item.id === parsed.id);
+      const assignment = window ? next.assignments.find((item) => item.id === window.assignmentId) : undefined;
+      if (!window || !assignment) throw new Error("The distribution push could not be scaled.");
+      const queued = window.status === "active" ? queueLiveAssignmentRun(next, assignment.id, assignment.presenceId, window.id) : undefined;
+      if (queued) next = queued.state;
+      next = recordRuntimeEvent(next, assignment.presenceId, "Distribution work scaled", window.status === "active" ? "The new capacity is saved and the next verified batch is queued." : "The new capacity is saved. Resume the push when you are ready to continue.", "positive", { sourceObjectId: assignment.id });
+      writeState(next);
+      if (queued?.run.id) void dispatchLiveAssignmentWorker(queued.run.id);
+      return stateResponse(request, next, { runId: queued?.run.id });
     }
     if (parsed.type === "pauseAssignmentPursuit" || parsed.type === "resumeAssignmentPursuit" || parsed.type === "cancelAssignmentPursuit") {
       const next = applyOperation(current, parsed);

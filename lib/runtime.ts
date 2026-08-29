@@ -173,6 +173,37 @@ export const SELF_DIRECTED_ATTENTION_PRESETS: Record<
   curious: { maxModelCallsPerDay: 90, maxVisionCallsPerDay: 30, maxChannelReadsPerDay: 150, maxHydrationsPerDay: 90 },
 };
 
+/** The distribution push shares Autonomy Today's understandable capacity levels. */
+export const ASSIGNMENT_PURSUIT_SCALE_PRESETS = {
+  focused: {
+    label: "Focused",
+    maxVerifiedActions: 15,
+    resourceBudget: { maxChannelReads: SELF_DIRECTED_ATTENTION_PRESETS.quiet.maxChannelReadsPerDay, maxHydrations: SELF_DIRECTED_ATTENTION_PRESETS.quiet.maxHydrationsPerDay, maxModelCalls: SELF_DIRECTED_ATTENTION_PRESETS.quiet.maxModelCallsPerDay, maxVisionCalls: SELF_DIRECTED_ATTENTION_PRESETS.quiet.maxVisionCallsPerDay },
+  },
+  balanced: {
+    label: "Balanced",
+    maxVerifiedActions: 40,
+    resourceBudget: { maxChannelReads: SELF_DIRECTED_ATTENTION_PRESETS.balanced.maxChannelReadsPerDay, maxHydrations: SELF_DIRECTED_ATTENTION_PRESETS.balanced.maxHydrationsPerDay, maxModelCalls: SELF_DIRECTED_ATTENTION_PRESETS.balanced.maxModelCallsPerDay, maxVisionCalls: SELF_DIRECTED_ATTENTION_PRESETS.balanced.maxVisionCallsPerDay },
+  },
+  expanded: {
+    label: "Expanded",
+    maxVerifiedActions: 90,
+    resourceBudget: { maxChannelReads: SELF_DIRECTED_ATTENTION_PRESETS.curious.maxChannelReadsPerDay, maxHydrations: SELF_DIRECTED_ATTENTION_PRESETS.curious.maxHydrationsPerDay, maxModelCalls: SELF_DIRECTED_ATTENTION_PRESETS.curious.maxModelCallsPerDay, maxVisionCalls: SELF_DIRECTED_ATTENTION_PRESETS.curious.maxVisionCallsPerDay },
+  },
+} as const;
+
+export type AssignmentPursuitScale = keyof typeof ASSIGNMENT_PURSUIT_SCALE_PRESETS;
+
+export function assignmentPursuitScaleForWindow(window: Pick<AssignmentPursuitWindow, "maxVerifiedActions" | "resourceBudget">): AssignmentPursuitScale | "custom" {
+  const match = (Object.entries(ASSIGNMENT_PURSUIT_SCALE_PRESETS) as Array<[AssignmentPursuitScale, typeof ASSIGNMENT_PURSUIT_SCALE_PRESETS[AssignmentPursuitScale]]>)
+    .find(([, preset]) => preset.maxVerifiedActions === window.maxVerifiedActions
+      && preset.resourceBudget.maxChannelReads === window.resourceBudget?.maxChannelReads
+      && preset.resourceBudget.maxHydrations === window.resourceBudget?.maxHydrations
+      && preset.resourceBudget.maxModelCalls === window.resourceBudget?.maxModelCalls
+      && preset.resourceBudget.maxVisionCalls === window.resourceBudget?.maxVisionCalls);
+  return match?.[0] ?? "custom";
+}
+
 const attentionBudgetKeys = ["maxModelCallsPerDay", "maxVisionCallsPerDay", "maxChannelReadsPerDay", "maxHydrationsPerDay"] as const;
 function attentionBudgetMatchesPreset(budget: NonNullable<SelfDirectedAttentionPolicy["budget"]> | undefined, preset: NonNullable<SelfDirectedAttentionPolicy["budget"]>) {
   return Boolean(budget) && attentionBudgetKeys.every((key) => budget?.[key] === preset[key]);
@@ -893,14 +924,14 @@ function periodEndKey(start: string, period: "day" | "week") {
   return date.toISOString().slice(0, 10);
 }
 
-export function derivePublishingProgress(source: OpenPresenceState, presenceId?: string, at: string | number | Date = new Date()): PublishingInitiativeProgress {
-  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+export function derivePublishingProgress(source: OpenPresenceState, presenceId?: string, at: string | number | Date = new Date(), options?: { normalized?: boolean }): PublishingInitiativeProgress {
+  const state = options?.normalized ? source : normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presences.find((item) => item.id === (presenceId ?? state.activePresenceId)) ?? state.presence;
   const initiative = normalizePublishingInitiative(presence?.publishingInitiative);
   const period = initiative.target?.period ?? "day";
   const periodStart = periodKey(at, period, initiative.timezone);
   const verifiedOriginals = presence
-    ? derivePublicHistory(state, presence.id).filter((item) => item.kind === "post" && !item.parentExternalRef && periodKey(item.occurredAt, period, initiative.timezone) === periodStart).length
+    ? derivePublicHistory(state, presence.id, { normalized: true }).filter((item) => item.kind === "post" && !item.parentExternalRef && periodKey(item.occurredAt, period, initiative.timezone) === periodStart).length
     : 0;
   const target = initiative.mode === "pace" ? initiative.target?.count : undefined;
   const reviewWaiting = presence ? state.executions.some((execution) => execution.presenceId === presence.id && execution.affordance === "post" && execution.status === "awaiting-review") : false;
@@ -927,8 +958,8 @@ function publishingPlanPriority(plan: PublishingPlan) {
   return plan.status === "active" ? 1 : 0;
 }
 
-export function derivePublishingPlanProjection(source: OpenPresenceState, presenceId?: string, at: string | number | Date = new Date()): PublishingPlan | undefined {
-  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+export function derivePublishingPlanProjection(source: OpenPresenceState, presenceId?: string, at: string | number | Date = new Date(), options?: { normalized?: boolean }): PublishingPlan | undefined {
+  const state = options?.normalized ? source : normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presences.find((item) => item.id === (presenceId ?? state.activePresenceId)) ?? state.presence;
   if (!presence || presence.publishingInitiative.mode === "off") return undefined;
   const environment = planEnvironmentFor(presence);
@@ -937,7 +968,7 @@ export function derivePublishingPlanProjection(source: OpenPresenceState, presen
     .sort((left, right) => publishingPlanPriority(right) - publishingPlanPriority(left) || right.revision - left.revision || right.updatedAt.localeCompare(left.updatedAt))[0];
   if (!plan) return undefined;
   const atMs = at instanceof Date ? at.getTime() : typeof at === "number" ? at : new Date(at).getTime();
-  const verifiedOriginals = derivePublicHistory(state, presence.id).filter((item) => item.kind === "post" && !item.parentExternalRef && item.environment === environment && new Date(item.occurredAt).getTime() >= new Date(plan.horizonStart).getTime() && new Date(item.occurredAt).getTime() <= new Date(plan.horizonEnd).getTime()).length;
+  const verifiedOriginals = derivePublicHistory(state, presence.id, { normalized: true }).filter((item) => item.kind === "post" && !item.parentExternalRef && item.environment === environment && new Date(item.occurredAt).getTime() >= new Date(plan.horizonStart).getTime() && new Date(item.occurredAt).getTime() <= new Date(plan.horizonEnd).getTime()).length;
   const windows = plan.windows.map((window) => ({ ...window, status: window.status === "completed" ? "completed" as const : atMs >= new Date(window.endAt).getTime() ? "completed" as const : atMs >= new Date(window.startAt).getTime() ? "active" as const : "future" as const }));
   return { ...plan, verifiedOriginals, windows };
 }
@@ -1520,8 +1551,8 @@ function publicHistoryExternalUrl(state: OpenPresenceState, presence: Presence, 
  * intent or execution queue. Delivery records are joined as provenance and
  * outcome evidence; they do not create public-history truth on their own.
  */
-export function derivePublicHistory(source: OpenPresenceState, presenceId?: string): PublicHistoryItem[] {
-  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+export function derivePublicHistory(source: OpenPresenceState, presenceId?: string, options?: { normalized?: boolean }): PublicHistoryItem[] {
+  const state = options?.normalized ? source : normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presences = presenceId ? state.presences.filter((item) => item.id === presenceId) : state.presences;
   const result = new Map<string, PublicHistoryItem>();
   for (const presence of presences) {
@@ -1701,8 +1732,8 @@ const considerationTimingLabel = (time: string, value: string) => {
   return `custom consideration ${start}–${end}`;
 };
 
-export function deriveActivitySummary(source: OpenPresenceState, presenceId?: string): ActivitySummary {
-  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+export function deriveActivitySummary(source: OpenPresenceState, presenceId?: string, options?: { normalized?: boolean }): ActivitySummary {
+  const state = options?.normalized ? source : normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presences.find((item) => item.id === (presenceId ?? state.activePresenceId)) ?? state.presence;
   const activitySessionIds = new Set(
     state.playgroundSessions
@@ -1862,8 +1893,8 @@ export function deriveActivitySummary(source: OpenPresenceState, presenceId?: st
     replies: activityModeLabel(presence?.execution.reply ?? presence?.execution.comment),
     quietHours: quietHoursLabel(presence?.quietHours),
   };
-  const publishingInitiative = derivePublishingProgress(state, presence?.id);
-  return { current, lastPulseAt: pulseEvent?.time, nextAttention, nextIntent, needsAttention: { count: reviewCount, label: reviewCount ? "Needs review" : "No review items", detail: reviewCount ? `${reviewCount} action${reviewCount === 1 ? "" : "s"} waiting for approval.` : "Nothing is waiting for your decision." }, rhythm, publishingInitiative, publishingPlan: derivePublishingPlanProjection(state, presence?.id) };
+  const publishingInitiative = derivePublishingProgress(state, presence?.id, new Date(), { normalized: true });
+  return { current, lastPulseAt: pulseEvent?.time, nextAttention, nextIntent, needsAttention: { count: reviewCount, label: reviewCount ? "Needs review" : "No review items", detail: reviewCount ? `${reviewCount} action${reviewCount === 1 ? "" : "s"} waiting for approval.` : "Nothing is waiting for your decision." }, rhythm, publishingInitiative, publishingPlan: derivePublishingPlanProjection(state, presence?.id, new Date(), { normalized: true }) };
 }
 
 function growthAssignmentFor(source: OpenPresenceState, presenceId: string, assignmentId?: string) {
@@ -6786,6 +6817,33 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     if (["draft", "paused", "blocked", "needs_operator"].includes(assignment.status)) assignment.status = "active";
     assignment.updatedAt = timestamp;
     state.events.unshift(event("decision", "Distribution push started", `${presence.name} will pursue the existing distribution responsibility more intensely until ${deadlineAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}, with capacity for up to ${maxVerifiedActions} qualified verified actions. This is a ceiling, not a quota.`, "positive", { presenceId: presence.id, sourceObjectId: assignment.id }));
+    return state;
+  }
+  if (operation.type === "scaleAssignmentPursuit") {
+    const window = (state.assignmentPursuitWindows ?? []).find((item) => item.id === operation.id);
+    if (!window || pursuitTerminalStatuses.has(window.status)) return state;
+    const assignment = state.assignments.find((item) => item.id === window.assignmentId);
+    const presence = state.presences.find((item) => item.id === window.presenceId);
+    if (!assignment || !presence) return state;
+    const counts = assignmentPursuitVerifiedCounts(state, window);
+    const pending = state.executions.filter((item) => item.assignmentId === window.assignmentId && item.presenceId === window.presenceId && !["failed", "blocked", "cancelled", "expired", "verification-closed"].includes(item.status)).length;
+    const requestedCapacity = Math.max(1, Math.min(100, Math.floor(operation.maxVerifiedActions)));
+    const timestamp = now();
+    const usage = assignmentPursuitUsage(state, window);
+    window.maxVerifiedActions = Math.max(requestedCapacity, counts.verified + pending);
+    window.maxActionsPerHour = operation.maxActionsPerHour ?? window.maxActionsPerHour;
+    if (operation.resourceBudget) {
+      window.resourceBudget = {
+        maxChannelReads: Math.max(operation.resourceBudget.maxChannelReads ?? 0, usage.channelReads + 1) || undefined,
+        maxHydrations: Math.max(operation.resourceBudget.maxHydrations ?? 0, usage.hydrations + 1) || undefined,
+        maxModelCalls: Math.max(operation.resourceBudget.maxModelCalls ?? 0, usage.modelCalls + 1) || undefined,
+        maxVisionCalls: Math.max(operation.resourceBudget.maxVisionCalls ?? 0, usage.visionCalls + 1) || undefined,
+        maxEstimatedCostCents: operation.resourceBudget.maxEstimatedCostCents,
+      };
+    }
+    window.nextRunAt = window.status === "active" ? timestamp : window.nextRunAt;
+    window.updatedAt = timestamp;
+    state.events.unshift(event("decision", "Distribution push scaled", `${presence.name} now has ${window.maxVerifiedActions} spaces for qualified verified outcomes. The ${window.status} push keeps the same quality bar and will not force activity.`, "positive", { presenceId: presence.id, sourceObjectId: assignment.id }));
     return state;
   }
   if (operation.type === "pauseAssignmentPursuit" || operation.type === "resumeAssignmentPursuit" || operation.type === "cancelAssignmentPursuit") {

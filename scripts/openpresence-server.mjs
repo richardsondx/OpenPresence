@@ -62,6 +62,51 @@ const port = process.env.OPENPRESENCE_PORT || "3015";
 // build artifacts isolated so one dev server cannot invalidate another
 // server's route manifests while Chrome is exercising the interface.
 const nextDistDir = process.env.OPENPRESENCE_NEXT_DIST_DIR || `.next-${port}`;
+const serverLockPath = `${dbPath}.server-lock`;
+let serverLockFd;
+function processIsAlive(processId) {
+  if (!Number.isInteger(processId) || processId <= 0) return false;
+  try {
+    process.kill(processId, 0);
+    return true;
+  } catch (error) {
+    return error?.code === "EPERM";
+  }
+}
+function acquireServerLock() {
+  const lockContents = JSON.stringify({ pid: process.pid, port, startedAt: new Date().toISOString() });
+  try {
+    serverLockFd = fs.openSync(serverLockPath, "wx", 0o600);
+    fs.writeFileSync(serverLockFd, lockContents);
+    return;
+  } catch (error) {
+    if (error?.code !== "EEXIST") throw error;
+  }
+
+  let existing;
+  try {
+    existing = JSON.parse(fs.readFileSync(serverLockPath, "utf8"));
+  } catch {
+    throw new Error(`OpenPresence database is already starting or has an unreadable server lock: ${serverLockPath}`);
+  }
+  if (processIsAlive(Number(existing?.pid))) {
+    throw new Error(`OpenPresence database is already served by process ${existing.pid} on port ${existing.port ?? "unknown"}. Stop that server before starting another one against ${dbPath}.`);
+  }
+  try {
+    fs.unlinkSync(serverLockPath);
+  } catch (unlinkError) {
+    throw new Error(`OpenPresence found a stale server lock but could not remove it: ${serverLockPath}. ${unlinkError instanceof Error ? unlinkError.message : String(unlinkError)}`);
+  }
+  serverLockFd = fs.openSync(serverLockPath, "wx", 0o600);
+  fs.writeFileSync(serverLockFd, lockContents);
+}
+function releaseServerLock() {
+  if (serverLockFd === undefined) return;
+  try { fs.closeSync(serverLockFd); } catch { /* process is already exiting */ }
+  serverLockFd = undefined;
+  try { fs.unlinkSync(serverLockPath); } catch { /* another process may have repaired a stale lock */ }
+}
+acquireServerLock();
 const publicationSigningKeyPath = path.join(path.dirname(dbPath), ".publication-signing-key");
 const localSecretKeyPath = path.join(path.dirname(dbPath), ".secret-key");
 const localSecretKey = process.env.OPENPRESENCE_SECRET_KEY || (() => {
@@ -97,6 +142,11 @@ const child = spawn("pnpm", ["exec", "next", mode, "-p", port], {
   stdio: "inherit",
 });
 
+child.on("error", (error) => {
+  releaseServerLock();
+  throw error;
+});
+
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
     child.kill(signal);
@@ -104,6 +154,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 child.on("exit", (code, signal) => {
+  releaseServerLock();
   if (signal) process.kill(process.pid, signal);
   process.exit(code ?? 1);
 });

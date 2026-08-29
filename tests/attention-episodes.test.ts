@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { createAttentionEpisode, linkAttentionEpisodeRecords, summarizeAttentionEpisode } from "../lib/attention-episodes";
+import { createAttentionEpisode, linkAttentionEpisodeRecords, reconcileOrphanedAttentionEpisodes, summarizeAttentionEpisode } from "../lib/attention-episodes";
 import { createAgent, initialState } from "../lib/runtime";
 import type { Execution, MirrorObject, Outcome, SocialDecision, SocialIntent } from "../lib/types";
 
@@ -17,6 +17,7 @@ describe("Attention Episodes", () => {
       id: "mirror_episode_test",
       presenceId: presence.id,
       channelId: "x",
+      bridgeId: "bridge_episode_test",
       externalRef: { type: "x.post", id: "post_episode_test" },
       objectType: "post",
       author: { displayName: "Author", handle: "author" },
@@ -42,7 +43,7 @@ describe("Attention Episodes", () => {
 
     state = linkAttentionEpisodeRecords(state, episodeId, { mirrorObjectIds: [mirror.id], decisionIds: [decision.id], intentIds: [intent.id], executionIds: [execution.id], outcomeIds: [outcome.id] });
     state = summarizeAttentionEpisode(state, episodeId);
-    const episode = state.attentionEpisodes.find((item) => item.id === episodeId)!;
+    const episode = (state.attentionEpisodes ?? []).find((item) => item.id === episodeId)!;
 
     expect(episode.mirrorObjectIds).toContain(mirror.id);
     expect(episode.socialDecisionIds).toContain(decision.id);
@@ -62,7 +63,7 @@ describe("Attention Episodes", () => {
     state = created.state;
     state.executions.unshift({ id: "execution_waiting", presenceId: presence.id, socialIntentId: "intent_waiting", affordance: "x.repost", status: "queued", runId: "run_episode_waiting" } as unknown as Execution);
     state = summarizeAttentionEpisode(state, created.episode.id, { status: "waiting", stage: "confirming" });
-    const episode = state.attentionEpisodes.find((item) => item.id === created.episode.id)!;
+    const episode = (state.attentionEpisodes ?? []).find((item) => item.id === created.episode.id)!;
     expect(episode.status).toBe("waiting");
     expect(episode.stage).toBe("confirming");
     expect(episode.pendingExecutionCount).toBe(1);
@@ -76,7 +77,7 @@ describe("Attention Episodes", () => {
     state.presences = [presence];
     const created = createAttentionEpisode(state, { presenceId: presence.id, runId: "run_episode_summary" });
     state = summarizeAttentionEpisode(created.state, created.episode.id);
-    expect(state.attentionEpisodes[0].summary).toContain("0 actions selected");
+    expect(state.attentionEpisodes?.[0]?.summary).toContain("0 actions selected");
 
     state.socialDecisions.unshift({
       id: "decision_episode_summary",
@@ -88,6 +89,48 @@ describe("Attention Episodes", () => {
       createdAt: new Date().toISOString(),
     } as unknown as SocialDecision);
     state = summarizeAttentionEpisode(state, created.episode.id);
-    expect(state.attentionEpisodes[0].summary).toContain("1 action selected");
+    expect(state.attentionEpisodes?.[0]?.summary).toContain("1 action selected");
+  });
+
+  it("settles stale running episodes that have no durable attention run owner", () => {
+    const state = initialState();
+    const old = "2026-08-29T11:00:00.000Z";
+    state.attentionEpisodes = [{
+      id: "orphan_episode",
+      agentId: "agent",
+      presenceId: "presence",
+      channel: "x",
+      environment: "live",
+      source: "scheduled",
+      status: "running",
+      stage: "choosing",
+      startedAt: old,
+      updatedAt: old,
+      runIds: ["missing_run"],
+      mirrorObjectIds: [],
+      newMirrorObjectIds: [],
+      changedMirrorObjectIds: [],
+      socialDecisionIds: [],
+      socialIntentIds: [],
+      executionIds: [],
+      outcomeIds: [],
+      fetchedCount: 1,
+      newCount: 1,
+      changedCount: 0,
+      knownCount: 0,
+      consideredCount: 0,
+      closeAttentionCount: 0,
+      noOpCount: 0,
+      actionCounts: {},
+      verifiedOutcomeCount: 0,
+      pendingExecutionCount: 0,
+      failedExecutionCount: 0,
+      resourceUsage: { channelReads: 1, channelWrites: 0, modelCalls: 0, visionCalls: 0, hydrations: 0, mediaFetches: 0 },
+      steps: [],
+    }];
+
+    expect(reconcileOrphanedAttentionEpisodes(state, new Date("2026-08-29T12:00:00.000Z"))).toBe(1);
+    expect(state.attentionEpisodes[0]).toMatchObject({ status: "failed", stage: "completed", completedAt: "2026-08-29T12:00:00.000Z" });
+    expect(state.attentionEpisodes[0].lastError).toContain("no longer owns");
   });
 });

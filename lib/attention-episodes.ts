@@ -14,6 +14,7 @@ import type {
 
 const pendingExecutionStatuses = new Set(["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"]);
 const terminalFailureStatuses = new Set(["failed", "blocked", "expired", "cancelled", "verification-closed"]);
+const liveAttentionRunStates = new Set(["queued", "running", "waiting", "recovering", "delivery_uncertain", "reconciling"]);
 
 const clone = <T>(value: T): T => JSON.parse(JSON.stringify(value)) as T;
 const episodeId = () => `attention_${Date.now()}_${Math.random().toString(36).slice(2, 8)}`;
@@ -215,6 +216,41 @@ export function summarizeAttentionEpisode(
 
 export function attentionEpisodeForRun(state: OpenPresenceState, runId: string) {
   return state.attentionEpisodes?.find((episode) => episode.runIds.includes(runId) || (state.operationalRuns ?? []).some((run) => run.id === runId && run.attentionEpisodeId === episode.id));
+}
+
+/**
+ * Settle an attention episode that outlived every durable worker run.
+ *
+ * A running episode without a queued/running/waiting run is not recoverable
+ * work; leaving it active makes Activity look permanently busy and causes
+ * every read model to carry an orphaned transcript. Delivery/verification
+ * episodes are deliberately excluded here because their waiting run is the
+ * conservative owner of uncertain external state.
+ */
+export function reconcileOrphanedAttentionEpisodes(source: OpenPresenceState, now = new Date(), staleAfterMs = 120_000) {
+  const nowMs = now.getTime();
+  const nowIso = now.toISOString();
+  const liveRuns = (source.operationalRuns ?? []).filter((run) => run.kind === "attention" && liveAttentionRunStates.has(run.state));
+  const liveRunIds = new Set(liveRuns.map((run) => run.id));
+  const episodeIdsWithLiveRuns = new Set(liveRuns.map((run) => run.attentionEpisodeId).filter((id): id is string => Boolean(id)));
+  let repaired = 0;
+  source.attentionEpisodes = (source.attentionEpisodes ?? []).map((episode) => {
+    if (episode.status !== "running") return episode;
+    const hasLiveOwner = episodeIdsWithLiveRuns.has(episode.id) || episode.runIds.some((runId) => liveRunIds.has(runId));
+    const updatedMs = new Date(episode.updatedAt).getTime();
+    if (hasLiveOwner || !Number.isFinite(updatedMs) || nowMs - updatedMs < staleAfterMs) return episode;
+    repaired += 1;
+    return {
+      ...episode,
+      status: "failed" as const,
+      stage: "completed" as const,
+      completedAt: nowIso,
+      updatedAt: nowIso,
+      lastError: "The attention worker no longer owns this episode after a process restart or lease expiry.",
+      summary: "The attention pass stopped before it could settle; no new public action is inferred from the incomplete record.",
+    };
+  });
+  return repaired;
 }
 
 export function executionIsPending(execution: Execution) {

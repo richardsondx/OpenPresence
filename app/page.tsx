@@ -803,6 +803,7 @@ export default function Home() {
   const [selectedFile, setSelectedFile] = useState<FileKind>("BRAIN");
   const [pendingOperation, setPendingOperation] = useState<string | null>(null);
   const stateEtag = useRef<string | null>(null);
+  const initialStateLoaded = useRef(false);
   const attentionOperationInFlight = useRef(false);
   // A scheduled attention request can race another tab, the bridge, or a
   // worker. Keep the conflict visible without immediately re-triggering the
@@ -838,7 +839,10 @@ export default function Home() {
         syncBrowserWorkspaceContext(payload);
       })
       .catch((reason: unknown) => setError(clientErrorMessage(reason, "Unable to load local state")))
-      .finally(() => setLoading(false));
+      .finally(() => {
+        initialStateLoaded.current = true;
+        setLoading(false);
+      });
   }, [fetchState]);
   useEffect(() => {
     if (state?.onboarded) window.scrollTo({ top: 0, left: 0 });
@@ -849,7 +853,10 @@ export default function Home() {
     return () => window.removeEventListener("popstate", onPopState);
   }, []);
   useEffect(() => {
-    if (!state || loading) return;
+    // The initial request already uses the correct Activity/full projection.
+    // Do not immediately issue a second identical GET when `loading` flips
+    // false; only route changes need a follow-up projection refresh.
+    if (!state || loading || !initialStateLoaded.current) return;
     // Activity uses a small projection; hydrate the full workspace when an
     // information-heavy view is opened instead of making the first Activity
     // paint wait for unrelated Agent history.
@@ -8776,7 +8783,7 @@ function LiveView({
               : undefined;
   const checking = !runtimeUnavailable && !truthfullyPaused && (pendingOperation === "runPulse" || pendingOperation === "runAttentionWorker" || pendingOperation === "syncNativeX" || isNativeSyncing || Boolean(activeObservationRun));
   const runningAssignment = !runtimeUnavailable && pendingOperation === "runLiveAssignment";
-  const activity = deriveActivitySummary(state, selected?.id);
+  const activity = deriveActivitySummary(state, selected?.id, { normalized: true });
   const attentionPlan = compileAgendaWork(state, selected?.id);
   const pendingMentionItems = (attentionPlan.workItems ?? []).filter((item) => item.source === "mention");
   const pendingMentionCount = attentionPlan.pendingMentionCount ?? pendingMentionItems.length;
@@ -9544,7 +9551,7 @@ function LiveView({
           ? "Completed"
           : "Waiting";
   const activityHistory = selected
-    ? derivePublicHistory(state, selected.id)
+    ? derivePublicHistory(state, selected.id, { normalized: true })
       .filter((item) => publicHistoryMatchesPresence(item, selected))
       .filter((item) => activityEnvironment === "sandbox" ? item.environment === "sandbox" : item.environment !== "sandbox")
     : [];

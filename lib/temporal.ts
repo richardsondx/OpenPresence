@@ -20,6 +20,7 @@ import { settleAttentionResponsibility } from "./attention-responsibility";
 import { bridgeExecutionStatus } from "./bridge-contract";
 import { scheduledAssignmentIsDue } from "./runtime";
 import { assignmentRunBlocksNewWork, isAutonomousPreWriteDeliveryFailure, reconcileLiveAssignmentRuns } from "./live-assignment-run";
+import { reconcileOrphanedAttentionEpisodes } from "./attention-episodes";
 import type {
   JsonValue,
   Execution,
@@ -520,13 +521,22 @@ export function runOperationalSweep(now = new Date()): SweepResult {
     const execution = (stateView.executions ?? []).find((item) => item.assignmentId === run.assignmentId && item.presenceId === run.presenceId && (item.runId === run.id || (!item.runId && item.createdAt >= (run.startedAt ?? run.createdAt))));
     return Boolean(execution && isAutonomousPreWriteDeliveryFailure(execution));
   });
-  const state = hasExpiredQueuedExecution || hasStaleBridgeExecution || hasAutonomousPreWriteFailure ? readState() : stateView;
+  const hasOrphanedAttentionEpisode = (stateView.attentionEpisodes ?? []).some((episode) => {
+    if (episode.status !== "running") return false;
+    const updatedAt = new Date(episode.updatedAt).getTime();
+    if (!Number.isFinite(updatedAt) || now.getTime() - updatedAt < 120_000) return false;
+    return !(stateView.operationalRuns ?? []).some((run) => run.kind === "attention"
+      && ["queued", "running", "waiting", "recovering", "delivery_uncertain", "reconciling"].includes(run.state)
+      && (run.attentionEpisodeId === episode.id || episode.runIds.includes(run.id)));
+  });
+  const state = hasExpiredQueuedExecution || hasStaleBridgeExecution || hasAutonomousPreWriteFailure || hasOrphanedAttentionEpisode ? readState() : stateView;
   // A disconnected Bridge cannot perform claim-time expiry. Close stale
   // pre-dispatch intents here so the queue has a bounded lifetime and never
   // presents an undeliverable action as permanently in flight.
   const expiredQueuedExecutions = hasExpiredQueuedExecution ? expireQueuedDeliveryWindows(state, now) : 0;
   const staleBridgeExecutions = hasStaleBridgeExecution ? closeStaleBridgeExecutions(state, now) : 0;
-  if (hasAutonomousPreWriteFailure || expiredQueuedExecutions > 0 || staleBridgeExecutions > 0) {
+  const repairedAttentionEpisodes = hasOrphanedAttentionEpisode ? reconcileOrphanedAttentionEpisodes(state, now) : 0;
+  if (hasAutonomousPreWriteFailure || expiredQueuedExecutions > 0 || staleBridgeExecutions > 0 || repairedAttentionEpisodes > 0) {
     reconcileLiveAssignmentRuns(state, now.getTime());
     writeState(state, { advanceWorkspaceRevision: false });
   }
