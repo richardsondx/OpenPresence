@@ -1828,16 +1828,6 @@ export function recordProcessHeartbeat(processId: string, processType: ProcessHe
   `).run(processId, processType, nowIso, metadata ? JSON.stringify(metadata) : null);
 }
 
-/**
- * Verify the already-open canonical database on demand. Startup performs the
- * same check before migrations; this second entry point is intentionally used
- * only to reconcile a historical corruption incident after a controlled
- * recovery, not on every ordinary health poll.
- */
-export function databaseIntegrityCheck(): boolean {
-  return sqlite.pragma("quick_check", { simple: true }) === "ok";
-}
-
 export function getProcessHeartbeats(): ProcessHeartbeat[] {
   const rows = sqlite.prepare("SELECT process_id, process_type, last_heartbeat_at, metadata FROM process_heartbeats").all() as Array<{
     process_id: string;
