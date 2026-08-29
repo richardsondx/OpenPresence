@@ -67,6 +67,14 @@ const sqlite = (() => {
   const existing = sqlitePool.get(resolvedDbPath);
   if (existing) return existing;
   const created = new Database(resolvedDbPath);
+  // Refuse to run migrations or autonomous writes against a structurally
+  // corrupt file. Starting in that state can turn a recoverable snapshot into
+  // a moving target and makes the eventual repair much less trustworthy.
+  const integrity = created.pragma("quick_check", { simple: true });
+  if (integrity !== "ok") {
+    created.close();
+    throw new Error(`OpenPresence database ${resolvedDbPath} failed SQLite integrity check: ${String(integrity)}. Refusing to start; restore a validated backup before continuing.`);
+  }
   created.pragma("journal_mode = WAL");
   // Chrome Bridge heartbeats and the Presence worker can touch the same local
   // database concurrently. Wait briefly for the writer instead of surfacing a

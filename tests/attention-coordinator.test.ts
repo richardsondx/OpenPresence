@@ -1,9 +1,9 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import { requestAttention } from "../lib/attention-coordinator";
 import { settleAttentionResponsibility } from "../lib/attention-responsibility";
 import { claimDueScheduledWakes, listOperationalRuns, listScheduledWakes, upsertOperationalRun } from "../lib/db";
 import { initialState } from "../lib/runtime";
-import { runOperationalSweep } from "../lib/temporal";
+import { runOperationalSweep, scheduleOperationalSweep, stopTemporalEngine } from "../lib/temporal";
 import type { AttentionEpisode, Execution, OperationalRun } from "../lib/types";
 
 const now = () => new Date().toISOString();
@@ -14,6 +14,17 @@ function attentionRun(presenceId: string, patch: Partial<OperationalRun> = {}): 
 }
 
 describe("durable Attention coordinator", () => {
+  it("coalesces request-driven sweep hints into one scheduled pass", () => {
+    vi.useFakeTimers();
+    try {
+      expect(scheduleOperationalSweep()).toBe(true);
+      expect(scheduleOperationalSweep()).toBe(false);
+    } finally {
+      stopTemporalEngine();
+      vi.useRealTimers();
+    }
+  });
+
   it("merges simultaneous scheduler, inbound, assignment, and operator signals into one wake", () => {
     const presenceId = `presence_signal_${Date.now()}_${Math.random()}`;
     requestAttention(presenceId, "scheduled_observation");

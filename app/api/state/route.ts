@@ -15,7 +15,7 @@ import { assignmentPublicExpressionLeakageReason } from "@/lib/runtime";
 import { activeAssignmentPursuitWindow, assignmentPursuitCanSpend, assignmentPursuitUsage, assignmentPursuitVerifiedCounts } from "@/lib/runtime";
 import { attentionGovernorSnapshot, requestAttentionCapacity } from "@/lib/attention-governor";
 import { requestAttention } from "@/lib/attention-coordinator";
-import { pauseExhaustedAssignmentPursuits, runOperationalSweep } from "@/lib/temporal";
+import { pauseExhaustedAssignmentPursuits, runOperationalSweep, scheduleOperationalSweep } from "@/lib/temporal";
 import { deriveActivityNow } from "@/lib/activity-now";
 import { createOperatorNudge, directWatchQuery, isBurstStatusQuestion, operatorBurstStatusReply, operatorNudgeReceipt, recordOperatorConversationMessage, recordNudgeAssignmentHandoff, releasePausedNudges, settleNudgeFromAssignment } from "@/lib/operator-chat";
 
@@ -5046,7 +5046,7 @@ export async function POST(request: Request) {
       if (presence?.status === "live") {
         const receipt = requestAttention(parsed.presenceId, "operator_nudge", new Date().toISOString(), "broad");
         if (isTestRuntime()) await runOperationalSweep();
-        else setImmediate(() => void runOperationalSweep());
+        else scheduleOperationalSweep();
         return stateResponse(request, next, { runId: receipt.runId ?? receipt.wake?.id });
       }
       return stateResponse(request, next);
@@ -5064,7 +5064,7 @@ export async function POST(request: Request) {
       if (presence.status === "live") {
         const receipt = requestAttention(parsed.presenceId, "operator_nudge", new Date().toISOString(), "broad");
         if (isTestRuntime()) await runOperationalSweep();
-        else setImmediate(() => void runOperationalSweep());
+        else scheduleOperationalSweep();
         return stateResponse(request, current, { runId: receipt.runId ?? receipt.wake?.id });
       }
       return stateResponse(request, current);
@@ -5085,7 +5085,7 @@ export async function POST(request: Request) {
       if (scheduled.created && scheduled.run) dispatchLiveAssignmentWorker(scheduled.run.id);
       const receipt = requestAttention(presence.id, "operator_check", new Date().toISOString(), "broad");
       if (isTestRuntime()) await runOperationalSweep();
-      else setImmediate(() => void runOperationalSweep());
+      else scheduleOperationalSweep();
       return stateResponse(request, next, { runId: receipt.runId ?? receipt.wake?.id, receiptOnly: true });
     }
     if (parsed.type === "runAttentionWorker") {
@@ -5098,7 +5098,7 @@ export async function POST(request: Request) {
       // operator is not blocked behind native observation/model judgment;
       // the scheduler owns execution and Activity reports the verified result.
       if (isTestRuntime()) await runOperationalSweep();
-      else setImmediate(() => void runOperationalSweep());
+      else scheduleOperationalSweep();
       const run = receipt.runId
         ? listOperationalRuns(presenceId).find((item) => item.id === receipt.runId)
         : listOperationalRuns(presenceId).find((item) => item.kind === "attention" && item.attention?.signalIds.includes(receipt.signalId));
@@ -6310,7 +6310,7 @@ export async function POST(request: Request) {
         const requested = recordRuntimeEvent(next, presenceId, receipt.runId ? "Check joined active attention" : "Check requested", receipt.runId ? "The signal joined the current Attention responsibility." : `${expectedPresence.name} will observe, judge, and verify any warranted act in one durable run.`, "positive", { runId: receipt.runId });
         writeState(requested);
         if (isTestRuntime()) await runOperationalSweep();
-        else setImmediate(() => void runOperationalSweep());
+        else scheduleOperationalSweep();
         const run = receipt.runId
           ? listOperationalRuns(presenceId).find((item) => item.id === receipt.runId)
           : listOperationalRuns(presenceId).find((item) => item.kind === "attention" && item.attention?.signalIds.includes(receipt.signalId));

@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readNativeXCredentials, readRecentXMentions, readRecentXPosts, readXAudienceSnapshot, readXPublicationMetrics, readXPostsByIds, searchRecentXPosts, type XRecentPost } from "./x";
 import { detectDuplicatePublicOutcomes } from "./public-action-safety";
-import { applyOperation, intervalForPresence, markNativeConnectionNeedsAttention, recordNativeMirrors, recordNativeMirrorDeletion, recordNativeObservation, recordPublicFooting, recordResourceUsageEvent, recordRuntimeEvent, recordPublicRequestsFromMirrors, recordWatchSignals } from "./runtime";
+import { applyOperation, intervalForPresence, markNativeConnectionNeedsAttention, recordNativeMirrors, recordNativeMirrorDeletion, recordNativeObservation, recordPublicFooting, recordResourceUsageEvent, recordRuntimeEvent, recordPublicRequestsFromMirrors, recordWatchSignals, recordPublicationMetricSnapshots } from "./runtime";
 import { normalizeHandle } from "./x";
 import { languagesMatch } from "./language-policy";
 import type { EntityRef, MirrorObject, OpenPresenceState, Presence, PresenceQuietHours } from "./types";
@@ -239,15 +239,19 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
       const ownMirrorObjects = next.mirrorObjects.filter((item) => item.presenceId === presenceId && item.actorPresenceId === presenceId && item.environment === "live" && !item.archived && item.externalRef.type === "x.post").slice(0, 100);
       next = recordResourceUsageEvent(next, { presenceId, invocationId: `x-reconcile:${randomUUID()}`, runId: options?.runId, originKind: "other", attentionSource: "inbound_social", category: "channel_read", provider: "x", usage: { requests: 1 }, attentionEpisodeId: options?.attentionEpisodeId });
       const metrics = await readXPublicationMetrics(credentials, ownMirrorObjects.map((item) => item.externalRef.id));
+      const metricOperations: Array<Parameters<typeof recordPublicationMetricSnapshots>[1][number]> = [];
+      const seenMetricBuckets = new Set(next.publicationMetricSnapshots.map((item) => `${item.mirrorObjectId}:${Math.round(item.publicationAgeSeconds / 3600)}`));
       for (const metric of metrics) {
         const mirror = ownMirrorObjects.find((item) => item.externalRef.id === metric.id);
         if (!mirror) continue;
         const ageSeconds = Math.max(0, Math.round((Date.now() - new Date(mirror.occurredAt ?? mirror.observedAt).getTime()) / 1000));
         const ageBucket = Math.round(ageSeconds / 3600);
-        const duplicate = next.publicationMetricSnapshots.some((item) => item.mirrorObjectId === mirror.id && Math.round(item.publicationAgeSeconds / 3600) === ageBucket);
-        if (duplicate) continue;
-        next = applyOperation(next, { type: "recordPublicationMetricSnapshot", presenceId, mirrorObjectId: mirror.id, publicationAgeSeconds: ageSeconds, metrics: { impressions: metric.impressions, likes: metric.likes, replies: metric.replies, reposts: metric.reposts, quotes: metric.quotes }, source: "native" });
+        const metricKey = `${mirror.id}:${ageBucket}`;
+        if (seenMetricBuckets.has(metricKey)) continue;
+        seenMetricBuckets.add(metricKey);
+        metricOperations.push({ type: "recordPublicationMetricSnapshot", presenceId, mirrorObjectId: mirror.id, publicationAgeSeconds: ageSeconds, metrics: { impressions: metric.impressions, likes: metric.likes, replies: metric.replies, reposts: metric.reposts, quotes: metric.quotes }, source: "native" });
       }
+      if (metricOperations.length) next = recordPublicationMetricSnapshots(next, metricOperations);
     } catch (error) {
       next = recordRuntimeEvent(next, presenceId, "Publication measurement unavailable", error instanceof Error ? error.message : "X did not return publication metrics.", "warning");
     }

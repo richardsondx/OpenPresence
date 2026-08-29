@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyOperation, audienceDeltas, capabilityProviderLabel, collapseAudienceSnapshots, compileAssignmentInstruction, completeNativeExecution, derivePresenceCapabilityManifest, formChatPostIntent, formXActionIntent, formXReplyIntent, publicationMetricBaseline, recordVerifiedFollow } from "@/lib/runtime";
+import { applyOperation, audienceDeltas, capabilityProviderLabel, collapseAudienceSnapshots, compileAssignmentInstruction, completeNativeExecution, derivePresenceCapabilityManifest, formChatPostIntent, formXActionIntent, formXReplyIntent, publicationMetricBaseline, recordPublicationMetricSnapshots, recordVerifiedFollow } from "@/lib/runtime";
 import { createAgent } from "@/lib/runtime";
 import type { MirrorObject, OpenPresenceState } from "@/lib/types";
 import { nextSelfDirectedAttentionAt, recurringAttentionOperation, selectBridgeDiscoveryCandidates, selectGrowthDiscoverySource } from "@/lib/growth-scheduler";
@@ -159,6 +159,16 @@ describe("continuous growth responsibility", () => {
     const latest = next.publicationMetricSnapshots[0];
     expect(publicationMetricBaseline(next, latest).comparableCount).toBe(2);
     expect(audienceDeltas(next, presenceId).current).toBeUndefined();
+  });
+
+  it("records a publication-metric batch without dropping measurements or events", () => {
+    const state = fixture();
+    const presenceId = state.presence!.id;
+    const presence = { ...state.presence!, createdAt: "2026-08-14T00:00:00.000Z" };
+    const mirrors: MirrorObject[] = Array.from({ length: 100 }, (_, index) => ({ id: `metric-${index}`, bridgeId: "native:test", presenceId, channelId: "x", externalRef: { type: "x.post", id: `post-${index}` }, objectType: "post", author: { displayName: "Genny", handle: "genny" }, content: { text: `post-${index}` }, observedAt: "2026-08-16T00:00:00.000Z", occurredAt: "2026-08-15T23:00:00.000Z", visibility: "public", shareability: "presence-only", environment: "live", source: "native", trust: "untrusted_world_content" }));
+    const next = recordPublicationMetricSnapshots({ ...state, presence, presences: [presence], mirrorObjects: mirrors }, mirrors.map((mirror) => ({ type: "recordPublicationMetricSnapshot" as const, presenceId, mirrorObjectId: mirror.id, publicationAgeSeconds: 3600, metrics: { impressions: 100 }, source: "native" as const })));
+    expect(next.publicationMetricSnapshots).toHaveLength(100);
+    expect(next.events.filter((event) => event.title === "Publication performance observed")).toHaveLength(100);
   });
 
   it("does not baseline a pre-Presence publication just because its metric was collected later", () => {

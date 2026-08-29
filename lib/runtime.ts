@@ -403,8 +403,8 @@ export function audienceDeltas(source: OpenPresenceState, presenceId: string) {
   return { current: latest?.followers, daily: since(1), sevenDay: since(7), twentyEightDay: since(28) };
 }
 
-function comparableSnapshots(source: OpenPresenceState, presenceId: string, mirrorObjectId: string, ageSeconds: number) {
-  const state = normalizeState(source);
+function comparableSnapshots(source: OpenPresenceState, presenceId: string, mirrorObjectId: string, ageSeconds: number, options?: { normalized?: boolean }) {
+  const state = options?.normalized ? source : normalizeState(source);
   return state.publicationMetricSnapshots.filter((item) => item.presenceId === presenceId && item.mirrorObjectId !== mirrorObjectId && growthPublicationIsInPresenceScope(state, presenceId, item) && Math.abs(item.publicationAgeSeconds - ageSeconds) <= Math.max(21_600, ageSeconds * 0.25));
 }
 
@@ -415,8 +415,8 @@ function median(values: number[]) {
   return ordered.length % 2 ? ordered[middle] : (ordered[middle - 1] + ordered[middle]) / 2;
 }
 
-export function publicationMetricBaseline(source: OpenPresenceState, snapshot: PublicationMetricSnapshot) {
-  const prior = comparableSnapshots(source, snapshot.presenceId, snapshot.mirrorObjectId, snapshot.publicationAgeSeconds);
+export function publicationMetricBaseline(source: OpenPresenceState, snapshot: PublicationMetricSnapshot, options?: { normalized?: boolean }) {
+  const prior = comparableSnapshots(source, snapshot.presenceId, snapshot.mirrorObjectId, snapshot.publicationAgeSeconds, options);
   const relative: NonNullable<PublicationMetricSnapshot["baseline"]>["relative"] = {};
   for (const metric of ["impressions", "likes", "replies", "reposts", "quotes"] as const) {
     const baseline = median(prior.map((item) => item[metric]).filter((value): value is number => typeof value === "number"));
@@ -424,6 +424,25 @@ export function publicationMetricBaseline(source: OpenPresenceState, snapshot: P
     if (baseline && typeof value === "number") relative[metric] = Number((value / baseline).toFixed(2));
   }
   return { comparableCount: prior.length, confidence: prior.length >= 20 ? "high" as const : prior.length >= 5 ? "medium" as const : "low" as const, relative };
+}
+
+type PublicationMetricSnapshotOperation = Extract<Operation, { type: "recordPublicationMetricSnapshot" }>;
+
+function recordPublicationMetricSnapshotInPlace(state: OpenPresenceState, operation: PublicationMetricSnapshotOperation) {
+  const presence = state.presences.find((item) => item.id === (operation.presenceId ?? state.activePresenceId)) ?? state.presence;
+  const mirror = state.mirrorObjects.find((item) => item.id === operation.mirrorObjectId && item.presenceId === presence?.id);
+  if (!presence || !mirror || !Number.isFinite(operation.publicationAgeSeconds ?? 0)) return;
+  const snapshot: PublicationMetricSnapshot = { id: id("publication-metric"), presenceId: presence.id, mirrorObjectId: mirror.id, observedAt: now(), publicationAgeSeconds: Math.max(0, Math.round(operation.publicationAgeSeconds ?? Math.max(0, (Date.now() - new Date(mirror.occurredAt ?? mirror.observedAt).getTime()) / 1000))), ...operation.metrics, source: operation.source ?? (presence.environment === "sandbox" ? "sandbox" : "manual"), observationStatus: operation.observationStatus ?? "observed" };
+  snapshot.baseline = publicationMetricBaseline(state, snapshot, { normalized: true });
+  state.publicationMetricSnapshots.unshift(snapshot);
+  state.events.unshift(event("learning", "Publication performance observed", `Performance evidence for a verified ${presence.channel === "x" ? "X" : presence.name} publication is available for Growth review.`, "positive", { presenceId: presence.id, sourceObjectId: mirror.id }));
+}
+
+/** Record a publication-metric batch with one compatibility-state clone. */
+export function recordPublicationMetricSnapshots(source: OpenPresenceState, operations: PublicationMetricSnapshotOperation[]) {
+  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  for (const operation of operations) recordPublicationMetricSnapshotInPlace(state, operation);
+  return state;
 }
 
 /**
@@ -6590,13 +6609,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     return state;
   }
   if (operation.type === "recordPublicationMetricSnapshot") {
-    const presence = state.presences.find((item) => item.id === (operation.presenceId ?? state.activePresenceId)) ?? state.presence;
-    const mirror = state.mirrorObjects.find((item) => item.id === operation.mirrorObjectId && item.presenceId === presence?.id);
-    if (!presence || !mirror || !Number.isFinite(operation.publicationAgeSeconds ?? 0)) return state;
-    const snapshot: PublicationMetricSnapshot = { id: id("publication-metric"), presenceId: presence.id, mirrorObjectId: mirror.id, observedAt: now(), publicationAgeSeconds: Math.max(0, Math.round(operation.publicationAgeSeconds ?? Math.max(0, (Date.now() - new Date(mirror.occurredAt ?? mirror.observedAt).getTime()) / 1000))), ...operation.metrics, source: operation.source ?? (presence.environment === "sandbox" ? "sandbox" : "manual"), observationStatus: operation.observationStatus ?? "observed" };
-    snapshot.baseline = publicationMetricBaseline(state, snapshot);
-    state.publicationMetricSnapshots.unshift(snapshot);
-    state.events.unshift(event("learning", "Publication performance observed", `Performance evidence for a verified ${presence.channel === "x" ? "X" : presence.name} publication is available for Growth review.`, "positive", { presenceId: presence.id, sourceObjectId: mirror.id }));
+    recordPublicationMetricSnapshotInPlace(state, operation);
     return state;
   }
   if (operation.type === "updateAgentRequest") {

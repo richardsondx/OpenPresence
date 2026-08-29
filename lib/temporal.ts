@@ -816,15 +816,53 @@ export function runOperationalSweep(now = new Date()): SweepResult {
   };
 }
 
-let temporalTimer: ReturnType<typeof setInterval> | undefined;
+// Next.js development can load this module into more than one server bundle.
+// A module-local timer then creates one temporal sweep per bundle, all reading
+// and mutating the same SQLite workspace. Keep the ownership marker on the
+// process global so the scheduler remains single-flight across hot reloads.
+type TemporalEngineRuntime = {
+  timer?: ReturnType<typeof setInterval>;
+  sweepTimer?: ReturnType<typeof setTimeout>;
+};
+
+const temporalRuntimeOwner = globalThis as typeof globalThis & {
+  __openPresenceTemporalRuntime?: TemporalEngineRuntime;
+};
+
+/**
+ * Coalesce request-driven sweep hints. A state mutation can be followed by
+ * several equivalent hints (operator receipt, worker completion, and the
+ * five-second scheduler). Running the synchronous sweep once per hint makes
+ * every caller compete with the UI for the event loop and repeatedly parses
+ * the large compatibility snapshot. Durable wakes remain the source of
+ * truth; this is only a process-local execution hint.
+ */
+export function scheduleOperationalSweep(delayMs = 0): boolean {
+  const runtime = temporalRuntimeOwner.__openPresenceTemporalRuntime ?? {};
+  if (runtime.sweepTimer) return false;
+  const timer = setTimeout(() => {
+    const current = temporalRuntimeOwner.__openPresenceTemporalRuntime;
+    if (current) current.sweepTimer = undefined;
+    try {
+      runOperationalSweep();
+    } catch {
+      // The next durable scheduler tick remains responsible for retrying the
+      // sweep after a transient runtime or database failure.
+    }
+  }, Math.max(0, delayMs));
+  if (typeof timer.unref === "function") timer.unref();
+  runtime.sweepTimer = timer;
+  temporalRuntimeOwner.__openPresenceTemporalRuntime = runtime;
+  return true;
+}
 
 /** Start the process-local loop; all durable scheduling remains in SQLite. */
 export function startTemporalEngine(intervalMs = 5_000): () => void {
-  if (temporalTimer) return () => stopTemporalEngine();
+  if (temporalRuntimeOwner.__openPresenceTemporalRuntime?.timer) return () => stopTemporalEngine();
   runOperationalSweep();
   recordProcessHeartbeat("scheduler", "scheduler");
   recordProcessHeartbeat("runtime", "runtime");
-  temporalTimer = setInterval(() => {
+  const timer = setInterval(() => {
     const sweepStartedAt = Date.now();
     try {
       const sweep = runOperationalSweep();
@@ -840,14 +878,17 @@ export function startTemporalEngine(intervalMs = 5_000): () => void {
       recordProcessHeartbeat("runtime", "runtime", telemetry);
     } catch { /* The supervisor owns process-level failure. */ }
   }, intervalMs);
-  if (typeof temporalTimer.unref === "function") temporalTimer.unref();
+  if (typeof timer.unref === "function") timer.unref();
+  temporalRuntimeOwner.__openPresenceTemporalRuntime = { timer };
   return () => stopTemporalEngine();
 }
 
 export function stopTemporalEngine(): void {
-  if (!temporalTimer) return;
-  clearInterval(temporalTimer);
-  temporalTimer = undefined;
+  const runtime = temporalRuntimeOwner.__openPresenceTemporalRuntime;
+  if (!runtime) return;
+  if (runtime.timer) clearInterval(runtime.timer);
+  if (runtime.sweepTimer) clearTimeout(runtime.sweepTimer);
+  temporalRuntimeOwner.__openPresenceTemporalRuntime = undefined;
 }
 
 export { claimOperationalRunLease, releaseOperationalRunLease };
