@@ -1205,6 +1205,8 @@ export interface NativeObservationState {
   ownPostCount?: number;
   mentionCount?: number;
   conversationCount?: number;
+  /** Consecutive unchanged reads used only to widen the next poll interval. */
+  zeroDeltaStreak?: number;
   error?: string;
 }
 

@@ -119,9 +119,14 @@ export async function hydrateNativeXThreadContext(
   return next;
 }
 
-export const nextObservationAt = (presence: Presence | undefined, from = Date.now()) => {
+export const nextObservationAt = (presence: Presence | undefined, from = Date.now(), zeroDeltaStreak = 0) => {
   const base = new Date(from);
-  const candidate = new Date(from + intervalFor(presence));
+  const baseInterval = intervalFor(presence);
+  // Repeated empty reads are evidence that the channel is quiet, not a reason
+  // to keep paying the full observation cost. Cap the multiplier so a later
+  // explicit wake or inbound signal can still make the Presence responsive.
+  const multiplier = 2 ** Math.min(3, Math.max(0, Math.floor(zeroDeltaStreak)));
+  const candidate = new Date(from + Math.min(baseInterval * multiplier, 2 * 60 * 60_000));
   if (isQuiet(presence?.quietHours, base)) {
     const end = presence?.quietHours ? quietHoursEnd(presence.quietHours, base) : undefined;
     if (end) return end.toISOString();
@@ -159,12 +164,12 @@ function sharedWatchQueries(watches: OpenPresenceState["watches"]) {
 }
 
 export async function reconcileNativeX(source: OpenPresenceState, presenceId: string, options?: { runId?: string; invocationId?: string; attentionEpisodeId?: string; inboundOnly?: boolean }): Promise<OpenPresenceState> {
+  const previousObservation = source.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x")?.observation;
   let next = recordNativeObservation(source, presenceId, {
-    ...(source.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x")?.observation ?? {}),
+    ...(previousObservation ?? {}),
     status: "syncing",
     error: undefined,
   });
-  next = recordRuntimeEvent(next, presenceId, "Social Mirror syncing", "Reconciling the connected X account into the Social Mirror.", "positive");
 
   const connection = next.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x");
   const credentials = connection ? readNativeXCredentials(connection.id) : undefined;
@@ -214,6 +219,21 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
         next = recordRuntimeEvent(next, presenceId, "Watchlist observation limited", error instanceof Error ? error.message : "X did not return the watched account's recent posts.", "warning");
       }
     }
+    const existingMirrors = new Map(next.mirrorObjects
+      .filter((item) => item.presenceId === presenceId && item.channelId === "x" && item.externalRef.type === "x.post")
+      .map((item) => [item.externalRef.id, item]));
+    const mirrorChanged = (post: XRecentPost) => {
+      const existing = existingMirrors.get(post.id);
+      if (!existing) return true;
+      if (existing.content?.text !== post.text || existing.occurredAt !== post.createdAt || existing.parentExternalRef?.id !== post.parentId || existing.conversationExternalRef !== post.conversationId) return true;
+      const existingReferences = (existing.referencedExternalRefs ?? []).map((reference) => `${reference.type}:${reference.id}`).join(",");
+      const nextReferences = (post.referencedPosts ?? []).map((reference) => `x.post:${reference.id}`).join(",");
+      return existingReferences !== nextReferences || (existing.assetRefs?.length ?? 0) !== (post.media?.length ?? 0);
+    };
+    const hasMirrorDelta = [...posts, ...mentions, ...watchPosts].some(mirrorChanged)
+      // A re-observed own reply can reconcile a lost delivery acknowledgement
+      // even when its Mirror content is unchanged.
+      || posts.some((post) => Boolean(post.parentId && next.executions.some((execution) => execution.presenceId === presenceId && execution.target?.id === post.parentId && execution.affordance === "x.reply" && !execution.externalRef && ["blocked", "failed", "cancelled", "verification-closed"].includes(execution.status))));
     const observedAt = new Date().toISOString();
     const hasGrowthAssignment = next.assignments.some((assignment) => assignment.presenceId === presenceId && assignment.successEvidence?.metric === "followers" && assignment.status !== "cancelled");
     if (hasGrowthAssignment && !options?.inboundOnly) {
@@ -225,17 +245,25 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
         next = recordRuntimeEvent(next, presenceId, "Audience measurement unavailable", error instanceof Error ? error.message : "X did not return follower metrics.", "warning");
       }
     }
-    next = recordNativeMirrors(next, [
-      ...posts.map((post) => ({ connectionId: connection.id, presenceId, own: true, post })),
-      ...mentions.map((post) => ({ connectionId: connection.id, presenceId, post })),
-      ...watchPosts.map((post) => ({ connectionId: connection.id, presenceId, post })),
-    ], { attentionEpisodeId: options?.attentionEpisodeId, attentionRunId: options?.runId, attentionInvocationId: options?.invocationId });
-    next = detectDuplicatePublicOutcomes(next, presenceId);
-    const watchedMirrorObjects = next.mirrorObjects.filter((object) => object.presenceId === presenceId && watchPosts.some((post) => post.id === object.externalRef.id));
-    next = recordWatchSignals(next, watchedMirrorObjects, nextObservationAt(targetPresence ?? undefined));
-    const inboundMirrorObjects = next.mirrorObjects.filter((object) => object.presenceId === presenceId && mentions.some((post) => post.id === object.externalRef.id));
-    next = recordPublicRequestsFromMirrors(next, inboundMirrorObjects);
-    if (hasGrowthAssignment && !options?.inboundOnly) try {
+    if (hasMirrorDelta) {
+      next = recordNativeMirrors(next, [
+        ...posts.map((post) => ({ connectionId: connection.id, presenceId, own: true, post })),
+        ...mentions.map((post) => ({ connectionId: connection.id, presenceId, post })),
+        ...watchPosts.map((post) => ({ connectionId: connection.id, presenceId, post })),
+      ], { attentionEpisodeId: options?.attentionEpisodeId, attentionRunId: options?.runId, attentionInvocationId: options?.invocationId });
+      next = detectDuplicatePublicOutcomes(next, presenceId);
+      const watchedMirrorObjects = next.mirrorObjects.filter((object) => object.presenceId === presenceId && watchPosts.some((post) => post.id === object.externalRef.id));
+      next = recordWatchSignals(next, watchedMirrorObjects, nextObservationAt(targetPresence ?? undefined));
+      const inboundMirrorObjects = next.mirrorObjects.filter((object) => object.presenceId === presenceId && mentions.some((post) => post.id === object.externalRef.id));
+      next = recordPublicRequestsFromMirrors(next, inboundMirrorObjects);
+    }
+    const latestMetricAt = next.publicationMetricSnapshots.reduce((latest, item) => {
+      if (item.presenceId !== presenceId) return latest;
+      const observedAt = Date.parse(item.observedAt);
+      return Number.isFinite(observedAt) ? Math.max(latest, observedAt) : latest;
+    }, 0);
+    const publicationMetricsDue = !latestMetricAt || Date.now() - latestMetricAt >= 60 * 60_000;
+    if (hasGrowthAssignment && !options?.inboundOnly && (hasMirrorDelta || publicationMetricsDue)) try {
       const ownMirrorObjects = next.mirrorObjects.filter((item) => item.presenceId === presenceId && item.actorPresenceId === presenceId && item.environment === "live" && !item.archived && item.externalRef.type === "x.post").slice(0, 100);
       next = recordResourceUsageEvent(next, { presenceId, invocationId: `x-reconcile:${randomUUID()}`, runId: options?.runId, originKind: "other", attentionSource: "inbound_social", category: "channel_read", provider: "x", usage: { requests: 1 }, attentionEpisodeId: options?.attentionEpisodeId });
       const metrics = await readXPublicationMetrics(credentials, ownMirrorObjects.map((item) => item.externalRef.id));
@@ -258,7 +286,7 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
     const currentPostIds = new Set(posts.map((post) => post.id));
     const missingOwnPostIds = [...previousOwnPostIds].filter((postId) => !currentPostIds.has(postId));
     let deletedOwnPostIds: string[] = [];
-    if (missingOwnPostIds.length && !options?.inboundOnly) {
+    if (missingOwnPostIds.length && !options?.inboundOnly && (hasMirrorDelta || publicationMetricsDue)) {
       try {
         const stillVisible: XRecentPost[] = [];
         for (let offset = 0; offset < missingOwnPostIds.length; offset += 100) {
@@ -292,29 +320,33 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
         .filter((value): value is string => Boolean(value)),
     );
     const partial = mentionsResult.status === "rejected";
+    const zeroDeltaStreak = hasMirrorDelta || partial ? 0 : Math.min(8, (previousObservation?.zeroDeltaStreak ?? 0) + 1);
     const error = partial
       ? mentionsResult.reason instanceof Error ? mentionsResult.reason.message : "X did not return inbound mentions."
       : undefined;
     next = recordNativeObservation(next, presenceId, {
       status: partial ? "degraded" : "up-to-date",
       lastObservedAt: observedAt,
-      nextObservationAt: nextObservationAt(next.presences.find((item) => item.id === presenceId)),
+      nextObservationAt: nextObservationAt(next.presences.find((item) => item.id === presenceId), Date.parse(observedAt), zeroDeltaStreak),
       ownPostCount: posts.length,
       mentionCount: mentions.length,
       conversationCount: conversations.size,
+      zeroDeltaStreak,
       error,
     });
-    next = recordRuntimeEvent(
-      next,
-      presenceId,
-      partial ? "Social Mirror partially updated" : "Social Mirror updated",
-      partial
-        ? `Observed ${posts.length} public post${posts.length === 1 ? "" : "s"}${deletedOwnPostIds.length ? ` and reconciled ${deletedOwnPostIds.length} deleted post${deletedOwnPostIds.length === 1 ? "" : "s"}` : ""}; inbound mentions were unavailable. The last known Mirror remains available.`
-        : posts.length || mentions.length
-          ? `Observed ${posts.length} public post${posts.length === 1 ? "" : "s"} and ${mentions.length} inbound mention${mentions.length === 1 ? "" : "s"}${deletedOwnPostIds.length ? `; reconciled ${deletedOwnPostIds.length} deleted post${deletedOwnPostIds.length === 1 ? "" : "s"}` : ""}.`
-          : "X is up to date. No recent posts, mentions, or conversations were found.",
-      partial ? "warning" : "positive",
-    );
+    if (partial || hasMirrorDelta || deletedOwnPostIds.length) {
+      next = recordRuntimeEvent(
+        next,
+        presenceId,
+        partial ? "Social Mirror partially updated" : "Social Mirror updated",
+        partial
+          ? `Observed ${posts.length} public post${posts.length === 1 ? "" : "s"}${deletedOwnPostIds.length ? ` and reconciled ${deletedOwnPostIds.length} deleted post${deletedOwnPostIds.length === 1 ? "" : "s"}` : ""}; inbound mentions were unavailable. The last known Mirror remains available.`
+          : posts.length || mentions.length
+            ? `Observed ${posts.length} public post${posts.length === 1 ? "" : "s"} and ${mentions.length} inbound mention${mentions.length === 1 ? "" : "s"}${deletedOwnPostIds.length ? `; reconciled ${deletedOwnPostIds.length} deleted post${deletedOwnPostIds.length === 1 ? "" : "s"}` : ""}.`
+            : "X is up to date. No recent posts, mentions, or conversations were found.",
+        partial ? "warning" : "positive",
+      );
+    }
     return next;
   } catch (error) {
     const message = error instanceof Error ? error.message : "X did not return a readable observation.";

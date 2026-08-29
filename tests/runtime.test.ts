@@ -1368,6 +1368,17 @@ describe("OpenPresence runtime boundaries", () => {
     expect(nextDate.getMinutes()).toBe(0);
   });
 
+  it("backs off repeated zero-delta observations without removing explicit wake responsiveness", () => {
+    const state = createAgent(input);
+    const presence = { ...state.presence!, pacing: "custom" as const, attentionIntervalMinutes: 30 };
+    const base = Date.parse("2026-08-21T12:00:00.000Z");
+    const firstRetry = Date.parse(nextObservationAt(presence, base, 1));
+    const quietRetry = Date.parse(nextObservationAt(presence, base, 10));
+    expect(firstRetry - base).toBe(60 * 60_000);
+    expect(quietRetry - base).toBe(2 * 60 * 60_000);
+    expect(nextObservationAt(presence, base, 0)).toBe(nextObservationAt(presence, base));
+  });
+
   it("treats a successfully reconciled empty Mirror as up to date", () => {
     const state = createAgent(input);
     state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read", account: { id: "account-1", username: "jenny_ai", name: "Jenny" }, observation: { status: "up-to-date", lastObservedAt: new Date().toISOString(), nextObservationAt: new Date(Date.now() + 300_000).toISOString(), ownPostCount: 0, mentionCount: 0, conversationCount: 0 }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
