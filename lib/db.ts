@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { sql } from "drizzle-orm";
-import { assertAssignmentPersistenceInvariant, initialState, normalizeState, preflightAssignment, stateForAgent, stateForContext } from "./runtime";
+import { assertAssignmentPersistenceInvariant, initialState, normalizeState, preflightAssignment, stateForAgent } from "./runtime";
 import type { AgentWorkspaceSnapshot, AttentionScope, AttentionTrigger, Bridge, BridgeAdapterStatus, BrowserBody, DependencyHealth, DependencyHealthKind, DependencyHealthState, Execution, JsonValue, MirrorEvent, OpenPresenceState, OperationalRun, OperationalRunState, ProcessHeartbeat, RecoveryAttempt, RecoveryIncident, RecoveryIncidentState, ScheduledWake } from "./types";
 
 const dataDir = path.join(process.cwd(), "data");
@@ -770,7 +770,8 @@ export function readStateForContext(context: StateContext): OpenPresenceState {
   const scoped = readStateSnapshotForContext(context);
   // Browser-facing mutations do not need the Agent directory snapshots. Keep
   // those durable rows server-side so POST responses stay small too.
-  return JSON.parse(JSON.stringify({ ...scoped, agentWorkspaces: [] })) as OpenPresenceState;
+  scoped.agentWorkspaces = [];
+  return scoped;
 }
 
 /** Read-only context projection for GET responses; unchanged active reads share the cache. */
@@ -779,7 +780,7 @@ export function readStateSnapshotForContext(context: StateContext): OpenPresence
   // compatibility row's historical Agent directory. This is the hot path for
   // Activity, health, and browser configuration requests.
   const row = sqlite.prepare("SELECT payload, updated_at FROM app_state WHERE id = 1").get() as { payload?: string; updated_at?: string } | undefined;
-  if (!row?.payload) return readStateSnapshot();
+  if (!row?.payload) return JSON.parse(JSON.stringify(readStateSnapshot())) as OpenPresenceState;
   try {
     const compact = JSON.parse(row.payload) as OpenPresenceState;
     const requestedAgentId = context.agentId ?? compact.activeAgentId ?? undefined;
@@ -791,7 +792,16 @@ export function readStateSnapshotForContext(context: StateContext): OpenPresence
       ? { ...compact, ...workspace, agents: compact.agents, activeAgentId: workspace.agent?.id ?? requestedAgentId, agentWorkspaces: [workspace] }
       : { ...compact, agentWorkspaces: [] };
     const scoped = hydrateMirrorEvents(normalizeState(scopedInput as OpenPresenceState));
-    return stateForContext(hydrateOperationalState(hydrateBridgeHealth(scoped)), context.presenceId ? { presenceId: context.presenceId } : {});
+    // `scopedInput` is freshly parsed from SQLite, so normalization already
+    // gives callers an isolated mutable context. Re-running stateForContext
+    // here used to deep-clone and normalize the same multi-megabyte workspace
+    // a second time on every worker read. Select the requested Presence
+    // directly after validation while preserving the operational projections.
+    if (context.presenceId && scoped.presences.some((presence) => presence.id === context.presenceId)) {
+      scoped.activePresenceId = context.presenceId;
+      scoped.presence = scoped.presences.find((presence) => presence.id === context.presenceId) ?? scoped.presence;
+    }
+    return hydrateOperationalState(hydrateBridgeHealth(scoped));
   } catch (error) {
     throw new Error(`OpenPresence database ${resolvedDbPath} contains an unreadable scoped workspace snapshot. ${error instanceof Error ? error.message : String(error)}`);
   }
