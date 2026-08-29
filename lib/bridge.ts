@@ -290,7 +290,15 @@ export function ingestEvents(bridge: Bridge, payload: z.infer<typeof eventsInput
   touchBridge(state, state.bridges.find((item) => item.id === bridge.id) ?? current); state.events.unshift(bridgeEvent(state, "Mirror updated", `${payload.events.length} external event${payload.events.length === 1 ? "" : "s"} received.`)); writeState(state);
   const presence = state.presences.find((item) => item.id === bridge.presenceId) ?? state.presence;
   // Inbound activity wakes a Resting Presence, never one the operator paused.
-  if (receivedInbound && presence?.status === "live") requestAttention(bridge.presenceId, "inbound_event", new Date().toISOString(), "observe_inbound");
+  if (receivedInbound && presence?.status === "live") {
+    requestAttention(bridge.presenceId, "inbound_event", new Date().toISOString(), "observe_inbound");
+    // The durable wake remains authoritative, while this local hint avoids
+    // making a fresh mention wait for the next five-second scheduler tick.
+    // Import lazily to avoid a bridge ↔ temporal module cycle during startup.
+    void import("./temporal").then(({ scheduleOperationalSweep }) => scheduleOperationalSweep()).catch(() => {
+      // The separate durable scheduler will pick up the wake on its next tick.
+    });
+  }
   return state;
 }
 
