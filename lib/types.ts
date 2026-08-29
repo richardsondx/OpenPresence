@@ -1882,7 +1882,7 @@ export interface OperatorConversation {
   messages: OperatorConversationMessage[];
 }
 
-export type ActivityNowState = "working" | "resting" | "paused" | "recovering" | "stuck";
+export type ActivityNowState = "working" | "bursting" | "resting" | "paused" | "recovering" | "stuck";
 export interface ActivityNowProjection {
   presenceId: string;
   state: ActivityNowState;
@@ -2257,6 +2257,8 @@ export interface AssignmentPursuitWindow {
   resourceBudget?: AssignmentPursuitResourceBudget;
   status: AssignmentPursuitWindowStatus;
   pauseReason?: string;
+  /** Stable social objects already judged during this temporary push. */
+  consideredCandidateKeys?: string[];
   lastRunAt?: string;
   nextRunAt?: string;
   createdAt: string;
@@ -2666,6 +2668,7 @@ export type AssignmentOperation =
   | { type: "workAssignment"; id: string; sessionId: string }
   | { type: "runLiveAssignment"; assignmentId: string; presenceId?: string }
   | { type: "startAssignmentPursuit"; assignmentId: string; presenceId?: string; startsAt?: string; deadlineAt: string; maxVerifiedActions: number; actionCaps?: Partial<Record<AssignmentPursuitAction, number>>; maxActionsPerHour?: number; maxActionsPerPerson?: number; maxActionsPerConversation?: number; resourceBudget?: AssignmentPursuitResourceBudget }
+  | { type: "scaleAssignmentPursuit"; id: string; maxVerifiedActions: number; maxActionsPerHour?: number; resourceBudget?: AssignmentPursuitResourceBudget }
   | { type: "pauseAssignmentPursuit"; id: string }
   | { type: "resumeAssignmentPursuit"; id: string }
   | { type: "cancelAssignmentPursuit"; id: string }

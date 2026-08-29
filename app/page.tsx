@@ -80,8 +80,8 @@ import { isCognitionEligibleMirrorObject } from "@/lib/social-context";
 import { peopleForPresence, resolveCanonicalPerson, isPlaceholderIdentity } from "@/lib/network-memory";
 import { readPeopleNote } from "@/lib/people-notes";
 import { autobiographicalEventsForPerson } from "@/lib/autobiographical-memory";
-import { assignmentIsCurrentlyProcessing, assignmentIsOpen, assignmentProgressLabel, audienceDeltas, capabilityProviderLabel, cleanUserFacingAssignmentInstruction, collapseAudienceSnapshots, compileAgendaWork, defaultSelfDirectedAttentionPolicy, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, intervalForPresence, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence, relationshipPolicyFromWatchPurpose, SELF_DIRECTED_ATTENTION_PRESETS } from "@/lib/runtime";
-import { assignmentPursuitUsage, assignmentPursuitVerifiedCounts } from "@/lib/runtime";
+import { ASSIGNMENT_PURSUIT_SCALE_PRESETS, assignmentIsCurrentlyProcessing, assignmentIsOpen, assignmentProgressLabel, assignmentPursuitScaleForWindow, audienceDeltas, capabilityProviderLabel, cleanUserFacingAssignmentInstruction, collapseAudienceSnapshots, compileAgendaWork, defaultSelfDirectedAttentionPolicy, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, intervalForPresence, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence, relationshipPolicyFromWatchPurpose, SELF_DIRECTED_ATTENTION_PRESETS } from "@/lib/runtime";
+import { assignmentPursuitVerifiedCounts } from "@/lib/runtime";
 import type {
   CalendarSlot,
   CapabilityTrialCapability,
@@ -89,6 +89,7 @@ import type {
   AttentionTestMode,
   Agent,
   Assignment,
+  AssignmentPursuitWindow,
   AssignmentRun,
   AssignmentStatus,
   AgendaWorkItem,
@@ -478,6 +479,19 @@ function syncBrowserWorkspaceContext(state: OpenPresenceState) {
   window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
 }
 
+function setBrowserPresenceContext(presenceId: string) {
+  if (typeof window === "undefined") return;
+  const url = new URL(window.location.href);
+  url.searchParams.set("presenceId", presenceId);
+  window.history.replaceState(window.history.state, "", `${url.pathname}${url.search}${url.hash}`);
+}
+
+function browserRequestContextIsCurrent(agentId: string | null, presenceId: string | null) {
+  if (typeof window === "undefined") return true;
+  const current = new URL(window.location.href).searchParams;
+  return current.get("agentId") === agentId && current.get("presenceId") === presenceId;
+}
+
 const runtimeModels = [
   { provider: "openai" as const, label: "OpenAI", model: "gpt-5.6-sol", name: "GPT 5.6 Sol", quality: "low" as const, detail: "Fast drafting" },
   { provider: "openai" as const, label: "OpenAI", model: "gpt-5.6-sol", name: "GPT 5.6 Sol", quality: "medium" as const, detail: "Balanced" },
@@ -827,6 +841,8 @@ export default function Home() {
   }, [rememberStateResponse]);
   useEffect(() => {
     const query = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
+    const requestedAgentId = query.get("agentId");
+    const requestedPresenceId = query.get("presenceId");
     query.set("read", Date.now().toString());
     if (typeof window !== "undefined" && viewForLocation(window.location) === "live") {
       query.set("projection", "activity");
@@ -834,6 +850,7 @@ export default function Home() {
     fetchState<OpenPresenceState>(`/api/state?${query.toString()}`)
       .then((payload) => {
         if (!payload) return;
+        if (!browserRequestContextIsCurrent(requestedAgentId, requestedPresenceId)) return;
         setError(null);
         setState(payload);
         syncBrowserWorkspaceContext(payload);
@@ -865,6 +882,11 @@ export default function Home() {
   async function mutate(operation: unknown, requestContext?: OpenPresenceState) {
     setError(null);
     const operationType = typeof operation === "object" && operation !== null && "type" in operation && typeof operation.type === "string" ? operation.type : null;
+    const selectedPresenceId = operationType === "selectPresence" && typeof operation === "object" && operation !== null && "id" in operation && typeof operation.id === "string" ? operation.id : undefined;
+    // Claim the new URL context before the request starts. This prevents an
+    // older Activity read, already in flight for the previous Presence, from
+    // winning the race and snapping the operator back to the old identity.
+    if (selectedPresenceId) setBrowserPresenceContext(selectedPresenceId);
     const tracksAttention = ["lookNow", "wakePresence", "runPulse", "runAttentionWorker", "runLiveAssignment", "startAssignment", "workAssignment"].includes(operationType ?? "");
     if (tracksAttention) {
       if (attentionOperationInFlight.current) return null;
@@ -880,7 +902,7 @@ export default function Home() {
           try {
             const query = new URLSearchParams(window.location.search);
             query.set("read", Date.now().toString());
-            const pollPayload = await fetchState<OpenPresenceState>(`/api/state?${query.toString()}`);
+          const pollPayload = await fetchState<OpenPresenceState>(`/api/state?${query.toString()}`);
             if (!pollPayload) return;
             setError(null);
             setState(pollPayload);
@@ -963,10 +985,16 @@ export default function Home() {
     if (refreshStateInFlight.current?.projection === requestedProjection) return refreshStateInFlight.current.request;
     const request = (async () => {
       const query = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
+      const requestedAgentId = query.get("agentId");
+      const requestedPresenceId = query.get("presenceId");
       query.set("read", Date.now().toString());
       if (useActivityProjection) query.set("projection", "activity");
       const payload = await fetchState<OpenPresenceState>(`/api/state?${query.toString()}`);
       if (!payload) {
+        if (!state) throw new Error("The workspace state is not available.");
+        return state;
+      }
+      if (!browserRequestContextIsCurrent(requestedAgentId, requestedPresenceId)) {
         if (!state) throw new Error("The workspace state is not available.");
         return state;
       }
@@ -8797,7 +8825,6 @@ function LiveView({
   const [countdownNow, setCountdownNow] = useState<number>(() => Date.now());
   const presenceCopy = (text: string) => text.replaceAll("Jenny", presenceName).replaceAll(state.agent?.name ?? "Jenny", presenceName);
   const activityEnvironment: PresenceEnvironment = selected?.environment ?? "live";
-  const activityBoundary = selected ? presenceGrowthBoundary(state, selected.id) : undefined;
   const scopedAttentionEpisodes = (state.attentionEpisodes ?? [])
     .filter((episode) => episode.presenceId === selected?.id && episode.environment === activityEnvironment)
     .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
@@ -8851,8 +8878,8 @@ function LiveView({
   const activityIdentityMismatch = activityChromeBridge?.accountIdentity?.status === "mismatch";
   const activityIdentityPending = Boolean(activityChromeBridge && !bridgeIdentityReady(activityChromeBridge));
   const activityIdentityDetail = activityIdentityMismatch
-    ? activityChromeBridge?.accountIdentity?.message ?? `Chrome is connected to the wrong X account. Genny needs ${selected?.handle}.`
-    : `Chrome is connected, but the X account is not verified yet. Genny needs ${selected?.handle}.`;
+    ? `${activityChromeBridge?.accountIdentity?.message ?? "The connected X account does not match this Presence."} Expected: ${selected?.handle}.`
+    : `The connected X account is not verified yet. Expected: ${selected?.handle}.`;
   const refreshActivityConnection = async () => {
     if (!selected || refreshingConnection) return;
     setRefreshingConnection(true);
@@ -9799,7 +9826,7 @@ function LiveView({
         eyebrow="Activity"
         title={`${presenceName} at a glance`}
         titleAdornment={<span className={`activity-live-state activity-live-state-${paused ? "paused" : runtimeUnavailable ? "unavailable" : operationalHealth?.status ?? "live"}`}><span aria-hidden="true">{paused ? "◐" : runtimeUnavailable ? "!" : operationalHealth?.status === "needs_you" || operationalHealth?.status === "degraded" ? "!" : operationalHealth?.status === "recovering" ? "◐" : "●"}</span> {paused ? "Paused" : runtimeUnavailable ? "OpenPresence unavailable" : operationalHealth?.status === "needs_you" ? "Needs you" : operationalHealth?.status === "degraded" ? "Degraded" : operationalHealth?.status === "recovering" ? "Recovering" : "Live"}</span>}
-        description={`Autonomous on ${channelLabel(selected?.channel ?? "x", state.channelDefinitions)} · what ${presenceName} is doing and has actually done.`}
+        description={`What ${presenceName} is doing, what needs you, and what actually happened.`}
         actionsClassName="heading-actions"
         actions={<>
           {nextCheckStatus && <span className="next-check-countdown" aria-label={nextCheckStatus}>{nextCheckStatus}</span>}
@@ -9871,10 +9898,7 @@ function LiveView({
         const pursuit = (state.assignmentPursuitWindows ?? []).find((item) => item.presenceId === selected.id && ["active", "paused"].includes(item.status));
         if (!pursuit) return null;
         const assignment = state.assignments.find((item) => item.id === pursuit.assignmentId);
-        const usage = assignmentPursuitUsage(state, pursuit);
-        const counts = assignmentPursuitVerifiedCounts(state, pursuit);
-        const pursuitRuns = (state.assignmentRuns ?? []).filter((run) => run.pursuitWindowId === pursuit.id);
-        return <section className="activity-glance-card activity-pursuit-card" aria-label="Distribution push progress"><div className="activity-glance-heading"><div><SectionEyebrow>Distribution push</SectionEyebrow><h2>{pursuit.status === "active" ? "Burst is active" : "Burst is paused"}</h2></div><Activity size={21} aria-hidden="true" /></div><p>{assignment?.title ?? "Existing distribution responsibility"}</p><div className="activity-pursuit-grid"><div><strong>{counts.verified}</strong><span>verified actions · {pursuit.maxVerifiedActions} max</span></div><div><strong>{pursuitRuns.length}</strong><span>scan passes</span></div><div><strong>{usage.channelReads}</strong><span>channel reads</span></div><div><strong>{usage.modelCalls}</strong><span>model calls</span></div></div><small>{pursuit.status === "active" ? "The Agent is scanning in short passes and will keep going until the window ends or capacity is reached." : "The burst is paused."} Qualified opportunities only; silence is recorded when a conversation does not earn an action.</small><div className="activity-pursuit-controls">{pursuit.status === "active" ? <Button variant="secondary" onClick={() => void mutate({ type: "pauseAssignmentPursuit", id: pursuit.id })}>Pause push</Button> : <Button variant="secondary" onClick={() => void mutate({ type: "resumeAssignmentPursuit", id: pursuit.id })}>Resume push</Button>}<Button variant="ghost" onClick={() => void mutate({ type: "cancelAssignmentPursuit", id: pursuit.id })}>Stop push</Button></div></section>;
+        return <AssignmentPursuitCard state={state} pursuit={pursuit} assignmentTitle={assignment?.title ?? "Existing distribution responsibility"} presenceName={presenceName} mutate={mutate} now={countdownNow} />;
       })()}
 
       {selected && (
@@ -9917,7 +9941,7 @@ function LiveView({
           <section className={`right-now-status-card activity-working-now-card right-now-${activityNow?.state ?? "resting"}`} aria-label={`Right now: ${activityNow?.title ?? "Resting"}`} data-testid="right-now-status">
             <span className="right-now-status-mark" aria-hidden="true"><span /></span>
             <div className="right-now-status-copy">
-              <div className="right-now-status-topline"><span>{activityNow?.state === "working" ? "WORKING" : activityNow?.state === "paused" ? "PAUSED" : activityNow?.state === "recovering" ? "RECOVERING" : activityNow?.state === "stuck" ? "STUCK" : "RESTING"}</span><small>Server-confirmed state</small></div>
+              <div className="right-now-status-topline"><span>{activityNow?.state === "working" ? "Working" : activityNow?.state === "bursting" ? "Bursting" : activityNow?.state === "paused" ? "Paused" : activityNow?.state === "recovering" ? "Recovering" : activityNow?.state === "stuck" ? "Stuck" : "At rest"}</span><small>Confirmed state</small></div>
               <strong>{activityNow?.title ?? "Resting between attention passes"}</strong>
               <p className="working-now-state-copy"><strong>{activityNow?.detail ?? "Nothing is running right now."}</strong></p>
               {activityNow?.state === "working" && <div className="activity-now-live-line"><span className="activity-now-live-dot" aria-hidden="true" /><span>Working for {activityNowElapsed < 60 ? `${activityNowElapsed}s` : `${Math.floor(activityNowElapsed / 60)}m ${activityNowElapsed % 60}s`}</span></div>}
@@ -10177,11 +10201,11 @@ function LiveView({
             <section className="activity-in-flight-panel" aria-label="In-flight actions">
               <div className="activity-in-flight-header" style={{ display: "flex", justifyContent: "space-between", alignItems: "center" }}>
                 <div>
-                  <SectionEyebrow>In flight · {inFlightExecutions.length}</SectionEyebrow>
+                  <SectionEyebrow>Being handled · {inFlightExecutions.length}</SectionEyebrow>
                   <span className="quiet-label">
                     {inFlightExecutions.length === 1
-                      ? "1 action already decided; the body is delivering or verifying."
-                      : `${inFlightExecutions.length} actions already decided; the body is delivering or verifying.`}
+                      ? "1 action already chosen; it is being sent or confirmed."
+                      : `${inFlightExecutions.length} actions already chosen; they are being sent or confirmed.`}
                   </span>
                 </div>
                 {activityActionRecords.some((r) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued"].includes(r.execution.status)) && (
@@ -10254,10 +10278,10 @@ function LiveView({
                         <div className="activity-in-flight-detail">
                           <span>
                             {isPostDispatch
-                              ? "The public action has already been submitted. OpenPresence is waiting to observe the result in Social Mirror."
+                              ? "The public action was sent. OpenPresence is waiting for the channel to confirm it."
                               : isDeferredByTrial
                                 ? `This unsent action is temporarily held to keep the exclusive ${activeCapabilityTrial.capability} trial unpolluted.`
-                                : "The action has not been sent yet. Moving through the execution envelope."}
+                                : "The action has not been sent yet. It is waiting for its turn."}
                           </span>
                           <small className="activity-in-flight-provenance">{provenanceText}</small>
                         </div>
@@ -10308,8 +10332,8 @@ function LiveView({
         <section className="activity-in-flight-panel activity-in-flight-primary" aria-label="In flight">
           <div className="activity-in-flight-header">
             <div>
-              <SectionEyebrow>In flight · {inFlightExecutions.length}</SectionEyebrow>
-              <span className="quiet-label">Decided actions being sent or confirmed</span>
+              <SectionEyebrow>Being handled · {inFlightExecutions.length}</SectionEyebrow>
+              <span className="quiet-label">Chosen actions being sent or confirmed</span>
             </div>
             {activityActionRecords.some((record) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued"].includes(record.execution.status)) && <Button variant="secondary" disabled={cancellingAll} onClick={() => void cancelAllPreDispatchExecutions()}>{cancellingAll ? "Cancelling…" : "Cancel unsent"}</Button>}
             {activityActionRecords.some((record) => record.execution.status === "verification-pending") && <button type="button" className="activity-in-flight-clear" disabled={cancellingAll} onClick={() => void clearAllUnverifiedExecutions()}>{cancellingAll ? "Clearing…" : "Clear waiting"}</button>}
@@ -10333,7 +10357,7 @@ function LiveView({
       )}
 
       <details className="activity-advanced-menu">
-        <summary>More activity <span>Review, health, and technical detail</span></summary>
+        <summary>Activity details <span>Review, history, and recovery</span></summary>
         <div className="activity-advanced-menu-actions">
           {activity.needsAttention.count > 0 && <button type="button" onClick={() => { setShowActivityDetails(true); setActiveSubtab("queue"); }}>Review pending <span>{activity.needsAttention.count}</span></button>}
           <button type="button" onClick={() => { setShowActivityDetails(true); setActiveSubtab("requests"); }}><ShieldCheck size={13} /> Public requests <span>{pendingPublicRequestCount || publicRequests.length}</span></button>
@@ -10357,17 +10381,17 @@ function LiveView({
       {showActivityDetails && activeSubtab === "activity" && (
         <div className="activity-tab-content">
           {activityIdentityPending && (
-            <div className="activity-connection-notice" role="status" aria-live="polite">
+            <div className="activity-connection-notice" role="alert" aria-live="assertive">
               <CircleAlert size={17} aria-hidden="true" />
               <div>
-                <strong>{activityIdentityMismatch ? "Wrong signed-in account" : "Verify the signed-in account"}</strong>
-                <span>{activityIdentityDetail} Switch the controlled X tab to the expected account; delivery will resume automatically.</span>
+                <strong>{activityIdentityMismatch ? "Delivery paused · wrong X account" : "Delivery paused · verify X account"}</strong>
+                <span>{activityIdentityDetail} Switch the controlled X tab, then check again.</span>
               </div>
               <div className="activity-connection-notice-actions">
                 <button type="button" className="activity-connection-notice-refresh" onClick={() => void refreshActivityConnection()} disabled={refreshingConnection}>
-                  <RotateCcw size={12} aria-hidden="true" /> {refreshingConnection ? "Refreshing…" : "Refresh connection"}
+                  <RotateCcw size={12} aria-hidden="true" /> {refreshingConnection ? "Checking…" : "Check again"}
                 </button>
-                <button type="button" className="activity-connection-notice-action" onClick={() => setView("presence")}>Fix account</button>
+                <button type="button" className="activity-connection-notice-action" onClick={() => setView("presence")}>Switch X account</button>
               </div>
             </div>
           )}
@@ -10392,17 +10416,11 @@ function LiveView({
               <button type="button" className="button button-secondary activity-attention-link" onClick={() => setActiveSubtab("queue")}>Open Agenda & Review</button>
             </section>
           )}
-          {selected && activityBoundary && (
-            <div className="growth-scope-note activity-scope-note" role="note">
-              <strong>Activity window</strong>
-              <span>{activityBoundary.startAt ? `${activityBoundary.source === "recorded" ? "Presence created" : "Presence start inferred"} ${formatHistoryTimestamp(activityBoundary.startAt)} · Earlier account history is excluded.` : "Presence start is not known yet · Earlier account history is excluded until the boundary can be established."}</span>
-            </div>
-          )}
           {selected && <ActivityRecentDone history={activityHistory} followExecutions={verifiedFollowExecutions} state={state} presenceName={presenceName} now={countdownNow} onOpenFeed={() => setView("feed")} />}
           <div className="activity-main-grid">
             <div className="activity-left-column">
               <details className="activity-history-details">
-                <summary>Activity history <span>Decisions, observations, and delivery detail</span></summary>
+                <summary>History &amp; evidence <span>Decisions, observations, and delivery detail</span></summary>
               <section className="event-stream activity-log" id="recent-activity">
                 <div className="section-heading">
                   <div>
@@ -11305,6 +11323,7 @@ function ActivityContextInspector({ object, state, mutate, onClose, onOpenSettin
   const replyDeliveryInFlight = replyExecution && !["failed", "blocked", "expired", "succeeded"].includes(replyExecution.status);
   const replyWasSent = replyExecution?.status === "succeeded" || state.outcomes.some((item) => item.executionId === replyExecution?.id && item.status === "succeeded");
   const replyFailed = replyExecution && ["failed", "blocked", "expired"].includes(replyExecution.status);
+  const targetLanguageNeedsConfirmation = replyExecution?.failure?.code === "TARGET_LANGUAGE_MISMATCH";
   const replyDirective = !replyFailed && replyDirectiveCandidate && (replyDirectiveCandidate.status === "requested" || replyDeliveryInFlight || replyWasSent) ? replyDirectiveCandidate : undefined;
   const ignoreDirective = state.operatorDirectives.find((item) => item.presenceId === object.presenceId && item.target.id === object.externalRef.id && item.requiredAct === "no_op" && (!object.sessionId || item.sessionId === object.sessionId) && item.status !== "failed");
   const repliesOff = (presence?.execution.reply ?? "off") === "off";
@@ -11350,7 +11369,7 @@ function ActivityContextInspector({ object, state, mutate, onClose, onOpenSettin
         </article>
         <section className="operator-reply-card" aria-label={`Ask ${presenceName} to reply`}>
           <SectionEyebrow>Operator direction</SectionEyebrow>
-          <h3>{replyDirective ? "Reply requested" : replyFailed ? `Try replying again with ${presenceName}` : `Ask ${presenceName} to reply`}</h3>
+          <h3>{replyDirective ? "Reply requested" : replyFailed ? targetLanguageNeedsConfirmation ? "Confirm the target language before retrying" : `Try replying again with ${presenceName}` : `Ask ${presenceName} to reply`}</h3>
           <p>{replyDirective ? `The social act is set. ${presenceName} owns the wording; the Presence reply setting owns how it is delivered.` : `You choose that this interaction should happen. ${presenceName} still decides what to say, within the Presence's privacy and channel boundaries.`}</p>
           {relatedJudgment && <div className="operator-judgment"><strong>{ignoreDirective ? `${presenceName} was asked to leave this alone` : `${presenceName} chose silence`}</strong><span>{relatedJudgment.detail.replaceAll("Jenny", presenceName)}</span></div>}
           {!replyDirective && !repliesOff && <label className="operator-direction-field">Optional direction for {presenceName}<textarea aria-label={`Optional direction for ${presenceName}`} value={direction} onChange={(event) => setDirection(event.target.value)} placeholder={`Anything you want ${presenceName} to consider?`} rows={3} /></label>}
@@ -11369,9 +11388,9 @@ function ActivityContextInspector({ object, state, mutate, onClose, onOpenSettin
             return (
               <div className="operator-failed-actions-wrap" style={{ display: "grid", gap: "0.75rem" }}>
                 <div className="operator-requested-state operator-requested-failure" role="alert">
-                  <strong>{presenceName} did not deliver the requested reply.</strong>
+                  <strong>{targetLanguageNeedsConfirmation ? "The target needs a language check before delivery." : `${presenceName} did not deliver the requested reply.`}</strong>
                   <span>{explanation.title}: {explanation.reason}</span>
-                  <small>{explanation.consequence} Next step: {explanation.fix}</small>
+                  <small>{explanation.consequence} {targetLanguageNeedsConfirmation ? "OpenPresence will check the target directly from X before retrying; the Presence language will not change." : `Next step: ${explanation.fix}`}</small>
                   {replyExecution?.failure?.message && (
                     <details>
                       <summary>Technical details</summary>
@@ -11380,10 +11399,16 @@ function ActivityContextInspector({ object, state, mutate, onClose, onOpenSettin
                   )}
                 </div>
                 <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
-                  <Button variant="primary" className="full-button" onClick={() => void askToReply()} disabled={requesting || retrying}>
-                    {requesting ? <><LoaderCircle size={14} className="spin" /> Asking {presenceName}…</> : <><Reply size={14} /> Ask {presenceName} to try again</>}
-                  </Button>
-                  {canRetryExact && (
+                  {targetLanguageNeedsConfirmation ? (
+                    <Button variant="primary" className="full-button" onClick={() => void retryDelivery()} disabled={requesting || retrying}>
+                      {retrying ? <><LoaderCircle size={14} className="spin" /> Confirming English…</> : <><Check size={14} /> Confirm English &amp; retry</>}
+                    </Button>
+                  ) : (
+                    <Button variant="primary" className="full-button" onClick={() => void askToReply()} disabled={requesting || retrying}>
+                      {requesting ? <><LoaderCircle size={14} className="spin" /> Asking {presenceName}…</> : <><Reply size={14} /> Ask {presenceName} to try again</>}
+                    </Button>
+                  )}
+                  {canRetryExact && !targetLanguageNeedsConfirmation && (
                     <Button variant="secondary" onClick={() => void retryDelivery()} disabled={requesting || retrying}>
                       {retrying ? <><LoaderCircle size={14} className="spin" /> Retrying…</> : "Retry delivery"}
                     </Button>
@@ -11518,10 +11543,10 @@ const deliveryFailureExplanation = (failure?: { code?: string; message: string; 
   }
   if (normalized.includes("target_language_mismatch") || normalized.includes("language mismatch")) {
     return {
-      title: "Target language was not confirmed as English",
-      reason: "The English-only Presence policy could not confirm that the target content belonged in the feed.",
+      title: "Target language needs confirmation",
+      reason: "The English-only Presence policy needs a fresh check of this target before it can deliver the action.",
       consequence: "The action was blocked before delivery.",
-      fix: "Retry this action to refresh the target directly from X. If X confirms the post as English, delivery can continue without changing the Presence language.",
+      fix: "Confirm English and retry; OpenPresence will refresh this target directly from X without changing the Presence language.",
     };
   }
   if (normalized.includes("duplicate content") || normalized.includes("duplicate tweet")) {
@@ -11684,6 +11709,7 @@ function RecentPublicAttempts({
             const externalUrl = object ? externalUrlForMirrorObject(object, object.author?.handle) : undefined;
             const timestamp = execution.executedAt ?? execution.updatedAt ?? execution.createdAt;
             const failure = !succeeded ? deliveryFailureExplanation(execution.failure, presence?.handle) : undefined;
+            const targetLanguageNeedsConfirmation = execution.failure?.code === "TARGET_LANGUAGE_MISMATCH";
             const retryable = ["failed", "blocked", "expired"].includes(execution.status)
               && (execution.failure?.retryable !== false || execution.failure?.code === "TARGET_LANGUAGE_MISMATCH")
               && !execution.failure?.reviewedAt;
@@ -11709,7 +11735,7 @@ function RecentPublicAttempts({
                           void mutate({ type: "retryExecution", id: execution.id }).finally(() => setRetryingExecutionId(null));
                         }}
                       >
-                        {retryingExecutionId === execution.id ? "Retrying…" : "Retry"}
+                        {retryingExecutionId === execution.id ? (targetLanguageNeedsConfirmation ? "Confirming…" : "Retrying…") : targetLanguageNeedsConfirmation ? "Confirm English & retry" : "Retry"}
                       </button>
                     )}
                     {object && onContext && <button type="button" onClick={() => onContext(object)}>View post</button>}
@@ -11996,6 +12022,7 @@ function FailedAttemptsReview({
           const recipient = object?.author?.handle ?? object?.author?.displayName;
           const externalUrl = object ? externalUrlForMirrorObject(object, object.author?.handle) : undefined;
           const retryable = (execution.failure?.retryable !== false || execution.failure?.code === "TARGET_LANGUAGE_MISMATCH") && execution.attempts < 5 && !execution.failure?.reviewedAt;
+          const targetLanguageNeedsConfirmation = execution.failure?.code === "TARGET_LANGUAGE_MISMATCH";
           const retryUnavailableReason = execution.attempts >= 5 ? "Retry limit reached" : execution.failure?.reviewedAt ? "Closed after review" : "Retry requires the underlying issue to be fixed first";
           const suggestedReview = suggestedFailureReview(execution.failure);
           const reviewFailure = () => {
@@ -12042,7 +12069,7 @@ function FailedAttemptsReview({
                       setRetryingExecutionId(execution.id);
                       void mutate({ type: "retryExecution", id: execution.id }).finally(() => setRetryingExecutionId(null));
                     }}
-                  >{retryingExecutionId === execution.id ? "Retrying…" : "Retry attempt"}</button> : <span className="failed-attempt-no-retry">{retryUnavailableReason}</span>}
+                  >{retryingExecutionId === execution.id ? (targetLanguageNeedsConfirmation ? "Confirming…" : "Retrying…") : targetLanguageNeedsConfirmation ? "Confirm English & retry" : "Retry attempt"}</button> : <span className="failed-attempt-no-retry">{retryUnavailableReason}</span>}
                   {object && onContext && <button type="button" onClick={() => onContext(object)}>View source post</button>}
                   {externalUrl && <a href={externalUrl} target="_blank" rel="noreferrer">Open on X</a>}
                 </div>
@@ -13633,6 +13660,86 @@ function PublicHistoryInspector({ item, state, mutate, index, total, onNavigate,
   return <aside className="history-inspector" aria-label={`${kindLabel} details`}><div className="history-inspector-header"><div><SectionEyebrow>{kindLabel} details</SectionEyebrow><h2>{kindLabel}</h2><small title={historyTimeTitle(item)}>{formatHistoryTimestamp(displayAt)}{item.environment === "sandbox" ? " · Sandbox observed" : ""}</small></div><button type="button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button></div>{isDeleted && <div className="history-availability history-availability-deleted"><Trash2 size={14} /><span><strong>Deleted on X</strong><small>The original is retained here as verified history, but X no longer serves it.</small></span></div>}<div className="history-inspector-navigation" aria-label="Browse public posts"><span aria-live="polite"><strong>Post {position}</strong> of {total}</span><div><button type="button" aria-label="Previous post" disabled={index <= 0} onClick={() => onNavigate(-1)}><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /></button><button type="button" aria-label="Next post" disabled={index < 0 || index >= total - 1} onClick={() => onNavigate(1)}><ChevronRight size={14} /></button></div></div><div className="history-inspector-identity"><PresenceGlyph accent={presence?.accent ?? "#D68754"} name={presence?.name ?? "Presence"} look={presence ? presenceAvatarLook(presence) : "core"} /><span><strong>{presence?.name ?? "Presence"}</strong><small>{presence?.handle ?? ""}</small></span></div>{parent?.content?.text && <div className="history-parent-context"><SectionEyebrow>Context</SectionEyebrow><p>{parent.content.text}</p><small>{parent.author?.displayName ?? "Public conversation"}</small></div>}<p className="history-inspector-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : item.kind === "like" ? "Liked publicly." : "No text was returned by the channel.")}</p>{mirrorObject?.assetRefs?.length ? <MediaPerceptionDisclosure object={mirrorObject} state={state} mutate={mutate} presenceName={presence?.name ?? "this Presence"} /> : null}{itemAssets.length > 0 && <section className="history-provenance"><SectionEyebrow>Attached sources</SectionEyebrow>{itemAssets.map((asset) => <div key={asset.id}><a className="history-external-link" href={asset.provenance.sourcePageUrl ?? asset.provenance.sourceUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {asset.provenance.publisher ?? asset.description ?? "Open source"}</a><small>Origin: {asset.provenance.origin}. Source identity: {asset.provenance.sourceIdentityStatus ?? "unknown"}. Rights: {asset.rights?.status ?? "unknown"}.</small></div>)}</section>}<div className="history-proof">{isDeleted ? <Trash2 size={14} /> : <Check size={14} />}<span>{isDeleted ? "Deleted on X · retained in Social Mirror" : `Observed in Social Mirror · ${item.externalRef.type}`}</span><button type="button" className="history-copy-id" aria-label="Copy internal post ID" title="Copy internal post ID" onClick={() => void copyPostId()}><Copy size={12} /> {postIdCopied ? "Copied" : "Copy ID"}</button></div><section className="history-provenance"><SectionEyebrow>Provenance</SectionEyebrow><p>{originLabel}</p><p>{item.executionId ? "Published by OpenPresence and verified in the Social Mirror." : "Observed on the connected channel and attributed to this Presence."}</p>{item.origin?.planWindowId && <small>Plan window: {item.origin.planWindowId}</small>}{assignment && <p>Assignment output · {assignmentProgressLabel(assignment)}</p>}{mirrorObject?.environment === "sandbox" && <small>Simulated social reality · this expression has no live destination. Sandbox world time: {formatTime(item.occurredAt)}.</small>}</section><section className="history-outcome"><SectionEyebrow>Outcome</SectionEyebrow>{metrics.length ? <div className="history-outcome-grid">{metrics.map(([key, value]) => <div key={key}><strong>{value}</strong><small>{key.replaceAll("_", " ")}</small></div>)}</div> : <p>No channel outcome evidence is attached to this expression yet.</p>}</section><div className="history-inspector-actions">{item.externalUrl ? <a className="history-external-link" href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {isDeleted ? "Open original URL · deleted on X" : item.kind === "reply" || item.kind === "comment" ? "Open reply on X" : item.kind === "like" ? "Open liked post on X" : item.kind === "repost" ? "Open reposted post on X" : "Open original on X"}</a> : item.environment === "sandbox" && item.channel === "x" ? <p className="history-sandbox-note">Sandbox rehearsal only. This expression has no live destination.</p> : item.channel === "x" ? <p className="history-sandbox-note">X URL unavailable from the connected account.</p> : null}<Button variant="secondary" onClick={onActivity}><Activity size={14} /> View in Activity</Button></div></aside>;
 }
 
+function AssignmentPursuitCard({
+  state,
+  pursuit,
+  assignmentTitle,
+  presenceName,
+  mutate,
+  now,
+  compact = false,
+}: {
+  state: OpenPresenceState;
+  pursuit: AssignmentPursuitWindow;
+  assignmentTitle?: string;
+  presenceName: string;
+  mutate: Mutate;
+  now: number;
+  compact?: boolean;
+}) {
+  const [scaling, setScaling] = useState(false);
+  const counts = assignmentPursuitVerifiedCounts(state, pursuit, now);
+  const pendingStatuses = ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"];
+  const pending = state.executions.filter((item) => item.assignmentId === pursuit.assignmentId && item.presenceId === pursuit.presenceId && pendingStatuses.includes(item.status)).length;
+  const executions = state.executions
+    .filter((item) => item.assignmentId === pursuit.assignmentId && item.presenceId === pursuit.presenceId)
+    .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
+  const latestExecution = executions[0];
+  const latestOutcome = latestExecution ? state.outcomes.find((item) => item.executionId === latestExecution.id) : undefined;
+  const target = latestExecution?.target ? state.mirrorObjects.find((item) => item.externalRef.type === latestExecution.target?.type && item.externalRef.id === latestExecution.target?.id) : undefined;
+  const targetLabel = target?.author?.handle ? `@${target.author.handle.replace(/^@/, "")}` : target?.author?.displayName ?? "the observed conversation";
+  const latestEvents = state.events
+    .filter((item) => item.presenceId === pursuit.presenceId && item.sourceObjectId === pursuit.assignmentId && ["Promotion opportunity held", "Promotion opportunity unavailable", "Promotion actions held", "Promotion action failed", "Promotion actions queued", "Distribution candidate skipped", "Distribution candidate disappeared"].includes(item.title))
+    .sort((left, right) => new Date(right.time).getTime() - new Date(left.time).getTime());
+  const latestEvent = latestEvents[0];
+  const result = latestExecution
+    ? latestExecution.status === "succeeded" && latestOutcome?.status === "succeeded"
+      ? `Verified ${formatActivityAffordance(latestExecution.affordance)} ${targetLabel}`
+      : pendingStatuses.includes(latestExecution.status)
+        ? `Waiting for confirmation · ${formatActivityAffordance(latestExecution.affordance)} ${targetLabel}`
+        : ["failed", "blocked", "expired", "verification-closed"].includes(latestExecution.status)
+          ? `Couldn’t deliver ${formatActivityAffordance(latestExecution.affordance)} ${targetLabel}`
+          : latestEvent?.title ?? "Pass completed without a public action"
+    : latestEvent?.title === "Promotion opportunity held"
+      ? "No action selected · the quality bar held"
+      : latestEvent?.title === "Promotion opportunity unavailable"
+        ? "No suitable conversation found yet"
+        : latestEvent?.title === "Promotion actions held"
+          ? "No eligible action formed"
+          : latestEvent?.title ?? "No pass result recorded yet";
+  const resultDetail = latestExecution?.failure?.message ?? latestEvent?.detail ?? "The next pass will look for a specific, useful opportunity.";
+  const activeRun = (state.assignmentRuns ?? []).some((run) => run.pursuitWindowId === pursuit.id && ["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"].includes(run.status));
+  const nextPass = pursuit.status !== "active" ? "paused" : activeRun ? "in progress" : formatCountdown(pursuit.nextRunAt, now) ?? "queued";
+  const pausedAtCapacity = pursuit.status === "paused" && pursuit.pauseReason?.includes("budget reached");
+  const scale = assignmentPursuitScaleForWindow(pursuit);
+  const remaining = Math.max(0, pursuit.maxVerifiedActions - counts.verified - pending);
+  const scalePursuit = async (value: string) => {
+    if (!(value in ASSIGNMENT_PURSUIT_SCALE_PRESETS) || scaling) return;
+    const preset = ASSIGNMENT_PURSUIT_SCALE_PRESETS[value as keyof typeof ASSIGNMENT_PURSUIT_SCALE_PRESETS];
+    const hoursRemaining = Math.max(1, (new Date(pursuit.deadlineAt).getTime() - now) / 3_600_000);
+    setScaling(true);
+    try {
+      await mutate({ type: "scaleAssignmentPursuit", id: pursuit.id, maxVerifiedActions: preset.maxVerifiedActions, maxActionsPerHour: Math.min(100, Math.max(1, Math.ceil(preset.maxVerifiedActions / hoursRemaining))), resourceBudget: preset.resourceBudget });
+    } finally {
+      setScaling(false);
+    }
+  };
+  return <section className={compact ? "assignment-pursuit assignment-pursuit-compact" : "activity-glance-card activity-pursuit-card"} aria-label={`Distribution push progress for ${presenceName}`}>
+    <div className={compact ? "assignment-pursuit-header" : "activity-glance-heading"}><div><SectionEyebrow>Distribution push</SectionEyebrow><h2>{pursuit.status === "active" ? (compact ? "Higher effort window" : "Burst is active") : "Burst is paused"}</h2></div>{!compact && <Activity size={21} aria-hidden="true" />}</div>
+    {assignmentTitle && <p>{assignmentTitle}</p>}
+    <div className={compact ? "assignment-pursuit-grid" : "activity-pursuit-grid"}>
+      <div><strong>{counts.verified} / {pursuit.maxVerifiedActions}</strong><span>verified outcomes</span></div>
+      <div><strong>{remaining}</strong><span>capacity remaining</span></div>
+      <div><strong>{pending}</strong><span>awaiting confirmation</span></div>
+      <div><strong>{nextPass}</strong><span>next pass</span></div>
+    </div>
+    <div className="assignment-pursuit-result" data-testid="distribution-push-latest-result"><span>Latest result</span><strong>{result}</strong><small>{resultDetail.slice(0, 220)}{resultDetail.length > 220 ? "…" : ""}</small></div>
+    <div className="assignment-pursuit-scale"><label htmlFor={`pursuit-scale-${pursuit.id}`}>Scale effort<select id={`pursuit-scale-${pursuit.id}`} aria-label="Scale distribution push effort" value={scale} disabled={scaling} onChange={(event) => void scalePursuit(event.target.value)}><option value="focused">Focused · up to 15 outcomes</option><option value="balanced">Balanced · up to 40 outcomes</option><option value="expanded">Expanded · up to 90 outcomes</option>{scale === "custom" && <option value="custom">Custom · current capacity</option>}</select></label><small>Uses the same Focused, Balanced, and Expanded levels as Autonomy Today. This is capacity, not a quota.</small></div>
+    <small>{pursuit.status === "active" ? `The Agent keeps looking until ${new Date(pursuit.deadlineAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} or capacity is reached. Weak opportunities are left alone.` : pausedAtCapacity ? "Capacity was reached. Choose a larger effort level above to resume automatically." : "The burst is paused. Resume it when you want the Agent to continue."}</small>
+    <div className={compact ? "assignment-pursuit-actions" : "activity-pursuit-controls"}>{pursuit.status === "active" ? <Button variant="secondary" onClick={() => void mutate({ type: "pauseAssignmentPursuit", id: pursuit.id })}>Pause push</Button> : <Button variant="secondary" onClick={() => void mutate({ type: "resumeAssignmentPursuit", id: pursuit.id })}>Resume push</Button>}<Button variant="ghost" onClick={() => void mutate({ type: "cancelAssignmentPursuit", id: pursuit.id })}>Stop push</Button></div>
+  </section>;
+}
+
 function ScheduleLayerToolbar({
   plan,
   presenceName,
@@ -13651,8 +13758,8 @@ function ScheduleLayerToolbar({
   return (
     <section className="schedule-layer-toolbar" aria-label="Calendar layers">
       <div className="schedule-layer-intro">
-        <SectionEyebrow>Calendar layers</SectionEyebrow>
-        <p>You and {presenceName} share this schedule. Assignments stay visible beside {presenceName}&apos;s own growth work, with the authority to pause or cancel either.</p>
+        <SectionEyebrow>Planning layers</SectionEyebrow>
+        <p>Choose which planning layers to see. They are permissions to consider work, not promises to publish.</p>
       </div>
       <div className="schedule-layer-controls">
         <button type="button" className={`schedule-plan-header-toggle schedule-layer-toggle-plan ${layers.plan ? "active" : ""} ${plan ? "" : "unavailable"}`} aria-pressed={layers.plan} disabled={!plan} onClick={() => onToggle("plan")}>◇ {presenceName}&apos;s plan</button>
@@ -13667,7 +13774,7 @@ function ScheduleLayerToolbar({
       </div>
       <div className="schedule-layer-actions">
         {plan ? <>
-          <span className="schedule-plan-status">Plan {plan.status === "active" ? "active" : plan.status}</span>
+        <span className="schedule-plan-status">Plan {plan.status === "active" ? "active" : plan.status}</span>
           <Button type="button" variant="ghost" onClick={() => void mutate({ type: "replanPublishing", presenceId: plan.presenceId })}>Replan</Button>
         </> : <Button type="button" variant="ghost" onClick={() => void mutate({ type: "replanPublishing" })}>Create plan</Button>}
         <Button type="button" variant="ghost" onClick={onReset}>Show all layers</Button>
@@ -14812,6 +14919,7 @@ function ScheduleView({
   const [runningPlaygroundId, setRunningPlaygroundId] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
   const [pausingId, setPausingId] = useState<string | null>(null);
+  const [scheduleNow] = useState(() => Date.now());
   const add = async (event: React.FormEvent) => {
     event.preventDefault();
     if (creatingAssignment) return;
@@ -14987,9 +15095,9 @@ function ScheduleView({
   return (
     <div className="page">
       <PageHeader
-        eyebrow="Future attention"
+        eyebrow="Future work"
         title="Schedule"
-        description={<>What {presenceName} expects to work on later. Add a responsibility when there is a clear outcome worth pursuing.</>}
+        description={<>Choose what {presenceName} may work on later. A schedule grants permission to consider work, not a promise to publish.</>}
         actionsClassName="heading-actions calendar-heading-actions"
         actions={<>
           {pendingReviewCount > 0 && (
@@ -15083,17 +15191,20 @@ function ScheduleView({
               <option value="reflection">Reflection</option>
             </select>
           </label>
-          <fieldset className="assignment-asset-constraint">
-            <legend>Asset constraint <small>Optional · authorization still comes from the Asset</small></legend>
-            <label>Collection
-              <select aria-label="Assignment Asset Collection" value={assetConstraintCollectionId} onChange={(event) => setAssetConstraintCollectionId(event.target.value)}>
-                <option value="">Any eligible Asset</option>
-                {assetCollections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}
-              </select>
-            </label>
-            <label className="assignment-asset-required"><input type="checkbox" checked={assetConstraintRequired} onChange={(event) => setAssetConstraintRequired(event.target.checked)} /> Require an Asset for this Assignment</label>
-            <small className="form-hint">Collections organize and constrain the work; they never broaden an Asset&apos;s Presence eligibility.</small>
-          </fieldset>
+          <details className="assignment-advanced-details">
+            <summary>Optional asset preferences</summary>
+            <fieldset className="assignment-asset-constraint">
+              <legend>Asset preference <small>Only approved Assets can be used</small></legend>
+              <label>Collection
+                <select aria-label="Assignment Asset Collection" value={assetConstraintCollectionId} onChange={(event) => setAssetConstraintCollectionId(event.target.value)}>
+                  <option value="">Any eligible Asset</option>
+                  {assetCollections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}
+                </select>
+              </label>
+              <label className="assignment-asset-required"><input type="checkbox" checked={assetConstraintRequired} onChange={(event) => setAssetConstraintRequired(event.target.checked)} /> Require an Asset for this responsibility</label>
+              <small className="form-hint">This limits the choice; it does not grant permission to publish an Asset.</small>
+            </fieldset>
+          </details>
           <div className="timing-options">
             <button
               type="button"
@@ -15102,14 +15213,14 @@ function ScheduleView({
               onClick={() => setTimingOptionsOpen((open) => !open)}
             >
               <span>
-                  <strong>Assignment window</strong>
+                <strong>When should it work?</strong>
                 <small>{timingMode === "flexible" ? "Flexible · a few hours" : timingMode === "exact" ? `Exact · ${time}` : `Custom · ${considerationStart}–${considerationEnd}`}</small>
               </span>
               <ChevronDown size={15} className={timingOptionsOpen ? "rotated" : ""} />
             </button>
             {timingOptionsOpen && (
               <fieldset className="timing-panel">
-                  <legend>When must this be resolved?</legend>
+                <legend>When must this be resolved?</legend>
                 <label className={`timing-choice ${timingMode === "flexible" ? "selected" : ""}`}>
                   <input type="radio" name="timing-mode" checked={timingMode === "flexible"} onChange={() => chooseTimingMode("flexible")} />
                   <span><strong>Flexible</strong><small>Recommended · {presenceName} can work within a few hours.</small></span>
@@ -15132,7 +15243,7 @@ function ScheduleView({
             )}
           </div>
           <Button type="submit" variant="secondary" disabled={creatingAssignment}>
-            {creatingAssignment ? <><LoaderCircle size={14} className="spin" /> Reviewing assignment…</> : <><Check size={14} /> Review assignment</>}
+            {creatingAssignment ? <><LoaderCircle size={14} className="spin" /> Reviewing responsibility…</> : <><Check size={14} /> Review responsibility</>}
           </Button>
         </form>
       )}
@@ -15150,7 +15261,7 @@ function ScheduleView({
                 required
               />
             </label>
-            <p className="schedule-prompt-help">I’ll turn the intent into reviewable responsibilities, timing, and the Agent’s proposed approach. You can review everything before anything is saved.</p>
+            <p className="schedule-prompt-help">I’ll turn this goal into responsibilities you can review before saving. Nothing is saved until you confirm.</p>
             {promptError && <p className="form-error" role="alert">{promptError}</p>}
             <Button type="submit" variant="secondary" disabled={analyzingPrompt || Boolean(promptProposal)}>
               {analyzingPrompt ? <><LoaderCircle size={14} className="spin" /> Building plan…</> : <><Sparkles size={14} /> Review proposed plan</>}
@@ -15164,9 +15275,9 @@ function ScheduleView({
               </div>
               <p className="schedule-prompt-original"><strong>Your intent</strong> “{promptProposal.prompt}”</p>
               <div className="schedule-prompt-assumptions"><strong>Planning notes</strong>{promptProposal.assumptions.map((assumption) => <span key={assumption}>{assumption}</span>)}</div>
-            <p className="schedule-prompt-help"><strong>{promptProposal.previews.filter((draft) => ["ready", "ready_with_assumptions"].includes(draft.preflight?.status ?? "")).length} {promptProposal.previews.filter((draft) => ["ready", "ready_with_assumptions"].includes(draft.preflight?.status ?? "")).length === 1 ? "item is" : "items are"} ready to activate.</strong> Any item that needs input will be created as a visible draft to fix. The Agent owns the approach; public actions remain bounded by the Presence capabilities and approval policy.</p>
+              <p className="schedule-prompt-help"><strong>{promptProposal.previews.filter((draft) => ["ready", "ready_with_assumptions"].includes(draft.preflight?.status ?? "")).length} {promptProposal.previews.filter((draft) => ["ready", "ready_with_assumptions"].includes(draft.preflight?.status ?? "")).length === 1 ? "item is" : "items are"} ready.</strong> Anything that needs more information stays as a draft until you fix it.</p>
               <div className="schedule-prompt-drafts">
-                {promptProposal.previews.map((draft, index) => <article key={`${draft.instruction}-${index}`} className="schedule-prompt-draft"><div className="schedule-prompt-draft-time">{draft.schedule?.day} · {draft.schedule?.time}<small>{draft.schedule?.executionWindow}</small></div><div><strong>{draft.instruction}</strong><small>{draft.objective?.replaceAll("_", " ")} · {draft.deliverable?.type === "meaningful_engagement" ? "adaptive social responsibility; no fixed quota" : `${draft.deliverable?.quantity ?? 1} considered outcome`}</small>{draft.plan?.capabilitiesConsidered?.length ? <small>Capabilities considered: {draft.plan.capabilitiesConsidered.join(", ")}</small> : null}</div></article>)}
+                {promptProposal.previews.map((draft, index) => <article key={`${draft.instruction}-${index}`} className="schedule-prompt-draft"><div className="schedule-prompt-draft-time">{draft.schedule?.day} · {draft.schedule?.time}<small>{draft.schedule?.executionWindow}</small></div><div><strong>{draft.instruction}</strong><small>{draft.objective?.replaceAll("_", " ")} · {draft.deliverable?.type === "meaningful_engagement" ? "adaptive responsibility" : `${draft.deliverable?.quantity ?? 1} considered outcome`}</small></div></article>)}
               </div>
               <div className="schedule-prompt-actions"><Button type="button" variant="secondary" onClick={revisePrompt}>Revise prompt</Button><Button type="button" variant="secondary" onClick={resetPrompt}>Cancel</Button><Button type="button" variant="primary" disabled={confirmingPrompt} onClick={() => void confirmPrompt()}>{confirmingPrompt ? <><LoaderCircle size={14} className="spin" /> Saving plan…</> : <><Check size={14} /> Confirm plan · activate ready items</>}</Button></div>
             </div>
@@ -15235,24 +15346,25 @@ function ScheduleView({
             </form>
           ) : <p className="assignment-inspector-instruction">{cleanUserFacingAssignmentInstruction(selectedAssignment.instruction)}</p>}
           <div className="assignment-inspector-meta">
-            <div><span>Window</span><strong>{selectedAssignment.activation?.type === "continuous" ? flexibleAssignmentTiming : selectedAssignment.schedule ? `${selectedAssignment.schedule.day} · ${selectedAssignment.schedule.time}–${splitConsiderationWindow(selectedAssignment.schedule.executionWindow, selectedAssignment.schedule.time).end}` : flexibleAssignmentTiming}</strong><small>{selectedAssignment.activation?.type === "continuous" ? "Agent-authored plan · work can happen within a few hours when useful." : selectedAssignment.schedule ? `Each ${selectedAssignment.schedule.day === "Daily" ? "day" : selectedAssignment.schedule.day.toLowerCase()} runs from ${selectedAssignment.schedule.time} until ${splitConsiderationWindow(selectedAssignment.schedule.executionWindow, selectedAssignment.schedule.time).end}; that occurrence closes then. The recurring Assignment continues until completed or canceled.` : "A bounded window chosen when the responsibility is ready to begin."}</small></div>
+            <div><span>Window</span><strong>{selectedAssignment.activation?.type === "continuous" ? flexibleAssignmentTiming : selectedAssignment.schedule ? `${selectedAssignment.schedule.day} · ${selectedAssignment.schedule.time}–${splitConsiderationWindow(selectedAssignment.schedule.executionWindow, selectedAssignment.schedule.time).end}` : flexibleAssignmentTiming}</strong><small>{selectedAssignment.activation?.type === "continuous" ? "Work can happen within a few hours when useful." : selectedAssignment.schedule ? `Available ${selectedAssignment.schedule.day === "Daily" ? "daily" : selectedAssignment.schedule.day.toLowerCase()} from ${selectedAssignment.schedule.time}–${splitConsiderationWindow(selectedAssignment.schedule.executionWindow, selectedAssignment.schedule.time).end}. Recurs until completed or canceled.` : "Available within a few hours when useful."}</small></div>
             <div><span>Status</span><strong>{selectedAssignment.status === "draft" ? "Review before activation" : selectedAssignment.status.replaceAll("_", " ")}</strong><small>{assignmentScheduleProgress(selectedAssignment)}</small></div>
           </div>
           {(() => {
             const pursuit = (state.assignmentPursuitWindows ?? []).find((item) => item.assignmentId === selectedAssignment.id && ["active", "paused"].includes(item.status));
             if (!pursuit) return null;
-            const usage = assignmentPursuitUsage(state, pursuit);
-            const counts = assignmentPursuitVerifiedCounts(state, pursuit);
-            const pending = state.executions.filter((item) => item.assignmentId === selectedAssignment.id && !["failed", "blocked", "cancelled", "expired", "verification-closed"].includes(item.status)).length;
-            const minutesLeft = Math.max(0, Math.round((new Date(pursuit.deadlineAt).getTime() - Date.now()) / 60_000));
-            return <section className="assignment-pursuit" aria-label="Current distribution push"><div className="assignment-pursuit-header"><div><SectionEyebrow>Current push</SectionEyebrow><h3>{pursuit.status === "active" ? "Higher effort window" : "Push paused"}</h3></div><span>{pursuit.status}</span></div><p>{counts.verified} verified · up to {pursuit.maxVerifiedActions} qualified actions · {minutesLeft}m left</p><div className="assignment-pursuit-usage"><span>Resources</span><small>{usage.channelReads} reads · {usage.hydrations} hydrations · {usage.modelCalls} model calls{pending ? ` · ${pending} awaiting outcome` : ""}</small></div><div className="assignment-pursuit-actions">{pursuit.status === "active" ? <Button variant="secondary" onClick={() => void mutate({ type: "pauseAssignmentPursuit", id: pursuit.id })}>Pause push</Button> : <Button variant="secondary" onClick={() => void mutate({ type: "resumeAssignmentPursuit", id: pursuit.id })}>Resume push</Button>}<Button variant="ghost" onClick={() => void mutate({ type: "cancelAssignmentPursuit", id: pursuit.id })}>Stop push</Button></div></section>;
+            return <AssignmentPursuitCard state={state} pursuit={pursuit} assignmentTitle={cleanUserFacingAssignmentInstruction(selectedAssignment.instruction)} presenceName={presenceName} mutate={mutate} now={scheduleNow} compact />;
           })()}
           {selectedAssignment.preflight && <section className={`assignment-preflight assignment-preflight-${selectedAssignment.preflight.status}`} aria-label="Assignment readiness review">
             <div className="assignment-preflight-header"><div><SectionEyebrow>Agent readiness review</SectionEyebrow><h3>{selectedAssignment.preflight.status === "ready" ? "Ready to activate" : selectedAssignment.preflight.status === "ready_with_assumptions" ? "Ready with assumptions" : selectedAssignment.preflight.status === "needs_input" ? "Needs input before activation" : "Blocked before activation"}</h3></div><span className="assignment-preflight-status">{selectedAssignment.preflight.status.replaceAll("_", " ")}</span></div>
             <p>{selectedAssignment.preflight.semanticSummary}</p>
-            {selectedAssignment.preflight.contract && <div className="assignment-contract"><div><span>Outcome</span><strong>{selectedAssignment.preflight.contract.deliverable}</strong></div><div><span>Done when</span><strong>{selectedAssignment.preflight.contract.successEvidence}</strong></div><div><span>Genny decides</span><small>{selectedAssignment.preflight.contract.agentDecides.join(" · ")}</small></div>{selectedAssignment.preflight.contract.assumptions.length > 0 && <div><span>Assumptions</span><small>{selectedAssignment.preflight.contract.assumptions.join(" ")}</small></div>}</div>}
-            <div className="assignment-readiness-checks">{selectedAssignment.preflight.checks.map((check) => <div key={check.label} className={`assignment-readiness-check assignment-readiness-${check.status}`}><span aria-hidden="true">{check.status === "pass" ? "✓" : check.status === "warning" ? "!" : "×"}</span><div><strong>{check.label}</strong><small>{check.detail}</small></div></div>)}</div>
-            {selectedAssignment.preflight.issues.length > 0 && <div className="assignment-preflight-issues"><strong>Before activation</strong><ul>{selectedAssignment.preflight.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul></div>}
+            <details className="assignment-preflight-details" open={["needs_input", "blocked"].includes(selectedAssignment.preflight.status)}>
+              <summary>Readiness details <span>Outcome, assumptions, and checks</span></summary>
+              <div className="assignment-preflight-details-body">
+                {selectedAssignment.preflight.contract && <div className="assignment-contract"><div><span>Outcome</span><strong>{selectedAssignment.preflight.contract.deliverable}</strong></div><div><span>Done when</span><strong>{selectedAssignment.preflight.contract.successEvidence}</strong></div><div><span>Genny decides</span><small>{selectedAssignment.preflight.contract.agentDecides.join(" · ")}</small></div>{selectedAssignment.preflight.contract.assumptions.length > 0 && <div><span>Assumptions</span><small>{selectedAssignment.preflight.contract.assumptions.join(" ")}</small></div>}</div>}
+                <div className="assignment-readiness-checks">{selectedAssignment.preflight.checks.map((check) => <div key={check.label} className={`assignment-readiness-check assignment-readiness-${check.status}`}><span aria-hidden="true">{check.status === "pass" ? "✓" : check.status === "warning" ? "!" : "×"}</span><div><strong>{check.label}</strong><small>{check.detail}</small></div></div>)}</div>
+                {selectedAssignment.preflight.issues.length > 0 && <div className="assignment-preflight-issues"><strong>Before activation</strong><ul>{selectedAssignment.preflight.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul></div>}
+              </div>
+            </details>
           </section>}
           {selectedAssignment.lastOutcome && ["needs_operator", "blocked", "failed", "expired_incomplete"].includes(selectedAssignment.status) && (
             <section className="assignment-outcome" role="alert" aria-label="Assignment needs operator action">
@@ -15268,7 +15380,7 @@ function ScheduleView({
               </small>
             </section>
           )}
-          <p className="assignment-inspector-note">The outcome is delegated; {presenceName} chooses the approach and may reject weak candidates. A rejection keeps the Assignment working. Only a verified deliverable, a bounded blocked result, or operator cancellation ends it. Approvals for a drafted social action live in Activity → Agenda & Review; Schedule owns the responsibility and its readiness.</p>
+          <p className="assignment-inspector-note">{presenceName} chooses the approach. Only a verified outcome, a bounded block, or cancellation ends this Assignment.</p>
           <div className="assignment-inspector-actions">
             {editingAssignmentId !== selectedAssignment.id && selectedAssignment.status !== "completed" && selectedAssignment.status !== "cancelled" && !getAssignmentProcessingState(selectedAssignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing && (
               <Button variant="secondary" onClick={() => beginAssignmentEdit(selectedAssignment)}><Pencil size={14} /> Edit Assignment</Button>
@@ -15352,18 +15464,39 @@ function ScheduleList({
     .slice(0, 8);
   const selectedDayLabel = scheduleDayFilters.find((item) => item.value === dayFilter)?.value;
   const hasItems = (layers.assignments && filteredAssignments.length > 0) || (layers.plan && visiblePlanWindows.length > 0);
+  const currentAssignments = filteredAssignments.filter((assignment) => assignment.status !== "expired_incomplete");
+  const expiredAssignments = filteredAssignments.filter((assignment) => assignment.status === "expired_incomplete");
   const gennyAssignment = state.assignments.find((assignment) => assignment.presenceId === publishingPlan?.presenceId && assignment.origin === "publishing_initiative");
   const gennyPaused = gennyAssignment?.status === "paused" || publishingPlan?.status === "paused";
   const toggleGennyAssignment = async () => {
     if (!gennyAssignment) return;
     await mutate({ type: gennyPaused ? "resumeAssignment" : "pauseAssignment", id: gennyAssignment.id });
   };
+  const renderAssignment = (assignment: Assignment) => {
+    const objective = assignmentObjective(assignment);
+    const timing = assignmentTimingLabel(assignment);
+    const proc = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId);
+    const status = proc.isProcessing ? `Processing (${proc.phaseLabel})` : assignment.status === "draft" ? "Not started" : objectiveLabel(assignment.status);
+    return <button type="button" className={`schedule-list-row schedule-list-row-assignment${proc.isProcessing ? " is-processing schedule-list-row-processing" : ""}`} key={assignment.id} onClick={() => onAssignment(assignment)} aria-label={`Open Assignment ${assignment.instruction}`} aria-busy={proc.isProcessing}>
+      <div className="schedule-list-row-mark" aria-hidden="true" />
+      <div className="schedule-list-row-copy">
+        <div className="schedule-list-row-kicker">
+          <strong>{assignment.origin === "publishing_initiative" ? `${presenceName} · Agent-owned` : assignment.createdBy === "operator" ? "You · Operator assignment" : "Agent-owned assignment"}</strong>
+          <span className="schedule-objective-badge">{objectiveLabel(objective)}</span>
+          {proc.isProcessing && <span className="schedule-processing-badge"><LoaderCircle size={9} className="spin" /> Working now · {proc.phaseLabel}</span>}
+        </div>
+        <h3>{cleanUserFacingAssignmentInstruction(assignment.instruction)}</h3>
+        <small>{timing} · {assignmentScheduleProgress(assignment)} · {proc.isProcessing ? <span className="schedule-processing-status-text">Processing ({proc.phaseLabel}…)</span> : status}</small>
+      </div>
+      <ChevronRight size={16} aria-hidden="true" />
+    </button>;
+  };
   return <section className="schedule-list" aria-label="Schedule list">
     <div className="schedule-list-header">
       <div>
         <SectionEyebrow>List schedule</SectionEyebrow>
         <h2>Scheduled responsibilities</h2>
-        <p>Your assignments and {presenceName}&apos;s own growth assignment, together. Each row is a real responsibility with a visible owner and state.</p>
+        <p>Each row is a responsibility with a visible owner, timing, and state.</p>
       </div>
       <div className="schedule-list-header-controls">
         <div className="schedule-day-filter-label">Show days</div>
@@ -15376,26 +15509,12 @@ function ScheduleList({
     {!hasItems ? <EmptyState title={!layers.assignments ? "Assignments are hidden" : dayFilter !== "all" ? `No responsibilities on ${selectedDayLabel}` : "No scheduled responsibilities"} body={!layers.assignments ? "Turn on Assignments above to see scheduled responsibilities." : dayFilter !== "all" ? "Try another day or show all scheduled responsibilities." : "Add an Assignment only when you want a specific outcome pursued."} action={!layers.assignments ? <Button onClick={onResetLayers} variant="secondary">Show assignments</Button> : dayFilter !== "all" ? <Button onClick={() => onDayFilterChange("all")} variant="secondary">Show all days</Button> : <Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add assignment</Button>} /> : <>
       <div className="schedule-list-rows">
       {layers.plan && visiblePlanWindows.length > 0 && visiblePlanWindows.map((window, index) => { const position = publishingWindowCalendarPosition(window, publishingPlan?.timezone); return <article className="schedule-list-row schedule-list-row-plan" key={window.id} aria-label={`${presenceName} assignment window ${window.purpose}`}><div className="schedule-list-row-mark" aria-hidden="true" /><div className="schedule-list-row-copy"><div className="schedule-list-row-kicker"><strong>{position.day} · {position.startTime}–{position.endTime}</strong><span>{presenceName} · Agent-owned</span><span>{gennyPaused ? "Paused" : window.status === "active" ? "Working window" : "Scheduled"}</span></div><h3>{window.purpose[0].toUpperCase() + window.purpose.slice(1)} toward {presenceName}&apos;s mission</h3><small>{window.summary} · {gennyPaused ? "assignment paused" : window.status.replaceAll("_", " ")}</small></div><div className="schedule-plan-window-actions">{index === 0 && gennyAssignment && <><button type="button" className="schedule-inline-action" onClick={() => void toggleGennyAssignment()}>{gennyPaused ? "Resume" : "Pause"}</button><button type="button" className="schedule-inline-action" onClick={() => onAssignment(gennyAssignment)}>Details</button></>}<span aria-hidden="true"><ChevronRight size={16} /></span></div></article>; })}
-      {layers.assignments && filteredAssignments.map((assignment) => {
-        const objective = assignmentObjective(assignment);
-        const timing = assignmentTimingLabel(assignment);
-        const proc = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId);
-        const status = proc.isProcessing ? `Processing (${proc.phaseLabel})` : assignment.status === "draft" ? "Not started" : objectiveLabel(assignment.status);
-        return <button type="button" className={`schedule-list-row schedule-list-row-assignment${proc.isProcessing ? " is-processing schedule-list-row-processing" : ""}`} key={assignment.id} onClick={() => onAssignment(assignment)} aria-label={`Open Assignment ${assignment.instruction}`} aria-busy={proc.isProcessing}>
-          <div className="schedule-list-row-mark" aria-hidden="true" />
-          <div className="schedule-list-row-copy">
-            <div className="schedule-list-row-kicker">
-              <strong>{assignment.origin === "publishing_initiative" ? `${presenceName} · Agent-owned` : assignment.createdBy === "operator" ? "You · Operator assignment" : "Agent-owned assignment"}</strong>
-              <span className="schedule-objective-badge">{objectiveLabel(objective)}</span>
-              {proc.isProcessing && <span className="schedule-processing-badge"><LoaderCircle size={9} className="spin" /> Working now · {proc.phaseLabel}</span>}
-            </div>
-            <h3>{cleanUserFacingAssignmentInstruction(assignment.instruction)}</h3>
-            <small>{timing} · {assignmentScheduleProgress(assignment)} · {proc.isProcessing ? <span className="schedule-processing-status-text">Processing ({proc.phaseLabel}…)</span> : status}</small>
-          </div>
-          <ChevronRight size={16} aria-hidden="true" />
-        </button>;
-      })}
+      {layers.assignments && currentAssignments.map(renderAssignment)}
     </div></>}
+    {layers.assignments && expiredAssignments.length > 0 && <details className="schedule-archive-details">
+      <summary><span><strong>Past or incomplete responsibilities</strong><small>Kept available for review without competing with current work.</small></span><b>{expiredAssignments.length}</b></summary>
+      <div className="schedule-list-rows schedule-list-rows-archive">{expiredAssignments.map(renderAssignment)}</div>
+    </details>}
   </section>;
 }
 
@@ -15537,9 +15656,9 @@ function WeekCalendar({
     <section className={compact ? "week-calendar week-calendar-compact-mode" : "week-calendar"} aria-label={`Weekly schedule showing ${calendarLabel || "no layers"}`}>
       <div className="week-calendar-toolbar">
         <div>
-          <SectionEyebrow>Visual schedule</SectionEyebrow>
+          <SectionEyebrow>This week</SectionEyebrow>
           <h2>When {presenceName} can notice and act</h2>
-          <p>Genny&apos;s growth assignment shares this calendar with yours. Windows show when it will choose the next useful step; only verified outcomes count as done.</p>
+          <p>Windows show when {presenceName} may choose the next useful step. A window grants permission to consider work; only verified outcomes count as done.</p>
         </div>
         <div className="week-calendar-toolbar-side">
           <div className="calendar-density-toggle" role="group" aria-label="Visual schedule density">

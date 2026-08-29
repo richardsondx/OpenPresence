@@ -23,8 +23,12 @@ test("Schedule combines Agent-owned and operator Assignments with persistent con
   await details.getByRole("button", { name: "Close Assignment details", exact: true }).click();
 
   await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
+  await expect(page.getByText("Optional asset preferences", { exact: true })).toBeVisible();
+  await expect(page.getByLabel("Assignment Asset Collection")).toBeHidden();
+  await page.getByText("Optional asset preferences", { exact: true }).click();
+  await expect(page.getByLabel("Assignment Asset Collection")).toBeVisible();
   await page.getByLabel("What should Jenny accomplish?").fill("Teach one useful idea about persistent agents.");
-  await page.getByRole("button", { name: "Review assignment", exact: true }).click();
+  await page.getByRole("button", { name: "Review responsibility", exact: true }).click();
   await page.getByRole("button", { name: "Activate Assignment", exact: true }).click();
   await expect(schedule.getByText("You · Operator assignment", { exact: true })).toBeVisible();
 

@@ -1,4 +1,5 @@
 import type { ActivityNowProjection, AttentionStep, OpenPresenceState, OperationalRun, ScheduledWake } from "./types";
+import { assignmentPursuitVerifiedCounts } from "./runtime";
 
 const ACTIVE_RUN_STATES = new Set<OperationalRun["state"]>(["queued", "running", "recovering", "delivery_uncertain", "reconciling"]);
 const STAGE_EXPECTATIONS_MS: Record<string, number> = {
@@ -14,6 +15,37 @@ const STAGE_EXPECTATIONS_MS: Record<string, number> = {
 };
 
 const latest = <T>(items: T[], at: (item: T) => string | undefined) => [...items].sort((a, b) => (at(b) ?? "").localeCompare(at(a) ?? ""))[0];
+
+function pursuitResourceUsage(state: OpenPresenceState, pursuit: NonNullable<OpenPresenceState["assignmentPursuitWindows"]>[number], now: Date) {
+  const start = new Date(pursuit.startsAt).getTime();
+  const end = Math.min(new Date(pursuit.deadlineAt).getTime(), now.getTime());
+  const events = state.resourceUsageEvents.filter((event) => event.presenceId === pursuit.presenceId
+    && event.attentionSource === "assignment"
+    && event.originId === pursuit.assignmentId
+    && new Date(event.createdAt).getTime() >= start
+    && new Date(event.createdAt).getTime() <= end);
+  const count = (category: string) => events
+    .filter((event) => event.category === category)
+    .reduce((total, event) => total + (event.usage.requests ?? 1), 0);
+  return {
+    channelReads: count("channel_read"),
+    modelCalls: count("model"),
+    hydrations: count("hydration"),
+    visionCalls: count("vision"),
+  };
+}
+
+function pursuitCapacityReason(state: OpenPresenceState, pursuit: NonNullable<OpenPresenceState["assignmentPursuitWindows"]>[number], now: Date) {
+  const usage = pursuitResourceUsage(state, pursuit, now);
+  const limits: Array<[string, number | undefined, number]> = [
+    ["model calls", pursuit.resourceBudget?.maxModelCalls, usage.modelCalls],
+    ["channel reads", pursuit.resourceBudget?.maxChannelReads, usage.channelReads],
+    ["hydrations", pursuit.resourceBudget?.maxHydrations, usage.hydrations],
+    ["vision calls", pursuit.resourceBudget?.maxVisionCalls, usage.visionCalls],
+  ];
+  const reached = limits.find(([, limit, current]) => limit !== undefined && current >= limit);
+  return reached ? `${reached[0]} budget reached (${reached[2]} / ${reached[1]}).` : undefined;
+}
 
 function assignmentSteps(run: NonNullable<OpenPresenceState["assignmentRuns"]>[number]): AttentionStep[] {
   const at = run.lastProgressAt ?? run.updatedAt;
@@ -88,6 +120,16 @@ export function deriveActivityNow(state: OpenPresenceState, presenceId: string, 
   const activeAssignmentRun = latest((state.assignmentRuns ?? []).filter((run) => run.presenceId === presenceId && ["researching", "selecting", "writing", "delivering"].includes(run.status)), (run) => run.lastProgressAt ?? run.updatedAt);
   const queuedAssignmentRun = latest((state.assignmentRuns ?? []).filter((run) => run.presenceId === presenceId && run.status === "queued"), (run) => run.updatedAt);
   const pendingDeliveryRun = latest((state.assignmentRuns ?? []).filter((run) => run.presenceId === presenceId && run.status === "delivery_pending"), (run) => run.updatedAt);
+  const activePursuit = (state.assignmentPursuitWindows ?? []).find((pursuit) => pursuit.presenceId === presenceId
+    && pursuit.status === "active"
+    && new Date(pursuit.startsAt).getTime() <= now.getTime()
+    && new Date(pursuit.deadlineAt).getTime() > now.getTime());
+  const pausedPursuit = latest((state.assignmentPursuitWindows ?? []).filter((pursuit) => pursuit.presenceId === presenceId
+    && pursuit.status === "paused"
+    && new Date(pursuit.updatedAt ?? pursuit.createdAt).getTime() <= now.getTime()), (pursuit) => pursuit.updatedAt ?? pursuit.createdAt);
+  const pursuitRun = activePursuit
+    ? latest((state.assignmentRuns ?? []).filter((run) => run.pursuitWindowId === activePursuit.id && ["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"].includes(run.status)), (run) => run.lastProgressAt ?? run.updatedAt)
+    : undefined;
   const activeEpisode = activeRun?.attentionEpisodeId ? state.attentionEpisodes?.find((episode) => episode.id === activeRun.attentionEpisodeId) : undefined;
   const pendingWake = [...(state.scheduledWakes ?? [])]
     // A due wake is dispatch work, not a future promise to the operator. During
@@ -138,6 +180,81 @@ export function deriveActivityNow(state: OpenPresenceState, presenceId: string, 
       pendingInboundCount,
       pendingNudgeCount: pendingNudges.length,
       staleForMs: stuck ? age : undefined,
+    };
+  }
+
+  // A burst is a separate operator-requested execution window. Do not let an
+  // old Attention verification run win the headline while the burst is still
+  // active. Between bounded passes this is intentionally a distinct state:
+  // the worker is not running at this exact millisecond, but the push is.
+  if (activePursuit) {
+    const capacityReason = pursuitCapacityReason(state, activePursuit, now);
+    const verified = assignmentPursuitVerifiedCounts(state, activePursuit, now.getTime()).verified;
+    if (capacityReason) return {
+      presenceId,
+      state: "paused",
+      title: "Burst paused at capacity",
+      detail: `The burst used its bounded resource envelope: ${capacityReason} Only ${verified} public action${verified === 1 ? " is" : "s are"} verified; no further pass will be inferred from the exhausted budget.`,
+      since: activePursuit.createdAt,
+      activeAssignmentId: activePursuit.assignmentId,
+      nextWakePurpose: "Resume after the resource envelope is changed",
+      steps: [],
+      pendingInboundCount,
+      pendingNudgeCount: pendingNudges.length,
+    };
+    if (pursuitRun) {
+      const progressAt = pursuitRun.heartbeatAt ?? pursuitRun.lastProgressAt ?? pursuitRun.startedAt ?? pursuitRun.createdAt;
+      const age = Math.max(0, now.getTime() - new Date(progressAt).getTime());
+      const expected = pursuitRun.status === "researching" || pursuitRun.status === "selecting" ? 180_000 : 300_000;
+      const stuck = age > expected;
+      const title = pursuitRun.status === "writing" ? "Burst is writing an expression" : pursuitRun.status === "delivering" || pursuitRun.status === "delivery_pending" ? "Burst is delivering an action" : "Burst is scanning for an opportunity";
+      return {
+        presenceId,
+        state: stuck ? "stuck" : "working",
+        title: stuck ? `Stuck while ${title.toLowerCase()}` : title,
+        detail: stuck ? `No meaningful burst progress has been recorded for ${Math.max(1, Math.floor(age / 1000))} seconds.` : `Pass ${pursuitRun.attempts} is working through the burst window.`,
+        since: pursuitRun.startedAt ?? pursuitRun.createdAt,
+        activeAssignmentId: activePursuit.assignmentId,
+        steps: assignmentSteps(pursuitRun),
+        pendingInboundCount,
+        pendingNudgeCount: pendingNudges.length,
+        staleForMs: stuck ? age : undefined,
+      };
+    }
+    const nextPass = activePursuit.nextRunAt && new Date(activePursuit.nextRunAt).getTime() > now.getTime() ? activePursuit.nextRunAt : undefined;
+    return {
+      presenceId,
+      state: nextPass ? "bursting" : "stuck",
+      title: nextPass ? "Burst is active · next pass scheduled" : "Burst is due but not running",
+      detail: nextPass ? "The burst is between bounded scan passes; the next pass will continue looking for a qualified opportunity." : "The burst window is active, but its next pass is overdue and no AssignmentRun is present.",
+      since: activePursuit.createdAt,
+      nextWakeAt: nextPass,
+      nextWakePurpose: "Continue the burst scan",
+      activeAssignmentId: activePursuit.assignmentId,
+      steps: [],
+      pendingInboundCount,
+      pendingNudgeCount: pendingNudges.length,
+    };
+  }
+
+  // A burst that was durably paused must remain the headline until its
+  // operator-visible reason is understood. Otherwise an unrelated stale
+  // Attention verification run can make a completed/paused burst look like
+  // the current work is merely "at rest".
+  if (pausedPursuit) {
+    const verified = assignmentPursuitVerifiedCounts(state, pausedPursuit, now.getTime()).verified;
+    const reason = pausedPursuit.pauseReason ?? "The burst is paused and will not schedule another pass.";
+    return {
+      presenceId,
+      state: "paused",
+      title: reason.includes("budget reached") ? "Burst paused at capacity" : "Burst paused",
+      detail: `${reason} Only ${verified} public action${verified === 1 ? " is" : "s are"} verified; no further pass will be inferred until the burst is resumed or closed.`,
+      since: pausedPursuit.createdAt,
+      activeAssignmentId: pausedPursuit.assignmentId,
+      nextWakePurpose: "Resume or close the burst",
+      steps: [],
+      pendingInboundCount,
+      pendingNudgeCount: pendingNudges.length,
     };
   }
 

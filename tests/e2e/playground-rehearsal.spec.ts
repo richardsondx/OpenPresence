@@ -39,7 +39,7 @@ test("Agent publishing work shares the Schedule with Assignments", async ({ page
   const schedule = page.getByRole("region", { name: "Schedule list" });
   await expect(schedule.getByText("Jenny · Agent-owned", { exact: true }).first()).toBeVisible();
   await expect(schedule.getByRole("button", { name: /Open Assignment/ }).first()).toBeVisible();
-  await expect(page.getByText("You and Jenny share this schedule", { exact: false })).toBeVisible();
+  await expect(page.getByText("Compare Jenny’s rhythm with the responsibilities you gave it", { exact: false })).toBeVisible();
 });
 
 test("switching Presence switches Playground world and rehearsal history", async ({ page, request }) => {
@@ -94,7 +94,7 @@ test("Playground Assignments use the Sandbox session without requiring a Sandbox
   await openPostingRehearsal(page);
   await page.getByRole("button", { name: /Give an Assignment/ }).click();
   await page.getByLabel("Assignment instruction").fill("Produce 2 original X posts about useful agent ideas. Choose your own angles and do not repeat yourself.");
-  await page.getByRole("button", { name: "Review assignment", exact: true }).click();
+  await page.getByRole("button", { name: "Review responsibility", exact: true }).click();
   const review = page.locator(".assignment-review");
   await expect(review.getByText("Agent decides how", { exact: true })).toBeVisible();
   await expect(review).toContainText("Topics · thesis · evidence · format · wording · timing strategy");
@@ -134,7 +134,7 @@ test("Playground Assignment produces distinct posts and renders the requested me
   await openPostingRehearsal(page);
   await page.getByRole("button", { name: /Give an Assignment/ }).click();
   await page.getByLabel("Assignment instruction").fill("Produce exactly 5 original X posts about useful AI-agent decisions. Choose distinct angles, do not repeat yourself, and include one image, chart, gif, link, and video across the set.");
-  await page.getByRole("button", { name: "Review assignment", exact: true }).click();
+  await page.getByRole("button", { name: "Review responsibility", exact: true }).click();
   await page.getByRole("button", { name: "Start rehearsal", exact: true }).click();
   await expect(page.locator(".assignment-progress-panel")).toContainText("5 / 5 published", { timeout: 30000 });
 
@@ -179,7 +179,7 @@ test("Playground completes a 10-publication Assignment without recycling candida
   await openPostingRehearsal(page);
   await page.getByRole("button", { name: /Give an Assignment/ }).click();
   await page.getByLabel("Assignment instruction").fill("Produce exactly 10 original X posts for founders. Choose distinct angles and do not repeat yourself.");
-  await page.getByRole("button", { name: "Review assignment", exact: true }).click();
+  await page.getByRole("button", { name: "Review responsibility", exact: true }).click();
   await page.getByRole("button", { name: "Start rehearsal", exact: true }).click();
   await expect(page.locator(".assignment-progress-panel")).toContainText("10 / 10 published", { timeout: 30000 });
   const cards = page.locator(".social-card.agent-authored");
@@ -202,7 +202,7 @@ test("Sandbox Assignment instructions never leak internal QA markers into Feed",
   await openPostingRehearsal(page);
   await page.getByRole("button", { name: /Give an Assignment/ }).click();
   await page.getByLabel("Assignment instruction").fill("Produce exactly 1 original X post about a useful agent decision. Include QA-TEN-RUN-2026-08-14 only as an internal diagnostic marker and never publish it.");
-  await page.getByRole("button", { name: "Review assignment", exact: true }).click();
+  await page.getByRole("button", { name: "Review responsibility", exact: true }).click();
   await page.getByRole("button", { name: "Start rehearsal", exact: true }).click();
   await expect(page.locator(".assignment-progress-panel")).toContainText("1 / 1 published", { timeout: 30000 });
   await expect(page.locator(".assignment-progress-panel")).not.toContainText("QA-TEN-RUN-2026-08-14");
@@ -222,9 +222,9 @@ test("Schedule preserves an Assignment's exact timing", async ({ page }) => {
   await page.getByLabel("What should Jenny accomplish?", { exact: true }).fill("Produce 1 original X post about a useful AI-agent decision.");
   await page.getByLabel("Day", { exact: true }).selectOption({ label: "Thursday" });
   await page.getByLabel("Time", { exact: true }).fill("23:35");
-  await page.getByRole("button", { name: /Assignment window/ }).click();
+  await page.getByRole("button", { name: /When should it work\?/ }).click();
   await page.getByRole("radio", { name: /Exact time/ }).check();
-  await page.getByRole("button", { name: "Review assignment", exact: true }).click();
+  await page.getByRole("button", { name: "Review responsibility", exact: true }).click();
 
   await page.getByRole("button", { name: "List", exact: true }).click();
   const assignmentRow = page.locator(".schedule-assignment-row").filter({ hasText: "Produce 1 original X post about a useful AI-agent decision." });

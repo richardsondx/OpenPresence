@@ -55,6 +55,25 @@ test("Presence is selected from one dropdown and changes the active Presence", a
   await expect(page.getByRole("heading", { name: "Presence settings", exact: true })).toBeVisible();
 });
 
+test("Activity keeps the newly selected Presence context after switching", async ({ page, request }) => {
+  await createAgent(page);
+  const initial = await request.get("/api/state").then((response) => response.json());
+  const firstPresence = initial.presence;
+  const created = await request.post("/api/state", { data: { type: "createPresence", input: { channel: "x", name: "Genny on X", handle: "@example_agent", mode: "agent", accent: "#4F7CAC" } } });
+  expect(created.ok()).toBeTruthy();
+  const createdState = await created.json();
+  const secondPresence = createdState.presence;
+
+  await page.goto(`/activity?agentId=${initial.activeAgentId}&presenceId=${firstPresence.id}`);
+  await expect(page.getByRole("heading", { name: `${firstPresence.name} at a glance`, exact: true })).toBeVisible();
+  await page.getByRole("button", { name: new RegExp(`Switch Presence, currently ${firstPresence.handle}`) }).click();
+  await page.getByRole("menuitem", { name: `Select Presence ${secondPresence.name} (${secondPresence.handle})` }).click();
+
+  await expect(page.getByRole("button", { name: `Switch Presence, currently ${secondPresence.handle}` })).toBeVisible();
+  await expect(page.getByRole("heading", { name: `${secondPresence.name} at a glance`, exact: true })).toBeVisible();
+  await expect(page).toHaveURL(new RegExp(`presenceId=${secondPresence.id}`));
+});
+
 test("Presence dropdown keeps cross-channel Presences visible while Feed scope changes", async ({ page, request }) => {
   await createAgent(page);
   const created = await request.post("/api/state", { data: { type: "createPresence", input: { channel: "linkedin", name: "Jenny LinkedIn", handle: "@jenny_linkedin", mode: "agent", accent: "#4F7CAC" } } });

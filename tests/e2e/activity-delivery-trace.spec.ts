@@ -32,6 +32,8 @@ test("Activity surfaces Genny's self-directed attention", async ({ page }) => {
 
   await page.reload();
   await expect(page.locator(".activity-page")).toBeVisible();
+  await expect(page.locator(".activity-heading")).toContainText("what needs you");
+  await expect(page.locator(".activity-advanced-menu > summary")).toContainText("Activity details");
   const glance = page.getByRole("region", { name: "Today at a glance" });
   await expect(glance).toBeVisible();
   await expect(glance).toContainText("4");

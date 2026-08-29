@@ -6841,6 +6841,16 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
         maxEstimatedCostCents: operation.resourceBudget.maxEstimatedCostCents,
       };
     }
+    // A capacity pause is recoverable when the operator raises the exhausted
+    // envelope. Resume only that automatic pause; an intentional operator
+    // pause must still require an explicit Resume action.
+    if (window.status === "paused" && window.pauseReason?.includes("budget reached")
+      && ["maxChannelReads", "maxHydrations", "maxModelCalls", "maxVisionCalls", "maxEstimatedCostCents"]
+        .every((category) => assignmentPursuitCanSpend(state, window, category as keyof AssignmentPursuitResourceBudget, new Date(timestamp).getTime()))) {
+      window.status = "active";
+      window.pauseReason = undefined;
+      window.nextRunAt = timestamp;
+    }
     window.nextRunAt = window.status === "active" ? timestamp : window.nextRunAt;
     window.updatedAt = timestamp;
     state.events.unshift(event("decision", "Distribution push scaled", `${presence.name} now has ${window.maxVerifiedActions} spaces for qualified verified outcomes. The ${window.status} push keeps the same quality bar and will not force activity.`, "positive", { presenceId: presence.id, sourceObjectId: assignment.id }));

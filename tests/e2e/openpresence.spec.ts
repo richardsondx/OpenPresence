@@ -674,11 +674,11 @@ test("Schedule stores an Assignment and shows its readiness contract", async ({ 
   await page.getByRole("button", { name: "List", exact: true }).click();
   await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
   await expect(page.getByLabel("Assignment window")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Timing options" })).toHaveAttribute("aria-expanded", "false");
+  await expect(page.getByRole("button", { name: "When should it work?" })).toHaveAttribute("aria-expanded", "false");
   await expect(page.getByText("How long is this relevant?", { exact: true })).toHaveCount(0);
   await page.getByLabel("What should Jenny accomplish?").fill("Teach the audience one useful idea about persistent agents.");
   await page.getByRole("textbox", { name: "Time", exact: true }).fill("09:15");
-  await page.getByRole("button", { name: "Review assignment" }).click();
+  await page.getByRole("button", { name: "Review responsibility" }).click();
   await expect(page.getByText("Teach the audience one useful idea about persistent agents.")).toBeVisible();
   await expect(page.getByText("Ready to activate", { exact: true })).toBeVisible();
   await expect(page.getByText("The post is live on X and confirmed.", { exact: true })).toBeVisible();
@@ -691,7 +691,7 @@ test("Schedule reveals a custom Assignment window only when requested", async ({
   await navigate(page, "Schedule");
   await page.getByRole("button", { name: "List", exact: true }).click();
   await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
-  await page.getByRole("button", { name: "Timing options" }).click();
+  await page.getByRole("button", { name: "When should it work?" }).click();
   await expect(page.getByText("How long is this relevant?", { exact: true })).toBeVisible();
   await expect(page.getByText("Recommended · Jenny can work within a few hours.", { exact: true })).toBeVisible();
   await page.getByRole("radio", { name: /Custom/ }).check();
@@ -699,7 +699,7 @@ test("Schedule reveals a custom Assignment window only when requested", async ({
   await page.getByLabel("Assignment ends").fill("10:30");
   expect(await page.evaluate(() => document.documentElement.scrollWidth <= window.innerWidth)).toBe(true);
   await page.getByLabel("What should Jenny accomplish?").fill("Review one useful idea for the audience.");
-  await page.getByRole("button", { name: "Review assignment" }).click();
+  await page.getByRole("button", { name: "Review responsibility" }).click();
   await expect(page.getByText("07:00–10:30", { exact: true })).toBeVisible();
 });
 
@@ -979,7 +979,7 @@ test("Schedule reviews and activates delegated work", async ({ page }) => {
   await navigate(page, "Schedule");
   await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
   await page.getByLabel("What should Jenny accomplish?").fill("Produce one useful idea before it is sent.");
-  await page.getByRole("button", { name: "Review assignment" }).click();
+  await page.getByRole("button", { name: "Review responsibility" }).click();
   await expect(page.getByRole("heading", { name: "Ready to activate" })).toBeVisible();
   await page.getByRole("button", { name: "Activate Assignment" }).click();
   await expect(page.getByText("active", { exact: true })).toBeVisible();
@@ -1727,7 +1727,7 @@ test("Custom Channel connects a Bridge, receives Mirror events, and completes qu
   await navigate(page, "Schedule");
   await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
   await page.getByLabel("What should Jenny in Founders accomplish?").fill("Share one useful memory idea with the founders.");
-  await page.getByRole("button", { name: "Review assignment" }).click();
+  await page.getByRole("button", { name: "Review responsibility" }).click();
   await expect(page.getByText("post is available through the Presence execution envelope.", { exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Activate Assignment" }).click();
   await expect(page.getByText("active", { exact: true })).toBeVisible();

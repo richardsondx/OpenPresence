@@ -72,6 +72,17 @@ describe("Language & phrasing policy", () => {
     expect(targetLanguageValidationForAction(state, { presenceId: state.presence!.id, target, environment: "live" })).toMatchObject({ valid: true, expected: "en" });
   });
 
+  it("confirms a live English target when X omits language metadata", () => {
+    let state = createAgent(input);
+    state = recordNativeMirror(state, {
+      connectionId: "operator-link",
+      presenceId: state.presence!.id,
+      post: { id: "english-without-lang", text: "A thoughtful note about agents can change how people work." },
+    });
+    const target = state.mirrorObjects[0]!.externalRef;
+    expect(targetLanguageValidationForAction(state, { presenceId: state.presence!.id, target, environment: "live" })).toMatchObject({ valid: true, expected: "en", observed: "en" });
+  });
+
   it("blocks a targeted Sandbox interaction when the observed post is not in the Presence language", () => {
     let state = createAgent(input);
     state = startPlaygroundSession(state, state.presence!.id, "fresh");

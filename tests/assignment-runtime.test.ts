@@ -50,6 +50,31 @@ describe("Sandbox assignment runtime", () => {
     expect(state.assignments.find((item) => item.id === assignment.id)?.status).toBe("active");
   });
 
+  it("scales a distribution push using the same capacity levels as Autonomy Today", () => {
+    let state = createAgent({ name: "Scale Agent", description: "A careful operator", mode: "agent", handle: "@scale_agent", accent: "#D68754" });
+    const presence = { ...state.presence!, environment: "live" as const };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    state = applyOperation(state, { type: "createAssignment", presenceId: presence.id, environment: "live", instruction: "Help https://x.com/source_author/status/2093472969037099455 reach people who genuinely care." });
+    const assignment = state.assignments[0]!;
+    state = applyOperation(state, { type: "startAssignmentPursuit", assignmentId: assignment.id, presenceId: presence.id, deadlineAt: new Date(Date.now() + 3_600_000).toISOString(), maxVerifiedActions: 40, resourceBudget: { maxChannelReads: 60, maxHydrations: 36, maxModelCalls: 40, maxVisionCalls: 15 } });
+    const window = state.assignmentPursuitWindows?.[0];
+    expect(window).toBeDefined();
+    if (!window) return;
+    state = applyOperation(state, { type: "scaleAssignmentPursuit", id: window.id, maxVerifiedActions: 90, maxActionsPerHour: 90, resourceBudget: { maxChannelReads: 150, maxHydrations: 90, maxModelCalls: 90, maxVisionCalls: 30 } });
+    expect(state.assignmentPursuitWindows?.[0]).toMatchObject({ maxVerifiedActions: 90, maxActionsPerHour: 90, resourceBudget: { maxChannelReads: 150, maxHydrations: 90, maxModelCalls: 90, maxVisionCalls: 30 } });
+    expect(state.events[0]?.title).toBe("Distribution push scaled");
+    expect(state.assignmentPursuitWindows?.[0]?.nextRunAt).toBeTruthy();
+
+    window!.status = "paused";
+    window!.pauseReason = "maxModelCalls budget reached (40 / 40).";
+    window!.nextRunAt = undefined;
+    state = applyOperation(state, { type: "scaleAssignmentPursuit", id: window.id, maxVerifiedActions: 90, maxActionsPerHour: 90, resourceBudget: { maxChannelReads: 150, maxHydrations: 90, maxModelCalls: 90, maxVisionCalls: 30 } });
+    expect(state.assignmentPursuitWindows?.[0]?.status).toBe("active");
+    expect(state.assignmentPursuitWindows?.[0]?.pauseReason).toBeUndefined();
+    expect(state.assignmentPursuitWindows?.[0]?.nextRunAt).toBeTruthy();
+  });
+
   it("moves on when a distribution source post has been deleted", async () => {
     process.env.OPENPRESENCE_X_API_MOCK = "0";
     vi.spyOn(ai, "generateAgentSocialDecision").mockResolvedValue({ action: "no_op", text: "", rationale: "No remaining conversation earned a useful action." });
@@ -82,6 +107,49 @@ describe("Sandbox assignment runtime", () => {
     expect(updated?.lastOutcome?.message ?? "").not.toContain("blocked");
     expect(result.events.some((event) => event.title === "Distribution source moved on")).toBe(true);
     expect(result.events.some((event) => event.title === "Promotion Assignment blocked")).toBe(false);
+  });
+
+  it("does not spend another model call re-judging the same burst candidates", async () => {
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    const decision = vi.spyOn(ai, "generateAgentSocialDecision").mockResolvedValue({ action: "no_op", text: "", rationale: "Neither fresh candidate earned a useful action." });
+    let state = createAgent({ name: "Efficient Distribution Agent", description: "A thoughtful collaborator", mode: "agent", handle: "@efficient_distribution", accent: "#D68754" });
+    const presence = { ...state.presence!, environment: "live" as const, connectionMode: "native" as const, execution: { ...state.presence!.execution, reply: "auto" as const, like: "auto" as const, repost: "auto" as const } };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    state.nativeConnections = [{ id: "efficient-connection", presenceId: presence.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "efficient-account", username: "efficient_distribution", name: "Efficient Distribution Agent" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    saveChannelSecret("efficient-connection", { apiKey: "api", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" });
+    const now = new Date().toISOString();
+    state.mirrorObjects = [
+      { id: "source-post", bridgeId: "native:efficient-connection", presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: "2093472969037099455" }, objectType: "post", language: "en", content: { text: "OwnTheHype turns attention into a market for ideas worth seeing.", language: "en" }, author: { externalRef: { type: "x.user", id: "source-author" }, displayName: "Source Author", handle: "source_author" }, observedAt: now, occurredAt: now, visibility: "public", shareability: "presence-only", environment: "live", source: "native", trust: "untrusted_world_content" },
+      { id: "candidate-post", bridgeId: "native:efficient-connection", presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: "candidate-post" }, objectType: "post", language: "en", content: { text: "A relevant builder conversation about attention markets.", language: "en" }, author: { externalRef: { type: "x.user", id: "candidate-author" }, displayName: "Candidate Author", handle: "candidate_author" }, observedAt: now, occurredAt: now, visibility: "public", shareability: "presence-only", environment: "live", source: "native", trust: "untrusted_world_content" },
+    ];
+    state = applyOperation(state, { type: "createAssignment", presenceId: presence.id, environment: "live", instruction: "Help https://x.com/source_author/status/2093472969037099455 reach people who genuinely care. Inspect relevant conversations and choose useful authorized actions." });
+    const assignment = state.assignments[0]!;
+    state = applyOperation(state, { type: "startAssignmentPursuit", assignmentId: assignment.id, presenceId: presence.id, deadlineAt: new Date(Date.now() + 3_600_000).toISOString(), maxVerifiedActions: 10, resourceBudget: { maxChannelReads: 10, maxModelCalls: 10 } });
+    writeState(state);
+    let observedQuery = "";
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL) => {
+      const url = String(input);
+      if (url.includes("/2/tweets/search/recent")) observedQuery = url;
+      return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+
+    const run = async () => {
+      await POST(new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "runLiveAssignment", assignmentId: assignment.id, presenceId: presence.id }) }));
+      const deadline = Date.now() + 5_000;
+      while (Date.now() < deadline && !readState().events.some((event) => event.title === "Promotion opportunity held")) await new Promise((resolve) => setTimeout(resolve, 20));
+    };
+
+    await run();
+    const afterFirst = readState();
+    const firstCalls = decision.mock.calls.length;
+    const firstWindow = afterFirst.assignmentPursuitWindows?.find((item) => item.assignmentId === assignment.id);
+    expect(firstCalls).toBe(1);
+    expect(decodeURIComponent(observedQuery).toLowerCase()).toContain("ownthehype");
+    expect(firstWindow?.consideredCandidateKeys).toEqual(expect.arrayContaining(["x.post:2093472969037099455", "x.post:candidate-post"]));
+
+    await run();
+    expect(decision.mock.calls.length).toBe(firstCalls);
   });
 
   it("keeps Sandbox checks available while the Presence is paused", async () => {

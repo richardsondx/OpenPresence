@@ -14,7 +14,7 @@ test("Calendar Week mode visualizes Assignment timing without pretending to show
   await page.getByLabel("Day").selectOption("Tuesday");
   await page.getByRole("textbox", { name: "Time" }).fill("08:00");
   await page.getByLabel("Objective", { exact: true }).selectOption("education");
-  await page.getByRole("button", { name: "Review assignment", exact: true }).click();
+  await page.getByRole("button", { name: "Review responsibility", exact: true }).click();
   await expect(page.getByRole("button", { name: "Week", exact: true })).toHaveAttribute("aria-pressed", "true");
   await expect(page.getByRole("region", { name: "Weekly schedule" })).toBeVisible();
   await expect(page.getByText("When Jenny can notice and act")).toBeVisible();
