@@ -40,7 +40,7 @@ export function operatorBurstStatusReply(source: OpenPresenceState, presenceId: 
   const verifiedLabel = `${counts.verified} verified action${counts.verified === 1 ? "" : "s"}`;
   const capacity = `capacity for up to ${window.maxVerifiedActions}`;
   if (window.status === "paused") return `It started at ${start} and is currently paused. I have ${verifiedLabel}; ${capacity} until ${deadline}.`;
-  if (pending > 0) return `It’s active now—it started at ${start} and runs until ${deadline}. I have ${verifiedLabel}, with ${pending} action${pending === 1 ? "" : "s"} awaiting confirmation.`;
+  if (pending > 0) return `It’s active now—it started at ${start} and runs until ${deadline}. I have ${verifiedLabel}, with ${pending} action${pending === 1 ? "" : "s"} awaiting authorized delivery or X verification.`;
   if (activeRun) return `It’s active now—it started at ${start} and runs until ${deadline}. I have ${verifiedLabel}; the next pass is in progress.`;
   return `It’s active now—it started at ${start} and runs until ${deadline}. I have ${verifiedLabel}; the next pass is queued.`;
 }

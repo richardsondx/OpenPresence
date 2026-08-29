@@ -47,7 +47,7 @@ describe("truthful Activity right-now projection", () => {
     state.assignmentRuns[0].status = "delivery_pending";
     const waiting = deriveActivityNow(state, presence.id);
     expect(waiting.state).toBe("resting");
-    expect(waiting.title).toBe("Waiting for delivery confirmation");
+    expect(waiting.title).toBe("Waiting for authorized delivery or X verification");
     expect(waiting.detail).toContain("no worker is running");
   });
 
@@ -62,7 +62,7 @@ describe("truthful Activity right-now projection", () => {
     expect(projection.detail).toContain("No cognition worker is running");
   });
 
-  it("shows confirmation as a durable waiting state and repairs its verification wake", () => {
+  it("shows X verification as a durable waiting state and repairs its verification wake", () => {
     const state = fixture();
     const presence = state.presence!;
     const timestamp = new Date().toISOString();
@@ -74,7 +74,7 @@ describe("truthful Activity right-now projection", () => {
     expect(repairPendingBridgeVerificationWakes(state, new Date(timestamp))).toBe(0);
     state.scheduledWakes = listScheduledWakes(presence.id);
     const projection = deriveActivityNow(state, presence.id, new Date(timestamp));
-    expect(projection.title).toBe("Waiting for confirmation");
+    expect(projection.title).toBe("Waiting for X verification");
     expect(projection.nextWakePurpose).toBe("Confirm delivery");
     expect(listScheduledWakes(presence.id).some((wake) => wake.id === `wake_verification_${executionId}` && wake.kind === "verification")).toBe(true);
   });
@@ -137,7 +137,7 @@ describe("truthful Activity right-now projection", () => {
     const projection = deriveActivityNow(state, presence.id, now);
     expect(projection.state).toBe("bursting");
     expect(projection.title).toContain("Burst is active");
-    expect(projection.title).not.toBe("Waiting for confirmation");
+    expect(projection.title).not.toBe("Waiting for X verification");
   });
 
   it("pauses a burst durably when a resource envelope is exhausted", () => {
@@ -318,7 +318,7 @@ describe("natural operator conversation", () => {
     const reply = operatorBurstStatusReply(state, presence.id, new Date("2026-08-28T23:00:00.000Z"));
     expect(reply).toContain("It’s active now");
     expect(reply).toContain("0 verified actions");
-    expect(reply).toContain("awaiting confirmation");
+    expect(reply).toContain("awaiting authorized delivery or X verification");
     expect(reply).not.toContain("Assignment instruction");
   });
 

@@ -8864,7 +8864,7 @@ function LiveView({
       : activeAttentionEpisode?.stage === "acting"
         ? "Acting"
         : activeAttentionEpisode?.stage === "confirming"
-          ? "Confirming"
+          ? "Verifying"
           : activeAttentionEpisode?.stage === "completed"
             ? "Completed"
             : undefined;
@@ -9494,7 +9494,7 @@ function LiveView({
     : focusNeedsReview
       ? focusedAssignmentExecution?.status === "awaiting-review" ? "Draft ready for review" : "Needs your attention"
       : focusIsConfirming
-        ? `Sent to ${channelLabel(selected?.channel ?? "x", state.channelDefinitions)} · waiting for confirmation`
+        ? `Sent to ${channelLabel(selected?.channel ?? "x", state.channelDefinitions)} · waiting for X verification`
         : focusIsSending
           ? `Sending to ${channelLabel(selected?.channel ?? "x", state.channelDefinitions)}`
           : focusIsCompleted || focusedAssignmentExecution?.status === "succeeded"
@@ -9509,11 +9509,11 @@ function LiveView({
     : focusNeedsReview
       ? "Next: Review the draft before it is sent."
       : focusIsConfirming
-        ? "Next: Confirm the live post in the feed."
+        ? "Next: Verify the live post in the feed."
         : focusIsSending
           ? "Next: Wait for X to confirm the post."
           : focusIsCompleted || focusedAssignmentExecution?.status === "succeeded"
-            ? "Published and confirmed."
+        ? "Published and verified."
             : currentFocusAssignment?.work?.phase === "candidate_review" && !focusedDraftContent
               ? focusProgressIsActive
                 ? focusedAssignmentIsOriginal ? "Next: Write the post once an angle earns it." : `Next: Write the ${focusedActionLabel.toLowerCase()} once an angle earns it.`
@@ -9712,14 +9712,14 @@ function LiveView({
       : rightNowStateCopy;
   const workingNowTitle = activeAttentionEpisode
     ? currentAttentionMirror
-      ? `${presenceName} is ${activeAttentionEpisode.stage === "confirming" ? "confirming" : activeAttentionEpisode.stage === "acting" ? "acting on" : "looking at"} ${attentionEpisodeTarget ?? "a public post"}.`
-      : `${presenceName} is ${activeAttentionEpisode.stage === "acting" ? "acting" : activeAttentionEpisode.stage === "confirming" ? "confirming an action" : "looking for something worth acting on"}.`
+      ? `${presenceName} is ${activeAttentionEpisode.stage === "confirming" ? "verifying" : activeAttentionEpisode.stage === "acting" ? "acting on" : "looking at"} ${attentionEpisodeTarget ?? "a public post"}.`
+      : `${presenceName} is ${activeAttentionEpisode.stage === "acting" ? "acting" : activeAttentionEpisode.stage === "confirming" ? "verifying an action" : "looking for something worth acting on"}.`
     : focusActivityTitle
     ?? (relevantExecution && actionContext ? actionDescription : activeCapabilityTrial ? `Preparing a ${activeCapabilityTrial.capability.replaceAll("_", " ")}` : `${presenceName} is watching for something worth acting on.`);
   const workingNowDetail = focusActivityTitle
     ? `${focusedTopic ? `Topic: ${focusedTopic}. ` : ""}${focusStatusLine}`
     : activeAttentionEpisode
-    ? `${activeAttentionEpisode.fetchedCount} fetched · ${activeAttentionEpisode.newCount} new · ${activeAttentionEpisode.consideredCount} considered · ${attentionEpisodeActionTotal} action${attentionEpisodeActionTotal === 1 ? "" : "s"} selected${activeAttentionEpisode.pendingExecutionCount ? ` · ${activeAttentionEpisode.pendingExecutionCount} awaiting confirmation` : ""}.`
+    ? `${activeAttentionEpisode.fetchedCount} fetched · ${activeAttentionEpisode.newCount} new · ${activeAttentionEpisode.consideredCount} considered · ${attentionEpisodeActionTotal} action${attentionEpisodeActionTotal === 1 ? "" : "s"} selected${activeAttentionEpisode.pendingExecutionCount ? ` · ${activeAttentionEpisode.pendingExecutionCount} awaiting delivery or X verification` : ""}.`
     : runtimeUnavailable
     ? "The browser could not reach the OpenPresence service. The last saved state remains visible while the connection is restored."
     : paused
@@ -9729,7 +9729,7 @@ function LiveView({
       : currentFailedExecution
         ? latestFailure?.reason ?? "This action needs your attention before it can continue."
       : focusInFlightExecutions.length > 0
-        ? "A public action is on its way out. OpenPresence is waiting for confirmation."
+        ? "A public action is on its way out. OpenPresence is waiting for channel verification."
         : checking || activeOperationalRun || activeAssignmentRun
           ? "Looking for something worth saying or doing."
             : runtimeRecovering
@@ -9829,7 +9829,7 @@ function LiveView({
       : nowMode === "acting"
         ? nowActionRecord?.snippet ? "Preparing the smallest useful response." : "Preparing the action."
         : nowMode === "confirming"
-          ? `Confirming on ${channelLabel(selected?.channel ?? "x", state.channelDefinitions)}…`
+          ? `Verifying on ${channelLabel(selected?.channel ?? "x", state.channelDefinitions)}…`
         : nowMode === "waiting"
               ? (lastLookCopy ?? "No attention run is currently active.")
             : nowMode === "paused"
@@ -10005,7 +10005,7 @@ function LiveView({
                 ? inFlightTrialExecution.status === "awaiting-review"
                   ? `Trial candidate drafted and ready for your review before delivery.`
                   : inFlightTrialExecution.status === "verification-pending"
-                  ? `Delivered to ${channelLabel(selected.channel, state.channelDefinitions)} · Awaiting confirmation in Social Mirror…`
+                  ? `Delivered to ${channelLabel(selected.channel, state.channelDefinitions)} · Awaiting verification in Social Mirror…`
                   : `Preparing ${activeCapabilityTrial.capability} execution…`
                 : activeCapabilityTrial.status === "judging"
                 ? `Evaluating candidate opportunities against editorial taste…`
@@ -10220,8 +10220,8 @@ function LiveView({
                   <SectionEyebrow>Being handled · {inFlightExecutions.length}</SectionEyebrow>
                   <span className="quiet-label">
                     {inFlightExecutions.length === 1
-                      ? "1 action already chosen; it is being sent or confirmed."
-                      : `${inFlightExecutions.length} actions already chosen; they are being sent or confirmed.`}
+                      ? "1 action already chosen; it is being sent or verified."
+                      : `${inFlightExecutions.length} actions already chosen; they are being sent or verified.`}
                   </span>
                 </div>
                 {activityActionRecords.some((r) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued"].includes(r.execution.status)) && (
@@ -10349,7 +10349,7 @@ function LiveView({
           <div className="activity-in-flight-header">
             <div>
               <SectionEyebrow>Being handled · {inFlightExecutions.length}</SectionEyebrow>
-              <span className="quiet-label">Chosen actions being sent or confirmed</span>
+              <span className="quiet-label">Chosen actions being sent or verified</span>
             </div>
             {activityActionRecords.some((record) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued"].includes(record.execution.status)) && <Button variant="secondary" disabled={cancellingAll} onClick={() => void cancelAllPreDispatchExecutions()}>{cancellingAll ? "Cancelling…" : "Cancel unsent"}</Button>}
             {activityActionRecords.some((record) => record.execution.status === "verification-pending") && <button type="button" className="activity-in-flight-clear" disabled={cancellingAll} onClick={() => void clearAllUnverifiedExecutions()}>{cancellingAll ? "Clearing…" : "Clear waiting"}</button>}
@@ -10360,7 +10360,7 @@ function LiveView({
               const preDispatch = ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued"].includes(record.execution.status);
               return <article className="activity-in-flight-card activity-in-flight-card-compact" key={record.execution.id}>
                 <div className="activity-in-flight-card-main">
-                  <div className="activity-in-flight-card-topline"><span className={`activity-state-chip ${sent ? "chip-sent" : "chip-preparing"}`}>{sent ? "Confirming" : "Publishing"}</span><span className="activity-in-flight-time">{record.execution.executedAt ? `Sent ${formatTime(record.execution.executedAt)}` : `Started ${formatTime(record.execution.createdAt)}`}</span></div>
+                  <div className="activity-in-flight-card-topline"><span className={`activity-state-chip ${sent ? "chip-sent" : "chip-preparing"}`}>{sent ? "Verifying" : "Publishing"}</span><span className="activity-in-flight-time">{record.execution.executedAt ? `Sent ${formatTime(record.execution.executedAt)}` : `Started ${formatTime(record.execution.createdAt)}`}</span></div>
                   <h3 className="activity-in-flight-title">{record.action} {record.targetDisplay}</h3>
                   {record.snippet && <p className="activity-in-flight-snippet">“{record.snippet.slice(0, 140)}{record.snippet.length > 140 ? "…" : ""}”</p>}
                   {record.expressionPreview && <div className="activity-in-flight-expression-preview"><small>{record.action === "Reply" ? "Reply preview" : "Expression preview"}</small><p>“{record.expressionPreview.slice(0, 220)}{record.expressionPreview.length > 220 ? "…" : ""}”</p></div>}
@@ -12260,9 +12260,9 @@ function ExecutionQueueSummary({
   }
   const verificationBlockedByCredits = pending.some((execution) => execution.status === "verification-pending" && execution.failure?.code === "X_API_CREDITS_EXHAUSTED");
   const queueDetail = verificationPending > 0
-    ? verificationBlockedByCredits
-      ? `${verificationPending} action${verificationPending === 1 ? " is" : "s are"} waiting for X confirmation; verification is paused because the X API has no credits remaining.`
-      : `${verificationPending} Chrome-submitted action${verificationPending === 1 ? " is" : "s are"} waiting for X API confirmation.`
+      ? verificationBlockedByCredits
+      ? `${verificationPending} action${verificationPending === 1 ? " is" : "s are"} waiting for X verification; verification is paused because the X API has no credits remaining.`
+      : `${verificationPending} action${verificationPending === 1 ? " is" : "s are"} waiting for the channel to verify the public result.`
     : bridgePending > 0
     ? bridgeStatus === "connected"
       ? `${bridgePending} browser fallback action${bridgePending === 1 ? " is" : "s are"} waiting for the next browser check${nextQueueCountdown ? ` in ${nextQueueCountdown}` : ""}.`
@@ -13720,7 +13720,7 @@ function AssignmentPursuitCard({
     ? latestExecution.status === "succeeded" && latestOutcome?.status === "succeeded"
       ? `Verified ${formatActivityAffordance(latestExecution.affordance)} ${targetLabel}`
       : pendingStatuses.includes(latestExecution.status)
-        ? `Waiting for confirmation · ${formatActivityAffordance(latestExecution.affordance)} ${targetLabel}`
+        ? `Waiting for X verification · ${formatActivityAffordance(latestExecution.affordance)} ${targetLabel}`
         : ["failed", "blocked", "expired", "verification-closed"].includes(latestExecution.status)
           ? `Couldn’t deliver ${formatActivityAffordance(latestExecution.affordance)} ${targetLabel}`
           : latestEvent?.title ?? "Pass completed without a public action"
@@ -13734,7 +13734,7 @@ function AssignmentPursuitCard({
   const resultDetail = latestExecution?.failure?.message ?? latestEvent?.detail ?? "The next pass will look for a specific, useful opportunity.";
   const activeRun = (state.assignmentRuns ?? []).some((run) => run.pursuitWindowId === pursuit.id && ["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"].includes(run.status));
   const nextPass = pursuit.status !== "active" ? "paused" : activeRun ? "in progress" : formatCountdown(pursuit.nextRunAt, now) ?? "queued";
-  const pausedAtCapacity = pursuit.status === "paused" && pursuit.pauseReason?.includes("budget reached");
+  const pausedAtResourceBudget = pursuit.status === "paused" && pursuit.pauseReason?.includes("budget reached");
   const scale = assignmentPursuitScaleForWindow(pursuit);
   const remaining = Math.max(0, pursuit.maxVerifiedActions - counts.verified - pending);
   const scalePursuit = async (value: string) => {
@@ -13754,12 +13754,12 @@ function AssignmentPursuitCard({
     <div className={compact ? "assignment-pursuit-grid" : "activity-pursuit-grid"}>
       <div><strong>{counts.verified} / {pursuit.maxVerifiedActions}</strong><span>verified outcomes</span></div>
       <div><strong>{remaining}</strong><span>capacity remaining</span></div>
-      <div><strong>{pending}</strong><span>awaiting confirmation</span></div>
+      <div><strong>{pending}</strong><span>awaiting delivery or verification</span></div>
       <div><strong>{nextPass}</strong><span>next pass</span></div>
     </div>
     <div className="assignment-pursuit-result" data-testid="distribution-push-latest-result"><span>Latest result</span><strong>{result}</strong><small>{resultDetail.slice(0, 220)}{resultDetail.length > 220 ? "…" : ""}</small></div>
     <div className="assignment-pursuit-scale"><label htmlFor={`pursuit-scale-${pursuit.id}`}>Scale effort<select id={`pursuit-scale-${pursuit.id}`} aria-label="Scale distribution push effort" value={scale} disabled={scaling} onChange={(event) => void scalePursuit(event.target.value)}><option value="focused">Focused · up to 15 outcomes</option><option value="balanced">Balanced · up to 40 outcomes</option><option value="expanded">Expanded · up to 90 outcomes</option>{scale === "custom" && <option value="custom">Custom · current capacity</option>}</select></label><small>Uses the same Focused, Balanced, and Expanded levels as Autonomy Today. This is capacity, not a quota.</small></div>
-    <small>{pursuit.status === "active" ? `The Agent keeps looking until ${new Date(pursuit.deadlineAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} or capacity is reached. Weak opportunities are left alone.` : pausedAtCapacity ? "Capacity was reached. Choose a larger effort level above to resume automatically." : "The burst is paused. Resume it when you want the Agent to continue."}</small>
+    <small>{pursuit.status === "active" ? `The Agent keeps looking until ${new Date(pursuit.deadlineAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} or capacity is reached. Weak opportunities are left alone.` : pausedAtResourceBudget ? `The burst paused because its bounded resource envelope was reached. Choose a larger effort level above to resume; ${remaining} outcome slots remain.` : "The burst is paused. Resume it when you want the Agent to continue."}</small>
     <div className={compact ? "assignment-pursuit-actions" : "activity-pursuit-controls"}>{pursuit.status === "active" ? <Button variant="secondary" onClick={() => void mutate({ type: "pauseAssignmentPursuit", id: pursuit.id })}>Pause push</Button> : <Button variant="secondary" onClick={() => void mutate({ type: "resumeAssignmentPursuit", id: pursuit.id })}>Resume push</Button>}<Button variant="ghost" onClick={() => void mutate({ type: "cancelAssignmentPursuit", id: pursuit.id })}>Stop push</Button></div>
   </section>;
 }

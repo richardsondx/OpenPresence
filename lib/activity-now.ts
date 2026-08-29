@@ -55,7 +55,7 @@ function assignmentSteps(run: NonNullable<OpenPresenceState["assignmentRuns"]>[n
     { kind: "searching", label: "Researching source evidence" },
     { kind: "judging", label: "Judging the candidates" },
     { kind: "acting", label: "Writing the expression" },
-    { kind: "verifying", label: "Delivering and confirming" },
+    { kind: "verifying", label: "Delivering and verifying" },
   ];
   return definitions.map((definition, index) => ({
     id: `${run.id}:${definition.kind}`,
@@ -87,7 +87,7 @@ function runTitle(stage: string) {
   if (stage === "discovery.triage") return "Narrowing the candidates";
   if (stage === "discovery.decide" || stage === "choosing") return "Judging what deserves a response";
   if (stage === "delivering") return "Sending the chosen action";
-  if (stage === "verifying") return "Confirming what happened";
+  if (stage === "verifying") return "Verifying what happened";
   return "Working through the current attention pass";
 }
 
@@ -282,9 +282,9 @@ export function deriveActivityNow(state: OpenPresenceState, presenceId: string, 
     return {
       presenceId,
       state: "resting",
-      title: waitingForConfirmation ? "Waiting for confirmation" : waitingForAuthorizedDelivery ? "Waiting for authorized delivery" : "Waiting for the attention pass to settle",
+      title: waitingForConfirmation ? "Waiting for X verification" : waitingForAuthorizedDelivery ? "Waiting for authorized delivery" : "Waiting for the attention pass to settle",
       detail: verificationPaused
-        ? "Confirmation is paused until the authorized verification route is available. Review the runtime notice to continue."
+        ? "X verification is paused until the authorized verification route is available. Review the runtime notice to continue."
         : waitingForConfirmation
           ? "A selected action reached the delivery boundary and is waiting for a verified outcome."
           : waitingForAuthorizedDelivery
@@ -338,7 +338,7 @@ export function deriveActivityNow(state: OpenPresenceState, presenceId: string, 
   if (pendingDeliveryRun) return {
     presenceId,
     state: "resting",
-    title: "Waiting for delivery confirmation",
+    title: "Waiting for authorized delivery or X verification",
     detail: "Cognition is finished and no worker is running. The result is waiting on its authorized delivery or verification route.",
     since: pendingDeliveryRun.startedAt ?? pendingDeliveryRun.createdAt,
     activeAssignmentId: pendingDeliveryRun.assignmentId,

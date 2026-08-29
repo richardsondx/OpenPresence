@@ -56,6 +56,19 @@ export function classifyFailureRootCause(
   const msg = typeof error === "string" ? error : error.message || "";
   const lower = msg.toLowerCase();
 
+  // SQLite corruption is not a transient runtime outage. Retrying workers
+  // against a malformed canonical database only deepens the ambiguity and can
+  // leave external delivery records stranded between states.
+  if (/database disk image is malformed|malformed database schema|file is not a database|database corruption/i.test(lower)) {
+    return {
+      rootCauseKey: "database.corruption",
+      safeSummary: "The canonical OpenPresence database is corrupt. Stop live delivery and recover the database before resuming this burst.",
+      retryable: false,
+      requiresOperator: true,
+      requiresAuth: false,
+    };
+  }
+
   // Authentication & Session expiry
   if (/auth|unauthorized|session expired|login required|credentials revoked|token expired/i.test(lower)) {
     return {
@@ -184,15 +197,16 @@ export function recordOperationalFailure(input: {
 } {
   const nowIso = new Date().toISOString();
   const classification = classifyFailureRootCause(input.error, input.dependency);
-  const budget = RECOVERY_BUDGETS[input.dependency] ?? RECOVERY_BUDGETS.runtime;
+  const effectiveDependency: DependencyHealthKind = classification.rootCauseKey === "database.corruption" ? "database" : input.dependency;
+  const budget = RECOVERY_BUDGETS[effectiveDependency] ?? RECOVERY_BUDGETS.runtime;
 
   // 1. Get or initialize dependency health
-  let health = getDependencyHealth(input.dependency, input.presenceId);
+  let health = getDependencyHealth(effectiveDependency, input.presenceId);
   if (!health) {
     health = {
-      id: `dh_${input.dependency}_${input.presenceId ?? "global"}`,
+      id: `dh_${effectiveDependency}_${input.presenceId ?? "global"}`,
       presenceId: input.presenceId,
-      dependency: input.dependency,
+      dependency: effectiveDependency,
       state: "healthy",
       consecutiveFailures: 0,
       updatedAt: nowIso,

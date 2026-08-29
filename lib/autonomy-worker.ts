@@ -500,7 +500,7 @@ export async function executeAutonomyRun(runId: string): Promise<OpenPresenceSta
       const failedBeforeDelivery = episodeExecutions.filter((execution) => ["failed", "blocked", "expired", "cancelled"].includes(execution.status)).length;
       const deliveryLabel = reachedDelivery > 0 ? "Delivery attempted" : waitingForDelivery > 0 ? "Waiting to send" : "No delivery completed";
       const deliveryDetail = reachedDelivery > 0
-        ? `${reachedDelivery} of ${autonomousExecutionIds.size} selected action${autonomousExecutionIds.size === 1 ? "" : "s"} reached the channel or are awaiting confirmation.`
+        ? `${reachedDelivery} of ${autonomousExecutionIds.size} selected action${autonomousExecutionIds.size === 1 ? "" : "s"} reached the channel or are awaiting X verification.`
         : waitingForDelivery > 0
           ? `No selected action reached the channel yet. ${waitingForDelivery} action${waitingForDelivery === 1 ? " remains" : "s remain"} queued for an authorized delivery route.`
           : failedBeforeDelivery > 0
@@ -508,7 +508,7 @@ export async function executeAutonomyRun(runId: string): Promise<OpenPresenceSta
             : "No selected action reached the channel, so nothing was sent.";
       resultState = recordAttentionStep(resultState, attentionEpisodeId, "acting", { label: deliveryLabel, detail: deliveryDetail, current: reachedDelivery, total: autonomousExecutionIds.size, status: "completed" });
       if (reachedDelivery > 0) {
-        resultState = recordAttentionStep(resultState, attentionEpisodeId, "verifying", { label: "Confirming what happened", detail: "Checking the Social Mirror for authoritative outcomes.", current: resultState.outcomes.filter((outcome) => outcome.attentionEpisodeId === attentionEpisodeId && outcome.status === "succeeded").length, total: autonomousExecutionIds.size });
+        resultState = recordAttentionStep(resultState, attentionEpisodeId, "verifying", { label: "Verifying what happened", detail: "Checking the Social Mirror for authoritative outcomes.", current: resultState.outcomes.filter((outcome) => outcome.attentionEpisodeId === attentionEpisodeId && outcome.status === "succeeded").length, total: autonomousExecutionIds.size });
       }
     }
 

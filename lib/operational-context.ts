@@ -33,6 +33,35 @@ function normalizeLegacyRuntimeIncidents(presenceId?: string) {
   for (const incident of listRecoveryIncidents(presenceId)) {
     if (incident.state === "resolved") continue;
 
+    // A pre-existing SQLite corruption incident may have been recorded by an
+    // older build as a recoverable runtime error. Preserve the incident and
+    // promote it to the database/operator boundary; automatic retries cannot
+    // make a malformed canonical database safe.
+    if (incident.rootCauseKey === "runtime.transient_error" && /database disk image is malformed|malformed database schema|file is not a database|database corruption/i.test(incident.safeSummary)) {
+      incident.rootCauseKey = "database.corruption";
+      incident.dependencyId = `dh_database_${incident.presenceId ?? "global"}`;
+      incident.state = "needs_operator";
+      incident.safeSummary = "The canonical OpenPresence database is corrupt. Stop live delivery and recover the database before resuming this burst.";
+      incident.operatorActionRequired = true;
+      incident.requiresAuth = false;
+      delete incident.nextAttemptAt;
+      incident.updatedAt = now;
+      upsertRecoveryIncident(incident);
+      const databaseHealth = getDependencyHealth("database", incident.presenceId) ?? {
+        id: `dh_database_${incident.presenceId ?? "global"}`,
+        presenceId: incident.presenceId,
+        dependency: "database" as const,
+        state: "requires_operator" as const,
+        consecutiveFailures: 1,
+        updatedAt: now,
+      };
+      databaseHealth.state = "requires_operator";
+      databaseHealth.currentIncidentId = incident.id;
+      databaseHealth.updatedAt = now;
+      upsertDependencyHealth(databaseHealth);
+      continue;
+    }
+
     // Older incident rows can carry the operator boundary but retain a stale
     // recoverable state/attempt timestamp. Normalize that contradiction before
     // compiling health so the UI cannot report an exhausted provider as an
@@ -249,7 +278,7 @@ export function readOperationalHealth(presenceId?: string, now = new Date()): Op
           ? "Chrome is connected, but the signed-in account has not been verified yet. Delivery is paused safely until identity verification completes."
           : "A delivery is waiting for the authorized browser connector to check in."
       : attentionDeliveryWaiting
-        ? "A selected social action is waiting for delivery or verification. OpenPresence will not claim success until the authorized route confirms what happened."
+        ? "A selected social action is waiting for its authorized delivery route or X verification. OpenPresence will not claim success until the channel confirms what happened."
     : status === "healthy"
       ? "Genny is live and all required runtime capabilities are healthy."
       : status === "degraded"

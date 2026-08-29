@@ -24,7 +24,7 @@ import {
   recordOperationalSuccess,
 } from "../lib/incident-engine";
 import { projectLegacyFailuresToIncidents } from "../lib/incident-migration";
-import { compileOperationalContext } from "../lib/operational-context";
+import { compileOperationalContext, readOperationalHealth } from "../lib/operational-context";
 import { reconsiderAffectedRuns } from "../lib/recovery-reconsideration";
 import {
   calculateStaleAt,
@@ -192,6 +192,30 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
     expect(classification.rootCauseKey).toBe("model_provider.credentials_missing");
     expect(classification.retryable).toBe(false);
     expect(classification.requiresOperator).toBe(true);
+  });
+
+  it("treats SQLite corruption as a database boundary instead of a recoverable runtime outage", () => {
+    const uniquePresence = `presence_database_corruption_${Date.now()}`;
+    const classification = classifyFailureRootCause("database disk image is malformed", "runtime");
+    expect(classification).toMatchObject({
+      rootCauseKey: "database.corruption",
+      retryable: false,
+      requiresOperator: true,
+    });
+
+    const { incident } = recordOperationalFailure({
+      dependency: "runtime",
+      presenceId: uniquePresence,
+      runId: "run_database_corruption",
+      error: "database disk image is malformed",
+    });
+    expect(incident).toMatchObject({
+      rootCauseKey: "database.corruption",
+      dependencyId: `dh_database_${uniquePresence}`,
+      state: "needs_operator",
+      operatorActionRequired: true,
+    });
+    expect(readOperationalHealth(uniquePresence).status).toBe("needs_you");
   });
 
   it("Invariant: an existing recovery incident escalates immediately when credits become operator-blocked", () => {
