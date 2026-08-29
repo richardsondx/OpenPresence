@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { claimExecutions, closeChromeVerification, createBridgeWithKey, failExecution, ingestEvents, recordVerifiedBridgeReaction, reportBridgeIdentity } from "../lib/bridge";
 import { applyOperation, createAgent, formXReplyIntent } from "../lib/runtime";
-import { readState, readStateForBridge, WorkspaceConflictError, writeState } from "../lib/db";
+import { readState, readStateForBridge, readStateVersion, WorkspaceConflictError, writeState } from "../lib/db";
 import type { Execution } from "../lib/types";
 
 afterEach(() => vi.unstubAllEnvs());
@@ -14,6 +14,19 @@ describe("Bridge browser retry lifecycle", () => {
     expect(scoped.bridges.some((bridge) => bridge.id === bridgeResult.bridge!.id)).toBe(true);
     expect(scoped.presences.some((presence) => presence.id === state.presence!.id)).toBe(true);
     expect(scoped.agentWorkspaces).toEqual([]);
+  });
+
+  it("does not rewrite the workspace for a fresh unchanged identity probe", () => {
+    const state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });
+    const bridge = bridgeResult.bridge!;
+    reportBridgeIdentity(bridge, { executorId: "chrome-test", username: "example_agent" });
+    const beforeVersion = readStateVersion();
+    const beforeRevision = readState().workspaceRevision;
+    const repeated = reportBridgeIdentity(bridge, { executorId: "chrome-test", username: "example_agent" });
+    expect(repeated.identity).toMatchObject({ status: "verified", username: "example_agent" });
+    expect(readStateVersion()).toBe(beforeVersion);
+    expect(readState().workspaceRevision).toBe(beforeRevision);
   });
 
   it("settles a verified Assignment quote and mirror object", () => {

@@ -118,6 +118,18 @@ export function reportBridgeIdentity(bridge: Bridge, input: z.infer<typeof ident
   const expected = normalizedHandle(presence?.handle);
   const actual = normalizedHandle(input.username);
   const status: NonNullable<Bridge["accountIdentity"]>["status"] = actual && expected && actual === expected ? "verified" : actual ? "mismatch" : "unknown";
+  const previousExecutorIdentity = readBridgeIdentityForExecutor(current.id, input.executorId);
+  const hasIdentityHeldWork = state.executions.some((execution) => execution.bridgeId === current.id && execution.deliveryHold?.reason === "bridge_identity");
+  if (previousExecutorIdentity
+    && previousExecutorIdentity.status === status
+    && normalizedHandle(previousExecutorIdentity.username) === actual
+    && Date.now() - new Date(previousExecutorIdentity.observedAt).getTime() <= BRIDGE_IDENTITY_MAX_AGE_MS) {
+    // Chrome may probe the same signed-in account on every tab mount. The
+    // executor identity is already durable and fresh; avoid rewriting the
+    // monolithic workspace and invalidating Activity caches for an unchanged
+    // security fact.
+    if (!hasIdentityHeldWork) return { state, identity: readBridgeIdentity(current.id) ?? previousExecutorIdentity, expectedHandle: presence?.handle };
+  }
   const message = status === "mismatch"
     ? `The controlled browser is signed in as @${actual}, but this Presence expects @${expected}.`
     : status === "unknown"

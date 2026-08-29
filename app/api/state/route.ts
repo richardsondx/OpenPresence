@@ -4555,7 +4555,14 @@ export async function GET(request: Request) {
   if (request.headers.get("if-none-match") === etag) {
     return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "no-cache" } });
   }
-  const contextualState = readStateViewForContext({ agentId: resolvedAgentId, presenceId: requestedPresenceId });
+  // The first read above already materializes the requested read model. Reuse
+  // it when the resolved Agent/Presence scope is unchanged; reading it again
+  // used to parse and normalize the same multi-megabyte workspace twice for
+  // every non-304 Activity or full-state response.
+  const contextualState = stored.agent?.id === resolvedAgentId
+    && (!requestedPresenceId || stored.presence?.id === requestedPresenceId)
+    ? stored
+    : readStateViewForContext({ agentId: resolvedAgentId, presenceId: requestedPresenceId });
   // The server retains all Agent snapshots for switching and scoped writes,
   // but the browser only needs the active workspace and the lightweight Agent
   // directory. Keeping the snapshots out of the initial payload prevents the
