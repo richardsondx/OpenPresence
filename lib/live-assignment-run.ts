@@ -14,6 +14,11 @@ const autonomousPreWriteClosureCodes = new Set(["BRIDGE_NOT_CHECKED_IN"]);
 export function isAutonomousPreWriteDeliveryFailure(execution: Pick<Execution, "status" | "externalRef" | "failure">) {
   return retryableDeliveryStatuses.has(execution.status)
     && !execution.externalRef
+    // Once reconciliation has closed the safe pre-write miss, the durable
+    // failure is deliberately non-retryable. Treating it as fresh work on
+    // every temporal sweep would rewrite the entire compatibility snapshot
+    // indefinitely and keep the UI's read token moving forever.
+    && execution.failure?.retryable !== false
     && autonomousPreWriteClosureCodes.has(execution.failure?.code?.toUpperCase() ?? "");
 }
 

@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyOperation, assertAssignmentPersistenceInvariant, assignmentIsCurrentlyProcessing, assignmentProgressLabel, compileAssignmentInstruction, createAgent, normalizeState, preflightAssignment } from "../lib/runtime";
 import { evaluateExecutionReadiness } from "../lib/execution-readiness";
-import { assignmentRunBlocksNewWork, classifyLiveAssignmentRun, liveAssignmentRunStage, reconcileLiveAssignmentRuns } from "../lib/live-assignment-run";
+import { assignmentRunBlocksNewWork, classifyLiveAssignmentRun, isAutonomousPreWriteDeliveryFailure, liveAssignmentRunStage, reconcileLiveAssignmentRuns } from "../lib/live-assignment-run";
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
@@ -422,6 +422,13 @@ describe("canonical Assignment domain", () => {
     expect(reconciled.executions[0]).toMatchObject({ status: "failed", failure: { code: "BRIDGE_NOT_CHECKED_IN", retryable: false, reviewDisposition: "closed_non_retryable", reviewedAt: expect.any(String) } });
     expect(reconciled.executions[0]?.externalRef).toBeUndefined();
     expect(reconciled.assignmentRuns?.[0]).toMatchObject({ status: "failed", lastError: expect.stringContaining("no public action was sent") });
+  });
+
+  it("does not treat a terminally closed pre-write miss as fresh work", () => {
+    expect(isAutonomousPreWriteDeliveryFailure({
+      status: "failed",
+      failure: { code: "BRIDGE_NOT_CHECKED_IN", retryable: false },
+    })).toBe(false);
   });
 
   it("releases a recurring pre-write miss to its next scheduled occurrence", () => {

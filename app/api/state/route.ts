@@ -68,6 +68,20 @@ const scheduledAttentionLeaseMs = 60_000;
 const pulseLeaseMs = 30_000;
 const assignmentWorkerLeaseMs = 120_000;
 
+type ActivityResponseCacheEntry = { etag: string; body: string };
+const activityResponseCache = new Map<string, ActivityResponseCacheEntry>();
+const activityResponseCacheLimit = 8;
+
+function rememberActivityResponse(key: string, entry: ActivityResponseCacheEntry) {
+  activityResponseCache.delete(key);
+  activityResponseCache.set(key, entry);
+  while (activityResponseCache.size > activityResponseCacheLimit) {
+    const oldest = activityResponseCache.keys().next().value;
+    if (oldest === undefined) break;
+    activityResponseCache.delete(oldest);
+  }
+}
+
 function assetDiscoveryForState(state: OpenPresenceState) {
   const evidenceConnection = state.assetProviderConnections.find((item) => item.provider === "evidence-visual" && item.status === "available");
   if (evidenceConnection) return { connection: evidenceConnection, provider: new EvidenceVisualAssetDiscoveryProvider(evidenceConnection.endpoint, evidenceConnection.config?.corpus as string | undefined) };
@@ -4579,14 +4593,19 @@ export async function GET(request: Request) {
   const requestedAgentId = url.searchParams.get("agentId") || process.env.OPENPRESENCE_DEFAULT_AGENT_ID;
   const requestedPresenceId = url.searchParams.get("presenceId");
   const projection = url.searchParams.get("projection");
+  const readToken = readStateReadToken();
   const earlyResolvedAgentId = requestedAgentId ?? "";
-  const earlyEtag = `"${readStateReadToken()}:${earlyResolvedAgentId}:${requestedPresenceId ?? ""}:${projection ?? "full"}"`;
+  const earlyEtag = `"${readToken}:${earlyResolvedAgentId}:${requestedPresenceId ?? ""}:${projection ?? "full"}"`;
+  const conditionalTag = request.headers.get("if-none-match");
+  const cachedActivityEntry = !requestedAgentId && projection === "activity" && conditionalTag
+    ? [...activityResponseCache.values()].find((entry) => entry.etag === conditionalTag && entry.etag.startsWith(`"${readToken}:`))
+    : undefined;
   // Conditional Activity polls are common and should not parse/recover the
   // full workspace before returning 304. A request with an explicit Agent ID
   // has a stable ETag identity; requests without one take the normal path once
   // to resolve the active Agent.
-  if (requestedAgentId && request.headers.get("if-none-match") === earlyEtag) {
-    return new Response(null, { status: 304, headers: { ETag: earlyEtag, "Cache-Control": "no-cache" } });
+  if (requestedAgentId && conditionalTag === earlyEtag || cachedActivityEntry) {
+    return new Response(null, { status: 304, headers: { ETag: cachedActivityEntry?.etag ?? earlyEtag, "Cache-Control": "no-cache" } });
   }
   let stored = readStateViewForContext({ agentId: requestedAgentId, presenceId: requestedPresenceId });
   const expiredPursuits = expireElapsedPursuitWindows(stored);
@@ -4643,10 +4662,21 @@ export async function GET(request: Request) {
   // Mirror events are an ingestion audit log used by the server, not a
   // browser-facing collection. Omitting that duplicated event envelope keeps
   // Activity reads fast without removing any durable data or mirror objects.
-  const browserState = projection === "activity"
-    ? activityProjection(contextualState)
-    : { ...contextualState, responseProjection: "full" as const, agentWorkspaces: [], mirrorEvents: [] };
-  const response = NextResponse.json({ ...browserState, runtimeIdentity: { dbPath: resolvedDbPath, dbSelectionSource, agentId: contextualState.agent?.id ?? null, presenceId: contextualState.presence?.id ?? null, handle: contextualState.presence?.handle ?? null } }, { headers: { ETag: etag, "Cache-Control": "no-cache" } });
+  const responseHeaders = { ETag: etag, "Cache-Control": "no-cache" };
+  const activityCacheKey = `${resolvedAgentId ?? ""}:${requestedPresenceId ?? ""}`;
+  const cachedActivity = projection === "activity" ? activityResponseCache.get(activityCacheKey) : undefined;
+  const response = cachedActivity?.etag === etag
+    ? new NextResponse(cachedActivity.body, { headers: { ...responseHeaders, "Content-Type": "application/json" } })
+    : (() => {
+      const browserState = projection === "activity"
+        ? activityProjection(contextualState)
+        : { ...contextualState, responseProjection: "full" as const, agentWorkspaces: [], mirrorEvents: [] };
+      const payload = { ...browserState, runtimeIdentity: { dbPath: resolvedDbPath, dbSelectionSource, agentId: contextualState.agent?.id ?? null, presenceId: contextualState.presence?.id ?? null, handle: contextualState.presence?.handle ?? null } };
+      if (projection !== "activity") return NextResponse.json(payload, { headers: responseHeaders });
+      const body = JSON.stringify(payload);
+      rememberActivityResponse(activityCacheKey, { etag, body });
+      return new NextResponse(body, { headers: { ...responseHeaders, "Content-Type": "application/json" } });
+    })();
   try { setRuntimeScopeCookie(response, createRuntimeScope(contextualState, { presenceId: contextualState.presence?.id })); } catch { /* onboarding has no RuntimeScope yet */ }
   return response;
   } catch (error) {
