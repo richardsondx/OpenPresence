@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyOperation, assertAssignmentPersistenceInvariant, assignmentIsCurrentlyProcessing, assignmentProgressLabel, compileAssignmentInstruction, createAgent, normalizeState, preflightAssignment } from "../lib/runtime";
 import { evaluateExecutionReadiness } from "../lib/execution-readiness";
-import { assignmentRunBlocksNewWork, classifyLiveAssignmentRun, isAutonomousPreWriteDeliveryFailure, liveAssignmentRunStage, reconcileLiveAssignmentRuns } from "../lib/live-assignment-run";
+import { assignmentRunBlocksNewWork, classifyLiveAssignmentRun, isAutonomousPreWriteDeliveryFailure, liveAssignmentRunStage, maxConcurrentPursuitDeliveries, reconcileLiveAssignmentRuns } from "../lib/live-assignment-run";
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
@@ -289,6 +289,62 @@ describe("canonical Assignment domain", () => {
 
     expect(assignmentRunBlocksNewWork(state, run)).toBe(false);
     state.executions[0]!.failure!.retryable = true;
+    expect(assignmentRunBlocksNewWork(state, run)).toBe(true);
+  });
+
+  it("pipelines a bounded number of distinct pursuit deliveries while verification catches up", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "createAssignment", instruction: "Help this post reach relevant builders.", presenceId: state.presence!.id, environment: "live" });
+    const assignment = state.assignments[0]!;
+    assignment.status = "working";
+    const pursuitId = "pursuit:pipeline";
+    state.assignmentPursuitWindows = [{
+      id: pursuitId,
+      assignmentId: assignment.id,
+      agentId: assignment.agentId,
+      presenceId: assignment.presenceId,
+      startsAt: "2026-08-29T03:00:00.000Z",
+      deadlineAt: "2026-08-29T07:00:00.000Z",
+      maxVerifiedActions: 40,
+      status: "active",
+    }];
+    const run = {
+      id: "assignment-run:pipeline",
+      assignmentId: assignment.id,
+      agentId: assignment.agentId,
+      presenceId: assignment.presenceId,
+      sessionId: `live:${assignment.presenceId}`,
+      pursuitWindowId: pursuitId,
+      status: "delivery_pending" as const,
+      currentStage: "publishing" as const,
+      attempts: 1,
+      maxAttempts: 4,
+      rejectedCandidates: 0,
+      startedAt: "2026-08-29T03:10:00.000Z",
+      createdAt: "2026-08-29T03:10:00.000Z",
+      updatedAt: "2026-08-29T03:12:00.000Z",
+    };
+    state.assignmentRuns = [run];
+    state.executions = Array.from({ length: maxConcurrentPursuitDeliveries - 1 }, (_, index) => ({
+      id: `execution:pipeline:${index}`,
+      socialIntentId: `intent:pipeline:${index}`,
+      presenceId: assignment.presenceId,
+      assignmentId: assignment.id,
+      runId: run.id,
+      affordance: "x.reply",
+      mode: "auto",
+      status: "verification-pending",
+      attempts: 1,
+      connector: "bridge",
+      idempotencyKey: `pipeline:${index}`,
+      failure: { code: "X_API_VERIFICATION_PENDING", retryable: true },
+      createdAt: "2026-08-29T03:11:00.000Z",
+      updatedAt: "2026-08-29T03:12:00.000Z",
+      environment: "live",
+    } as never));
+
+    expect(assignmentRunBlocksNewWork(state, run)).toBe(false);
+    state.executions.push({ ...state.executions[0], id: "execution:pipeline:final" } as never);
     expect(assignmentRunBlocksNewWork(state, run)).toBe(true);
   });
 

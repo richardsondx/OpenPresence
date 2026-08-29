@@ -6130,7 +6130,16 @@ export function formXActionIntent(source: OpenPresenceState, input: { affordance
   if (targetIsBlockedByPerson(state, presence.id, input.target) && input.source !== "operator") return state;
   const requiresExpression = capability === "quote";
   if (requiresExpression && !input.text?.trim()) return state;
-  if (requiresExpression && input.target.type === "x.post" && !xTargetAllowsQuotedExpression(state, presence, input.target.id)) return state;
+  const nativeTargetAllowed = !requiresExpression || input.target.type !== "x.post" || xTargetAllowsQuotedExpression(state, presence, input.target.id);
+  // Native X rejects quotes/replies to arbitrary public posts for this app,
+  // but the signed-in Chrome body is an independent authorized route. Keep
+  // the native target restriction while allowing a verified browser quote to
+  // be formed when that route is actually available.
+  const browserQuoteBridge = requiresExpression && !nativeTargetAllowed ? browserBridgeFor(state, presence.id, "quote") : undefined;
+  const browserQuoteRouteReady = Boolean(browserQuoteBridge
+    && (browserQuoteBridge.name.startsWith("OpenPresence Chrome") || browserQuoteBridge.name.startsWith("Chrome"))
+    && bridgeExecutionStatus(browserQuoteBridge) === "connected");
+  if (requiresExpression && !nativeTargetAllowed && !browserQuoteRouteReady) return state;
   const environment = "live" as const;
   if (hasExistingPublicAction(state, { presenceId: presence.id, environment, affordance: input.affordance, target: input.target, text: input.text })) return state;
   const targetObject = input.target.type === "x.post" ? state.mirrorObjects.find((item) => item.presenceId === presence.id && item.externalRef.type === input.target.type && item.externalRef.id === input.target.id) : undefined;
@@ -6168,7 +6177,7 @@ export function formXActionIntent(source: OpenPresenceState, input: { affordance
   const nativeX = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.access === "read-write" && normalizeHandleForComparison(connection.account?.username) === normalizeHandleForComparison(presence.handle) && (connection.status === "connected" || (connection.status === "needs-attention" && nativeDeliveryFailureIsConnectionScoped(connection.healthMessage ?? connection.deliveryError ?? ""))));
   // The Native API gets the first attempt. A browser route is selected only
   // after this exact affordance has learned that native delivery fails.
-  const browserFallbackRequired = browserFallbackWasLearned(presence, input.affordance);
+  const browserFallbackRequired = (!nativeTargetAllowed && requiresExpression) || browserFallbackWasLearned(presence, input.affordance);
   const connectedNative = browserFallbackRequired ? undefined : nativeX;
   const bridge = browserFallbackRequired || !nativeX ? browserBridgeFor(state, presence.id, capability) : undefined;
   const connector = browserFallbackRequired && bridge ? "bridge" as const : connectedNative ? "native" as const : bridge ? bridge.kind : undefined;

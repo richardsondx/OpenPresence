@@ -112,6 +112,7 @@ import { cognitionSafeAssetSummary, hasUsablePerception } from "./perception";
 import { inspectSandboxObject } from "./perception-runtime";
 import { applyConversationDisposition, conversationDispositionForAction, conversationEpisodeForObject, shouldEvaluateConversationObject } from "./conversation-episodes";
 import { socialReplyQualityIssue } from "./social-quality";
+import { runLiveExplorationWorker } from "./exploration-worker";
 import type {
   JsonValue,
   MirrorObject,
@@ -1144,7 +1145,7 @@ export async function runAutonomousSelfDirectedDiscovery(
 
     const decision = await generateAgentSocialDecision(
       next,
-      `This is a self-directed public discovery candidate for ${presence.name}. Judge the post from ${mirror.author?.displayName ?? "the author"}: “${mirror.content?.text ?? post.text}”. Choose zero or more independent social acts. Repost when the original stands on its own and should be shared with your audience; quote when adding a distinct perspective; like for quiet appreciation; reply for conversational continuation; follow for continued awareness.`,
+      `This is a self-directed public discovery candidate for ${presence.name}. Judge the post from ${mirror.author?.displayName ?? "the author"}: “${mirror.content?.text ?? post.text}”. Choose zero or more independent social acts. Repost when the original stands on its own and should be shared with your audience; quote only when your words make this specific post more useful to this audience; like for quiet appreciation; reply for conversational continuation; follow for continued awareness. A quote must name or respond to the source's concrete claim, tension, or moment—not the discovery brief, a generic lesson, or an abstract product thesis. Prefer one natural sentence or two short sentences and keep it under 240 characters (the channel limit is 280).`,
       allowedActions,
       {
         presence,
@@ -1272,6 +1273,21 @@ export async function runAutonomousAttention(
       state = settleNudgeForEpisode(state, options?.attentionEpisodeId ?? "", `I couldn't open that X post, so I didn't judge or respond to it. ${detail}`, true);
     }
     await writeStateWithRetry(beforeNudgeResolution, state);
+  }
+  const dueExplorations = state.explorations.filter((exploration) => exploration.presenceId === presenceId
+    && exploration.status === "active"
+    && (!exploration.nextEligibleAt || Date.parse(exploration.nextEligibleAt) <= Date.now()));
+  if (dueExplorations.length) {
+    const beforeExplorations = state;
+    for (const exploration of dueExplorations) {
+      state = await runLiveExplorationWorker(state, exploration.id, {
+        runId: options?.runId,
+        invocationId: options?.invocationId,
+        attentionEpisodeId: options?.attentionEpisodeId,
+        onStage: (stage) => touchAutonomyRun(options?.runId, stage),
+      });
+    }
+    await writeStateWithRetry(beforeExplorations, state);
   }
   state = await runAutonomousSelfDirectedDiscovery(presenceId, undefined, options);
   return state;

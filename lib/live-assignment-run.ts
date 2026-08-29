@@ -4,6 +4,8 @@ const pendingDeliveryStatuses = new Set(["awaiting-review", "approved", "awaitin
 const retryableDeliveryStatuses = new Set(["failed", "blocked", "expired"]);
 const activePursuitSkippableFailureCodes = new Set(["TARGET_LANGUAGE_MISMATCH", "TARGET_DISAPPEARED", "X_API_CREDITS_EXHAUSTED"]);
 const autonomousPreWriteClosureCodes = new Set(["BRIDGE_NOT_CHECKED_IN"]);
+/** Keep a small amount of verified-delivery work moving while X confirms prior acts. */
+export const maxConcurrentPursuitDeliveries = 3;
 
 /**
  * These failures are safe for the Agent to close autonomously: the durable
@@ -103,6 +105,19 @@ export function assignmentRunBlocksNewWork(source: OpenPresenceState, run: Assig
     && (execution.runId === run.id || (!execution.runId && execution.createdAt >= (run.startedAt ?? run.createdAt)))
     && pendingDeliveryStatuses.has(execution.status));
   if (!linked.length) return false;
+  const activePursuit = Boolean(run.pursuitWindowId && (source.assignmentPursuitWindows ?? []).some((window) => window.id === run.pursuitWindowId && window.status === "active"));
+  // A browser/API verification round-trip can take longer than cognition.
+  // During an explicit pursuit, distinct candidates may continue through a
+  // small bounded window; target-level duplicate checks still apply before
+  // every new intent is formed. Manual review and unclaimed delivery remain
+  // hard stops.
+  if (activePursuit && linked.every((execution) => execution.status === "verification-pending" && execution.failure?.retryable !== false)) {
+    const pendingPursuitDeliveries = source.executions.filter((execution) => execution.assignmentId === run.assignmentId
+      && execution.presenceId === run.presenceId
+      && execution.status === "verification-pending"
+      && execution.failure?.retryable !== false).length;
+    return pendingPursuitDeliveries >= maxConcurrentPursuitDeliveries;
+  }
   return linked.some((execution) => !(execution.status === "verification-pending" && execution.failure?.retryable === false));
 }
 

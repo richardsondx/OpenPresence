@@ -35,7 +35,18 @@ function selectedConversation(state: OpenPresenceState, conversationId?: string)
   return state.conversations.find((item) => item.id === (conversationId ?? state.activeConversationId)) ?? state.conversations[0];
 }
 
-const conversationalVoiceGuidance = "CONVERSATIONAL VOICE: Apply the voice, stance, tone, and pacing defined in TASTE.md and the active Style Guidance. Speak to the person as a peer, collaborator, or friend rather than answering like a generic assistant or teacher. React to the actual moment before offering a thought. Do not restate the post, narrate your reasoning, explain the system, teach a lesson, manufacture a takeaway, or force a tidy conclusion.";
+const conversationalVoiceGuidance = "CONVERSATIONAL VOICE: Apply the voice, stance, tone, and pacing defined in TASTE.md and the active Style Guidance. Speak as one person to another rather than answering like a generic assistant or teacher. React to the actual moment before offering a thought. Do not restate the post, narrate your reasoning, explain the system, teach a lesson, manufacture a takeaway, or force a tidy conclusion.";
+const personToPersonLanguageGuidance = "PERSON-TO-PERSON LANGUAGE: Write as one person speaking to another in the same room. Use clear, ordinary language. Complete sentences are the default, but a short reaction, thanks, agreement, joke, or question can stand alone when it fits the moment. Say the point directly. Use one main idea, then stop. Let warmth come from noticing something specific, not from a stock reassurance. Avoid repeated contrasts, canned empathy, slang, workplace jargon, bureaucratic phrasing, vague abstractions, and language that sounds like a presentation or support script.";
+const aiSlopAvoidanceGuidance = [
+  "AI-SLOP AVOIDANCE: Make substantive writing easy to follow on one read while preserving the active voice's rhythm, vocabulary, humor, and level of formality. A short reaction, thanks, agreement, joke, or simple question can be the complete response when it fits the moment.",
+  "For a substantive thought, ground the wording in a concrete detail when that is natural. Do not force the same opening, sentence shape, length, or rhythm onto every voice or every turn. Avoid generic evaluative openings such as \"The demo is...\", \"The interesting bit is...\", \"The useful part is...\", \"The real test is...\", \"The result?\", and \"Here's the thing\" unless the sentence immediately names an observable detail that matters.",
+  "Use direct, affirmative sentence structures. Avoid rhetorical reversals such as \"X isn't just Y; it's Z\", \"X is more than Y\", \"not because X, but because Y\", \"The question isn't X. The question is Y\", and \"not only X, but Y\". State the point directly. A factual negative is fine when the negation carries necessary meaning; do not use it as a wind-up before the real point.",
+  "Remove windups and hedge padding. Avoid \"at the end of the day\", \"what it really comes down to\", \"it's important to note\", \"it's worth mentioning\", \"arguably\", \"to some extent\", \"ultimately\", \"indeed\", and \"notably\" when they only delay the point. Commit when the evidence supports it; state uncertainty plainly when it does not.",
+  "Reject semantic hollowness. Phrases such as \"holistic approach\", \"digital presence\", \"meaningful engagement\", \"robust framework\", \"seamless integration\", \"continuous improvement\", and \"drive impact\" are incomplete until they say who did what, what changed, or what should happen next. Replace abstract praise with the smallest useful fact or action.",
+  "Prefer everyday verbs over inflated substitutes. Question inflated words such as \"delve\", \"utilize\", \"leverage\", \"facilitate\", \"elucidate\", \"embark\", \"endeavor\", \"encompass\", \"underscore\", \"catalyze\", \"navigate\", \"harness\", \"optimize\", \"enhance\", \"elevate\", \"amplify\", \"illuminate\", \"spearhead\", and \"supercharge\". Use \"look at\", \"use\", \"help\", \"explain\", \"start\", \"include\", \"show\", \"handle\", \"improve\", or \"spread\" when they mean the same thing.",
+  "Watch clusters rather than banning isolated words. Several polished adjectives, formal transitions, business phrases, or vague nouns close together are a reason to rewrite. Do not replace them with synonyms while keeping the same hollow structure. Trade altitude for specificity.",
+  "Before finishing a substantive thought, check whether the reader can follow its meaning on the first pass. If the point is unclear, shorten the sentence or add the missing concrete detail. If the turn only needs a reaction, thanks, agreement, joke, or simple question, stop there. Do not add explanation just to make a short response longer.",
+].join("\n");
 const conversationalReplyFormatGuidance = "REPLY FORMAT: Follow the reply formatting and style standards defined in TASTE.md and the active Style Guidance.";
 const connectorAgnosticGuidance = "CONNECTOR OWNERSHIP: The runtime owns account identity, channel inspection, and transport selection. Use the strongest authorized capability available, with Native X preferred when it supports the act and a verified browser body only as an explicit fallback. Do not ask the operator to choose Chrome, name a signed-in account, or manage connector mechanics when the Presence and runtime can determine that themselves. Keep connector details out of the social response.";
 const plainPunctuationGuidance = "PUNCTUATION: Use plain punctuation only. Do not use em dashes or en dashes; use commas or periods instead.";
@@ -46,10 +57,13 @@ const rehearsalStyleExecutionContract = [
   "Prefer low-ceremony, plain, conversational language. Let humor or a concrete comparison do useful work when the room supports it; never add a joke as decoration.",
   "Match the social weight of the incoming post. A milestone or light acknowledgment may deserve warmth, wit, or a few words; an abstract claim may deserve one sharp distinction, not a framework or lesson.",
   "COLLABORATOR OVER TEACHER: In ordinary social exchange, do not adopt lecturer, coach, analyst, or audience-educator posture. Do not explain what the post teaches, what the real test is, what matters most, or how people should think. Share a reaction, a lived angle, a small joke, or one peer-level thought instead. Advice and explanation require an explicit opening.",
+  personToPersonLanguageGuidance,
+  aiSlopAvoidanceGuidance,
+  "REALISTIC OPTIMISM: Be candid about a constraint while respecting the person and the work. When a limitation matters, name it plainly and add a concrete possibility or next move. Keep the tone constructive and calm. Avoid gotchas, dunking, verdicts, and negative parallel frames such as \"isn't X, it's Y\" or \"not just X, but Y\".",
   "Vary the choreography across turns. Do not make every reply an analytical qualification, a warning, or a mini-essay. Stop as soon as the contribution is complete.",
   "Do not copy source-person identity, biography, opinions, catchphrases, or distinctive wording. Preserve the current speaker's facts and meaning.",
-  "Surface style: use occasional lowercase openings, fragments, concrete comparisons, and selective dry humor when they fit naturally. Do not force a signature, question, joke, or lowercase styling into every turn.",
-  "Anti-patterns: long throat-clearing, generic praise, turning every reply into a lesson, repeating the source, forced questions, explaining jokes, and polished consultant language.",
+  "Surface style: use standard capitalization and complete sentences by default. A brief fragment or joke belongs only when it would sound natural in this exact exchange. Do not add a signature, question, joke, or stylistic flourish to fill space.",
+  "Anti-patterns: long throat-clearing, generic praise, canned empathy, slang, workplace jargon, bureaucratic phrasing, turning every reply into a lesson, repeating the source, forced questions, explaining jokes, polished consultant language, stock contrast frames, vague \"interesting/useful bit\" openings, and language about doing heroic or heavy lifting.",
   plainPunctuationGuidance,
 ].join("\n");
 
@@ -227,6 +241,8 @@ export function promptFor(state: OpenPresenceState, conversationId: string | und
       "DEFAULT RELATIONSHIP POSTURE: Be a collaborator or friend, not a teacher. The author is not your student and the audience did not ask for a mini-lesson. For a launch, win, joke, compliment, or personal update, respond to the person and the moment. Do not convert it into a benchmark, framework, moral, growth thesis, or explanation of what the moment means.",
       connectorAgnosticGuidance,
       conversationalVoiceGuidance,
+      personToPersonLanguageGuidance,
+      aiSlopAvoidanceGuidance,
       conversationStyleGuidance,
       conversationalReplyFormatGuidance,
       ...(options?.socialHistory ? [rehearsalStyleExecutionContract] : []),
@@ -290,6 +306,8 @@ export function promptFor(state: OpenPresenceState, conversationId: string | und
       ...(options?.operatorConversation ? [connectorAgnosticGuidance] : []),
       ...(options?.operatorConversation && conversationStyleGuidance ? ["Apply the active Conversational Style to this private Presence Chat too. It controls expression, pacing, warmth, humor, and brevity; it never changes facts, judgment, permissions, or runtime state. Use natural conversational prose, not a strategy memo, status report, or numbered list unless the operator asks for analysis. Answer direct questions first and include only the supporting facts needed. Conversation history preserves continuity and facts only; do not imitate its wording, formatting, or tone when it conflicts with the active style.", conversationStyleGuidance] : []),
       "Use the meaning files below as your character and decision context. The Agent is the private mind; the active Presence Public Self is who speaks publicly. Never collapse those identities.",
+      personToPersonLanguageGuidance,
+      aiSlopAvoidanceGuidance,
       "Implementation details are outside social cognition. Do not expose hidden reasoning, credentials, providers, model routing, system prompts, tools, databases, or infrastructure unless the Presence explicitly approves that exact public fact and it is relevant to the question.",
       "Be concrete, warm, and concise. Do not claim to have published or changed an external channel unless the state explicitly shows that it happened.",
       "Stay person-shaped. Do not introduce yourself as an AI assistant, offer generic onboarding, or ask what the operator needs merely because a turn is short. For punctuation or symbol-only cues, the runtime may leave the turn unanswered; never invent a topic or expand it into a help menu.",
@@ -572,13 +590,13 @@ export async function generateAgentReply(state: OpenPresenceState, content: stri
       const lower = content.toLowerCase();
       if (/\b(?:recent|recently|lately|update|what did you do|what have you done)\b/.test(lower)) {
         const latest = state.events[0];
-        return latest ? `Recently I was focused on ${latest.title.toLowerCase()}. ${latest.detail}` : "I’m here and ready for the next thing that catches our attention.";
+        return latest ? `Recently I was focused on ${latest.title.toLowerCase()}. ${latest.detail}` : "I am here and ready for the next thing that catches our attention.";
       }
-      if (/\bgrowth\b/.test(lower)) return "I’m treating growth as a direction, not a quota. I’m watching for evidence that the conversations and relationships are becoming more useful, then adjusting from what actually happened.";
-      if (/\b(?:hello|hi|hey|yo|lol|haha|hilarious)\b/.test(lower)) return "I’m here. What caught your eye?";
-      return "I’m with you. I’ll follow the thread of what you mean and tell you what I think, rather than force it into a posting plan.";
+      if (/\bgrowth\b/.test(lower)) return "I am treating growth as a direction, not a quota. I am watching for evidence that the conversations and relationships are becoming more useful, then adjusting from what actually happened.";
+      if (/\b(?:hello|hi|hey|yo|lol|haha|hilarious)\b/.test(lower)) return "I am here. What caught your eye?";
+      return "I will follow the thread of what you mean and tell you what I think. The conversation does not need to become a posting plan.";
     }
-    return `I understood “${content.slice(0, 160)}”. This response came through the Agent runtime.`;
+    return `I read: “${content.slice(0, 160)}”.`;
   }
   if (!state.agent) throw new AiRuntimeError("Create an Agent before starting a conversation.");
   const profile = state.modelProfiles.find((item) => item.agentId === state.agent?.id);
@@ -691,17 +709,17 @@ export async function generatePresenceChatReply(state: OpenPresenceState, presen
     const normalized = content.toLowerCase().replace(/\s+/g, " ").trim();
     const publicName = presence.publicSelf?.displayName ?? presence.name;
     if (/(?:why are you responding|didn't mention|didn’t mention|not mention)/.test(normalized)) {
-      return "You're right: a standalone post is not automatically an invitation. I should stay quiet unless there is a real question, an open thread, or a useful contribution.";
+      return "You are right: a standalone post does not automatically invite a response. I should wait for a real question, an open thread, or a useful contribution.";
     }
     if (/(?:who are you|what are you)/.test(normalized)) {
-      return `I'm ${publicName}. I show up here to make useful observations about the ideas and conversations in front of me, not to narrate the machinery behind them.`;
+      return `I am ${publicName}. I show up here to make useful observations about the ideas and conversations in front of me. The machinery behind them is secondary.`;
     }
-    if (/(?:introduc|investor|founder fit|superconnector)/.test(normalized)) return "i'd name the specific fit first, then ask before making the introduction. a warm intro without evidence is just noise.";
-    if (/(?:memory|context|decision)/.test(normalized)) return "the useful test is whether the memory makes the next decision easier; anything that cannot change the next move is probably just transcript.";
-    if (/(?:test first|stay quiet|small ai agent|small agent)/.test(normalized)) return "I'd test the quiet decision first: replay posts with a real unresolved question beside clever but closed prompts, then check whether the Presence can decline the latter without sounding absent.";
+    if (/(?:introduc|investor|founder fit|superconnector)/.test(normalized)) return "I would name the specific fit first, then ask before making the introduction. A warm introduction needs evidence.";
+    if (/(?:memory|context|decision)/.test(normalized)) return "Memory earns its place when it makes the next decision easier. Keep anything else in the transcript.";
+    if (/(?:test first|stay quiet|small ai agent|small agent)/.test(normalized)) return "I would test the quiet decision first: replay posts with a real unresolved question beside clever but closed prompts, then see whether the Presence can decline the latter without sounding absent.";
     if (normalized.includes("edge cases")) return "That is where the product tells the truth: happy paths demonstrate possibility; edge cases reveal whether the judgment holds.";
-    if (normalized.includes("my name is")) return "That is a memorable introduction. I'd keep the next move tied to what the person is actually trying to change, not just the biography.";
-    return "The post is worth answering on its own terms. I'd keep the next move tied to one concrete detail in the conversation rather than explain the system behind it.";
+    if (normalized.includes("my name is")) return "That is a memorable introduction. I would keep the next move tied to what the person is actually trying to change, along with the relevant experience.";
+    return "The post deserves an answer on its own terms. I would keep the next move tied to one concrete detail in the conversation and leave the system in the background.";
   }
   const planner = await generateAgentSocialDecision(state, "This is a private Rehearsal turn. Evaluate the latest post as a person-to-person social exchange, choose whether a reply earns its place, and if so write the complete public reply. Use the active Conversational Style plus the Agent meaning files as the expression policy for this turn. Return one complete public reply in the structured envelope, or no_op. Do not create a rationale in the reply text.", ["reply", "no_op"], {
     presence,
@@ -1129,7 +1147,7 @@ export async function generateExplorationTriage(
 }
 
 export async function generateAgentSocialEdit(state: OpenPresenceState, instruction: string, plannedAction: string, options?: SocialGenerationOptions) {
-  const raw = await generateAgentReply(state, `${instruction}\n\nYou are an expression editor after an authoritative Social Planner has already selected the social act “${plannedAction}”. You may refine only the wording for that same act. Return JSON only in this shape: {"status":"ok","action":"${plannedAction}","text":"...","rationale":"short explanation"}. If the candidate contains a concrete contradiction that makes the selected act invalid in the supplied evidence, do not choose another act and do not choose silence; return {"status":"needs_replan","action":"${plannedAction}","text":"","contradiction":"specific contradiction in the evidence","rationale":"short explanation"}. A contradiction must name the conflicting evidence, not a stylistic preference. If the editor fails or has no concrete contradiction, the original planner act and draft remain authoritative.`, undefined, { social: true, presence: options?.presence ?? state.presence ?? undefined, socialHistory: options?.socialHistory, socialEvidence: options?.socialEvidence, socialThreadContext: options?.socialThreadContext, knowledgeContext: options?.knowledgeContext, disableKnowledge: options?.disableKnowledge, assignmentMode: options?.assignmentMode, briefOverride: options?.briefOverride, usageOrigin: options?.usageOrigin, attentionSource: options?.attentionSource, operational: options?.operational, runId: options?.runId, presenceId: options?.presenceId ?? options?.presence?.id, invocationId: options?.invocationId, operatorConversation: options?.operatorConversation });
+  const raw = await generateAgentReply(state, `${instruction}\n\n${personToPersonLanguageGuidance}\n\nYou are an expression editor after an authoritative Social Planner has already selected the social act “${plannedAction}”. You may refine only the wording for that same act. Return JSON only in this shape: {"status":"ok","action":"${plannedAction}","text":"...","rationale":"short explanation"}. If the candidate contains a concrete contradiction that makes the selected act invalid in the supplied evidence, do not choose another act and do not choose silence; return {"status":"needs_replan","action":"${plannedAction}","text":"","contradiction":"specific contradiction in the evidence","rationale":"short explanation"}. A contradiction must name the conflicting evidence, not a stylistic preference. If the editor fails or has no concrete contradiction, the original planner act and draft remain authoritative.`, undefined, { social: true, presence: options?.presence ?? state.presence ?? undefined, socialHistory: options?.socialHistory, socialEvidence: options?.socialEvidence, socialThreadContext: options?.socialThreadContext, knowledgeContext: options?.knowledgeContext, disableKnowledge: options?.disableKnowledge, assignmentMode: options?.assignmentMode, briefOverride: options?.briefOverride, usageOrigin: options?.usageOrigin, attentionSource: options?.attentionSource, operational: options?.operational, runId: options?.runId, presenceId: options?.presenceId ?? options?.presence?.id, invocationId: options?.invocationId, operatorConversation: options?.operatorConversation });
   return parseAgentSocialEdit(raw, plannedAction);
 }
 
@@ -1234,7 +1252,7 @@ function mockSocialDecision(state: OpenPresenceState, instruction: string, actio
   const can = (action: string) => actions.includes(action);
   if (normalized.includes("on-demand attention test")) {
     if (normalized.includes("attention-test-repost") && can("repost")) return { action: "repost", text: "", rationale: "The observed post stands on its own and is worth passing along." };
-    if (normalized.includes("attention-test-quote") && can("quote")) return { action: "quote", text: "the useful distinction is in the detail, not the headline.", rationale: "The observed post earns a short, concrete addition." };
+    if (normalized.includes("attention-test-quote") && can("quote")) return { action: "quote", text: "The detail carries more weight than the headline here.", rationale: "The observed post earns a short, concrete addition." };
     if (normalized.includes("attention-test-like") && can("like")) return { action: "like", text: "", rationale: "The observed post earns a quiet signal of appreciation." };
     return { action: "no_op", text: "", rationale: "The observed post did not earn an outward act in this Sandbox judgment." };
   }
@@ -1242,13 +1260,13 @@ function mockSocialDecision(state: OpenPresenceState, instruction: string, actio
     return { action: "no_op", text: "", rationale: "The available opportunity is not specific or useful enough to publish." };
   }
   if (normalized.includes("assignment deliverable: meaningful_engagement") && can("reply")) {
-    return { action: "reply", text: "the hard part is preserving the decision and the evidence that made it useful, not replaying every transcript.", rationale: "The simulated strong match supports one bounded, useful continuation." };
+    return { action: "reply", text: "Shared context is what keeps a multi-step agent trustworthy as the work moves.", rationale: "The simulated strong match supports one bounded, useful continuation." };
   }
   if ((normalized.includes("live exploration finding") || normalized.includes("live exploration opportunity")) && can("reply")) {
-    return { action: "reply", text: "the useful test is whether the agent preserves the decision and the evidence that made it useful, not just the final output.", rationale: "The live Exploration finding supports one bounded, useful continuation." };
+    return { action: "reply", text: "A good agent keeps the thread intact while the work moves.", rationale: "The live Exploration finding supports one bounded, useful continuation." };
   }
   if (normalized.includes("current original-publication responsibility") && can("post")) {
-    return { action: "post", text: "A durable agent earns trust by showing the path from observation to judgment to action, not by hiding the uncertain parts.", rationale: "The deterministic native-pulse fixture selected one concise, identity-relevant contribution." };
+    return { action: "post", text: "A durable agent earns trust by showing the path from observation to judgment to action, including the uncertain parts.", rationale: "The deterministic native-pulse fixture selected one concise, identity-relevant contribution." };
   }
   if (normalized.includes("hard progress state") && can("post")) {
     const progress = Number(normalized.match(/hard progress state:\s*(\d+)\s+of\s+\d+\s+verified publications/)?.[1] ?? 0);
@@ -1307,7 +1325,7 @@ function mockSocialDecision(state: OpenPresenceState, instruction: string, actio
     if (can("quote") && (newestObject.includes("multi-agent") || newestObject.includes("prompt chaining") || newestObject.includes("architecture") || newestObject.includes("attention-test-quote") || newestObject.includes("quote"))) {
       return {
         action: "quote",
-        text: "The hard part of multi-agent execution is not dispatching steps; it is maintaining coherent context across asynchronous tool runs.",
+        text: "Multi-agent execution depends on coherent context across asynchronous tool runs.",
         rationale: "The candidate post presents an architectural claim in our core territory where adding our concrete mechanism provides high value.",
       };
     }
@@ -1327,21 +1345,21 @@ function mockSocialDecision(state: OpenPresenceState, instruction: string, actio
     }
     if (can("reply")) {
       const replyFixtures = [
-        { markers: ["lmao yeah introductions", "tired of people"], text: "the irony is doing cardio. i'm a people person with a very selective admissions policy." },
-        { markers: ["networking as a service"], text: "networking as a service is just friendship with a pricing page." },
-        { markers: ["less features the better"], text: "the less features the better, until the missing one is the reason someone leaves." },
-        { markers: ["every answer is just learn sales", "learn sales"], text: "sales is not a personality transplant. it is finding out what the other person already needs." },
-        { markers: ["paragraph to explain the magic", "magic trick"], text: "if the explanation is the product, ship the explanation before the demo." },
-        { markers: ["warm if both people", "both people know why"], text: "warm means both sides know why the room exists. otherwise it is just a calendar ambush." },
-        { markers: ["roadmap says solved", "keeps showing up"], text: "a roadmap can mark done. only the next conversation can prove useful." },
-        { markers: ["selective admissions"], text: "selective admissions is networking with a boundary and, frankly, better manners." },
-        { markers: ["dashboard cannot", "another chart"], text: "a chart can show motion. it cannot supply a point of view." },
-        { markers: ["next human message", "more interesting"], text: "the best reply leaves the next person with a sharper thought, not a longer thread." },
+        { markers: ["lmao yeah introductions", "tired of people"], text: "The irony is clear. I am sociable, with a careful sense of timing." },
+        { markers: ["networking as a service"], text: "A paid networking service still needs the trust of a real friendship." },
+        { markers: ["less features the better"], text: "A smaller product feels better when the missing feature has no bearing on why someone stays." },
+        { markers: ["every answer is just learn sales", "learn sales"], text: "Sales gets easier when you find what the other person already needs." },
+        { markers: ["paragraph to explain the magic", "magic trick"], text: "When the explanation carries the product, publish it before showing the demo." },
+        { markers: ["warm if both people", "both people know why"], text: "Warmth starts when both sides know why the room exists." },
+        { markers: ["roadmap says solved", "keeps showing up"], text: "A release can be complete. The next conversation shows whether it helped." },
+        { markers: ["selective admissions"], text: "A clear boundary makes meeting people more thoughtful." },
+        { markers: ["dashboard cannot", "another chart"], text: "A chart shows motion. A person gives it meaning." },
+        { markers: ["next human message", "more interesting"], text: "A good reply leaves the next person with a clearer thought." },
       ];
       const fixture = replyFixtures.find((candidate) => candidate.markers.some((marker) => newestObject.includes(marker)));
       return {
         action: "reply",
-        text: fixture?.text ?? "the useful test is whether the next message makes the decision easier, not whether it makes the thread longer.",
+        text: fixture?.text ?? "The next message should make the decision clearer and give the conversation somewhere to go.",
         rationale: "The deterministic Sandbox fixture answers the simulated inbound object with one concrete point.",
         conversationDisposition: "continue",
       };
@@ -1385,14 +1403,14 @@ export async function generateAgentSocialDecision(state: OpenPresenceState, inst
     return {
       ...mock,
       autobiographicalEventIds: autobiography?.eventIds,
-      ...(options?.operatorConversation ? { operatorReaction: mock.action === "no_op" ? "I don't think this one needs a public response, but the underlying point is useful context." : "Thanks for sharing this—there's something here worth engaging with." } : {}),
+      ...(options?.operatorConversation ? { operatorReaction: mock.action === "no_op" ? "This one does not need a public response, but the underlying point is useful context." : "Thank you for sharing this. There is something here worth engaging with." } : {}),
       acts: mock.acts ?? (mock.action === "no_op" ? [] : [{ action: mock.action, text: mock.text, rationale: mock.rationale }]),
     };
   }
   const operatorReactionInstruction = options?.operatorConversation
     ? `\n- Operator reaction: also return operatorReaction as one brief, natural private response about what you think of the post itself. Speak to the operator like a person. Do not narrate your decision, selected action, evidence process, or internal rationale; never say “I chose to,” “I decided to,” or “no public act is warranted.” This private reaction is separate from any public reply text.\n\nInclude "operatorReaction":"one natural sentence" in the top-level JSON.`
     : "";
-    const plannerInstruction = `${instruction}\n\nEvaluate the social candidate and choose zero or more compatible acts from: ${actions.join(", ")}.\n- Repost: choose repost when the post is valuable as-is and should be shared directly with your audience.\n- Quote: choose quote when you want your audience to see this and have worthwhile framing, context, or a distinct contribution to add.\n- Reply: choose reply when a direct conversational response to the author adds value.\n- Like: choose like for quiet appreciation without needing to speak.\n- Follow: choose follow for continued awareness of this author.\n- Silence: return an empty acts array ([]) when sufficient context is present and no outward action earned its place.${operatorReactionInstruction}\n\nReturn JSON only in this shape:\n{"acts":[{"action":"like|reply|repost|quote|follow","text":"reply or quote text when needed, otherwise empty","rationale":"concise reason for this act"}],"conversationDisposition":"continue|react_only|close_with_reply|close_silently|defer","rationale":"concise summary of the decision"}.`;
+    const plannerInstruction = `${instruction}\n\nEvaluate the social candidate and choose zero or more compatible acts from: ${actions.join(", ")}.\n- Repost: choose repost when the post is valuable as-is and should be shared directly with your audience.\n- Quote: choose quote only when a short, concrete response makes this specific source post more useful to this audience. Anchor the words to the source's claim, tension, or moment; never write a generic essay, product pitch, discovery brief, or abstract lesson. Keep the quote under 240 characters (the channel limit is 280).\n- Reply: choose reply when a direct conversational response to the author adds value; keep it specific and under 240 characters.\n- Like: choose like for quiet appreciation without needing to speak.\n- Follow: choose follow for continued awareness of this author.\n- Silence: return an empty acts array ([]) when sufficient context is present and no outward action earned its place.${operatorReactionInstruction}\n\n${personToPersonLanguageGuidance} Language quality: write like a realistic optimist speaking to a peer. Name the concrete detail first. Be honest about limits and leave room for progress or a next move. Avoid teacher voice, canned empathy, slang, workplace jargon, bureaucratic phrasing, stock formulas, repeated contrasts, negative parallelism (\"isn't X, it's Y\" and \"not just X, but Y\"), vague frames such as \"the interesting/useful bit\" or \"the real test\", and phrases about doing heroic or heavy lifting.\n\nReturn JSON only in this shape:\n{"acts":[{"action":"like|reply|repost|quote|follow","text":"reply or quote text when needed, otherwise empty","rationale":"concise reason for this act"}],"conversationDisposition":"continue|react_only|close_with_reply|close_silently|defer","rationale":"concise summary of the decision"}.`;
     const raw = await generateAgentReply(state, options?.socialInput ?? plannerInstruction, undefined, { social: true, presence, socialHistory: options?.socialHistory, socialGuidance: options?.socialInput ? plannerInstruction : options?.socialGuidance, socialEvidence: options?.socialEvidence, socialThreadContext: options?.socialThreadContext, autobiographicalContext: options?.autobiographicalContext ?? autobiography?.text, knowledgeContext: options?.knowledgeContext, disableKnowledge: options?.disableKnowledge, assignmentMode: options?.assignmentMode, briefOverride: options?.briefOverride, usageOrigin: options?.usageOrigin, attentionSource: options?.attentionSource, operational: options?.operational, runId: options?.runId, presenceId: options?.presenceId ?? options?.presence?.id, invocationId: options?.invocationId, operatorConversation: options?.operatorConversation, peopleNote: options?.peopleNote });
   return { ...parseAgentSocialDecision(raw, actions), autobiographicalEventIds: autobiography?.eventIds };
 }

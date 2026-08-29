@@ -5818,7 +5818,7 @@ function WatchingView({ state, mutate, refreshState, setView }: { state: OpenPre
   const explorationSessions = selectedExploration ? state.explorationSessions.filter((item) => item.explorationId === selectedExploration.id).sort((a, b) => b.startedAt.localeCompare(a.startedAt)) : [];
   const lastExplorationSession = explorationSessions.find((item) => item.id === selectedExplorationSessionId) ?? explorationSessions[0];
   const assignment = selectedExploration?.engagement?.assignmentId ? state.assignments.find((item) => item.id === selectedExploration.engagement?.assignmentId) : undefined;
-  const chromeBridge = state.bridges.find((item) => item.presenceId === presence.id && item.name.startsWith("OpenPresence Chrome · ") && item.state !== "offline");
+  const chromeBridge = state.bridges.find((item) => item.presenceId === presence.id && item.name.startsWith("OpenPresence Chrome") && item.state !== "offline");
   const chromeStatus = presence.browserAccess?.enabled
     ? chromeBridge && bridgeExecutionStatus(chromeBridge) === "connected"
       ? "connected" as const
@@ -5930,7 +5930,7 @@ function ExplorationResponsibility({
       <button type="button" aria-pressed={mode === "objective"} className={mode === "objective" ? "active" : ""} onClick={() => void setEngagement(exploration.id, "objective")} disabled={busy}><strong>Pursue an outcome</strong><span>Give {presence.name} a specific ongoing Assignment.</span></button>
     </div>
     {mode !== "surface" && <div className="exploration-assignment-note"><span className="status-dot" /> <span>{assignmentIsActive && assignment ? <><strong>Assignment active.</strong> {assignment.progress.verified} verified interaction{assignment.progress.verified === 1 ? "" : "s"}; {assignment.environment === "sandbox" ? "Sandbox execution is enabled." : "Live delivery still follows this Presence's execution settings."}</> : assignment ? <>Assignment {assignment.status}. It will not act until it is active.</> : "Assignment is being prepared."}</span></div>}
-    {mode !== "surface" && chromeStatus !== "not-route" && <div className={`exploration-connection-note exploration-connection-${chromeStatus}`} role="status"><span className="status-dot" /><span><strong>{chromeStatus === "connected" ? "Chrome connected" : chromeStatus === "needed" ? "Chrome connection needed" : "Chrome not enabled"}</strong><small>{chromeStatus === "connected" ? "Genny can use the selected signed-in tab when a reply earns its place." : chromeStatus === "needed" ? "Open Settings → Chrome connection before enabling live engagement." : "Enable OpenPresence Chrome in Settings before enabling live engagement."}</small></span></div>}
+    {mode !== "surface" && chromeStatus !== "not-route" && <div className={`exploration-connection-note exploration-connection-${chromeStatus}`} role="status"><span className="status-dot" /><span><strong>{chromeStatus === "connected" ? "Chrome connected" : chromeStatus === "needed" ? "Chrome connection needed" : "Chrome not enabled"}</strong><small>{chromeStatus === "connected" ? "Available for public quotes and replies when the signed-in tab is verified; native X remains preferred when it can act." : chromeStatus === "needed" ? "Open Settings → Chrome connection before enabling live engagement." : "Enable OpenPresence Chrome in Settings before enabling live engagement."}</small></span></div>}
     {mode === "objective" && <label className="exploration-objective">Conversation objective <input aria-label="Conversation objective" value={objectiveDraft || assignment?.instruction || ""} onChange={(event) => setObjectiveDraft(event.target.value)} placeholder="Engage people describing a concrete problem with persistent agents." /></label>}
   </section>;
 }
@@ -6029,8 +6029,15 @@ function ExplorationRunMonitor({
 }) {
   void ExplorationRunMonitorAudit;
   const [retrying, setRetrying] = useState(false);
+  const [nowMs, setNowMs] = useState(0);
+  useEffect(() => {
+    const timer = window.setTimeout(() => setNowMs(Date.now()), 0);
+    return () => window.clearTimeout(timer);
+  }, [exploration.id, exploration.nextEligibleAt]);
   const plan = state.discoveryPlans.find((item) => item.explorationId === exploration.id && item.briefRevision === exploration.revision) ?? state.discoveryPlans.find((item) => item.explorationId === exploration.id);
   const connection = state.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x");
+  const activeAttentionRun = (state.operationalRuns ?? []).find((run) => run.presenceId === presence.id && run.kind === "attention" && run.attention?.scope === "broad" && ["queued", "running", "recovering", "delivery_uncertain", "reconciling"].includes(run.state));
+  const explorationDue = exploration.status === "active" && (!exploration.nextEligibleAt || (nowMs > 0 && Date.parse(exploration.nextEligibleAt) <= nowMs));
   const mirrorCount = state.mirrorObjects.filter((item) => item.presenceId === presence.id && item.visibility === "public").length;
   const running = lastSession?.status === "running";
   const degraded = lastSession?.status === "degraded" || lastSession?.status === "failed";
@@ -6048,7 +6055,11 @@ function ExplorationRunMonitor({
     ? connection.status === "connected" ? "Connected" : "Connected · write attention needed"
     : "Not connected";
   const lookNarrative = !lastSession
-    ? "No look has been recorded yet. Genny will show the source, search strategy, and outcome here after the first look."
+    ? activeAttentionRun && explorationDue
+      ? "This Exploration is queued for the next durable attention pass. Its first look will appear here when the pass finishes."
+      : explorationDue
+        ? "This Exploration is due for attention. The next durable pass will record its search and outcome here."
+        : "No look has been recorded yet. Genny will show the source, search strategy, and outcome here after the first look."
     : running
       ? "Genny has recorded this look and is waiting for the connected discovery source to return."
       : degraded && xSearch
@@ -6058,8 +6069,8 @@ function ExplorationRunMonitor({
           : xSearch
             ? `${lastSession.candidatesSeen} public result${lastSession.candidatesSeen === 1 ? "" : "s"} entered the Mirror. Genny triaged them and surfaced ${lastSession.findingsCreated} worthwhile opportunit${lastSession.findingsCreated === 1 ? "y" : "ies"}.`
             : `Genny reviewed ${lastSession.candidatesSeen} object${lastSession.candidatesSeen === 1 ? "" : "s"} already available in the Social Mirror and surfaced ${lastSession.findingsCreated} worthwhile opportunit${lastSession.findingsCreated === 1 ? "y" : "ies"}.`;
-  const statusLabel = running ? "Running" : !lastSession ? "Not started" : degraded ? "Needs attention" : "Healthy";
-  const statusClass = running ? "running" : !lastSession ? "idle" : degraded ? "degraded" : "completed";
+  const statusLabel = running ? "Running" : activeAttentionRun && explorationDue ? "Queued" : !lastSession ? "Not started" : degraded ? "Needs attention" : "Healthy";
+  const statusClass = running ? "running" : activeAttentionRun && explorationDue ? "running" : !lastSession ? "idle" : degraded ? "degraded" : "completed";
   return <>
     <section className="exploration-strategy" aria-label="Search strategy">
       <div className="exploration-section-heading"><div><SectionEyebrow>How {presence.name} is searching</SectionEyebrow><h3>{presence.channel === "x" ? "X public discovery" : channelLabel(presence.channel, state.channelDefinitions)} <span className="exploration-inline-status"><span className="status-dot" /> {sourceStatus}</span></h3></div><span>{directions.length} active direction{directions.length === 1 ? "" : "s"}</span></div>
@@ -8970,8 +8981,7 @@ function LiveView({
             item.channelId === selected?.channel &&
             isScopedMirror(item) &&
             (!sessionId || item.sessionId === sessionId) &&
-            item.externalRef.type === reference.type &&
-            item.externalRef.id === reference.id,
+            ((item.externalRef.type === reference.type && item.externalRef.id === reference.id) || item.id === reference.id),
         )
       : undefined;
   const explorationFindingsForEvent = (item: OpenPresenceState["events"][number]) => {
@@ -9127,7 +9137,11 @@ function LiveView({
   const activityActionRecords = inFlightExecutions.map((execution) => {
     const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
     const decision = state.socialDecisions.find((item) => item.socialIntentId === execution.socialIntentId);
-    const context = objectForReference(execution.target, execution.sessionId);
+    const context = objectForReference(execution.target, execution.sessionId)
+      ?? objectForReference(intent?.target, intent?.sessionId)
+      ?? (decision?.focalMirrorObjectIds ?? [])
+        .map((id) => state.mirrorObjects.find((item) => item.id === id && isScopedMirror(item)))
+        .find(Boolean);
     const relatedEvent = activityEvents.find((event) =>
       event.executionId === execution.id ||
       event.intentId === execution.socialIntentId ||
@@ -9142,13 +9156,15 @@ function LiveView({
     const authorName = context?.author?.displayName && !isSnowflake(context.author.displayName)
       ? context.author.displayName
       : undefined;
-    const targetDisplay = authorHandle
+    const targetDisplay = authorHandle && authorName
+      ? `to ${authorName} (${authorHandle})`
+      : authorHandle
       ? `to ${authorHandle}`
       : authorName
       ? `to ${authorName}`
       : context?.content?.text
       ? `to “${context.content.text.slice(0, 36)}…”`
-      : "to public post";
+      : "to the selected post";
     const publicationPayload = execution.publication?.payload;
     const expressionPreview = execution.publication?.publicExpression?.text
       ?? (publicationPayload && typeof publicationPayload === "object" && !Array.isArray(publicationPayload) && typeof publicationPayload.text === "string" ? publicationPayload.text : undefined);
@@ -11431,6 +11447,24 @@ const formatActivityAffordance = (value?: string) => {
   const affordance = value?.split(".").pop() ?? "action";
   return affordance.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
 };
+function socialAuthorLabel(author?: MirrorObject["author"]) {
+  const isOpaqueIdentity = (value?: string) => !value || /^@?\d{8,}$/.test(value.trim()) || value.startsWith("sandbox-object_");
+  const displayName = author?.displayName?.trim();
+  const handleValue = author?.handle?.trim();
+  const display = displayName && !isOpaqueIdentity(displayName) ? displayName : undefined;
+  const handle = handleValue && !isOpaqueIdentity(handleValue)
+    ? (handleValue.startsWith("@") ? handleValue : `@${handleValue}`)
+    : undefined;
+  if (display && handle) return `${display} (${handle})`;
+  return display ?? handle;
+}
+
+function socialTargetLabel(target?: MirrorObject, fallback = "the selected post") {
+  const text = target?.content?.text?.trim();
+  const author = socialAuthorLabel(target?.author);
+  return author ?? (text ? `“${text.slice(0, 48)}${text.length > 48 ? "…" : ""}”` : fallback);
+}
+
 const formatAssignmentActionLabel = (affordance?: string, deliverable?: string) => {
   const normalized = `${affordance ?? deliverable ?? "post"}`.toLowerCase();
   if (normalized.includes("reply")) return "Reply";
@@ -12819,25 +12853,13 @@ function AgentAgenda({
             {inFlightExecutions.map((exec) => {
               const targetObject = exec.target?.id
                 ? state.mirrorObjects.find(
-                    (m) => (exec.presenceId ? m.presenceId === exec.presenceId : true) && (m.externalRef.id === exec.target?.id || m.id === exec.target?.id)
+                    (m) => (exec.presenceId ? m.presenceId === exec.presenceId : true)
+                      && m.environment !== "sandbox"
+                      && !m.sessionId
+                      && ((m.externalRef.type === exec.target?.type && m.externalRef.id === exec.target?.id) || m.id === exec.target?.id),
                   )
                 : undefined;
-
-              const isSnowflake = (str?: string) => !str || /^@?\d{8,}$/.test(str.trim()) || str.startsWith("sandbox-object_");
-              const authorRaw = targetObject?.author?.handle ?? targetObject?.author?.displayName;
-              const targetHandle = authorRaw && !isSnowflake(authorRaw)
-                ? (authorRaw.startsWith("@") ? authorRaw : `@${authorRaw}`)
-                : undefined;
-
-              const snippet = targetObject?.content?.text?.trim()
-                ? `“${targetObject.content.text.slice(0, 48)}${targetObject.content.text.length > 48 ? "…" : ""}”`
-                : undefined;
-
-              const targetLabel = targetHandle
-                ? `to ${targetHandle}`
-                : snippet
-                ? `to ${snippet}`
-                : "to public post";
+              const targetLabel = `to ${socialTargetLabel(targetObject)}`;
 
               return (
                 <div key={exec.id} style={{ display: "flex", justifyContent: "space-between", alignItems: "center", padding: "8px 12px", background: "var(--bg-surface, #fff)", border: "1px solid var(--border, #eee)", borderRadius: "6px", marginBottom: "6px" }}>
@@ -12926,10 +12948,12 @@ function ExecutionLedger({
     ? state.presences.find((item) => item.id === latest.presenceId)
     : undefined;
   const actionContext = intent?.target
-    ? state.mirrorObjects.find((item) => item.presenceId === latest?.presenceId && item.externalRef.id === intent.target?.id && (environment !== "sandbox" ? item.environment !== "sandbox" && !item.sessionId : item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && sessionIds?.has(item.sessionId)))))
+    ? state.mirrorObjects.find((item) => item.presenceId === latest?.presenceId
+      && (item.externalRef.type === intent.target?.type && item.externalRef.id === intent.target?.id || item.id === intent.target?.id)
+      && (environment !== "sandbox" ? item.environment !== "sandbox" && !item.sessionId : item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && sessionIds?.has(item.sessionId)))))
     : undefined;
   const actionName = formatActivityAffordance(intent?.affordance ?? latest?.affordance);
-  const targetLabel = actionContext?.author?.handle ? (actionContext.author.handle.startsWith("@") ? actionContext.author.handle : `@${actionContext.author.handle}`) : actionContext?.author?.displayName ?? "the observed post";
+  const targetLabel = socialTargetLabel(actionContext, "the observed post");
   const actionSnippet = actionContext?.content?.text?.trim();
 
   if (!latest || !intent)
@@ -13686,8 +13710,8 @@ function AssignmentPursuitCard({
     .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
   const latestExecution = executions[0];
   const latestOutcome = latestExecution ? state.outcomes.find((item) => item.executionId === latestExecution.id) : undefined;
-  const target = latestExecution?.target ? state.mirrorObjects.find((item) => item.externalRef.type === latestExecution.target?.type && item.externalRef.id === latestExecution.target?.id) : undefined;
-  const targetLabel = target?.author?.handle ? `@${target.author.handle.replace(/^@/, "")}` : target?.author?.displayName ?? "the observed conversation";
+  const target = latestExecution?.target ? state.mirrorObjects.find((item) => (item.externalRef.type === latestExecution.target?.type && item.externalRef.id === latestExecution.target?.id) || item.id === latestExecution.target?.id) : undefined;
+  const targetLabel = socialTargetLabel(target, "the observed conversation");
   const latestEvents = state.events
     .filter((item) => item.presenceId === pursuit.presenceId && item.sourceObjectId === pursuit.assignmentId && ["Promotion opportunity held", "Promotion opportunity unavailable", "Promotion actions held", "Promotion action failed", "Promotion actions queued", "Distribution candidate skipped", "Distribution candidate disappeared"].includes(item.title))
     .sort((left, right) => new Date(right.time).getTime() - new Date(left.time).getTime());

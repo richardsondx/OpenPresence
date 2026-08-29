@@ -1,8 +1,10 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { applyOperation, compileExploration, createAgent, finishExplorationSession, startExplorationSession } from "../lib/runtime";
-import { readState, writeState } from "../lib/db";
+import { applyOperation, compileExploration, createAgent, finishExplorationSession, formXActionIntent, startExplorationSession } from "../lib/runtime";
+import { listOperationalRuns, readState, writeState, writeState as writeDbState } from "../lib/db";
 import { POST } from "../app/api/state/route";
 import { POST as xManagePost } from "../app/api/x/manage/route";
+import { runLiveExplorationWorker } from "../lib/exploration-worker";
+import { runOperationalSweep } from "../lib/temporal";
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
@@ -61,7 +63,7 @@ describe("Presence-scoped Explorations", () => {
     expect(completed.executions).toHaveLength(0);
   });
 
-  it("runs an autonomous Exploration Assignment without the Look now button", async () => {
+  it("does not send sandbox Explorations through the live temporal worker", async () => {
     process.env.OPENPRESENCE_AI_MOCK = "1";
     let state = createAgent(input);
     state = applyOperation(state, { type: "setPresence", patch: { connectionMode: "sandbox", execution: { ...state.presence!.execution, reply: "auto", post: "auto" } } });
@@ -78,13 +80,21 @@ describe("Presence-scoped Explorations", () => {
     const response = await POST(new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "runAttentionWorker" }) }));
     expect(response.status).toBe(200);
     const completed = await response.json();
-    const finding = completed.explorationFindings.find((item: { explorationId: string }) => item.explorationId === exploration.id);
-    const assignmentId = completed.explorations.find((item: { id: string }) => item.id === exploration.id).engagement.assignmentId;
-    expect(finding).toMatchObject({ status: "acted", socialIntentId: expect.any(String) });
-    expect(completed.socialIntents.some((item: { assignmentId?: string; affordance: string }) => item.assignmentId === assignmentId && item.affordance === "reply")).toBe(true);
-    expect(completed.executions.some((item: { assignmentId?: string; status: string }) => item.assignmentId === assignmentId && item.status === "succeeded")).toBe(true);
-    expect(completed.events.some((item: { title: string; detail: string }) => item.title === "Exploration engagement verified" && item.detail.includes("Assignment"))).toBe(true);
-    expect(readState().assignments.find((item) => item.id === assignmentId)?.progress.verified).toBe(1);
+    expect(completed.runId).toEqual(expect.any(String));
+    expect(readState().explorationSessions).toHaveLength(0);
+  });
+
+  it("creates a broad durable attention run when a live Exploration is due", () => {
+    let state = createAgent(input);
+    const presenceId = state.presence!.id;
+    state.presence!.environment = "live";
+    state.presence!.connectionMode = "native";
+    state.presences = state.presences.map((item) => item.id === presenceId ? { ...item, environment: "live" as const, connectionMode: "native" } : item);
+    state = applyOperation(state, { type: "createExploration", presenceId, brief: "Find builders discussing persistent agent memory." });
+    state.explorations[0]!.nextEligibleAt = new Date(Date.now() - 1_000).toISOString();
+    writeDbState(state);
+    runOperationalSweep();
+    expect(listOperationalRuns(presenceId).some((run) => run.kind === "attention" && run.attention?.scope === "broad")).toBe(true);
   });
 
   it("routes a live Exploration finding through reply intent and native delivery", async () => {
@@ -113,15 +123,14 @@ describe("Presence-scoped Explorations", () => {
       .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }));
     vi.stubGlobal("fetch", fetchMock);
 
-    const response = await POST(new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "runAttentionWorker" }) }));
-    expect(response.status).toBe(200);
-    const completed = await response.json();
-    const assignmentId = completed.explorations.find((item: { id: string }) => item.id === exploration.id).engagement.assignmentId;
+    const completed = await runLiveExplorationWorker(readState(), exploration.id, { runId: "exploration-test-run", invocationId: "exploration-test-invocation" });
+    writeState(completed);
+    const assignmentId = completed.explorations.find((item: { id: string }) => item.id === exploration.id)!.engagement!.assignmentId;
     expect(completed.explorationFindings.some((item: { status: string }) => item.status === "blocked")).toBe(true);
     expect(completed.socialIntents.some((item: { assignmentId?: string; affordance: string }) => item.assignmentId === assignmentId && item.affordance === "x.reply")).toBe(true);
     expect(completed.executions.some((item: { assignmentId?: string; affordance: string; status: string }) => item.assignmentId === assignmentId && item.affordance === "x.reply" && item.status === "blocked")).toBe(true);
-    expect(completed.events.some((event: { title: string }) => event.title === "Exploration reply delivered" || event.title === "Exploration reply queued")).toBe(true);
-    expect(fetchMock).toHaveBeenCalledTimes(3);
+    expect(completed.events.some((event: { title: string }) => event.title === "Exploration engagement delivered" || event.title === "Exploration engagement queued" || event.title === "Exploration engagement failed")).toBe(true);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
     vi.unstubAllGlobals();
   });
 
@@ -142,19 +151,39 @@ describe("Presence-scoped Explorations", () => {
     bridge.state = "online";
     bridge.lastSeenAt = new Date().toISOString();
     bridge.lastHeartbeatAt = bridge.lastSeenAt;
+    bridge.accountIdentity = { username: "jenny_ai", status: "verified", observedAt: bridge.lastSeenAt };
     state.nativeConnections = [{ id: "native-x-exploration", presenceId, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "builder-presence", username: "jenny_ai", name: "Jenny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
     const mirrorId = "mirror-browser-reply-1";
     state.mirrorObjects.unshift({ id: mirrorId, bridgeId: bridge.id, presenceId, channelId: "x", externalRef: { type: "x.post", id: "unrelated-post-1" }, objectType: "post", language: "en", author: { externalRef: { type: "x.user", id: "builder-1" }, displayName: "Builder", handle: "builder" }, content: { text: "We are struggling to deploy persistent agent memory and keep decisions coherent." }, observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", environment: "live", source: "operator", trust: "untrusted_world_content" });
     state.explorations[0]!.nextEligibleAt = new Date(Date.now() - 1_000).toISOString();
     writeState(state);
 
-    const response = await POST(new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "runAttentionWorker" }) }));
-    expect(response.status).toBe(200);
-    const completed = await response.json();
-    const assignmentId = completed.explorations.find((item: { id: string }) => item.id === exploration.id).engagement.assignmentId;
+    const completed = await runLiveExplorationWorker(readState(), exploration.id, { runId: "exploration-browser-test-run", invocationId: "exploration-browser-test-invocation" });
+    writeState(completed);
+    const assignmentId = completed.explorations.find((item: { id: string }) => item.id === exploration.id)!.engagement!.assignmentId;
     const execution = completed.executions.find((item: { assignmentId?: string }) => item.assignmentId === assignmentId);
     expect(completed.explorationFindings.some((item: { status: string }) => item.status === "considering")).toBe(true);
     expect(execution).toMatchObject({ assignmentId, affordance: "x.reply", connector: "bridge", bridgeId: bridge.id, status: "queued", target: { type: "x.post", id: "unrelated-post-1" } });
-    expect(completed.events.some((event: { title: string; detail: string }) => event.title === "Exploration reply queued" && event.detail.includes("browser capability fallback"))).toBe(true);
+    expect(completed.events.some((event: { title: string; detail: string }) => event.title === "Exploration engagement queued" && event.detail.includes("verified Chrome"))).toBe(true);
+  });
+
+  it("makes a public quote available through verified Chrome when native X target rules reject it", () => {
+    let state = createAgent(input);
+    const presenceId = state.presence!.id;
+    state = applyOperation(state, { type: "setPresence", patch: { connectionMode: "native", execution: { ...state.presence!.execution, quote: "auto" } } });
+    state.presence!.environment = "live";
+    state.presences = state.presences.map((item) => item.id === presenceId ? { ...item, environment: "live" as const, connectionMode: "native" } : item);
+    state = applyOperation(state, { type: "createBridge", input: { presenceId, name: "OpenPresence Chrome · Jenny", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["quote"], formats: ["x.quote"], metrics: [] } } });
+    const bridge = state.bridges[0]!;
+    bridge.state = "online";
+    bridge.lastHeartbeatAt = new Date().toISOString();
+    bridge.lastSeenAt = bridge.lastHeartbeatAt;
+    bridge.accountIdentity = { username: "jenny_ai", status: "verified", observedAt: bridge.lastHeartbeatAt };
+    state.nativeConnections = [{ id: "native-x-quote", presenceId, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "jenny", username: "jenny_ai", name: "Jenny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    state.mirrorObjects.unshift({ id: "mirror-public-quote", bridgeId: bridge.id, presenceId, channelId: "x", externalRef: { type: "x.post", id: "public-quote-target" }, objectType: "post", language: "en", author: { externalRef: { type: "x.user", id: "builder" }, displayName: "Builder", handle: "builder" }, content: { text: "A concrete public post about persistent agent memory." }, observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", environment: "live", source: "operator", trust: "untrusted_world_content" });
+    const quoted = formXActionIntent(state, { affordance: "x.quote", target: { type: "x.post", id: "public-quote-target" }, text: "The concrete challenge here is keeping memory coherent as decisions accumulate." , origin: { kind: "exploration", refId: "exploration-test" } });
+    expect(quoted.executions[0]).toMatchObject({ affordance: "x.quote", connector: "bridge", bridgeId: bridge.id, status: "queued" });
+    const withoutVerifiedBridge = formXActionIntent({ ...state, bridges: [] }, { affordance: "x.quote", target: { type: "x.post", id: "public-quote-target" }, text: "The concrete challenge here is keeping memory coherent as decisions accumulate.", origin: { kind: "exploration", refId: "exploration-test" } });
+    expect(withoutVerifiedBridge.executions).toHaveLength(0);
   });
 });

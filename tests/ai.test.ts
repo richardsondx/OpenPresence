@@ -22,6 +22,27 @@ describe("Agent social decision parsing", () => {
     ]);
   });
 
+  it("applies shared anti-slop guidance to public, rehearsal, and private voices", () => {
+    const state = createAgent({ name: "Genny", description: "Make useful founder observations.", mode: "agent", handle: "@genny_slop", accent: "#D68754" });
+    const publicPrompt = promptFor(state, undefined, "A concrete post from another person.", { social: true, presence: state.presence! });
+    const rehearsalPrompt = promptFor(state, undefined, "A concrete rehearsal post.", {
+      social: true,
+      presence: state.presence!,
+      socialHistory: [{ role: "user", content: "A concrete rehearsal post." }],
+    });
+    const privatePrompt = promptFor(state, undefined, "What do you think?", { operatorConversation: true, operatorHistory: [] });
+
+    for (const system of [publicPrompt.system, rehearsalPrompt.system, privatePrompt.system]) {
+      expect(system).toContain("AI-SLOP AVOIDANCE");
+      expect(system).toContain("The demo is...");
+      expect(system).toContain("at the end of the day");
+      expect(system).toContain("semantic hollowness");
+      expect(system).toContain("preserving the active voice's rhythm");
+      expect(system).toContain("A short reaction, thanks, agreement, joke, or simple question can be the complete response");
+      expect(system).toContain("Do not force the same opening, sentence shape, length, or rhythm onto every voice");
+    }
+  });
+
   it("parses bounded model-backed Growth Review decisions", () => {
     const decision = parseGrowthReviewDecision('```json\n{"summary":"Shift toward reply-led discovery.","working":["Evidence posts earn replies."],"uncertain":["Follower attribution is sparse."],"weak":[],"rationale":"Replies are the strongest observed signal.","plan":{"summary":"Reply-led discovery","dailyTargets":["Review 10 relevant conversations"],"discoveryDirections":["Prioritize AI builder threads"]}}\n```');
     expect(decision).toMatchObject({

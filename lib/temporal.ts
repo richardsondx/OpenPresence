@@ -603,6 +603,18 @@ export function runOperationalSweep(now = new Date()): SweepResult {
       if (!hasAttentionRun) requestAttention(presence.id, "self_directed", nowIso, "broad");
       continue;
     }
+    const explorationDue = state.explorations.some((exploration) => exploration.presenceId === presence.id
+      && exploration.status === "active"
+      && (!exploration.nextEligibleAt || new Date(exploration.nextEligibleAt).getTime() <= now.getTime()));
+    const hasBroadAttentionRun = listOperationalRuns(presence.id, ["queued", "running", "recovering", "delivery_uncertain", "reconciling"])
+      .some((run) => run.kind === "attention" && run.attention?.scope === "broad");
+    if (explorationDue) {
+      // Explorations are a first-class durable source of attention. They must
+      // not wait behind the Presence-wide self-directed cooldown, and an
+      // observe_inbound run must not suppress this broad work.
+      if (!hasBroadAttentionRun) requestAttention(presence.id, "self_directed", nowIso, "broad");
+      continue;
+    }
     if (nextEligibleAt && new Date(nextEligibleAt).getTime() > now.getTime()) {
       if (!hasPendingAttentionWake && !hasAttentionRun) requestAttention(presence.id, "self_directed", nextEligibleAt, "broad");
       continue;
