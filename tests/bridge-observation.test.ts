@@ -1,6 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBridgeWithKey, ingestEvents, reportBridgeIdentity } from "../lib/bridge";
-import { createAgent } from "../lib/runtime";
+import { applyOperation, createAgent } from "../lib/runtime";
+import { runAutonomousObservation } from "../lib/autonomy-worker";
 import { readState, writeState } from "../lib/db";
 
 afterEach(() => vi.unstubAllEnvs());
@@ -68,6 +69,62 @@ describe("Bridge world-observation authorship", () => {
     const observed = readState().mirrorObjects.find((item) => item.externalRef.id === "external-post-1");
     expect(observed).toMatchObject({ objectType: "post", author: { handle: "interesting_author" } });
     expect(observed?.actorPresenceId).toBeUndefined();
+  });
+
+  it("indexes a Bridge mention so the next attention pass can judge it without a native read", () => {
+    const state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    state.presence!.environment = "live";
+    state.presence!.connectionMode = "bridge";
+    state.presences = state.presences.map((presence) => presence.id === state.presence!.id ? { ...presence, environment: "live", connectionMode: "bridge" } : presence);
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });
+    writeState(bridgeResult.state);
+    const bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge?.id)!;
+
+    ingestEvents(bridge, { events: [{
+      sourceEventId: "mention-1",
+      event: "created",
+      object: {
+        externalRef: { type: "x.post", id: "mention-1" },
+        objectType: "post",
+        language: "en",
+        author: { displayName: "Maya", handle: "@maya", externalRef: { type: "x.user", id: "maya" } },
+        content: { text: "Hey @example_agent, what are you building?" },
+        visibility: "public",
+        shareability: "presence-only",
+      },
+    }] });
+
+    expect(readState().presence?.context.publicFooting?.recentInboundIds).toContain("mention-1");
+  });
+
+  it("continues a Bridge mention into cognition when native X is unavailable", async () => {
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
+    const initial = createAgent({ name: "Genny", description: "Explain AI agents", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    initial.presence!.environment = "live";
+    initial.presence!.connectionMode = "bridge";
+    const state = applyOperation(initial, { type: "setPresence", patch: { execution: { ...initial.presence!.execution, reply: "auto" } } });
+    state.presences = state.presences.map((presence) => presence.id === state.presence!.id ? { ...presence, environment: "live", connectionMode: "bridge" } : presence);
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });
+    writeState(bridgeResult.state);
+    let bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge?.id)!;
+    reportBridgeIdentity(bridge, { executorId: "chrome-test", username: "example_agent" });
+    bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge?.id)!;
+    ingestEvents(bridge, { events: [{
+      sourceEventId: "cognition-mention-1",
+      event: "created",
+      object: {
+        externalRef: { type: "x.post", id: "cognition-mention-1" },
+        objectType: "post",
+        language: "en",
+        author: { displayName: "Maya", handle: "@maya", externalRef: { type: "x.user", id: "maya" } },
+        content: { text: "Hey @example_agent, what makes an agent loop reliable?" },
+        visibility: "public",
+        shareability: "presence-only",
+      },
+    }] });
+
+    const result = await runAutonomousObservation(state.presence!.id, { runId: "bridge-mention-run", invocationId: "bridge-mention-invocation" });
+    expect(result.socialDecisions.some((decision) => decision.focalMirrorObjectIds.some((id) => result.mirrorObjects.find((mirror) => mirror.id === id)?.externalRef.id === "cognition-mention-1"))).toBe(true);
   });
 
   it("attributes an observed post to the Presence only when its author matches", () => {

@@ -239,18 +239,39 @@ function recordVerifiedLiveAssetUsage(state: OpenPresenceState, bridge: Bridge, 
 export function ingestEvents(bridge: Bridge, payload: z.infer<typeof eventsInput>) {
   const state = readStateForBridge(bridge.id); const current = state.bridges.find((item) => item.id === bridge.id); if (!current) throw new Error("Bridge not found");
   let receivedInbound = false;
+  const receivedInboundIds: string[] = [];
   for (const item of payload.events) {
     if (state.mirrorEvents.some((event) => event.bridgeId === bridge.id && event.sourceEventId === item.sourceEventId)) continue;
     const presence = state.presences.find((candidate) => candidate.id === current.presenceId) ?? state.presence;
     const observedLanguage = item.object.language ?? item.object.content?.language;
     if (observedLanguage !== undefined && !languagesMatch(presence?.language, observedLanguage)) continue;
     const object = upsertObject(state, current, { ...item.object, actorPresenceId: observedActorPresenceId(presence, item.object) }, item.sourceEventId, item.event === "deleted");
-    if (item.event !== "deleted" && object.actorPresenceId !== bridge.presenceId) receivedInbound = true;
+    if (item.event !== "deleted" && object.actorPresenceId !== bridge.presenceId) {
+      receivedInbound = true;
+      receivedInboundIds.push(object.externalRef.id);
+    }
     const curationTarget = object.actorPresenceId === bridge.presenceId && object.parentExternalRef
       ? state.mirrorObjects.find((item) => item.externalRef.type === object.parentExternalRef?.type && item.externalRef.id === object.parentExternalRef?.id)
       : object;
     Object.assign(state, curateRelationshipFromMirror(state, curationTarget ?? object, bridge.presenceId));
     state.mirrorEvents.unshift({ id: localId("mirr_evt"), bridgeId: bridge.id, presenceId: bridge.presenceId, sourceEventId: item.sourceEventId, event: item.event, externalRef: item.object.externalRef, object, receivedAt: timestamp() });
+  }
+  if (receivedInboundIds.length) {
+    // Bridge events are already authenticated Mirror evidence. Record the
+    // bounded inbound index alongside the event so the attention selector can
+    // hand the fresh item to cognition without requiring a second native read.
+    const presence = state.presences.find((candidate) => candidate.id === bridge.presenceId) ?? state.presence;
+    const timestampValue = timestamp();
+    const priorFooting = presence?.context.publicFooting ?? { postsPublished: 0, recentPostIds: [], observedAt: timestampValue };
+    const recentInboundIds = [...new Set([...(priorFooting.recentInboundIds ?? []), ...receivedInboundIds])].slice(-100);
+    const updatedPresence = presence ? {
+      ...presence,
+      context: { ...presence.context, publicFooting: { ...priorFooting, recentInboundIds, observedAt: timestampValue } },
+    } : undefined;
+    if (updatedPresence) {
+      state.presences = state.presences.map((candidate) => candidate.id === updatedPresence.id ? updatedPresence : candidate);
+      if (state.presence?.id === updatedPresence.id) state.presence = updatedPresence;
+    }
   }
   touchBridge(state, state.bridges.find((item) => item.id === bridge.id) ?? current); state.events.unshift(bridgeEvent(state, "Mirror updated", `${payload.events.length} external event${payload.events.length === 1 ? "" : "s"} received.`)); writeState(state);
   const presence = state.presences.find((item) => item.id === bridge.presenceId) ?? state.presence;

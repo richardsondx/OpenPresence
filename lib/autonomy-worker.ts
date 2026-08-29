@@ -464,7 +464,7 @@ export async function executeAutonomyRun(runId: string): Promise<OpenPresenceSta
     } else if (run.kind === "discovery") {
       resultState = await runAutonomousSelfDirectedDiscovery(run.presenceId, undefined, { runId, invocationId, attentionEpisodeId, forceEligibility: run.attention?.triggers.includes("operator_check") || run.attention?.triggers.includes("operator_nudge") });
     } else if (run.kind === "attention" && run.attention?.scope === "observe_inbound") {
-      resultState = await runObservedAttentionPass(run.presenceId, { runId, invocationId, attentionEpisodeId, suppressAmbientInbound: run.attention?.triggers.includes("operator_nudge") });
+      resultState = await runObservedAttentionPass(run.presenceId, { runId, invocationId, attentionEpisodeId, suppressAmbientInbound: run.attention?.triggers.includes("operator_nudge"), inboundOnly: true });
     } else {
       resultState = await runAutonomousAttention(run.presenceId, { runId, invocationId, attentionEpisodeId, forceEligibility: run.attention?.triggers.includes("operator_check") || run.attention?.triggers.includes("operator_nudge"), suppressAmbientInbound: run.attention?.triggers.includes("operator_nudge") });
     }
@@ -577,7 +577,7 @@ export async function executeAutonomyRun(runId: string): Promise<OpenPresenceSta
  */
 export async function runAutonomousObservation(
   presenceId: string,
-  options?: { runId?: string; invocationId?: string; attentionEpisodeId?: string; forceEligibility?: boolean; suppressAmbientInbound?: boolean },
+  options?: { runId?: string; invocationId?: string; attentionEpisodeId?: string; forceEligibility?: boolean; suppressAmbientInbound?: boolean; inboundOnly?: boolean },
 ): Promise<OpenPresenceState> {
   const current = readStateSnapshotForContext({ presenceId });
   const presence = current.presences.find((p) => p.id === presenceId) ?? current.presence;
@@ -590,7 +590,10 @@ export async function runAutonomousObservation(
   // optional action capability and never replaces the native reader.
   const connection = current.nativeConnections.find((c) => c.presenceId === presence.id && c.channelId === "x");
   if (!connection) {
-    return current;
+    // A Bridge event is already an observed Social Mirror update. Continue
+    // into the inbound judgment stage instead of treating the absence of
+    // native read credentials as a reason to discard the wake.
+    return runAutonomousPulse(presenceId, options, current);
   }
 
   try {
@@ -942,7 +945,7 @@ export async function runAutonomousWatchSignals(
  */
 export async function runObservedAttentionPass(
   presenceId: string,
-  options?: { runId?: string; invocationId?: string; attentionEpisodeId?: string; suppressAmbientInbound?: boolean },
+  options?: { runId?: string; invocationId?: string; attentionEpisodeId?: string; suppressAmbientInbound?: boolean; inboundOnly?: boolean },
   dependencies: {
     observe: typeof runAutonomousObservation;
     judgeWatches: typeof runAutonomousWatchSignals;
