@@ -124,6 +124,19 @@ import type {
 } from "./types";
 
 const activeAutonomyWorkers = new Map<string, Promise<OpenPresenceState | null>>();
+
+/**
+ * Keep provider/model work from competing with the operator UI in local
+ * development. A queued durable run remains eligible for the next temporal
+ * sweep, so this is a throughput guard rather than a dropped responsibility.
+ * Production retains a small amount of parallelism unless the operator sets
+ * an explicit bound.
+ */
+export function autonomyWorkerConcurrencyLimit(): number {
+  const configured = Number(process.env.OPENPRESENCE_AUTONOMY_MAX_CONCURRENCY);
+  if (Number.isInteger(configured) && configured > 0) return Math.min(4, configured);
+  return process.env.NODE_ENV === "development" ? 1 : 2;
+}
 // A scheduled wake and an inbound-event wake can arrive together. Serialize
 // Watch judgment per Presence so both workers cannot select the same pending
 // signal before either one persists its disposition.
@@ -264,6 +277,7 @@ export function getAutonomyWorkerRun(key: string) {
 export function dispatchAutonomyWorker(runId: string): Promise<OpenPresenceState | null> {
   const existing = activeAutonomyWorkers.get(runId);
   if (existing) return existing;
+  if (activeAutonomyWorkers.size >= autonomyWorkerConcurrencyLimit()) return Promise.resolve(null);
 
   const promise = new Promise<OpenPresenceState | null>((resolve) => {
     setTimeout(async () => {
