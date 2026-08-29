@@ -119,7 +119,9 @@ export function reportBridgeIdentity(bridge: Bridge, input: z.infer<typeof ident
   const actual = normalizedHandle(input.username);
   const status: NonNullable<Bridge["accountIdentity"]>["status"] = actual && expected && actual === expected ? "verified" : actual ? "mismatch" : "unknown";
   const previousExecutorIdentity = readBridgeIdentityForExecutor(current.id, input.executorId);
-  const hasIdentityHeldWork = state.executions.some((execution) => execution.bridgeId === current.id && execution.deliveryHold?.reason === "bridge_identity");
+  const hasIdentityHeldWork = state.executions.some((execution) => execution.bridgeId === current.id
+    && ["queued", "awaiting-connector"].includes(execution.status)
+    && execution.deliveryHold?.reason === "bridge_identity");
   if (previousExecutorIdentity
     && previousExecutorIdentity.status === status
     && normalizedHandle(previousExecutorIdentity.username) === actual
