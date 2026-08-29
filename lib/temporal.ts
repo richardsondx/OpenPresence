@@ -18,7 +18,7 @@ import {
 import { attentionRequestFromWake, attentionRunAcceptsSignal, mergeAttentionRequests, requestAttention } from "./attention-coordinator";
 import { settleAttentionResponsibility } from "./attention-responsibility";
 import { bridgeExecutionStatus } from "./bridge-contract";
-import { scheduledAssignmentIsDue } from "./runtime";
+import { assignmentPursuitCanSpend, assignmentPursuitUsage, recordRuntimeEvent, scheduledAssignmentIsDue } from "./runtime";
 import { assignmentRunBlocksNewWork, isAutonomousPreWriteDeliveryFailure, reconcileLiveAssignmentRuns } from "./live-assignment-run";
 import { reconcileOrphanedAttentionEpisodes } from "./attention-episodes";
 import type {
@@ -97,6 +97,40 @@ export function repairMissingAssignmentWakes(state: OpenPresenceState, now = new
 }
 
 const assignmentDispatchesInFlight = new Set<string>();
+const assignmentPursuitResourceCategories = [
+  "maxChannelReads",
+  "maxHydrations",
+  "maxModelCalls",
+  "maxVisionCalls",
+  "maxEstimatedCostCents",
+] as const;
+
+/** Convert an exhausted live burst into an explicit durable pause. */
+export function pauseExhaustedAssignmentPursuits(state: OpenPresenceState, now = new Date()): number {
+  let paused = 0;
+  for (const pursuit of state.assignmentPursuitWindows ?? []) {
+    if (pursuit.status !== "active" || new Date(pursuit.startsAt).getTime() > now.getTime() || new Date(pursuit.deadlineAt).getTime() <= now.getTime()) continue;
+    const usage = assignmentPursuitUsage(state, pursuit, now.getTime());
+    const limits: Array<[keyof NonNullable<typeof pursuit.resourceBudget>, number | undefined, number]> = [
+      ["maxChannelReads", pursuit.resourceBudget?.maxChannelReads, usage.channelReads],
+      ["maxHydrations", pursuit.resourceBudget?.maxHydrations, usage.hydrations],
+      ["maxModelCalls", pursuit.resourceBudget?.maxModelCalls, usage.modelCalls],
+      ["maxVisionCalls", pursuit.resourceBudget?.maxVisionCalls, usage.visionCalls],
+      ["maxEstimatedCostCents", pursuit.resourceBudget?.maxEstimatedCostCents, usage.estimatedCostCents],
+    ];
+    const reached = limits.find(([, limit, current]) => limit !== undefined && current >= limit);
+    if (!reached) continue;
+    const [category, limit, current] = reached;
+    pursuit.status = "paused";
+    pursuit.pauseReason = `${category} budget reached (${current} / ${limit}).`;
+    pursuit.nextRunAt = undefined;
+    pursuit.updatedAt = now.toISOString();
+    paused += 1;
+    const assignment = state.assignments.find((item) => item.id === pursuit.assignmentId && item.presenceId === pursuit.presenceId);
+    if (assignment) recordRuntimeEvent(state, pursuit.presenceId, "Distribution push paused", `The burst paused automatically because its bounded resource envelope was reached: ${pursuit.pauseReason}`, "warning", { sourceObjectId: assignment.id });
+  }
+  return paused;
+}
 
 export function dueLiveAssignmentsWithoutWorkers(state: OpenPresenceState, now = new Date()) {
   return state.assignments.filter((assignment) => {
@@ -107,6 +141,11 @@ export function dueLiveAssignmentsWithoutWorkers(state: OpenPresenceState, now =
       && new Date(pursuit.startsAt).getTime() <= now.getTime()
       && new Date(pursuit.deadlineAt).getTime() > now.getTime()
       && (!pursuit.nextRunAt || new Date(pursuit.nextRunAt).getTime() <= now.getTime()));
+    // Capacity is a scheduler gate, not merely a worker-time validation. If
+    // a concurrent worker writes an older snapshot after the sweep's pause,
+    // an exhausted pursuit must still be unable to generate another dispatch
+    // attempt or an HTTP 400 retry storm.
+    if (pursuitDue && pursuit && !assignmentPursuitResourceCategories.every((category) => assignmentPursuitCanSpend(state, pursuit, category, now.getTime()))) return false;
     // A temporary distribution push is its own execution window. The parent
     // Assignment may already have satisfied its ordinary daily deliverable,
     // and its bounded retry budget must not silence the explicitly requested
@@ -536,7 +575,8 @@ export function runOperationalSweep(now = new Date()): SweepResult {
   const expiredQueuedExecutions = hasExpiredQueuedExecution ? expireQueuedDeliveryWindows(state, now) : 0;
   const staleBridgeExecutions = hasStaleBridgeExecution ? closeStaleBridgeExecutions(state, now) : 0;
   const repairedAttentionEpisodes = hasOrphanedAttentionEpisode ? reconcileOrphanedAttentionEpisodes(state, now) : 0;
-  if (hasAutonomousPreWriteFailure || expiredQueuedExecutions > 0 || staleBridgeExecutions > 0 || repairedAttentionEpisodes > 0) {
+  const pausedExhaustedPursuits = pauseExhaustedAssignmentPursuits(state, now);
+  if (hasAutonomousPreWriteFailure || expiredQueuedExecutions > 0 || staleBridgeExecutions > 0 || repairedAttentionEpisodes > 0 || pausedExhaustedPursuits > 0) {
     reconcileLiveAssignmentRuns(state, now.getTime());
     writeState(state, { advanceWorkspaceRevision: false });
   }

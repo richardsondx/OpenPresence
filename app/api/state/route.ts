@@ -15,7 +15,7 @@ import { assignmentPublicExpressionLeakageReason } from "@/lib/runtime";
 import { activeAssignmentPursuitWindow, assignmentPursuitCanSpend, assignmentPursuitUsage, assignmentPursuitVerifiedCounts } from "@/lib/runtime";
 import { attentionGovernorSnapshot, requestAttentionCapacity } from "@/lib/attention-governor";
 import { requestAttention } from "@/lib/attention-coordinator";
-import { runOperationalSweep } from "@/lib/temporal";
+import { pauseExhaustedAssignmentPursuits, runOperationalSweep } from "@/lib/temporal";
 import { deriveActivityNow } from "@/lib/activity-now";
 import { createOperatorNudge, directWatchQuery, isBurstStatusQuestion, operatorBurstStatusReply, operatorNudgeReceipt, recordOperatorConversationMessage, recordNudgeAssignmentHandoff, releasePausedNudges, settleNudgeFromAssignment } from "@/lib/operator-chat";
 
@@ -5747,6 +5747,17 @@ export async function POST(request: Request) {
       const assignment = current.assignments.find((item) => item.id === parsed.assignmentId && item.presenceId === presenceId);
       const presence = current.presences.find((item) => item.id === presenceId) ?? current.presence;
       if (!assignment || !presence || assignment.environment === "sandbox") throw new Error("That live Assignment is no longer available.");
+      // A scheduler sweep normally pauses exhausted pursuits. Re-check at the
+      // queue boundary too: a worker can race with that sweep and write an
+      // older snapshot, but it must never turn exhausted capacity into a
+      // repeated failed dispatch.
+      if (pauseExhaustedAssignmentPursuits(current) > 0) {
+        writeState(current, { advanceWorkspaceRevision: false });
+        if (request.headers.get("x-openpresence-internal-dispatch") === "assignment") {
+          return NextResponse.json({ accepted: true, assignmentId: parsed.assignmentId, paused: true }, { status: 202 });
+        }
+        return stateResponse(request, current);
+      }
       const pursuit = activeAssignmentPursuitWindow(current, parsed.assignmentId);
       const queued = queueLiveAssignmentRun(current, parsed.assignmentId, presenceId, pursuit?.id);
       const next = recordRuntimeEvent(queued.state, presenceId, "Assignment work queued", `${presence.name} will continue this Assignment in its own background work queue. Check now only observes progress; it does not restart the Assignment.`, "positive");

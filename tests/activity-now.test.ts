@@ -3,7 +3,7 @@ import { deriveActivityNow } from "../lib/activity-now";
 import { createOperatorNudge, directWatchQuery, isBurstStatusQuestion, operatorBurstStatusReply, operatorNudgeReceipt, operatorRequestsWatch, recordOperatorConversationMessage, recordNudgeAssignmentHandoff, releasePausedNudges, settleNudgeForEpisode, settleNudgeFromAssignment, startQueuedNudge } from "../lib/operator-chat";
 import { operatorConversationActionEvents } from "../lib/operator-chat-projection";
 import { createAgent, formXActionIntent } from "../lib/runtime";
-import { dueLiveAssignmentsWithoutWorkers, repairMissingAssignmentWakes, repairMissingOperatorNudgeWakes, repairPendingBridgeVerificationWakes } from "../lib/temporal";
+import { dueLiveAssignmentsWithoutWorkers, pauseExhaustedAssignmentPursuits, repairMissingAssignmentWakes, repairMissingOperatorNudgeWakes, repairPendingBridgeVerificationWakes } from "../lib/temporal";
 import { listScheduledWakes, upsertOperationalRun } from "../lib/db";
 import type { OperationalRun } from "../lib/types";
 
@@ -121,6 +121,50 @@ describe("truthful Activity right-now projection", () => {
     }];
 
     expect(dueLiveAssignmentsWithoutWorkers(state, new Date("2026-08-29T01:00:00.000Z")).map((item) => item.id)).toEqual(["completed_distribution_assignment"]);
+  });
+
+  it("keeps a burst visible above stale confirmation work between scan passes", () => {
+    const state = fixture();
+    const presence = { ...state.presence!, environment: "live" as const, status: "live" as const };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    const now = new Date("2026-08-29T01:00:00.000Z");
+    state.assignments.unshift({ id: "burst_assignment", agentId: state.agent!.id, presenceId: presence.id, environment: "live", status: "active", deliverable: { type: "meaningful_engagement" }, progress: { required: 1, verified: 0 }, createdAt: now.toISOString(), updatedAt: now.toISOString() } as never);
+    state.assignmentPursuitWindows = [{ id: "burst", assignmentId: "burst_assignment", agentId: state.agent!.id, presenceId: presence.id, startsAt: "2026-08-29T00:00:00.000Z", deadlineAt: "2026-08-29T02:00:00.000Z", maxVerifiedActions: 10, status: "active", nextRunAt: "2026-08-29T01:01:00.000Z", createdAt: now.toISOString(), updatedAt: now.toISOString() }];
+    state.operationalRuns = [{ id: "stale_confirmation", runId: "stale_confirmation", presenceId: presence.id, kind: "attention", state: "waiting", stage: "verifying", createdAt: now.toISOString(), startedAt: now.toISOString(), lastProgressAt: now.toISOString(), attemptCount: 1, recoveryCount: 0 } as OperationalRun];
+    state.executions = [{ id: "old_pending", assignmentId: "old_assignment", presenceId: presence.id, status: "verification-pending", failure: { retryable: false }, createdAt: now.toISOString(), updatedAt: now.toISOString() } as never];
+
+    const projection = deriveActivityNow(state, presence.id, now);
+    expect(projection.state).toBe("bursting");
+    expect(projection.title).toContain("Burst is active");
+    expect(projection.title).not.toBe("Waiting for confirmation");
+  });
+
+  it("pauses a burst durably when a resource envelope is exhausted", () => {
+    const state = fixture();
+    const presence = { ...state.presence!, environment: "live" as const, status: "live" as const };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    const now = new Date("2026-08-29T01:00:00.000Z");
+    state.assignments.unshift({ id: "budgeted_burst_assignment", agentId: state.agent!.id, presenceId: presence.id, environment: "live", status: "active", instruction: "Find a worthwhile conversation to engage with.", deliverable: { type: "meaningful_engagement" }, progress: { required: 1, verified: 0 }, createdAt: now.toISOString(), updatedAt: now.toISOString() } as never);
+    state.assignmentPursuitWindows = [{ id: "budgeted_burst", assignmentId: "budgeted_burst_assignment", agentId: state.agent!.id, presenceId: presence.id, startsAt: "2026-08-29T00:00:00.000Z", deadlineAt: "2026-08-29T02:00:00.000Z", maxVerifiedActions: 10, resourceBudget: { maxModelCalls: 1 }, status: "active", nextRunAt: now.toISOString(), createdAt: now.toISOString(), updatedAt: now.toISOString() }];
+    state.resourceUsageEvents = [{ id: "model_budget", agentId: state.agent!.id, presenceId: presence.id, invocationId: "run", originKind: "assignment", originId: "budgeted_burst_assignment", attentionSource: "assignment", category: "model", usage: { requests: 1 }, createdAt: now.toISOString() }];
+
+    expect(pauseExhaustedAssignmentPursuits(state, now)).toBe(1);
+    expect(state.assignmentPursuitWindows[0]).toMatchObject({ status: "paused", nextRunAt: undefined, pauseReason: "maxModelCalls budget reached (1 / 1)." });
+  });
+
+  it("does not redispatch an exhausted burst before its pause is persisted", () => {
+    const state = fixture();
+    const presence = { ...state.presence!, environment: "live" as const, status: "live" as const };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    const now = new Date("2026-08-29T01:00:00.000Z");
+    state.assignments.unshift({ id: "due_exhausted_burst", agentId: state.agent!.id, presenceId: presence.id, environment: "live", status: "active", deliverable: { type: "meaningful_engagement" }, progress: { required: 1, verified: 0 }, createdAt: now.toISOString(), updatedAt: now.toISOString() } as never);
+    state.assignmentPursuitWindows = [{ id: "due_exhausted", assignmentId: "due_exhausted_burst", agentId: state.agent!.id, presenceId: presence.id, startsAt: "2026-08-29T00:00:00.000Z", deadlineAt: "2026-08-29T02:00:00.000Z", maxVerifiedActions: 10, resourceBudget: { maxModelCalls: 1 }, status: "active", nextRunAt: now.toISOString(), createdAt: now.toISOString(), updatedAt: now.toISOString() }];
+    state.resourceUsageEvents = [{ id: "model_budget", agentId: state.agent!.id, presenceId: presence.id, invocationId: "run", originKind: "assignment", originId: "due_exhausted_burst", attentionSource: "assignment", category: "model", usage: { requests: 1 }, createdAt: now.toISOString() }];
+
+    expect(dueLiveAssignmentsWithoutWorkers(state, now)).toEqual([]);
   });
 
   it("does not present a due scheduler row as the next future wake", () => {
