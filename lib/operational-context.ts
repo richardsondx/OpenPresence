@@ -154,6 +154,7 @@ export function readOperationalHealth(presenceId?: string, now = new Date()): Op
   let assignmentNeedsOperatorSummary: string | undefined;
   let bridgeDeliveryWaiting = false;
   let bridgeIdentityWaiting = false;
+  let attentionDeliveryWaiting = false;
   let enabledCapabilityUnavailable = false;
   let bridgeContinuityAvailable = false;
   try {
@@ -206,6 +207,12 @@ export function readOperationalHealth(presenceId?: string, now = new Date()): Op
       Boolean(execution.bridgeId && (waitingBridgeIds.has(execution.bridgeId) || identityWaitingBridgeIds.has(execution.bridgeId))) &&
       pendingStatuses.has(execution.status),
     );
+    attentionDeliveryWaiting = activeRuns.some((run) =>
+      run.kind === "attention"
+      && run.state === "waiting"
+      && ["delivering", "verifying"].includes(run.stage)
+      && (run.result?.pendingExecutionCount ?? 0) > 0,
+    );
     if (presence) {
       const bridgeReady = bridges.some((bridge) => bridgeExecutionStatus(bridge as Bridge) === "connected");
       const nativeReady = Boolean(nativeConn && nativeConn.status === "connected" && nativeConn.access === "read-write" && nativeConn.account?.username?.replace(/^@/, "").toLowerCase() === presence.handle.replace(/^@/, "").toLowerCase());
@@ -241,6 +248,8 @@ export function readOperationalHealth(presenceId?: string, now = new Date()): Op
         ? bridgeIdentityWaiting
           ? "Chrome is connected, but the signed-in account has not been verified yet. Delivery is paused safely until identity verification completes."
           : "A delivery is waiting for the authorized browser connector to check in."
+      : attentionDeliveryWaiting
+        ? "A selected social action is waiting for delivery or verification. OpenPresence will not claim success until the authorized route confirms what happened."
     : status === "healthy"
       ? "Genny is live and all required runtime capabilities are healthy."
       : status === "degraded"

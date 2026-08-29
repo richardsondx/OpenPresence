@@ -64,6 +64,7 @@ import {
 import {
   derivePresenceCapabilityManifest,
   deriveSelfDirectedDiscoveryPlan,
+  deferInboundJudgment,
   formChatPostIntent,
   formXActionIntent,
   formXReplyIntent,
@@ -634,7 +635,7 @@ export async function runAutonomousObservation(
       requestAttention(presenceId, "scheduled_observation", wakeAt, "observe_inbound");
     }
 
-    const inbound = options?.suppressAmbientInbound ? undefined : unjudgedNativeInbound(next, presenceId)[0];
+    const inbound = options?.suppressAmbientInbound ? undefined : selectUnjudgedNativeInbound(next, presenceId)[0];
     if (inbound) {
       if (options?.attentionEpisodeId) next = recordAttentionStep(next, options.attentionEpisodeId, "judging", { label: "Judging a new conversation", detail: inbound.author?.handle ? `Reviewing @${inbound.author.handle.replace(/^@/, "")}` : "Reviewing the newest inbound post", current: 0, total: 1, evidenceRefs: [inbound.externalRef] });
       next = recordRuntimeEvent(next, presenceId, "New mention received", "A new public mention entered the Social Mirror, so Genny is considering it now.", "positive", { sourceObjectId: inbound.id });
@@ -672,7 +673,7 @@ export async function runAutonomousPulse(
   // unrelated ambient mention steal the same model turn and become a public
   // action with the nudge's execution authority. It remains in the Mirror for
   // the next ordinary observation pass.
-  const observedMentions = options?.suppressAmbientInbound ? [] : unjudgedNativeInbound(next, presenceId);
+  const observedMentions = options?.suppressAmbientInbound ? [] : selectUnjudgedNativeInbound(next, presenceId);
   if (observedMentions.length) {
     let inbound = observedMentions[0]!;
     if (inbound.parentExternalRef) {
@@ -725,6 +726,8 @@ export async function runAutonomousPulse(
         runId: options?.runId,
         error: error instanceof Error ? error : String(error),
       });
+      next = deferInboundJudgment(next, presenceId, inbound.externalRef.id, new Date(Date.now() + 60_000).toISOString());
+      await writeStateWithRetry(current, next);
       return next;
     }
 
@@ -1440,7 +1443,7 @@ export async function judgeOperatorNudgeTargets(
   return next;
 }
 
-function unjudgedNativeInbound(source: OpenPresenceState, presenceId: string) {
+export function selectUnjudgedNativeInbound(source: OpenPresenceState, presenceId: string, now = new Date()) {
   const connection = source.nativeConnections.find((item) => item.presenceId === presenceId && item.channelId === "x");
   const accountId = connection?.account?.id;
   const footing = source.presences.find((item) => item.id === presenceId)?.context.publicFooting;
@@ -1463,8 +1466,13 @@ function unjudgedNativeInbound(source: OpenPresenceState, presenceId: string) {
       .filter((id): id is string => Boolean(id)),
   );
   const presence = source.presences.find((item) => item.id === presenceId) ?? source.presence;
+  const inboundAttentionCooldowns = footing?.inboundAttentionCooldowns ?? {};
   const candidates = source.mirrorObjects
     .filter((item) => item.presenceId === presenceId && item.channelId === "x" && item.objectType === "post" && item.author?.externalRef?.type === "x.user" && item.author.externalRef.id !== accountId && recentInboundIds.has(item.externalRef.id) && !judgedInboundIds.has(item.externalRef.id) && !alreadyRepliedPostIds.has(item.externalRef.id) && !alreadyExecutedTargetIds.has(item.externalRef.id) && !alreadyDecidedInboundIds.has(item.externalRef.id) && !alreadyDecidedInboundIds.has(item.id) && !targetIsBlockedByPerson(source, presenceId, item.externalRef) && Boolean(presence && isCognitionEligibleMirrorObject(item, presence.language)) && Boolean(shouldEvaluateConversationObject(source, item, presenceId).eligible))
+    .filter((item) => {
+      const retryAt = inboundAttentionCooldowns[item.externalRef.id];
+      return !retryAt || !Number.isFinite(Date.parse(retryAt)) || Date.parse(retryAt) <= now.getTime();
+    })
     .sort((a, b) => (b.occurredAt ?? "").localeCompare(a.occurredAt ?? "") || b.observedAt.localeCompare(a.observedAt));
   return candidates;
 }

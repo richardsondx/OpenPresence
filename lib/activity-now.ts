@@ -147,7 +147,7 @@ export function deriveActivityNow(state: OpenPresenceState, presenceId: string, 
     // silently looking like an abandoned worker.
     const waitingExecutions = state.executions.filter((execution) =>
       execution.presenceId === presenceId
-      && execution.attentionEpisodeId === waitingAttentionRun.attentionEpisodeId
+      && (execution.attentionEpisodeId === waitingAttentionRun.attentionEpisodeId || execution.runId === waitingAttentionRun.id || !execution.attentionEpisodeId && !execution.runId)
       && execution.status === "verification-pending",
     );
     const verificationPaused = waitingExecutions.some((execution) => execution.failure?.retryable === false);
@@ -156,19 +156,23 @@ export function deriveActivityNow(state: OpenPresenceState, presenceId: string, 
       : undefined;
     const waitingSteps = truthfulAttentionSteps(state, waitingEpisode);
     const waitingEpisodeExecutions = waitingEpisode
-      ? state.executions.filter((execution) => execution.attentionEpisodeId === waitingEpisode.id || waitingEpisode.executionIds.includes(execution.id))
-      : [];
+      ? state.executions.filter((execution) => execution.attentionEpisodeId === waitingEpisode.id || waitingEpisode.executionIds.includes(execution.id) || execution.runId === waitingAttentionRun.id)
+      : state.executions.filter((execution) => execution.presenceId === presenceId && (!execution.attentionEpisodeId && !execution.runId || execution.runId === waitingAttentionRun.id));
     const deliveryReached = waitingEpisodeExecutions.some((execution) => ["succeeded", "claimed", "executing", "verification-pending"].includes(execution.status));
     const deliveryWaiting = waitingEpisodeExecutions.filter((execution) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued"].includes(execution.status)).length;
+    const waitingForConfirmation = waitingAttentionRun.stage === "verifying" && (deliveryReached || waitingExecutions.length > 0);
+    const waitingForAuthorizedDelivery = waitingAttentionRun.stage === "delivering" || deliveryWaiting > 0;
     return {
       presenceId,
       state: "resting",
-      title: deliveryReached && waitingAttentionRun.stage === "verifying" ? "Waiting for confirmation" : deliveryWaiting ? "Waiting for authorized delivery" : "No delivery was attempted",
+      title: waitingForConfirmation ? "Waiting for confirmation" : waitingForAuthorizedDelivery ? "Waiting for authorized delivery" : "Waiting for the attention pass to settle",
       detail: verificationPaused
         ? "Confirmation is paused until the authorized verification route is available. Review the runtime notice to continue."
-        : deliveryWaiting
-          ? `${deliveryWaiting} selected action${deliveryWaiting === 1 ? " is" : "s are"} still waiting for an authorized delivery route. Nothing has reached the channel yet.`
-          : "The social world did not produce a selected action that reached delivery. Nothing was sent.",
+        : waitingForConfirmation
+          ? "A selected action reached the delivery boundary and is waiting for a verified outcome."
+          : waitingForAuthorizedDelivery
+            ? `${deliveryWaiting || "The selected action"} ${deliveryWaiting === 1 ? "is" : deliveryWaiting ? "selected actions are" : "is"} waiting for an authorized delivery route. No cognition worker is running.`
+            : "The attention pass is waiting on durable delivery state; no new public action is being inferred from the incomplete record.",
       since: waitingAttentionRun.startedAt ?? waitingAttentionRun.createdAt,
       nextWakeAt: pendingWake?.wakeAt,
       nextWakePurpose: wakePurpose(pendingWake),

@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { createAgent, applyOperation, startPlaygroundSession, compileAgendaWork } from "../lib/runtime";
 import { parseAgentSocialDecision } from "../lib/ai";
-import { hasEpisodeRepresentation } from "../lib/autonomy-worker";
+import { deferInboundJudgment } from "../lib/runtime";
+import { hasEpisodeRepresentation, selectUnjudgedNativeInbound } from "../lib/autonomy-worker";
 
 describe("Autonomous Closed-Loop Cognition Invariants", () => {
   it("does not represent the same target twice inside one attention episode", () => {
@@ -12,6 +13,41 @@ describe("Autonomous Closed-Loop Cognition Invariants", () => {
 
     expect(hasEpisodeRepresentation(state, presenceId, "episode-target", "episode_one")).toBe(true);
     expect(hasEpisodeRepresentation(state, presenceId, "episode-target", "episode_two")).toBe(false);
+  });
+
+  it("lets newer inbound mentions proceed when one candidate is deferred after a provider failure", () => {
+    let state = createAgent({ name: "Jenny", description: "Test", mode: "agent", handle: "@jenny_ai", accent: "#D68754" });
+    const presenceId = state.presence!.id;
+    const observedAt = new Date("2026-08-29T12:00:00.000Z").toISOString();
+    state.presence = {
+      ...state.presence!,
+      context: {
+        ...state.presence!.context,
+        publicFooting: { postsPublished: 0, recentPostIds: [], recentInboundIds: ["older-mention", "newer-mention"], judgedInboundIds: [], observedAt },
+      },
+    };
+    state.presences = state.presences.map((item) => item.id === presenceId ? state.presence! : item);
+    state.mirrorObjects = ["older-mention", "newer-mention"].map((id, index) => ({
+      id: `mirror-${id}`,
+      bridgeId: "native:test",
+      presenceId,
+      channelId: "x" as const,
+      externalRef: { type: "x.post" as const, id },
+      objectType: "post",
+      author: { displayName: `Author ${index}`, handle: `author_${index}`, externalRef: { type: "x.user" as const, id: `author-${index}` } },
+      content: { text: `A substantive mention ${index}.` },
+      language: "en",
+      occurredAt: new Date(`2026-08-29T12:0${index}:00.000Z`).toISOString(),
+      observedAt,
+      visibility: "public",
+      shareability: "presence-only",
+      environment: "live",
+      source: "native",
+      trust: "untrusted_world_content",
+    } as never));
+    state = deferInboundJudgment(state, presenceId, "older-mention", new Date("2026-08-29T12:05:00.000Z").toISOString());
+    expect(selectUnjudgedNativeInbound(state, presenceId, new Date("2026-08-29T12:01:00.000Z"))).toHaveLength(1);
+    expect(selectUnjudgedNativeInbound(state, presenceId, new Date("2026-08-29T12:01:00.000Z"))[0]?.externalRef.id).toBe("newer-mention");
   });
 
   it("evaluates autonomous deliberation invariants when only world stimuli are supplied", async () => {

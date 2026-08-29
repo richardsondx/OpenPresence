@@ -1257,6 +1257,8 @@ export interface PublicFooting {
   recentPostIds: string[];
   recentInboundIds?: string[];
   judgedInboundIds?: string[];
+  /** Temporary per-post retry gates prevent one provider failure from starving newer mentions. */
+  inboundAttentionCooldowns?: Record<string, string>;
   observedAt: string;
 }
 

@@ -1113,6 +1113,7 @@ export function recordPublicFooting(source: OpenPresenceState, presenceId: strin
       publicFooting: {
         ...footing,
         judgedInboundIds: footing.judgedInboundIds ?? presence.context.publicFooting?.judgedInboundIds,
+        inboundAttentionCooldowns: footing.inboundAttentionCooldowns ?? presence.context.publicFooting?.inboundAttentionCooldowns,
       },
     },
   });
@@ -1127,7 +1128,24 @@ export function markInboundJudged(source: OpenPresenceState, presenceId: string,
   if (!presence) return state;
   const footing = presence.context.publicFooting ?? { postsPublished: 0, recentPostIds: [], observedAt: now() };
   const judgedInboundIds = [...new Set([...(footing.judgedInboundIds ?? []), externalId])].slice(-100);
-  return recordPublicFooting(state, presenceId, { ...footing, judgedInboundIds });
+  const inboundAttentionCooldowns = { ...(footing.inboundAttentionCooldowns ?? {}) };
+  delete inboundAttentionCooldowns[externalId];
+  return recordPublicFooting(state, presenceId, { ...footing, judgedInboundIds, inboundAttentionCooldowns });
+}
+
+/**
+ * Defer one inbound candidate after an infrastructure/model failure without
+ * turning the failure into a social NO_OP. Newer mentions remain eligible.
+ */
+export function deferInboundJudgment(source: OpenPresenceState, presenceId: string, externalId: string, retryAt: string) {
+  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
+  if (!presence) return state;
+  const footing = presence.context.publicFooting ?? { postsPublished: 0, recentPostIds: [], observedAt: now() };
+  const inboundAttentionCooldowns = { ...(footing.inboundAttentionCooldowns ?? {}), [externalId]: retryAt };
+  const recentIds = new Set(footing.recentInboundIds ?? []);
+  const compactCooldowns = Object.fromEntries(Object.entries(inboundAttentionCooldowns).filter(([id]) => recentIds.has(id)).slice(-100));
+  return recordPublicFooting(state, presenceId, { ...footing, inboundAttentionCooldowns: compactCooldowns });
 }
 
 export function markCalendarSlotEvaluated(source: OpenPresenceState, slotId: string) {
