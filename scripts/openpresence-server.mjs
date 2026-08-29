@@ -128,32 +128,75 @@ const publicationSigningKey = process.env.OPENPRESENCE_PUBLICATION_SIGNING_KEY |
   return generated;
 })();
 
+const childEnv = {
+  ...process.env,
+  OPENPRESENCE_DB_PATH: dbPath,
+  OPENPRESENCE_PORT: port,
+  OPENPRESENCE_SECRET_KEY: localSecretKey,
+  OPENPRESENCE_DEFAULT_AGENT_NAME: process.env.OPENPRESENCE_DEFAULT_AGENT_NAME || "Genny",
+  OPENPRESENCE_PUBLICATION_SIGNING_KEY: publicationSigningKey,
+  OPENPRESENCE_NEXT_DIST_DIR: nextDistDir,
+};
+// Production starts the canonical temporal owner from Next instrumentation.
+// Development keeps that eager import disabled to avoid duplicating the large
+// runtime module graph, and instead gives the same durable sweep one child
+// supervisor. This leaves one scheduler owner per database in both modes.
+const schedulerToken = process.env.OPENPRESENCE_SCHEDULER_TOKEN || crypto.randomBytes(32).toString("base64url");
+childEnv.OPENPRESENCE_SCHEDULER_TOKEN = schedulerToken;
+
 const child = spawn("pnpm", ["exec", "next", mode, "-p", port], {
   cwd: projectRoot,
-  env: {
-    ...process.env,
-    OPENPRESENCE_DB_PATH: dbPath,
-    OPENPRESENCE_PORT: port,
-    OPENPRESENCE_SECRET_KEY: localSecretKey,
-    OPENPRESENCE_DEFAULT_AGENT_NAME: process.env.OPENPRESENCE_DEFAULT_AGENT_NAME || "Genny",
-    OPENPRESENCE_PUBLICATION_SIGNING_KEY: publicationSigningKey,
-    OPENPRESENCE_NEXT_DIST_DIR: nextDistDir,
-  },
+  env: childEnv,
   stdio: "inherit",
 });
 
+let stopping = false;
+let scheduler;
+let schedulerRestartTimer;
+
+function startDevScheduler() {
+  if (mode !== "dev" || process.env.OPENPRESENCE_DISABLE_DEV_SCHEDULER === "1" || stopping) return;
+  scheduler = spawn(process.execPath, [path.join(projectRoot, "scripts", "openpresence-scheduler-worker.mjs")], {
+    cwd: projectRoot,
+    env: childEnv,
+    stdio: "inherit",
+  });
+  scheduler.on("error", (error) => {
+    console.error(`[openpresence-server] scheduler error: ${error instanceof Error ? error.message : String(error)}`);
+  });
+  scheduler.on("exit", (code, signal) => {
+    scheduler = undefined;
+    if (stopping) return;
+    console.error(`[openpresence-server] scheduler exited (code=${code ?? "?"}, signal=${signal ?? "none"}); restarting.`);
+    schedulerRestartTimer = setTimeout(startDevScheduler, 1_000);
+  });
+}
+
+function stopChildren(signal) {
+  stopping = true;
+  if (schedulerRestartTimer) clearTimeout(schedulerRestartTimer);
+  child.kill(signal);
+  if (scheduler) scheduler.kill(signal);
+}
+
+startDevScheduler();
+
 child.on("error", (error) => {
+  stopChildren("SIGTERM");
   releaseServerLock();
   throw error;
 });
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
-    child.kill(signal);
+    stopChildren(signal);
   });
 }
 
 child.on("exit", (code, signal) => {
+  stopping = true;
+  if (schedulerRestartTimer) clearTimeout(schedulerRestartTimer);
+  if (scheduler) scheduler.kill(signal || "SIGTERM");
   releaseServerLock();
   if (signal) process.kill(process.pid, signal);
   process.exit(code ?? 1);
