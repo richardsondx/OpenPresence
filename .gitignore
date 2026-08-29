@@ -16,6 +16,8 @@ data/*.db
 data/**/*.db
 data/*.db-*
 data/**/*.db-*
+data/*.db.server-lock
+data/**/*.db.server-lock
 data/*.bak
 data/**/*.bak
 data/*.bak-*
