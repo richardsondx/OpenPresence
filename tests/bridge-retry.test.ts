@@ -1,12 +1,21 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { claimExecutions, closeChromeVerification, createBridgeWithKey, failExecution, ingestEvents, recordVerifiedBridgeReaction, reportBridgeIdentity } from "../lib/bridge";
 import { applyOperation, createAgent, formXReplyIntent } from "../lib/runtime";
-import { readState, WorkspaceConflictError, writeState } from "../lib/db";
+import { readState, readStateForBridge, WorkspaceConflictError, writeState } from "../lib/db";
 import type { Execution } from "../lib/types";
 
 afterEach(() => vi.unstubAllEnvs());
 
 describe("Bridge browser retry lifecycle", () => {
+  it("resolves connector state from the indexed Bridge owner", () => {
+    const state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });
+    const scoped = readStateForBridge(bridgeResult.bridge!.id);
+    expect(scoped.bridges.some((bridge) => bridge.id === bridgeResult.bridge!.id)).toBe(true);
+    expect(scoped.presences.some((presence) => presence.id === state.presence!.id)).toBe(true);
+    expect(scoped.agentWorkspaces).toEqual([]);
+  });
+
   it("settles a verified Assignment quote and mirror object", () => {
     let state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
     state.presence!.environment = "live";

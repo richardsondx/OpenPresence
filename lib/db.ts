@@ -947,6 +947,17 @@ export function readStateForAgent(agentId?: string | null): OpenPresenceState {
 
 /** Resolve connector work from its durable Presence/Agent owner, never from the active projection. */
 export function readStateForBridge(bridgeId: string): OpenPresenceState {
+  // Bridge authentication and polling are high-frequency connector paths. The
+  // normalized bridge index already records the owning Agent and Presence, so
+  // do not deep-clone the complete compatibility workspace for every claim,
+  // identity, acknowledgement, or verification request. Keep the complete
+  // read as a compatibility fallback for older databases whose bridge index
+  // has not been populated yet.
+  const owner = sqlite.prepare("SELECT agent_id, parent_id FROM bridges WHERE id = ?").get(bridgeId) as { agent_id?: string | null; parent_id?: string | null } | undefined;
+  if (owner?.parent_id) {
+    const scoped = readStateForContext({ agentId: owner.agent_id, presenceId: owner.parent_id });
+    if (scoped.bridges.some((bridge) => bridge.id === bridgeId)) return scoped;
+  }
   const state = readState();
   if (state.bridges.some((bridge) => bridge.id === bridgeId)) return state;
   for (const workspace of state.agentWorkspaces) {
