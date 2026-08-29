@@ -48,6 +48,16 @@ describe("canonical Assignment domain", () => {
     expect(assignment.preflight).toMatchObject({ status: "ready", contract: { successEvidence: expect.stringContaining("confirmed") } });
   });
 
+  it("treats a dated schedule as weekly unless the instruction explicitly says once", () => {
+    const state = createAgent(input);
+    const schedule = { day: "Tuesday", time: "08:00", executionWindow: "08:00–11:00" };
+    const recurring = compileAssignmentInstruction(state, "Quote one useful AI agent post.", state.presence!.id, "live", undefined, schedule);
+    const oneTime = compileAssignmentInstruction(state, "Quote one useful AI agent post once.", state.presence!.id, "live", undefined, schedule);
+
+    expect(recurring.recurrence).toMatchObject({ kind: "weekly", label: "Every week" });
+    expect(oneTime.recurrence).toMatchObject({ kind: "once", label: "Once" });
+  });
+
   it("persists the Schedule objective for List and Week projections", () => {
     const state = createAgent(input);
     const next = applyOperation(state, { type: "createAssignment", instruction: "Teach one useful lesson about persistent agents.", presenceId: state.presence!.id, environment: "sandbox", objective: "education", schedule: { day: "Tuesday", time: "08:00", executionWindow: "08:00–11:00" } });
@@ -458,7 +468,7 @@ describe("canonical Assignment domain", () => {
 
   it("autonomously closes a stale pre-write Bridge miss instead of asking the operator", () => {
     let state = createAgent(input);
-    state = applyOperation(state, { type: "createAssignment", instruction: "Share one specific lesson about trustworthy software.", presenceId: state.presence!.id, environment: "live", schedule: { day: "Thursday", time: "15:00", executionWindow: "15:00–18:00" } });
+    state = applyOperation(state, { type: "createAssignment", instruction: "Share one specific lesson about trustworthy software once.", presenceId: state.presence!.id, environment: "live", schedule: { day: "Thursday", time: "15:00", executionWindow: "15:00–18:00" } });
     const assignment = state.assignments[0]!;
     assignment.status = "needs_operator";
     assignment.work = { ...(assignment.work ?? { phase: "blocked", attempts: 2, maxAttempts: 4, storiesResearched: 0 }), phase: "blocked", attempts: 2, blockedReason: "The authorized browser connector did not check in before the bounded delivery window closed; no external write was attempted." };

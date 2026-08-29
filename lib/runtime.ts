@@ -4499,6 +4499,12 @@ function assignmentDeliverableType(instruction: string): Assignment["deliverable
   return "original_publication";
 }
 
+function scheduledAssignmentRecurrence(schedule: Assignment["schedule"]) {
+  if (!schedule) return { kind: "once" as const, label: "Once" };
+  if (schedule.day.trim().toLowerCase() === "daily") return { kind: "daily" as const, label: "Every day" };
+  return { kind: "weekly" as const, label: "Every week" };
+}
+
 function assignmentDeliverableLabel(type: Assignment["deliverable"]["type"]) {
   if (type === "audience_growth") return "a long-term audience-growth responsibility";
   return type === "original_publication" ? "one original post published" : type === "reply" ? "one public reply or conversation contribution" : type === "like" ? "one Like applied" : type === "decision_report" ? "one reasoned decision report" : `one ${type.replaceAll("_", " ")}`;
@@ -4634,7 +4640,15 @@ export function compileAssignmentInstruction(source: OpenPresenceState, instruct
   const presence = source.presences.find((item) => item.id === (presenceId ?? source.activePresenceId)) ?? source.presence;
   if (!presence || !source.agent) throw new Error("Choose a Presence before creating an Assignment.");
   const { quantity, quantityMode } = assignmentQuantity(clean);
-  const recurrence = /every\s+(?:weekday|workday)|each\s+weekday/i.test(clean) ? { kind: "weekdays" as const, label: "Every weekday" } : /every\s+day|each\s+day|per\s+day|daily/i.test(clean) ? { kind: "daily" as const, label: "Every day" } : /this\s+week|each\s+week|per\s+week|weekly/i.test(clean) ? { kind: "weekly" as const, label: "This week" } : { kind: "once" as const, label: "Once" };
+  const recurrence = /\b(?:once|one[- ]time|single\s+occurrence)\b/i.test(clean)
+    ? { kind: "once" as const, label: "Once" }
+    : /every\s+(?:weekday|workday)|each\s+weekday/i.test(clean)
+      ? { kind: "weekdays" as const, label: "Every weekday" }
+      : /every\s+day|each\s+day|per\s+day|daily/i.test(clean)
+        ? { kind: "daily" as const, label: "Every day" }
+        : /this\s+week|each\s+week|per\s+week|weekly/i.test(clean)
+          ? { kind: "weekly" as const, label: "Every week" }
+          : scheduledAssignmentRecurrence(schedule);
   const targetFollowers = growthTarget(clean);
   const type = assignmentDeliverableType(clean);
   const topicMatch = clean.match(/\b(?:about|around|focus(?:ed)?\s+on|cover(?:ing)?)\s+(.+?)(?:\.|;|$)/i);
@@ -5708,6 +5722,20 @@ export function xTargetAllowsQuotedExpression(source: OpenPresenceState, presenc
   if (!target) return true;
   const nativeX = source.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x");
   return mirrorObjectIsOwnOrMentionsPresence(target, presence.handle, nativeX?.account?.id);
+}
+
+/**
+ * A scheduled quote may use the verified Chrome route when native X's
+ * mention-only target rule excludes an otherwise eligible public post. Keep
+ * this separate from the native predicate so formXActionIntent still routes
+ * the action to Chrome instead of accidentally sending it through native X.
+ */
+export function xQuoteTargetHasAvailableRoute(source: OpenPresenceState, presence: Presence, targetId: string) {
+  if (xTargetAllowsQuotedExpression(source, presence, targetId)) return true;
+  const browserQuoteBridge = browserBridgeFor(source, presence.id, "quote");
+  return Boolean(browserQuoteBridge
+    && (browserQuoteBridge.name.startsWith("OpenPresence Chrome") || browserQuoteBridge.name.startsWith("Chrome"))
+    && bridgeExecutionStatus(browserQuoteBridge) === "connected");
 }
 
 function executionCanUseNativeX(state: OpenPresenceState, execution: Execution, presence: Presence) {
