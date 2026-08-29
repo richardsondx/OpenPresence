@@ -18,6 +18,8 @@ describe("Continuous Growth Awareness & Strategy Adaptation", () => {
   it("derives an auditable GrowthEvidenceSnapshot separating activity from outcomes", () => {
     let state = fixture();
     const presenceId = state.presence!.id;
+    const presence = { ...state.presence!, createdAt: new Date(Date.now() - 6 * 86_400_000).toISOString() };
+    state = { ...state, presence, presences: [presence] };
 
     // Record observed actions
     state = applyOperation(state, {

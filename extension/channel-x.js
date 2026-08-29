@@ -162,25 +162,15 @@
     // and reply-composer routes. The left-rail Profile link is stable across
     // those routes and is scoped to the signed-in account, unlike arbitrary
     // author links inside the post being viewed.
-    const exactProfileLink = [...document.querySelectorAll('a[href]')].find((link) => {
-      try {
-        const pathname = new URL(link.href).pathname.replace(/\/$/, "").toLowerCase();
-        return pathname === `/${normalized}`;
-      } catch { return false; }
-    });
-    const fallbackObserved = exactProfileLink ? normalized : undefined;
-    const actual = visibleHandle || observed || fallbackObserved;
+    // Never infer identity from an arbitrary profile link on the page. A
+    // viewed post, quote card, recommendation, or reply target can all link
+    // to the Presence's expected handle while the browser is signed in as a
+    // different account. Only X's signed-in account surfaces are authoritative.
+    const actual = visibleHandle || observed;
     if (actual && actual === normalized) {
-      sessionStorage.setItem("openpresence-last-verified-account", JSON.stringify({ username: actual, verifiedAt: Date.now() }));
       return { ok: true, username: actual };
     }
     if (actual) return { ok: false, username: actual, message: `Account check failed. Expected @${normalized}; the controlled tab is signed in as @${actual}.` };
-    try {
-      const remembered = JSON.parse(sessionStorage.getItem("openpresence-last-verified-account") || "null");
-      if (remembered?.username === normalized && Date.now() - Number(remembered.verifiedAt) < 120_000) {
-        return { ok: true, username: normalized, fromRecentVerification: true };
-      }
-    } catch { /* Ignore malformed transient tab state. */ }
     return { ok: false, message: `Account check failed. Expected @${normalized}; X has not exposed a verifiable signed-in account.` };
   }
 
@@ -201,8 +191,9 @@
       }, 10_000) || account;
     }
     // During an X SPA navigation the account controls may not have mounted
-    // yet. Unknown is a loading state, not proof that the wrong account is
-    // signed in; preserve the last verified identity until X exposes one.
+    // yet. After the bounded probe, report unknown explicitly so the Bridge
+    // cannot keep treating an old identity as current while an account switch
+    // is in progress.
     try {
       const identity = account.username || `unknown:${account.message || "unverified"}`;
       if (identity === lastIdentityReport && Date.now() - lastIdentityReportAt < 15_000) return;
@@ -222,7 +213,29 @@
       const author = readAuthor(article);
       const textNode = article.querySelector('[data-testid="tweetText"]');
       const language = textNode?.getAttribute("lang")?.trim() || undefined;
-      return { id: match[1], text: text(textNode), language, ...author, element: article };
+      const quoteLink = [...article.querySelectorAll('a[href*="/status/"]')].find((candidate) => {
+        const quotedId = candidate.href?.match(/status\/(\d+)/)?.[1];
+        return quotedId && quotedId !== match[1];
+      });
+      const quoteId = quoteLink?.href?.match(/status\/(\d+)/)?.[1];
+      const quoteContainer = quoteLink?.closest('[data-testid="quoteTweet"], [role="link"]') || quoteLink?.parentElement;
+      const quoteTextNode = quoteContainer?.querySelector?.('[data-testid="tweetText"]');
+      const quoteAuthor = quoteContainer ? readAuthor(quoteContainer) : undefined;
+      const mediaFrom = (container, excluded) => [...(container?.querySelectorAll?.('img[src], video[src], video[poster]') || [])].flatMap((node) => {
+        if (excluded?.contains(node)) return [];
+        const playableVideoUrl = node.tagName === "VIDEO" ? (node.currentSrc || node.src) : undefined;
+        const sourceUrl = playableVideoUrl || node.src || node.poster;
+        if (!sourceUrl || /profile_images|emoji/i.test(sourceUrl)) return [];
+        return [{ sourceUrl, kind: playableVideoUrl ? "video" : "image", altText: node.getAttribute("alt") || (node.tagName === "VIDEO" ? "Video preview" : undefined) }];
+      }).slice(0, 4);
+      const quotedPost = quoteId ? {
+        id: quoteId,
+        text: text(quoteTextNode),
+        language: quoteTextNode?.getAttribute("lang")?.trim() || undefined,
+        ...(quoteAuthor || {}),
+        media: mediaFrom(quoteContainer),
+      } : undefined;
+      return { id: match[1], text: text(textNode), language, ...author, media: mediaFrom(article, quoteContainer), quotedPost, element: article };
     }).filter(Boolean);
   }
 
@@ -321,12 +334,13 @@
   async function execute(execution, canNavigate = true, pendingStage = "") {
     setState("preparing");
     const failure = (result) => { setState("observing"); return result; };
+    const accountFailure = (result) => ({ executionId: execution.id, ok: false, code: result?.username ? "ACCOUNT_MISMATCH" : "ACCOUNT_NOT_READY", message: result?.message || `Account check failed. Expected ${expectedHandle}; X did not expose a signed-in account in time.`, retryable: !result?.username });
     const account = await waitFor(() => {
       const result = verifyAccount();
       return result.ok || result.username ? result : undefined;
     }, 15_000);
     reportAccountIdentity();
-    if (!account?.ok) return failure({ executionId: execution.id, ok: false, code: account?.username ? "ACCOUNT_MISMATCH" : "ACCOUNT_NOT_READY", message: account?.message || `Account check failed. Expected ${expectedHandle}; X did not expose a signed-in account in time.`, retryable: !account?.username });
+    if (!account?.ok) return failure(accountFailure(account));
     const affordance = String(execution.affordance || "").replace(/^x\./, "");
     if (!["post", "reply", "quote", "repost", "like", "follow"].includes(affordance)) return failure({ executionId: execution.id, ok: false, code: "UNSUPPORTED_AFFORDANCE", message: `The Chrome Bridge does not execute ${execution.affordance || "this action"}.`, retryable: false });
     const targetId = execution.target?.id;
@@ -337,6 +351,11 @@
         window.location.href = `https://x.com/i/user/${encodeURIComponent(targetId)}`;
         return undefined;
       }
+      const followAccount = await waitFor(() => {
+        const result = verifyAccount();
+        return result.ok || result.username ? result : undefined;
+      }, 15_000);
+      if (!followAccount?.ok) return failure(accountFailure(followAccount));
       const followButton = await waitFor(() => [...document.querySelectorAll('button,[role="button"]')].find((node) => {
         const label = actionLabel(node).toLowerCase();
         return /(^|\b)follow(\b|$)/i.test(label) && !/following|unfollow/i.test(label) && node.getAttribute("aria-disabled") !== "true";
@@ -357,12 +376,23 @@
     // Recognize both signals so a claimed execution is never stranded in a
     // dedicated composer tab after the Bridge rebinds it.
     const composerUrl = window.location.pathname.includes("/compose/post");
-    let composer = (pendingStage === "composer" || pendingStage === "reply-composer" || composerUrl)
+    const mountedComposer = document.querySelector('[data-testid="tweetTextarea_0"]');
+    let composer = (pendingStage === "composer" || pendingStage === "reply-composer" || composerUrl || mountedComposer)
       ? await waitFor(() => document.querySelector('[data-testid="tweetTextarea_0"]'), 20_000)
       : null;
-    let target = composer || affordance === "post" ? null : visiblePosts().find((post) => post.id === targetId);
+    // A mounted composer is not proof that it belongs to this execution. X
+    // can leave a reply composer open while another Bridge execution is
+    // claimed, or open a generic /compose/post tab with no target identity in
+    // its URL. Resolve the approved target from the visible conversation
+    // before writing any reply/quote text; otherwise fail closed.
+    let target = affordance === "post" ? null : visiblePosts().find((post) => post.id === targetId);
     if (!target && !composer) {
       target = await waitFor(() => visiblePosts().find((post) => post.id === targetId), 15_000);
+    }
+    if (composer && affordance !== "post" && !target) {
+      if (composerText()) return failure({ executionId: execution.id, ok: false, code: "COMPOSER_BUSY", message: "X still has an open reply composer; OpenPresence left its unsaved text untouched.", retryable: true });
+      target = await waitFor(() => visiblePosts().find((post) => post.id === targetId), 5_000);
+      if (!target) return failure({ executionId: execution.id, ok: false, code: "COMPOSER_TARGET_MISMATCH", message: "The open X composer did not show the approved target post. OpenPresence left it untouched.", retryable: true });
     }
     if (affordance === "post" && !composer && canNavigate) {
       sessionStorage.setItem("openpresence-pending-execution", JSON.stringify({ execution, expectedHandle, presenceName, stage: "composer" }));
@@ -388,7 +418,7 @@
     }, 15_000);
     if (!afterNavigation?.ok) {
       const latest = verifyAccount();
-      return failure({ executionId: execution.id, ok: false, code: latest.username ? "ACCOUNT_MISMATCH" : "ACCOUNT_NOT_READY", message: latest.message, retryable: !latest.username });
+      return failure(accountFailure(latest));
     }
     setState("acting");
     if (affordance === "like" || affordance === "repost") {
@@ -443,6 +473,19 @@
     if (!content) return failure({ executionId: execution.id, ok: false, code: "MISSING_PUBLICATION_TEXT", message: "The Bridge execution did not include approved publication text.", retryable: false });
     if (!(await window.OpenPresenceComposer?.fillComposer({ composer, value: content }))) {
       return failure({ executionId: execution.id, ok: false, code: "COMPOSER_INPUT_FAILED", message: `X did not accept the approved ${affordance === "post" ? "post" : "reply"} text or enable the submit button.`, retryable: true });
+    }
+    // Account switching can happen while an X composer is open. A positive
+    // check at execution start is not sufficient authority for the final
+    // public click; re-check the signed-in account after text entry and before
+    // submitting any post, reply, or quote.
+    const beforeSubmitAccount = verifyAccount();
+    if (!beforeSubmitAccount.ok) return failure(accountFailure(beforeSubmitAccount));
+    // Re-check after text entry and immediately before submit. X is a live SPA:
+    // the conversation can be replaced or remounted between the first target
+    // check and the final click. A target that disappears at this point must
+    // leave the authored text unsubmitted.
+    if (affordance !== "post" && !visiblePosts().some((post) => post.id === targetId)) {
+      return failure({ executionId: execution.id, ok: false, code: "COMPOSER_TARGET_CHANGED", message: "The approved target post changed or disappeared before submission. OpenPresence did not click Reply.", retryable: true });
     }
     const submit = await waitFor(enabledSubmitButton, 12_000);
     if (!submit) {
@@ -510,7 +553,12 @@
     reportAccountIdentity();
     const account = verifyAccount();
     if (!account.ok) { setState("waiting"); return; }
-    for (const post of visiblePosts().filter(isEnglishPost).slice(0, 12)) sendMessage({ type: "OPENPRESENCE_OBSERVATION", observation: { sourceEventId: `x:${post.id}`, externalRef: { type: "x.post", id: post.id }, object: { externalRef: { type: "x.post", id: post.id }, objectType: "post", language: post.language, author: { displayName: post.displayName, handle: post.handle }, content: post.text ? { text: post.text, language: post.language } : undefined, visibility: "public", shareability: "presence-only" } } });
+    for (const post of visiblePosts().filter(isEnglishPost).slice(0, 12)) {
+      if (post.quotedPost && isEnglishPost(post.quotedPost)) {
+        sendMessage({ type: "OPENPRESENCE_OBSERVATION", observation: { sourceEventId: `x:${post.quotedPost.id}`, externalRef: { type: "x.post", id: post.quotedPost.id }, object: { externalRef: { type: "x.post", id: post.quotedPost.id }, objectType: "post", language: post.quotedPost.language, author: { displayName: post.quotedPost.displayName, handle: post.quotedPost.handle }, content: post.quotedPost.text ? { text: post.quotedPost.text, language: post.quotedPost.language } : undefined, media: post.quotedPost.media, visibility: "public", shareability: "presence-only" } } });
+      }
+      sendMessage({ type: "OPENPRESENCE_OBSERVATION", observation: { sourceEventId: `x:${post.id}`, externalRef: { type: "x.post", id: post.id }, object: { externalRef: { type: "x.post", id: post.id }, referencedExternalRefs: post.quotedPost ? [{ type: "x.post", id: post.quotedPost.id }] : undefined, objectType: "post", language: post.language, author: { displayName: post.displayName, handle: post.handle }, content: post.text ? { text: post.text, language: post.language } : undefined, media: post.media, visibility: "public", shareability: "presence-only" } } });
+    }
   }
 
   chrome.runtime.onMessage.addListener((message, _sender, sendResponse) => {

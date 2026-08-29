@@ -23,6 +23,7 @@ test("Watching lets a Presence review and persist a creator Watch", async ({ pag
   await expect(page.getByText("Give Jenny a reason to look around.")).toBeVisible();
 
   await page.getByRole("tab", { name: /Watchlist/ }).click();
+  await expect(page.getByRole("status", { name: "Watchlist processing status" })).toContainText("No WatchSignals waiting for consideration");
   await page.getByRole("button", { name: "Add watch", exact: true }).first().click();
   await page.getByLabel("What should this Presence watch?").fill("https://x.com/AlexHormozi");
   await expect(page.getByText("Here's what Jenny will watch")).toBeVisible();
@@ -34,7 +35,8 @@ test("Watching lets a Presence review and persist a creator Watch", async ({ pag
   await expect(page.locator(".watch-card").filter({ hasText: "@AlexHormozi" }).locator(".watch-card-intent p")).toHaveText("Learn selectively from their ideas without copying their voice.");
   await expect(page.locator(".watch-status")).toHaveText(/Watching/);
   await expect(page.getByText("Waiting for first observation", { exact: true })).toBeVisible();
-  await expect(page.getByText(/This Watch is active\. No action is needed yet; Jenny will show signals here when the connected source supplies them\./)).toBeVisible();
+  await expect(page.getByText(/This Watch is active\. Genny checks it during the Presence's regular attention passes\./)).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: /Watching active/ })).toBeVisible();
   await expect(page.getByText(/Performance baseline|Not started/, { exact: false })).toHaveCount(0);
 
   await page.getByRole("button", { name: "Edit @AlexHormozi", exact: true }).click();
@@ -59,21 +61,28 @@ test("Watching lets a Presence review and persist a creator Watch", async ({ pag
   await expect(page.getByText("No known things yet.")).toBeVisible();
 });
 
-test("Presence Settings keeps public Requests denied until the operator opts in", async ({ page }) => {
+test("Presence Settings keeps public Requests denied until the operator opts in", async ({ page, request }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
   await page.getByRole("button", { name: "Watching", exact: true }).first().click();
   await page.getByRole("tab", { name: /Watchlist/ }).click();
 
   await expect(page.getByRole("heading", { name: "Who is allowed to ask Jenny to do work?", exact: true })).toHaveCount(0);
-  await expect(page.getByText("Request access is managed in Presence Settings.", { exact: false })).toBeVisible();
-  await page.getByRole("button", { name: /Open Presence Settings/ }).click();
+  await expect(page.getByText("Request access is managed in Presence Settings.", { exact: false })).toHaveCount(0);
+  await page.getByRole("button", { name: /Manage .*'s attention/ }).click();
   await expect(page.getByRole("heading", { name: "Presence settings", exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Who is allowed to ask Jenny to do work?", exact: true })).toBeVisible();
   await expect(page.locator(".watch-policy-security")).toContainText("Nobody can ask");
   await page.locator(".watch-policy-options button").filter({ hasText: "Anyone" }).click();
+  const acceptance = page.getByLabel("Acceptance");
+  await expect(acceptance.locator("option")).toHaveCount(2);
+  await expect(acceptance).toHaveValue("operator_review");
+  await acceptance.selectOption("agent_autonomous");
   await page.getByRole("button", { name: "Save request policy", exact: true }).click();
-  await expect(page.locator(".watch-policy-security")).toContainText("Anyone can submit a request for review");
+  await expect(page.locator(".watch-policy-security")).toContainText("Anyone can submit an eligible request for Genny to consider");
+  const saved = await request.get("/api/state");
+  const savedState = await saved.json();
+  expect(savedState.presence.requestPolicy.acceptance).toBe("agent_autonomous");
 });
 
 test("Watchlist plans stay distinct and scannable after the original instruction is hidden", async ({ page }) => {
@@ -105,6 +114,9 @@ test("Watchlist plans stay distinct and scannable after the original instruction
   await expect(founderCard.locator(".watch-plan-guidance > div").first().locator("p")).toHaveText(/Posts likely to interest/);
   await expect(founderCard.locator(".watch-plan-guidance > div").nth(1).locator("p")).toHaveText(/Mention others only when it improves the discussion/);
   await expect(page.getByText(/Keep up with @/)).toHaveCount(0);
+  await expect(page.getByText("How Jenny will approach this relationship", { exact: true })).toHaveCount(3);
+  await expect(page.getByText("Action threshold", { exact: true })).toHaveCount(3);
+  await expect(page.getByText("Relationship", { exact: true })).toHaveCount(0);
   await expect(page.locator(".watch-operator-instruction[open]")).toHaveCount(0);
 });
 
@@ -121,6 +133,61 @@ test("Watching keeps topic and opportunity inputs as attention, not commands", a
   await expect(page.getByText("Manual source", { exact: true })).toBeVisible();
   await expect(page.getByText("Waiting for source material", { exact: true })).toBeVisible();
   await expect(page.getByText(/This Watch is saved, but it needs connected or manually supplied material before Jenny can notice anything\./)).toBeVisible();
+});
+
+test("Watching can pause and resume one Watch with persisted runtime state", async ({ page, request }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  await page.getByRole("button", { name: "Watching", exact: true }).first().click();
+  await page.getByRole("tab", { name: /Watchlist/ }).click();
+  await page.getByRole("button", { name: "Add watch", exact: true }).first().click();
+  await page.getByLabel("What should this Presence watch?").fill("@pause_me");
+  await page.getByRole("button", { name: "Start watching", exact: true }).click();
+
+  const card = page.locator(".watch-card").filter({ hasText: "@pause_me" });
+  await expect(card.getByRole("button", { name: "Pause @pause_me", exact: true })).toBeVisible();
+  await card.getByRole("button", { name: "Pause @pause_me", exact: true }).click();
+  await expect(card.locator(".watch-status")).toHaveText(/Paused/);
+  await expect(card.getByText("This Watch is paused. Jenny will not observe it, consider it, or take action until you resume it.", { exact: true })).toBeVisible();
+  await expect(page.getByRole("status").filter({ hasText: "All Watches paused" })).toBeVisible();
+
+  const paused = await request.get("/api/state");
+  const pausedState = await paused.json();
+  expect(pausedState.watches.find((watch: { query: string }) => watch.query === "@pause_me").state).toBe("paused");
+
+  await card.getByRole("button", { name: "Resume @pause_me", exact: true }).click();
+  await expect(card.locator(".watch-status")).toHaveText(/Watching/);
+  const resumed = await request.get("/api/state");
+  const resumedState = await resumed.json();
+  expect(resumedState.watches.find((watch: { query: string }) => watch.query === "@pause_me").state).toBe("active");
+});
+
+test("Watching warns when a watched person has blocked the Presence", async ({ page, request }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  const base = await request.get("/api/state").then((response) => response.json());
+  const presenceId = base.presence.id as string;
+  await request.post("/api/state", { data: { type: "rememberPerson", presenceId, channel: "x", externalActorId: "rasmic", displayName: "Rasmic", handle: "rasmic", source: "operator" } });
+  await request.post("/api/state", { data: { type: "createWatch", presenceId, query: "@rasmic", purpose: "Stay aware of this person." } });
+
+  await page.route("**/api/state**", async (route) => {
+    if (!["GET", "POST"].includes(route.request().method()) || new URL(route.request().url()).pathname !== "/api/state") return route.continue();
+    const response = await route.fetch({ headers: { "if-none-match": "" } });
+    const body = await response.json();
+    const identity = body.personIdentities?.find((item: { externalActorId?: string; channel?: string; sourcePresenceId?: string }) => item.externalActorId === "rasmic" && item.channel === "x" && item.sourcePresenceId === presenceId);
+    if (identity) identity.contactability = { status: "blocked_by_person", observedAt: new Date().toISOString(), source: "browser_delivery", evidenceExecutionId: "e2e-blocked-watch" };
+    await route.fulfill({ response, json: body });
+  });
+
+  await page.reload();
+  await page.getByRole("button", { name: "Watching", exact: true }).first().click();
+  await page.getByRole("tab", { name: /Watchlist/ }).click();
+  const card = page.locator(".watch-card").filter({ hasText: "@rasmic" });
+  await expect(card.getByRole("alert")).toContainText("Rasmic has blocked this Presence on X.");
+  await expect(card.getByRole("alert")).toContainText("Pause it to stop observing this person.");
+  await expect(card.getByRole("button", { name: "Pause Watch", exact: true })).toBeVisible();
+  await card.getByRole("button", { name: "Pause Watch", exact: true }).click();
+  await expect(card.locator(".watch-status")).toHaveText(/Paused/);
 });
 
 test("Watching keeps autonomous attention out of the explicit attention list", async ({ page }) => {

@@ -1,5 +1,6 @@
 import { randomUUID } from "node:crypto";
 import { readNativeXCredentials, readRecentXMentions, readRecentXPosts, readXAudienceSnapshot, readXPublicationMetrics, readXPostsByIds, searchRecentXPosts, type XRecentPost } from "./x";
+import { detectDuplicatePublicOutcomes } from "./public-action-safety";
 import { applyOperation, intervalForPresence, markNativeConnectionNeedsAttention, recordNativeMirrors, recordNativeMirrorDeletion, recordNativeObservation, recordPublicFooting, recordResourceUsageEvent, recordRuntimeEvent, recordPublicRequestsFromMirrors, recordWatchSignals } from "./runtime";
 import { normalizeHandle } from "./x";
 import { languagesMatch } from "./language-policy";
@@ -78,7 +79,7 @@ export async function hydrateNativeXThreadContext(
     attentionEpisodeId?: string;
   },
 ): Promise<OpenPresenceState> {
-  if (!observedObject.parentExternalRef) return source;
+  if (!observedObject.parentExternalRef && !observedObject.referencedExternalRefs?.length) return source;
   const connection = source.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x");
   const credentials = connection ? readNativeXCredentials(connection.id) : undefined;
   if (!connection || !credentials) return source;
@@ -91,6 +92,7 @@ export async function hydrateNativeXThreadContext(
     observedObject,
     maxDepth: 8,
     maxObjects: 8,
+    includeReferences: true,
     fetchObjects: async (refs: EntityRef[]) => {
       const targetRefs = refs.filter((ref) => ref.type === "x.post");
       if (!targetRefs.length) return [];
@@ -228,6 +230,7 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
       ...mentions.map((post) => ({ connectionId: connection.id, presenceId, post })),
       ...watchPosts.map((post) => ({ connectionId: connection.id, presenceId, post })),
     ], { attentionEpisodeId: options?.attentionEpisodeId, attentionRunId: options?.runId, attentionInvocationId: options?.invocationId });
+    next = detectDuplicatePublicOutcomes(next, presenceId);
     const watchedMirrorObjects = next.mirrorObjects.filter((object) => object.presenceId === presenceId && watchPosts.some((post) => post.id === object.externalRef.id));
     next = recordWatchSignals(next, watchedMirrorObjects, nextObservationAt(targetPresence ?? undefined));
     const inboundMirrorObjects = next.mirrorObjects.filter((object) => object.presenceId === presenceId && mentions.some((post) => post.id === object.externalRef.id));

@@ -24,7 +24,7 @@ test("Schedule sends post exploration to Playground", async ({ page }) => {
   await expect(page.getByRole("button", { name: /Give an Assignment/ })).toBeVisible();
 });
 
-test("Publishing Plan exposes its exact pace and windows in Schedule", async ({ page, request }) => {
+test("Agent publishing work shares the Schedule with Assignments", async ({ page, request }) => {
   await createAgent(page);
   const initial = await request.get("/api/state").then((response) => response.json());
   const presence = initial.presence;
@@ -36,20 +36,10 @@ test("Publishing Plan exposes its exact pace and windows in Schedule", async ({ 
   await page.getByRole("button", { name: "Schedule", exact: true }).click();
   await expect(page.getByRole("region", { name: "Calendar layers", exact: true })).toContainText("Plan active");
   await expect(page.getByRole("region", { name: "Agent publishing plan" })).toHaveCount(0);
-  await page.getByRole("button", { name: /Genny's plan/ }).click();
-  const plan = page.getByRole("region", { name: "Agent publishing plan" });
-  await expect(plan).toBeVisible();
-  await expect(plan).toContainText(/A publishing pace to work toward|Work toward/);
-  await expect(plan.getByRole("button", { name: "Expand plan" })).toBeVisible();
-  await expect(plan).not.toContainText("Current work");
-  await expect(plan).not.toContainText("Full consideration windows");
-  await plan.getByRole("button", { name: "Expand plan" }).click();
-  await expect(plan.getByRole("button", { name: "Minimize plan" })).toBeVisible();
-  await expect(plan).toContainText("Chosen pace");
-  await expect(plan).toContainText("Current work");
-  await expect(plan).toContainText("Full consideration windows");
-  await expect(page.getByText("Assignments are commitments. Use the optional Genny's plan layer", { exact: false })).toBeVisible();
-  await expect(page.getByRole("button", { name: /Genny's plan/ })).toHaveAttribute("aria-pressed", "true");
+  const schedule = page.getByRole("region", { name: "Schedule list" });
+  await expect(schedule.getByText("Jenny · Agent-owned", { exact: true }).first()).toBeVisible();
+  await expect(schedule.getByRole("button", { name: /Open Assignment/ }).first()).toBeVisible();
+  await expect(page.getByText("You and Jenny share this schedule", { exact: false })).toBeVisible();
 });
 
 test("switching Presence switches Playground world and rehearsal history", async ({ page, request }) => {

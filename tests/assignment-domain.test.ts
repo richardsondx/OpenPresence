@@ -1,7 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { applyOperation, assertAssignmentPersistenceInvariant, assignmentIsCurrentlyProcessing, assignmentProgressLabel, compileAssignmentInstruction, createAgent, normalizeState, preflightAssignment } from "../lib/runtime";
 import { evaluateExecutionReadiness } from "../lib/execution-readiness";
-import { classifyLiveAssignmentRun, liveAssignmentRunStage, reconcileLiveAssignmentRuns } from "../lib/live-assignment-run";
+import { assignmentRunBlocksNewWork, classifyLiveAssignmentRun, liveAssignmentRunStage, reconcileLiveAssignmentRuns } from "../lib/live-assignment-run";
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
@@ -52,6 +52,22 @@ describe("canonical Assignment domain", () => {
     const state = createAgent(input);
     const next = applyOperation(state, { type: "createAssignment", instruction: "Teach one useful lesson about persistent agents.", presenceId: state.presence!.id, environment: "sandbox", objective: "education", schedule: { day: "Tuesday", time: "08:00", executionWindow: "08:00–11:00" } });
     expect(next.assignments[0]?.objective).toBe("education");
+  });
+
+  it("edits an Assignment in place and refreshes its completion contract", () => {
+    const state = createAgent(input);
+    const createdState = applyOperation(state, { type: "createAssignment", instruction: "Publish one useful lesson about persistent agents.", presenceId: state.presence!.id, environment: "sandbox", objective: "education", schedule: { day: "Tuesday", time: "08:00", executionWindow: "08:00–11:00" } });
+    const created = createdState.assignments[0]!;
+    const next = applyOperation(createdState, { type: "updateAssignment", id: created.id, instruction: "Publish exactly 2 original lessons about trustworthy software.", objective: "audience_growth", schedule: null });
+    const edited = next.assignments[0]!;
+
+    expect(edited.id).toBe(created.id);
+    expect(edited.instruction).toContain("exactly 2");
+    expect(edited.progress.required).toBe(2);
+    expect(edited.objective).toBe("audience_growth");
+    expect(edited.schedule).toBeUndefined();
+    expect(edited.revision).toBe((created.revision ?? 0) + 1);
+    expect(next.events[0]?.title).toBe("Assignment updated");
   });
 
   it("does not treat a draft's initial work phase as active processing", () => {
@@ -232,6 +248,103 @@ describe("canonical Assignment domain", () => {
     expect(reconciled.assignments.find((item) => item.id === assignment.id)).toMatchObject({ status: "awaiting_execution", work: { phase: "publishing" } });
   });
 
+  it("does not let non-retryable verification freeze an active distribution push", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "createAssignment", instruction: "Find one useful builder conversation.", presenceId: state.presence!.id, environment: "live", schedule: { day: "Daily", time: "08:00", executionWindow: "08:00–18:00" } });
+    const assignment = state.assignments[0]!;
+    const run = {
+      id: "assignment-run:uncertain",
+      assignmentId: assignment.id,
+      agentId: assignment.agentId,
+      presenceId: assignment.presenceId,
+      sessionId: `live:${assignment.presenceId}`,
+      pursuitWindowId: "pursuit:active",
+      status: "delivery_pending" as const,
+      currentStage: "publishing" as const,
+      attempts: 1,
+      maxAttempts: 4,
+      rejectedCandidates: 0,
+      startedAt: "2026-08-29T03:10:00.000Z",
+      createdAt: "2026-08-29T03:10:00.000Z",
+      updatedAt: "2026-08-29T03:12:00.000Z",
+    };
+    state.assignmentRuns = [run];
+    state.executions = [{
+      id: "execution:uncertain",
+      socialIntentId: "intent:uncertain",
+      presenceId: assignment.presenceId,
+      assignmentId: assignment.id,
+      runId: run.id,
+      affordance: "x.reply",
+      mode: "auto",
+      status: "verification-pending",
+      attempts: 1,
+      connector: "bridge",
+      idempotencyKey: "uncertain",
+      failure: { code: "X_API_CREDITS_EXHAUSTED", message: "The X API has no credits remaining.", retryable: false },
+      createdAt: "2026-08-29T03:11:00.000Z",
+      updatedAt: "2026-08-29T03:12:00.000Z",
+      environment: "live",
+    } as never];
+
+    expect(assignmentRunBlocksNewWork(state, run)).toBe(false);
+    state.executions[0]!.failure!.retryable = true;
+    expect(assignmentRunBlocksNewWork(state, run)).toBe(true);
+  });
+
+  it("does not let an old stale candidate re-block an active distribution push", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "createAssignment", instruction: "Help this post reach relevant builders.", presenceId: state.presence!.id, environment: "live" });
+    const assignment = state.assignments[0]!;
+    assignment.status = "active";
+    state.assignmentPursuitWindows = [{
+      id: "pursuit:active",
+      assignmentId: assignment.id,
+      presenceId: assignment.presenceId,
+      startsAt: "2026-08-29T03:00:00.000Z",
+      deadlineAt: "2026-08-29T07:00:00.000Z",
+      maxVerifiedActions: 10,
+      status: "active",
+    }];
+    const run = {
+      id: "assignment-run:stale-candidate",
+      assignmentId: assignment.id,
+      agentId: assignment.agentId,
+      presenceId: assignment.presenceId,
+      sessionId: `live:${assignment.presenceId}`,
+      pursuitWindowId: "pursuit:active",
+      status: "failed" as const,
+      currentStage: "blocked" as const,
+      attempts: 1,
+      maxAttempts: 4,
+      rejectedCandidates: 0,
+      createdAt: "2026-08-29T03:10:00.000Z",
+      updatedAt: "2026-08-29T03:11:00.000Z",
+      completedAt: "2026-08-29T03:11:00.000Z",
+    };
+    state.assignmentRuns = [run];
+    state.executions = [{
+      id: "execution:stale-candidate",
+      socialIntentId: "intent:stale-candidate",
+      presenceId: assignment.presenceId,
+      assignmentId: assignment.id,
+      runId: run.id,
+      affordance: "x.reply",
+      mode: "auto",
+      status: "blocked",
+      attempts: 1,
+      connector: "native",
+      idempotencyKey: "stale-candidate",
+      failure: { code: "TARGET_LANGUAGE_MISMATCH", message: "The target x.post is not available in the Social Mirror, so its language cannot be confirmed.", retryable: false },
+      createdAt: "2026-08-29T03:10:30.000Z",
+      updatedAt: "2026-08-29T03:11:00.000Z",
+      environment: "live",
+    } as never];
+
+    const reconciled = reconcileLiveAssignmentRuns(state, Date.parse("2026-08-29T03:12:00.000Z"));
+    expect(reconciled.assignments[0]?.status).not.toBe("needs_operator");
+  });
+
   it("reopens an Assignment with a bounded retry after a retryable delivery window expires", () => {
     let state = createAgent(input);
     state = applyOperation(state, { type: "createAssignment", instruction: "Publish one useful lesson about persistent agents.", presenceId: state.presence!.id, environment: "live", schedule: { day: "Tuesday", time: "08:00", executionWindow: "08:00–11:00" } });
@@ -285,6 +398,51 @@ describe("canonical Assignment domain", () => {
     // again; the scheduler needs to see the overdue wake and claim it.
     const later = reconcileLiveAssignmentRuns(reconciled, now + 20 * 60_000);
     expect(later.assignments.find((item) => item.id === assignment.id)?.nextDueAt).toBe(recoveredAssignment.nextDueAt);
+  });
+
+  it("autonomously closes a stale pre-write Bridge miss instead of asking the operator", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "createAssignment", instruction: "Share one specific lesson about trustworthy software.", presenceId: state.presence!.id, environment: "live", schedule: { day: "Thursday", time: "15:00", executionWindow: "15:00–18:00" } });
+    const assignment = state.assignments[0]!;
+    assignment.status = "needs_operator";
+    assignment.work = { ...(assignment.work ?? { phase: "blocked", attempts: 2, maxAttempts: 4, storiesResearched: 0 }), phase: "blocked", attempts: 2, blockedReason: "The authorized browser connector did not check in before the bounded delivery window closed; no external write was attempted." };
+    assignment.lastOutcome = { class: "delivery_failed", message: "The authorized browser connector did not check in before the bounded delivery window closed; no external write was attempted.", at: "2026-08-27T23:35:38.872Z" };
+    const runId = "assignment-run:stale-bridge";
+    state.assignmentRuns = [{ id: runId, assignmentId: assignment.id, agentId: assignment.agentId, presenceId: assignment.presenceId, sessionId: "live:test", status: "failed", currentStage: "blocked", attempts: 2, maxAttempts: 4, rejectedCandidates: 0, createdAt: "2026-08-27T23:35:38.085Z", updatedAt: "2026-08-27T23:35:39.266Z", completedAt: "2026-08-27T23:35:39.266Z", lastError: assignment.lastOutcome.message }];
+    state.executions = [{ id: "execution:stale-bridge", socialIntentId: "intent:stale-bridge", presenceId: assignment.presenceId, assignmentId: assignment.id, runId, affordance: "x.post", mode: "auto", status: "failed", attempts: 1, connector: "bridge", bridgeId: "bridge:stale", idempotencyKey: "stale-bridge", failure: { code: "BRIDGE_NOT_CHECKED_IN", message: assignment.lastOutcome.message, retryable: true, reviewedAt: "2026-08-27T23:35:39.200Z", reviewDisposition: "stale" }, createdAt: "2026-08-27T23:35:38.100Z", updatedAt: "2026-08-27T23:35:39.266Z", environment: "live" } as never];
+
+    const reconciled = reconcileLiveAssignmentRuns(state, Date.parse("2026-08-29T04:00:00.000Z"));
+    expect(reconciled.assignments[0]).toMatchObject({
+      status: "expired_incomplete",
+      progress: { verified: 0 },
+      work: { phase: "completed", blockedReason: undefined },
+      lastOutcome: { class: "incomplete", message: expect.stringContaining("no public action was sent") },
+      nextDueAt: undefined,
+    });
+    expect(reconciled.executions[0]).toMatchObject({ status: "failed", failure: { code: "BRIDGE_NOT_CHECKED_IN", retryable: false, reviewDisposition: "closed_non_retryable", reviewedAt: expect.any(String) } });
+    expect(reconciled.executions[0]?.externalRef).toBeUndefined();
+    expect(reconciled.assignmentRuns?.[0]).toMatchObject({ status: "failed", lastError: expect.stringContaining("no public action was sent") });
+  });
+
+  it("releases a recurring pre-write miss to its next scheduled occurrence", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "createAssignment", instruction: "Share a useful lesson daily.", presenceId: state.presence!.id, environment: "live", schedule: { day: "Daily", time: "08:00", executionWindow: "08:00–18:00" } });
+    const assignment = state.assignments[0]!;
+    assignment.status = "needs_operator";
+    assignment.recurrence = { kind: "daily", label: "Every day" };
+    assignment.activation = { type: "scheduled", recurrence: assignment.recurrence };
+    const failureMessage = "The authorized browser connector did not check in before the bounded delivery window closed; no external write was attempted.";
+    assignment.work = { ...(assignment.work ?? { phase: "blocked", attempts: 1, maxAttempts: 4, storiesResearched: 0 }), phase: "blocked", blockedReason: failureMessage };
+    assignment.lastOutcome = { class: "delivery_failed", message: failureMessage, at: "2026-08-28T18:00:00.000Z" };
+    const runId = "assignment-run:recurring-stale-bridge";
+    state.assignmentRuns = [{ id: runId, assignmentId: assignment.id, agentId: assignment.agentId, presenceId: assignment.presenceId, sessionId: "live:test", status: "failed", currentStage: "blocked", attempts: 1, maxAttempts: 4, rejectedCandidates: 0, createdAt: "2026-08-28T18:00:00.000Z", updatedAt: "2026-08-28T18:00:02.000Z", completedAt: "2026-08-28T18:00:02.000Z" }];
+    state.executions = [{ id: "execution:recurring-stale-bridge", socialIntentId: "intent:recurring-stale-bridge", presenceId: assignment.presenceId, assignmentId: assignment.id, runId, affordance: "x.post", mode: "auto", status: "failed", attempts: 1, connector: "bridge", bridgeId: "bridge:stale", idempotencyKey: "recurring-stale-bridge", failure: { code: "BRIDGE_NOT_CHECKED_IN", message: failureMessage, retryable: true, reviewedAt: "2026-08-28T18:00:02.000Z", reviewDisposition: "stale" }, createdAt: "2026-08-28T18:00:00.100Z", updatedAt: "2026-08-28T18:00:02.000Z", environment: "live" } as never];
+
+    const now = Date.parse("2026-08-29T20:00:00.000Z");
+    const reconciled = reconcileLiveAssignmentRuns(state, now);
+    expect(reconciled.assignments[0]).toMatchObject({ status: "active", progress: { verified: 0 }, work: { phase: "candidate_review", attempts: 0, blockedReason: undefined }, lastOutcome: { class: "delivery_failed" } });
+    expect(Date.parse(reconciled.assignments[0]!.nextDueAt!)).toBeGreaterThan(now);
+    expect(reconciled.assignmentRuns?.[0]).toMatchObject({ status: "deferred", currentStage: "candidate_review" });
   });
 
   it("does not attach an old unbound execution to a new Assignment run", () => {
@@ -377,6 +535,68 @@ describe("canonical Assignment domain", () => {
       work: { phase: "blocked", blockedReason: message },
     });
     expect(reconciled.assignments.find((item) => item.id === assignment.id)?.nextDueAt).toBeUndefined();
+  });
+
+  it("does not let a cross-Presence execution block the current Assignment run", () => {
+    const state = createAgent(input);
+    const assignment = applyOperation(state, { type: "createAssignment", instruction: "Help this post reach relevant builders.", presenceId: state.presence!.id, environment: "live" }).assignments[0]!;
+    const otherPresence = { ...state.presence!, id: "presence:other", handle: "other" };
+    state.presences = [state.presence!, otherPresence];
+    const run = {
+      id: "assignment-run:presence-isolation",
+      assignmentId: assignment.id,
+      agentId: assignment.agentId,
+      presenceId: assignment.presenceId,
+      sessionId: "live:test",
+      status: "failed" as const,
+      currentStage: "blocked" as const,
+      attempts: 1,
+      maxAttempts: 4,
+      rejectedCandidates: 0,
+      createdAt: "2026-08-27T00:00:00.000Z",
+      updatedAt: "2026-08-27T00:01:00.000Z",
+      completedAt: "2026-08-27T00:01:00.000Z",
+    };
+    state.assignmentRuns = [run];
+    state.executions = [{
+      id: "execution:other-presence",
+      socialIntentId: "intent:other-presence",
+      presenceId: otherPresence.id,
+      assignmentId: assignment.id,
+      runId: run.id,
+      affordance: "x.reply",
+      mode: "auto",
+      status: "blocked",
+      attempts: 0,
+      connector: "native",
+      idempotencyKey: "other-presence",
+      failure: { code: "TARGET_LANGUAGE_MISMATCH", message: "The target belongs to another Presence.", retryable: false },
+      createdAt: "2026-08-27T00:00:10.000Z",
+      updatedAt: "2026-08-27T00:01:00.000Z",
+      environment: "live",
+    }];
+
+    const reconciled = reconcileLiveAssignmentRuns(state, Date.parse("2026-08-27T00:02:00.000Z"));
+    expect(reconciled.assignmentRuns?.[0]?.status).toBe("failed");
+    expect(reconciled.assignments.find((item) => item.id === assignment.id)?.status).not.toBe("needs_operator");
+  });
+
+  it("repairs an unreviewed browser account mismatch into a resumable delivery hold", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "createAssignment", instruction: "Make one useful builder introduction.", presenceId: state.presence!.id, environment: "live", schedule: { day: "Wednesday", time: "13:00", executionWindow: "13:00–16:00" } });
+    const assignment = state.assignments[0]!;
+    assignment.status = "needs_operator";
+    assignment.work = { ...(assignment.work ?? { phase: "blocked", attempts: 1, maxAttempts: 4, storiesResearched: 0 }), phase: "blocked", blockedReason: "Account check failed." };
+    assignment.lastOutcome = { class: "delivery_failed", message: "Account check failed.", at: "2026-08-27T03:53:40.766Z" };
+    state.assignmentRuns = [{ id: "assignment-run:identity-hold", assignmentId: assignment.id, agentId: assignment.agentId, presenceId: assignment.presenceId, sessionId: "live:test", status: "failed", currentStage: "blocked", attempts: 1, maxAttempts: 4, rejectedCandidates: 0, createdAt: "2026-08-27T03:53:08.659Z", updatedAt: "2026-08-27T03:53:40.766Z", completedAt: "2026-08-27T03:53:40.766Z", lastError: "Account check failed." }];
+    state.executions = [{ id: "execution:identity-hold", socialIntentId: "intent:identity-hold", presenceId: assignment.presenceId, assignmentId: assignment.id, runId: "assignment-run:identity-hold", affordance: "x.reply", mode: "auto", status: "failed", attempts: 1, connector: "bridge", bridgeId: "bridge:test", idempotencyKey: "identity-hold", failure: { code: "ACCOUNT_MISMATCH", message: "Account check failed.", retryable: false }, publication: { id: "publication:identity-hold", format: "x.reply", payload: { text: "A useful introduction." }, assetIds: [], links: [], publicExpression: { id: "expression:identity-hold", presenceId: assignment.presenceId, socialIntentId: "intent:identity-hold", format: "x.reply", text: "A useful introduction.", assetIds: [], links: [], safetyStatus: "sealed", provenance: { modelProfileId: "model:test", generatedAt: "2026-08-27T03:53:08.659Z", promptHash: "prompt", sourceObjectIds: [] }, createdAt: "2026-08-27T03:53:08.659Z" }, createdAt: "2026-08-27T03:53:08.659Z", environment: "live" }, createdAt: "2026-08-27T03:53:08.659Z", updatedAt: "2026-08-27T03:53:40.766Z", environment: "live" } as never];
+
+    const reconciled = reconcileLiveAssignmentRuns(state, Date.parse("2026-08-27T04:00:00.000Z"));
+    expect(reconciled.executions[0]).toMatchObject({ status: "queued", deliveryHold: { reason: "bridge_identity" }, failure: { code: "ACCOUNT_MISMATCH", retryable: true } });
+    expect(reconciled.executions[0]?.permit).toBeUndefined();
+    expect(reconciled.executions[0]?.publication?.publicExpression?.safetyStatus).toBe("candidate");
+    expect(reconciled.assignmentRuns?.[0]).toMatchObject({ status: "delivery_pending", currentStage: "publishing", completedAt: undefined });
+    expect(reconciled.assignments[0]).toMatchObject({ status: "awaiting_execution", work: { phase: "publishing" } });
   });
 
   it("closes an X already-published rejection without retrying or asking the operator", () => {

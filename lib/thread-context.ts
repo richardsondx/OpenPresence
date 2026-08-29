@@ -99,10 +99,12 @@ export async function hydrateThreadContext(input: {
   fetchObjects: (refs: EntityRef[]) => Promise<MirrorObject[]>;
   maxDepth?: number;
   maxObjects?: number;
+  includeReferences?: boolean;
 }): Promise<HydratedThreadContext> {
-  // Only extract info from a thread during replies.
-  // When observing a specific post (not a reply), do not fetch thread ancestry or referenced items.
-  if (!input.observedObject.parentExternalRef) {
+  // Only extract ancestry during replies by default. Connectors may opt into
+  // fetching explicit quote references for a standalone post because the
+  // referenced author is part of the observed social context.
+  if (!input.observedObject.parentExternalRef && !input.includeReferences) {
     return { objects: [], missingExternalRefs: [] };
   }
   const maxDepth = Math.max(0, Math.min(8, input.maxDepth ?? 8));

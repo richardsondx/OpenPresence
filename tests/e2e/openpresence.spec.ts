@@ -16,7 +16,7 @@ async function createAgent(page: import("@playwright/test").Page, name = "Jenny"
   if (name !== "Jenny") await page.getByLabel("Presence handle").fill(`@${name.toLowerCase()}`);
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
   if (test.info().project.name === "mobile") {
-    await expect(page.getByRole("heading", { name: `${name}, right now.` })).toBeVisible();
+    await expect(page.getByRole("heading", { name: new RegExp(`${name}(, right now\\.| at a glance)`) })).toBeVisible();
   } else {
     await expect(page.getByRole("button", { name: `Switch agent, currently ${name}` })).toBeVisible();
   }
@@ -396,6 +396,54 @@ test("Presence Settings makes the destination route explicit", async ({ page }) 
   await page.reload();
   await navigate(page, "Settings");
   await expect(routeOptions.getByRole("button", { name: /^Sandbox/ })).toHaveClass(/selected/);
+});
+
+test("Custom Voice reveals StylePrint tools only when selected", async ({ page }) => {
+  await createAgent(page);
+  await navigate(page, "Settings");
+
+  const styleCard = page.locator(".conversation-style-card");
+  const customChoice = styleCard.getByRole("button", { name: /Custom Voice/ });
+  await expect(customChoice).toBeVisible();
+  await expect(styleCard.locator(".conversation-style-custom")).toHaveCount(0);
+
+  await customChoice.click();
+  await expect(customChoice).toHaveAttribute("aria-pressed", "true");
+  await expect(styleCard.locator(".conversation-style-custom")).toBeVisible();
+  await expect(styleCard.getByRole("button", { name: "Copy generator prompt", exact: true })).toBeVisible();
+  await expect(styleCard.getByRole("button", { name: "Import StylePrint", exact: true })).toBeVisible();
+
+  await styleCard.getByRole("button", { name: /Kairos/ }).click();
+  await expect(styleCard.locator(".conversation-style-custom")).toHaveCount(0);
+  await expect(styleCard.locator(".conversation-style-preview")).toBeVisible();
+});
+
+test("Presence DM instructions are reachable, saved, and restored", async ({ page, request }) => {
+  await createAgent(page);
+  await navigate(page, "Settings");
+
+  const dmNav = page.getByRole("button", { name: /DMs \/ Private Messages/ });
+  await expect(dmNav).toBeVisible();
+  await dmNav.click();
+  const dmSection = page.locator("#section-dms");
+  await expect(dmSection).toBeVisible();
+  await expect(dmSection.getByText("A private message arrives", { exact: true })).toBeVisible();
+  await dmSection.getByLabel("DM condition").fill("When the person asks for a next step");
+  await dmSection.getByLabel("DM instructions").fill("Reply with the approved next-step link, and be honest about what has completed.");
+  await dmSection.getByRole("button", { name: "Save DM instructions", exact: true }).click();
+
+  const saved = await (await request.get("/api/state")).json();
+  expect(saved.presences[0].dmInstructions).toMatchObject({
+    when: "private_message_arrives",
+    condition: "When the person asks for a next step",
+    instructions: "Reply with the approved next-step link, and be honest about what has completed.",
+  });
+
+  await page.reload();
+  await navigate(page, "Settings");
+  await page.getByRole("button", { name: /DMs \/ Private Messages/ }).click();
+  await expect(page.locator("#section-dms").getByLabel("DM condition")).toHaveValue("When the person asks for a next step");
+  await expect(page.locator("#section-dms").getByLabel("DM instructions")).toHaveValue("Reply with the approved next-step link, and be honest about what has completed.");
 });
 
 test("Ghost Public Self names the represented person or organization", async ({ page }) => {
@@ -935,6 +983,15 @@ test("Schedule reviews and activates delegated work", async ({ page }) => {
   await expect(page.getByRole("heading", { name: "Ready to activate" })).toBeVisible();
   await page.getByRole("button", { name: "Activate Assignment" }).click();
   await expect(page.getByText("active", { exact: true })).toBeVisible();
+});
+
+test("legacy calendar links open the canonical Schedule surface", async ({ page }) => {
+  await createAgent(page);
+  const state = await (await page.request.get("/api/state")).json();
+  await page.goto(`/calendar?agentId=${state.activeAgentId}&presenceId=${state.activePresenceId}`);
+  await expect(page.getByRole("heading", { name: "Schedule", exact: true })).toBeVisible();
+  await expect(page.locator(".schedule-plan-overview")).toBeVisible();
+  await expect(page.locator(".loading-screen")).toHaveCount(0);
 });
 
 test("Presence settings are generated from channel capabilities and pause truthfully", async ({ page }) => {

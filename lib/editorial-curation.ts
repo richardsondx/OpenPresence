@@ -39,6 +39,23 @@ export function getDefaultCurationSources(_brief?: PresenceBrief): CurationSourc
   return [];
 }
 
+/** Remove source cards seeded by releases that predated fully custom sources. */
+const legacyDefaultCurationSourceIds = new Set([
+  "fred",
+  "treasury",
+  "sec_edgar",
+  "market_research",
+  "github_tech",
+  "arxiv",
+  "web_discovery",
+  "rss_feed",
+]);
+
+export function normalizeCurationSources(sources?: CurationSourceConfig[]): CurationSourceConfig[] {
+  if (!Array.isArray(sources)) return [];
+  return sources.filter((source) => !legacyDefaultCurationSourceIds.has(source.id));
+}
+
 export interface SourceDiscoveryPlan {
   presenceId: string;
   goal: string;
@@ -551,6 +568,42 @@ export function defaultSourceProviders(): SourceProvider[] {
   ];
 }
 
+/** Resolve enabled user-defined sources through their selected source category. */
+export function sourceProvidersForCurationSources(sources: CurationSourceConfig[]): SourceProvider[] {
+  const builtIns = defaultSourceProviders();
+  const byKind = new Map<CurationSourceKind, SourceProvider>();
+  for (const provider of builtIns) byKind.set(provider.providerType, provider);
+
+  return normalizeCurationSources(sources)
+    .filter((source) => source.enabled)
+    .flatMap((source) => {
+      const delegate = byKind.get(source.kind);
+      if (!delegate) return [];
+      return [{
+        id: source.id,
+        name: source.name,
+        providerType: source.kind,
+        async discover(plan: SourceDiscoveryPlan) {
+          const scopedPlan = {
+            ...plan,
+            goal: source.description?.trim() ? `${plan.goal}. Prioritize ${source.description.trim()}.` : plan.goal,
+            territories: source.topics?.length ? source.topics : source.domains?.length ? source.domains : plan.territories,
+          };
+          const leads = await delegate.discover(scopedPlan);
+          return leads.map((lead) => ({
+            ...lead,
+            providerId: source.id,
+            publisher: lead.publisher ?? source.name,
+            sourceUrl: source.urlOrEndpoint?.trim() || lead.sourceUrl,
+          }));
+        },
+        hydrate: (lead: SourceLead) => delegate.hydrate(lead),
+        resolveUnderlyingData: delegate.resolveUnderlyingData ? (lead: SourceLead) => delegate.resolveUnderlyingData!(lead) : undefined,
+        rightsMetadata: delegate.rightsMetadata ? (lead: SourceLead) => delegate.rightsMetadata!(lead) : undefined,
+      } satisfies SourceProvider];
+    });
+}
+
 // --------------------------------------------------------------------------
 // Multi-Layer Feedback Classification
 // --------------------------------------------------------------------------
@@ -766,7 +819,7 @@ export async function runCanonicalEditorialDiscovery(
   const presence = state.presences.find((p) => p.id === options.presenceId) ?? state.presence;
   const taste = state.files.find((f) => f.kind === "TASTE")?.content;
   const references = (state.editorialReferences ?? []).filter((r) => r.presenceId === options.presenceId);
-  const configuredSources = presence?.curationSources ?? getDefaultCurationSources(presence?.brief);
+  const configuredSources = normalizeCurationSources(presence?.curationSources ?? getDefaultCurationSources(presence?.brief));
   const enabledSourceIds = new Set(configuredSources.filter((s) => s.enabled).map((s) => s.id));
 
   const territories = presence?.brief.primaryTerritory?.length ? presence.brief.primaryTerritory : ["macroeconomics", "markets"];
@@ -780,10 +833,9 @@ export async function runCanonicalEditorialDiscovery(
     maxCandidates: options.maxCandidates ?? 4,
   };
 
-  const providers = defaultSourceProviders().filter((provider) => {
-    if (options.sources?.length) return options.sources.includes(provider.id);
-    return enabledSourceIds.has(provider.id);
-  });
+  const providers = options.sources?.length
+    ? defaultSourceProviders().filter((provider) => options.sources!.includes(provider.id))
+    : sourceProvidersForCurationSources(configuredSources).filter((provider) => enabledSourceIds.has(provider.id));
 
   const allLeads: SourceLead[] = [];
   for (const provider of providers) {

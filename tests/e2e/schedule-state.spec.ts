@@ -5,25 +5,28 @@ test.beforeEach(async ({ request }) => {
   expect(response.ok()).toBeTruthy();
 });
 
-test("Schedule keeps flexible Agent plans optional and shows live Assignment work", async ({ page }) => {
+test("Schedule combines Agent-owned and operator Assignments with persistent controls", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
   await page.getByRole("button", { name: "Schedule", exact: true }).click();
 
   await page.getByRole("button", { name: "Create plan", exact: true }).click();
-  const plan = page.getByRole("region", { name: "Agent publishing plan" });
-  await expect(plan).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "◇ Genny's plan", exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "◇ Genny's plan", exact: true }).click();
-  await expect(plan).toBeVisible();
-  await expect(page.getByText(/flexible plan/i).first()).toBeVisible();
-  await expect(plan.getByRole("button", { name: "Expand plan", exact: true })).toBeVisible();
-  await expect(page.getByRole("region", { name: "Schedule list" }).getByText("Publishing window", { exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "◇ Jenny's plan", exact: true })).toBeVisible();
+  const schedule = page.getByRole("region", { name: "Schedule list" });
+  await expect(page.getByRole("region", { name: "Agent publishing plan" })).toHaveCount(0);
+  await expect(schedule.getByText("Jenny · Agent-owned", { exact: true }).first()).toBeVisible();
+  await schedule.getByRole("button", { name: /Open Assignment/ }).first().click();
+  const details = page.getByRole("complementary", { name: "Assignment details" });
+  await details.getByRole("button", { name: "Pause Jenny's assignment", exact: true }).click();
+  await expect(details.getByText("paused", { exact: true })).toBeVisible();
+  await details.getByRole("button", { name: "Resume Jenny's assignment", exact: true }).click();
+  await details.getByRole("button", { name: "Close Assignment details", exact: true }).click();
 
   await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
   await page.getByLabel("What should Jenny accomplish?").fill("Teach one useful idea about persistent agents.");
   await page.getByRole("button", { name: "Review assignment", exact: true }).click();
   await page.getByRole("button", { name: "Activate Assignment", exact: true }).click();
+  await expect(schedule.getByText("You · Operator assignment", { exact: true })).toBeVisible();
 
   await page.route("**/api/state", async (route) => {
     const request = route.request();

@@ -1,7 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import * as ai from "@/lib/ai";
 import * as perceptionRuntime from "@/lib/perception-runtime";
-import { applyOperation, createAgent, startPlaygroundSession } from "@/lib/runtime";
+import { saveChannelSecret } from "../lib/db";
+import { applyOperation, assignmentIsSatisfied, createAgent, startPlaygroundSession } from "@/lib/runtime";
 import { readState, saveProviderSecret, writeState } from "@/lib/db";
 import { POST } from "@/app/api/state/route";
 
@@ -30,6 +31,59 @@ async function waitForAssignment(assignmentId: string, timeoutMs = 5_000) {
 }
 
 describe("Sandbox assignment runtime", () => {
+  it("treats increased effort as a ceiling over the existing adaptive responsibility", () => {
+    let state = createAgent({ name: "Push Agent", description: "A thoughtful collaborator", mode: "agent", handle: "@push_agent", accent: "#D68754" });
+    const presence = { ...state.presence!, environment: "live" as const, connectionMode: "native" as const, execution: { ...state.presence!.execution, reply: "auto" as const, like: "auto" as const } };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    state = applyOperation(state, { type: "createAssignment", presenceId: presence.id, environment: "live", instruction: "Help https://x.com/source_author/status/2093472969037099455 reach people who genuinely care." });
+    const assignment = state.assignments[0]!;
+    expect(assignment).toMatchObject({ activation: { type: "continuous" }, quantityPolicy: { quantity: "agent_planned" }, progress: { required: 0 }, seed: { role: "distributable_target", externalRef: { id: "2093472969037099455" } } });
+    expect(assignmentIsSatisfied(assignment, state)).toBe(false);
+    state = applyOperation(state, { type: "startAssignmentPursuit", assignmentId: assignment.id, presenceId: presence.id, deadlineAt: new Date(Date.now() + 3_600_000).toISOString(), maxVerifiedActions: 100, actionCaps: { reply: 20, like: 60 }, resourceBudget: { maxChannelReads: 500, maxModelCalls: 100 } });
+    const window = state.assignmentPursuitWindows?.[0];
+    expect(window).toMatchObject({ assignmentId: assignment.id, maxVerifiedActions: 100, status: "active", actionCaps: { reply: 20, like: 60 } });
+    state = applyOperation(state, { type: "pauseAssignmentPursuit", id: window!.id });
+    expect(state.assignmentPursuitWindows?.[0]).toMatchObject({ status: "paused", pauseReason: "Paused by the operator." });
+    state = applyOperation(state, { type: "resumeAssignmentPursuit", id: window!.id });
+    expect(state.assignmentPursuitWindows?.[0]?.status).toBe("active");
+    expect(state.assignments.find((item) => item.id === assignment.id)?.status).toBe("active");
+  });
+
+  it("moves on when a distribution source post has been deleted", async () => {
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    vi.spyOn(ai, "generateAgentSocialDecision").mockResolvedValue({ action: "no_op", text: "", rationale: "No remaining conversation earned a useful action." });
+    let state = createAgent({ name: "Distribution Agent", description: "A thoughtful collaborator", mode: "agent", handle: "@distribution_agent", accent: "#D68754" });
+    const presence = { ...state.presence!, environment: "live" as const, connectionMode: "native" as const, execution: { ...state.presence!.execution, reply: "auto" as const, like: "auto" as const } };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    state.nativeConnections = [{ id: "distribution-connection", presenceId: presence.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "distribution-account", username: "distribution_agent", name: "Distribution Agent" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    saveChannelSecret("distribution-connection", { apiKey: "api", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" });
+    state.mirrorObjects = [{ id: "live-candidate", bridgeId: "native:distribution-connection", presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: "live-candidate" }, objectType: "post", language: "en", content: { text: "A relevant public conversation remains available.", language: "en" }, author: { externalRef: { type: "x.user", id: "candidate-author" }, displayName: "Candidate Author", handle: "candidate_author" }, observedAt: new Date().toISOString(), occurredAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", environment: "live", source: "native", trust: "untrusted_world_content" }];
+    state = applyOperation(state, { type: "createAssignment", presenceId: presence.id, environment: "live", instruction: "Each day, help https://x.com/source_author/status/2093472969037099455 reach people who genuinely care. Inspect relevant conversations and choose useful authorized actions." });
+    const assignment = state.assignments[0]!;
+    state = applyOperation(state, { type: "activateAssignment", id: assignment.id });
+    writeState(state);
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL) => {
+      const url = String(input);
+      if (url.includes("/2/tweets/search/recent")) return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.includes("/2/tweets?")) return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
+      if (url.includes("publish.x.com/oembed")) return new Response("", { status: 404 });
+      return new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } });
+    }));
+
+    const response = await POST(new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "runLiveAssignment", assignmentId: assignment.id, presenceId: presence.id }) }));
+    expect(response.ok).toBe(true);
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline && !readState().events.some((event) => event.title === "Promotion opportunity held")) await new Promise((resolve) => setTimeout(resolve, 20));
+    const result = readState();
+    const updated = result.assignments.find((item) => item.id === assignment.id);
+    expect(updated?.status).toBe("active");
+    expect(updated?.lastOutcome?.message ?? "").not.toContain("blocked");
+    expect(result.events.some((event) => event.title === "Distribution source moved on")).toBe(true);
+    expect(result.events.some((event) => event.title === "Promotion Assignment blocked")).toBe(false);
+  });
+
   it("keeps Sandbox checks available while the Presence is paused", async () => {
     process.env.OPENPRESENCE_AI_MOCK = "1";
     let state = createAgent({ name: "Paused Sandbox Agent", description: "A careful operator", mode: "agent", handle: "@paused_sandbox", accent: "#D68754" });

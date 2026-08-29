@@ -68,6 +68,15 @@ async function visible(locator) {
   try { return await locator.isVisible(); } catch { return false; }
 }
 
+async function throwIfBlockedByTarget(page) {
+  const dialogText = await page.locator('[role="dialog"], [data-testid="confirmationSheetDialog"]').allInnerTexts().catch(() => []);
+  const evidence = dialogText.find((text) => /author has blocked you|you (?:have been|are) blocked by (?:this|the) (?:author|user|account)/i.test(text));
+  if (!evidence) return;
+  const error = new Error("X reports that this author has blocked the Presence, so this action cannot be performed.");
+  error.code = "TARGET_BLOCKED_PRESENCE";
+  throw error;
+}
+
 async function signedIn(page) {
   if (await page.getByText(/log in|sign up/i).first().isVisible().catch(() => false)) return false;
   if (!expectedHandle) return true;
@@ -203,6 +212,7 @@ async function fillReply(page, targetId, text, assets = []) {
   if (!submitted) throw new Error("X did not expose the direct Reply submit control.");
   for (let attempt = 0; attempt < 12; attempt += 1) {
     await page.waitForTimeout(750);
+    await throwIfBlockedByTarget(page);
     const matching = page.locator("article").filter({ hasText: text.slice(0, Math.min(80, text.length)) });
     if (await matching.count()) {
       const hrefs = await matching.last().locator('a[href*="/status/"]').evaluateAll((links) => links.map((link) => link.getAttribute("href"))).catch(() => []);
@@ -231,6 +241,7 @@ async function fillComposer(page, text, assets = []) {
 async function findCreatedPostId(page, text, excludedId) {
   for (let attempt = 0; attempt < 12; attempt += 1) {
     await page.waitForTimeout(750);
+    await throwIfBlockedByTarget(page);
     const matching = page.locator("article").filter({ hasText: text.slice(0, Math.min(80, text.length)) });
     if (await matching.count()) {
       const hrefs = await matching.last().locator('a[href*="/status/"]').evaluateAll((links) => links.map((link) => link.getAttribute("href"))).catch(() => []);
@@ -245,6 +256,7 @@ async function openTargetPost(page, targetId) {
   await page.goto(`https://x.com/i/web/status/${targetId}`, { waitUntil: "domcontentloaded", timeout: 45_000 });
   if (!(await signedIn(page))) throw new Error(`The X browser session is not signed in as @${expectedHandle || "the expected account"}.`);
   await page.waitForTimeout(1_000);
+  await throwIfBlockedByTarget(page);
   const targetArticle = page.locator('article').filter({ has: page.locator(`a[href*="/status/${targetId}"]`) }).first();
   if (!(await visible(targetArticle))) throw new Error("X did not expose the target post.");
   return targetArticle;
@@ -268,6 +280,7 @@ async function deliverOriginalPost(page, text, assets) {
 
 async function deliverLike(page, targetId) {
   const article = await clickPostControl(page, targetId, "like", "like");
+  await throwIfBlockedByTarget(page);
   const control = article.getByTestId("unlike");
   if (!(await visible(control))) throw new Error("X did not verify the post as liked.");
   return targetId;
@@ -279,6 +292,7 @@ async function deliverRepost(page, targetId) {
   if (await visible(menuItem)) await menuItem.click();
   else if (await visible(page.getByText(/^Repost$/i).last())) await page.getByText(/^Repost$/i).last().click();
   await page.waitForTimeout(750);
+  await throwIfBlockedByTarget(page);
   if (!(await visible(article.getByTestId("unretweet")))) throw new Error("X did not verify the post as reposted.");
   return targetId;
 }
@@ -290,6 +304,7 @@ async function deliverQuote(page, targetId, text, assets) {
   if (await visible(quote)) await quote.click();
   else if (await visible(page.getByText(/quote/i).last())) await page.getByText(/quote/i).last().click();
   await page.waitForTimeout(750);
+  await throwIfBlockedByTarget(page);
   await fillComposer(page, text, assets);
   return findCreatedPostId(page, text, targetId);
 }
@@ -299,9 +314,11 @@ async function deliverFollow(page, targetId) {
   await page.goto(targetUrl, { waitUntil: "domcontentloaded", timeout: 45_000 });
   if (!(await signedIn(page))) throw new Error(`The X browser session is not signed in as @${expectedHandle || "the expected account"}.`);
   await page.waitForTimeout(1_000);
+  await throwIfBlockedByTarget(page);
   const follow = page.getByRole("button", { name: /^follow$/i }).first();
   if (!(await clickFirstVisible([follow]))) throw new Error("X did not expose a Follow control for the target user.");
   await page.waitForTimeout(750);
+  await throwIfBlockedByTarget(page);
   if (!(await visible(page.getByRole("button", { name: /following/i }).first()))) throw new Error("X did not verify the relationship as Following.");
   return targetId;
 }
@@ -331,7 +348,7 @@ async function deliver(page, execution) {
 }
 
 async function fail(execution, error) {
-  await request(`/api/bridge/v1/executions/${execution.id}/fail`, { executorId, code: "BROWSER_DELIVERY_FAILED", message: error instanceof Error ? error.message : String(error), retryable: false });
+  await request(`/api/bridge/v1/executions/${execution.id}/fail`, { executorId, code: error?.code || "BROWSER_DELIVERY_FAILED", message: error instanceof Error ? error.message : String(error), retryable: false });
 }
 
 async function main() {

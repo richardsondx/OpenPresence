@@ -1,0 +1,4 @@
+interface:
+  display_name: "Product Usability Auditor"
+  short_description: "Find product friction and prioritize simpler fixes"
+  default_prompt: "Use $product-usability-auditor to audit this feature against user value, usability, truth, and recovery."

@@ -292,6 +292,37 @@ describe("Canonical Assignment Convergence and Agenda Compilation", () => {
     expect(agenda.nextUp?.every((item) => item.safePriorityReason.length > 0 && item.nextAction.length > 0 && item.doneWhen.length > 0)).toBe(true);
   });
 
+  it("keeps pending mentions visible even when the compact Agenda only renders its first three", () => {
+    const state = createMockState();
+    const presence = state.presence!;
+    for (let index = 0; index < 4; index += 1) {
+      state.mirrorObjects.push({
+        id: `mirror_pending_mention_${index}`,
+        bridgeId: "native:presence_main",
+        presenceId: presence.id,
+        channelId: "x",
+        externalRef: { type: "x.post", id: `post_pending_mention_${index}` },
+        objectType: "post",
+        author: { displayName: `Person ${index}`, handle: `person_${index}` },
+        content: { text: `@genny this is a pending question ${index}` },
+        occurredAt: "2026-08-19T13:00:00.000Z",
+        observedAt: "2026-08-19T13:01:00.000Z",
+        visibility: "public",
+        shareability: "presence-only",
+        archived: false,
+        environment: "live",
+        source: "native",
+        trust: "untrusted_world_content",
+      } as never);
+    }
+
+    const agenda = compileAgendaWork(state, presence.id, new Date("2026-08-19T14:00:00.000Z"));
+
+    expect(agenda.pendingMentionCount).toBe(4);
+    expect(agenda.workItems?.filter((item) => item.source === "mention")).toHaveLength(3);
+    expect(agenda.watching?.find((item) => item.source === "mention")?.count).toBe(4);
+  });
+
   it("marks a scheduled assignment due when its schedule window opens", () => {
     const assignment: Assignment = {
       id: "assign_due_test",
@@ -318,6 +349,26 @@ describe("Canonical Assignment Convergence and Agenda Compilation", () => {
     // Wednesday at 09:15 local time (after due time)
     const afterTime = new Date(2026, 7, 19, 9, 15, 0);
     expect(scheduledAssignmentIsDue(assignment, afterTime)).toBe(true);
+
+    // The occurrence closes at the configured end time; it must not run indefinitely.
+    expect(scheduledAssignmentIsDue(assignment, new Date(2026, 7, 19, 11, 0, 0))).toBe(true);
+    expect(scheduledAssignmentIsDue(assignment, new Date(2026, 7, 19, 11, 1, 0))).toBe(false);
+  });
+
+  it("treats Daily as a real recurrence and rolls the next occurrence to tomorrow", () => {
+    const daily = {
+      day: "Daily",
+      time: "08:00",
+      executionWindow: "08:00–18:00",
+    };
+    const evening = new Date(2026, 7, 19, 20, 0, 0);
+    const next = nextScheduledOccurrence(daily, evening, { kind: "daily" });
+
+    expect(next.getFullYear()).toBe(2026);
+    expect(next.getMonth()).toBe(7);
+    expect(next.getDate()).toBe(20);
+    expect(next.getHours()).toBe(8);
+    expect(next.getMinutes()).toBe(0);
   });
 
   it("dynamically ranks fresh strategic opportunities ahead of stale mentions using property-based scoring", () => {
@@ -563,5 +614,8 @@ describe("Canonical Assignment Convergence and Agenda Compilation", () => {
     const agenda = compileAgendaWork(state, "presence_main", now);
     const watchlistWork = agenda.nextUp?.find((item) => item.id.includes("watch_key_researcher"));
     expect(watchlistWork).toBeDefined();
+    expect(watchlistWork?.source).toBe("watchlist");
+    expect(watchlistWork?.assignmentId).toBeUndefined();
+    expect(state.assignments.some((assignment) => (assignment.title ?? "").includes("Lead Researcher"))).toBe(false);
   });
 });

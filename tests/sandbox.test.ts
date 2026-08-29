@@ -131,6 +131,32 @@ describe("Sandbox and Playground boundaries", () => {
     expect(intentEvent?.sourceObjectId).toBe(post.id);
   });
 
+  it("blocks an unsupported leading mention while preserving the observed participant", () => {
+    let state = applyOperation(createAgent(input), { type: "setPresence", patch: { execution: { reply: "auto" } } });
+    state = startPlaygroundSession(state);
+    const session = state.playgroundSessions[0]!;
+    state = addSandboxEvent(state, { sessionId: session.id, actionId: "post", actorName: "Maya Chen", actorHandle: "@maya", content: "A post worth replying to." });
+    const post = state.mirrorObjects.find((item) => item.sessionId === session.id)!;
+
+    const blocked = formSandboxIntent(state, { sessionId: session.id, affordance: "reply", text: "@benswerd I have a useful distinction.", target: post.externalRef });
+    expect(blocked.executions[0]).toMatchObject({ status: "blocked", failure: { code: "UNSUPPORTED_LEADING_MENTION" } });
+    expect(blocked.executions[0]?.failure?.message).toContain("@benswerd");
+
+    const grounded = formSandboxIntent(state, { sessionId: session.id, affordance: "reply", text: "@maya I have a useful distinction.", target: post.externalRef });
+    expect(grounded.executions[0]).toMatchObject({ status: "queued" });
+  });
+
+  it("blocks a near-copy that turns another person's statement into the Presence's voice", () => {
+    let state = applyOperation(createAgent(input), { type: "setPresence", patch: { execution: { reply: "auto" } } });
+    state = startPlaygroundSession(state);
+    const session = state.playgroundSessions[0]!;
+    state = addSandboxEvent(state, { sessionId: session.id, actionId: "post", actorName: "Micky", actorHandle: "@Rasmic", content: "@benswerd hmm you gave me reason to opensource it... give me a couple days and will do it" });
+    const post = state.mirrorObjects.find((item) => item.sessionId === session.id)!;
+
+    const result = formSandboxIntent(state, { sessionId: session.id, affordance: "reply", text: "@benswerd Hmm, you’ve given me a reason to open-source it… give me a couple of days and I’ll do it.", target: post.externalRef });
+    expect(result.executions[0]).toMatchObject({ status: "blocked", failure: { code: "SOURCE_EXPRESSION_ECHO" } });
+  });
+
   it("stores raw simulated media separately and records truthful insufficient perception", () => {
     let state = startPlaygroundSession(createAgent(input));
     const session = state.playgroundSessions[0]!;

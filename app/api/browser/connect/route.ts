@@ -1,8 +1,8 @@
 import { NextResponse } from "next/server";
 import { z } from "zod";
-import { createBridgeWithKey, rotateBridgeKey } from "@/lib/bridge";
+import { createBridgeWithKey } from "@/lib/bridge";
 import { chromeBrowserBridgeCapabilities } from "@/lib/bridge-contract";
-import { getBrowserBody, readState, upsertBrowserBody, writeState } from "@/lib/db";
+import { getBrowserBody, issueBridgeExecutorKey, readState, upsertBrowserBody, writeState } from "@/lib/db";
 import { stateForContext } from "@/lib/runtime";
 
 export const dynamic = "force-dynamic";
@@ -29,7 +29,7 @@ export async function POST(request: Request) {
     const capabilities = chromeBrowserBridgeCapabilities();
     const existing = state.bridges.find((bridge) => bridge.presenceId === presence.id && bridge.kind === "bridge" && bridge.state !== "offline");
     const result = existing
-      ? rotateBridgeKey(state, existing.id)
+      ? { state, key: issueBridgeExecutorKey(existing.id, parsed.executorId) }
       : createBridgeWithKey(state, { type: "createBridge", input: { presenceId: presence.id, name: `OpenPresence Chrome · ${presence.name}`, kind: "bridge", capabilities } });
     if (existing) {
       const renewed = result.state.bridges.find((bridge) => bridge.id === existing.id);

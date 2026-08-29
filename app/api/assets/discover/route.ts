@@ -1,16 +1,18 @@
 import { NextResponse } from "next/server";
 import { EvidenceVisualAssetDiscoveryProvider, TavilyAssetDiscoveryProvider } from "@/lib/asset-discovery";
-import { readProviderSecret, readState } from "@/lib/db";
-import { stateForContext } from "@/lib/runtime";
+import { readProviderSecret, readStateForContext } from "@/lib/db";
+import { assertRuntimeScope, createRuntimeScope } from "@/lib/runtime";
+import { readRuntimeScopeCookie } from "@/lib/runtime-scope";
 
 export async function POST(request: Request) {
+  const token = readRuntimeScopeCookie(request.headers.get("cookie"));
+  if (!token) return NextResponse.json({ error: "A server-resolved RuntimeScope is required." }, { status: 401 });
   const body = await request.json().catch(() => ({})) as { query?: string; semanticKind?: "chart" | "photo" | "illustration" | "meme" | "diagram" | "clip" | "generated" | "other"; limit?: number };
   if (!body.query?.trim()) return NextResponse.json({ error: "A discovery query is required." }, { status: 400 });
   try {
-    const state = stateForContext(readState(), {
-      agentId: request.headers.get("x-openpresence-agent-id"),
-      presenceId: request.headers.get("x-openpresence-presence-id"),
-    });
+    const state = readStateForContext(token);
+    const scope = createRuntimeScope(state, { presenceId: token.presenceId });
+    assertRuntimeScope(state, scope);
     const evidenceConnection = state.assetProviderConnections.find((item) => item.provider === "evidence-visual" && item.status === "available");
     const tavilyConnection = state.assetProviderConnections.find((item) => item.provider === "tavily" && item.status === "available");
     if (evidenceConnection || process.env.EVIDENCE_VISUAL_URL || process.env.NODE_ENV !== "test") {

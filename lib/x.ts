@@ -477,9 +477,14 @@ export function normalizeXText(value: string) {
 }
 
 export function matchesXReply(post: XRecentPost, input: { targetId: string; text: string; handle: string }) {
+  // X includes the addressed handle in the API text for replies, while the
+  // sealed Public Expression intentionally does not. The parent id and exact
+  // account match remain mandatory; only normalize the transport-added
+  // leading mention before comparing the authored text.
+  const withoutLeadingMentions = (value: string) => value.replace(/^(?:@[^\s]+\s+)+/, "");
   return post.parentId === input.targetId
     && normalizeHandle(post.authorUsername ?? "") === normalizeHandle(input.handle)
-    && normalizeXText(post.text) === normalizeXText(input.text);
+    && normalizeXText(withoutLeadingMentions(post.text)) === normalizeXText(withoutLeadingMentions(input.text));
 }
 
 export function matchesXQuote(post: XRecentPost, input: { targetId: string; text: string; handle: string }) {
@@ -497,7 +502,11 @@ export async function findVerifiedXReply(credentials: XCredentials, input: { tar
     const candidate = (await readXPostsByIds(credentials, [input.candidateId])).find((post) => matchesXReply(post, input));
     if (candidate) return candidate;
   }
-  const posts = await searchRecentXPosts(credentials, `conversation_id:${input.targetId} from:${normalizeHandle(input.handle)} -is:retweet`, 100);
+  // `conversation_id` is the thread root, not necessarily the post being
+  // replied to. Searching the authored account and then requiring the exact
+  // parent in matchesXReply verifies replies at any depth without widening
+  // the acceptance boundary.
+  const posts = await searchRecentXPosts(credentials, `from:${normalizeHandle(input.handle)} -is:retweet`, 100);
   return posts.find((post) => matchesXReply(post, input));
 }
 

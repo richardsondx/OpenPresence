@@ -19,6 +19,64 @@ const INTERNAL_DECISION_KEYS = new Set([
 ]);
 const PUBLIC_OUTPUT_KEYS = new Set(["text", "reply", "draft", "content"]);
 
+/** Handles at the beginning of an expression are an explicit routing choice.
+ * Keep this check deliberately narrow: mentions later in a sentence remain
+ * ordinary authored language and are not rewritten by the runtime. */
+export function leadingMentionHandles(value?: string): string[] {
+  if (!value) return [];
+  const handles: string[] = [];
+  let remainder = value.trimStart();
+  while (remainder.startsWith("@")) {
+    const match = remainder.match(/^@([A-Za-z0-9_]{1,30})(?=$|[\s,.;:!?)}\]…])/);
+    if (!match) break;
+    handles.push(match[1]!.toLowerCase());
+    remainder = remainder.slice(match[0].length).replace(/^[\s,.;:!?)}\]…]+/, "");
+  }
+  return handles;
+}
+
+/** Return a deterministic execution-boundary reason for an ungrounded opener. */
+export function unsupportedLeadingMention(value: string | undefined, supportedHandles: Iterable<string>): string | undefined {
+  const supported = new Set([...supportedHandles].map((handle) => handle.replace(/^@/, "").trim().toLowerCase()).filter(Boolean));
+  const unsupported = leadingMentionHandles(value).find((handle) => !supported.has(handle));
+  return unsupported ? `The expression starts with @${unsupported}, but that account is not present in the observed target or thread context.` : undefined;
+}
+
+function expressionTokens(value: string) {
+  return value
+    .trim()
+    .replace(/^(?:@[A-Za-z0-9_]{1,30}[\s,.;:!?)}\]…]+)+/, "")
+    .toLowerCase()
+    .replace(/[’']/g, "")
+    .replace(/[-–—]/g, "")
+    .match(/[a-z0-9]+/g) ?? [];
+}
+
+/** Fail closed on a substantial near-copy of observed source speech. This is
+ * intentionally narrow so normal acknowledgment and short quotation remain
+ * available while first-person source impersonation does not. */
+export function observedSourceEchoReason(value: string | undefined, observedTexts: Iterable<string>): string | undefined {
+  if (!value) return undefined;
+  const candidate = expressionTokens(value);
+  if (candidate.length < 12) return undefined;
+  for (const sourceText of observedTexts) {
+    const source = expressionTokens(sourceText);
+    if (source.length < 12) continue;
+    const rows = Array.from({ length: source.length + 1 }, () => new Uint16Array(candidate.length + 1));
+    for (let left = 1; left <= source.length; left += 1) {
+      for (let right = 1; right <= candidate.length; right += 1) {
+        rows[left]![right] = source[left - 1] === candidate[right - 1]
+          ? rows[left - 1]![right - 1]! + 1
+          : Math.max(rows[left - 1]![right]!, rows[left]![right - 1]!);
+      }
+    }
+    if (rows[source.length]![candidate.length]! / Math.min(source.length, candidate.length) >= 0.75) {
+      return "The expression substantially repeats an observed person's wording and could misrepresent their statement as the Presence's own.";
+    }
+  }
+  return undefined;
+}
+
 /** Apply the Presence's canonical public-post line format after model output. */
 export function formatOneSentencePerLine(value?: string) {
   if (!value) return "";

@@ -81,3 +81,22 @@ export function cognitionSafeAssetSummary(assets: Asset[], perceptions: AssetPer
     return `Attached ${ref.kind}: ${perception.result.observation}${perception.result.interpretation ? ` Likely meaning: ${perception.result.interpretation}` : ""} Uncertainty: ${perception.result.uncertainty}.`;
   }).join("\n");
 }
+
+/** Describe media with the social object and author that own it. Keeping this
+ * association explicit prevents a quote author's image or video from being
+ * silently attributed to the person who posted the outer quote. */
+export function cognitionSafeThreadAssetSummary(
+  assets: Asset[],
+  perceptions: AssetPerception[],
+  objects: MirrorObject[],
+  referencedObjectIds: Iterable<string> = [],
+): string {
+  const referenced = new Set(referencedObjectIds);
+  return objects.flatMap((object) => {
+    if (!object.assetRefs?.length) return [];
+    const owner = object.author?.handle ? `${object.author.displayName} (@${object.author.handle.replace(/^@/, "")})` : object.author?.displayName ?? "Unknown author";
+    const relation = referenced.has(object.id) ? "quoted/referenced post" : object.parentExternalRef ? "thread post" : "focal post";
+    const details = cognitionSafeAssetSummary(assets, perceptions, object);
+    return [`Media owned by ${owner} on ${relation} ${object.externalRef.type}:${object.externalRef.id}:\n${details}`];
+  }).join("\n");
+}

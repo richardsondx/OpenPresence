@@ -259,6 +259,10 @@ describe("Chrome extension composer and execution helpers", () => {
     expect(backgroundSource).toContain("OPENPRESENCE_CHANNEL_READY");
     expect(backgroundSource).toContain("sendSessionContextToTab");
     expect(backgroundSource).toContain("lastIdentityProbeAt");
+    expect(backgroundSource).toContain("findExpectedXTab");
+    expect(backgroundSource).toContain("adoptExpectedXTab");
+    expect(backgroundSource).toContain("tabOwned");
+    expect(backgroundSource).toContain('chrome.tabs.query({ url: ["https://x.com/*", "https://*.x.com/*"] })');
     expect(channelSource).toContain("identityReportInFlight");
     expect(channelSource).toContain("sendResponse({ ok: true })");
     expect(channelSource).toContain("X mounts the account menu/profile link after the initial document");

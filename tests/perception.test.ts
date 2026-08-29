@@ -3,8 +3,17 @@ import { compareDiscoveredAssets, inspectSandboxObject } from "../lib/perception
 import type { Asset } from "../lib/types";
 import { saveProviderSecret } from "../lib/db";
 import { addSandboxEvent, applyOperation, createAgent, startPlaygroundSession } from "../lib/runtime";
+import { cognitionSafeThreadAssetSummary, createAssetPerception } from "../lib/perception";
 
 describe("sandbox link perception", () => {
+  it("labels quoted media with its owning author and social object", () => {
+    const now = new Date().toISOString();
+    const asset: Asset = { id: "quoted-asset", agentId: "agent", presenceId: "presence", type: "image", status: "ready", provenance: { origin: "native-x", sourceUrl: "https://pbs.twimg.com/media/demo.jpg", author: "edward40e", importedAt: now }, createdAt: now, updatedAt: now };
+    const quoted = { id: "quoted-object", bridgeId: "native:x", presenceId: "presence", channelId: "x" as const, externalRef: { type: "x.post", id: "quoted-post" }, objectType: "post", author: { displayName: "Edward", handle: "@edward40e" }, assetRefs: [{ assetId: asset.id, kind: "image" as const }], observedAt: now, visibility: "public" as const, shareability: "presence-only" as const };
+    const perception = createAssetPerception({ asset, presenceId: "presence", socialObjectId: quoted.id, level: "inspect", result: { observation: "A Pokémon game demo is visible.", uncertainty: "low" } });
+    expect(cognitionSafeThreadAssetSummary([asset], [perception], [quoted], [quoted.id])).toContain("Media owned by Edward (@edward40e) on quoted/referenced post x.post:quoted-post");
+  });
+
   it("retrieves shallow public provenance instead of treating a URL as evidence", async () => {
     const fetchMock = vi.fn().mockResolvedValue(new Response("<html><head><title>Keystone proof</title><meta name=\"description\" content=\"Deterministic replay and tamper rejection.\"></head><body>Proof details</body></html>", { status: 200, headers: { "content-type": "text/html" } }));
     vi.stubGlobal("fetch", fetchMock);

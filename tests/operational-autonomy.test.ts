@@ -30,6 +30,7 @@ import {
   calculateStaleAt,
   closeStaleBridgeExecutions,
   evaluateOperationalRunProgress,
+  isLiveTemporalPresence,
   runOperationalSweep,
   scheduleRetryWake,
   scheduleWake,
@@ -49,6 +50,12 @@ import {
 
 describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () => {
   const presenceId = "presence_test_1";
+
+  it("keeps Sandbox Presences out of the live temporal scheduler", () => {
+    expect(isLiveTemporalPresence({ status: "live", environment: "live" })).toBe(true);
+    expect(isLiveTemporalPresence({ status: "live", environment: "sandbox" })).toBe(false);
+    expect(isLiveTemporalPresence({ status: "paused", environment: "live" })).toBe(false);
+  });
 
   it("fences a second worker invocation even when it targets the same run in the same process", () => {
     const runId = `run_lease_fence_${Date.now()}_${Math.random()}`;

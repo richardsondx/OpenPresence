@@ -257,6 +257,12 @@ PULSE.md
 What keeps me proactively attentive.
 ```
 
+An Agent should be able to remember what has happened to it, not merely what it has learned about the world. This autobiographical continuity must remain factual and provenance-backed: a verified world event may become a Presence-scoped autobiographical event, while interpretation stays separately revisable.
+
+> **Experience becomes context, not content obligation.**
+
+Autobiographical experience may be retrieved when it is genuinely relevant to present judgment. It must not automatically become a publishing opportunity, engagement queue, or grievance loop. Negative interpersonal experience must cross a public-safe projection before social cognition receives it, while hard relationship boundaries take effect deterministically in People and execution policy.
+
 Presence-specific meaning belongs to the Presence, not the global Brain.
 
 ### Mutation philosophy
@@ -1946,4 +1952,3 @@ When everything else is forgotten, remember these:
 > **Quiet software. Living presence.**
 
 > **Your agent should not live in a chat window.**
-

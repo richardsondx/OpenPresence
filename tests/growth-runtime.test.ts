@@ -22,6 +22,8 @@ describe("continuous growth responsibility", () => {
 
   it("compiles a 100K request into one continuous Assignment with an evidence contract", () => {
     const state = fixture();
+    expect(state.presence?.createdAt).toBeTruthy();
+    expect(state.presences[0]?.createdAt).toBe(state.presence?.createdAt);
     const assignment = compileAssignmentInstruction(state, "Grow this Presence toward 100,000 followers while building an audience of AI founders.", state.presence!.id, "live");
     expect(assignment.activation).toEqual({ type: "continuous" });
     expect(assignment.successEvidence).toMatchObject({ metric: "followers", comparator: ">=", value: 100000 });
@@ -32,6 +34,10 @@ describe("continuous growth responsibility", () => {
 
   it("does not complete from work, but completes from a verified audience snapshot", () => {
     const state = fixture();
+    const createdAt = "2026-07-01T00:00:00.000Z";
+    const presence = { ...state.presence!, createdAt };
+    state.presence = presence;
+    state.presences = [presence];
     let next = applyOperation(state, { type: "createAssignment", presenceId: state.presence!.id, environment: "live", instruction: "Grow this Presence toward 100,000 followers while building an audience of AI founders." });
     const assignment = next.assignments[0];
     next = applyOperation(next, { type: "activateAssignment", id: assignment.id });
@@ -41,6 +47,20 @@ describe("continuous growth responsibility", () => {
     next = applyOperation(next, { type: "recordAudienceSnapshot", presenceId: state.presence!.id, followers: 100_000, source: "native", observedAt: "2026-08-16T00:00:00.000Z" });
     expect(next.assignments[0].status).toBe("completed");
     expect(next.assignments[0].progress.verified).toBe(1);
+  });
+
+  it("excludes audience snapshots recorded before the Presence boundary", () => {
+    const state = fixture();
+    const createdAt = "2026-08-01T00:00:00.000Z";
+    const presence = { ...state.presence!, createdAt };
+    state.presence = presence;
+    state.presences = [presence];
+    let next = applyOperation(state, { type: "recordAudienceSnapshot", presenceId: presence.id, followers: 999, source: "native", observedAt: "2026-07-31T00:00:00.000Z" });
+    next = applyOperation(next, { type: "recordAudienceSnapshot", presenceId: presence.id, followers: 12, source: "native", observedAt: "2026-08-01T00:00:00.000Z" });
+    next = applyOperation(next, { type: "recordAudienceSnapshot", presenceId: presence.id, followers: 15, source: "native", observedAt: "2026-08-02T00:00:00.000Z" });
+
+    expect(next.audienceSnapshots).toHaveLength(3);
+    expect(audienceDeltas(next, presence.id)).toMatchObject({ current: 15, daily: 3 });
   });
 
   it("does not let a manual count complete a live follower goal", () => {
@@ -63,6 +83,7 @@ describe("continuous growth responsibility", () => {
     expect(next.assignments[0].planHistory).toHaveLength(1);
     expect(Object.fromEntries(next.files.filter((file) => ["SOUL", "MISSION", "TASTE", "BRAIN"].includes(file.kind)).map((file) => [file.kind, file.content]))).toEqual(before);
     expect(next.files.find((file) => file.kind === "GROWTH")?.content).toContain("Latest review");
+    expect(next.changeSets.find((changeSet) => changeSet.operations.some((operation) => operation.path === "agentFiles.GROWTH"))?.presenceId).toBe(state.presence!.id);
     next = applyOperation(next, { type: "reviewGrowth", presenceId: state.presence!.id, assignmentId: assignment.id, kind: "weekly" });
     expect(next.growthReviews).toHaveLength(1);
   });
@@ -127,6 +148,9 @@ describe("continuous growth responsibility", () => {
   it("uses a median comparable baseline and exposes low confidence with sparse evidence", () => {
     const state = fixture();
     const presenceId = state.presence!.id;
+    const presence = { ...state.presence!, createdAt: "2026-08-14T00:00:00.000Z" };
+    state.presence = presence;
+    state.presences = [presence];
     const makeMirror = (id: string): MirrorObject => ({ id, bridgeId: "native:test", presenceId, channelId: "x", externalRef: { type: "x.post", id }, objectType: "post", author: { displayName: "Genny", handle: "genny" }, content: { text: id }, observedAt: "2026-08-16T00:00:00.000Z", occurredAt: "2026-08-15T23:00:00.000Z", visibility: "public", shareability: "presence-only", environment: "live", source: "native", trust: "untrusted_world_content" });
     let next = { ...state, mirrorObjects: [makeMirror("a"), makeMirror("b"), makeMirror("c")] };
     next = applyOperation(next, { type: "recordPublicationMetricSnapshot", presenceId, mirrorObjectId: "a", publicationAgeSeconds: 3600, metrics: { impressions: 100 }, source: "native" });
@@ -135,6 +159,21 @@ describe("continuous growth responsibility", () => {
     const latest = next.publicationMetricSnapshots[0];
     expect(publicationMetricBaseline(next, latest).comparableCount).toBe(2);
     expect(audienceDeltas(next, presenceId).current).toBeUndefined();
+  });
+
+  it("does not baseline a pre-Presence publication just because its metric was collected later", () => {
+    const state = fixture();
+    const presenceId = state.presence!.id;
+    const presence = { ...state.presence!, createdAt: "2026-08-20T00:00:00.000Z" };
+    state.presence = presence;
+    state.presences = [presence];
+    const makeMirror = (id: string): MirrorObject => ({ id, bridgeId: "native:test", presenceId, channelId: "x", externalRef: { type: "x.post", id }, objectType: "post", author: { displayName: "Genny", handle: "genny" }, content: { text: id }, observedAt: "2026-08-19T23:00:00.000Z", occurredAt: "2026-08-19T22:00:00.000Z", visibility: "public", shareability: "presence-only", environment: "live", source: "native", trust: "untrusted_world_content" });
+    let next = { ...state, mirrorObjects: [makeMirror("a"), makeMirror("b"), makeMirror("c")] };
+    next = applyOperation(next, { type: "recordPublicationMetricSnapshot", presenceId, mirrorObjectId: "a", publicationAgeSeconds: 3600, metrics: { impressions: 100 }, source: "native" });
+    next = applyOperation(next, { type: "recordPublicationMetricSnapshot", presenceId, mirrorObjectId: "b", publicationAgeSeconds: 3600, metrics: { impressions: 300 }, source: "native" });
+    next = applyOperation(next, { type: "recordPublicationMetricSnapshot", presenceId, mirrorObjectId: "c", publicationAgeSeconds: 3600, metrics: { impressions: 200 }, source: "native" });
+
+    expect(publicationMetricBaseline(next, next.publicationMetricSnapshots[0]).comparableCount).toBe(0);
   });
 
   it("reports an honest unavailable capability without a connected body", () => {

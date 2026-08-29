@@ -10,6 +10,8 @@ import { POST } from "../app/api/x/manage/route";
 import { POST as statePost } from "../app/api/state/route";
 import { WorkspaceConflictError } from "../lib/db";
 import { GET as ollamaModelsGet } from "../app/api/ollama/models/route";
+import { recordOperationalFailure } from "../lib/incident-engine";
+import { readOperationalHealth } from "../lib/operational-context";
 
 beforeEach(() => {
   process.env.OPENPRESENCE_X_API_MOCK = "1";
@@ -384,6 +386,33 @@ describe("native X connection", () => {
     vi.unstubAllGlobals();
   });
 
+  it("rechecks model provider credits from the Needs You incident and clears only that incident", async () => {
+    const presenceId = readState().presence!.id;
+    await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "configureProvider", provider: "openai", label: "OpenAI workspace", secret: "provider-secret-test", hasSecret: true }), headers: { "content-type": "application/json" } }));
+    await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "setModel", model: "gpt-5.6-luna", provider: "openai", quality: "high" }), headers: { "content-type": "application/json" } }));
+    const { incident } = recordOperationalFailure({ dependency: "model_provider", presenceId, error: "credits depleted" });
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ choices: [{ message: { content: "OK" } }] }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "recheckModelProvider", presenceId, incidentId: incident.id }), headers: { "content-type": "application/json" } }));
+      expect(response.status).toBe(200);
+      expect(readOperationalHealth(presenceId).incidents.find((item) => item.id === incident.id)).toBeUndefined();
+      expect(JSON.parse(fetchMock.mock.calls[0]?.[1]?.body as string).messages).toContainEqual({ role: "user", content: "Reply with exactly OK." });
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
+  it("rechecks an X-backed credits incident and clears the generic runtime card", async () => {
+    const presenceId = readState().presence!.id;
+    const saved = await POST(new Request("http://localhost/api/x/manage", { method: "POST", body: JSON.stringify({ action: "save", presenceId, credentials: { apiKey: "test_api", apiSecret: "test_secret", accessToken: "test_access", accessTokenSecret: "test_access_secret" } }), headers: { "content-type": "application/json" } }));
+    expect(saved.status).toBe(200);
+    const { incident } = recordOperationalFailure({ dependency: "runtime", presenceId, error: "X has no API credits remaining. Add credits or choose an API plan to continue." });
+    const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "syncNativeX", presenceId, manual: true, incidentId: incident.id }), headers: { "content-type": "application/json" } }));
+    expect(response.status).toBe(200);
+    expect(readOperationalHealth(presenceId).incidents.find((item) => item.id === incident.id)).toBeUndefined();
+  });
+
   it("disconnects the Presence and removes its protected secret", async () => {
     const presenceId = readState().presence!.id;
     const save = await POST(new Request("http://localhost/api/x/manage", { method: "POST", body: JSON.stringify({ action: "save", presenceId, credentials: { apiKey: "test_api", apiSecret: "test_secret", bearerToken: "test_bearer" } }), headers: { "content-type": "application/json" } }));
@@ -708,6 +737,7 @@ describe("native X connection", () => {
     expect(matchesXReply(post, { targetId: "other-post", text: post.text, handle: "@example_agent" })).toBe(false);
     expect(matchesXReply(post, { targetId: "boardy-post-1", text: post.text, handle: "@another-account" })).toBe(false);
     expect(matchesXReply(post, { targetId: "boardy-post-1", text: "A different reply", handle: "@example_agent" })).toBe(false);
+    expect(matchesXReply({ ...post, text: "@boardyai I'm voting for cats as test authors, not judges." }, { targetId: "boardy-post-1", text: post.text, handle: "@example_agent" })).toBe(true);
   });
 
   it("matches and finds a Chrome-submitted quote only by exact author, text, and quoted target", async () => {
@@ -733,6 +763,19 @@ describe("native X connection", () => {
     }), { status: 200, headers: { "content-type": "application/json" } })));
     const result = await findVerifiedXReply({ apiKey: "api", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" }, { targetId: "target-1", text: "The verified reply.", handle: "@example_agent" });
     expect(result?.id).toBe("reply-from-search");
+    vi.unstubAllGlobals();
+  });
+
+  it("verifies a reply at any thread depth instead of assuming the target is the thread root", async () => {
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({
+      data: [{ id: "nested-reply", text: "@martin_casado The verified reply.", author_id: "genny-id", conversation_id: "root-1", referenced_tweets: [{ type: "replied_to", id: "target-1" }] }],
+      includes: { users: [{ id: "genny-id", username: "example_agent", name: "Genny" }] },
+    }), { status: 200, headers: { "content-type": "application/json" }}));
+    vi.stubGlobal("fetch", fetchMock);
+    const result = await findVerifiedXReply({ apiKey: "api", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" }, { targetId: "target-1", text: "The verified reply.", handle: "@example_agent" });
+    expect(result?.id).toBe("nested-reply");
+    expect(fetchMock.mock.calls[0]?.[0]).toContain("from%3Aexample_agent");
     vi.unstubAllGlobals();
   });
 

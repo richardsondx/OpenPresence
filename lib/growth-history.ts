@@ -1,4 +1,5 @@
 import type { OpenPresenceState } from "./types";
+import { growthEvidenceIsInPresenceScope } from "./growth-scope";
 
 export interface HistoricalGrowthContext {
   sourceChangeSetId: string;
@@ -24,9 +25,13 @@ function numberAfter(pattern: RegExp, text: string) {
  * measurement. Older revisions are durable provenance when the structured
  * audience snapshot collection is unavailable or was not migrated.
  */
-export function deriveHistoricalGrowthContext(state: OpenPresenceState): HistoricalGrowthContext | undefined {
+export function deriveHistoricalGrowthContext(state: OpenPresenceState, presenceId?: string): HistoricalGrowthContext | undefined {
   const revision = [...(state.changeSets ?? [])]
-    .filter((changeSet) => changeSet.operations.some((operation) => operation.path === "agentFiles.GROWTH" && typeof operation.after === "string"))
+    .filter((changeSet) => {
+      if (presenceId && changeSet.presenceId && changeSet.presenceId !== presenceId) return false;
+      if (presenceId && !changeSet.presenceId && !growthEvidenceIsInPresenceScope(state, presenceId, changeSet.createdAt)) return false;
+      return changeSet.operations.some((operation) => operation.path === "agentFiles.GROWTH" && typeof operation.after === "string");
+    })
     .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
   const content = revision?.operations.find((operation) => operation.path === "agentFiles.GROWTH" && typeof operation.after === "string")?.after;
   if (!revision || typeof content !== "string") return undefined;

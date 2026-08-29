@@ -26,7 +26,8 @@ export function settleAttentionResponsibility(source: OpenPresenceState, run: Op
 
   if (pendingExecutionCount > 0 || (selectedActionCount > 0 && verifiedOutcomeCount < selectedActionCount && failedExecutionCount === 0)) {
     run.state = "waiting";
-    run.stage = pendingExecutionCount > 0 ? "delivering" : "verifying";
+    const hasVerificationPending = executions.some((item) => item.status === "verification-pending");
+    run.stage = hasVerificationPending ? "verifying" : pendingExecutionCount > 0 ? "delivering" : "verifying";
     run.result = { disposition: "waiting_delivery", summary: pendingExecutionCount > 0 ? `${selectedActionCount} action${selectedActionCount === 1 ? "" : "s"} selected; ${pendingExecutionCount} still await delivery or verification.` : `${selectedActionCount} action${selectedActionCount === 1 ? "" : "s"} delivered; verified observation is still pending.`, selectedActionCount, pendingExecutionCount, failedExecutionCount, verifiedOutcomeCount };
     state = summarizeAttentionEpisode(state, attentionEpisodeId, { status: "waiting", stage: "confirming" });
     return { state, run };

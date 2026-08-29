@@ -1,8 +1,19 @@
 import { describe, expect, it } from "vitest";
 import { createAgent, applyOperation, startPlaygroundSession, compileAgendaWork } from "../lib/runtime";
 import { parseAgentSocialDecision } from "../lib/ai";
+import { hasEpisodeRepresentation } from "../lib/autonomy-worker";
 
 describe("Autonomous Closed-Loop Cognition Invariants", () => {
+  it("does not represent the same target twice inside one attention episode", () => {
+    const state = createAgent({ name: "Jenny", description: "Test", mode: "agent", handle: "@jenny_ai", accent: "#D68754" });
+    const presenceId = state.presence!.id;
+    state.mirrorObjects.unshift({ id: "mirror_episode_target", bridgeId: "native:test", presenceId, channelId: "x", externalRef: { type: "x.post", id: "episode-target" }, objectType: "post", author: { displayName: "Someone" }, content: { text: "Hello" }, visibility: "public", shareability: "presence-only", observedAt: new Date().toISOString() });
+    state.socialDecisions.unshift({ id: "decision_episode_target", agentId: state.agent!.id, presenceId, focalMirrorObjectIds: ["mirror_episode_target"], origin: { kind: "inbound_social", refId: "episode-target" }, decision: "reply", summary: "One reply is enough.", influences: [], confidence: "medium", attentionEpisodeId: "episode_one", createdAt: new Date().toISOString() });
+
+    expect(hasEpisodeRepresentation(state, presenceId, "episode-target", "episode_one")).toBe(true);
+    expect(hasEpisodeRepresentation(state, presenceId, "episode-target", "episode_two")).toBe(false);
+  });
+
   it("evaluates autonomous deliberation invariants when only world stimuli are supplied", async () => {
     // 1. Setup Presence with auto execution enabled
     let state = createAgent({

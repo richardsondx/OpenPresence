@@ -19,11 +19,13 @@ import { attentionRequestFromWake, attentionRunAcceptsSignal, mergeAttentionRequ
 import { settleAttentionResponsibility } from "./attention-responsibility";
 import { bridgeExecutionStatus } from "./bridge-contract";
 import { scheduledAssignmentIsDue } from "./runtime";
+import { assignmentRunBlocksNewWork, isAutonomousPreWriteDeliveryFailure, reconcileLiveAssignmentRuns } from "./live-assignment-run";
 import type {
   JsonValue,
   Execution,
   OpenPresenceState,
   OperationalRun,
+  Presence,
   ScheduledWake,
   ScheduledWakeKind,
 } from "./types";
@@ -99,13 +101,26 @@ export function dueLiveAssignmentsWithoutWorkers(state: OpenPresenceState, now =
   return state.assignments.filter((assignment) => {
     const presence = state.presences.find((item) => item.id === assignment.presenceId);
     if (!presence || presence.status !== "live" || assignment.environment === "sandbox") return false;
-    if (!["accepted", "planning", "active", "working", "awaiting_execution"].includes(assignment.status)) return false;
+    const pursuit = (state.assignmentPursuitWindows ?? []).find((window) => window.assignmentId === assignment.id && window.presenceId === assignment.presenceId && window.status === "active");
+    const pursuitDue = Boolean(pursuit
+      && new Date(pursuit.startsAt).getTime() <= now.getTime()
+      && new Date(pursuit.deadlineAt).getTime() > now.getTime()
+      && (!pursuit.nextRunAt || new Date(pursuit.nextRunAt).getTime() <= now.getTime()));
+    // A temporary distribution push is its own execution window. The parent
+    // Assignment may already have satisfied its ordinary daily deliverable,
+    // and its bounded retry budget must not silence the explicitly requested
+    // push. Keep operator-blocked/cancelled work excluded; only the normal
+    // completed projection is reopened by a live pursuit.
+    const pursuitMayContinue = pursuitDue && ["accepted", "planning", "active", "working", "awaiting_execution", "completed", "completed_with_adaptation"].includes(assignment.status);
+    if (!pursuitMayContinue && !["accepted", "planning", "active", "working", "awaiting_execution"].includes(assignment.status)) return false;
     const work = assignment.work;
     const quietBudgetExhausted = Boolean(work?.maxAttempts && work.attempts >= work.maxAttempts && ["action_no_op", "candidate_rejected"].includes(assignment.lastOutcome?.class ?? ""));
-    if (quietBudgetExhausted || work?.maxAttempts && work.attempts >= work.maxAttempts) return false;
-    const isDue = Boolean(assignment.nextDueAt && new Date(assignment.nextDueAt).getTime() <= now.getTime()) || scheduledAssignmentIsDue(assignment, now);
+    if (!pursuitDue && (quietBudgetExhausted || work?.maxAttempts && work.attempts >= work.maxAttempts)) return false;
+    const isDue = pursuitDue || Boolean(assignment.nextDueAt && new Date(assignment.nextDueAt).getTime() <= now.getTime()) || scheduledAssignmentIsDue(assignment, now);
     if (!isDue) return false;
-    return !(state.assignmentRuns ?? []).some((run) => run.assignmentId === assignment.id && ["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"].includes(run.status));
+    return !(state.assignmentRuns ?? []).some((run) => run.assignmentId === assignment.id
+      && ["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"].includes(run.status)
+      && assignmentRunBlocksNewWork(state, run));
   });
 }
 
@@ -123,17 +138,23 @@ export function dispatchDueAssignmentWorkers(state: OpenPresenceState, now = new
     if (!assignment.presenceId || assignmentDispatchesInFlight.has(assignment.id)) continue;
     assignmentDispatchesInFlight.add(assignment.id);
     dispatched += 1;
+    const controller = new AbortController();
+    const timeout = setTimeout(() => controller.abort(), 10_000);
     setImmediate(() => {
       void fetch(`${origin}/api/state`, {
         method: "POST",
         headers: { "content-type": "application/json", "x-openpresence-internal-dispatch": "assignment" },
         body: JSON.stringify({ type: "runLiveAssignment", assignmentId: assignment.id, presenceId: assignment.presenceId }),
+        signal: controller.signal,
       }).then(async (response) => {
         if (!response.ok) throw new Error(`Assignment worker dispatch returned HTTP ${response.status}.`);
         await response.body?.cancel();
       }).catch(() => {
         // nextDueAt remains durable; the next bounded sweep retries safely.
-      }).finally(() => assignmentDispatchesInFlight.delete(assignment.id));
+      }).finally(() => {
+        clearTimeout(timeout);
+        assignmentDispatchesInFlight.delete(assignment.id);
+      });
     });
   }
   return dispatched;
@@ -160,8 +181,9 @@ export function repairMissingOperatorNudgeWakes(state: OpenPresenceState, now = 
 /**
  * Close a Bridge action that cannot make progress because its adapter stopped
  * checking in. An unclaimed action must never hold an Attention run forever;
- * this records a truthful terminal failure and leaves the operator a durable
- * reason to reconnect/retry the connector.
+ * this records a truthful terminal failure. Assignment reconciliation then
+ * decides whether the bounded attempt can be closed autonomously or must
+ * remain operator-visible because delivery may have crossed the write boundary.
  */
 export function closeStaleBridgeExecutions(source: OpenPresenceState, now = new Date(), claimWindowMs = 120_000): number {
   const nowMs = now.getTime();
@@ -401,6 +423,51 @@ export function scheduleRecoveryCooldownWake(
   return scheduleWake("recovery_cooldown", wakeAt, presenceId, targetId, payload);
 }
 
+const verificationRunStates = new Set<OperationalRun["state"]>(["queued", "running", "waiting", "recovering", "reconciling"]);
+
+/**
+ * Repair verification responsibility after a server or browser restart. The
+ * browser's bounded retry loop is only a delivery hint; the server must retain
+ * a durable read-only path for executions that are still ambiguous.
+ */
+export function repairPendingBridgeVerificationWakes(state: OpenPresenceState, now = new Date()): number {
+  let repaired = 0;
+  for (const execution of state.executions ?? []) {
+    if (execution.connector !== "bridge" || execution.status !== "verification-pending") continue;
+    const attentionRunId = execution.runId ?? (execution.attentionEpisodeId
+      ? listOperationalRuns(execution.presenceId).find((run) => run.kind === "attention" && run.attentionEpisodeId === execution.attentionEpisodeId)?.id
+      : undefined);
+    const attentionRun = attentionRunId ? getOperationalRun(attentionRunId) : undefined;
+    if (attentionRun?.kind === "attention" && attentionRun.attentionEpisodeId && attentionRun.state === "waiting" && attentionRun.stage !== "verifying") {
+      attentionRun.stage = "verifying";
+      attentionRun.lastProgressAt = now.toISOString();
+      upsertOperationalRun(attentionRun);
+    }
+    if (execution.failure?.retryable === false) continue;
+    const wakeId = `wake_verification_${execution.id}`;
+    const existingWake = listScheduledWakes(execution.presenceId).find((wake) => wake.id === wakeId && wake.state === "pending");
+    if (existingWake) continue;
+    const verifierRun = listOperationalRuns(execution.presenceId).find((run) => run.kind === "verification" && run.executionId === execution.id && verificationRunStates.has(run.state));
+    // An active verifier owns its next wake. A waiting verifier without one is
+    // exactly the restart gap this repair is meant to close.
+    if (verifierRun && ["queued", "running", "recovering", "reconciling"].includes(verifierRun.state)) continue;
+    const wakeAt = verifierRun?.nextWakeAt ?? new Date(now.getTime() + 30_000).toISOString();
+    upsertScheduledWake({
+      id: wakeId,
+      presenceId: execution.presenceId,
+      wakeAt,
+      kind: "verification",
+      targetId: execution.id,
+      payload: { executionId: execution.id },
+      state: "pending",
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    });
+    repaired += 1;
+  }
+  return repaired;
+}
+
 // ============================================================================
 // Temporal Sweep & Recovery Loop
 // ============================================================================
@@ -419,6 +486,10 @@ export interface SweepResult {
   staleRunsDetected: OperationalRun[];
   dispatchedWakes: ScheduledWake[];
   timestamp: string;
+}
+
+export function isLiveTemporalPresence(presence: Pick<Presence, "status" | "environment">) {
+  return presence.status === "live" && presence.environment !== "sandbox";
 }
 
 export function runOperationalSweep(now = new Date()): SweepResult {
@@ -445,18 +516,28 @@ export function runOperationalSweep(now = new Date()): SweepResult {
     const formedAt = new Date(execution.updatedAt ?? execution.createdAt).getTime();
     return Number.isFinite(formedAt) && now.getTime() - formedAt >= 120_000;
   });
-  const state = hasExpiredQueuedExecution || hasStaleBridgeExecution ? readState() : stateView;
+  const hasAutonomousPreWriteFailure = (stateView.assignmentRuns ?? []).some((run) => {
+    const execution = (stateView.executions ?? []).find((item) => item.assignmentId === run.assignmentId && item.presenceId === run.presenceId && (item.runId === run.id || (!item.runId && item.createdAt >= (run.startedAt ?? run.createdAt))));
+    return Boolean(execution && isAutonomousPreWriteDeliveryFailure(execution));
+  });
+  const state = hasExpiredQueuedExecution || hasStaleBridgeExecution || hasAutonomousPreWriteFailure ? readState() : stateView;
   // A disconnected Bridge cannot perform claim-time expiry. Close stale
   // pre-dispatch intents here so the queue has a bounded lifetime and never
   // presents an undeliverable action as permanently in flight.
   const expiredQueuedExecutions = hasExpiredQueuedExecution ? expireQueuedDeliveryWindows(state, now) : 0;
   const staleBridgeExecutions = hasStaleBridgeExecution ? closeStaleBridgeExecutions(state, now) : 0;
-  if (expiredQueuedExecutions > 0 || staleBridgeExecutions > 0) {
+  if (hasAutonomousPreWriteFailure || expiredQueuedExecutions > 0 || staleBridgeExecutions > 0) {
+    reconcileLiveAssignmentRuns(state, now.getTime());
     writeState(state, { advanceWorkspaceRevision: false });
   }
+  repairPendingBridgeVerificationWakes(state, now);
   dispatchDueAssignmentWorkers(state, now);
   repairMissingOperatorNudgeWakes(state, now);
-  for (const presence of state.presences.filter((item) => item.status === "live")) {
+  // Sandbox Presences are advanced by Playground's deterministic clock. They
+  // must never enter the live temporal loop: a sandbox has no live channel
+  // reader, so treating it as due here creates a no-op attention run on every
+  // sweep and can starve the local runtime with repeated snapshot writes.
+  for (const presence of state.presences.filter(isLiveTemporalPresence)) {
     const nextEligibleAt = presence.selfDirectedAttention?.nextEligibleAt;
     const hasPendingAttentionWake = listScheduledWakes(presence.id).some((wake) => wake.state === "pending" && (wake.kind === "attention" || wake.kind === "self_directed_discovery"));
     const hasAttentionRun = listOperationalRuns(presence.id, ["queued", "running", "recovering", "delivery_uncertain", "reconciling"])
@@ -489,6 +570,32 @@ export function runOperationalSweep(now = new Date()): SweepResult {
   for (const wake of dueWakes) {
     dispatchedWakes.push(wake);
 
+    if (wake.kind === "verification" && wake.targetId) {
+      const execution = state.executions.find((item) => item.id === wake.targetId && item.status === "verification-pending");
+      if (!execution || execution.failure?.retryable === false) continue;
+      const existingVerifier = listOperationalRuns(execution.presenceId).find((run) => run.kind === "verification" && run.executionId === execution.id && verificationRunStates.has(run.state));
+      if (existingVerifier) {
+        if (existingVerifier.state === "waiting") {
+          existingVerifier.state = "queued";
+          existingVerifier.stage = "woken_from_verification";
+          existingVerifier.lastProgressAt = nowIso;
+          delete existingVerifier.nextWakeAt;
+          upsertOperationalRun(existingVerifier);
+        }
+        dispatchAutonomyWorker(existingVerifier.id);
+      } else {
+        const { run } = queueAutonomyRun(execution.presenceId, "verification", {
+          runId: `op_run_verification_${execution.id}`,
+          executionId: execution.id,
+          stage: "verifying",
+          sourceRef: wake.id,
+          metadata: { source: "verification_wake" },
+        });
+        dispatchAutonomyWorker(run.id);
+      }
+      continue;
+    }
+
     // If wake is an autonomous observation or attention wake
     if (wake.kind === "observation" || wake.kind === "attention" || wake.kind === "self_directed_discovery") {
       const presenceId = wake.presenceId ?? "global";
@@ -505,10 +612,6 @@ export function runOperationalSweep(now = new Date()): SweepResult {
       // it as a worker that can consume a new attention signal.
       const existingRun = listOperationalRuns(presenceId).find((run) => run.kind === "attention" && (
         ["queued", "running", "recovering", "delivery_uncertain", "reconciling"].includes(run.state)
-        // Delivery/verification is still part of the prior attention pass.
-        // Keep the next wake durable instead of starting a second cognition
-        // pass that can re-select the same WatchSignal.
-        || (run.state === "waiting" && ["delivering", "verifying"].includes(run.stage))
       ));
       if (existingRun) {
         if (attentionRunAcceptsSignal(existingRun)) {

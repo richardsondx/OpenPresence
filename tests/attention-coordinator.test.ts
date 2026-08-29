@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { requestAttention } from "../lib/attention-coordinator";
 import { settleAttentionResponsibility } from "../lib/attention-responsibility";
-import { claimDueScheduledWakes, listScheduledWakes, upsertOperationalRun } from "../lib/db";
+import { claimDueScheduledWakes, listOperationalRuns, listScheduledWakes, upsertOperationalRun } from "../lib/db";
 import { initialState } from "../lib/runtime";
+import { runOperationalSweep } from "../lib/temporal";
 import type { AttentionEpisode, Execution, OperationalRun } from "../lib/types";
 
 const now = () => new Date().toISOString();
@@ -67,6 +68,18 @@ describe("durable Attention coordinator", () => {
     const receipt = requestAttention(presenceId, "operator_nudge");
     expect(receipt.coalesced).toBe(false);
     expect(receipt.wake?.state).toBe("pending");
+  });
+
+  it("dispatches a due attention wake while an older delivery remains verification-pending", () => {
+    const presenceId = `presence_waiting_verification_${Date.now()}_${Math.random()}`;
+    upsertOperationalRun(attentionRun(presenceId, { state: "waiting", stage: "verifying" }));
+    requestAttention(presenceId, "inbound_event", "2020-01-01T00:00:00.000Z", "observe_inbound");
+
+    runOperationalSweep(new Date());
+
+    const runs = listOperationalRuns(presenceId).filter((run) => run.kind === "attention");
+    expect(runs.some((run) => run.state === "waiting" && run.stage === "verifying")).toBe(true);
+    expect(runs.some((run) => run.id !== `run_${presenceId}` && run.state === "queued" && run.attention?.triggers.includes("inbound_event"))).toBe(true);
   });
 });
 

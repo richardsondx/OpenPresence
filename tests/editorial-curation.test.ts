@@ -11,6 +11,7 @@ import {
   runCanonicalEditorialDiscovery,
   seedDefaultEditorialReferences,
   synthesizeEditorialCalibration,
+  normalizeCurationSources,
 } from "@/lib/editorial-curation";
 import type {
   EditorialFeedbackEvent,
@@ -40,6 +41,9 @@ describe("Editorial Curation Architecture & Lineage", () => {
       boundaries: ["no ungrounded speculation", "ground claims in data"],
     },
     connectionMode: "sandbox",
+    curationSources: [
+      { id: "custom_macro", name: "My Macro Sources", kind: "macro_primary", enabled: true, urlOrEndpoint: "https://fred.stlouisfed.org" },
+    ],
   };
 
   function createTestState(): OpenPresenceState {
@@ -203,28 +207,24 @@ describe("Editorial Curation Architecture & Lineage", () => {
     expect(testResult.regressions.length).toBe(0);
   });
 
-  it("dynamically generates domain-appropriate default curation sources based on presence brief", () => {
-    const macroSources = getDefaultCurationSources({
-      purpose: "Macro trends and fiscal policies",
-      audience: "Investors",
-      primaryTerritory: ["macroeconomics", "markets", "interest rates"],
-      adjacentTerritory: ["equities"],
-      boundaries: [],
-    });
-    expect(macroSources.find((s) => s.id === "fred")?.enabled).toBe(true);
-    expect(macroSources.find((s) => s.id === "treasury")?.enabled).toBe(true);
-    expect(macroSources.find((s) => s.id === "github_tech")?.enabled).toBe(false);
+  it("does not create defaults and removes only legacy seeded source cards", () => {
+    expect(getDefaultCurationSources()).toEqual([]);
+    const custom = { id: "custom_fred", name: "My FRED feed", kind: "macro_primary" as const, enabled: true };
+    expect(normalizeCurationSources([
+      { id: "fred", name: "FRED / Macro Data", kind: "macro_primary", enabled: false },
+      { id: "web_discovery", name: "Web & Primary Domain Search", kind: "web_discovery", enabled: true },
+      custom,
+    ])).toEqual([custom]);
+  });
 
-    const techSources = getDefaultCurationSources({
-      purpose: "Deep tech and open source AI models",
-      audience: "Software engineers and researchers",
-      primaryTerritory: ["software", "ai models", "code benchmarks"],
-      adjacentTerritory: ["hardware"],
-      boundaries: [],
+  it("runs discovery through enabled custom sources", async () => {
+    const state = createTestState();
+    const result = await runCanonicalEditorialDiscovery(state, {
+      presenceId: dummyPresence.id,
+      maxCandidates: 1,
     });
-    expect(techSources.find((s) => s.id === "github_tech")?.enabled).toBe(true);
-    expect(techSources.find((s) => s.id === "arxiv")?.enabled).toBe(true);
-    expect(techSources.find((s) => s.id === "treasury")?.enabled).toBe(false);
+    expect(result.leads[0]?.providerId).toBe("custom_macro");
+    expect(result.leads[0]?.sourceUrl).toBe("https://fred.stlouisfed.org");
   });
 
   it("discovers domain-specific leads for tech/AI presences when tech sources are configured", async () => {
@@ -268,4 +268,3 @@ describe("Editorial Curation Architecture & Lineage", () => {
     expect(result.opportunities.length).toBeGreaterThan(0);
   });
 });
-

@@ -6,6 +6,36 @@ import { readState, writeState } from "../lib/db";
 afterEach(() => vi.unstubAllEnvs());
 
 describe("Bridge world-observation authorship", () => {
+  it("keeps Chrome-observed quote media attached to the quoted author", () => {
+    const state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    state.presence!.environment = "live";
+    state.presence!.connectionMode = "bridge";
+    state.presences = state.presences.map((presence) => presence.id === state.presence!.id ? { ...presence, environment: "live", connectionMode: "bridge" } : presence);
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });
+    writeState(bridgeResult.state);
+    const bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge?.id)!;
+
+    ingestEvents(bridge, { events: [{
+      sourceEventId: "quoted-post-with-image",
+      event: "created",
+      object: {
+        externalRef: { type: "x.post", id: "quoted-post" },
+        objectType: "post",
+        language: "en",
+        author: { displayName: "Edward", handle: "@edward40e" },
+        content: { text: "The project and its attached demo." },
+        media: [{ sourceUrl: "https://pbs.twimg.com/media/demo.jpg", kind: "image", altText: "Project demo" }],
+        visibility: "public",
+        shareability: "presence-only",
+      },
+    }] });
+
+    const persisted = readState();
+    const quoted = persisted.mirrorObjects.find((item) => item.externalRef.id === "quoted-post")!;
+    const asset = persisted.assets.find((item) => item.id === quoted.assetRefs?.[0]?.assetId);
+    expect(asset).toMatchObject({ provenance: { author: "@edward40e", sourcePageUrl: "https://x.com/edward40e/status/quoted-post" } });
+  });
+
   it("keeps an observed external X post eligible for the Agent's attention", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("OPENPRESENCE_TEST_MODE", "0");

@@ -195,6 +195,38 @@ async function probeAndReportIdentity(session, tabId = session.tabId, claimAfter
   return username;
 }
 
+async function findExpectedXTab(presence, excludeTabId) {
+  const expected = String(presence?.handle || "").replace(/^@/, "").trim().toLowerCase();
+  if (!expected) return undefined;
+  const tabs = await chrome.tabs.query({ url: ["https://x.com/*", "https://*.x.com/*"] }).catch(() => []);
+  const candidates = tabs
+    .filter((tab) => tab?.id && tab.id !== excludeTabId && isXTab(tab))
+    .sort((left, right) => Number(Boolean(right.active)) - Number(Boolean(left.active)));
+  for (const tab of candidates) {
+    const username = await probeVisibleXAccount(tab.id);
+    if (username === expected) return { tab, username };
+  }
+  return undefined;
+}
+
+async function adoptExpectedXTab(session) {
+  const replacement = await findExpectedXTab(session.presence, session.tabId);
+  if (!replacement) return false;
+  const previousTabId = session.tabId;
+  const previousTabOwned = session.tabOwned !== false;
+  session.tabId = replacement.tab.id;
+  session.windowId = replacement.tab.windowId;
+  session.groupId = undefined;
+  session.tabOwned = false;
+  await persistSessions();
+  await sendSessionContext(session);
+  const verified = await reportIdentity(session, replacement.username, true);
+  if (previousTabOwned && previousTabId && previousTabId !== replacement.tab.id) {
+    await chrome.tabs.remove(previousTabId).catch(() => {});
+  }
+  return verified?.identity?.status === "verified";
+}
+
 async function updateBadge() {
   const count = sessions.size;
   await chrome.action.setBadgeText({ text: count ? String(count) : "" });
@@ -275,10 +307,6 @@ async function requestMetrics(session) {
 }
 
 async function reportIdentity(session, username, claimAfterVerification = true) {
-  // X can briefly expose neither the account switcher nor the profile link
-  // while its SPA is navigating. Do not overwrite a previously verified
-  // identity with an empty value during that loading window.
-  if ((typeof username !== "string" || !username.trim()) && session.lastIdentityStatus === "verified") return undefined;
   try {
     const result = await bridgeRequest(session, "/api/bridge/v1/identity", { method: "POST", body: JSON.stringify({ executorId: session.executorId, username }) });
     session.lastIdentityStatus = result.identity?.status;
@@ -356,6 +384,12 @@ async function startSession(presenceId) {
     const current = sessions.get(presenceId);
     const connected = await heartbeat(current);
     if (connected) {
+      // A persisted Bridge may still point at an old X tab after the
+      // operator has signed into the expected account in another open tab.
+      // Repair the binding only after positively verifying that tab's account.
+      // This keeps the fail-closed write boundary while making the explicit
+      // “Open controlled Chrome” repair action actually recover the session.
+      await adoptExpectedXTab(current);
       if (current.windowId) await chrome.windows.update(current.windowId, { focused: true });
       await sendSessionContext(current);
       sendSessionStatus(current);
@@ -373,12 +407,15 @@ async function startSession(presenceId) {
   const connected = await connect.json().catch(() => ({}));
   if (!connect.ok) throw new Error(connected.error || "OpenPresence could not prepare the Chrome bridge.");
 
-  const window = await chrome.windows.create({ url: channelHome(presence), focused: true, type: "normal" });
-  const tab = window.tabs?.[0];
+  const existing = await findExpectedXTab(presence);
+  const window = existing
+    ? await chrome.windows.update(existing.tab.windowId, { focused: true }).then(() => ({ id: existing.tab.windowId }))
+    : await chrome.windows.create({ url: channelHome(presence), focused: true, type: "normal" });
+  const tab = existing?.tab || window.tabs?.[0];
   if (!tab?.id) throw new Error("Chrome did not return a controlled tab.");
-  const groupId = await chrome.tabs.group({ tabIds: [tab.id] });
-  await chrome.tabGroups.update(groupId, { title: `OpenPresence · ${presence.name} · ${presence.channel}`, color: groupColor(presence.accent) });
-  const session = { presence, bridgeId: connected.bridgeId, bridgeKey: connected.bridgeKey, executorId, windowId: window.id, tabId: tab.id, groupId };
+  const groupId = existing ? undefined : await chrome.tabs.group({ tabIds: [tab.id] });
+  if (groupId) await chrome.tabGroups.update(groupId, { title: `OpenPresence · ${presence.name} · ${presence.channel}`, color: groupColor(presence.accent) });
+  const session = { presence, bridgeId: connected.bridgeId, bridgeKey: connected.bridgeKey, executorId, windowId: tab.windowId || window.id, tabId: tab.id, groupId, tabOwned: !existing };
   sessions.set(presenceId, session);
   await persistSessions();
   // The tab can finish loading before the session is inserted into `sessions`,
@@ -428,7 +465,9 @@ async function stopSession(presenceId) {
   }
   sessions.delete(presenceId);
   await persistSessions();
-  try { await chrome.tabs.remove(session.tabId); } catch { /* The user may have closed it already. */ }
+  if (session.tabOwned !== false) {
+    try { await chrome.tabs.remove(session.tabId); } catch { /* The user may have closed it already. */ }
+  }
   await updateBadge();
   sendStatus({ state: "stopped", presenceId });
 }
@@ -841,10 +880,16 @@ chrome.tabs.onUpdated.addListener((tabId, changeInfo) => {
     const session = [...sessions.values()].find((item) => item.tabId === tabId
       || (item.activeExecutionId && item.windowId === tab.windowId));
     if (!session) return;
-    if (session.activeExecutionId && session.activeExecution?.id === session.activeExecutionId && tabId !== session.tabId) {
+    const activeTargetId = session.activeExecution?.target?.id;
+    const isExpectedTargetPage = Boolean(activeTargetId && typeof tab.url === "string" && new RegExp(`/status/${String(activeTargetId).replace(/[.*+?^${}()|[\]\\]/g, "\\$&")}(?:[/?#]|$)`).test(tab.url));
+    const isChildComposer = typeof tab.url === "string"
+      && /\/compose\/post(?:\?|$)/.test(tab.url)
+      && tab.openerTabId === session.tabId;
+    if (session.activeExecutionId && session.activeExecution?.id === session.activeExecutionId && tabId !== session.tabId && (isExpectedTargetPage || isChildComposer)) {
       // Rebind to the newly-created X composer and deliver the same claimed
-      // execution. The content script will finish the approved action and
-      // report the result through the normal acknowledgement path.
+      // execution only when the new tab is provably the approved target or a
+      // composer opened by the controlled target tab. Unrelated X tabs in the
+      // same window must never inherit a live public action.
       session.tabId = tabId;
       void persistSessions();
       sendSessionContext(session);

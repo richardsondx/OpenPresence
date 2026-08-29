@@ -126,6 +126,16 @@ export function classifyFailureRootCause(
   }
 
   // Duplicate content
+  if (/duplicate public outcome|multiple verified public (?:replies|actions)|duplicate delivery detected/i.test(lower)) {
+    return {
+      rootCauseKey: "runtime.duplicate_public_outcome",
+      safeSummary: "Multiple public actions were observed from this Presence for the same target. Delivery to that target is quarantined; review the public thread and channel standing before resuming.",
+      retryable: false,
+      requiresOperator: true,
+      requiresAuth: false,
+    };
+  }
+
   if (/duplicate content|duplicate.*tweet|already said that/i.test(lower)) {
     return {
       rootCauseKey: `${dependency}.duplicate_content`,
@@ -344,6 +354,38 @@ export function recordOperationalSuccess(
   }
 
   return { health, resolvedIncidents };
+}
+
+/**
+ * Resolve one operator-visible incident after an explicit, successful
+ * recheck. This is intentionally narrower than recordOperationalSuccess:
+ * provider checks can prove the requested incident is healthy without
+ * hiding an unrelated incident for the same Presence.
+ */
+export function resolveOperationalIncident(incidentId: string): RecoveryIncident | undefined {
+  const incident = getRecoveryIncident(incidentId);
+  if (!incident || incident.state === "resolved") return incident;
+
+  const nowIso = new Date().toISOString();
+  incident.state = "resolved";
+  incident.resolvedAt = nowIso;
+  incident.updatedAt = nowIso;
+  incident.operatorActionRequired = false;
+  delete incident.nextAttemptAt;
+  upsertRecoveryIncident(incident);
+
+  const dependencyKind = (incident.dependencyId?.replace(/^dh_/, "").split("_")[0] ?? "runtime") as DependencyHealthKind;
+  const health = getDependencyHealth(dependencyKind, incident.presenceId);
+  if (health?.currentIncidentId === incident.id) {
+    health.state = "healthy";
+    health.consecutiveFailures = 0;
+    health.lastHealthyAt = nowIso;
+    delete health.currentIncidentId;
+    delete health.circuitUntil;
+    health.updatedAt = nowIso;
+    upsertDependencyHealth(health);
+  }
+  return incident;
 }
 
 export function logRecoveryAttempt(input: {

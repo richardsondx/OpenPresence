@@ -5,7 +5,7 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { sql } from "drizzle-orm";
 import { assertAssignmentPersistenceInvariant, initialState, normalizeState, preflightAssignment, stateForAgent, stateForContext } from "./runtime";
-import type { AgentWorkspaceSnapshot, AttentionScope, AttentionTrigger, Bridge, BridgeAdapterStatus, BrowserBody, DependencyHealth, DependencyHealthKind, DependencyHealthState, JsonValue, MirrorEvent, OpenPresenceState, OperationalRun, OperationalRunState, ProcessHeartbeat, RecoveryAttempt, RecoveryIncident, RecoveryIncidentState, ScheduledWake } from "./types";
+import type { AgentWorkspaceSnapshot, AttentionScope, AttentionTrigger, Bridge, BridgeAdapterStatus, BrowserBody, DependencyHealth, DependencyHealthKind, DependencyHealthState, Execution, JsonValue, MirrorEvent, OpenPresenceState, OperationalRun, OperationalRunState, ProcessHeartbeat, RecoveryAttempt, RecoveryIncident, RecoveryIncidentState, ScheduledWake } from "./types";
 
 const dataDir = path.join(process.cwd(), "data");
 fs.mkdirSync(dataDir, { recursive: true });
@@ -175,10 +175,12 @@ sqlite.exec("CREATE TABLE IF NOT EXISTS bridge_health (bridge_id TEXT PRIMARY KE
 // the monolithic workspace so an older cognition write cannot erase a newer
 // verified account binding.
 sqlite.exec("CREATE TABLE IF NOT EXISTS bridge_identity (bridge_id TEXT PRIMARY KEY, executor_id TEXT NOT NULL, username TEXT, status TEXT NOT NULL, message TEXT, observed_at TEXT NOT NULL, updated_at TEXT NOT NULL)");
+sqlite.exec("CREATE TABLE IF NOT EXISTS bridge_executor_identity (bridge_id TEXT NOT NULL, executor_id TEXT NOT NULL, username TEXT, status TEXT NOT NULL, message TEXT, observed_at TEXT NOT NULL, updated_at TEXT NOT NULL, PRIMARY KEY (bridge_id, executor_id))");
+sqlite.exec("INSERT OR IGNORE INTO bridge_executor_identity (bridge_id, executor_id, username, status, message, observed_at, updated_at) SELECT bridge_id, executor_id, username, status, message, observed_at, updated_at FROM bridge_identity");
 sqlite.exec("INSERT INTO agent_workspace_revisions (agent_id, revision, updated_at) SELECT agent_id, 0, updated_at FROM agent_workspaces WHERE agent_id NOT IN (SELECT agent_id FROM agent_workspace_revisions)");
 const normalizedTables = [
-  "agents", "agent_files", "provider_connections", "asset_provider_connections", "agent_model_profiles", "agent_tool_bindings", "presences", "execution_envelopes", "conversations", "presence_chat_sessions", "messages", "change_sets", "standing_intents", "publishing_plans", "social_intents", "executions", "outcomes", "publications", "asset_usages", "source_evidence", "claim_grounding", "library_sources", "assets", "assignment_runs", "skills", "agent_skills", "content_drops", "channel_definitions", "native_channel_connections", "bridges", "mirror_objects", "mirror_events", "bridge_sync", "conversation_episodes", "assignment_contributions", "people", "person_identities", "relationships", "relationship_facts", "relationship_open_loops", "recommendation_records", "introduction_records", "scenarios", "scenario_versions", "scenario_runs", "scenario_run_provenance", "scenario_evaluations", "attention_episodes",
-  "operational_runs", "scheduled_wakes", "dependency_health", "recovery_incidents", "recovery_attempts", "browser_bodies",
+  "agents", "agent_files", "provider_connections", "asset_provider_connections", "agent_model_profiles", "agent_tool_bindings", "presences", "execution_envelopes", "conversations", "presence_chat_sessions", "messages", "change_sets", "standing_intents", "publishing_plans", "social_intents", "executions", "outcomes", "publications", "asset_usages", "source_evidence", "claim_grounding", "library_sources", "assets", "asset_collections", "asset_collection_memberships", "asset_metadata_edits", "asset_processing_jobs", "assignment_runs", "skills", "agent_skills", "content_drops", "channel_definitions", "native_channel_connections", "bridges", "mirror_objects", "mirror_events", "bridge_sync", "conversation_episodes", "assignment_contributions", "people", "person_identities", "relationships", "relationship_facts", "relationship_open_loops", "recommendation_records", "introduction_records", "scenarios", "scenario_versions", "scenario_runs", "scenario_run_provenance", "scenario_evaluations", "attention_episodes",
+  "operational_runs", "scheduled_wakes", "dependency_health", "recovery_incidents", "recovery_attempts", "browser_bodies", "people_notes",
 ];
 for (const table of normalizedTables) {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY, agent_id TEXT, parent_id TEXT, payload TEXT NOT NULL, updated_at TEXT NOT NULL)`);
@@ -205,7 +207,146 @@ sqlite.exec("CREATE TABLE IF NOT EXISTS recovery_attempts_log (id TEXT PRIMARY K
 sqlite.exec("CREATE TABLE IF NOT EXISTS process_heartbeats (process_id TEXT PRIMARY KEY, process_type TEXT NOT NULL, last_heartbeat_at TEXT NOT NULL, metadata TEXT)");
 sqlite.exec("CREATE TABLE IF NOT EXISTS body_sessions (presence_id TEXT PRIMARY KEY, mode TEXT NOT NULL, ownership TEXT NOT NULL, state TEXT NOT NULL, expected_identity TEXT, verified_identity TEXT, last_healthy_at TEXT, profile_dir TEXT, updated_at TEXT NOT NULL)");
 
+// This is the external-effect idempotency boundary. Workspace snapshots are
+// intentionally not used as the lock: Native routes, Bridge polling, workers,
+// and hot-reloaded Next bundles can all hold different snapshots while sharing
+// one SQLite database. A targeted public action gets exactly one durable slot,
+// regardless of wording, intent id, run id, connector, or process.
+sqlite.exec(`CREATE TABLE IF NOT EXISTS public_action_delivery_slots (
+  scope_key TEXT PRIMARY KEY,
+  presence_id TEXT NOT NULL,
+  environment TEXT NOT NULL,
+  affordance TEXT NOT NULL,
+  target_type TEXT,
+  target_id TEXT,
+  execution_id TEXT NOT NULL,
+  state TEXT NOT NULL,
+  external_type TEXT,
+  external_id TEXT,
+  reserved_at TEXT NOT NULL,
+  updated_at TEXT NOT NULL
+)`);
+sqlite.exec("CREATE INDEX IF NOT EXISTS public_action_delivery_slots_execution_idx ON public_action_delivery_slots (execution_id)");
+
+export type PublicActionDeliverySlotState = "reserved" | "handed_off" | "uncertain" | "verified";
+export interface PublicActionDeliverySlot {
+  scopeKey: string;
+  presenceId: string;
+  environment: string;
+  affordance: string;
+  targetType?: string;
+  targetId?: string;
+  executionId: string;
+  state: PublicActionDeliverySlotState;
+  externalType?: string;
+  externalId?: string;
+  reservedAt: string;
+  updatedAt: string;
+}
+
+/**
+ * Targeted social actions are unique by target, not by generated wording.
+ * That is the safety invariant X users experience: one Presence may reply to
+ * one post once. Untargeted original posts retain content idempotency through
+ * their existing durable idempotency key.
+ */
+export function publicActionDeliveryScope(execution: Pick<Execution, "presenceId" | "environment" | "affordance" | "target" | "idempotencyKey">) {
+  const environment = execution.environment ?? "live";
+  const target = execution.target;
+  const semanticIdentity = target
+    ? `${execution.presenceId}\u0000${environment}\u0000${execution.affordance}\u0000${target.type}\u0000${target.id}`
+    : `${execution.presenceId}\u0000${environment}\u0000${execution.affordance}\u0000${execution.idempotencyKey}`;
+  return `delivery:v1:${crypto.createHash("sha256").update(semanticIdentity).digest("hex")}`;
+}
+
+function deliverySlotFromRow(row: Record<string, unknown>): PublicActionDeliverySlot {
+  return {
+    scopeKey: String(row.scope_key),
+    presenceId: String(row.presence_id),
+    environment: String(row.environment),
+    affordance: String(row.affordance),
+    targetType: row.target_type ? String(row.target_type) : undefined,
+    targetId: row.target_id ? String(row.target_id) : undefined,
+    executionId: String(row.execution_id),
+    state: String(row.state) as PublicActionDeliverySlotState,
+    externalType: row.external_type ? String(row.external_type) : undefined,
+    externalId: row.external_id ? String(row.external_id) : undefined,
+    reservedAt: String(row.reserved_at),
+    updatedAt: String(row.updated_at),
+  };
+}
+
+function durableExecutionSnapshots(): Execution[] {
+  const rows = sqlite.prepare("SELECT payload FROM app_state WHERE id = 1 UNION ALL SELECT payload FROM agent_workspaces").all() as Array<{ payload?: string }>;
+  const byId = new Map<string, Execution>();
+  for (const row of rows) {
+    if (!row.payload) continue;
+    try {
+      const executions = (JSON.parse(row.payload) as { executions?: Execution[] }).executions ?? [];
+      for (const execution of executions) byId.set(execution.id, execution);
+    } catch { /* A malformed compatibility row is handled by ordinary state loading. */ }
+  }
+  return [...byId.values()];
+}
+
+/** Atomically acquire the only connector handoff allowed for a public act. */
+export function reservePublicActionDelivery(execution: Execution): { acquired: boolean; slot: PublicActionDeliverySlot } {
+  const scopeKey = publicActionDeliveryScope(execution);
+  return sqlite.transaction(() => {
+    let row = sqlite.prepare("SELECT * FROM public_action_delivery_slots WHERE scope_key = ?").get(scopeKey) as Record<string, unknown> | undefined;
+    if (!row) {
+      // Backfill lazily from the canonical snapshot so upgrading an existing
+      // workspace cannot reply again to a target that was already delivered.
+      const represented = durableExecutionSnapshots().find((candidate) => candidate.id !== execution.id
+        && ["claimed", "executing", "verification-pending", "succeeded"].includes(candidate.status)
+        && publicActionDeliveryScope(candidate) === scopeKey);
+      const owner = represented ?? execution;
+      const nowIso = new Date().toISOString();
+      const state: PublicActionDeliverySlotState = represented?.status === "succeeded" ? "verified"
+        : represented ? "uncertain"
+          : "reserved";
+      sqlite.prepare(`INSERT OR IGNORE INTO public_action_delivery_slots
+        (scope_key, presence_id, environment, affordance, target_type, target_id, execution_id, state, external_type, external_id, reserved_at, updated_at)
+        VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)`).run(
+        scopeKey,
+        owner.presenceId,
+        owner.environment ?? "live",
+        owner.affordance,
+        owner.target?.type ?? null,
+        owner.target?.id ?? null,
+        owner.id,
+        state,
+        owner.externalRef?.type ?? null,
+        owner.externalRef?.id ?? null,
+        nowIso,
+        nowIso,
+      );
+      row = sqlite.prepare("SELECT * FROM public_action_delivery_slots WHERE scope_key = ?").get(scopeKey) as Record<string, unknown>;
+    }
+    const slot = deliverySlotFromRow(row);
+    return { acquired: slot.executionId === execution.id, slot };
+  })();
+}
+
+export function updatePublicActionDelivery(executionId: string, state: PublicActionDeliverySlotState, externalRef?: { type: string; id: string }) {
+  const nowIso = new Date().toISOString();
+  sqlite.prepare(`UPDATE public_action_delivery_slots
+    SET state = ?, external_type = COALESCE(?, external_type), external_id = COALESCE(?, external_id), updated_at = ?
+    WHERE execution_id = ?`).run(state, externalRef?.type ?? null, externalRef?.id ?? null, nowIso, executionId);
+}
+
+/** Release only when the connector proves it failed before any public write. */
+export function releasePublicActionDelivery(executionId: string) {
+  sqlite.prepare("DELETE FROM public_action_delivery_slots WHERE execution_id = ? AND state IN ('reserved', 'handed_off')").run(executionId);
+}
+
+export function readPublicActionDeliverySlot(execution: Pick<Execution, "presenceId" | "environment" | "affordance" | "target" | "idempotencyKey">) {
+  const row = sqlite.prepare("SELECT * FROM public_action_delivery_slots WHERE scope_key = ?").get(publicActionDeliveryScope(execution)) as Record<string, unknown> | undefined;
+  return row ? deliverySlotFromRow(row) : undefined;
+}
+
 sqlite.exec("CREATE TABLE IF NOT EXISTS bridge_credentials (bridge_id TEXT PRIMARY KEY, key_hash TEXT NOT NULL, key_prefix TEXT NOT NULL, revoked_at TEXT, updated_at TEXT NOT NULL)");
+sqlite.exec("CREATE TABLE IF NOT EXISTS bridge_executor_credentials (bridge_id TEXT NOT NULL, executor_id TEXT NOT NULL, key_hash TEXT NOT NULL UNIQUE, key_prefix TEXT NOT NULL, revoked_at TEXT, updated_at TEXT NOT NULL, PRIMARY KEY (bridge_id, executor_id))");
 sqlite.exec("CREATE TABLE IF NOT EXISTS channel_credentials (connection_id TEXT PRIMARY KEY, ciphertext TEXT NOT NULL, iv TEXT NOT NULL, auth_tag TEXT NOT NULL, key_version INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL)");
 sqlite.exec("CREATE TABLE IF NOT EXISTS provider_credentials (connection_id TEXT PRIMARY KEY, ciphertext TEXT NOT NULL, iv TEXT NOT NULL, auth_tag TEXT NOT NULL, key_version INTEGER NOT NULL DEFAULT 1, updated_at TEXT NOT NULL)");
 
@@ -238,18 +379,29 @@ function hydrateBridgeCredentials(state: OpenPresenceState): OpenPresenceState {
 const mirrorEventReadWindow = 5_000;
 function hydrateMirrorEvents(state: OpenPresenceState): OpenPresenceState {
   try {
-    const rows = sqlite.prepare("SELECT payload FROM mirror_events ORDER BY rowid ASC LIMIT ?").all(mirrorEventReadWindow) as Array<{ payload?: string }>;
+    // The table is append-only. Reading the oldest window meant the current
+    // observation repeatedly failed to see its prior source event, appended a
+    // new audit row on every poll, and eventually made the dev server spend
+    // most of its time cloning/parsing mirror history. Keep the newest
+    // bounded window while preserving chronological order for consumers.
+    const rows = sqlite.prepare("SELECT payload FROM mirror_events ORDER BY rowid DESC LIMIT ?").all(mirrorEventReadWindow) as Array<{ payload?: string }>;
     const events = rows.flatMap((row) => {
       try { return row.payload ? [JSON.parse(row.payload) as MirrorEvent] : []; } catch { return []; }
-    });
+    }).reverse();
     return events.length ? { ...state, mirrorEvents: events } : state;
   } catch {
     return state;
   }
 }
 
-function readBridgeIdentity(bridgeId: string): Bridge["accountIdentity"] | undefined {
+export function readBridgeIdentity(bridgeId: string): Bridge["accountIdentity"] | undefined {
   const row = sqlite.prepare("SELECT username, status, message, observed_at FROM bridge_identity WHERE bridge_id = ?").get(bridgeId) as { username?: string | null; status: string; message?: string | null; observed_at: string } | undefined;
+  if (!row) return undefined;
+  return { username: row.username ?? undefined, status: row.status as NonNullable<Bridge["accountIdentity"]>["status"], message: row.message ?? undefined, observedAt: row.observed_at };
+}
+
+export function readBridgeIdentityForExecutor(bridgeId: string, executorId: string): Bridge["accountIdentity"] | undefined {
+  const row = sqlite.prepare("SELECT username, status, message, observed_at FROM bridge_executor_identity WHERE bridge_id = ? AND executor_id = ?").get(bridgeId, executorId) as { username?: string | null; status: string; message?: string | null; observed_at: string } | undefined;
   if (!row) return undefined;
   return { username: row.username ?? undefined, status: row.status as NonNullable<Bridge["accountIdentity"]>["status"], message: row.message ?? undefined, observedAt: row.observed_at };
 }
@@ -484,17 +636,30 @@ export function readStateReadToken() {
 }
 
 export function writeBridgeIdentity(input: { bridgeId: string; executorId: string; username?: string; status: NonNullable<Bridge["accountIdentity"]>["status"]; message?: string; observedAt: string }) {
+  sqlite.prepare(`INSERT INTO bridge_executor_identity (bridge_id, executor_id, username, status, message, observed_at, updated_at)
+    VALUES (?, ?, ?, ?, ?, ?, ?)
+    ON CONFLICT(bridge_id, executor_id) DO UPDATE SET username = excluded.username,
+      status = excluded.status, message = excluded.message, observed_at = excluded.observed_at, updated_at = excluded.updated_at`).run(
+    input.bridgeId, input.executorId, input.username ?? null, input.status, input.message ?? null, input.observedAt, input.observedAt,
+  );
+  const cutoff = new Date(new Date(input.observedAt).getTime() - 30 * 60_000).toISOString();
+  const aggregate = sqlite.prepare(`SELECT executor_id, username, status, message, observed_at, updated_at
+    FROM bridge_executor_identity
+    WHERE bridge_id = ?
+    ORDER BY CASE WHEN status = 'verified' AND observed_at >= ? THEN 0 ELSE 1 END, observed_at DESC
+    LIMIT 1`).get(input.bridgeId, cutoff) as { executor_id: string; username?: string | null; status: string; message?: string | null; observed_at: string; updated_at: string };
   sqlite.prepare(`INSERT INTO bridge_identity (bridge_id, executor_id, username, status, message, observed_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
     ON CONFLICT(bridge_id) DO UPDATE SET executor_id = excluded.executor_id, username = excluded.username,
       status = excluded.status, message = excluded.message, observed_at = excluded.observed_at, updated_at = excluded.updated_at`).run(
-    input.bridgeId, input.executorId, input.username ?? null, input.status, input.message ?? null, input.observedAt, input.observedAt,
+    input.bridgeId, aggregate.executor_id, aggregate.username ?? null, aggregate.status, aggregate.message ?? null, aggregate.observed_at, aggregate.updated_at,
   );
   stateCache = undefined;
 }
 
 export function deleteBridgeIdentity(bridgeId: string) {
   sqlite.prepare("DELETE FROM bridge_identity WHERE bridge_id = ?").run(bridgeId);
+  sqlite.prepare("DELETE FROM bridge_executor_identity WHERE bridge_id = ?").run(bridgeId);
   stateCache = undefined;
 }
 
@@ -821,6 +986,10 @@ function entityRows(state: OpenPresenceState): Record<string, { id: string; agen
     claim_grounding: state.claimGrounding.map((item) => ({ id: item.id, parentId: item.publicationId, payload: item })),
     library_sources: state.librarySources.map((item) => ({ id: item.id, agentId: item.agentId, payload: item })),
     assets: state.assets.map((item) => ({ id: item.id, agentId: item.agentId, payload: item })),
+    asset_collections: (state.assetCollections ?? []).map((item) => ({ id: item.id, agentId: item.agentId, payload: item })),
+    asset_collection_memberships: (state.assetCollectionMemberships ?? []).map((item) => ({ id: item.id, agentId: item.agentId, parentId: item.collectionId, payload: item })),
+    asset_metadata_edits: (state.assetMetadataEdits ?? []).map((item) => ({ id: item.id, agentId: item.agentId, parentId: item.assetId, payload: item })),
+    asset_processing_jobs: (state.assetProcessingJobs ?? []).map((item) => ({ id: item.id, agentId: item.agentId, parentId: item.assetId, payload: item })),
     assignment_runs: (state.assignmentRuns ?? []).map((item) => ({ id: item.id, agentId, parentId: item.assignmentId, payload: item })),
     skills: state.skills.map((item) => ({ id: item.id, payload: item })),
     agent_skills: state.agentSkills.map((item) => ({ id: item.id, agentId: item.agentId, payload: item })),
@@ -834,6 +1003,7 @@ function entityRows(state: OpenPresenceState): Record<string, { id: string; agen
     conversation_episodes: state.conversationEpisodes.map((item) => ({ id: item.id, agentId: item.agentId, parentId: item.presenceId, payload: item })),
     assignment_contributions: state.assignmentContributions.map((item) => ({ id: item.id, parentId: item.assignmentId, payload: item })),
     people: state.people.map((item) => ({ id: item.id, agentId, payload: item })),
+    people_notes: (state.peopleNotes ?? []).map((item) => ({ id: item.id, agentId: item.agentId, parentId: item.presenceId, payload: item })),
     person_identities: state.personIdentities.map((item) => ({ id: item.id, agentId, parentId: item.personId, payload: item })),
     relationships: state.relationships.map((item) => ({ id: item.id, agentId: item.agentId, parentId: item.personId, payload: item })),
     relationship_facts: state.relationshipFacts.map((item) => ({ id: item.id, agentId, parentId: item.relationshipId, payload: item })),
@@ -1016,11 +1186,29 @@ function issueBridgeKey(bridgeId: string) {
   sqlite.prepare("INSERT INTO bridge_credentials (bridge_id, key_hash, key_prefix, updated_at) VALUES (?, ?, ?, ?) ON CONFLICT(bridge_id) DO UPDATE SET key_hash = excluded.key_hash, key_prefix = excluded.key_prefix, revoked_at = NULL, updated_at = excluded.updated_at").run(bridgeId, hashBridgeKey(key), key.slice(0, 12), new Date().toISOString());
   return key;
 }
-function revokeBridgeKey(bridgeId: string) { sqlite.prepare("UPDATE bridge_credentials SET revoked_at = ?, updated_at = ? WHERE bridge_id = ?").run(new Date().toISOString(), new Date().toISOString(), bridgeId); }
-export function deleteBridgeCredential(bridgeId: string) { sqlite.prepare("DELETE FROM bridge_credentials WHERE bridge_id = ?").run(bridgeId); }
+export function issueBridgeExecutorKey(bridgeId: string, executorId: string) {
+  const key = `opb_${crypto.randomBytes(32).toString("base64url")}`;
+  sqlite.prepare(`INSERT INTO bridge_executor_credentials (bridge_id, executor_id, key_hash, key_prefix, updated_at)
+    VALUES (?, ?, ?, ?, ?)
+    ON CONFLICT(bridge_id, executor_id) DO UPDATE SET key_hash = excluded.key_hash, key_prefix = excluded.key_prefix, revoked_at = NULL, updated_at = excluded.updated_at`).run(
+    bridgeId, executorId, hashBridgeKey(key), key.slice(0, 12), new Date().toISOString(),
+  );
+  return key;
+}
+function revokeBridgeKey(bridgeId: string) {
+  const at = new Date().toISOString();
+  sqlite.prepare("UPDATE bridge_credentials SET revoked_at = ?, updated_at = ? WHERE bridge_id = ?").run(at, at, bridgeId);
+  sqlite.prepare("UPDATE bridge_executor_credentials SET revoked_at = ?, updated_at = ? WHERE bridge_id = ?").run(at, at, bridgeId);
+}
+export function deleteBridgeCredential(bridgeId: string) {
+  sqlite.prepare("DELETE FROM bridge_credentials WHERE bridge_id = ?").run(bridgeId);
+  sqlite.prepare("DELETE FROM bridge_executor_credentials WHERE bridge_id = ?").run(bridgeId);
+}
 function authenticateBridgeKey(key: string) {
   const row = sqlite.prepare("SELECT bridge_id, key_hash, revoked_at FROM bridge_credentials WHERE key_hash = ?").get(hashBridgeKey(key)) as { bridge_id: string; key_hash: string; revoked_at?: string | null } | undefined;
-  return row && !row.revoked_at ? row.bridge_id : undefined;
+  if (row && !row.revoked_at) return row.bridge_id;
+  const executorRow = sqlite.prepare("SELECT bridge_id, revoked_at FROM bridge_executor_credentials WHERE key_hash = ?").get(hashBridgeKey(key)) as { bridge_id: string; revoked_at?: string | null } | undefined;
+  return executorRow && !executorRow.revoked_at ? executorRow.bridge_id : undefined;
 }
 
 type StoredSecret = Record<string, string | undefined>;

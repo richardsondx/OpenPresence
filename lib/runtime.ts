@@ -1,4 +1,4 @@
-import type { ActionRecord, ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, AgendaHorizon, AgendaItem, AgendaCompilation, AgendaWorkItem, AgendaWatchingItem, Asset, Assignment, AssignmentDelegationPolicy, AssignmentPlan, AssignmentPreflight, AssignmentQuantityMode, AssignmentReadinessCheck, AssignmentRun, AttentionTest, AttentionTestMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, ExplorationBrief, ExplorationFinding, ExplorationSession, ExplorationSessionStatus, FileKind, FileProposal, GhostProfile, GhostRepresentation, JsonValue, LiveEvent, MirrorObject, OpenPresenceState, Operation, OperatorDirective, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, ResourceUsageEvent, RuntimeScope, SandboxAssetInput, SelfDirectedAttentionPolicy, SocialAssetKind, SocialDecision, SocialDecisionConfidence, SocialDecisionKind, SocialIntent, SocialOrigin, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, PublicRequestType, PublicRequestDisposition, PresenceRequestPolicy, DelegationGrant, RelationshipPolicy, RelationshipLearningMode, RelationshipEngagementMode, LanguagePolicy, Scenario, ScenarioStimulus, ScenarioStimulusRequirements, ScenarioVersion, ScenarioRun, ScenarioRunProvenance, ScenarioRunEvaluation, StructuralFinding, PublishingInitiative, PublishingInitiativeProgress, PublishingPlan, PublishingPlanDraft, PublishingPlanWorkEvent, PresenceCapability, PresenceCapabilityManifest, PublicationMetricSnapshot, PresenceAudienceSnapshot, CapabilityTrial } from "./types";
+import type { ActionRecord, ActivitySummary, Agent, AgentFile, AgentModelProfile, AgentToolBinding, AgendaHorizon, AgendaItem, AgendaCompilation, AgendaWorkItem, AgendaWatchingItem, Asset, Assignment, AssignmentDelegationPolicy, AssignmentPlan, AssignmentPreflight, AssignmentQuantityMode, AssignmentReadinessCheck, AssignmentRun, AssignmentPursuitWindow, AssignmentPursuitAction, AssignmentPursuitResourceBudget, AttentionTest, AttentionTestMode, Bridge, CalendarSlot, ChannelDefinition, ChangeSet, ChangeSetOperation, ChannelId, ConnectorCapabilities, CreateAgentInput, CreatePresenceInput, EntityRef, Execution, ExecutionEnvelope, ExplorationBrief, ExplorationFinding, ExplorationSession, ExplorationSessionStatus, FileKind, FileProposal, GhostProfile, GhostRepresentation, JsonValue, LiveEvent, MirrorObject, OpenPresenceState, Operation, OperatorDirective, Outcome, Presence, PresenceBrief, PresenceContext, PresenceConnectionMode, PresenceEnvironment, PresenceQuietHours, Publication, PublicFooting, PublicSelf, PublicDisclosurePosture, PublicTechnicalFact, PublicHistoryItem, ResourceUsageEvent, RuntimeScope, SandboxAssetInput, SelfDirectedAttentionPolicy, SocialAssetKind, SocialDecision, SocialDecisionConfidence, SocialDecisionKind, SocialIntent, SocialOrigin, StandingIntent, SandboxEnvironment, PlaygroundSession, PreferenceEvidence, PreferenceReason, PreferenceReaction, OriginalPostRehearsalAttempt, Watch, WatchKind, PublicRequestType, PublicRequestDisposition, PresenceRequestPolicy, DelegationGrant, RelationshipPolicy, RelationshipLearningMode, RelationshipEngagementMode, LanguagePolicy, Scenario, ScenarioStimulus, ScenarioStimulusRequirements, ScenarioVersion, ScenarioRun, ScenarioRunProvenance, ScenarioRunEvaluation, StructuralFinding, PublishingInitiative, PublishingInitiativeProgress, PublishingPlan, PublishingPlanDraft, PublishingPlanWorkEvent, PresenceCapability, PresenceCapabilityManifest, PublicationMetricSnapshot, PresenceAudienceSnapshot, CapabilityTrial } from "./types";
 import { AGENT_CAPABILITY_DEFINITIONS, CHANNEL_CAPABILITIES, CHANNEL_EXTENSIONS, simulationForChannel } from "./types";
 import { buildScenarioFromPrompt, builtinScenarioDefinitions, repairScenarioStimuli, scenarioFromImport, stableHash, validateScenarioFidelity } from "./scenarios";
 import { DEFAULT_PRESENCE_LANGUAGE, effectiveLanguagePolicy, EMPTY_LANGUAGE_POLICY, languageEligibleForObservation, languagesMatch, normalizeLanguagePolicy, normalizePresenceLanguage, normalizedObservedLanguage, validateLanguage } from "./language-policy";
@@ -8,17 +8,20 @@ import { isTestRuntime } from "./test-runtime";
 import { createRememberedPerson, deriveIdentityHydrationState, evidenceRefFromMirror, factForCorrection, isPlaceholderIdentity, normalizePersonIdentityScopes, relationshipCurationEligible, relationshipForPerson } from "./network-memory";
 import { applyConversationDisposition, conversationDispositionForAction, ensureConversationEpisode, settleConversationClosure, updateConversationEpisodeFromMirror } from "./conversation-episodes";
 import { createPublicExpressionCandidate, PublicationSecurityError, verifyExecutionPermit } from "./publication-security";
-import { formatOneSentencePerLine, formatPublicExpression, publicExpressionLeakageReason } from "./public-expression";
+import { formatOneSentencePerLine, formatPublicExpression, observedSourceEchoReason, publicExpressionLeakageReason, unsupportedLeadingMention } from "./public-expression";
 import { normalizeMirrorObject } from "./mirror-content";
 import { bridgeExecutionStatus, chromeBrowserBridgeCapabilities } from "./bridge-contract";
 import type { RelationshipVisibility } from "./types";
 import { addKnowledgeItem, archiveKnowledgeCollection, archiveKnowledgeDocument, archiveKnowledgeItem, createKnowledgeCollection, createKnowledgeDocument, migrateKnowledgeState, saveKnowledgeDocument, setKnowledgeAccess, setMindFileKnowledgeBinding, setKnowledgeBinding, updateKnowledgeCollection, uploadKnowledgeVersion } from "./knowledge";
+import { applyAssetLibraryOperation, authorizeAssetSelection, normalizeAssetLibraryState } from "./asset-library";
 import { evaluateExecutionReadiness } from "./execution-readiness";
 import { xCreditsExhausted } from "./x-credits";
-import { getDefaultCurationSources, seedDefaultEditorialReferences } from "./editorial-curation";
+import { getDefaultCurationSources, normalizeCurationSources, seedDefaultEditorialReferences } from "./editorial-curation";
 import { isTerminalDuplicateExecution, reconcileLiveAssignmentRuns, settleTerminalDuplicateAssignment } from "./live-assignment-run";
 import { BUILTIN_CONVERSATION_STYLES, DEFAULT_CONVERSATION_STYLE_ID } from "./conversation-styles";
 import { defaultAvatarLook } from "./avatars";
+import { autobiographicalExpressionSafetyReason, retrievePublicSafeAutobiographicalContext } from "./autobiographical-memory";
+import { growthEvidenceIsInPresenceScope, growthPublicationIsInPresenceScope, growthWindowStartAt, presenceGrowthBoundary } from "./growth-scope";
 
 const now = () => new Date().toISOString();
 const id = (prefix: string) => `${prefix}_${Math.random().toString(36).slice(2, 10)}`;
@@ -112,13 +115,28 @@ export function defaultPresenceBrief(agent?: Pick<Agent, "description" | "audien
   };
 }
 
+/**
+ * Keep the Boundaries field about exclusions. Operators often paste a natural
+ * sentence such as "avoid hype, ask genuine questions, and lead with help";
+ * sentence/comma fragments beginning with positive guidance should not become
+ * Keep out chips or negative cognition context. Preserve ambiguous fragments
+ * rather than guessing at their intent.
+ */
+export function normalizePresenceBoundaryValues(values: string[]): string[] {
+  const positiveClause = /^(?:and|or)?\s*(?:ask\s+(?:genuine|real|useful)\b|lead\s+with\b|help\b|support\b|encourage\b|offer\b|be\s+(?:helpful|useful)\b|focus\s+on\b|mention\b.*\bonly\s+when\b)/i;
+  return values
+    .flatMap((value) => value.split(/(?<=[.!?])\s+/))
+    .map((value) => value.trim().replace(/^(?:and|or)\s+/i, "").replace(/[.!?]+$/, "").trim())
+    .filter((value) => value && !positiveClause.test(value));
+}
+
 function normalizePresenceBrief(value: Partial<PresenceBrief> | undefined, fallback: PresenceBrief): PresenceBrief {
   return {
     purpose: value?.purpose?.trim() || fallback.purpose,
     audience: value?.audience?.trim() || fallback.audience,
     primaryTerritory: value?.primaryTerritory?.map((item) => item.trim()).filter(Boolean) ?? fallback.primaryTerritory,
     adjacentTerritory: value?.adjacentTerritory?.map((item) => item.trim()).filter(Boolean) ?? fallback.adjacentTerritory,
-    boundaries: value?.boundaries?.map((item) => item.trim()).filter(Boolean) ?? fallback.boundaries,
+    boundaries: value?.boundaries ? normalizePresenceBoundaryValues(value.boundaries) : fallback.boundaries,
   };
 }
 
@@ -138,7 +156,7 @@ const fileContent = (kind: FileKind, input: CreateAgentInput, presence?: Presenc
 };
 
 export function initialState(): OpenPresenceState {
-  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], operatorConversations: [], operatorNudges: [], agentRequests: [], capabilityChangeEvents: [], events: [], socialDecisions: [], resourceUsageEvents: [], attentionEpisodes: [], calendar: [], assignments: [], growthReviews: [], growthRevisions: [], growthEvidenceSnapshots: [], growthFileVersions: [], audienceSnapshots: [], publicationMetricSnapshots: [], watches: [], watchSignals: [], relationshipPolicies: [], presenceRequestPolicies: [], delegationGrants: [], publicRequests: [], explorations: [], discoveryPlans: [], explorationSessions: [], explorationFindings: [], actions: [], publishingPlans: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], assetProviderConnections: [], toolBindings: [], changeSets: [], standingIntents: [], operatorDirectives: [], socialIntents: [], executions: [], outcomes: [], attentionTests: [], capabilityTrials: [], publications: [], assetUsages: [], sourceEvidence: [], claimGrounding: [], preferenceEvidence: [], originalPostRehearsals: [], librarySources: [], assets: [], perceptions: [], assetResearchSessions: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], conversationEpisodes: [], assignmentContributions: [], people: [], personIdentities: [], relationships: [], relationshipFacts: [], relationshipOpenLoops: [], recommendationRecords: [], introductionRecords: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], scenarios: [], scenarioVersions: [], scenarioRuns: [], scenarioRunProvenance: [], scenarioEvaluations: [], knowledgeDocuments: [], knowledgeVersions: [], knowledgeSegments: [], presenceKnowledgeAccess: [], mindFileKnowledgeBindings: [], knowledgeRetrievalRuns: [], knowledgeCitations: [], knowledgeCollections: [], knowledgeItems: [], presenceKnowledgeBindings: [], conversationStyles: [], operationalRuns: [], scheduledWakes: [], dependencyHealth: [], recoveryIncidents: [], recoveryAttempts: [], browserBodies: [], editorialOpportunities: [], editorialFeedbackEvents: [], editorialReferences: [], sourceAssets: [], mediaPerceptions: [], verificationRecords: [], rightsAssessments: [], editorialDecisions: [], publicationPackages: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
+  return { onboarded: false, agent: null, presence: null, presences: [], activePresenceId: null, files: [], proposals: [], messages: [], conversations: [], activeConversationId: null, presenceChatSessions: [], operatorConversations: [], operatorNudges: [], agentRequests: [], capabilityChangeEvents: [], events: [], socialDecisions: [], autobiographicalEvents: [], autobiographicalReflections: [], resourceUsageEvents: [], attentionEpisodes: [], calendar: [], assignments: [], growthReviews: [], growthRevisions: [], growthEvidenceSnapshots: [], growthFileVersions: [], audienceSnapshots: [], publicationMetricSnapshots: [], watches: [], watchSignals: [], relationshipPolicies: [], relationshipStudies: [], relationshipInsightSets: [], presenceRequestPolicies: [], delegationGrants: [], publicRequests: [], explorations: [], discoveryPlans: [], explorationSessions: [], explorationFindings: [], actions: [], publishingPlans: [], metrics: { qualifiedFollows: 0, conversations: 0, opportunitiesIgnored: 0, audienceHealth: 98 }, modelProfiles: [], providerConnections: [], assetProviderConnections: [], toolBindings: [], changeSets: [], standingIntents: [], operatorDirectives: [], socialIntents: [], executions: [], outcomes: [], attentionTests: [], capabilityTrials: [], publications: [], assetUsages: [], sourceEvidence: [], claimGrounding: [], preferenceEvidence: [], originalPostRehearsals: [], librarySources: [], assets: [], perceptions: [], assetResearchSessions: [], assetCollections: [], assetCollectionMemberships: [], assetMetadataEdits: [], assetProcessingJobs: [], skills: [], agentSkills: [], contentDrops: [], channelDefinitions: builtinChannelDefinitions(), nativeConnections: [], bridges: [], mirrorObjects: [], mirrorEvents: [], bridgeSync: [], conversationEpisodes: [], assignmentContributions: [], people: [], peopleNotes: [], personIdentities: [], relationships: [], relationshipFacts: [], relationshipOpenLoops: [], recommendationRecords: [], introductionRecords: [], sandboxEnvironments: [], playgroundSessions: [], sandboxActors: [], networkSearches: [], networkIntroductions: [], scenarios: [], scenarioVersions: [], scenarioRuns: [], scenarioRunProvenance: [], scenarioEvaluations: [], knowledgeDocuments: [], knowledgeVersions: [], knowledgeSegments: [], presenceKnowledgeAccess: [], mindFileKnowledgeBindings: [], knowledgeRetrievalRuns: [], knowledgeCitations: [], knowledgeCollections: [], knowledgeItems: [], presenceKnowledgeBindings: [], conversationStyles: [], operationalRuns: [], scheduledWakes: [], dependencyHealth: [], recoveryIncidents: [], recoveryAttempts: [], browserBodies: [], editorialOpportunities: [], editorialFeedbackEvents: [], editorialReferences: [], sourceAssets: [], mediaPerceptions: [], verificationRecords: [], rightsAssessments: [], editorialDecisions: [], publicationPackages: [], agents: [], activeAgentId: null, agentWorkspaces: [] };
 }
 
 export const SELF_DIRECTED_ATTENTION_PRESETS: Record<
@@ -223,6 +241,7 @@ export function derivePresenceCapabilityManifest(source: OpenPresenceState, pres
   const targetObject = context?.target?.type === "x.post"
     ? state.mirrorObjects.find((object) => object.presenceId === presence.id && object.externalRef.type === "x.post" && object.externalRef.id === context.target?.id)
     : undefined;
+  const targetBlockedPresence = targetIsBlockedByPerson(state, presence.id, context?.target);
   const browserRouteRequired = (action: string) => browserFallbackWasLearned(presence, `${presence.channel}.${action}`)
     || (action === "reply" && Boolean(targetObject && !mirrorObjectIsOwnOrMentionsPresence(targetObject, presence.handle, native?.account?.id)));
   const nativeAction = (action: string) => Boolean(nativeWritable && !nativeGlobalDeliveryBlocked && nativeActionSupported(action) && !browserRouteRequired(action));
@@ -230,8 +249,10 @@ export function derivePresenceCapabilityManifest(source: OpenPresenceState, pres
   const bridgeAction = (action: string) => Boolean(bridgeConnected && bridge?.capabilities.affordances.some((item) => item === action || item === `${presence.channel}.${action}`));
   const bridgeMetric = (metric: string) => Boolean(bridgeConnected && bridge?.capabilities.metrics.some((item) => item === metric || item.includes(metric)));
   const actionItem = (action: string, supported = channelIds.has(action)): PresenceCapability => {
-    const nativeCan = supported && nativeAction(action);
-    const bridgeCan = supported && bridgeAction(action);
+    const interpersonalAction = ["reply", "like", "repost", "quote", "follow"].includes(action);
+    const blockedForTarget = targetBlockedPresence && interpersonalAction;
+    const nativeCan = supported && !blockedForTarget && nativeAction(action);
+    const bridgeCan = supported && !blockedForTarget && bridgeAction(action);
     const canExecute = nativeCan || bridgeCan;
     const requiresBrowser = !nativeCan && bridgeCan;
     const canVerify = nativeCan ? true : bridgeCan ? Boolean(bridge?.capabilities.reconcile) : false;
@@ -243,7 +264,9 @@ export function derivePresenceCapabilityManifest(source: OpenPresenceState, pres
       : native?.status === "needs-attention"
         ? `Native X write access needs attention${native.healthMessage ? `: ${native.healthMessage}` : "."}`
         : undefined;
-    const limitation = canExecute
+    const limitation = blockedForTarget
+      ? "X verified that this person blocked the Presence. Automatic interaction is suppressed until later verified evidence changes that relationship state."
+      : canExecute
       ? undefined
       : !supported
         ? `${capabilityLabel[action] ?? action} is not supported by ${channelName(presence.channel)}.`
@@ -332,11 +355,13 @@ function bridgeAdapterIsConnected(bridge: Bridge) {
 }
 
 export function latestAudienceSnapshot(source: OpenPresenceState, presenceId: string) {
-  return collapseAudienceSnapshots(normalizeState(source).audienceSnapshots.filter((item) => item.presenceId === presenceId))[0];
+  const state = normalizeState(source);
+  return collapseAudienceSnapshots(state.audienceSnapshots.filter((item) => item.presenceId === presenceId && growthEvidenceIsInPresenceScope(state, presenceId, item.observedAt)))[0];
 }
 
 export function audienceDeltas(source: OpenPresenceState, presenceId: string) {
-  const snapshots = normalizeState(source).audienceSnapshots.filter((item) => item.presenceId === presenceId).sort((left, right) => new Date(left.observedAt).getTime() - new Date(right.observedAt).getTime());
+  const state = normalizeState(source);
+  const snapshots = state.audienceSnapshots.filter((item) => item.presenceId === presenceId && growthEvidenceIsInPresenceScope(state, presenceId, item.observedAt)).sort((left, right) => new Date(left.observedAt).getTime() - new Date(right.observedAt).getTime());
   const latest = snapshots.at(-1);
   const since = (days: number) => {
     if (!latest) return undefined;
@@ -348,7 +373,8 @@ export function audienceDeltas(source: OpenPresenceState, presenceId: string) {
 }
 
 function comparableSnapshots(source: OpenPresenceState, presenceId: string, mirrorObjectId: string, ageSeconds: number) {
-  return normalizeState(source).publicationMetricSnapshots.filter((item) => item.presenceId === presenceId && item.mirrorObjectId !== mirrorObjectId && Math.abs(item.publicationAgeSeconds - ageSeconds) <= Math.max(21_600, ageSeconds * 0.25));
+  const state = normalizeState(source);
+  return state.publicationMetricSnapshots.filter((item) => item.presenceId === presenceId && item.mirrorObjectId !== mirrorObjectId && growthPublicationIsInPresenceScope(state, presenceId, item) && Math.abs(item.publicationAgeSeconds - ageSeconds) <= Math.max(21_600, ageSeconds * 0.25));
 }
 
 function median(values: number[]) {
@@ -409,6 +435,217 @@ export function curateRelationshipFromMirror(source: OpenPresenceState, object: 
   return state;
 }
 
+const BLOCKED_RELATIONSHIP_FACT = "This person has blocked this Presence on X.";
+
+function actorForSocialTarget(state: OpenPresenceState, presenceId: string, target?: EntityRef) {
+  if (!target?.id) return undefined;
+  if (target.type === "x.user") {
+    const mirrorAuthor = state.mirrorObjects.find((item) => item.presenceId === presenceId && item.author?.externalRef?.id === target.id)?.author;
+    const identity = state.personIdentities.find((item) => item.sourcePresenceId === presenceId && item.channel === "x" && item.externalActorId === target.id);
+    return { id: target.id, displayName: mirrorAuthor?.displayName ?? identity?.displayName, handle: mirrorAuthor?.handle ?? identity?.handle, avatarUrl: mirrorAuthor?.avatarUrl ?? identity?.avatarUrl };
+  }
+  if (target.type === "x.post") {
+    const object = state.mirrorObjects.find((item) => item.presenceId === presenceId && item.externalRef.type === "x.post" && item.externalRef.id === target.id);
+    const actorId = object?.author?.externalRef?.id;
+    if (!actorId) return undefined;
+    return { id: actorId, displayName: object.author?.displayName, handle: object.author?.handle, avatarUrl: object.author?.avatarUrl };
+  }
+  return undefined;
+}
+
+export function targetIsBlockedByPerson(state: OpenPresenceState, presenceId: string, target?: EntityRef) {
+  const actor = actorForSocialTarget(state, presenceId, target);
+  if (!actor) return false;
+  return state.personIdentities.some((identity) => identity.sourcePresenceId === presenceId
+    && identity.channel === "x"
+    && identity.externalActorId === actor.id
+    && identity.contactability?.status === "blocked_by_person");
+}
+
+/**
+ * Close a queued action after a verified relationship boundary was learned.
+ * This is intentionally separate from recording the boundary itself so every
+ * connector can re-check the same durable rule immediately before handoff.
+ */
+export function cancelExecutionForBlockedTarget(source: OpenPresenceState, executionId: string, message?: string) {
+  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  const execution = state.executions.find((item) => item.id === executionId);
+  if (!execution || !targetIsBlockedByPerson(state, execution.presenceId, execution.target)) return state;
+  if (["succeeded", "failed", "blocked", "cancelled", "expired", "verification-closed"].includes(execution.status)) return state;
+  const timestamp = now();
+  const detail = message ?? "The target person has blocked this Presence. No further interaction will be attempted.";
+  execution.status = "cancelled";
+  execution.failure = { code: "TARGET_BLOCKED_PRESENCE", message: detail, retryable: false, reviewedAt: timestamp, reviewDisposition: "closed_non_retryable", reviewNote: "The durable relationship boundary was re-checked before Bridge delivery." };
+  execution.reviewReason = "Delivery was stopped because the target person has blocked this Presence.";
+  execution.lease = undefined;
+  execution.permit = undefined;
+  execution.updatedAt = timestamp;
+  const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
+  if (intent?.state === "active") { intent.state = "withdrawn"; intent.updatedAt = timestamp; }
+  const action = state.actions.find((item) => item.executionId === execution.id);
+  if (action) { action.status = "skipped"; action.reason = "The target person has blocked this Presence; no external action was attempted."; }
+  if (execution.assignmentId) {
+    const assignment = state.assignments.find((item) => item.id === execution.assignmentId);
+    if (assignment && !["completed", "completed_with_adaptation", "cancelled", "expired_incomplete"].includes(assignment.status)) {
+      assignment.status = "needs_operator";
+      assignment.work = { ...(assignment.work ?? { phase: "blocked", attempts: 0, maxAttempts: 4, storiesResearched: 0 }), phase: "blocked", blockedReason: detail };
+      assignment.lastOutcome = { class: "delivery_failed", message: detail, at: timestamp };
+      assignment.nextDueAt = undefined;
+      assignment.updatedAt = timestamp;
+      for (const run of state.assignmentRuns ?? []) {
+        if (run.assignmentId !== assignment.id || ["published", "deferred", "blocked", "failed", "cancelled", "superseded_stale"].includes(run.status)) continue;
+        run.status = "blocked";
+        run.currentStage = "blocked";
+        run.lastError = detail;
+        run.completedAt = timestamp;
+        run.leaseOwner = undefined;
+        run.leaseExpiresAt = undefined;
+        run.updatedAt = timestamp;
+      }
+    }
+  }
+  state.events.unshift(event("execution", "Delivery stopped", detail, "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }));
+  return state;
+}
+
+/** Only explicit provider/browser evidence is strong enough to create a
+ * durable interpersonal boundary. Generic 403s and missing controls are not. */
+export function isPersonBlockingError(message: string, code?: string) {
+  return code === "TARGET_BLOCKED_PRESENCE"
+    || /(?:this|the) author has blocked you|you (?:have been|are) blocked by (?:this|the) (?:author|user|account)|blocked from (?:replying|following|interacting).*(?:author|user|account)/i.test(message);
+}
+
+export function recordPersonBlockedFromExecution(source: OpenPresenceState, executionId: string, message: string, sourceKind: "native_delivery" | "browser_delivery") {
+  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  const execution = state.executions.find((item) => item.id === executionId);
+  const presence = execution ? state.presences.find((item) => item.id === execution.presenceId) ?? state.presence : undefined;
+  const actor = execution && presence ? actorForSocialTarget(state, presence.id, execution.target) : undefined;
+  if (!state.agent || !execution || !presence || !actor) return state;
+  const existingIdentity = state.personIdentities.find((identity) => identity.sourcePresenceId === presence.id && identity.channel === "x" && identity.externalActorId === actor.id);
+  const existingPerson = existingIdentity ? state.people.find((person) => person.id === existingIdentity.personId) : undefined;
+  const displayName = actor.displayName ?? existingIdentity?.displayName ?? existingPerson?.displayName ?? (actor.handle ? `@${actor.handle.replace(/^@/, "")}` : `X account ${actor.id}`);
+  const remembered = createRememberedPerson({
+    agentId: state.agent.id,
+    presenceId: presence.id,
+    channel: "x",
+    externalActorId: actor.id,
+    displayName,
+    handle: actor.handle ?? existingIdentity?.handle,
+    avatarUrl: actor.avatarUrl ?? existingIdentity?.avatarUrl,
+    sourceEnvironment: presence.environment ?? "live",
+    source: "current-context",
+    evidenceKind: "reply_target",
+  }, state.people, state.personIdentities, state.relationships);
+  const observedAt = now();
+  remembered.person.memoryState = "active";
+  remembered.person.updatedAt = observedAt;
+  remembered.relationship.state = "active";
+  remembered.relationship.updatedAt = observedAt;
+  remembered.identity.contactability = { status: "blocked_by_person", observedAt, source: sourceKind, evidenceExecutionId: execution.id, reason: message.slice(0, 500) };
+  state.people = [remembered.person, ...state.people.filter((item) => item.id !== remembered.person.id)];
+  state.personIdentities = [remembered.identity, ...state.personIdentities.filter((item) => item.id !== remembered.identity.id && !(item.sourcePresenceId === presence.id && item.channel === "x" && item.externalActorId === actor.id))];
+  state.relationships = [remembered.relationship, ...state.relationships.filter((item) => item.id !== remembered.relationship.id)];
+  const activeFact = state.relationshipFacts.find((fact) => fact.relationshipId === remembered.relationship.id && fact.statement === BLOCKED_RELATIONSHIP_FACT && !fact.validTo);
+  if (!activeFact) state.relationshipFacts.unshift({ id: id("relationship-fact"), relationshipId: remembered.relationship.id, statement: BLOCKED_RELATIONSHIP_FACT, epistemicKind: "connector_verified", confidence: "high", provenanceRefs: [{ kind: "social_intent", id: execution.socialIntentId, sourcePresenceId: presence.id, observedAt }], visibility: `presence:${presence.id}`, validFrom: observedAt, createdAt: observedAt });
+  const existingBoundaryEvent = state.autobiographicalEvents.find((item) => item.presenceId === presence.id
+    && item.kind === "relationship_boundary"
+    && item.counterpartyPersonId === remembered.person.id
+    && item.facts.boundary === "blocked"
+    && !state.autobiographicalEvents.some((newer) => newer.kind === "relationship_boundary" && newer.counterpartyPersonId === remembered.person.id && newer.facts.boundary === "available" && newer.observedAt > item.observedAt));
+  if (!existingBoundaryEvent) state.autobiographicalEvents.unshift({
+    id: id("autobiographical-event"),
+    agentId: state.agent.id,
+    presenceId: presence.id,
+    kind: "relationship_boundary",
+    counterpartyPersonId: remembered.person.id,
+    facts: { boundary: "blocked", reasonKnown: false, channel: "x" },
+    evidenceRefs: [{ kind: "social_intent", id: execution.socialIntentId, sourcePresenceId: presence.id, observedAt }],
+    occurredAt: observedAt,
+    observedAt,
+    createdAt: observedAt,
+  });
+  state.relationshipPolicies = state.relationshipPolicies.map((policy) => policy.presenceId === presence.id && policy.personId === remembered.person.id
+    ? { ...policy, engagement: "observe_only", updatedAt: observedAt }
+    : policy);
+  const affectedWatchIds = new Set(state.watches.filter((watch) => watch.presenceId === presence.id && (watch.target?.personId === remembered.person.id || watch.target?.externalActorId === actor.id)).map((watch) => watch.id));
+  state.watches = state.watches.map((watch) => affectedWatchIds.has(watch.id)
+    ? { ...watch, state: "paused", updatedAt: observedAt }
+    : watch);
+  state.watchSignals = state.watchSignals.map((signal) => signal.presenceId === presence.id && (signal.personId === remembered.person.id || affectedWatchIds.has(signal.watchId))
+    ? { ...signal, disposition: signal.disposition === "pending" ? "dismissed" : signal.disposition, updatedAt: observedAt }
+    : signal);
+  const blockedActorId = actor.id;
+  const affectedAssignmentIds = new Set<string>();
+  for (const candidate of state.executions) {
+    if (candidate.presenceId !== presence.id || !["queued", "approved", "awaiting-review", "awaiting-manual", "awaiting-connector", "claimed", "executing", "verification-pending"].includes(candidate.status)) continue;
+    if (actorForSocialTarget(state, presence.id, candidate.target)?.id !== blockedActorId) continue;
+    const boundaryMessage = `${displayName} has blocked this Presence. No further interaction will be attempted until verified evidence shows that changed.`;
+    if (candidate.assignmentId) affectedAssignmentIds.add(candidate.assignmentId);
+    const uncertain = ["claimed", "executing", "verification-pending"].includes(candidate.status);
+    candidate.status = uncertain ? "verification-closed" : "cancelled";
+    candidate.failure = { code: "TARGET_BLOCKED_PRESENCE", message: uncertain ? `${boundaryMessage} This action had already crossed the connector boundary; check X before attempting anything new.` : boundaryMessage, retryable: false, reviewedAt: observedAt, reviewDisposition: uncertain ? "operator_action_required" : "closed_non_retryable", reviewNote: uncertain ? "The block was learned after connector handoff, so the external outcome remains unresolved and will not be retried." : "The action was stopped before connector handoff." };
+    candidate.reviewReason = uncertain ? "The target block was learned while delivery was in progress or awaiting verification." : "The target block was learned before delivery.";
+    candidate.lease = undefined;
+    candidate.permit = undefined;
+    candidate.updatedAt = observedAt;
+  }
+  if (execution.assignmentId) affectedAssignmentIds.add(execution.assignmentId);
+  for (const assignmentId of affectedAssignmentIds) {
+    const assignment = state.assignments.find((item) => item.id === assignmentId);
+    if (!assignment || ["completed", "completed_with_adaptation", "cancelled", "expired_incomplete"].includes(assignment.status)) continue;
+    const detail = `${displayName} has blocked this Presence. The Assignment is stopped and needs an operator decision; no further interaction will be attempted until verified evidence shows that changed.`;
+    assignment.status = "needs_operator";
+    assignment.work = { ...(assignment.work ?? { phase: "blocked", attempts: 0, maxAttempts: 4, storiesResearched: 0 }), phase: "blocked", blockedReason: detail };
+    assignment.lastOutcome = { class: "delivery_failed", message: detail, at: observedAt };
+    assignment.nextDueAt = undefined;
+    assignment.updatedAt = observedAt;
+    for (const run of state.assignmentRuns ?? []) {
+      if (run.assignmentId !== assignmentId || ["published", "deferred", "blocked", "failed", "cancelled", "superseded_stale"].includes(run.status)) continue;
+      run.status = "blocked";
+      run.currentStage = "blocked";
+      run.lastError = detail;
+      run.completedAt = observedAt;
+      run.leaseOwner = undefined;
+      run.leaseExpiresAt = undefined;
+      run.updatedAt = observedAt;
+    }
+    state.events.unshift(event("decision", "Assignment stopped at relationship boundary", detail, "warning", { presenceId: presence.id, sessionId: assignment.sessionId }));
+  }
+  state.events.unshift(event("memory", `${presence.name} noticed a relationship boundary`, `${displayName} blocked this Presence on X. Interaction with this person has stopped, and the verified event is now part of ${presence.name}'s history.`, "quiet", { presenceId: presence.id, executionId: execution.id, intentId: execution.socialIntentId }));
+  return state;
+}
+
+export function clearPersonBlockFromExecution(source: OpenPresenceState, executionId: string) {
+  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  const execution = state.executions.find((item) => item.id === executionId);
+  const presence = execution ? state.presences.find((item) => item.id === execution.presenceId) ?? state.presence : undefined;
+  const actor = execution && presence ? actorForSocialTarget(state, presence.id, execution.target) : undefined;
+  if (!execution || !presence || !actor) return state;
+  const identity = state.personIdentities.find((item) => item.sourcePresenceId === presence.id && item.channel === "x" && item.externalActorId === actor.id);
+  if (!identity || identity.contactability?.status !== "blocked_by_person") return state;
+  const observedAt = now();
+  identity.contactability = { status: "available", observedAt, source: "verified_action", evidenceExecutionId: execution.id };
+  const relationship = state.relationships.find((item) => item.personId === identity.personId);
+  for (const fact of state.relationshipFacts) {
+    if (relationship && fact.relationshipId === relationship.id && fact.statement === BLOCKED_RELATIONSHIP_FACT && !fact.validTo) fact.validTo = observedAt;
+  }
+  const person = state.people.find((item) => item.id === identity.personId);
+  if (state.agent) state.autobiographicalEvents.unshift({
+    id: id("autobiographical-event"),
+    agentId: state.agent.id,
+    presenceId: presence.id,
+    kind: "relationship_boundary",
+    counterpartyPersonId: identity.personId,
+    facts: { boundary: "available", priorBoundary: "blocked", channel: "x", evidence: "verified_action" },
+    evidenceRefs: [{ kind: "social_intent", id: execution.socialIntentId, sourcePresenceId: presence.id, observedAt }],
+    occurredAt: observedAt,
+    observedAt,
+    createdAt: observedAt,
+  });
+  state.events.unshift(event("memory", "Contact available again", `${person?.displayName ?? actor.handle ?? "This person"} no longer appears to block this Presence; a channel action was verified.`, "positive", { presenceId: presence.id, executionId: execution.id, intentId: execution.socialIntentId }));
+  return state;
+}
+
 function makeFiles(input: CreateAgentInput, presence: Presence): AgentFile[] { return (Object.keys(fileMeta) as FileKind[]).map((kind) => ({ kind, ...fileMeta[kind], content: fileContent(kind, input, presence), revision: 1, updatedAt: now() })); }
 function event(type: LiveEvent["type"], title: string, detail: string, tone: LiveEvent["tone"] = "neutral", lineage?: Pick<LiveEvent, "presenceId" | "intentId" | "executionId" | "outcomeId" | "decisionId" | "sessionId" | "sourceObjectId" | "invocationId" | "runId" | "attentionEpisodeId">): LiveEvent { return { id: id("evt"), type, title, detail, time: now(), tone, ...lineage }; }
 
@@ -430,6 +667,7 @@ export interface SocialDecisionInput {
   relevantGrowthRevisionRef?: string;
   attentionEpisodeId?: string;
   operatorReaction?: string;
+  autobiographicalEventIds?: string[];
 }
 
 function socialDecisionLabel(decision: SocialDecisionKind) {
@@ -460,6 +698,7 @@ function createSocialDecision(state: OpenPresenceState, input: SocialDecisionInp
     runId: input.runId ?? input.plannerRunId,
     invocationId: input.invocationId,
     relevantGrowthRevisionRef: input.relevantGrowthRevisionRef,
+    autobiographicalEventIds: input.autobiographicalEventIds?.filter((eventId) => state.autobiographicalEvents.some((event) => event.id === eventId)),
     attentionEpisodeId: input.attentionEpisodeId,
     createdAt: now(),
   };
@@ -612,12 +851,16 @@ export function syncPublishingInitiativeAssignment(source: OpenPresenceState, pr
     nextDueAt: timestamp,
   } as Assignment;
   assignment.title = isPace ? "Original publishing pace" : "Maintain original presence";
+  assignment.createdBy = "agent";
   assignment.origin = "publishing_initiative";
   assignment.activation = { type: "continuous" };
   assignment.instruction = isPace ? `Aim for ${quantity ?? 1} original posts per ${initiative.target?.period ?? "day"}.` : "Maintain a useful original presence when there is something worth publishing.";
   assignment.deliverable = { type: isPace ? "original_publication" : "maintain_original_presence", quantity, quantityMode: mode };
+  assignment.recurrence = isPace
+    ? { kind: initiative.target?.period === "week" ? "weekly" as const : "daily" as const, label: `Every ${initiative.target?.period ?? "day"}` }
+    : { kind: "daily" as const, label: "Ongoing" };
   assignment.quantityPolicy = { quantity: quantity ?? "agent_planned", mode, period: initiative.target?.period ?? "assignment", timezone: initiative.timezone };
-  assignment.status = assignment.status === "completed" && isPace && (assignment.progress.verified >= (quantity ?? 0)) ? "completed" : "active";
+  assignment.status = "active";
   assignment.updatedAt = timestamp;
   if (!existing) state.assignments.unshift(assignment);
   presence.publishingInitiative = { ...initiative, assignmentId: assignment.id };
@@ -932,7 +1175,7 @@ export function recordNativeObservation(source: OpenPresenceState, presenceId: s
   return state;
 }
 
-export function recordNativeMirror(source: OpenPresenceState, input: { connectionId: string; presenceId: string; own?: boolean; post: { id: string; text: string; language?: string; createdAt?: string; authorId?: string; authorUsername?: string; authorName?: string; authorAvatarUrl?: string; conversationId?: string; parentId?: string; referencedPosts?: Array<{ type: "replied_to" | "quoted" | "retweeted"; id: string }>; media?: Array<{ mediaKey: string; type: "photo" | "video" | "animated_gif"; url?: string; previewImageUrl?: string; altText?: string }> } }, options?: { normalized?: boolean; attentionEpisodeId?: string; attentionRunId?: string; attentionInvocationId?: string; explicitOperatorEvidence?: boolean }) {
+export function recordNativeMirror(source: OpenPresenceState, input: { connectionId: string; presenceId: string; own?: boolean; post: { id: string; text: string; language?: string; createdAt?: string; authorId?: string; authorUsername?: string; authorName?: string; authorAvatarUrl?: string; conversationId?: string; parentId?: string; referencedPosts?: Array<{ type: "replied_to" | "quoted" | "retweeted"; id: string }>; media?: Array<{ mediaKey: string; type: "photo" | "video" | "animated_gif"; url?: string; previewImageUrl?: string; altText?: string }> } }, options?: { normalized?: boolean; attentionEpisodeId?: string; attentionRunId?: string; attentionInvocationId?: string; explicitOperatorEvidence?: boolean; suppressRelationshipCuration?: boolean }) {
   const state = options?.normalized ? source : normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presences.find((item) => item.id === input.presenceId) ?? state.presence;
   // Keep unverified provider data auditable, but never admit a confirmed
@@ -1030,7 +1273,7 @@ export function recordNativeMirror(source: OpenPresenceState, input: { connectio
   const curationTarget = mirrored?.actorPresenceId === input.presenceId && mirrored.parentExternalRef
     ? state.mirrorObjects.find((item) => item.presenceId === input.presenceId && item.externalRef.type === mirrored.parentExternalRef?.type && item.externalRef.id === mirrored.parentExternalRef?.id)
     : mirrored;
-  return curationTarget ? curateRelationshipFromMirror(state, curationTarget, input.presenceId, options) : state;
+  return curationTarget && !options?.suppressRelationshipCuration ? curateRelationshipFromMirror(state, curationTarget, input.presenceId, options) : state;
 }
 
 /**
@@ -1272,9 +1515,18 @@ export function derivePublicHistory(source: OpenPresenceState, presenceId?: stri
     const ownPostIds = new Set(footing?.recentPostIds ?? []);
     for (const object of state.mirrorObjects) {
       if (object.presenceId !== presence.id || object.visibility !== "public") continue;
-      const kind = mirrorHistoryKind(object);
-      if (!kind) continue;
+      // A public object can be observed after the Presence starts while
+      // still belonging to the account's earlier history. Keep it out of
+      // Presence-owned history and every consumer that derives from it.
+      if (!growthEvidenceIsInPresenceScope(state, presence.id, object.occurredAt ?? object.observedAt)) continue;
+      if (!growthEvidenceIsInPresenceScope(state, presence.id, object.observedAt)) continue;
       const execution = object.originExecutionId ? succeeded.get(object.originExecutionId) : undefined;
+      // A verified execution is the authoritative act. Native reconciliation
+      // can attach a like/repost execution to the observed source post, whose
+      // own reply lineage must not turn the reaction into a fake reply.
+      const executionKind = execution?.affordance ? historyKind(execution.affordance) : undefined;
+      const kind = executionKind ?? mirrorHistoryKind(object);
+      if (!kind) continue;
       const intent = execution ? state.socialIntents.find((item) => item.id === execution.socialIntentId) : undefined;
       const ownNativePost = presence.channel === "x" && kind === "post" && ownPostIds.has(object.externalRef.id);
       const publicHandle = (presence.context.publicIdentity.handle ?? presence.handle).replace(/^@/, "").toLowerCase();
@@ -1283,7 +1535,9 @@ export function derivePublicHistory(source: OpenPresenceState, presenceId?: stri
       const attributedToPresence = object.actorPresenceId === presence.id || ownNativePost || authoredByIdentity || Boolean(object.originExecutionId && succeeded.has(object.originExecutionId));
       if (!attributedToPresence) continue;
       const outcome = execution ? state.outcomes.find((item) => item.executionId === execution.id && item.status === "succeeded") : undefined;
-      const urlRef = kind === "like" || kind === "repost" ? object.parentExternalRef ?? object.externalRef : object.externalRef;
+      const reaction = kind === "like" || kind === "repost";
+      const historyExternalRef = reaction ? execution?.externalRef ?? object.externalRef : object.externalRef;
+      const urlRef = reaction ? object.externalRef : object.externalRef;
       const historyItem: PublicHistoryItem = {
         id: object.id,
         presenceId: presence.id,
@@ -1293,8 +1547,8 @@ export function derivePublicHistory(source: OpenPresenceState, presenceId?: stri
         authorAvatarUrl: object.author?.avatarUrl ?? (attributedToPresence ? nativeAccount?.profileImageUrl : undefined),
         occurredAt: object.occurredAt ?? object.observedAt,
         observedAt: object.observedAt,
-        externalRef: object.externalRef,
-        parentExternalRef: object.parentExternalRef ?? (kind === "quote" ? object.referencedExternalRefs?.[0] : undefined),
+        externalRef: historyExternalRef,
+        parentExternalRef: reaction ? object.externalRef : object.parentExternalRef ?? (kind === "quote" ? object.referencedExternalRefs?.[0] : undefined),
         executionId: execution?.id ?? object.originExecutionId,
         publicationId: execution?.publication?.id,
         origin: execution?.publication?.origin ?? intent?.origin,
@@ -1304,7 +1558,7 @@ export function derivePublicHistory(source: OpenPresenceState, presenceId?: stri
         availability: object.archived ? "deleted" : "available",
         metrics: outcome?.metrics ?? {},
       };
-      const resultKey = `${presence.id}:${object.externalRef.type}:${object.externalRef.id}`;
+      const resultKey = `${presence.id}:${historyExternalRef.type}:${historyExternalRef.id}`;
       const existing = result.get(resultKey);
       if (!existing || historyKindPriority(historyItem.kind) >= historyKindPriority(existing.kind)) result.set(resultKey, historyItem);
     }
@@ -1446,11 +1700,13 @@ export function deriveActivitySummary(source: OpenPresenceState, presenceId?: st
     : presence?.environment ?? "live";
   const isScopedEvent = (item: LiveEvent) => {
     if (!presence || item.presenceId !== presence.id) return !presence;
+    if (!growthEvidenceIsInPresenceScope(state, presence.id, item.time)) return false;
     if (activityEnvironment === "sandbox") return !item.sessionId || activitySessionIds.has(item.sessionId);
     return !item.sessionId;
   };
   const isScopedExecution = (item: Execution) => {
     if (!presence || item.presenceId !== presence.id) return !presence;
+    if (!growthEvidenceIsInPresenceScope(state, presence.id, item.createdAt)) return false;
     if (activityEnvironment === "sandbox") return item.environment === "sandbox" || (item.sessionId ? activitySessionIds.has(item.sessionId) : false);
     return item.environment !== "sandbox" && !item.sessionId;
   };
@@ -1603,17 +1859,17 @@ export function deriveGrowthEvidenceSnapshot(source: OpenPresenceState, presence
   const nowDate = new Date();
   const periodDays = 7;
   const windowEnd = nowDate.toISOString();
-  const windowStart = new Date(nowDate.getTime() - periodDays * 86_400_000).toISOString();
-  const audienceSnapshots = collapseAudienceSnapshots(state.audienceSnapshots.filter((s) => s.presenceId === presenceId));
-  const publicationSnapshots = state.publicationMetricSnapshots.filter((s) => s.presenceId === presenceId && new Date(s.observedAt).getTime() >= new Date(windowStart).getTime());
-  const scopedMirror = state.mirrorObjects.filter((m) => m.presenceId === presenceId && m.environment !== "sandbox" && new Date(m.occurredAt ?? m.observedAt).getTime() >= new Date(windowStart).getTime());
+  const windowStart = growthWindowStartAt(state, presenceId, periodDays, nowDate.getTime());
+  const audienceSnapshots = collapseAudienceSnapshots(state.audienceSnapshots.filter((s) => s.presenceId === presenceId && growthEvidenceIsInPresenceScope(state, presenceId, s.observedAt)));
+  const publicationSnapshots = state.publicationMetricSnapshots.filter((s) => s.presenceId === presenceId && growthPublicationIsInPresenceScope(state, presenceId, s) && new Date(s.observedAt).getTime() >= new Date(windowStart).getTime());
+  const scopedMirror = state.mirrorObjects.filter((m) => m.presenceId === presenceId && m.environment !== "sandbox" && growthEvidenceIsInPresenceScope(state, presenceId, m.occurredAt ?? m.observedAt) && new Date(m.occurredAt ?? m.observedAt).getTime() >= new Date(windowStart).getTime());
 
   const posts = scopedMirror.filter((m) => m.actorPresenceId === presenceId && m.objectType === "post").length;
   const replies = scopedMirror.filter((m) => m.actorPresenceId === presenceId && m.objectType === "reply").length;
   const quotes = scopedMirror.filter((m) => m.actorPresenceId === presenceId && m.objectType === "quote").length;
   const verifiedExecutions = state.executions.filter((execution) => {
     if (execution.presenceId !== presenceId || execution.status !== "succeeded") return false;
-    return new Date(execution.createdAt).getTime() >= new Date(windowStart).getTime();
+    return growthEvidenceIsInPresenceScope(state, presenceId, execution.createdAt) && new Date(execution.createdAt).getTime() >= new Date(windowStart).getTime();
   });
   const likes = verifiedExecutions.filter((execution) => state.socialIntents.find((intent) => intent.id === execution.socialIntentId)?.affordance === "like").length;
   const follows = verifiedExecutions.filter((execution) => state.socialIntents.find((intent) => intent.id === execution.socialIntentId)?.affordance === "follow").length;
@@ -1624,7 +1880,9 @@ export function deriveGrowthEvidenceSnapshot(source: OpenPresenceState, presence
   const impressionsList = publicationSnapshots.map((s) => s.impressions).filter((v): v is number => typeof v === "number");
   const medianPostReach = median(impressionsList);
   const repliesWithResponses = scopedMirror.filter((m) => m.actorPresenceId === presenceId && m.objectType === "reply" && scopedMirror.some((child) => child.parentExternalRef?.id === m.externalRef.id)).length;
-  const activeRelationships = (state.people ?? []).length || (state.relationships ?? []).length;
+  const scopedPersonIds = new Set(state.personIdentities.filter((identity) => identity.sourcePresenceId === presenceId && growthEvidenceIsInPresenceScope(state, presenceId, identity.createdAt)).map((identity) => identity.personId));
+  const activeRelationships = state.relationships.filter((relationship) => relationship.state === "active" && scopedPersonIds.has(relationship.personId)).length
+    || state.people.filter((person) => person.memoryState === "active" && scopedPersonIds.has(person.id)).length;
 
   const earliestSnapshot = audienceSnapshots.at(-1);
   const daysObserved = earliestSnapshot ? Math.max(1, Math.round((nowDate.getTime() - new Date(earliestSnapshot.observedAt).getTime()) / 86_400_000)) : 1;
@@ -1708,7 +1966,7 @@ function applyGrowthInterpretation(state: OpenPresenceState, assignment: Assignm
     versions.unshift({ version: file.revision, previousVersion: file.revision - 1, content: lines, presenceId: assignment.presenceId, scope, reviewId: review.id, reviewSource: review.reviewSource, changeSummary: review.planChangeSummary ?? "Updated the strategic interpretation from the latest evidence review.", createdAt: timestamp });
     state.growthFileVersions = versions.slice(0, 24);
     review.growthFileRevision = file.revision;
-    recordChangeSet(state, "Update GROWTH.md from evidence review", [{ path: "agentFiles.GROWTH", action: "update", before, after: lines }]);
+    recordChangeSet(state, "Update GROWTH.md from evidence review", [{ path: "agentFiles.GROWTH", action: "update", before, after: lines }], undefined, assignment.presenceId);
   }
 }
 
@@ -1718,7 +1976,7 @@ export function createGrowthReview(source: OpenPresenceState, assignment: Assign
   const nowDate = new Date();
   const periodDays = kind === "strategic" ? 28 : 7;
   const periodEnd = nowDate.toISOString();
-  const periodStart = new Date(nowDate.getTime() - periodDays * 86_400_000).toISOString();
+  const periodStart = growthWindowStartAt(state, assignment.presenceId, periodDays, nowDate.getTime());
 
   const snapshot = evidenceSnapshot ?? deriveGrowthEvidenceSnapshot(state, assignment.presenceId);
   const recent = state.growthReviews.find((item) => item.assignmentId === assignment.id && item.kind === kind && Date.now() - new Date(item.createdAt).getTime() < 86_400_000);
@@ -1731,8 +1989,8 @@ export function createGrowthReview(source: OpenPresenceState, assignment: Assign
   state.growthEvidenceSnapshots = snapshots.slice(0, 50);
 
   const previousGrowthRevisionRef = presence?.activeGrowthRevisionRef;
-  const audienceSnapshots = collapseAudienceSnapshots(state.audienceSnapshots.filter((s) => s.presenceId === assignment.presenceId));
-  const recentMetrics = state.publicationMetricSnapshots.filter((s) => s.presenceId === assignment.presenceId && new Date(s.observedAt).getTime() >= new Date(periodStart).getTime());
+  const audienceSnapshots = collapseAudienceSnapshots(state.audienceSnapshots.filter((s) => s.presenceId === assignment.presenceId && growthEvidenceIsInPresenceScope(state, assignment.presenceId, s.observedAt)));
+  const recentMetrics = state.publicationMetricSnapshots.filter((s) => s.presenceId === assignment.presenceId && growthPublicationIsInPresenceScope(state, assignment.presenceId, s) && new Date(s.observedAt).getTime() >= new Date(periodStart).getTime());
 
   const deltas = audienceDeltas(state, assignment.presenceId);
   const working: string[] = [];
@@ -1944,7 +2202,7 @@ function makePresence(input: CreatePresenceInput, displayName = input.name?.trim
   const context: PresenceContext = { presenceId, channel: input.channel, publicIdentity: { displayName: name, handle: input.handle.trim(), mode: input.mode }, publicSelf, brief, audienceContext: brief.audience, voiceAdaptation: `Adapt the Agent's point of view to ${channelName(input.channel)} without flattening it.`, availableAffordances: capabilities.map((item) => item.id) };
   const connectionMode: PresenceConnectionMode = input.connectionMode ?? (input.channel === "x" ? "native" : "bridge");
   const publishingInitiative = defaultPublishingInitiative();
-  const presence = { id: presenceId, channel: input.channel, name, handle: input.handle.trim(), mode: input.mode, status: "live" as const, accent: input.accent, avatarLook: input.avatarLook ?? defaultAvatarLook(input.channel), capabilities, execution, executionEnvelope: makeEnvelope(presenceId, capabilities, execution), context, brief, publicSelf, mediaPerceptionPolicy: input.mode === "ghost" ? "review-uncertain" as const : "use-judgment" as const, language: DEFAULT_PRESENCE_LANGUAGE, languagePolicy: { ...EMPTY_LANGUAGE_POLICY }, ghostProfile: input.mode === "ghost" ? defaultGhostProfile() : undefined, pacing: "recommended" as const, attentionIntervalMinutes: 5, quietHours: { enabled: false, start: "22:00", end: "07:00" }, publishingInitiative, selfDirectedAttention: defaultSelfDirectedAttentionPolicy(), requestPolicy: defaultPresenceRequestPolicy(presenceId), accountHealth: "healthy" as const, environment: connectionMode === "sandbox" ? "sandbox" as const : "live" as const, connectionMode, browserAccess: { enabled: false }, conversationStyleId: DEFAULT_CONVERSATION_STYLE_ID };
+  const presence = { id: presenceId, createdAt: now(), channel: input.channel, name, handle: input.handle.trim(), mode: input.mode, status: "live" as const, accent: input.accent, avatarLook: input.avatarLook ?? defaultAvatarLook(input.channel), capabilities, execution, executionEnvelope: makeEnvelope(presenceId, capabilities, execution), context, brief, publicSelf, mediaPerceptionPolicy: input.mode === "ghost" ? "review-uncertain" as const : "use-judgment" as const, language: DEFAULT_PRESENCE_LANGUAGE, languagePolicy: { ...EMPTY_LANGUAGE_POLICY }, ghostProfile: input.mode === "ghost" ? defaultGhostProfile() : undefined, pacing: "recommended" as const, attentionIntervalMinutes: 5, quietHours: { enabled: false, start: "22:00", end: "07:00" }, publishingInitiative, selfDirectedAttention: defaultSelfDirectedAttentionPolicy(), requestPolicy: defaultPresenceRequestPolicy(presenceId), accountHealth: "healthy" as const, environment: connectionMode === "sandbox" ? "sandbox" as const : "live" as const, connectionMode, browserAccess: { enabled: false }, conversationStyleId: DEFAULT_CONVERSATION_STYLE_ID };
   presence.context = compilePresenceContext(presence);
   return presence;
 }
@@ -2289,6 +2547,18 @@ export function relationshipPolicyFromWatchPurpose(purpose: string | undefined):
   return { learning, engagement, rhythm: engagement === "maintain_relationship" ? "regular" : "light" };
 }
 
+/** A paused Watch cannot form or deliver an autonomous social action. */
+export function isWatchPausedForOrigin(state: OpenPresenceState, origin?: SocialOrigin) {
+  if (origin?.kind !== "watchlist" || !origin.refId) return false;
+  return state.watches.some((watch) => watch.id === origin.refId && (watch.state ?? "active") === "paused");
+}
+
+/** Re-check the durable Watch state immediately before a connector handoff. */
+export function isWatchPausedForExecution(state: OpenPresenceState, execution: Execution) {
+  const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
+  return isWatchPausedForOrigin(state, intent?.origin);
+}
+
 export function recordWatchSignals(source: OpenPresenceState, mirrors: MirrorObject[], nextObservationAt?: string) {
   const state = source;
   for (const mirror of mirrors) {
@@ -2453,11 +2723,66 @@ function sandboxSessionFor(state: OpenPresenceState, sessionId: string) {
   return session;
 }
 
-export function executionPublicationText(state: OpenPresenceState, execution: Execution): string {
+export function executionPublicationText(state: OpenPresenceState, execution: Pick<Execution, "socialIntentId" | "publication">): string {
   const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
   const publication = intent?.publicationId ? state.publications.find((item) => item.id === intent.publicationId) : execution.publication;
   const payload = publication?.payload;
   return payload && typeof payload === "object" && "text" in payload && typeof payload.text === "string" ? payload.text : "";
+}
+
+const idempotentExecutionStatuses = new Set<Execution["status"]>([
+  "awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued",
+  "claimed", "executing", "verification-pending", "succeeded", "blocked",
+]);
+
+function normalizedActionText(value: string | undefined) {
+  return (value ?? "").normalize("NFKC").replace(/\s+/g, " ").trim().toLowerCase();
+}
+
+/**
+ * Public expressions are retried across worker passes and connector
+ * acknowledgements. The Social Intent id is intentionally not part of this
+ * key: a retry creates a new intent, but it is still the same public act.
+ */
+export function socialActionIdempotencyKey(input: { presenceId: string; environment: PresenceEnvironment; affordance: string; target?: EntityRef; text?: string }) {
+  return `social-action:v2:${stableHash({
+    presenceId: input.presenceId,
+    environment: input.environment,
+    affordance: input.affordance,
+    target: input.target ? { type: input.target.type, id: input.target.id } : undefined,
+    text: normalizedActionText(input.text),
+  })}`;
+}
+
+function samePublicAction(left: Execution, right: Pick<Execution, "presenceId" | "environment" | "affordance" | "target" | "publication" | "socialIntentId">, state: OpenPresenceState) {
+  return left.presenceId === right.presenceId
+    && (left.environment ?? "live") === (right.environment ?? "live")
+    && left.affordance === right.affordance
+    && left.target?.type === right.target?.type
+    && left.target?.id === right.target?.id
+    && (left.affordance === "x.like" || left.affordance === "x.repost" || left.affordance === "x.follow"
+      ? true
+      : normalizedActionText(executionPublicationText(state, left)) === normalizedActionText(executionPublicationText(state, right)));
+}
+
+/** Find an already accepted/in-flight attempt for the same public act. */
+export function existingPublicActionExecution(state: OpenPresenceState, candidate: Pick<Execution, "id" | "presenceId" | "environment" | "affordance" | "target" | "publication" | "socialIntentId">) {
+  return state.executions.find((execution) => execution.id !== candidate.id
+    && idempotentExecutionStatuses.has(execution.status)
+    && samePublicAction(execution, candidate, state));
+}
+
+export function hasExistingPublicAction(state: OpenPresenceState, input: { presenceId: string; environment?: PresenceEnvironment; affordance: string; target?: EntityRef; text?: string }) {
+  const environment = input.environment ?? "live";
+  return state.executions.some((execution) => execution.presenceId === input.presenceId
+    && (execution.environment ?? "live") === environment
+    && execution.affordance === input.affordance
+    && idempotentExecutionStatuses.has(execution.status)
+    && execution.target?.type === input.target?.type
+    && execution.target?.id === input.target?.id
+    && (input.affordance === "x.like" || input.affordance === "x.repost" || input.affordance === "x.follow"
+      ? true
+      : normalizedActionText(executionPublicationText(state, execution)) === normalizedActionText(input.text)));
 }
 
 const assignmentExpressionStopWords = new Set([
@@ -2691,7 +3016,7 @@ export function addSandboxEvent(source: OpenPresenceState, input: { sessionId: s
   const parentObject = targetExternalRef ? state.mirrorObjects.find((item) => item.sessionId === session.id && item.externalRef.type === targetExternalRef.type && item.externalRef.id === targetExternalRef.id) : undefined;
   const conversationExternalRef = parentObject?.conversationExternalRef ?? parentObject?.externalRef.id;
   const observedAt = session.virtualNow;
-  const visibility = definition?.privacyDefaults.visibility ?? "public";
+  const visibility = actionId === "message" ? "direct-message" as const : definition?.privacyDefaults.visibility ?? "public";
   const shareability = definition?.privacyDefaults.shareability ?? "presence-only";
   // Older persisted channel definitions may not have recorded their media
   // capabilities. Keep those definitions compatible with the built-in
@@ -2795,6 +3120,57 @@ export function resetPlaygroundSession(source: OpenPresenceState, sessionId: str
   return state;
 }
 
+/**
+ * Ground an authored leading mention against the post and its bounded thread.
+ * A model can mention someone later in a sentence as part of its own prose,
+ * but an opener addresses an account and must be supported by observed
+ * participant context. This is an execution boundary, not a text rewrite.
+ */
+function expressionMentionGroundingReason(state: OpenPresenceState, presence: Presence, target: EntityRef | undefined, text: string, sessionId?: string) {
+  if (!target || !text.trim()) return undefined;
+  const scope = state.mirrorObjects.filter((item) => item.presenceId === presence.id && item.channelId === presence.channel && (!sessionId || item.sessionId === sessionId));
+  const byRef = new Map(scope.map((item) => [`${item.externalRef.type}:${item.externalRef.id}`, item]));
+  const context = new Map<string, MirrorObject>();
+  const visit = (ref: EntityRef | undefined) => {
+    if (!ref) return;
+    const key = `${ref.type}:${ref.id}`;
+    if (context.has(key)) return;
+    const object = byRef.get(key);
+    if (!object) return;
+    context.set(key, object);
+    visit(object.parentExternalRef);
+    for (const referenced of object.referencedExternalRefs ?? []) visit(referenced);
+  };
+  visit(target);
+  const supportedHandles = new Set<string>([presence.handle]);
+  for (const object of context.values()) {
+    if (object.author?.handle) supportedHandles.add(object.author.handle);
+    for (const match of (object.content?.text ?? "").matchAll(/@([A-Za-z0-9_]{1,30})/g)) supportedHandles.add(match[1]!);
+  }
+  return unsupportedLeadingMention(text, supportedHandles);
+}
+
+function expressionSourceEchoReason(state: OpenPresenceState, presence: Presence, target: EntityRef | undefined, text: string, sessionId?: string) {
+  if (!target || !text.trim()) return undefined;
+  const scope = state.mirrorObjects.filter((item) => item.presenceId === presence.id && item.channelId === presence.channel && (!sessionId || item.sessionId === sessionId));
+  const byRef = new Map(scope.map((item) => [`${item.externalRef.type}:${item.externalRef.id}`, item]));
+  const observedTexts: string[] = [];
+  const visited = new Set<string>();
+  const visit = (ref: EntityRef | undefined) => {
+    if (!ref) return;
+    const key = `${ref.type}:${ref.id}`;
+    if (visited.has(key)) return;
+    visited.add(key);
+    const object = byRef.get(key);
+    if (!object) return;
+    if (object.content?.text) observedTexts.push(object.content.text);
+    visit(object.parentExternalRef);
+    for (const referenced of object.referencedExternalRefs ?? []) visit(referenced);
+  };
+  visit(target);
+  return observedSourceEchoReason(text, observedTexts);
+}
+
 export function formSandboxIntent(source: OpenPresenceState, input: { sessionId: string; affordance: string; format?: string; text: string; target?: EntityRef; perceptionTarget?: EntityRef; rehearsalAttemptId?: string; assignmentId?: string; conversationEpisodeId?: string; invocationId?: string; assets?: SandboxAssetInput[]; expressionMode?: import("./types").ExpressionMode; groundingStatus?: import("./types").GroundingStatus; assetReuse?: { usageType: import("./types").AssetUsageType; reason: string }; networkMetadata?: { referencedPeople?: import("./types").SocialIntentPersonReference[]; networkReason?: string }; operatorDirectiveId?: string; origin?: SocialOrigin; source?: "agent" | "operator"; attentionTestId?: string }) {
   const state = cloneState(source);
   const session = sandboxSessionFor(state, input.sessionId);
@@ -2836,20 +3212,28 @@ export function formSandboxIntent(source: OpenPresenceState, input: { sessionId:
   const leakageReason = identityLeakageReason(state, presence, input.text);
   const runtimeLeakageReasonValue = runtimeContextLeakageReason(input.text);
   const publicExpressionLeakageReasonValue = publicExpressionLeakageReason(input.text);
+  const mentionGroundingReason = input.source !== "operator" && !input.operatorDirectiveId
+    ? expressionMentionGroundingReason(state, presence, input.target, input.text, session.id)
+    : undefined;
+  const sourceEchoReason = input.source !== "operator" && !input.operatorDirectiveId
+    ? expressionSourceEchoReason(state, presence, input.target, input.text, session.id)
+    : undefined;
   const assignment = input.assignmentId ? state.assignments.find((item) => item.id === input.assignmentId) : undefined;
   const assignmentLeakageReason = assignment ? assignmentPublicExpressionLeakageReason(assignment, input.text) : undefined;
   const languageResult = validateLanguage(input.text, effectiveLanguagePolicy(state.agent, presence));
   const languageReason = languageResult.valid ? undefined : "The final expression violates an explicit Never use language rule.";
   const duplicateReason = duplicateAssets.length && !input.assetReuse ? "This exact asset was already used in this Sandbox Presence and needs an explicit reuse reason." : undefined;
-  const reviewReason = languageReason ?? duplicateReason ?? publicExpressionLeakageReasonValue ?? assignmentLeakageReason ?? leakageReason ?? runtimeLeakageReasonValue ?? (mediaReviewRequired ? "Attached media remains uncertain and this Presence requires review before acting." : undefined);
-  const status = languageReason || duplicateReason || publicExpressionLeakageReasonValue || assignmentLeakageReason ? "blocked" as const : reviewReason ? "awaiting-review" as const : executionMode === "auto" ? "queued" as const : executionMode === "review" ? "awaiting-review" as const : "awaiting-manual" as const;
+  const reviewReason = languageReason ?? duplicateReason ?? publicExpressionLeakageReasonValue ?? assignmentLeakageReason ?? mentionGroundingReason ?? sourceEchoReason ?? leakageReason ?? runtimeLeakageReasonValue ?? (mediaReviewRequired ? "Attached media remains uncertain and this Presence requires review before acting." : undefined);
+  const status = languageReason || duplicateReason || publicExpressionLeakageReasonValue || assignmentLeakageReason || mentionGroundingReason || sourceEchoReason ? "blocked" as const : reviewReason ? "awaiting-review" as const : executionMode === "auto" ? "queued" as const : executionMode === "review" ? "awaiting-review" as const : "awaiting-manual" as const;
   const execution: Execution = { id: id("execution"), socialIntentId: intent.id, presenceId: presence.id, affordance: input.affordance, mode: executionMode, status, attempts: 0, bridgeId: `sandbox:${session.environmentId}`, connector: "simulated", idempotencyKey: `sandbox:${session.id}:${intent.id}`, target: input.target, publication, reviewReason, createdAt: timestamp, updatedAt: timestamp, assignmentId: input.assignmentId, conversationEpisodeId, environment: "sandbox", sessionId: session.id, rehearsalAttemptId: input.rehearsalAttemptId, invocationId: input.invocationId, source: input.source ?? (input.operatorDirectiveId ? "operator" : "agent"), operatorDirectiveId: input.operatorDirectiveId, attentionTestId: input.attentionTestId } as Execution & { invocationId?: string };
   state.publications.unshift(publication); state.socialIntents.unshift(intent); state.executions.unshift(execution);
   if (languageReason) execution.failure = { code: "LANGUAGE_POLICY_VIOLATION", message: "Delivery blocked by Never use: " + languageResult.violations.map((item) => item.literal).join(", ") + ".", retryable: false };
   if (duplicateReason) execution.failure = { code: "DUPLICATE_ASSET_CANDIDATE", message: duplicateReason, retryable: false };
   if (publicExpressionLeakageReasonValue) execution.failure = { code: "PUBLIC_TEXT_INTERNAL_MARKER", message: publicExpressionLeakageReasonValue, retryable: false };
   if (assignmentLeakageReason) execution.failure = { code: "ASSIGNMENT_TEXT_LEAKAGE", message: assignmentLeakageReason, retryable: false };
-  state.events.unshift({ ...event("decision", publicExpressionLeakageReasonValue || assignmentLeakageReason ? "Public text boundary blocked" : leakageReason ? "Identity disclosure needs review" : mediaReviewRequired ? "Media action needs review" : "Social Intent formed", reviewReason ?? `${presence.name} chose ${input.affordance} for the simulated ${channelName(session.channelId)} world.`, publicExpressionLeakageReasonValue || assignmentLeakageReason || leakageReason || mediaReviewRequired ? "warning" : "positive", { presenceId: presence.id, intentId: intent.id, executionId: execution.id, sourceObjectId: targetObject?.id }), sessionId: session.id });
+  if (mentionGroundingReason) execution.failure = { code: "UNSUPPORTED_LEADING_MENTION", message: mentionGroundingReason, retryable: false };
+  if (sourceEchoReason) execution.failure = { code: "SOURCE_EXPRESSION_ECHO", message: sourceEchoReason, retryable: false };
+  state.events.unshift({ ...event("decision", publicExpressionLeakageReasonValue || assignmentLeakageReason || mentionGroundingReason || sourceEchoReason ? "Public text boundary blocked" : leakageReason ? "Identity disclosure needs review" : mediaReviewRequired ? "Media action needs review" : "Social Intent formed", reviewReason ?? `${presence.name} chose ${input.affordance} for the simulated ${channelName(session.channelId)} world.`, publicExpressionLeakageReasonValue || assignmentLeakageReason || mentionGroundingReason || sourceEchoReason || leakageReason || mediaReviewRequired ? "warning" : "positive", { presenceId: presence.id, intentId: intent.id, executionId: execution.id, sourceObjectId: targetObject?.id }), sessionId: session.id });
   return state;
 }
 
@@ -2862,6 +3246,18 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
   const session = sandboxSessionFor(state, execution.sessionId);
   const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
   const publication = intent?.publicationId ? state.publications.find((item) => item.id === intent.publicationId) : undefined;
+  if (publication?.assetIds?.length) {
+    try {
+      authorizeAssetSelection(state, publication.assetIds, { presenceId: execution.presenceId, requireReady: true });
+    } catch (error) {
+      execution.status = "blocked";
+      execution.failure = { code: "ASSET_AUTHORIZATION_FAILED", message: error instanceof Error ? error.message : "The selected Asset cannot be used by this Presence.", retryable: false };
+      execution.reviewReason = "Sandbox delivery failed closed at the Asset authorization boundary.";
+      execution.updatedAt = now();
+      state.events.unshift({ ...event("execution", "Asset authorization blocked delivery", execution.failure.message, "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }), sessionId: session.id });
+      return state;
+    }
+  }
   const text = publication?.payload && typeof publication.payload === "object" && "text" in publication.payload && typeof publication.payload.text === "string" ? publication.payload.text : "";
   if (!text.trim() && !["like", "reaction", "repost", "follow"].includes(execution.affordance)) throw new Error("Sandbox delivery requires a publication draft.");
   const publicExpressionReason = publicExpressionLeakageReason(text);
@@ -2875,6 +3271,18 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
   }
   const presence = state.presences.find((item) => item.id === execution.presenceId) ?? state.presence;
   if (!presence) throw new Error("The Sandbox Presence is unavailable.");
+  if (execution.source !== "operator") {
+    const mentionGroundingReason = expressionMentionGroundingReason(state, presence, execution.target, text, session.id);
+    const sourceEchoReason = expressionSourceEchoReason(state, presence, execution.target, text, session.id);
+    if (mentionGroundingReason || sourceEchoReason) {
+      execution.status = "blocked";
+      execution.failure = { code: mentionGroundingReason ? "UNSUPPORTED_LEADING_MENTION" : "SOURCE_EXPRESSION_ECHO", message: mentionGroundingReason ?? sourceEchoReason!, retryable: false };
+      execution.reviewReason = mentionGroundingReason ?? sourceEchoReason;
+      execution.updatedAt = now();
+      state.events.unshift({ ...event("execution", "Public text boundary blocked", mentionGroundingReason ?? sourceEchoReason!, "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }), sessionId: session.id });
+      return state;
+    }
+  }
   const targetLanguageResult = execution.publication ? targetLanguageValidationForExecution(state, execution) : { valid: true as const };
   if (!targetLanguageResult.valid) {
     execution.status = "blocked";
@@ -2900,7 +3308,8 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
     return { assetId, kind: asset?.type === "pdf" || asset?.type === "document" ? "document" as const : asset?.type ?? "image" as const, role: index === 0 && asset?.type !== "link" ? "primary" as const : asset?.type === "link" ? "link-preview" as const : "attachment" as const };
   });
   const isReply = execution.affordance === "reply" || execution.affordance === "x.reply";
-  const object = { id: id("mirror"), bridgeId: `sandbox:${session.environmentId}`, presenceId: presence.id, channelId: session.channelId, externalRef, parentExternalRef: isReply ? execution.target : undefined, objectType: execution.affordance, language: presence.language, author: { externalRef: { type: `${session.channelId}.user`, id: `agent:${presence.id}` }, displayName: presence.name, handle: presence.handle }, content: { text: text || undefined, language: presence.language }, assetRefs, occurredAt: session.virtualNow, observedAt: now(), visibility: "public" as const, shareability: "presence-only" as const, originExecutionId: execution.id, actorPresenceId: presence.id, sourceEventId: `sandbox-delivery:${execution.id}`, environment: "sandbox" as const, sessionId: session.id, assignmentId: execution.assignmentId };
+  const isMessage = execution.affordance === "message" || execution.affordance === "x.message";
+  const object = { id: id("mirror"), bridgeId: `sandbox:${session.environmentId}`, presenceId: presence.id, channelId: session.channelId, externalRef, parentExternalRef: isReply || isMessage ? execution.target : undefined, objectType: execution.affordance, language: presence.language, author: { externalRef: { type: `${session.channelId}.user`, id: `agent:${presence.id}` }, displayName: presence.name, handle: presence.handle }, content: { text: text || undefined, language: presence.language }, assetRefs, occurredAt: session.virtualNow, observedAt: now(), visibility: isMessage ? "direct-message" as const : "public" as const, shareability: "presence-only" as const, originExecutionId: execution.id, actorPresenceId: presence.id, sourceEventId: `sandbox-delivery:${execution.id}`, environment: "sandbox" as const, sessionId: session.id, assignmentId: execution.assignmentId };
   state.mirrorObjects.unshift(object);
   updateConversationEpisodeFromMirror(state, object, presence.id);
   state.mirrorEvents.unshift({ id: id("mirror-event"), bridgeId: object.bridgeId, presenceId: presence.id, sourceEventId: object.sourceEventId!, event: "created", externalRef, object, receivedAt: now(), environment: "sandbox", sessionId: session.id });
@@ -2939,6 +3348,7 @@ export function deliverSandboxExecution(source: OpenPresenceState, executionId: 
   if (publication) {
     const usageType = execution.affordance === "reply" ? "quote" : publication.assetReuse?.usageType ?? "new";
     for (const assetId of publication.assetIds) {
+      if (state.assetUsages.some((usage) => usage.assetId === assetId && usage.publicationId === publication.id && usage.environment === "sandbox")) continue;
       state.assetUsages.unshift({ id: id("asset-usage"), assetId, agentId: state.agent?.id ?? "", presenceId: presence.id, publicationId: publication.id, socialIntentId: execution.socialIntentId, assignmentId: execution.assignmentId, channelId: session.channelId, environment: "sandbox", usageType, reuseReason: publication.assetReuse?.reason, publishedAt: now() });
     }
   }
@@ -3035,11 +3445,13 @@ function normalizeAssignment(input: Assignment): Assignment {
     : { type: "manual" as const });
   const origin = input.origin ?? (input.deliverable?.type === "original_publication" && input.schedule ? "schedule" : "manual");
   const required = input.progress?.required ?? (typeof quantity === "number" ? quantity : 0);
+  const inferredSeedId = input.instruction.match(/https?:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[^\s/]+\/status\/(\d+)/i)?.[1];
   return {
     ...input,
     title: input.title ?? input.instruction,
     origin,
     activation,
+    seed: input.seed ?? (inferredSeedId ? { externalRef: { type: "x.post", id: inferredSeedId }, role: input.deliverable?.type === "meaningful_engagement" ? "distributable_target" : "required_target", availability: "unknown" } : undefined),
     deliverable: { ...input.deliverable, type: input.deliverable?.type ?? "custom", quantity: typeof quantity === "number" ? quantity : undefined, quantityMode: mode },
     quantityPolicy: input.quantityPolicy ?? { quantity: typeof quantity === "number" ? quantity : "agent_planned", mode, period: recurrence?.kind === "weekly" ? "week" : recurrence?.kind === "daily" || recurrence?.kind === "weekdays" ? "day" : "assignment" },
     revision: input.revision ?? 0,
@@ -3336,8 +3748,10 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
       }
     }
   }
+  const lifecycleState = { ...state, presences };
   const normalizedPresences = presences.map((item) => {
-    const migrated = { ...migrateBuiltInXCapabilities(item), conversationStyleId: item.conversationStyleId ?? DEFAULT_CONVERSATION_STYLE_ID, languagePolicy: normalizeLanguagePolicy((item as Presence & { languagePolicy?: LanguagePolicy }).languagePolicy), requestPolicy: item.requestPolicy ?? defaultPresenceRequestPolicy(item.id) };
+    const inferredCreatedAt = item.createdAt ?? presenceGrowthBoundary(lifecycleState, item.id).startAt;
+    const migrated = { ...migrateBuiltInXCapabilities(item), ...(inferredCreatedAt ? { createdAt: inferredCreatedAt } : {}), conversationStyleId: item.conversationStyleId ?? DEFAULT_CONVERSATION_STYLE_ID, languagePolicy: normalizeLanguagePolicy((item as Presence & { languagePolicy?: LanguagePolicy }).languagePolicy), requestPolicy: item.requestPolicy ?? defaultPresenceRequestPolicy(item.id) };
     const nativeConn = (state.nativeConnections ?? []).find((c) => c.presenceId === item.id && (c.kind === "x" || c.channelId === "x"));
     if (migrated.status === "live" && migrated.channel === "x" && migrated.environment !== "sandbox" && xCreditsExhausted(nativeConn)) {
       return { ...migrated, status: "paused" as const };
@@ -3350,7 +3764,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
     if (!builtin || definition.id !== "x") return definition;
     return { ...definition, affordances: [...builtin.affordances.filter((item) => !definition.affordances.some((current) => current.id === item.id)), ...definition.affordances], supportedAssetKinds: [...new Set([...(builtin.supportedAssetKinds ?? []), ...(definition.supportedAssetKinds ?? [])])] };
   });
-  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], workspaceRevision: state.workspaceRevision, presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], operatorConversations: state.operatorConversations ?? [], operatorNudges: state.operatorNudges ?? [], agentRequests: (state.agentRequests ?? []).filter((request) => request.kind !== "capability"), capabilityChangeEvents: state.capabilityChangeEvents ?? [], calendar, assignments: [] as Assignment[], assignmentRuns: state.assignmentRuns ?? [], growthReviews: state.growthReviews ?? [], growthRevisions: state.growthRevisions ?? [], growthEvidenceSnapshots: state.growthEvidenceSnapshots ?? [], growthFileVersions: state.growthFileVersions ?? [], audienceSnapshots: state.audienceSnapshots ?? [], publicationMetricSnapshots: state.publicationMetricSnapshots ?? [], watches, watchSignals: state.watchSignals ?? [], relationshipPolicies: state.relationshipPolicies ?? [], presenceRequestPolicies: state.presenceRequestPolicies ?? [], delegationGrants: state.delegationGrants ?? [], publicRequests: state.publicRequests ?? [], explorations: state.explorations ?? [], discoveryPlans: state.discoveryPlans ?? [], explorationSessions: state.explorationSessions ?? [], explorationFindings: state.explorationFindings ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, assetProviderConnections: state.assetProviderConnections ?? [], toolBindings: toolBindings.map((binding) => ({ ...binding, enabled: binding.enabled !== false })), changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], operatorDirectives: state.operatorDirectives ?? [], socialDecisions: state.socialDecisions ?? [], resourceUsageEvents: state.resourceUsageEvents ?? [], attentionEpisodes: state.attentionEpisodes ?? [], socialIntents: state.socialIntents ?? [], executions: (state.executions ?? []).map((execution) => {
+  const normalized = { ...base, ...state, agents, agent: agents.find((item) => item.id === activeAgentId) ?? agents[0] ?? null, activeAgentId, agentWorkspaces: state.agentWorkspaces ?? [], workspaceRevision: state.workspaceRevision, presence: hydratedPresence, presences: normalizedPresences, activePresenceId, conversations, activeConversationId, presenceChatSessions: state.presenceChatSessions ?? [], operatorConversations: state.operatorConversations ?? [], operatorNudges: state.operatorNudges ?? [], agentRequests: (state.agentRequests ?? []).filter((request) => request.kind !== "capability"), capabilityChangeEvents: state.capabilityChangeEvents ?? [], calendar, assignments: [] as Assignment[], assignmentRuns: state.assignmentRuns ?? [], growthReviews: state.growthReviews ?? [], growthRevisions: state.growthRevisions ?? [], growthEvidenceSnapshots: state.growthEvidenceSnapshots ?? [], growthFileVersions: state.growthFileVersions ?? [], audienceSnapshots: state.audienceSnapshots ?? [], publicationMetricSnapshots: state.publicationMetricSnapshots ?? [], watches, watchSignals: state.watchSignals ?? [], relationshipPolicies: state.relationshipPolicies ?? [], relationshipStudies: state.relationshipStudies ?? [], relationshipInsightSets: state.relationshipInsightSets ?? [], presenceRequestPolicies: state.presenceRequestPolicies ?? [], delegationGrants: state.delegationGrants ?? [], publicRequests: state.publicRequests ?? [], explorations: state.explorations ?? [], discoveryPlans: state.discoveryPlans ?? [], explorationSessions: state.explorationSessions ?? [], explorationFindings: state.explorationFindings ?? [], messages: conversations.find((item) => item.id === activeConversationId)?.messages ?? legacyMessages, modelProfiles: state.modelProfiles ?? [], providerConnections, assetProviderConnections: state.assetProviderConnections ?? [], toolBindings: toolBindings.map((binding) => ({ ...binding, enabled: binding.enabled !== false })), changeSets: state.changeSets ?? [], standingIntents: state.standingIntents ?? [], operatorDirectives: state.operatorDirectives ?? [], socialDecisions: state.socialDecisions ?? [], autobiographicalEvents: state.autobiographicalEvents ?? [], autobiographicalReflections: state.autobiographicalReflections ?? [], resourceUsageEvents: state.resourceUsageEvents ?? [], attentionEpisodes: state.attentionEpisodes ?? [], socialIntents: state.socialIntents ?? [], assetCollections: state.assetCollections ?? [], assetCollectionMemberships: state.assetCollectionMemberships ?? [], assetMetadataEdits: state.assetMetadataEdits ?? [], assetProcessingJobs: state.assetProcessingJobs ?? [], executions: (state.executions ?? []).map((execution) => {
     const repaired = repairLegacyXVerificationStatus(execution);
     if (repaired !== execution) return repaired;
     if (execution.failure && isTerminalDuplicateExecution(execution)) {
@@ -3369,6 +3783,8 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
     rightsAssessments: state.rightsAssessments ?? [],
     editorialDecisions: state.editorialDecisions ?? [],
     publicationPackages: state.publicationPackages ?? [] };
+  normalized.assignmentPursuitWindows = state.assignmentPursuitWindows ?? [];
+  normalized.peopleNotes = state.peopleNotes ?? [];
   normalized.assignments = canonicalizeAssignmentRecords(normalized, state.assignments ?? [], normalized.calendar);
   const assignmentIds = new Set(normalized.assignments.map((assignment) => assignment.id));
   // Older records could retain `active` after a model/provider failure even
@@ -3407,7 +3823,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
     if (execution.status !== "succeeded" || !execution.assignmentId) continue;
     const assignment = normalized.assignments.find((item) => item.id === execution.assignmentId);
     const verified = normalized.outcomes.some((outcome) => outcome.executionId === execution.id && outcome.status === "succeeded");
-    if (!assignment || !verified || assignment.progress.verified >= assignment.progress.required) continue;
+    if (!assignment || !verified || !growthEvidenceIsInPresenceScope(normalized, execution.presenceId, execution.createdAt) || assignment.progress.verified >= assignment.progress.required) continue;
     assignment.progress.verified = Math.min(assignment.progress.required, assignment.progress.verified + 1);
     const complete = assignmentIsSatisfied(assignment, normalized);
     assignment.status = complete ? "completed" : "active";
@@ -3537,6 +3953,7 @@ function normalizeState(raw: OpenPresenceState): OpenPresenceState {
   // the operator-facing compatibility stream.
   normalized.events = normalized.events.slice(0, 2_000);
   normalized.actions = normalized.actions.slice(0, 1_000);
+  normalizeAssetLibraryState(normalized);
   return migrateKnowledgeState(normalized);
 }
 
@@ -3615,7 +4032,7 @@ function hydratePresence(raw: Presence, fallbackBrief = defaultPresenceBrief()):
       actionReservePercent: selfDirectedAttention.allocation?.actionReservePercent ?? 30,
     },
   };
-  return { ...raw, id: idValue, channel, name, mode, capabilities, execution, brief, ghostProfile, publicSelf, mediaPerceptionPolicy, language, languagePolicy, browserAccess, selfDirectedAttention: normalizedSelfDirectedAttention, executionEnvelope: { ...executionEnvelope, presenceId: idValue, affordances: Object.fromEntries(capabilities.map((item) => [item.id, { mode: execution[item.id] ?? executionEnvelope.affordances?.[item.id]?.mode ?? "off" }])) }, context: compilePresenceContext({ ...raw, id: idValue, name, mode, capabilities, brief, ghostProfile, publicSelf, mediaPerceptionPolicy, language, languagePolicy, browserAccess, selfDirectedAttention: normalizedSelfDirectedAttention, executionEnvelope, context, publishingInitiative } as Presence), pacing, attentionIntervalMinutes, quietHours, publishingInitiative, accountHealth: raw.accountHealth ?? "healthy", environment, destination, accessBindings, connectionMode, curationSources: raw.curationSources ?? getDefaultCurationSources(brief) };
+  return { ...raw, id: idValue, channel, name, mode, capabilities, execution, brief, ghostProfile, publicSelf, mediaPerceptionPolicy, language, languagePolicy, browserAccess, selfDirectedAttention: normalizedSelfDirectedAttention, executionEnvelope: { ...executionEnvelope, presenceId: idValue, affordances: Object.fromEntries(capabilities.map((item) => [item.id, { mode: execution[item.id] ?? executionEnvelope.affordances?.[item.id]?.mode ?? "off" }])) }, context: compilePresenceContext({ ...raw, id: idValue, name, mode, capabilities, brief, ghostProfile, publicSelf, mediaPerceptionPolicy, language, languagePolicy, browserAccess, selfDirectedAttention: normalizedSelfDirectedAttention, executionEnvelope, context, publishingInitiative } as Presence), pacing, attentionIntervalMinutes, quietHours, publishingInitiative, accountHealth: raw.accountHealth ?? "healthy", environment, destination, accessBindings, connectionMode, curationSources: normalizeCurationSources(raw.curationSources ?? getDefaultCurationSources(brief)) };
 }
 
 function migrateBuiltInXCapabilities(presence: Presence): Presence {
@@ -3684,9 +4101,9 @@ export function assertRuntimeScope(source: OpenPresenceState, scope: RuntimeScop
   return true;
 }
 
-function recordChangeSet(state: OpenPresenceState, summary: string, operations: ChangeSetOperation[], conversationId?: string): string | undefined {
+function recordChangeSet(state: OpenPresenceState, summary: string, operations: ChangeSetOperation[], conversationId?: string, presenceId?: string): string | undefined {
   if (!state.agent) return undefined;
-  const changeSet: ChangeSet = { id: id("changeset"), agentId: state.agent.id, conversationId, summary, operations, createdAt: now() };
+  const changeSet: ChangeSet = { id: id("changeset"), agentId: state.agent.id, presenceId, conversationId, summary, operations, createdAt: now() };
   state.changeSets.unshift(changeSet);
   return changeSet.id;
 }
@@ -4014,7 +4431,7 @@ function assignmentQuantity(instruction: string): { quantity: number; quantityMo
   // deliverable. This keeps years/dates in QA markers, URLs, and topic text
   // from being mistaken for the requested Assignment quantity.
   const modifierMatch = instruction.match(/\b(exactly|at\s+least|up\s+to|no\s+more\s+than|at\s+most|maximum|max(?:imum)?|minimum|min(?:imum)?|aim\s+for|target|around|about)\s+(\d+)\b/i);
-  const deliverableMatch = instruction.match(/\b(\d+)\s+(?:(?:original|verified|sandbox|simulated|x|social|channel|distinct|new)\s+){0,6}(?:posts?|publications?|repl(?:y|ies)|quotes?|reposts?|messages?)\b/i);
+  const deliverableMatch = instruction.match(/\b(\d+)\s+(?:(?:original|verified|sandbox|simulated|x|social|channel|distinct|new|worthwhile|meaningful)\s+){0,6}(?:posts?|publications?|repl(?:y|ies)|quotes?|reposts?|messages?|interactions?|conversations?|engagements?)\b/i);
   const match = modifierMatch ?? deliverableMatch;
   const quantity = Math.max(1, Number(match?.[2] ?? match?.[1] ?? 1));
   const modifier = (modifierMatch?.[1] ?? "").toLowerCase().replace(/\s+/g, " ");
@@ -4024,6 +4441,7 @@ function assignmentQuantity(instruction: string): { quantity: number; quantityMo
 
 function assignmentDeliverableType(instruction: string): Assignment["deliverable"]["type"] {
   if (growthTarget(instruction)) return "audience_growth";
+  if (/(?:https?:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/)/i.test(instruction) && /\b(?:promot|amplif|distribut|surface|share|reach|right people|genuinely care)\b/i.test(instruction)) return "meaningful_engagement";
   const evaluationOnly = /\b(?:evaluate|assess|review|recommend|decide\s+whether|tell\s+me\s+whether)\b/i.test(instruction)
     && (!/\b(?:publish|post|reply|respond|answer|handle|send|engage|message)\b/i.test(instruction) || /\b(?:evaluate|assess|review)\s+(?:whether|if)\b/i.test(instruction));
   if (evaluationOnly) return "decision_report";
@@ -4072,7 +4490,7 @@ export function preflightAssignment(source: OpenPresenceState, assignment: Assig
   const assumptions: string[] = [];
   const affordance = assignmentAffordance(assignment.deliverable.type);
   const deliverable = assignmentDeliverableLabel(assignment.deliverable.type);
-  const timing = assignment.schedule ? `${assignment.schedule.day} · ${assignment.schedule.time} · ${assignment.schedule.executionWindow}` : undefined;
+  const timing = assignment.schedule ? `${assignment.schedule.day} · ${assignment.schedule.time}–${assignment.schedule.executionWindow.split(/[–-]/).map((part) => part.trim())[1] ?? assignment.schedule.time} · closes at ${assignment.schedule.executionWindow.split(/[–-]/).map((part) => part.trim())[1] ?? assignment.schedule.time}` : undefined;
 
   if (!presence) {
     checks.push({ label: "Presence", status: "fail", detail: "No Presence is available to carry this Assignment." });
@@ -4104,6 +4522,12 @@ export function preflightAssignment(source: OpenPresenceState, assignment: Assig
     const available = metricCapability?.availability === "available";
     checks.push({ label: "Evidence source", status: available ? "pass" : "warning", detail: available ? `${metricCapability?.provider ?? "Connected channel"} can observe ${assignment.successEvidence.metric}.` : `Follower evidence is not currently available; the responsibility can continue, but progress will remain unknown until a channel reports it.` });
     if (!available) assumptions.push("Follower progress will be updated when the connected channel reports a fresh audience snapshot.");
+  } else if (presence && assignment.deliverable.type === "meaningful_engagement") {
+    const manifest = derivePresenceCapabilityManifest(source, assignment.presenceId);
+    const actions = ["reply", "quote", "repost", "like", "follow"];
+    const available = manifest.items.filter((item) => actions.includes(item.capability) && item.canExecute && item.canVerify && (presence.execution[item.capability] ?? "off") !== "off");
+    checks.push({ label: "Channel capabilities", status: available.length ? "pass" : "fail", detail: available.length ? `${available.map((item) => item.label).join(", ")} are available for the Agent to choose from.` : "No verified public interaction capability is currently available." });
+    if (!available.length) issues.push("Enable at least one verified public interaction capability for this Presence before activating the Assignment.");
   } else if (presence && affordance) {
     const readiness = evaluateExecutionReadiness({
       presence,
@@ -4171,9 +4595,18 @@ export function compileAssignmentInstruction(source: OpenPresenceState, instruct
     /choose\s+your\s+own|find\s+your\s+own/i.test(clean) ? "The Agent chooses the topics, thesis, examples, format, and wording." : "",
   ].filter(Boolean);
   const timestamp = now();
+  const seedId = clean.match(/https?:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[^\s/]+\/status\/(\d+)/i)?.[1];
   const growthPlan: AssignmentPlan | undefined = targetFollowers ? { id: id("assignment-plan"), assignmentId: "pending", revision: 1, summary: "Build durable attention by publishing useful original ideas, participating where the Presence can add value, and developing relationships with people in the intended territory.", dailyTargets: ["Aim for 1–2 useful original publications when there is something worth saying.", "Inspect relevant conversations and continue promising relationships."], publishingApproach: ["Prefer concrete implementation lessons over broad commentary.", "Use the format that best serves the idea; do not publish filler to hit a quota."], discoveryDirections: topics?.length ? topics : presence.brief.primaryTerritory.slice(0, 6), relationshipFocus: [presence.brief.audience], hypotheses: ["Specific, useful observations should create stronger repeat interaction than generic commentary."], nextWeeklyReviewAt: new Date(Date.now() + 7 * 86_400_000).toISOString(), nextStrategicReviewAt: new Date(Date.now() + 28 * 86_400_000).toISOString(), source: "agent", createdAt: timestamp, updatedAt: timestamp } : undefined;
   const assignment: Assignment = { id: id("assignment"), agentId: source.agent.id, presenceId: presence.id, sessionId, channelId: presence.channel, environment, title: clean, origin: schedule ? "schedule" : "manual", activation: targetFollowers ? { type: "continuous" } : schedule ? { type: "scheduled", recurrence } : { type: "manual" }, instruction: clean, deliverable: { type, quantity: targetFollowers ? undefined : quantity, quantityMode: targetFollowers ? undefined : quantityMode }, quantityPolicy: targetFollowers ? { quantity: "agent_planned", mode: "at_least", period: "assignment" } : { quantity, mode: quantityMode, period: recurrence.kind === "weekly" ? "week" : recurrence.kind === "daily" || recurrence.kind === "weekdays" ? "day" : "assignment" }, recurrence: targetFollowers ? { kind: "once", label: "Continuous responsibility" } : recurrence, schedule, editorialContext: { topics, constraints }, audienceObjective: targetFollowers ? clean.split(/\bwhile\b/i)[1]?.trim() || presence.brief.audience : undefined, objective, successEvidence: targetFollowers ? { kind: "metric_threshold", metric: "followers", comparator: ">=", value: targetFollowers, label: `${targetFollowers.toLocaleString()} followers` } : undefined, plan: growthPlan, planHistory: growthPlan ? [growthPlan] : [], executionPolicy: { usePresenceEnvelope: true, delegationPolicy }, status: "draft", progress: { required: targetFollowers ? 1 : quantity, verified: 0 }, rejectedCandidates: 0, systemFailures: 0, work: { phase: "candidate_review", attempts: 0, maxAttempts: targetFollowers ? 0 : Math.min(12, Math.max(4, quantity * 4)), storiesResearched: 0 }, attemptHistory: [], storyResearch: [], createdAt: timestamp, updatedAt: timestamp };
+  if (type === "meaningful_engagement") {
+    assignment.activation = { type: "continuous" };
+    assignment.deliverable = { type };
+    assignment.quantityPolicy = { quantity: "agent_planned", mode: "at_least", period: "assignment" };
+    assignment.progress.required = 0;
+    assignment.work!.maxAttempts = 0;
+  }
   if (growthPlan) growthPlan.assignmentId = assignment.id;
+  if (seedId) assignment.seed = { externalRef: { type: "x.post", id: seedId }, role: type === "meaningful_engagement" ? "distributable_target" : "required_target", availability: "unknown" };
   assignment.preflight = preflightAssignment(source, assignment, delegationPolicy);
   return assignment;
 }
@@ -4195,6 +4628,65 @@ export function assignmentIsSatisfied(assignment: Assignment, source?: OpenPrese
   const mode = canonicalAssignmentQuantityMode(assignment.quantityPolicy?.mode ?? assignment.deliverable.quantityMode);
   if (assignment.quantityPolicy?.quantity === "agent_planned" || typeof required !== "number" || mode === "at_most") return false;
   return assignment.progress.verified >= required;
+}
+
+const pursuitTerminalStatuses = new Set<AssignmentPursuitWindow["status"]>(["completed", "expired", "cancelled"]);
+const pursuitActions: AssignmentPursuitAction[] = ["reply", "quote", "repost", "like", "follow"];
+
+export function activeAssignmentPursuitWindow(source: OpenPresenceState, assignmentId: string, at = Date.now()) {
+  return (source.assignmentPursuitWindows ?? []).find((window) => window.assignmentId === assignmentId
+    && window.status === "active"
+    && new Date(window.startsAt).getTime() <= at
+    && new Date(window.deadlineAt).getTime() > at);
+}
+
+export function assignmentPursuitUsage(source: OpenPresenceState, window: AssignmentPursuitWindow, at = Date.now()) {
+  const start = new Date(window.startsAt).getTime();
+  const end = Math.min(new Date(window.deadlineAt).getTime(), at);
+  const events = source.resourceUsageEvents.filter((item) => item.presenceId === window.presenceId
+    && item.attentionSource === "assignment"
+    && new Date(item.createdAt).getTime() >= start
+    && new Date(item.createdAt).getTime() <= end
+    && (!item.originId || item.originId === window.assignmentId));
+  const count = (category: ResourceUsageEvent["category"]) => events
+    .filter((item) => item.category === category)
+    .reduce((total, item) => total + (item.usage.requests ?? 1), 0);
+  const estimatedCostCents = events.reduce((total, item) => total + (item.cost?.currency === "USD" ? Math.round(item.cost.amount * 100) : 0), 0);
+  return {
+    channelReads: count("channel_read"),
+    hydrations: count("hydration"),
+    modelCalls: count("model"),
+    visionCalls: count("vision"),
+    estimatedCostCents,
+  };
+}
+
+export function assignmentPursuitVerifiedCounts(source: OpenPresenceState, window: AssignmentPursuitWindow, at = Date.now()) {
+  const start = new Date(window.startsAt).getTime();
+  const end = Math.min(new Date(window.deadlineAt).getTime(), at);
+  const executions = source.executions.filter((execution) => execution.assignmentId === window.assignmentId
+    && execution.presenceId === window.presenceId
+    && execution.status === "succeeded"
+    && new Date(execution.createdAt).getTime() >= start
+    && new Date(execution.createdAt).getTime() <= end);
+  const verifiedIds = new Set(source.outcomes.filter((outcome) => outcome.status === "succeeded" && executions.some((execution) => execution.id === outcome.executionId)).map((outcome) => outcome.executionId));
+  const counts: Record<AssignmentPursuitAction, number> = { reply: 0, quote: 0, repost: 0, like: 0, follow: 0 };
+  for (const execution of executions) {
+    const action = execution.affordance.replace(/^x\./, "") as AssignmentPursuitAction;
+    if (verifiedIds.has(execution.id) && pursuitActions.includes(action)) counts[action] += 1;
+  }
+  return { verified: [...verifiedIds].length, counts };
+}
+
+export function assignmentPursuitCanSpend(source: OpenPresenceState, window: AssignmentPursuitWindow, category: keyof AssignmentPursuitResourceBudget, at = Date.now()) {
+  const limit = window.resourceBudget?.[category];
+  if (limit === undefined) return true;
+  const usage = assignmentPursuitUsage(source, window, at);
+  const current = category === "maxChannelReads" ? usage.channelReads
+    : category === "maxHydrations" ? usage.hydrations
+      : category === "maxModelCalls" ? usage.modelCalls
+        : category === "maxVisionCalls" ? usage.visionCalls : usage.estimatedCostCents;
+  return current < limit;
 }
 
 export function formatRelativeTime(value: string, now = Date.now()) {
@@ -4223,6 +4715,18 @@ export function formatRelativeTime(value: string, now = Date.now()) {
   return `${weeks}w ago`;
 }
 
+function parseScheduleClock(value: string | undefined): number | undefined {
+  if (!value || !/^([01]\d|2[0-3]):[0-5]\d$/.test(value)) return undefined;
+  const [hours, minutes] = value.split(":").map(Number);
+  return hours * 60 + minutes;
+}
+
+function scheduledExecutionEnd(schedule: Assignment["schedule"]): number | undefined {
+  if (!schedule?.executionWindow) return undefined;
+  const [, end] = schedule.executionWindow.split(/[–-]/).map((part) => part.trim());
+  return parseScheduleClock(end);
+}
+
 export function scheduledAssignmentIsDue(assignment: Assignment, now = new Date()): boolean {
   if (!assignment.schedule || assignment.deliverable?.type === "reply") return false;
   if (!(["draft", "active", "working"].includes(assignment.status))) return false;
@@ -4231,23 +4735,54 @@ export function scheduledAssignmentIsDue(assignment: Assignment, now = new Date(
   if (evaluatedToday && assignment.lastOutcome && !["action_no_op", "candidate_rejected", "delivery_failed"].includes(assignment.lastOutcome.class)) return false;
   const day = assignment.schedule.day.trim().toLowerCase();
   const currentDay = now.toLocaleDateString("en-US", { weekday: "long" }).toLowerCase();
-  if (day !== currentDay) return false;
-  const [hours, minutes] = assignment.schedule.time.split(":").map(Number);
-  if (!Number.isFinite(hours) || !Number.isFinite(minutes)) return false;
-  return now.getHours() * 60 + now.getMinutes() >= hours * 60 + minutes;
+  const daily = assignment.recurrence?.kind === "daily" || day === "daily";
+  const weekdaysOnly = assignment.recurrence?.kind === "weekdays";
+  if (!daily && (!weekdaysOnly || ["monday", "tuesday", "wednesday", "thursday", "friday"].includes(currentDay)) && day !== currentDay) return false;
+  if (weekdaysOnly && !["monday", "tuesday", "wednesday", "thursday", "friday"].includes(currentDay)) return false;
+  const startMinutes = parseScheduleClock(assignment.schedule.time);
+  if (startMinutes === undefined) return false;
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
+  const endMinutes = scheduledExecutionEnd(assignment.schedule);
+  if (endMinutes === undefined) return currentMinutes >= startMinutes;
+  if (endMinutes >= startMinutes) return currentMinutes >= startMinutes && currentMinutes <= endMinutes;
+  // Preserve support for a window that crosses midnight (for example 22:00–02:00).
+  return currentMinutes >= startMinutes || currentMinutes <= endMinutes;
 }
 
-export function nextScheduledOccurrence(schedule: { day: string; time: string }, now = new Date()): Date {
+export function nextScheduledOccurrence(schedule: { day: string; time: string }, now = new Date(), recurrence?: Assignment["recurrence"]): Date {
   const daysOfWeek = ["sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday"];
+  const startMinutes = parseScheduleClock(schedule.time);
+  if (startMinutes === undefined) return new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
+  const daily = recurrence?.kind === "daily" || schedule.day.trim().toLowerCase() === "daily";
+  if (daily) {
+    const targetDate = new Date(now);
+    const hours = Math.floor(startMinutes / 60);
+    const minutes = startMinutes % 60;
+    targetDate.setHours(hours, minutes, 0, 0);
+    if (targetDate.getTime() <= now.getTime()) targetDate.setDate(targetDate.getDate() + 1);
+    return targetDate;
+  }
   const targetDayIndex = daysOfWeek.indexOf(schedule.day.trim().toLowerCase());
-  const [hours, minutes] = schedule.time.split(":").map(Number);
-  if (targetDayIndex === -1 || !Number.isFinite(hours) || !Number.isFinite(minutes)) {
+  const hours = Math.floor(startMinutes / 60);
+  const minutes = startMinutes % 60;
+  if (targetDayIndex === -1) {
     return new Date(now.getTime() + 7 * 24 * 60 * 60 * 1000);
   }
   const currentDayIndex = now.getDay();
   let dayDiff = targetDayIndex - currentDayIndex;
   const targetDate = new Date(now);
   targetDate.setHours(hours, minutes, 0, 0);
+  if (recurrence?.kind === "weekdays") {
+    const currentWeekday = now.getDay();
+    const targetWeekday = targetDayIndex === 0 || targetDayIndex === 6 ? 1 : targetDayIndex;
+    dayDiff = targetWeekday - currentWeekday;
+    if (dayDiff < 0 || (dayDiff === 0 && targetDate.getTime() <= now.getTime())) dayDiff += 7;
+    const result = new Date(now);
+    result.setDate(now.getDate() + dayDiff);
+    while ([0, 6].includes(result.getDay())) result.setDate(result.getDate() + 1);
+    result.setHours(hours, minutes, 0, 0);
+    return result;
+  }
   if (dayDiff < 0 || (dayDiff === 0 && targetDate.getTime() <= now.getTime())) {
     dayDiff += 7;
   }
@@ -4313,7 +4848,7 @@ function compileLegacyAgenda(state: OpenPresenceState, presenceId?: string, now 
 
   const scopedAssignments = state.assignments.filter((a) => {
     if (presenceScope && a.presenceId !== presenceScope) return false;
-    if (["completed", "completed_with_adaptation", "cancelled", "failed"].includes(a.status)) return false;
+    if (["completed", "completed_with_adaptation", "cancelled", "failed", "paused"].includes(a.status)) return false;
     return true;
   });
 
@@ -4370,7 +4905,7 @@ function compileLegacyAgenda(state: OpenPresenceState, presenceId?: string, now 
     let scheduledDate: Date | undefined;
     if (assignment.schedule) {
       scheduledFor = `${assignment.schedule.day} ${assignment.schedule.time}`;
-      scheduledDate = nextScheduledOccurrence(assignment.schedule, now);
+      scheduledDate = nextScheduledOccurrence(assignment.schedule, now, assignment.recurrence);
     } else if (assignment.nextDueAt) {
       scheduledDate = new Date(assignment.nextDueAt);
       scheduledFor = formatRelativeTime(assignment.nextDueAt);
@@ -4523,7 +5058,7 @@ export function compileAgendaWork(state: OpenPresenceState, presenceId?: string,
   const scopedPresenceId = presence?.id;
   const scopedAssignments = state.assignments.filter((assignment) => {
     if (scopedPresenceId && assignment.presenceId !== scopedPresenceId) return false;
-    return !["completed", "completed_with_adaptation", "cancelled", "failed", "expired_incomplete"].includes(assignment.status);
+    return !["completed", "completed_with_adaptation", "cancelled", "failed", "expired_incomplete", "paused"].includes(assignment.status);
   });
   const scopedMirror = state.mirrorObjects.filter((object) => object.presenceId === scopedPresenceId && object.environment !== "sandbox");
   const latestRunFor = (assignmentId: string) => [...(state.assignmentRuns ?? [])]
@@ -4584,7 +5119,7 @@ export function compileAgendaWork(state: OpenPresenceState, presenceId?: string,
           ? `Waiting for the next publishing window: ${assignment.schedule.day} at ${assignment.schedule.time}.`
           : assignment.lastOutcome?.message ?? "Ready to consider this responsibility now.";
     const doneWhen = progress ? progress.label : assignment.successEvidence?.kind === "metric_threshold" ? `${assignment.successEvidence.metric} ${assignment.successEvidence.comparator} ${assignment.successEvidence.value.toLocaleString()}.` : "A verified channel outcome is recorded.";
-    const minutesUntilDue = dueNow ? 0 : (assignment.schedule ? Math.round((new Date(nextScheduledOccurrence(assignment.schedule, now)).getTime() - now.getTime()) / 60000) : (assignment.nextDueAt ? Math.round((new Date(assignment.nextDueAt).getTime() - now.getTime()) / 60000) : undefined));
+  const minutesUntilDue = dueNow ? 0 : (assignment.schedule ? Math.round((new Date(nextScheduledOccurrence(assignment.schedule, now, assignment.recurrence)).getTime() - now.getTime()) / 60000) : (assignment.nextDueAt ? Math.round((new Date(assignment.nextDueAt).getTime() - now.getTime()) / 60000) : undefined));
     const urgencyScore = calculatePropertyBasedWorkScore({
       obligationKind: needsOperator ? "operator_blocked" : working ? "working_continuity" : dueNow ? "scheduled_due" : "routine",
       hasDeliverableObligation: true,
@@ -4611,7 +5146,7 @@ export function compileAgendaWork(state: OpenPresenceState, presenceId?: string,
       statusLabel: needsOperator ? "Needs you" : working ? "Working" : scheduledFuture ? "Upcoming" : "Ready",
       detail,
       progress,
-      nextEligibleAt: assignment.schedule ? new Date(nextScheduledOccurrence(assignment.schedule, now)).toISOString() : assignment.nextDueAt,
+      nextEligibleAt: assignment.schedule ? new Date(nextScheduledOccurrence(assignment.schedule, now, assignment.recurrence)).toISOString() : assignment.nextDueAt,
       targetMirrorObjectId: target?.id,
       updatedAt: assignment.updatedAt,
       urgencyScore,
@@ -4663,9 +5198,9 @@ export function compileAgendaWork(state: OpenPresenceState, presenceId?: string,
       if (seenMentionKeys.has(dedupeKey)) return false;
       seenMentionKeys.add(dedupeKey);
       return true;
-    })
-    .slice(0, 3);
-  mentionCandidates.forEach((object, index) => {
+    });
+  const mentionWorkCandidates = mentionCandidates.slice(0, 3);
+  mentionWorkCandidates.forEach((object, index) => {
     const elapsedHours = (now.getTime() - new Date(object.occurredAt ?? object.observedAt).getTime()) / (1000 * 60 * 60);
     const urgencyScore = calculatePropertyBasedWorkScore({
       obligationKind: "direct_mention",
@@ -4814,13 +5349,14 @@ export function compileAgendaWork(state: OpenPresenceState, presenceId?: string,
   // Activity uses a compact projection that intentionally omits large growth
   // histories. Treat those omitted collections as empty here; the Growth view
   // loads the complete state when it needs to calculate evidence watermarks.
-  const audienceCount = (state.audienceSnapshots ?? []).filter((s) => s.presenceId === scopedPresenceId).length;
-  const publicationCount = (state.publicationMetricSnapshots ?? []).filter((s) => s.presenceId === scopedPresenceId).length;
+  const growthEvidenceInScope = (observedAt: string | undefined) => Boolean(scopedPresenceId && growthEvidenceIsInPresenceScope(state, scopedPresenceId, observedAt));
+  const audienceCount = (state.audienceSnapshots ?? []).filter((s) => s.presenceId === scopedPresenceId && growthEvidenceInScope(s.observedAt)).length;
+  const publicationCount = (state.publicationMetricSnapshots ?? []).filter((s) => s.presenceId === scopedPresenceId && growthPublicationIsInPresenceScope(state, scopedPresenceId, s)).length;
   const watermark = presence?.growthEvidenceWatermark ?? (audienceCount + publicationCount);
   const lastTriaged = presence?.lastTriagedEvidenceWatermark ?? 0;
   const hasNewEvidence = watermark > lastTriaged;
 
-  const lastReview = (state.growthReviews ?? []).find((r) => r.presenceId === scopedPresenceId);
+  const lastReview = (state.growthReviews ?? []).find((r) => r.presenceId === scopedPresenceId && growthEvidenceInScope(r.createdAt));
   const hoursSinceLastReview = lastReview ? (now.getTime() - new Date(lastReview.createdAt).getTime()) / (1000 * 60 * 60) : Infinity;
   const isEventDrivenEligible = hasNewEvidence && (hoursSinceLastReview >= 12 || !lastReview);
 
@@ -4974,7 +5510,7 @@ export function compileAgendaWork(state: OpenPresenceState, presenceId?: string,
   const upcoming: AgendaWorkItem[] = scopedAssignments
     .filter((assignment) => assignment.schedule && !scheduledAssignmentIsDue(assignment, now) && !isWorkingAssignment(assignment))
     .map((assignment) => {
-      const nextAt = nextScheduledOccurrence(assignment.schedule!, now).toISOString();
+      const nextAt = nextScheduledOccurrence(assignment.schedule!, now, assignment.recurrence).toISOString();
       const title = ["original_publication", "maintain_original_presence"].includes(assignment.deliverable.type) ? "Original publication" : assignment.title ?? cleanUserFacingAssignmentInstruction(assignment.instruction);
       return {
         id: `upcoming-work:${assignment.id}`,
@@ -5016,6 +5552,7 @@ export function compileAgendaWork(state: OpenPresenceState, presenceId?: string,
   return {
     ...legacy,
     compiledAt: now.toISOString(),
+    pendingMentionCount: mentionCandidates.length,
     workItems: items,
     working,
     nextUp,
@@ -5282,19 +5819,21 @@ function addSocialEvaluation(state: OpenPresenceState, standing: StandingIntent,
   if (!presence || !state.agent) return;
   const formedAt = now(); const expiresAt = new Date(Date.now() + 45 * 60 * 1000).toISOString();
   const affordance = `${presence.channel}.post`;
+  const environment = presence.environment ?? "live";
+  const mode = slot.mode;
+  if (mode !== "off" && hasExistingPublicAction(state, { presenceId: presence.id, environment, affordance, text: slot.instruction })) return;
   const publication = makePublication(state, slot.instruction, `${presence.channel}.post`);
   const origin: SocialOrigin = { kind: "standing_intent", refId: standing.id };
   publication.origin = origin;
   const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance, publicationId: publication.id, priority: 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, standingIntentId: standing.id, origin, environment: presence.environment ?? "live" };
   state.socialIntents.unshift(socialIntent);
-  const mode = slot.mode;
   if (mode !== "off") {
     const nativeX = presence.channel === "x" ? state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === "x" && connection.status === "connected" && connection.access === "read-write") : undefined;
     const bridge = nativeX ? undefined : bridgeFor(state, presence.id, "post");
     const simulated = !bridge && !nativeX && presence.channel === "x" && isTestRuntime();
     const connector = nativeX ? "native" as const : bridge ? bridge.kind : simulated ? "simulated" as const : undefined;
     const status = simulated ? (mode === "auto" ? "succeeded" : mode === "review" ? "awaiting-review" : "awaiting-manual") : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
-    const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance, mode: mode as Exclude<import("./types").ExecutionMode, "off">, status, attempts: simulated && mode === "auto" ? 1 : 0, bridgeId: bridge?.id, connector, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, createdAt: formedAt, updatedAt: formedAt, executedAt: simulated && mode === "auto" ? formedAt : undefined, environment: presence.environment ?? "live" };
+    const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance, mode: mode as Exclude<import("./types").ExecutionMode, "off">, status, attempts: simulated && mode === "auto" ? 1 : 0, bridgeId: bridge?.id, connector, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance, text: slot.instruction }), publication, createdAt: formedAt, updatedAt: formedAt, executedAt: simulated && mode === "auto" ? formedAt : undefined, environment };
     state.executions.unshift(execution);
     if (simulated && mode === "auto") {
       const outcome: Outcome = { id: id("outcome"), socialIntentId: socialIntent.id, executionId: execution.id, presenceId: presence.id, status: "succeeded", observedAt: formedAt, metrics: { qualifiedFollows: 3 }, evidence: [], environment: presence.environment ?? "live" };
@@ -5312,25 +5851,38 @@ function addSocialEvaluation(state: OpenPresenceState, standing: StandingIntent,
 }
 
 export function isExplicitXPostRequest(content: string) {
-  const lower = content.toLowerCase();
-  return lower.includes("introduce this presence on x") ||
-    (lower.includes("post on x") && (lower.includes("presence") || lower.includes("publish")));
+  const normalized = content.toLowerCase().replace(/[’]/g, "'").replace(/\s+/g, " ").trim();
+  const explicitlyAsksForDraftOnly = /\b(?:draft|preview|example|suggest(?:ion)?|option|candidate)\b/.test(normalized)
+    && !/\b(?:publish|post|send|ship|make (?:it|this|that) live)\b/.test(normalized);
+  if (explicitlyAsksForDraftOnly) return false;
+  if (/^(?:how|what|why|when|where)\b/.test(normalized) || /^should\s+(?:i|we)\b/.test(normalized)) return false;
+  return /\bintroduce\s+(?:yourself|this\s+presence|the\s+presence)\s+(?:to\s+the\s+world|on\s+x)\b/.test(normalized)
+    && /\b(?:tweet|post|publish|on\s+x)\b/.test(normalized)
+    || /\b(?:make|create|publish|send|ship)\b[^.!?\n]{0,80}\b(?:first\s+)?(?:tweet|x\s+post|post\s+on\s+x)\b/.test(normalized)
+    || /\b(?:post|publish|send)\b[^.!?\n]{0,80}\b(?:to|on)\s+x\b/.test(normalized)
+    || /\b(?:tweet|post)\s+(?:this|that|it)\s+(?:now|on\s+x)?\b/.test(normalized);
 }
 
 export function formChatPostIntent(source: OpenPresenceState, text: string, standingIntentId?: string, sourceKind: "agent" | "operator" = "agent", assetIds: string[] = [], decisionInput?: SocialDecisionInput, runId?: string) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presence;
   if (!state.agent || !presence || presence.status !== "live" || presence.channel !== "x" || !text.trim()) return state;
+  const environment = presence.environment ?? "live";
+  if (hasExistingPublicAction(state, { presenceId: presence.id, environment, affordance: "x.post", text })) return state;
   const formedAt = now();
   const expiresAt = new Date(Date.now() + 45 * 60 * 1000).toISOString();
-  const validAssetIds = assetIds.filter((assetId) => state.assets.some((asset) => asset.id === assetId && asset.status === "ready"));
+  const autobiographicalContext = sourceKind === "agent" ? retrievePublicSafeAutobiographicalContext(state, presence, `${text}\n${decisionInput?.summary ?? ""}`, Date.now()) : undefined;
+  const autobiographicalEventIds = decisionInput?.autobiographicalEventIds ?? autobiographicalContext?.eventIds;
+  const effectiveDecisionInput = decisionInput ? { ...decisionInput, autobiographicalEventIds } : undefined;
+  const validAssetIds = authorizeAssetSelection(state, assetIds, { presenceId: presence.id });
   const publication = makePublication(state, text.trim(), validAssetIds.length ? "x.media-post" : "x.post", sourceKind === "operator" ? "operator_manual" : "agent_model", validAssetIds);
   const origin: SocialOrigin = standingIntentId ? { kind: "standing_intent", refId: standingIntentId } : sourceKind === "operator" ? { kind: "operator" } : { kind: "other" };
   publication.origin = origin;
-  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: "x.post", publicationId: publication.id, priority: 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, standingIntentId, origin, runId };
+  publication.autobiographicalEventIds = autobiographicalEventIds;
+  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: "x.post", publicationId: publication.id, priority: 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, standingIntentId, origin, runId, autobiographicalEventIds };
   if (publication.publicExpression) publication.publicExpression.socialIntentId = socialIntent.id;
   state.socialIntents.unshift(socialIntent);
-  const socialDecision = decisionInput ? createSocialDecision(state, { ...decisionInput, origin: decisionInput.origin ?? origin }, socialIntent.id) : undefined;
+  const socialDecision = effectiveDecisionInput ? createSocialDecision(state, { ...effectiveDecisionInput, origin: effectiveDecisionInput.origin ?? origin }, socialIntent.id) : undefined;
   if (socialDecision) state.socialDecisions.unshift(socialDecision);
   const mode = presence.execution.post ?? "off";
   if (mode === "off") {
@@ -5342,11 +5894,12 @@ export function formChatPostIntent(source: OpenPresenceState, text: string, stan
   const bridge = nativeX ? undefined : bridgeFor(state, presence.id, "post");
   const connector = nativeX ? "native" as const : bridge ? bridge.kind : undefined;
   const leakageReason = identityLeakageReason(state, presence, text);
-  const publicExpressionReason = publicExpressionLeakageReason(text);
+  const autobiographicalSafetyReason = sourceKind === "agent" ? autobiographicalExpressionSafetyReason(state, presence.id, autobiographicalEventIds, text) : undefined;
+  const publicExpressionReason = publicExpressionLeakageReason(text) ?? autobiographicalSafetyReason;
   const status = publicExpressionReason ? "blocked" : leakageReason ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
-  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.post", mode, status, attempts: 0, bridgeId: bridge?.id, connector, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, reviewReason: publicExpressionReason ?? leakageReason, createdAt: formedAt, updatedAt: formedAt, environment: presence.environment ?? "live", runId };
+  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.post", mode, status, attempts: 0, bridgeId: bridge?.id, connector, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance: "x.post", text }), publication, reviewReason: publicExpressionReason ?? leakageReason, createdAt: formedAt, updatedAt: formedAt, environment, runId };
   execution.source = sourceKind;
-  if (publicExpressionReason) execution.failure = { code: "PUBLIC_TEXT_INTERNAL_MARKER", message: publicExpressionReason, retryable: false };
+  if (publicExpressionReason) execution.failure = { code: autobiographicalSafetyReason ? "AUTOBIOGRAPHICAL_PRIVACY_BOUNDARY" : "PUBLIC_TEXT_INTERNAL_MARKER", message: publicExpressionReason, retryable: false };
   state.executions.unshift(execution);
   const reason = standingIntentId ? "Jenny evaluated a Calendar standing intention and handed the resulting Social Intent to the Presence execution envelope." : "The operator asked Jenny to introduce this Presence through the native X connector.";
   state.actions.unshift({ id: id("act"), intent: "post", summary: text.trim(), status: publicExpressionReason ? "failed" : mode === "review" ? "review" : "queued", reason: publicExpressionReason ?? reason, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
@@ -5358,6 +5911,8 @@ export function formStandingPostIntent(source: OpenPresenceState, text: string, 
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presence;
   if (!state.agent || !presence || presence.status !== "live" || !text.trim()) return state;
+  const environment = presence.environment ?? "live";
+  if (hasExistingPublicAction(state, { presenceId: presence.id, environment, affordance: `${presence.channel}.post`, text })) return state;
   const formedAt = now();
   const expiresAt = new Date(Date.now() + 45 * 60 * 1000).toISOString();
   const affordance = `${presence.channel}.post`;
@@ -5378,7 +5933,7 @@ export function formStandingPostIntent(source: OpenPresenceState, text: string, 
   const simulated = !bridge && !nativeX && presence.channel === "x" && isTestRuntime();
   const connector = nativeX ? "native" as const : bridge ? bridge.kind : simulated ? "simulated" as const : undefined;
   const status = simulated ? (mode === "auto" ? "succeeded" : mode === "review" ? "awaiting-review" : "awaiting-manual") : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
-  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance, mode, status, attempts: simulated && mode === "auto" ? 1 : 0, bridgeId: bridge?.id, connector, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, createdAt: formedAt, updatedAt: formedAt, executedAt: simulated && mode === "auto" ? formedAt : undefined, environment: presence.environment ?? "live" };
+  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance, mode, status, attempts: simulated && mode === "auto" ? 1 : 0, bridgeId: bridge?.id, connector, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance, text }), publication, createdAt: formedAt, updatedAt: formedAt, executedAt: simulated && mode === "auto" ? formedAt : undefined, environment };
   state.executions.unshift(execution);
   if (simulated && mode === "auto") {
     const outcome: Outcome = { id: id("outcome"), socialIntentId: socialIntent.id, executionId: execution.id, presenceId: presence.id, status: "succeeded", observedAt: formedAt, metrics: {}, evidence: [], environment: presence.environment ?? "live" };
@@ -5393,12 +5948,17 @@ export function formStandingPostIntent(source: OpenPresenceState, text: string, 
 }
 
 /** Form an original publication through the same execution envelope, with canonical Assignment lineage. */
-export function formAssignmentPostIntent(source: OpenPresenceState, text: string, assignmentId: string, assetIds: string[] = [], runId?: string) {
-  const state = formChatPostIntent(source, text, undefined, "agent", assetIds, undefined, runId);
+export function formAssignmentPostIntent(source: OpenPresenceState, text: string, assignmentId: string, assetIds: string[] = [], runId?: string, decisionInput?: SocialDecisionInput) {
+  const existingPresence = source.presence;
+  if (existingPresence && hasExistingPublicAction(source, { presenceId: existingPresence.id, environment: existingPresence.environment ?? "live", affordance: "x.post", text })) return normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  const assignmentContext = source.assignments.find((item) => item.id === assignmentId);
+  if (assignmentContext?.assetConstraint?.required && !assetIds.length) throw new Error("This Assignment requires an Asset from its Collection.");
+  const state = formChatPostIntent(source, text, undefined, "agent", assetIds, decisionInput, runId);
   const intent = state.socialIntents[0];
   const execution = intent ? state.executions.find((item) => item.socialIntentId === intent.id) : undefined;
   const assignment = state.assignments.find((item) => item.id === assignmentId);
   if (!intent || !execution || !assignment) return state;
+  if (assetIds.length && assignment.assetConstraint?.collectionId) authorizeAssetSelection(state, assetIds, { presenceId: assignment.presenceId, collectionId: assignment.assetConstraint.collectionId });
   const assignmentLeakageReason = assignmentPublicExpressionLeakageReason(assignment, text);
   if (assignmentLeakageReason) {
     execution.status = "blocked";
@@ -5422,15 +5982,43 @@ export function formAssignmentPostIntent(source: OpenPresenceState, text: string
   return state;
 }
 
+function missingDirectSocialContextRefs(state: OpenPresenceState, targetObject: MirrorObject | undefined) {
+  if (!targetObject) return [];
+  const refs = [targetObject.parentExternalRef, ...(targetObject.referencedExternalRefs ?? [])].filter((ref): ref is EntityRef => Boolean(ref));
+  return refs.filter((ref) => !state.mirrorObjects.some((candidate) => candidate.presenceId === targetObject.presenceId
+    && candidate.channelId === targetObject.channelId
+    && candidate.externalRef.type === ref.type
+    && candidate.externalRef.id === ref.id
+    && (candidate.environment === targetObject.environment || (targetObject.environment === "live" && candidate.environment === undefined))));
+}
+
 export function formXReplyIntent(source: OpenPresenceState, text: string, parentId: string, operatorDirectiveId?: string, assignmentId?: string, assetIds: string[] = [], decisionInput?: SocialDecisionInput) {
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presence;
   if (!state.agent || !presence || (presence.status !== "live" && !operatorDirectiveId) || presence.channel !== "x" || !text.trim() || !parentId.trim()) return state;
+  if (!operatorDirectiveId && isWatchPausedForOrigin(state, decisionInput?.origin)) return state;
+  const environment = presence.environment ?? "live";
+  const target = { type: "x.post" as const, id: parentId };
+  // Automatic attention must not revisit a contact who has blocked this
+  // Presence. A fresh, explicit operator directive may deliberately test the
+  // state; only a verified success from that path clears the block evidence.
+  if (targetIsBlockedByPerson(state, presence.id, target) && !operatorDirectiveId) return state;
+  if (hasExistingPublicAction(state, { presenceId: presence.id, environment, affordance: "x.reply", target, text })) return state;
+  const parentObject = state.mirrorObjects.find((item) => item.externalRef.type === "x.post" && item.externalRef.id === parentId && item.presenceId === presence.id);
+  const missingContextRefs = missingDirectSocialContextRefs(state, parentObject);
+  if (missingContextRefs.length) {
+    state.events.unshift(event("decision", "Public action held for complete context", `The target references ${missingContextRefs.map((ref) => `${ref.type}:${ref.id}`).join(", ")}, but that public object is not present in the Social Mirror. OpenPresence did not form or deliver a reply.`, "warning", { presenceId: presence.id }));
+    return state;
+  }
   const formedAt = now();
   const expiresAt = new Date(Date.now() + 45 * 60 * 1000).toISOString();
-  const validAssetIds = assetIds.filter((assetId) => state.assets.some((asset) => asset.id === assetId && asset.status === "ready"));
+  const autobiographicalContext = !operatorDirectiveId ? retrievePublicSafeAutobiographicalContext(state, presence, `${text}\n${decisionInput?.summary ?? ""}`, Date.now()) : undefined;
+  const autobiographicalEventIds = decisionInput?.autobiographicalEventIds ?? autobiographicalContext?.eventIds;
+  const effectiveDecisionInput = decisionInput ? { ...decisionInput, autobiographicalEventIds } : undefined;
+  const assignment = assignmentId ? state.assignments.find((item) => item.id === assignmentId) : undefined;
+  if (assignment?.assetConstraint?.required && !assetIds.length) throw new Error("This Assignment requires an Asset from its Collection.");
+  const validAssetIds = authorizeAssetSelection(state, assetIds, { presenceId: presence.id, collectionId: assignment?.assetConstraint?.collectionId });
   const publication = makePublication(state, text.trim(), validAssetIds.length ? "x.media-post" : "x.reply", operatorDirectiveId ? "operator_manual" : "agent_model", validAssetIds);
-  const parentObject = state.mirrorObjects.find((item) => item.externalRef.type === "x.post" && item.externalRef.id === parentId && item.presenceId === presence.id);
   const conversationEpisodeId = parentObject ? ensureConversationEpisode(state, parentObject, presence.id)?.id : undefined;
   const origin: SocialOrigin = decisionInput?.origin ?? (assignmentId
     ? { kind: "assignment", refId: assignmentId }
@@ -5440,10 +6028,11 @@ export function formXReplyIntent(source: OpenPresenceState, text: string, parent
   publication.origin = origin;
   publication.assignmentId = assignmentId;
   publication.invocationId = decisionInput?.invocationId;
-  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: "x.reply", target: { type: "x.post", id: parentId }, publicationId: publication.id, priority: 60, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, origin, source: operatorDirectiveId ? "operator" : "agent", operatorDirectiveId, conversationEpisodeId, assignmentId, runId: decisionInput?.runId, invocationId: decisionInput?.invocationId, attentionEpisodeId: decisionInput?.attentionEpisodeId };
+  publication.autobiographicalEventIds = autobiographicalEventIds;
+  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: "x.reply", target, publicationId: publication.id, priority: 60, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, origin, source: operatorDirectiveId ? "operator" : "agent", operatorDirectiveId, conversationEpisodeId, assignmentId, runId: decisionInput?.runId, invocationId: decisionInput?.invocationId, attentionEpisodeId: decisionInput?.attentionEpisodeId, autobiographicalEventIds };
   if (publication.publicExpression) publication.publicExpression.socialIntentId = socialIntent.id;
   state.socialIntents.unshift(socialIntent);
-  const socialDecision = decisionInput ? createSocialDecision(state, { ...decisionInput, focalMirrorObjectIds: decisionInput.focalMirrorObjectIds ?? (parentObject ? [parentObject.id] : []), origin: decisionInput.origin ?? origin }, socialIntent.id) : undefined;
+  const socialDecision = effectiveDecisionInput ? createSocialDecision(state, { ...effectiveDecisionInput, focalMirrorObjectIds: effectiveDecisionInput.focalMirrorObjectIds ?? (parentObject ? [parentObject.id] : []), origin: effectiveDecisionInput.origin ?? origin }, socialIntent.id) : undefined;
   if (socialDecision) state.socialDecisions.unshift(socialDecision);
   if (conversationEpisodeId) {
     applyConversationDisposition(
@@ -5468,10 +6057,13 @@ export function formXReplyIntent(source: OpenPresenceState, text: string, parent
   const connector = browserFallbackRequired && bridge ? "bridge" as const : nativeX ? "native" as const : bridge ? bridge.kind : undefined;
   const leakageReason = identityLeakageReason(state, presence, text);
   const runtimeLeakageReasonValue = runtimeContextLeakageReason(text);
-  const publicExpressionReason = publicExpressionLeakageReason(text);
+  const autobiographicalSafetyReason = !operatorDirectiveId ? autobiographicalExpressionSafetyReason(state, presence.id, autobiographicalEventIds, text) : undefined;
+  const mentionGroundingReason = !operatorDirectiveId ? expressionMentionGroundingReason(state, presence, target, text) : undefined;
+  const sourceEchoReason = !operatorDirectiveId ? expressionSourceEchoReason(state, presence, target, text) : undefined;
+  const publicExpressionReason = publicExpressionLeakageReason(text) ?? autobiographicalSafetyReason ?? mentionGroundingReason ?? sourceEchoReason;
   const status = publicExpressionReason ? "blocked" : leakageReason || runtimeLeakageReasonValue ? "awaiting-review" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
-  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.reply", mode, status, attempts: 0, bridgeId: bridge?.id, connector, target: { type: "x.post", id: parentId }, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, reviewReason: publicExpressionReason ?? leakageReason ?? runtimeLeakageReasonValue, createdAt: formedAt, updatedAt: formedAt, source: operatorDirectiveId ? "operator" : "agent", operatorDirectiveId, conversationEpisodeId, assignmentId, environment: presence.environment ?? "live", runId: decisionInput?.runId, invocationId: decisionInput?.invocationId, attentionEpisodeId: decisionInput?.attentionEpisodeId };
-  if (publicExpressionReason) execution.failure = { code: "PUBLIC_TEXT_INTERNAL_MARKER", message: publicExpressionReason, retryable: false };
+  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: "x.reply", mode, status, attempts: 0, bridgeId: bridge?.id, connector, target, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance: "x.reply", target, text }), publication, reviewReason: publicExpressionReason ?? leakageReason ?? runtimeLeakageReasonValue, createdAt: formedAt, updatedAt: formedAt, source: operatorDirectiveId ? "operator" : "agent", operatorDirectiveId, conversationEpisodeId, assignmentId, environment, runId: decisionInput?.runId, invocationId: decisionInput?.invocationId, attentionEpisodeId: decisionInput?.attentionEpisodeId };
+  if (publicExpressionReason) execution.failure = { code: autobiographicalSafetyReason ? "AUTOBIOGRAPHICAL_PRIVACY_BOUNDARY" : mentionGroundingReason ? "UNSUPPORTED_LEADING_MENTION" : sourceEchoReason ? "SOURCE_EXPRESSION_ECHO" : "PUBLIC_TEXT_INTERNAL_MARKER", message: publicExpressionReason, retryable: false };
   state.executions.unshift(execution);
   state.actions.unshift({ id: id("act"), intent: "reply", target: parentId, summary: text.trim(), status: publicExpressionReason ? "failed" : mode === "review" ? "review" : "queued", reason: publicExpressionReason ?? (operatorDirectiveId ? "The operator directed Jenny to enter this conversation; Jenny supplied the expression through the Presence execution envelope." : "Jenny chose to continue a relevant conversation through the Presence execution envelope."), createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
   state.events.unshift(event("decision", publicExpressionReason ? "Public text boundary blocked" : operatorDirectiveId ? "Jenny expressed the requested reply" : "A reply intention was formed", publicExpressionReason ?? (connector ? (operatorDirectiveId ? "The operator set the social act; Jenny supplied a contextual reply for the Presence execution envelope." : "Jenny found a relevant X conversation and handed a contextual reply to the Presence execution envelope.") : "Jenny found a relevant X conversation, but no write-enabled X connector is available."), publicExpressionReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, decisionId: socialDecision?.id, runId: decisionInput?.runId, invocationId: decisionInput?.invocationId }));
@@ -5483,24 +6075,40 @@ export function formXActionIntent(source: OpenPresenceState, input: { affordance
   const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presence;
   if (!state.agent || !presence || presence.status !== "live" || presence.channel !== "x" || !input.target.id) return state;
+  const requestedOrigin = input.origin ?? input.decision?.origin;
+  if (input.source !== "operator" && isWatchPausedForOrigin(state, requestedOrigin)) return state;
   const capability = input.affordance.slice("x.".length);
+  if (targetIsBlockedByPerson(state, presence.id, input.target) && input.source !== "operator") return state;
   const requiresExpression = capability === "quote";
   if (requiresExpression && !input.text?.trim()) return state;
   if (requiresExpression && input.target.type === "x.post" && !xTargetAllowsQuotedExpression(state, presence, input.target.id)) return state;
+  const environment = "live" as const;
+  if (hasExistingPublicAction(state, { presenceId: presence.id, environment, affordance: input.affordance, target: input.target, text: input.text })) return state;
+  const targetObject = input.target.type === "x.post" ? state.mirrorObjects.find((item) => item.presenceId === presence.id && item.externalRef.type === input.target.type && item.externalRef.id === input.target.id) : undefined;
+  const missingContextRefs = missingDirectSocialContextRefs(state, targetObject);
+  if (missingContextRefs.length) {
+    state.events.unshift(event("decision", "Public action held for complete context", `The target references ${missingContextRefs.map((ref) => `${ref.type}:${ref.id}`).join(", ")}, but that public object is not present in the Social Mirror. OpenPresence did not form or deliver the ${capability} action.`, "warning", { presenceId: presence.id }));
+    return state;
+  }
   const formedAt = now();
   const expiresAt = new Date(Date.now() + 45 * 60 * 1000).toISOString();
+  const autobiographicalContext = requiresExpression && input.source !== "operator" ? retrievePublicSafeAutobiographicalContext(state, presence, `${input.text ?? ""}\n${input.decision?.summary ?? ""}`, Date.now()) : undefined;
+  const autobiographicalEventIds = input.decision?.autobiographicalEventIds ?? autobiographicalContext?.eventIds;
+  const effectiveDecision = input.decision ? { ...input.decision, autobiographicalEventIds } : undefined;
   const origin: SocialOrigin = input.origin ?? input.decision?.origin ?? (input.assignmentId ? { kind: "assignment", refId: input.assignmentId } : { kind: "inbound_social", refId: input.target.id });
-  const validAssetIds = (input.assetIds ?? []).filter((assetId) => state.assets.some((asset) => asset.id === assetId && asset.status === "ready"));
+  const assignment = input.assignmentId ? state.assignments.find((item) => item.id === input.assignmentId) : undefined;
+  if (assignment?.assetConstraint?.required && !(input.assetIds ?? []).length) throw new Error("This Assignment requires an Asset from its Collection.");
+  const validAssetIds = authorizeAssetSelection(state, input.assetIds ?? [], { presenceId: presence.id, collectionId: assignment?.assetConstraint?.collectionId });
   const publication = requiresExpression ? makePublication(state, input.text!.trim(), validAssetIds.length ? "x.media-post" : input.affordance, "agent_model", validAssetIds) : undefined;
-  if (publication) { publication.origin = origin; publication.assignmentId = input.assignmentId; publication.invocationId = input.invocationId ?? input.decision?.invocationId; }
+  if (publication) { publication.origin = origin; publication.assignmentId = input.assignmentId; publication.invocationId = input.invocationId ?? input.decision?.invocationId; publication.autobiographicalEventIds = autobiographicalEventIds; }
   const trial = input.capabilityTrialId ? state.capabilityTrials.find((item) => item.id === input.capabilityTrialId && item.presenceId === presence.id && item.capability === capability) : undefined;
   const runId = input.runId ?? input.decision?.runId;
   const invocationId = input.invocationId ?? input.decision?.invocationId;
   const attentionEpisodeId = input.attentionEpisodeId ?? input.decision?.attentionEpisodeId;
-  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: input.affordance, target: input.target, publicationId: publication?.id, priority: capability === "follow" ? 35 : 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, origin, assignmentId: input.assignmentId, environment: "live", source: input.source ?? "agent", attentionTestId: input.attentionTestId, capabilityTrialId: trial?.id, runId, invocationId, attentionEpisodeId };
+  const socialIntent: SocialIntent = { id: id("intent"), agentId: state.agent.id, presenceId: presence.id, affordance: input.affordance, target: input.target, publicationId: publication?.id, priority: capability === "follow" ? 35 : 50, validity: { expiresAt }, state: "active", formedAt, updatedAt: formedAt, origin, assignmentId: input.assignmentId, environment: "live", source: input.source ?? "agent", attentionTestId: input.attentionTestId, capabilityTrialId: trial?.id, runId, invocationId, attentionEpisodeId, autobiographicalEventIds };
   if (publication?.publicExpression) publication.publicExpression.socialIntentId = socialIntent.id;
   state.socialIntents.unshift(socialIntent);
-  const socialDecision = input.decision ? createSocialDecision(state, { ...input.decision, focalMirrorObjectIds: input.decision.focalMirrorObjectIds ?? [] , origin: input.decision.origin ?? origin, runId: runId ?? input.decision.runId, invocationId: invocationId ?? input.decision.invocationId }, socialIntent.id) : undefined;
+  const socialDecision = effectiveDecision ? createSocialDecision(state, { ...effectiveDecision, focalMirrorObjectIds: effectiveDecision.focalMirrorObjectIds ?? [] , origin: effectiveDecision.origin ?? origin, runId: runId ?? effectiveDecision.runId, invocationId: invocationId ?? effectiveDecision.invocationId }, socialIntent.id) : undefined;
   if (socialDecision) state.socialDecisions.unshift(socialDecision);
   const mode = trial?.executionIsolation.mode ?? presence.execution[capability] ?? "off";
   if (mode === "off") {
@@ -5515,10 +6123,17 @@ export function formXActionIntent(source: OpenPresenceState, input: { affordance
   const connectedNative = browserFallbackRequired ? undefined : nativeX;
   const bridge = browserFallbackRequired || !nativeX ? browserBridgeFor(state, presence.id, capability) : undefined;
   const connector = browserFallbackRequired && bridge ? "bridge" as const : connectedNative ? "native" as const : bridge ? bridge.kind : undefined;
-  const leakageReason = publication ? publicExpressionLeakageReason(input.text!.trim()) : undefined;
+  const autobiographicalSafetyReason = publication && input.source !== "operator" ? autobiographicalExpressionSafetyReason(state, presence.id, autobiographicalEventIds, input.text!.trim()) : undefined;
+  const mentionGroundingReason = publication && input.source !== "operator"
+    ? expressionMentionGroundingReason(state, presence, input.target, input.text!.trim())
+    : undefined;
+  const sourceEchoReason = publication && input.source !== "operator"
+    ? expressionSourceEchoReason(state, presence, input.target, input.text!.trim())
+    : undefined;
+  const leakageReason = publication ? publicExpressionLeakageReason(input.text!.trim()) ?? autobiographicalSafetyReason ?? mentionGroundingReason ?? sourceEchoReason : undefined;
   const status = leakageReason ? "blocked" : mode === "auto" ? (connector ? "queued" : "awaiting-connector") : mode === "review" ? "awaiting-review" : "awaiting-manual";
-  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: input.affordance, mode, status, attempts: 0, bridgeId: bridge?.id, connector, target: input.target, idempotencyKey: `${presence.id}:${socialIntent.id}`, publication, reviewReason: leakageReason, createdAt: formedAt, updatedAt: formedAt, assignmentId: input.assignmentId ?? trial?.assignmentId, environment: "live", source: input.source ?? "agent", attentionTestId: input.attentionTestId, capabilityTrialId: trial?.id, runId, invocationId, attentionEpisodeId };
-  if (leakageReason) execution.failure = { code: "PUBLIC_TEXT_INTERNAL_MARKER", message: leakageReason, retryable: false };
+  const execution: Execution = { id: id("execution"), socialIntentId: socialIntent.id, presenceId: presence.id, affordance: input.affordance, mode, status, attempts: 0, bridgeId: bridge?.id, connector, target: input.target, idempotencyKey: socialActionIdempotencyKey({ presenceId: presence.id, environment, affordance: input.affordance, target: input.target, text: input.text }), publication, reviewReason: leakageReason, createdAt: formedAt, updatedAt: formedAt, assignmentId: input.assignmentId ?? trial?.assignmentId, environment, source: input.source ?? "agent", attentionTestId: input.attentionTestId, capabilityTrialId: trial?.id, runId, invocationId, attentionEpisodeId };
+  if (leakageReason) execution.failure = { code: autobiographicalSafetyReason ? "AUTOBIOGRAPHICAL_PRIVACY_BOUNDARY" : mentionGroundingReason ? "UNSUPPORTED_LEADING_MENTION" : sourceEchoReason ? "SOURCE_EXPRESSION_ECHO" : "PUBLIC_TEXT_INTERNAL_MARKER", message: leakageReason, retryable: false };
   state.executions.unshift(execution);
   state.actions.unshift({ id: id("act"), intent: capability as "like" | "repost" | "quote" | "follow", target: input.target.id, summary: input.text?.trim() ?? capability, status: leakageReason ? "failed" : mode === "review" ? "review" : "queued", reason: leakageReason ?? `The Presence formed a ${capability} action through the live X execution envelope.`, createdAt: formedAt, expiresAt, socialIntentId: socialIntent.id, executionId: execution.id });
   state.events.unshift(event("decision", leakageReason ? "Public action blocked" : `X ${capability} intention formed`, leakageReason ?? `${capability} is ready for the authorized X connector.`, leakageReason ? "warning" : connector ? "positive" : "warning", { presenceId: presence.id, intentId: socialIntent.id, executionId: execution.id, decisionId: socialDecision?.id, runId, invocationId }));
@@ -5551,6 +6166,18 @@ export function completeNativeExecution(source: OpenPresenceState, executionId: 
   let state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const execution = state.executions.find((item) => item.id === executionId && item.connector === "native");
   if (!execution) throw new Error("Native execution not found.");
+  if (execution.publication?.assetIds?.length) {
+    try {
+      authorizeAssetSelection(state, execution.publication.assetIds, { presenceId: execution.presenceId, requireReady: true });
+    } catch (error) {
+      execution.status = "blocked";
+      execution.failure = { code: "ASSET_AUTHORIZATION_FAILED", message: error instanceof Error ? error.message : "The selected Asset cannot be used by this Presence.", retryable: false };
+      execution.reviewReason = "Native completion failed closed at the Asset authorization boundary.";
+      execution.updatedAt = now();
+      state.events.unshift(event("execution", "Asset authorization blocked completion", execution.failure.message, "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }));
+      return state;
+    }
+  }
   const targetLanguageResult = execution.publication ? targetLanguageValidationForExecution(state, execution) : { valid: true as const, reason: undefined };
   if (!targetLanguageResult.valid) {
     execution.status = "blocked";
@@ -5623,7 +6250,7 @@ export function completeNativeExecution(source: OpenPresenceState, executionId: 
   const action = state.actions.find((item) => item.executionId === execution.id);
   if (action) { action.status = "executed"; action.outcomeId = outcome.id; }
   state.events.unshift(event("execution", "Published on X", "The native X connector delivered the approved action and returned an external reference.", "positive", { presenceId: execution.presenceId, executionId: execution.id, outcomeId: outcome.id }));
-  return state;
+  return clearPersonBlockFromExecution(state, execution.id);
 }
 
 /**
@@ -5675,7 +6302,7 @@ export function recordVerifiedXReply(source: OpenPresenceState, executionId: str
     action.outcomeId = outcome.id;
   }
   state.events.unshift(event("execution", `${writer} reply verified on X`, "The X API confirmed the exact public reply from the configured Presence account.", "positive", { presenceId: execution.presenceId, executionId: execution.id, outcomeId: outcome.id, intentId: execution.socialIntentId }));
-  return state;
+  return clearPersonBlockFromExecution(state, execution.id);
 }
 
 /** Backwards-compatible name for callers that specifically handle the fallback writer. */
@@ -5843,7 +6470,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
   }
   if (operation.type === "updateAssignmentPlan") {
     const assignment = state.assignments.find((item) => item.id === operation.assignmentId);
-    if (!assignment || !assignment.successEvidence || assignment.status === "cancelled") return state;
+    if (!assignment || assignment.status === "cancelled") return state;
     const timestamp = now();
     const nextPlan: AssignmentPlan = { ...operation.plan, id: id("assignment-plan"), assignmentId: assignment.id, revision: (assignment.plan?.revision ?? 0) + 1, createdAt: timestamp, updatedAt: timestamp, source: "agent" };
     assignment.planHistory = [...(assignment.planHistory ?? []), nextPlan];
@@ -5857,12 +6484,15 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     const presence = state.presences.find((item) => item.id === (operation.presenceId ?? state.activePresenceId)) ?? state.presence;
     if (!presence || !Number.isInteger(operation.followers) || operation.followers < 0) return state;
     const snapshot: PresenceAudienceSnapshot = { id: id("audience-snapshot"), presenceId: presence.id, channel: presence.channel, followers: operation.followers, following: operation.following, source: operation.source ?? (presence.environment === "sandbox" ? "sandbox" : "manual"), observationStatus: operation.observationStatus ?? "observed", observedAt: operation.observedAt ?? now(), environment: presence.environment };
+    // Keep raw polling deduplication independent from the Growth boundary.
+    // Historical records remain available as provenance, while all Growth
+    // reads below still fail closed on pre-Presence observations.
     const latest = collapseAudienceSnapshots(state.audienceSnapshots.filter((item) => item.presenceId === snapshot.presenceId))[0];
     const unchangedPollingBurst = latest && sameAudienceSnapshotReading(latest, snapshot) && Math.abs(new Date(latest.observedAt).getTime() - new Date(snapshot.observedAt).getTime()) <= AUDIENCE_SNAPSHOT_DEDUP_WINDOW_MS;
     if (unchangedPollingBurst) return state;
     state.audienceSnapshots.unshift(snapshot);
     const growthAssignment = growthAssignmentFor(state, presence.id);
-    if (growthAssignment && assignmentIsSatisfied(growthAssignment, state)) {
+    if (growthAssignment && growthEvidenceIsInPresenceScope(state, presence.id, snapshot.observedAt) && assignmentIsSatisfied(growthAssignment, state)) {
       growthAssignment.status = "completed";
       growthAssignment.progress.verified = 1;
       growthAssignment.lastOutcome = { class: "assignment_completed", message: `The ${presence.channel === "x" ? "X" : presence.name} audience snapshot verified the follower target.`, at: snapshot.observedAt };
@@ -6010,8 +6640,47 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     return state;
   }
   if (operation.type === "runCapabilityTrial") return state;
+  if (operation.type === "confirmSchedulePrompt") {
+    const presence = state.presences.find((item) => item.id === operation.presenceId);
+    if (!presence) throw new Error("That schedule Presence is no longer available.");
+    // The caller persists the returned state once. Building each Assignment
+    // on this cloned state keeps confirmation all-or-nothing if compilation
+    // or preflight rejects any draft.
+    let activatedCount = 0;
+    let draftCount = 0;
+    for (const draft of operation.drafts) {
+      const beforeIds = new Set(state.assignments.map((assignment) => assignment.id));
+      state = applyOperation(state, {
+        type: "createAssignment",
+        instruction: draft.instruction,
+        presenceId: operation.presenceId,
+        environment: draft.environment ?? (presence.connectionMode === "sandbox" ? "sandbox" : "live"),
+        objective: draft.objective,
+        delegationPolicy: draft.delegationPolicy,
+        schedule: draft.schedule,
+      });
+      const created = state.assignments.find((assignment) => !beforeIds.has(assignment.id) && assignment.presenceId === operation.presenceId);
+      if (created && draft.plan) {
+        state = applyOperation(state, { type: "updateAssignmentPlan", assignmentId: created.id, plan: draft.plan });
+      }
+      if (created && ["ready", "ready_with_assumptions"].includes(created.preflight?.status ?? "")) {
+        state = applyOperation(state, { type: "activateAssignment", id: created.id, delegationPolicy: draft.delegationPolicy });
+        activatedCount += 1;
+      } else if (created) {
+        draftCount += 1;
+      }
+    }
+    const activationDetail = activatedCount
+      ? `${activatedCount} ready Assignment${activatedCount === 1 ? " was" : "s were"} activated${draftCount ? `; ${draftCount} remain draft until their missing input is resolved` : ""}.`
+      : `${draftCount} Assignment${draftCount === 1 ? " remains" : "s remain"} draft until missing input is resolved.`;
+    state.events.unshift(event("system", "Schedule created from prompt", `${operation.drafts.length} independent Assignments were reviewed together and saved atomically. ${activationDetail}`, "positive", { presenceId: operation.presenceId }));
+    return state;
+  }
   if (operation.type === "createAssignment") {
     const assignment = compileAssignmentInstruction(state, operation.instruction, operation.presenceId, operation.environment ?? "sandbox", operation.sessionId, operation.schedule, operation.delegationPolicy, operation.objective);
+    if (operation.assetConstraint?.collectionId && !state.assetCollections?.some((collection) => collection.id === operation.assetConstraint?.collectionId && collection.agentId === state.agent?.id && collection.status === "active")) throw new Error("That Asset Collection does not belong to the active Agent.");
+    assignment.assetConstraint = operation.assetConstraint;
+    assignment.createdBy = "operator";
     const signature = assignmentCreationSignature(assignment);
     const duplicate = state.assignments.find((existing) => assignmentCanBlockDuplicateCreation(existing) && assignmentCreationSignature(existing) === signature);
     if (duplicate) return state;
@@ -6019,6 +6688,137 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     state.assignments.unshift(assignment);
     ensureCapabilityRequests(state, assignment.presenceId);
     state.events.unshift(event("system", "Assignment reviewed", `${assignment.preflight?.status === "ready" || assignment.preflight?.status === "ready_with_assumptions" ? "Ready to activate" : "Needs input before activation"} · ${assignment.progress.required} ${assignment.deliverable.type === "original_publication" ? "original publications" : assignment.deliverable.type} · ${assignment.recurrence?.label ?? "Once"}.`, assignment.preflight?.status === "blocked" || assignment.preflight?.status === "needs_input" ? "warning" : "positive", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
+    return state;
+  }
+  if (operation.type === "updateAssignment") {
+    const assignment = state.assignments.find((item) => item.id === operation.id);
+    if (!assignment || ["completed", "completed_with_adaptation", "cancelled"].includes(assignment.status)) return state;
+    const activeRun = (state.assignmentRuns ?? []).some((run) => run.assignmentId === assignment.id && ["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"].includes(run.status));
+    if (activeRun || ["working", "awaiting_execution"].includes(assignment.status)) return state;
+    const compiled = compileAssignmentInstruction(state, operation.instruction, assignment.presenceId, assignment.environment, assignment.sessionId, operation.schedule === undefined ? assignment.schedule : operation.schedule ?? undefined, assignment.executionPolicy.delegationPolicy ?? "keep_moving", operation.objective ?? assignment.objective);
+    const timestamp = now();
+    const previousInstruction = assignment.instruction;
+    assignment.instruction = compiled.instruction;
+    assignment.title = compiled.title;
+    assignment.activation = compiled.activation;
+    assignment.deliverable = compiled.deliverable;
+    assignment.progress = { ...assignment.progress, required: compiled.progress.required };
+    assignment.quantityPolicy = compiled.quantityPolicy;
+    assignment.recurrence = compiled.recurrence;
+    assignment.schedule = compiled.schedule;
+    assignment.timeframe = compiled.timeframe;
+    assignment.editorialContext = compiled.editorialContext;
+    assignment.audienceObjective = compiled.audienceObjective;
+    assignment.objective = compiled.objective;
+    assignment.successEvidence = compiled.successEvidence;
+    assignment.seed = compiled.seed;
+    if (operation.assetConstraint !== undefined) {
+      if (operation.assetConstraint.collectionId && !state.assetCollections?.some((collection) => collection.id === operation.assetConstraint?.collectionId && collection.agentId === state.agent?.id && collection.status === "active")) throw new Error("That Asset Collection does not belong to the active Agent.");
+      assignment.assetConstraint = operation.assetConstraint;
+    }
+    assignment.preflight = preflightAssignment(state, assignment, assignment.executionPolicy.delegationPolicy);
+    assignment.revision = (assignment.revision ?? 0) + 1;
+    assignment.updatedAt = timestamp;
+    state.events.unshift(event("system", "Assignment updated", `The operator revised this Assignment${previousInstruction.trim() === assignment.instruction.trim() ? "." : "; its readiness review has been refreshed."}`, "positive", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
+    return state;
+  }
+  if (operation.type === "startAssignmentPursuit") {
+    const assignment = state.assignments.find((item) => item.id === operation.assignmentId);
+    const presence = assignment ? state.presences.find((item) => item.id === assignment.presenceId) : undefined;
+    if (!assignment || !presence || assignment.presenceId !== (operation.presenceId ?? assignment.presenceId)) return state;
+    if (assignment.environment !== "live" || assignment.deliverable.type !== "meaningful_engagement") throw new Error("An increased-effort window is currently available for live adaptive distribution Assignments.");
+    const startsAt = operation.startsAt ?? now();
+    const deadlineAt = new Date(operation.deadlineAt);
+    if (Number.isNaN(deadlineAt.getTime()) || deadlineAt.getTime() <= new Date(startsAt).getTime()) throw new Error("The increased-effort window needs a future deadline.");
+    const maxVerifiedActions = Math.max(1, Math.min(100, Math.floor(operation.maxVerifiedActions)));
+    const existing = (state.assignmentPursuitWindows ?? []).find((window) => window.assignmentId === assignment.id && window.status === "active");
+    if (existing) {
+      existing.deadlineAt = operation.deadlineAt;
+      existing.maxVerifiedActions = Math.max(existing.maxVerifiedActions, maxVerifiedActions);
+      existing.actionCaps = operation.actionCaps ?? existing.actionCaps;
+      existing.maxActionsPerHour = operation.maxActionsPerHour ?? existing.maxActionsPerHour;
+      existing.maxActionsPerPerson = operation.maxActionsPerPerson ?? existing.maxActionsPerPerson;
+      existing.maxActionsPerConversation = operation.maxActionsPerConversation ?? existing.maxActionsPerConversation;
+      existing.resourceBudget = operation.resourceBudget ?? existing.resourceBudget;
+      existing.nextRunAt = now();
+      existing.updatedAt = now();
+      state.events.unshift(event("decision", "Distribution effort increased", `${presence.name} will look more often until ${deadlineAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}, with capacity for up to ${existing.maxVerifiedActions} qualified verified actions. The quality bar and action judgment are unchanged.`, "positive", { presenceId: presence.id, sourceObjectId: assignment.id }));
+      return state;
+    }
+    const timestamp = now();
+    const window: AssignmentPursuitWindow = {
+      id: id("assignment-pursuit"),
+      assignmentId: assignment.id,
+      agentId: assignment.agentId,
+      presenceId: presence.id,
+      startsAt,
+      deadlineAt: operation.deadlineAt,
+      maxVerifiedActions,
+      actionCaps: operation.actionCaps,
+      maxActionsPerHour: operation.maxActionsPerHour,
+      maxActionsPerPerson: operation.maxActionsPerPerson,
+      maxActionsPerConversation: operation.maxActionsPerConversation,
+      resourceBudget: operation.resourceBudget,
+      status: "active",
+      nextRunAt: timestamp,
+      createdAt: timestamp,
+      updatedAt: timestamp,
+    };
+    state.assignmentPursuitWindows = [window, ...(state.assignmentPursuitWindows ?? [])];
+    if (["draft", "paused", "blocked", "needs_operator"].includes(assignment.status)) assignment.status = "active";
+    assignment.updatedAt = timestamp;
+    state.events.unshift(event("decision", "Distribution push started", `${presence.name} will pursue the existing distribution responsibility more intensely until ${deadlineAt.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}, with capacity for up to ${maxVerifiedActions} qualified verified actions. This is a ceiling, not a quota.`, "positive", { presenceId: presence.id, sourceObjectId: assignment.id }));
+    return state;
+  }
+  if (operation.type === "pauseAssignmentPursuit" || operation.type === "resumeAssignmentPursuit" || operation.type === "cancelAssignmentPursuit") {
+    const window = (state.assignmentPursuitWindows ?? []).find((item) => item.id === operation.id);
+    if (!window || pursuitTerminalStatuses.has(window.status)) return state;
+    const timestamp = now();
+    if (operation.type === "pauseAssignmentPursuit") {
+      window.status = "paused";
+      window.pauseReason = "Paused by the operator.";
+      window.nextRunAt = undefined;
+    } else if (operation.type === "resumeAssignmentPursuit") {
+      window.status = "active";
+      window.pauseReason = undefined;
+      window.nextRunAt = timestamp;
+    } else {
+      window.status = "cancelled";
+      window.pauseReason = "Stopped by the operator.";
+      window.nextRunAt = undefined;
+    }
+    window.updatedAt = timestamp;
+    const assignment = state.assignments.find((item) => item.id === window.assignmentId);
+    const presence = state.presences.find((item) => item.id === window.presenceId);
+    if (assignment && operation.type === "cancelAssignmentPursuit" && !["completed", "cancelled", "failed", "expired_incomplete"].includes(assignment.status)) assignment.status = "active";
+    state.events.unshift(event("system", operation.type === "pauseAssignmentPursuit" ? "Distribution push paused" : operation.type === "resumeAssignmentPursuit" ? "Distribution push resumed" : "Distribution push stopped", `${presence?.name ?? "The Presence"}'s temporary increased-effort window is ${window.status}. The underlying Assignment remains a separate responsibility.`, operation.type === "cancelAssignmentPursuit" ? "quiet" : "positive", { presenceId: window.presenceId, sourceObjectId: assignment?.id }));
+    return state;
+  }
+  if (operation.type === "pauseAssignment") {
+    const assignment = state.assignments.find((item) => item.id === operation.id);
+    if (!assignment || ["completed", "completed_with_adaptation", "cancelled", "paused"].includes(assignment.status)) return state;
+    const timestamp = now();
+    assignment.status = "paused";
+    assignment.work = { ...(assignment.work ?? { phase: "candidate_review", attempts: 0, maxAttempts: 4, storiesResearched: 0 }), blockedReason: "Paused by the operator." };
+    assignment.updatedAt = timestamp;
+    if (assignment.origin === "publishing_initiative") {
+      state.publishingPlans = state.publishingPlans.map((plan) => plan.presenceId === assignment.presenceId && plan.status === "active" ? { ...plan, status: "paused" as const, updatedAt: timestamp } : plan);
+    }
+    state.events.unshift(event("system", "Assignment paused", `${assignment.title ?? assignment.instruction} is paused. No new work will be started until you resume it.`, "quiet", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
+    return state;
+  }
+  if (operation.type === "resumeAssignment") {
+    const assignment = state.assignments.find((item) => item.id === operation.id);
+    if (!assignment || assignment.status !== "paused") return state;
+    const timestamp = now();
+    assignment.status = "active";
+    assignment.work = { ...(assignment.work ?? { phase: "candidate_review", attempts: 0, maxAttempts: 4, storiesResearched: 0 }), blockedReason: undefined };
+    assignment.updatedAt = timestamp;
+    if (assignment.origin === "publishing_initiative") {
+      state.publishingPlans = state.publishingPlans.map((plan) => plan.presenceId === assignment.presenceId && plan.status === "paused" ? { ...plan, status: "active" as const, updatedAt: timestamp } : plan);
+    }
+    const presenceName = state.presences.find((presence) => presence.id === assignment.presenceId)?.name ?? "The Agent";
+    state.events.unshift(event("system", "Assignment resumed", `${assignment.title ?? assignment.instruction} is active again. ${presenceName} will choose the next worthwhile step within its authority.`, "positive", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
     return state;
   }
   if (operation.type === "activateAssignment") {
@@ -6128,6 +6928,10 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     const requestedHandle = watch.target?.handle ? normalizeHandleForComparison(watch.target.handle) : undefined;
     const knownIdentity = requestedHandle ? state.personIdentities.find((identity) => identity.channel === presence.channel && identity.sourcePresenceId === presence.id && normalizeHandleForComparison(identity.handle) === requestedHandle) : undefined;
     if (knownIdentity) watch.target = { ...(watch.target ?? { channel: presence.channel, identityStatus: "unresolved" }), channel: presence.channel, personId: knownIdentity.personId, externalActorId: knownIdentity.externalActorId, handle: knownIdentity.handle ?? requestedHandle, identityStatus: "verified" };
+    if (knownIdentity?.contactability?.status === "blocked_by_person") {
+      state.events.unshift(event("system", "Watch not added", `A verified relationship boundary prevents targeted monitoring of ${knownIdentity.displayName ?? knownIdentity.handle ?? "this person"}.`, "quiet", { presenceId: presence.id }));
+      return state;
+    }
     if (state.watches.some((item) => item.presenceId === watch.presenceId && item.query.toLowerCase() === watch.query.toLowerCase())) return state;
     state.watches.unshift(watch);
     state.events.unshift(event("system", "Watch added", `${watch.title} is now part of ${presence.name}'s attention. Observation is ${watch.observation.status === "manual" ? "waiting for a source" : "available automatically"}.`, "positive", { presenceId: presence.id }));
@@ -6142,6 +6946,10 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     const requestedHandle = compiled.target?.handle ? normalizeHandleForComparison(compiled.target.handle) : undefined;
     const knownIdentity = requestedHandle ? state.personIdentities.find((identity) => identity.channel === presence.channel && identity.sourcePresenceId === presence.id && normalizeHandleForComparison(identity.handle) === requestedHandle) : undefined;
     if (knownIdentity && compiled.target) compiled.target = { ...compiled.target, personId: knownIdentity.personId, externalActorId: knownIdentity.externalActorId, handle: knownIdentity.handle ?? requestedHandle, identityStatus: "verified" };
+    if (knownIdentity?.contactability?.status === "blocked_by_person") {
+      state.events.unshift(event("system", "Watch not updated", `A verified relationship boundary prevents targeted monitoring of ${knownIdentity.displayName ?? knownIdentity.handle ?? "this person"}.`, "quiet", { presenceId: presence.id }));
+      return state;
+    }
     const targetChanged = watch.kind !== compiled.kind || watch.query.toLowerCase() !== compiled.query.toLowerCase() || watch.target?.externalActorId !== compiled.target?.externalActorId || normalizeHandleForComparison(watch.target?.handle) !== normalizeHandleForComparison(compiled.target?.handle);
     const updated: Watch = { ...watch, title: compiled.title, kind: compiled.kind, query: compiled.query, purpose: compiled.purpose, target: compiled.target, state: watch.state ?? "active", sources: compiled.sources, updatedAt: now() };
     if (targetChanged) {
@@ -6160,6 +6968,49 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       }
     }
     state.events.unshift(event("system", "Watch updated", `${updated.title} remains part of ${presence.name}'s attention with its revised instructions. Existing observations remain in history; new observations use the updated Watch.`, "positive", { presenceId: presence.id }));
+    return state;
+  }
+  if (operation.type === "setWatchState") {
+    const watch = state.watches.find((item) => item.id === operation.id && item.agentId === state.agent?.id);
+    if (!watch || (watch.state ?? "active") === operation.state) return state;
+    const presence = state.presences.find((item) => item.id === watch.presenceId) ?? state.presence;
+    if (!presence) return state;
+    if (operation.state === "active" && watch.target?.externalActorId && targetIsBlockedByPerson(state, watch.presenceId, { type: "x.user", id: watch.target.externalActorId })) {
+      state.events.unshift(event("system", "Watch remains paused", "A verified relationship boundary prevents this Watch from being resumed.", "quiet", { presenceId: watch.presenceId }));
+      return state;
+    }
+    const timestamp = now();
+    watch.state = operation.state;
+    watch.updatedAt = timestamp;
+    if (operation.state === "paused") {
+      const watchIntentIds = new Set(state.socialIntents.filter((intent) => intent.presenceId === watch.presenceId && intent.origin?.kind === "watchlist" && intent.origin.refId === watch.id && intent.state === "active").map((intent) => intent.id));
+      for (const intent of state.socialIntents) {
+        if (watchIntentIds.has(intent.id)) {
+          intent.state = "withdrawn";
+          intent.updatedAt = timestamp;
+        }
+      }
+      for (const execution of state.executions) {
+        if (!watchIntentIds.has(execution.socialIntentId) || !["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued"].includes(execution.status)) continue;
+        execution.status = "cancelled";
+        execution.failure = { code: "WATCH_PAUSED", message: "The Watch was paused before this action reached a connector. No external action was attempted.", retryable: false };
+        execution.reviewReason = "The operator paused the source Watch before delivery.";
+        execution.updatedAt = timestamp;
+        const action = state.actions.find((item) => item.executionId === execution.id);
+        if (action) {
+          action.status = "skipped";
+          action.reason = "The source Watch was paused before delivery; no external action was attempted.";
+        }
+      }
+      state.watchSignals = state.watchSignals.map((signal) => signal.watchId === watch.id && signal.disposition === "social_opportunity"
+        ? { ...signal, disposition: "pending" as const, decisionId: undefined, updatedAt: timestamp }
+        : signal);
+    }
+    const statusLabel = operation.state === "paused" ? "Watch paused" : "Watch resumed";
+    const detail = operation.state === "paused"
+      ? watch.title + " is paused. It will not be observed, considered, or delivered until you resume it."
+      : watch.title + " is active again and may be considered during a future attention pass.";
+    state.events.unshift(event("system", statusLabel, detail, operation.state === "paused" ? "quiet" : "positive", { presenceId: presence.id }));
     return state;
   }
   if (operation.type === "deleteWatch") {
@@ -6208,12 +7059,17 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     } else {
       const instruction = operation.objective?.trim() || (operation.mode === "objective" ? `When ${exploration.title} finds a genuinely strong match, start a useful conversation.` : `Engage when ${exploration.title} finds something genuinely worth responding to.`);
       const assignment = priorAssignment ?? compileAssignmentInstruction(state, instruction, presence.id, presence.environment ?? "sandbox");
+      const parsedObjectiveQuantity = assignmentQuantity(instruction);
       assignment.title = operation.mode === "objective" ? "Exploration engagement objective" : "Exploration opportunistic engagement";
       assignment.origin = "exploration";
       assignment.activation = { type: "attention_source", sourceIds: [exploration.id] };
-      assignment.deliverable = { type: "meaningful_engagement", quantity: assignment.deliverable.quantity, quantityMode: assignment.deliverable.quantityMode };
+      assignment.instruction = instruction;
+      assignment.deliverable = { type: "meaningful_engagement", quantity: parsedObjectiveQuantity.quantity, quantityMode: parsedObjectiveQuantity.quantityMode };
       const explicitObjectiveQuantity = Boolean(operation.objective?.match(/\b(?:up\s+to|at\s+most|at\s+least|exactly|aim\s+for|maximum|max(?:imum)?|\d+\s+(?:meaningful\s+)?engagements?)\b/i));
-      assignment.quantityPolicy = operation.mode === "opportunistic" || !explicitObjectiveQuantity ? { quantity: "agent_planned", mode: "target", period: "assignment" } : assignment.quantityPolicy?.quantity ? { ...assignment.quantityPolicy, period: assignment.quantityPolicy.period === "assignment" ? "day" : assignment.quantityPolicy.period } : { quantity: "agent_planned", mode: "target", period: "assignment" };
+      assignment.quantityPolicy = operation.mode === "opportunistic" || !explicitObjectiveQuantity
+        ? { quantity: "agent_planned", mode: "target", period: "assignment" }
+        : { quantity: parsedObjectiveQuantity.quantity, mode: parsedObjectiveQuantity.quantityMode, period: "day" };
+      assignment.progress = { ...assignment.progress, required: typeof assignment.quantityPolicy.quantity === "number" ? assignment.quantityPolicy.quantity : assignment.progress.required };
       assignment.status = "active";
       assignment.sessionId = undefined;
       assignment.updatedAt = now();
@@ -6222,6 +7078,39 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     }
     exploration.updatedAt = now();
     state.events.unshift(event("system", "Exploration responsibility updated", operation.mode === "surface" ? "Findings will be surfaced without autonomous public action." : "Qualifying findings now flow through the canonical Assignment, Social Planner, and Presence execution envelope.", "positive", { presenceId: exploration.presenceId }));
+    return state;
+  }
+  if (operation.type === "updatePeopleNote") {
+    const presence = state.presences.find((item) => item.id === operation.presenceId);
+    const person = state.people.find((item) => item.id === operation.personId);
+    if (!state.agent || !presence || !person || person.agentId !== state.agent.id) return state;
+    const timestamp = now();
+    const noteId = `people-note:${state.agent.id}:${presence.id}:${person.id}`;
+    const existing = (state.peopleNotes ?? []).find((item) => item.id === noteId);
+    const note = {
+      id: noteId,
+      agentId: state.agent.id,
+      presenceId: presence.id,
+      personId: person.id,
+      markdown: operation.markdown.trim(),
+      revision: (existing?.revision ?? 0) + 1,
+      createdAt: existing?.createdAt ?? timestamp,
+      updatedAt: timestamp,
+      provenance: { source: operation.source ?? "operator", reason: operation.reason?.trim() || "People Note updated", operationId: operation.operationId, updatedAt: timestamp },
+    } as import("./types").PeopleNote;
+    state.peopleNotes = [note, ...(state.peopleNotes ?? []).filter((item) => item.id !== note.id)];
+    state.events.unshift(event("memory", "People Note updated", `${person.displayName}'s Presence note was saved as Markdown.`, "positive", { presenceId: presence.id }));
+    return state;
+  }
+  if (operation.type === "setPresenceDMInstructions") {
+    const presence = state.presences.find((item) => item.id === operation.presenceId);
+    if (!state.agent || !presence) return state;
+    const timestamp = now();
+    const instructions = operation.instructions.trim().slice(0, 8_000);
+    const dmInstructions = instructions ? { when: "private_message_arrives" as const, condition: operation.condition?.trim().slice(0, 1_000) || undefined, instructions, revision: (presence.dmInstructions?.revision ?? 0) + 1, updatedAt: timestamp, provenance: { source: operation.source ?? "operator", reason: operation.reason?.trim() || "Private-message guidance updated", operationId: operation.operationId, updatedAt: timestamp } } : undefined;
+    const nextPresence = { ...presence, dmInstructions };
+    state.presences = state.presences.map((item) => item.id === presence.id ? nextPresence : item);
+    if (state.presence?.id === presence.id) state.presence = nextPresence;
     return state;
   }
   if (operation.type === "rememberPerson") {
@@ -6350,6 +7239,9 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     state.events.unshift(event("execution", "Operator override recorded", "The operator explicitly chose Publish anyway for this exact text. The language rule remains active for future Agent output.", "warning", { presenceId: execution.presenceId, executionId: execution.id, intentId: execution.socialIntentId }));
     return state;
   }
+  if (["connectAssetSource", "rescanAssetSource", "pauseAssetSource", "resumeAssetSource", "createAssetCollection", "updateAssetCollection", "archiveAssetCollection", "addAssetToCollection", "removeAssetFromCollection", "setAssetAccessScope", "editAssetMetadata", "approveAssetMetadata", "resolveAssetReview", "reanalyzeAsset", "archiveAsset", "restoreAsset"].includes(operation.type)) {
+    return applyAssetLibraryOperation(state, operation as import("./types").AssetLibraryOperation);
+  }
   if (operation.type === "createKnowledgeDocument") return createKnowledgeDocument(state, operation);
   if (operation.type === "saveKnowledgeDocument") return saveKnowledgeDocument(state, operation);
   if (operation.type === "setKnowledgeAccess") return setKnowledgeAccess(state, operation);
@@ -6436,6 +7328,16 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
         ? ` ${stopped + unresolved} pending delivery${stopped + unresolved === 1 ? "" : "ies"} stopped${unresolved ? "; any external outcome remains unresolved" : ""}.`
         : "";
       assignment.lastOutcome = { class: "assignment_cancelled", message: `${assignment.progress.verified} / ${assignment.progress.required} verified publications remain recorded, but this Assignment will not continue.${stopDetail}`, at: assignment.updatedAt };
+      if (assignment.origin === "publishing_initiative") {
+        const owner = state.presences.find((presence) => presence.id === assignment.presenceId);
+        if (owner) {
+          owner.publishingInitiative = { ...owner.publishingInitiative, mode: "off", assignmentId: undefined, updatedAt: assignment.updatedAt };
+          owner.context = compilePresenceContext(owner);
+          state.presences = state.presences.map((presence) => presence.id === owner.id ? owner : presence);
+          if (state.presence?.id === owner.id) state.presence = owner;
+        }
+        state.publishingPlans = state.publishingPlans.map((plan) => plan.presenceId === assignment.presenceId && plan.status !== "superseded" ? { ...plan, status: "superseded" as const, updatedAt: assignment.updatedAt } : plan);
+      }
       state.events.unshift(event("decision", "Assignment cancelled", assignment.lastOutcome.message, "quiet", { presenceId: assignment.presenceId, sessionId: assignment.sessionId }));
       return state;
     }
@@ -6816,7 +7718,8 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       const execution = state.executions.find((item) => item.id === operation.id);
       const bridgePreWriteFailure = execution?.connector === "bridge"
         && ["ACCOUNT_MISMATCH", "ACCOUNT_NOT_READY", "INVALID_PROVENANCE", "TARGET_NOT_VISIBLE"].includes(execution.failure?.code ?? "");
-      if (!execution || !["failed", "blocked", "expired"].includes(execution.status) || execution.externalRef || (!bridgePreWriteFailure && execution.failure?.retryable === false) || execution.failure?.reviewedAt) return state;
+      const targetLanguageCanRefresh = execution?.failure?.code === "TARGET_LANGUAGE_MISMATCH" && execution.target?.type === "x.post";
+      if (!execution || !["failed", "blocked", "expired"].includes(execution.status) || execution.externalRef || (!bridgePreWriteFailure && !targetLanguageCanRefresh && execution.failure?.retryable === false) || execution.failure?.reviewedAt) return state;
       const intent = state.socialIntents.find((item) => item.id === execution.socialIntentId);
       if (!intent || intent.state !== "active") return state;
       if (intent.validity.expiresAt && new Date(intent.validity.expiresAt).getTime() <= Date.now()) return state;
@@ -6887,10 +7790,11 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       state.events.unshift(event("system", "Conversational style changed", "The Presence will use the selected style on its next social turn.", "positive", { presenceId: presence.id }));
       return state;
     }
-    case "setPresence": { if (state.presence) { const patch = operation.patch as typeof operation.patch & { publicSelf?: PublicSelf }; const requestedConnectionMode = patch.connectionMode ?? state.presence.connectionMode ?? (state.presence.environment === "sandbox" ? "sandbox" : state.presence.channel === "x" ? "native" : "bridge"); const connectionMode = requestedConnectionMode === "native" && state.presence.channel !== "x" ? "bridge" as const : requestedConnectionMode; const name = patch.name?.trim() || state.presence.name; const mode = patch.mode ?? state.presence.mode; const posture = patch.publicSelf?.posture ?? state.presence.publicSelf?.posture; const compatiblePostures = mode === "ghost" ? ["representational", "open-about-assistance"] : ["contextual", "ai-forward", "private"]; const publicSelf = { ...(patch.publicSelf ?? state.presence.publicSelf ?? defaultPublicSelf(name, mode)), displayName: name, posture: compatiblePostures.includes(posture as never) ? posture! : defaultPublicSelf(name, mode).posture }; const mediaPerceptionPolicy = patch.mediaPerceptionPolicy ?? state.presence.mediaPerceptionPolicy ?? (mode === "ghost" ? "review-uncertain" as const : "use-judgment" as const); const ghostProfile = normalizeGhostProfile(patch.ghostProfile ?? state.presence.ghostProfile ?? (mode === "ghost" ? defaultGhostProfile() : undefined)); const publishingInitiative = normalizePublishingInitiative(patch.publishingInitiative ?? state.presence.publishingInitiative); const updated = { ...state.presence, ...patch, publishingInitiative: patch.publishingInitiative ? { ...publishingInitiative, updatedAt: now() } : publishingInitiative, mediaPerceptionPolicy, publicSelf, connectionMode, environment: connectionMode === "sandbox" ? "sandbox" as const : "live" as const, name, mode, ghostProfile, execution: patch.execution ? { ...state.presence.execution, ...patch.execution } : state.presence.execution }; const priorHandle = state.presence.handle.trim().replace(/^@/, "").toLowerCase(); const nextHandle = updated.handle.trim().replace(/^@/, "").toLowerCase(); const identityChanged = state.presence.channel === "x" && priorHandle !== nextHandle; updated.executionEnvelope = { ...state.presence.executionEnvelope, affordances: Object.fromEntries(channelCapabilities(state, updated.channel).map((item) => [item.id, { mode: updated.execution[item.id] ?? "off" }])) }; updated.context = compilePresenceContext(updated); if (patch.brief) recordChangeSet(state, "Update Presence Brief", [{ path: `presences.${updated.id}.brief`, action: "update", before: state.presence.brief as unknown as JsonValue, after: updated.brief as unknown as JsonValue }]); state.presence = updated; state.presences = state.presences.map((item) => item.id === updated.id ? updated : item); if (identityChanged) { const message = `The X identity changed to @${nextHandle}. Reconnect and verify this account before observing or acting.`; state.nativeConnections = state.nativeConnections.map((connection) => connection.presenceId === updated.id && connection.kind === "x" ? { ...connection, status: "needs-attention" as const, healthMessage: message, observation: { ...connection.observation, status: "error" as const, error: message } } : connection); state.bridges = state.bridges.map((bridge) => bridge.presenceId === updated.id && bridge.channelId === "x" ? { ...bridge, accountIdentity: bridge.accountIdentity ? { ...bridge.accountIdentity, status: "mismatch" as const } : undefined } : bridge); } if (connectionMode === "native" && updated.channel === "x") { rebindQueuedExecutionsForNativeRoute(state, updated); unblockNativeExecutions(state, updated); } if (patch.publishingInitiative) { const linked = syncPublishingInitiativeAssignment(state, updated.id); state.assignments = linked.assignments; state.presences = linked.presences; state.presence = linked.presence; } const presenceFile = state.files.find((file) => file.kind === "PRESENCE"); if (presenceFile && state.agent) { presenceFile.content = fileContent("PRESENCE", { name: state.agent.name, description: state.agent.description, audience: state.agent.audience, mode, handle: updated.handle, accent: state.agent.accent }, state.presence ?? updated); presenceFile.revision += 1; presenceFile.updatedAt = now(); } } state.events.unshift(event("system", "Presence settings updated", state.presence?.status === "paused" ? "All external actions are paused." : "The new execution envelope is active.", state.presence?.status === "paused" ? "warning" : "positive", { presenceId: state.presence?.id })); return state; }
+    case "setPresence": { if (state.presence) { const patch = operation.patch as typeof operation.patch & { publicSelf?: PublicSelf }; const requestedConnectionMode = patch.connectionMode ?? state.presence.connectionMode ?? (state.presence.environment === "sandbox" ? "sandbox" : state.presence.channel === "x" ? "native" : "bridge"); const connectionMode = requestedConnectionMode === "native" && state.presence.channel !== "x" ? "bridge" as const : requestedConnectionMode; const name = patch.name?.trim() || state.presence.name; const mode = patch.mode ?? state.presence.mode; const posture = patch.publicSelf?.posture ?? state.presence.publicSelf?.posture; const compatiblePostures = mode === "ghost" ? ["representational", "open-about-assistance"] : ["contextual", "ai-forward", "private"]; const publicSelf = { ...(patch.publicSelf ?? state.presence.publicSelf ?? defaultPublicSelf(name, mode)), displayName: name, posture: compatiblePostures.includes(posture as never) ? posture! : defaultPublicSelf(name, mode).posture }; const mediaPerceptionPolicy = patch.mediaPerceptionPolicy ?? state.presence.mediaPerceptionPolicy ?? (mode === "ghost" ? "review-uncertain" as const : "use-judgment" as const); const ghostProfile = normalizeGhostProfile(patch.ghostProfile ?? state.presence.ghostProfile ?? (mode === "ghost" ? defaultGhostProfile() : undefined)); const publishingInitiative = normalizePublishingInitiative(patch.publishingInitiative ?? state.presence.publishingInitiative); const updated = { ...state.presence, ...patch, ...(patch.curationSources ? { curationSources: normalizeCurationSources(patch.curationSources) } : {}), publishingInitiative: patch.publishingInitiative ? { ...publishingInitiative, updatedAt: now() } : publishingInitiative, mediaPerceptionPolicy, publicSelf, connectionMode, environment: connectionMode === "sandbox" ? "sandbox" as const : "live" as const, name, mode, ghostProfile, execution: patch.execution ? { ...state.presence.execution, ...patch.execution } : state.presence.execution }; const priorHandle = state.presence.handle.trim().replace(/^@/, "").toLowerCase(); const nextHandle = updated.handle.trim().replace(/^@/, "").toLowerCase(); const identityChanged = state.presence.channel === "x" && priorHandle !== nextHandle; updated.executionEnvelope = { ...state.presence.executionEnvelope, affordances: Object.fromEntries(channelCapabilities(state, updated.channel).map((item) => [item.id, { mode: updated.execution[item.id] ?? "off" }])) }; updated.context = compilePresenceContext(updated); if (patch.brief) recordChangeSet(state, "Update Presence Brief", [{ path: `presences.${updated.id}.brief`, action: "update", before: state.presence.brief as unknown as JsonValue, after: updated.brief as unknown as JsonValue }]); state.presence = updated; state.presences = state.presences.map((item) => item.id === updated.id ? updated : item); if (identityChanged) { const message = `The X identity changed to @${nextHandle}. Reconnect and verify this account before observing or acting.`; state.nativeConnections = state.nativeConnections.map((connection) => connection.presenceId === updated.id && connection.kind === "x" ? { ...connection, status: "needs-attention" as const, healthMessage: message, observation: { ...connection.observation, status: "error" as const, error: message } } : connection); state.bridges = state.bridges.map((bridge) => bridge.presenceId === updated.id && bridge.channelId === "x" ? { ...bridge, accountIdentity: bridge.accountIdentity ? { ...bridge.accountIdentity, status: "mismatch" as const } : undefined } : bridge); } if (connectionMode === "native" && updated.channel === "x") { rebindQueuedExecutionsForNativeRoute(state, updated); unblockNativeExecutions(state, updated); } if (patch.publishingInitiative) { const linked = syncPublishingInitiativeAssignment(state, updated.id); state.assignments = linked.assignments; state.presences = linked.presences; state.presence = linked.presence; } const presenceFile = state.files.find((file) => file.kind === "PRESENCE"); if (presenceFile && state.agent) { presenceFile.content = fileContent("PRESENCE", { name: state.agent.name, description: state.agent.description, audience: state.agent.audience, mode, handle: updated.handle, accent: state.agent.accent }, state.presence ?? updated); presenceFile.revision += 1; presenceFile.updatedAt = now(); } } state.events.unshift(event("system", "Presence settings updated", state.presence?.status === "paused" ? "All external actions are paused." : "The new execution envelope is active.", state.presence?.status === "paused" ? "warning" : "positive", { presenceId: state.presence?.id })); return state; }
   }
   return state;
 }
+
 
 function makeCalendarSlot(instruction: string, presence: Presence | null, day = "Tuesday", time = "08:00", objective = "audience_growth", executionWindow = "08:00–11:00"): CalendarSlot { const clean = instruction.trim().replace(/[.!?]+$/, "") || "Teach the audience one useful thing"; const label = clean.length > 34 ? `${clean.slice(0, 34).trim()}…` : clean; const mode = presence?.execution.post ?? "review"; return { id: id("slot"), label, instruction: clean, day, time, objective, presence: presence?.id ?? "", mode, enabled: true, executionWindow }; }
 

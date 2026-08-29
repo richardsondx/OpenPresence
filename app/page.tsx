@@ -9,7 +9,6 @@ import {
   Badge,
   BarChart2,
   BarChart3,
-  Bookmark,
   BookOpen,
   Bot,
   Brain,
@@ -23,6 +22,7 @@ import {
   ChevronUp,
   Circle,
   CircleAlert,
+  CircleSlash2,
   Clock3,
   Copy,
   ExternalLink,
@@ -31,6 +31,8 @@ import {
   FileText,
   Filter,
   FlaskConical,
+  FolderOpen,
+  Gamepad2,
   Globe,
   Globe2,
   Ghost,
@@ -66,6 +68,7 @@ import {
   X,
 } from "lucide-react";
 import { AGENT_CAPABILITY_DEFINITIONS, CHANNEL_CAPABILITIES, isAgentCapabilityEnabled, simulationForChannel } from "@/lib/types";
+import { detectLibraryMedia, supportedLibraryMediaLabel } from "@/lib/asset-media";
 import { bridgeAdapterPrompt, bridgeAdapterStatusLabel, bridgeApiExamples, bridgeEnvironmentExample, bridgeExecutionStatus, bridgeExecutionStatusLabel, bridgeIdentityReady } from "@/lib/bridge-contract";
 import { latestPerception } from "@/lib/perception";
 import { attentionGovernorSnapshot } from "@/lib/attention-governor";
@@ -75,7 +78,10 @@ import { cleanMirrorText, normalizeMirrorAuthor } from "@/lib/mirror-content";
 import { languagesMatch } from "@/lib/language-policy";
 import { isCognitionEligibleMirrorObject } from "@/lib/social-context";
 import { peopleForPresence, resolveCanonicalPerson, isPlaceholderIdentity } from "@/lib/network-memory";
+import { readPeopleNote } from "@/lib/people-notes";
+import { autobiographicalEventsForPerson } from "@/lib/autobiographical-memory";
 import { assignmentIsCurrentlyProcessing, assignmentIsOpen, assignmentProgressLabel, audienceDeltas, capabilityProviderLabel, cleanUserFacingAssignmentInstruction, collapseAudienceSnapshots, compileAgendaWork, defaultSelfDirectedAttentionPolicy, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, intervalForPresence, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence, relationshipPolicyFromWatchPurpose, SELF_DIRECTED_ATTENTION_PRESETS } from "@/lib/runtime";
+import { assignmentPursuitUsage, assignmentPursuitVerifiedCounts } from "@/lib/runtime";
 import type {
   CalendarSlot,
   CapabilityTrialCapability,
@@ -98,6 +104,7 @@ import type {
   GhostProfile,
   GhostRepresentation,
   OpenPresenceState,
+  OperatorConversationMessage,
   OperatorNudgeStatus,
   PublicHistoryItem,
   PublicDisclosurePosture,
@@ -120,6 +127,8 @@ import type {
   PresenceRequestPolicy,
   PublicRequest,
   PublicRequestType,
+  RelationshipStudyMode,
+  RelationshipInsight,
   PresenceAudienceSnapshot,
   PublicationMetricSnapshot,
   SandboxActor,
@@ -137,14 +146,16 @@ import type {
   CurationSourceKind,
   ConversationStyleProfile,
 } from "@/lib/types";
+import type { SchedulePromptProposal } from "@/lib/schedule-prompt";
 import { getDefaultCurationSources } from "@/lib/editorial-curation";
 import { publicExpressionText } from "@/lib/public-expression";
 import { xCreditsBillingUrl, xCreditsExhausted } from "@/lib/x-credits";
 import { runtimeTimeoutForOperation, runtimeTimeoutMessage } from "@/lib/runtime-timeout";
 import { deriveHistoricalGrowthContext } from "@/lib/growth-history";
+import { growthEvidenceIsInPresenceScope, growthPublicationIsInPresenceScope, presenceGrowthBoundary } from "@/lib/growth-scope";
 import { deriveActivityNow } from "@/lib/activity-now";
 import { operatorConversationActionEvents, type OperatorConversationActionEvent } from "@/lib/operator-chat-projection";
-import { conversationStyleGeneratorPrompt, conversationStylesFor, normalizeImportedConversationStyle } from "@/lib/conversation-styles";
+import { conversationStyleGeneratorPrompt, conversationStylesFor, CUSTOM_CONVERSATION_STYLE_ID, normalizeImportedConversationStyle } from "@/lib/conversation-styles";
 import { AVATAR_LOOK_LABELS, AVATAR_LOOKS, avatarAssetPath, presenceAvatarLook, type AvatarLook } from "@/lib/avatars";
 
 const PUBLIC_TECHNICAL_FACTS: { id: PublicTechnicalFact; label: string; detail: string }[] = [
@@ -170,20 +181,21 @@ const fileOrder: FileKind[] = [
 const navItems: { id: View; label: string; icon: typeof MessageCircle }[] = [
   { id: "live", label: "Activity", icon: Radio },
   { id: "chat", label: "Chat", icon: MessageSquare },
-  { id: "rehearsal", label: "Rehearsal", icon: FlaskConical },
   { id: "watching", label: "Watching", icon: Eye },
   { id: "people", label: "People", icon: Users },
   { id: "feed", label: "Feed", icon: Newspaper },
   { id: "growth", label: "Growth", icon: TrendingUp },
   { id: "schedule", label: "Schedule", icon: Clock3 },
   { id: "presence", label: "Settings", icon: Settings2 },
+  { id: "rehearsal", label: "Rehearsal", icon: FlaskConical },
   { id: "teach", label: "Teach", icon: MessageCircle },
   { id: "knowledge", label: "Knowledge", icon: BookOpen },
+  { id: "assets", label: "Assets", icon: Layers },
   { id: "usage", label: "Usage", icon: BarChart3 },
-  { id: "playground", label: "Playground", icon: FlaskConical },
+  { id: "playground", label: "Playground", icon: Gamepad2 },
 ];
-const presenceNavItems = navItems.filter(({ id }) => id === "live" || id === "chat" || id === "watching" || id === "people" || id === "feed" || id === "growth" || id === "schedule" || id === "presence" || id === "playground");
-const agentNavItems = navItems.filter(({ id }) => id === "rehearsal" || id === "teach" || id === "knowledge" || id === "usage");
+const presenceNavItems = navItems.filter(({ id }) => id === "live" || id === "chat" || id === "watching" || id === "people" || id === "feed" || id === "growth" || id === "schedule" || id === "presence" || id === "rehearsal" || id === "playground");
+const agentNavItems = navItems.filter(({ id }) => id === "teach" || id === "knowledge" || id === "assets" || id === "usage");
 const viewPaths: Record<View, string> = {
   live: "/activity",
   chat: "/chat",
@@ -197,6 +209,7 @@ const viewPaths: Record<View, string> = {
   playground: "/playground",
   teach: "/teach",
   knowledge: "/knowledge",
+  assets: "/assets",
   usage: "/usage",
   brain: "/agent",
   calendar: "/calendar",
@@ -204,12 +217,14 @@ const viewPaths: Record<View, string> = {
 const pathViews = new Map(Object.entries(viewPaths).map(([view, path]) => [path, view as View]));
 function viewForLocation(location: Location): View {
   const pathView = pathViews.get(location.pathname.replace(/\/$/, "") || "/");
-  if (pathView) return pathView;
+  // `/calendar` was the original name of the responsibility surface. Keep
+  // old activity links valid while rendering the canonical Schedule view.
+  if (pathView) return pathView === "calendar" ? "schedule" : pathView;
   const requested = new URLSearchParams(location.search).get("view");
   return requested && Object.prototype.hasOwnProperty.call(viewPaths, requested) ? requested as View : "live";
 }
 const activityProjectionCollections = new Set([
-  "assignments", "assignmentRuns", "actions", "events", "executions", "outcomes", "publications", "socialDecisions", "socialIntents",
+  "assignments", "assignmentRuns", "actions", "events", "executions", "outcomes", "publications", "socialDecisions", "autobiographicalEvents", "autobiographicalReflections", "socialIntents",
   "mirrorObjects", "nativeConnections", "bridges", "playgroundSessions", "sandboxActors", "originalPostRehearsals", "assetResearchSessions", "operationalRuns", "attentionEpisodes", "operatorConversations", "operatorNudges", "resourceUsageEvents", "explorations", "watches", "capabilityTrials", "explorationFindings", "explorationSessions", "calendar",
 ]);
 function mergeActivityProjection(previous: OpenPresenceState, projection: OpenPresenceState): OpenPresenceState {
@@ -247,6 +262,12 @@ const formatTime = (value: string) => {
         hour: "numeric",
         minute: "2-digit",
       }).format(date);
+};
+const formatDateTime = (value: string) => {
+  const date = new Date(value);
+  return Number.isNaN(date.getTime())
+    ? "time unknown"
+    : new Intl.DateTimeFormat("en", { month: "short", day: "numeric", year: "numeric", hour: "numeric", minute: "2-digit" }).format(date);
 };
 const formatRelativeTime = (value: string, now = Date.now()) => {
   const date = new Date(value);
@@ -320,7 +341,7 @@ const formatCountdown = (value: string | undefined, now = Date.now()) => {
     ? `${hours}:${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`
     : `${String(minutes).padStart(2, "0")}:${String(seconds).padStart(2, "0")}`;
 };
-function useOperationalHealth(presenceId?: string) {
+function useOperationalHealth(presenceId?: string, refreshKey = 0) {
   const [health, setHealth] = useState<OperationalHealthSnapshot | null>(null);
   useEffect(() => {
     if (!presenceId) return;
@@ -346,7 +367,7 @@ function useOperationalHealth(presenceId?: string) {
       active = false;
       if (timerId) clearTimeout(timerId);
     };
-  }, [presenceId]);
+  }, [presenceId, refreshKey]);
   return health;
 }
 
@@ -837,7 +858,7 @@ export default function Home() {
   async function mutate(operation: unknown, requestContext?: OpenPresenceState) {
     setError(null);
     const operationType = typeof operation === "object" && operation !== null && "type" in operation && typeof operation.type === "string" ? operation.type : null;
-    const tracksAttention = ["wakePresence", "runPulse", "runAttentionWorker", "runLiveAssignment", "startAssignment", "workAssignment"].includes(operationType ?? "");
+    const tracksAttention = ["lookNow", "wakePresence", "runPulse", "runAttentionWorker", "runLiveAssignment", "startAssignment", "workAssignment"].includes(operationType ?? "");
     if (tracksAttention) {
       if (attentionOperationInFlight.current) return null;
       attentionOperationInFlight.current = true;
@@ -1063,7 +1084,11 @@ export default function Home() {
     (state.operationalRuns ?? []).some((run) =>
       run.presenceId === state.presence?.id
       && ["attention", "observation", "discovery", "browser_recovery", "runtime_recovery"].includes(run.kind)
-      && ["queued", "running", "waiting", "recovering", "delivery_uncertain", "reconciling"].includes(run.state),
+      // Waiting is a durable resting state. The ordinary Activity refresh
+      // observes it without re-parsing and re-serializing the full projection
+      // every second, which is especially important when verification is
+      // paused behind a permanent connector or quota gate.
+      && ["queued", "running", "recovering", "delivery_uncertain", "reconciling"].includes(run.state),
     )
   ));
   useEffect(() => {
@@ -1938,7 +1963,8 @@ function AgentWorkspaceShell({
   const xCreditsAlert = presence.channel === "x" && presence.environment !== "sandbox" && xCreditsExhausted(nativeXConnection)
     ? nativeXConnection
     : undefined;
-  const operationalHealth = useOperationalHealth(presence?.id);
+  const [healthRefreshKey, setHealthRefreshKey] = useState(0);
+  const operationalHealth = useOperationalHealth(presence?.id, healthRefreshKey);
   const [healthFocusKey, setHealthFocusKey] = useState(0);
   const presenceBridge = presence.channel !== "x" ? state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline") : undefined;
   const presenceBridgeStatus = presenceBridge ? bridgeExecutionStatus(presenceBridge) : undefined;
@@ -2129,6 +2155,7 @@ function AgentWorkspaceShell({
         <div className="workspace-content">
           {view === "teach" && <TeachView state={state} mutate={mutate} setView={setView} />}
           {view === "knowledge" && <KnowledgeView state={state} mutate={mutate} refreshState={refreshState} />}
+          {view === "assets" && <AssetsView state={state} refreshState={refreshState} />}
           {view === "usage" && <UsageView state={state} setView={setView} mutate={mutate} />}
           {view === "chat" && <OperatorChatView state={state} mutate={mutate} refreshState={refreshState} />}
           {view === "rehearsal" && <PresenceChatView key={`${presence.id}-${state.files.find((item) => item.kind === "TASTE")?.revision ?? 0}`} state={state} mutate={mutate} />}
@@ -2138,7 +2165,7 @@ function AgentWorkspaceShell({
             <PlaygroundView state={state} mutate={mutate} />
           )}
           {view === "live" && (
-            <LiveView key={`${state.presence?.id ?? "none"}-${state.presence?.channel ?? "none"}-${state.presence?.environment ?? "live"}-${healthFocusKey}`} state={state} mutate={mutate} pendingOperation={pendingOperation} operationalHealth={operationalHealth} healthFocusKey={healthFocusKey} runtimeError={Boolean(error && /OpenPresence (runtime could not be reached|service unavailable)/i.test(error))} refreshState={refreshState} setView={setView} />
+        <LiveView key={`${state.presence?.id ?? "none"}-${state.presence?.channel ?? "none"}-${state.presence?.environment ?? "live"}-${healthFocusKey}`} state={state} mutate={mutate} pendingOperation={pendingOperation} operationalHealth={operationalHealth} healthFocusKey={healthFocusKey} refreshHealth={() => setHealthRefreshKey((key) => key + 1)} runtimeError={Boolean(error && /OpenPresence (runtime could not be reached|service unavailable)/i.test(error))} refreshState={refreshState} setView={setView} />
           )}
           {view === "feed" && (
             <PublicHistoryView state={state} setView={setView} mutate={mutate} />
@@ -5030,7 +5057,7 @@ function PlaygroundView({ state, mutate, setView }: { state: OpenPresenceState; 
 function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutate }) {
   const presence = state.presence ?? state.presences[0];
   const [query, setQuery] = useState("");
-  const [filterMode, setFilterMode] = useState<"all" | "following" | "watched">("all");
+  const [filterMode, setFilterMode] = useState<"all" | "following" | "watched" | "boundaries">("all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [remembering, setRemembering] = useState(false);
   const [rememberName, setRememberName] = useState("");
@@ -5039,6 +5066,12 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
   const [correction, setCorrection] = useState("");
   const [delegationBusy, setDelegationBusy] = useState(false);
   const [factPage, setFactPage] = useState(1);
+  const [studyMode, setStudyMode] = useState<RelationshipStudyMode>("recent_history");
+  const [studyOpen, setStudyOpen] = useState(false);
+  const [studyBusy, setStudyBusy] = useState(false);
+  const [studyError, setStudyError] = useState<string | null>(null);
+  const [noteDraft, setNoteDraft] = useState("");
+  const [noteBusy, setNoteBusy] = useState(false);
   if (!presence) return null;
 
   const visiblePeople = peopleForPresence(state, presence).filter((person) => {
@@ -5054,6 +5087,7 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
   const isPersonFollowed = (personId: string) => {
     const identity = state.personIdentities.find((item) => item.personId === personId && item.sourcePresenceId === presence.id && (item.sourceEnvironment ?? "live") === (presence.environment ?? "live"));
     if (!identity) return false;
+    if (identity.contactability?.status === "blocked_by_person") return false;
     const hasFollowExecution = state.executions.some((e) => e.presenceId === presence.id && e.affordance === "x.follow" && e.target?.id === identity.externalActorId && e.status === "succeeded");
     const hasFollowOutcome = state.outcomes.some((o) => o.presenceId === presence.id && o.status === "succeeded" && state.socialIntents.some((i) => i.id === o.socialIntentId && i.affordance === "x.follow" && i.target?.id === identity.externalActorId));
     return Boolean(hasFollowExecution || hasFollowOutcome);
@@ -5064,7 +5098,13 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
   };
 
   const people = visiblePeople
-    .filter((person) => filterMode === "all" ? true : filterMode === "following" ? isPersonFollowed(person.id) : isPersonWatched(person.id))
+    .filter((person) => filterMode === "all"
+      ? true
+      : filterMode === "following"
+        ? isPersonFollowed(person.id)
+        : filterMode === "watched"
+          ? isPersonWatched(person.id)
+          : state.personIdentities.some((identity) => identity.personId === person.id && identity.sourcePresenceId === presence.id && identity.contactability?.status === "blocked_by_person"))
     .filter((person) => {
       if (!query.trim()) return true;
       const display = resolveCanonicalPerson(state, person.id, presence.id);
@@ -5073,12 +5113,21 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
   // Keep People focused on the relationship cards. Details are an intentional
   // second step rather than opening the first record as a default inspector.
   const selected = selectedId ? people.find((person) => person.id === selectedId) : undefined;
+  const selectedNote = selected ? readPeopleNote(state, presence.id, selected.id) : undefined;
   const selectedIdentity = selected ? state.personIdentities.find((identity) => identity.personId === selected.id && identity.sourcePresenceId === presence.id && (identity.sourceEnvironment ?? "live") === (presence.environment ?? "live")) : undefined;
+  const selectedIsBlocked = selectedIdentity?.contactability?.status === "blocked_by_person";
   const selectedIsFollowed = selected ? isPersonFollowed(selected.id) : false;
   const selectedIsWatched = selected ? isPersonWatched(selected.id) : false;
   const selectedWatch = selected ? state.watches.find((watch) => watch.presenceId === presence.id && watch.target?.personId === selected.id) : undefined;
   const selectedDisplayInfo = selected ? resolveCanonicalPerson(state, selected.id, presence.id) : { displayName: "Unknown account", handleLabel: "Profile details pending", rawHandle: undefined, avatarUrl: undefined, hydrationState: "unhydrated" as const, isPlaceholder: true };
   const selectedDelegationGrant = selected ? state.delegationGrants.find((item) => item.presenceId === presence.id && item.personId === selected.id && item.enabled && !item.revokedAt) : undefined;
+  const selectedStudies = selected ? (state.relationshipStudies ?? []).filter((item) => item.presenceId === presence.id && item.personId === selected.id).sort((left, right) => right.createdAt.localeCompare(left.createdAt)) : [];
+  const latestStudy = selectedStudies.find((item) => item.status === "completed");
+  const latestInsights = latestStudy?.insightSetId ? (state.relationshipInsightSets ?? []).find((item) => item.id === latestStudy.insightSetId) : undefined;
+  const studyEvidenceIds = selectedIdentity ? state.mirrorObjects.filter((item) => item.presenceId === presence.id && (item.environment ?? "live") === (presence.environment ?? "live") && item.author?.externalRef?.id === selectedIdentity.externalActorId && !item.archived && Boolean(item.content?.text?.trim())).map((item) => item.id) : [];
+  const studyEvidenceCount = studyEvidenceIds.length;
+  const latestStudyCoverage = latestStudy ? new Set([...(latestStudy.evidenceRefs.filter((ref) => ref.kind === "mirror_object").map((ref) => ref.id)), ...(latestStudy.refresh ? (selectedStudies.find((item) => item.id !== latestStudy.id && item.status === "completed")?.evidenceRefs.filter((ref) => ref.kind === "mirror_object").map((ref) => ref.id) ?? []) : [])]) : new Set<string>();
+  const newStudyEvidenceCount = latestStudy ? studyEvidenceIds.filter((id) => !latestStudyCoverage.has(id)).length : studyEvidenceCount;
 
   const relationship = selected ? state.relationships.find((item) => item.personId === selected.id) : undefined;
   const selectedRelationshipPolicy = selectedWatch ? watchRelationshipPolicy(selectedWatch, state) ?? watchPolicyFromPurpose(selectedWatch.purpose) : undefined;
@@ -5092,6 +5141,7 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
   );
   const loops = relationship ? state.relationshipOpenLoops.filter((loop) => loop.relationshipId === relationship.id && loop.status === "open") : [];
   const recentHistory = selectedIdentity ? state.mirrorObjects.filter((item) => item.presenceId === presence.id && (item.environment ?? "live") === (presence.environment ?? "live") && item.author?.externalRef?.id === selectedIdentity.externalActorId && isCognitionEligibleMirrorObject(item, presence.language)).sort((left, right) => (right.occurredAt ?? right.observedAt).localeCompare(left.occurredAt ?? left.observedAt)).slice(0, 8) : [];
+  const selectedAutobiographicalEvents = selected ? autobiographicalEventsForPerson(state, presence.id, selected.id) : [];
   
   // Find contemporaneous follow decision reason if available
   const followDecision = selectedIdentity ? state.socialDecisions.find((d) => d.presenceId === presence.id && d.acts?.some((a) => a.decision === "follow") && (d.focalMirrorObjectIds.some((mId) => state.mirrorObjects.find((m) => m.id === mId)?.author?.externalRef?.id === selectedIdentity.externalActorId))) : undefined;
@@ -5117,6 +5167,34 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
       setDelegationBusy(false);
     }
   };
+  const openStudy = (mode: RelationshipStudyMode = latestStudy ? "existing_evidence" : "recent_history") => {
+    setStudyMode(mode);
+    setStudyError(null);
+    setStudyOpen(true);
+  };
+  const runStudy = async () => {
+    if (!selected || studyBusy) return;
+    setStudyBusy(true);
+    setStudyError(null);
+    try {
+      await mutate({ type: "studyRelationship", presenceId: presence.id, personId: selected.id, mode: studyMode, refresh: studyMode === "existing_evidence" && Boolean(latestStudy) });
+      setStudyOpen(false);
+    } catch (error) {
+      setStudyError(error instanceof Error ? error.message : "The relationship study could not be completed.");
+    } finally {
+      setStudyBusy(false);
+    }
+  };
+  const savePeopleNote = async () => {
+    if (!selected || noteBusy) return;
+    setNoteBusy(true);
+    try { await mutate({ type: "updatePeopleNote", presenceId: presence.id, personId: selected.id, markdown: noteDraft, source: "operator", reason: "Edited in People inspector" }); }
+    finally { setNoteBusy(false); }
+  };
+  const insightEvidence = (insight: RelationshipInsight) => insight.evidenceRefs.map((ref) => {
+    const mirror = ref.kind === "mirror_object" ? state.mirrorObjects.find((item) => item.id === ref.id) : undefined;
+    return <details className="relationship-insight-evidence" key={`${insight.id}:${ref.id}`}><summary>Why does Genny think this?</summary><p>{mirror?.content?.text ?? "This evidence is recorded in the relationship study receipt."}</p><small>{mirror ? formatTime(mirror.occurredAt ?? mirror.observedAt) : ref.kind.replaceAll("_", " ")}</small></details>;
+  });
 
   return <div className="people-page">
     <PageHeader
@@ -5137,18 +5215,20 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
         <button type="button" className={`button button-small ${filterMode === "all" ? "button-secondary" : "button-ghost"}`} onClick={() => setFilterMode("all")}>All Remembered</button>
         <button type="button" className={`button button-small ${filterMode === "following" ? "button-secondary" : "button-ghost"}`} onClick={() => setFilterMode("following")}>Following · Verified</button>
         <button type="button" className={`button button-small ${filterMode === "watched" ? "button-secondary" : "button-ghost"}`} onClick={() => setFilterMode("watched")}>Watched</button>
+        <button type="button" className={`button button-small ${filterMode === "boundaries" ? "button-secondary" : "button-ghost"}`} onClick={() => setFilterMode("boundaries")}>Boundaries</button>
       </div>
       <label className="people-search" style={{ flex: 1 }}><span>Search people</span><input aria-label="Search people" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="Search by name or handle" /></label>
-      <span className="people-count">{people.length} {filterMode === "following" ? "following" : filterMode === "watched" ? "watched" : "remembered"}</span>
+      <span className="people-count">{people.length} {filterMode === "following" ? "following" : filterMode === "watched" ? "watched" : filterMode === "boundaries" ? "boundaries" : "remembered"}</span>
     </div>
-    {!people.length ? <section className="people-empty"><div className="watch-empty-mark"><Users size={23} /></div><SectionEyebrow>People</SectionEyebrow><h2>{filterMode === "following" ? "Not following anyone yet." : "No one remembered yet."}</h2><p>People appear as meaningful relationships develop and Genny chooses to maintain ongoing awareness.</p></section> : <div className={`people-layout ${selected ? "has-selection" : ""}`}><section className="people-list" aria-label="Remembered people">{people.map((person) => {
+    {!people.length ? <section className="people-empty"><div className="watch-empty-mark"><Users size={23} /></div><SectionEyebrow>People</SectionEyebrow><h2>{filterMode === "following" ? "Not following anyone yet." : filterMode === "boundaries" ? "No relationship boundaries recorded." : "No one remembered yet."}</h2><p>People appear as meaningful relationships develop and Genny chooses to maintain ongoing awareness.</p></section> : <div className={`people-layout ${selected ? "has-selection" : ""}`}><section className="people-list" aria-label="Remembered people">{people.map((person) => {
       const identity = state.personIdentities.find((item) => item.personId === person.id && item.sourcePresenceId === presence.id && (item.sourceEnvironment ?? "live") === (presence.environment ?? "live"));
       const rel = state.relationships.find((item) => item.personId === person.id);
       const followed = isPersonFollowed(person.id);
+      const blocked = identity?.contactability?.status === "blocked_by_person";
       const displayInfo = resolveCanonicalPerson(state, person.id, presence.id);
       const avatarUrl = displayInfo.avatarUrl ?? identity?.avatarUrl ?? state.mirrorObjects.find((item) => item.presenceId === presence.id && (item.environment ?? "live") === (presence.environment ?? "live") && item.author?.externalRef?.id === identity?.externalActorId)?.author?.avatarUrl;
 
-      return <button type="button" className={`people-row ${selected?.id === person.id ? "active" : ""}`} key={person.id} onClick={() => { setSelectedId((current) => current === person.id ? null : person.id); setFactPage(1); }}>
+      return <button type="button" className={`people-row ${blocked ? "people-row-blocked" : ""} ${selected?.id === person.id ? "active" : ""}`} key={person.id} onClick={() => { const closing = selected?.id === person.id; setSelectedId(closing ? null : person.id); setNoteDraft(closing ? "" : readPeopleNote(state, presence.id, person.id)?.markdown ?? ""); setFactPage(1); }}>
         <ChannelAvatar className="people-avatar" avatarUrl={avatarUrl} name={displayInfo.displayName} />
         <span className="people-row-copy">
           <strong>{displayInfo.displayName}</strong>
@@ -5156,11 +5236,14 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
             {displayInfo.handleLabel}
             {" · "}
             {rel?.lastMeaningfulInteractionAt ? `Last interacted ${formatTime(rel.lastMeaningfulInteractionAt)}` : "Remembered explicitly"}
-            {followed ? " · Following · Verified" : ""}
+            {blocked ? " · Blocked this Presence" : followed ? " · Following · Verified" : ""}
           </small>
-          <span>{followed ? "Following to stay aware of their contributions." : rel?.lastMeaningfulInteractionAt ? "Relationship context available." : "Remembered explicitly."}</span>
+          <span>{blocked ? "Automatic follow and interaction attempts are suppressed." : followed ? "Following to stay aware of their contributions." : rel?.lastMeaningfulInteractionAt ? "Relationship context available." : "Remembered explicitly."}</span>
         </span>
-        <ChevronRight size={16} />
+        <span className="people-row-trailing">
+          {blocked && <span className="people-boundary-badge" aria-label="No contact: this person blocked this Presence"><CircleSlash2 size={11} /> No contact</span>}
+          <ChevronRight size={16} />
+        </span>
       </button>;
     })}</section>
     {selected && <section className="person-inspector" aria-label={`${selectedDisplayInfo.displayName} relationship`}>
@@ -5175,17 +5258,19 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
           </p>
         </div>
         <div className="person-inspector-heading-actions">
-          <span className="people-status" style={{ background: selectedIsFollowed ? "var(--accent-subtle, #fef3eb)" : undefined, color: selectedIsFollowed ? "var(--accent, #d68754)" : undefined, fontWeight: selectedIsFollowed ? 600 : undefined }}>
-            {selectedIsFollowed ? "Following · Verified" : selectedIsWatched ? "Watched" : relationship?.lastMeaningfulInteractionAt ? "Remembered relationship" : "Remembered identity"}
+          <span className={`people-status ${selectedIsBlocked ? "people-status-blocked" : ""}`} style={{ background: selectedIsFollowed ? "var(--accent-subtle, #fef3eb)" : undefined, color: selectedIsFollowed ? "var(--accent, #d68754)" : undefined, fontWeight: selectedIsFollowed ? 600 : undefined }}>
+            {selectedIsBlocked ? "Blocked this Presence" : selectedIsFollowed ? "Following · Verified" : selectedIsWatched ? "Watched" : relationship?.lastMeaningfulInteractionAt ? "Remembered relationship" : "Remembered identity"}
           </span>
-          <button type="button" className="person-inspector-close" aria-label={`Close ${selectedDisplayInfo.displayName} details`} onClick={() => setSelectedId(null)}><X size={14} /> Close</button>
+          <button type="button" className="person-inspector-close" aria-label={`Close ${selectedDisplayInfo.displayName} details`} onClick={() => { setSelectedId(null); setNoteDraft(""); }}><X size={14} /> Close</button>
         </div>
       </div>
 
       <details className="person-reason">
         <summary><span>Why this person is remembered</span><ChevronRight size={14} /></summary>
         <p>
-          {selectedIsFollowed
+          {selectedIsBlocked
+            ? `X reported that this person blocked ${presence.name}. That verified boundary is remembered without inferring why.`
+            : selectedIsFollowed
             ? `${presence.name} chose to follow this person to stay aware of their contributions.`
             : relationship?.lastMeaningfulInteractionAt
               ? `${presence.name} interacted with this person on ${channelLabel(presence.channel, state.channelDefinitions)}. Prior evidence remains linked below.`
@@ -5196,7 +5281,9 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
       <div className="person-inspector-section">
         <SectionEyebrow>Current relationship</SectionEyebrow>
         <div style={{ display: "grid", gap: "6px", fontSize: "13px", marginTop: "6px" }}>
-          <div><strong>Status:</strong> {selectedIsFollowed ? "Following · Verified on X" : "Not followed"}</div>
+          <div><strong>Status:</strong> {selectedIsBlocked ? "Blocked this Presence on X" : selectedIsFollowed ? "Following · Verified on X" : "Not followed"}</div>
+          {selectedIsBlocked && <div className="people-contactability-note"><strong>Automation:</strong> No reply, like, repost, quote, or follow candidates will be created for this person. An explicit operator-requested action can check again; a verified success updates this status.</div>}
+          {selectedIsBlocked && selectedIdentity?.contactability?.observedAt && <div><strong>Observed:</strong> {formatTime(selectedIdentity.contactability.observedAt)}</div>}
           {selectedIsWatched && <div><strong>Watch:</strong> Active watchlist target</div>}
           <div><strong>Interactions:</strong> {recentHistory.length} recorded interaction{recentHistory.length === 1 ? "" : "s"}</div>
           {relationship?.lastMeaningfulInteractionAt && <div><strong>Last interaction:</strong> {formatTime(relationship.lastMeaningfulInteractionAt)}</div>}
@@ -5207,23 +5294,52 @@ function PeopleView({ state, mutate }: { state: OpenPresenceState; mutate: Mutat
         </div>
       </div>
 
-      {selectedRelationshipPlan && <div className="person-inspector-section person-plan-section">
-        <SectionEyebrow>{presence.name}&apos;s current relationship plan</SectionEyebrow>
+      {selectedAutobiographicalEvents.length > 0 && <div className="person-inspector-section relationship-biography" aria-label="Relationship history">
+        <SectionEyebrow>Relationship history</SectionEyebrow>
+        <div className="relationship-biography-list">{selectedAutobiographicalEvents.map((event) => {
+          const boundary = event.facts.boundary;
+          const blocked = event.kind === "relationship_boundary" && boundary === "blocked";
+          const available = event.kind === "relationship_boundary" && boundary === "available";
+          return <article key={event.id}>
+            <span className={`relationship-biography-mark ${blocked ? "blocked" : available ? "available" : ""}`} aria-hidden="true" />
+            <div><small>{formatDateTime(event.occurredAt)}</small><strong>{blocked ? "Relationship boundary established" : available ? "Contactability verified again" : event.kind.replaceAll("_", " ")}</strong><p>{blocked ? `X verified that this person blocked ${presence.name}. Interaction stopped; no reason was inferred.` : available ? "A later channel action succeeded. The prior boundary remains part of the relationship history, but interaction is no longer technically blocked." : "A verified event in this relationship was added to this Presence's history."}</p></div>
+          </article>;
+        })}</div>
+      </div>}
+
+      {selectedRelationshipPlan && !selectedIsBlocked && <div className="person-inspector-section person-plan-section">
+        <SectionEyebrow>How {presence.name} will approach this relationship</SectionEyebrow>
         <p>{selectedRelationshipPlan.goal}</p>
-        <div className="person-plan-facts"><span><strong>Attention</strong>{selectedRelationshipPlan.attention}</span><span><strong>Relationship revisit</strong>{selectedRelationshipPlan.revisit}</span><span><strong>Learning</strong>{selectedRelationshipPlan.learning}</span><span><strong>Social action</strong>{selectedRelationshipPlan.action}</span></div>
+        <div className="person-plan-facts"><span><strong>Learning</strong>{selectedRelationshipPlan.learning}</span><span><strong>Action threshold</strong>{selectedRelationshipPlan.action}</span></div>
         <small className="person-plan-boundary">This is a flexible approach, not a scheduled obligation or a reply quota. {presence.name} can stay quiet when there is no worthwhile opening.</small>
       </div>}
+
+      <div className="person-inspector-section relationship-study-section">
+        <div className="relationship-study-heading"><div><SectionEyebrow>Relationship understanding</SectionEyebrow><h3>{latestStudy ? `Last studied ${formatTime(latestStudy.completedAt ?? latestStudy.createdAt)}` : `Genny hasn't studied ${selectedDisplayInfo.displayName} yet`}</h3></div><span className="relationship-study-status">{latestInsights ? "Evidence-backed" : "Basic context"}</span></div>
+        <p>{latestStudy ? `${latestStudy.evidenceRefs.length} evidence item${latestStudy.evidenceRefs.length === 1 ? "" : "s"} reviewed${newStudyEvidenceCount ? ` · ${newStudyEvidenceCount} new since then` : ""}.` : "Watching collects evidence cheaply. Learn this person is an explicit research action and does not happen automatically."}</p>
+        {latestInsights && <div className="relationship-briefing"><div><strong>Current approach</strong><p>{selectedIsBlocked ? "Observe the verified boundary. Do not interact with, target, or research this person for engagement." : latestInsights.currentApproach.statement}</p>{!selectedIsBlocked && insightEvidence(latestInsights.currentApproach)}</div>{[...latestInsights.interests, ...latestInsights.currentFocus, ...latestInsights.publicInteractionPatterns, ...latestInsights.directRelationshipPatterns].slice(0, 6).map((insight) => <div key={insight.id}><strong>{insight.category.replaceAll("_", " ")}</strong><p>{insight.statement}</p><small className="relationship-insight-confidence">{insight.confidence}</small>{insightEvidence(insight)}</div>)}</div>}
+        {latestStudy && <small className="relationship-study-receipt">Receipt · {latestStudy.resourceUsage.channelReads} X reads · {latestStudy.resourceUsage.hydrations} hydrations · {latestStudy.resourceUsage.modelCalls} model calls · {latestStudy.resourceUsage.visionCalls} vision calls</small>}
+        <div className="relationship-study-actions"><Button variant="secondary" onClick={() => openStudy()} disabled={!selectedIdentity || studyBusy || selectedIsBlocked}>{selectedIsBlocked ? "Paused by boundary" : latestStudy ? "Study again" : "Learn this person"}</Button>{latestStudy && newStudyEvidenceCount > 0 && !selectedIsBlocked && <Button variant="ghost" onClick={() => openStudy("existing_evidence")} disabled={studyBusy}>Refresh new evidence</Button>}</div>
+      </div>
 
       <div className="person-inspector-section">
         <SectionEyebrow>What {presence.name} remembers</SectionEyebrow>
         {facts.length ? <><div className="person-facts-summary"><span>{facts.length} remembered fact{facts.length === 1 ? "" : "s"}</span><span>Showing {(visibleFactPage - 1) * PERSON_FACT_PAGE_SIZE + 1}–{Math.min(visibleFactPage * PERSON_FACT_PAGE_SIZE, facts.length)}</span></div><ul>{visibleFacts.map((fact) => <li key={fact.id}><span>{fact.statement}</span><small>{fact.epistemicKind.replaceAll("_", " ")} · {fact.provenanceRefs.map((ref) => ref.kind).join(", ")}</small></li>)}</ul>{factPageCount > 1 && <nav className="person-facts-pagination" aria-label={`${selected.displayName} remembered facts pages`}><button type="button" onClick={() => setFactPage((current) => Math.max(1, current - 1))} disabled={visibleFactPage <= 1}><ChevronLeft size={13} /> Newer</button><span aria-live="polite">Page {visibleFactPage} of {factPageCount}</span><button type="button" onClick={() => setFactPage((current) => Math.min(factPageCount, current + 1))} disabled={visibleFactPage >= factPageCount}>Older <ChevronRight size={13} /></button></nav>}</> : <p>No curated facts yet.</p>}
       </div>
+      <div className="person-inspector-section" aria-label="Presence People Note">
+        <SectionEyebrow>Presence note</SectionEyebrow>
+        <p>Private Markdown context for {presence.name} and this person. It stays scoped to this Presence and is only supplied when judging their request.</p>
+        <textarea aria-label={`Presence note for ${selectedDisplayInfo.displayName}`} value={noteDraft} onChange={(event) => setNoteDraft(event.target.value)} rows={5} placeholder="A small note that may help this Presence understand future requests…" />
+        <Button variant="secondary" disabled={noteBusy} onClick={() => void savePeopleNote()}>{noteBusy ? "Saving…" : "Save Presence note"}</Button>
+        {selectedNote && <small>Revision {selectedNote.revision} · updated {formatTime(selectedNote.updatedAt)}</small>}
+      </div>
       <div className="person-inspector-section"><SectionEyebrow>Open threads</SectionEyebrow>{loops.length ? <ul>{loops.map((loop) => <li key={loop.id}>{loop.description}</li>)}</ul> : <p>No open loops.</p>}</div>
       <div className="person-inspector-section"><SectionEyebrow>Recent interactions</SectionEyebrow>{recentHistory.length ? <div className="person-history">{recentHistory.map((item) => <article key={item.id}><small>{formatTime(item.occurredAt ?? item.observedAt)}</small><p>{item.content?.text ?? "[no text]"}</p></article>)}</div> : <p>No Mirror-backed interactions yet.</p>}</div>
       <div className="person-inspector-section person-request-access-section"><SectionEyebrow>Public request access</SectionEyebrow><p>{selectedDelegationGrant ? "This person has an explicit delegation grant for the allowed request types." : "Watching and remembering this person does not allow them to ask the Presence to do work."}</p><Button variant="secondary" onClick={() => void toggleSelectedDelegation()} disabled={!selectedIdentity || delegationBusy}>{selectedDelegationGrant ? "Revoke request access" : "Allow this person to submit requests"}</Button><small>The grant is only considered when the Presence policy is set to People I allow. Requests still enter operator review.</small></div>
-      <div className="person-inspector-actions"><Button variant="ghost" onClick={() => void mutate({ type: "forgetRelationship", relationshipId: relationship?.id })} disabled={!relationship}>Forget relationship</Button><Button variant="ghost" onClick={() => void mutate({ type: "createWatch", presenceId: presence.id, query: selectedIdentity?.handle ?? selected.displayName, purpose: "Keep this person in attention without treating Watching as relationship memory." })}>Watch</Button></div>
+      <div className="person-inspector-actions"><Button variant="ghost" onClick={() => void mutate({ type: "forgetRelationship", relationshipId: relationship?.id })} disabled={!relationship}>Forget relationship</Button><Button variant="ghost" disabled={selectedIsBlocked} onClick={() => void mutate({ type: "createWatch", presenceId: presence.id, query: selectedIdentity?.handle ?? selected.displayName, purpose: "Keep this person in attention without treating Watching as relationship memory." })}>{selectedIsBlocked ? "Watch paused by boundary" : "Watch"}</Button></div>
       {relationship && <div className="person-correction"><label>Correct memory<textarea aria-label="Correct relationship memory" value={correction} onChange={(event) => setCorrection(event.target.value)} placeholder="What should the Agent remember instead?" rows={3} /></label><Button variant="secondary" disabled={!correction.trim()} onClick={() => void correct()}><Pencil size={14} /> Save correction</Button></div>}
     </section>}</div>}
+    {studyOpen && selected && <div className="modal-backdrop relationship-study-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget && !studyBusy) setStudyOpen(false); }}><section className="relationship-study-modal" role="dialog" aria-modal="true" aria-labelledby="relationship-study-title"><div className="dialog-header"><div><SectionEyebrow>Explicit relationship research</SectionEyebrow><h2 id="relationship-study-title">Learn {selectedDisplayInfo.displayName}</h2></div><button type="button" className="icon-button" aria-label="Close relationship study" onClick={() => { if (!studyBusy) setStudyOpen(false); }}><X size={17} /></button></div><p>Genny will study public evidence to understand interests, observed conversation patterns, and what has worked between you. This is separate from Watching and never creates a public action.</p><div className="relationship-study-available"><span>Already available</span><strong>{studyEvidenceCount} evidence item{studyEvidenceCount === 1 ? "" : "s"}</strong><small>{selectedIdentity ? "From the Social Mirror and prior relationship history." : "A channel identity is required before research can run."}</small></div><div className="relationship-study-options" role="group" aria-label="Study depth">{([ ["existing_evidence", "Quick", "Use what OpenPresence already knows.", "Low usage"], ["recent_history", "Standard · Recommended", "Review recent public activity and selected evidence.", "Up to 30 posts · moderate usage"], ["deep_history", "Deep", "Review a broader recent window for stronger pattern confidence.", "Up to 100 posts · higher usage"] ] as Array<[RelationshipStudyMode, string, string, string]>).map(([mode, label, description, estimate]) => <button type="button" key={mode} className={studyMode === mode ? "selected" : ""} aria-pressed={studyMode === mode} onClick={() => setStudyMode(mode)}><strong>{label}</strong><span>{description}</span><small>{mode === "existing_evidence" ? `${estimate} · ${studyEvidenceCount} existing items` : estimate}</small></button>)}</div>{studyError && <div className="relationship-study-error" role="alert">{studyError}</div>}<div className="dialog-actions"><Button variant="ghost" onClick={() => setStudyOpen(false)} disabled={studyBusy}>Cancel</Button><Button variant="primary" onClick={() => void runStudy()} disabled={studyBusy || !selectedIdentity}>{studyBusy ? "Studying…" : latestStudy && studyMode === "existing_evidence" ? "Refresh insights" : "Start study"}</Button></div></section></div>}
   </div>;
 }
 
@@ -5292,24 +5408,42 @@ function watchPreview(query: string) {
   return { clean, kind: creator ? "creator" : opportunity ? "opportunity" : "topic" as "creator" | "topic" | "opportunity" };
 }
 
-function watchObservationCopy(watch: Watch) {
-  if (watch.observation.observedCount > 0) {
-    const count = watch.observation.observedCount;
+function watchObservationCopy(state: OpenPresenceState, watch: Watch) {
+  if ((watch.state ?? "active") === "paused") {
     return {
-      label: `${count} new post${count === 1 ? "" : "s"} seen`,
-      detail: "The Watch has current material for Genny to consider.",
+      label: "Paused",
+      detail: "This Watch is paused. Jenny will not observe it, consider it, or take action until you resume it.",
+    };
+  }
+  const counts = watchSignalCounts(state, watch);
+  if (counts.seen > 0) {
+    return {
+      label: `${counts.seen} post${counts.seen === 1 ? "" : "s"} seen`,
+      detail: watchOutcomeSummary(state, watch),
     };
   }
   if (watch.observation.source === "automatic") {
     return {
       label: "Waiting for first observation",
-      detail: "This Watch is active. No action is needed yet; Jenny will show signals here when the connected source supplies them.",
+      detail: "This Watch is active. Genny checks it during the Presence's regular attention passes.",
     };
   }
   return {
     label: "Waiting for source material",
     detail: "This Watch is saved, but it needs connected or manually supplied material before Jenny can notice anything.",
   };
+}
+
+function blockedIdentityForWatch(state: OpenPresenceState, watch: Watch) {
+  const target = watch.target;
+  if (watch.channel !== "x" || !target) return undefined;
+  const targetHandle = target.handle?.replace(/^@/, "").toLowerCase();
+  return state.personIdentities.find((identity) => identity.sourcePresenceId === watch.presenceId
+    && identity.channel === "x"
+    && identity.contactability?.status === "blocked_by_person"
+    && ((target.personId && identity.personId === target.personId)
+      || (target.externalActorId && identity.externalActorId === target.externalActorId)
+      || (targetHandle && identity.handle?.replace(/^@/, "").toLowerCase() === targetHandle)));
 }
 
 function watchRelationshipPolicy(watch: Watch, state: OpenPresenceState) {
@@ -5389,22 +5523,6 @@ function watchRelationshipPlan(watch: Watch, presence: Presence, policy?: { lear
   };
 }
 
-function watchAttentionCadence(presence: Presence) {
-  if (presence.status === "paused") return "Paused";
-  if (presence.pacing === "gentle") return "A few times a week";
-  if (presence.pacing === "custom") {
-    if (presence.attentionIntervalMinutes <= 15) return "Frequent";
-    if (presence.attentionIntervalMinutes <= 60) return "Daily";
-    if (presence.attentionIntervalMinutes <= 240) return "A few times a week";
-    return "Weekly";
-  }
-  return "Frequent";
-}
-
-function watchRelationshipCadence(policy?: { rhythm?: "light" | "regular" }) {
-  return policy?.rhythm === "regular" ? "Every 2–3 days" : policy?.rhythm === "light" ? "Weekly check-in" : "Not set";
-}
-
 function uniqueWatchSignals(state: OpenPresenceState, signals: OpenPresenceState["watchSignals"]) {
   const dispositionRank: Record<string, number> = { pending: 0, dismissed: 1, considered: 2, remembered: 3, social_opportunity: 4, assignment_created: 5 };
   const unique = new Map<string, OpenPresenceState["watchSignals"][number]>();
@@ -5418,33 +5536,65 @@ function uniqueWatchSignals(state: OpenPresenceState, signals: OpenPresenceState
   return [...unique.values()];
 }
 
-function watchOutcomeSummary(state: OpenPresenceState, watch: Watch, presenceName: string) {
+function watchSignalCounts(state: OpenPresenceState, watch: Watch) {
   const signals = uniqueWatchSignals(state, state.watchSignals.filter((signal) => signal.watchId === watch.id));
-  const pendingSignalCount = signals.filter((signal) => signal.disposition === "pending").length;
-  const opportunityCount = signals.filter((signal) => signal.disposition === "social_opportunity").length;
-  const judgedCount = signals.filter((signal) => signal.disposition !== "pending").length;
+  const waiting = signals.filter((signal) => signal.disposition === "pending").length;
+  const opportunity = signals.filter((signal) => signal.disposition === "social_opportunity").length;
+  const considered = signals.filter((signal) => signal.disposition !== "pending").length;
+  return { seen: Math.max(watch.observation.observedCount, signals.length), considered, waiting, opportunity };
+}
+
+function watchOutcomeSummary(state: OpenPresenceState, watch: Watch) {
+  const counts = watchSignalCounts(state, watch);
   const targetId = watch.target?.externalActorId;
   const interactions = targetId
     ? state.outcomes.filter((outcome) => outcome.presenceId === watch.presenceId && outcome.status === "succeeded" && state.executions.some((execution) => execution.id === outcome.executionId && execution.target?.id === targetId && ["x.reply", "x.comment", "x.quote", "x.repost", "x.like"].includes(execution.affordance))).length
     : 0;
-  const seen = watch.observation.observedCount;
-  const attention = [
-    pendingSignalCount ? `${pendingSignalCount} waiting for judgment` : "",
-    opportunityCount ? `${opportunityCount} selected for possible action` : "",
-    !pendingSignalCount && !opportunityCount && judgedCount ? `${judgedCount} reviewed; no action selected` : "",
-    !pendingSignalCount && !judgedCount ? "nothing worth acting on yet" : "",
+  const status = [
+    counts.considered ? `${counts.considered} considered` : "",
+    counts.waiting ? `${counts.waiting} waiting` : "",
+    counts.opportunity ? (counts.opportunity === 1 ? "1 opportunity" : `${counts.opportunity} opportunities`) : "",
+    !counts.considered && !counts.waiting ? "nothing judged yet" : "",
   ].filter(Boolean).join(" · ");
-  return `${seen} new post${seen === 1 ? "" : "s"} · ${attention}${interactions ? ` · ${interactions} interaction${interactions === 1 ? "" : "s"}` : ""}`;
+  return `${counts.seen} post${counts.seen === 1 ? "" : "s"} seen · ${status}${interactions ? ` · ${interactions} interaction${interactions === 1 ? "" : "s"}` : ""}`;
+}
+
+function watchSignalDispositionLabel(disposition: OpenPresenceState["watchSignals"][number]["disposition"]) {
+  if (disposition === "pending") return "waiting for consideration";
+  if (disposition === "social_opportunity") return "opportunity selected";
+  if (disposition === "assignment_created") return "promoted to Assignment";
+  if (disposition === "remembered") return "saved to relationship memory";
+  if (disposition === "dismissed") return "dismissed";
+  return "considered · no action";
+}
+
+function watchAttentionCountdown(nextAt: string | undefined, now = Date.now()) {
+  if (!nextAt) return undefined;
+  const remaining = new Date(nextAt).getTime() - now;
+  if (!Number.isFinite(remaining)) return undefined;
+  if (remaining <= 0) return "now";
+  const minutes = Math.ceil(remaining / 60_000);
+  if (minutes < 60) return `~${Math.max(1, minutes)}m`;
+  const hours = Math.floor(minutes / 60);
+  return `~${hours}h`;
+}
+
+function watchAttentionStatus(state: OpenPresenceState, presence: Presence, now = Date.now()) {
+  const presenceWatches = state.watches.filter((watch) => watch.presenceId === presence.id);
+  const activeWatches = presenceWatches.filter((watch) => (watch.state ?? "active") === "active");
+  if (presence.status === "paused") return "Watching paused · wake this Presence to resume";
+  if (presenceWatches.length && !activeWatches.length) return "All Watches paused · resume one to continue";
+  if (!activeWatches.length) return "No active Watches";
+  const nativeNext = state.nativeConnections.find((connection) => connection.presenceId === presence.id && connection.channelId === presence.channel)?.observation?.nextObservationAt;
+  const nextAt = nativeNext ?? activeWatches.map((watch) => watch.nextObservationAt).filter((value): value is string => Boolean(value)).sort()[0];
+  const countdown = watchAttentionCountdown(nextAt, now);
+  return countdown ? `Watching active · next attention pass in ${countdown}` : "Watching active · next attention pass scheduled automatically";
 }
 
 function watchPlanSummary(watch: Watch, presence: Presence, policy?: { learning: "off" | "selective"; engagement: "observe_only" | "when_worthwhile" | "maintain_relationship"; rhythm?: "light" | "regular" }) {
   const inferred = policy ?? watchPolicyFromPurpose(watch.purpose);
   const plan = watchRelationshipPlan(watch, presence, inferred);
-  return {
-    attention: watchAttentionCadence(presence),
-    revisit: watchRelationshipCadence(inferred),
-    ...plan,
-  };
+  return plan;
 }
 
 const REQUEST_TYPE_OPTIONS: Array<{ id: PublicRequestType; label: string }> = [
@@ -5458,30 +5608,39 @@ function defaultVisibleRequestPolicy(presenceId: string): PresenceRequestPolicy 
   return { presenceId, access: "nobody", allowedRequestTypes: ["answer", "research", "recommendation"], requireDirectAddress: true, acceptance: "operator_review", impactLimit: "low", updatedAt: new Date().toISOString() };
 }
 
-function requestStatusLabel(request: PublicRequest) {
-  if (request.eligibility !== "eligible") return "Not authorized";
-  if (request.disposition === "needs_operator_review") return "Needs your decision";
-  if (request.disposition === "accepted") return "Accepted";
-  if (request.disposition === "declined") return "Declined";
-  if (request.disposition === "needs_clarification") return "Needs clarification";
-  return "Considering";
+function publicRequestTypeLabel(type: PublicRequestType) {
+  return type === "answer" ? "Answer" : type === "research" ? "Research" : type === "recommendation" ? "Recommendation" : type === "introduction" ? "Introduction" : type === "content" ? "Content" : "Other";
+}
+
+function publicRequestState(request: PublicRequest) {
+  if (request.eligibility !== "eligible") {
+    const detail = request.eligibility === "identity_unverified"
+      ? "The requester could not be verified, so this cannot become work."
+      : request.eligibility === "addressing_required"
+        ? "This request was not directly addressed to the Presence."
+        : request.eligibility === "unsupported"
+          ? "This request type is not enabled in Presence Settings."
+          : "This request is outside the current access setting, so it cannot become work.";
+    return { label: "Outside access", detail, tone: "quiet" };
+  }
+  if (request.disposition === "needs_operator_review") return { label: "Needs your decision", detail: "Take responsibility to turn this into an Assignment, or decline it without creating work.", tone: "attention" };
+  if (request.disposition === "accepted") return { label: request.assignmentId ? "Assignment created" : "Accepted", detail: "This request is now an Assignment. Delivery still follows the Presence's existing settings.", tone: "accepted" };
+  if (request.disposition === "declined") return { label: "Declined", detail: "No Assignment or public action was created.", tone: "quiet" };
+  if (request.disposition === "needs_clarification") return { label: "Needs clarification", detail: "The request needs a narrower question before the Presence can take responsibility.", tone: "attention" };
+  return { label: "Considering", detail: "The Presence is considering whether this request is worth taking on.", tone: "quiet" };
 }
 
 function PresenceRequestPolicySettings({ presence, mutate }: { presence: Presence; mutate: Mutate }) {
   const visiblePolicy = presence.requestPolicy ?? defaultVisibleRequestPolicy(presence.id);
   const [requestAccess, setRequestAccess] = useState<PresenceRequestAccess>(visiblePolicy.access);
   const [requestTypes, setRequestTypes] = useState<PublicRequestType[]>(visiblePolicy.allowedRequestTypes);
+  const [acceptance, setAcceptance] = useState<PresenceRequestPolicy["acceptance"]>(visiblePolicy.acceptance);
   const [requestPolicyBusy, setRequestPolicyBusy] = useState(false);
-
-  useEffect(() => {
-    setRequestAccess(visiblePolicy.access);
-    setRequestTypes(visiblePolicy.allowedRequestTypes);
-  }, [visiblePolicy.access, visiblePolicy.allowedRequestTypes.join(",")]);
 
   const saveRequestPolicy = async () => {
     setRequestPolicyBusy(true);
     try {
-      await mutate({ type: "setPresenceRequestPolicy", presenceId: presence.id, policy: { access: requestAccess, allowedRequestTypes: requestTypes, requireDirectAddress: true, acceptance: "operator_review", impactLimit: "low" } });
+      await mutate({ type: "setPresenceRequestPolicy", presenceId: presence.id, policy: { access: requestAccess, allowedRequestTypes: requestTypes, requireDirectAddress: true, acceptance, impactLimit: "low" } });
     } finally {
       setRequestPolicyBusy(false);
     }
@@ -5492,8 +5651,30 @@ function PresenceRequestPolicySettings({ presence, mutate }: { presence: Presenc
     <div className="watch-policy-options" role="group" aria-label="Who can send public requests">
       {([ ["nobody", "Nobody", "Ignore public requests until you explicitly change this."], ["allowlist", "People I allow", "Only people with an explicit delegation grant can be considered."], ["anyone", "Anyone", "Directly addressed requests can enter review; acceptance is still separate."] ] as Array<[PresenceRequestAccess, string, string]>).map(([value, label, detail]) => <button type="button" key={value} className={requestAccess === value ? "selected" : ""} aria-pressed={requestAccess === value} onClick={() => setRequestAccess(value)}><strong>{label}</strong><span>{detail}</span></button>)}
     </div>
-    <div className="watch-policy-row"><div><span className="form-label">Request types</span><div className="watch-policy-checks">{REQUEST_TYPE_OPTIONS.map((item) => <label key={item.id}><input type="checkbox" checked={requestTypes.includes(item.id)} onChange={(event) => setRequestTypes((current) => event.target.checked ? [...new Set([...current, item.id])] : current.filter((value) => value !== item.id))} /> {item.label}</label>)}</div></div><label><span className="form-label">Acceptance</span><select value="operator_review" disabled><option value="operator_review">Review before accepting</option></select></label><Button variant="primary" disabled={requestPolicyBusy || requestTypes.length === 0} onClick={() => void saveRequestPolicy()}>{requestPolicyBusy ? "Saving…" : "Save request policy"}</Button></div>
-    <small className="watch-policy-security"><ShieldCheck size={14} /> Current setting: <strong>{requestAccess === "nobody" ? "Nobody can ask" : requestAccess === "allowlist" ? "Only explicitly allowed people can ask" : "Anyone can submit a request for review"}</strong>. No setting here authorizes unrestricted execution.</small>
+    <div className="watch-policy-row"><div><span className="form-label">Request types</span><div className="watch-policy-checks">{REQUEST_TYPE_OPTIONS.map((item) => <label key={item.id}><input type="checkbox" checked={requestTypes.includes(item.id)} onChange={(event) => setRequestTypes((current) => event.target.checked ? [...new Set([...current, item.id])] : current.filter((value) => value !== item.id))} /> {item.label}</label>)}</div></div><label><span className="form-label">Acceptance</span><select aria-label="Acceptance" value={acceptance} onChange={(event) => setAcceptance(event.target.value as PresenceRequestPolicy["acceptance"])}><option value="operator_review">Review before accepting</option><option value="agent_autonomous">Let Genny decide for eligible requests</option></select><small className="form-help">Access rules and impact limits still apply.</small></label><Button variant="primary" disabled={requestPolicyBusy || requestTypes.length === 0} onClick={() => void saveRequestPolicy()}>{requestPolicyBusy ? "Saving…" : "Save request policy"}</Button></div>
+    <small className="watch-policy-security"><ShieldCheck size={14} /> Current setting: <strong>{requestAccess === "nobody" ? "Nobody can ask" : requestAccess === "allowlist" ? acceptance === "agent_autonomous" ? "Only explicitly allowed people can be considered by Genny" : "Only explicitly allowed people can ask for your review" : acceptance === "agent_autonomous" ? "Anyone can submit an eligible request for Genny to consider" : "Anyone can submit a request for your review"}</strong>. No setting here authorizes unrestricted execution.</small>
+  </section>;
+}
+
+function PresenceDMSettings({ presence, mutate }: { presence: Presence; mutate: Mutate }) {
+  const [condition, setCondition] = useState(presence.dmInstructions?.condition ?? "");
+  const [instructions, setInstructions] = useState(presence.dmInstructions?.instructions ?? "");
+  const [busy, setBusy] = useState(false);
+  const save = async () => {
+    setBusy(true);
+    try { await mutate({ type: "setPresenceDMInstructions", presenceId: presence.id, condition, instructions, source: "operator", reason: "Configure private-message social hook" }); }
+    finally { setBusy(false); }
+  };
+  return <section className="settings-card dm-instructions-card" id="section-dms" aria-label="Private message automation">
+    <div className="section-heading compact"><div><SectionEyebrow>DMs · Presence-scoped</SectionEyebrow><h2>What should {presence.name} do when someone sends a private message?</h2></div><MessageCircle size={17} /></div>
+    <p className="muted">Write plain-language guidance for one private-message social hook. This Presence instruction is trusted configuration, not executable code. The private message and People Notes remain fallible social context. The existing Messages execution setting still controls whether a reply is automatic, reviewed, or manual.</p>
+    <div className="dm-hook-form">
+      <div className="dm-hook-step"><span className="form-label">When</span><strong>A private message arrives</strong><small>Fixed for this first version. Public posts and requests do not trigger this hook.</small></div>
+      <label><span className="form-label">If <small>(optional)</small></span><input aria-label="DM condition" value={condition} onChange={(event) => setCondition(event.target.value)} maxLength={1000} placeholder="For example, when the person asks for a booking or next step" /></label>
+      <label><span className="form-label">Do</span><textarea aria-label="DM instructions" value={instructions} onChange={(event) => setInstructions(event.target.value)} rows={5} maxLength={8000} placeholder="For example: Extract the booking details they provide, then reply with the approved next-step link. Be honest about what has and has not been completed. If details are missing, ask for them." /></label>
+      <div className="inline-form-actions"><Button type="button" variant="primary" disabled={busy} onClick={() => void save()}><Check size={14} /> {busy ? "Saving…" : "Save DM instructions"}</Button></div>
+    </div>
+    <small className="watch-policy-security"><ShieldCheck size={14} /> Live X currently has no inbound DM transport in this workspace. Rehearse the hook in the simulated private Messages surface; no live DM support is implied.</small>
   </section>;
 }
 
@@ -5511,12 +5692,18 @@ function WatchingView({ state, mutate, refreshState, setView }: { state: OpenPre
   const [reviewing, setReviewing] = useState(false);
   const [busy, setBusy] = useState(false);
   const [busyWatchId, setBusyWatchId] = useState<string | null>(null);
+  const [busyWatchAction, setBusyWatchAction] = useState<"pause" | "remove" | "edit" | null>(null);
   const [editingWatchId, setEditingWatchId] = useState<string | null>(null);
   const [editingWatchQuery, setEditingWatchQuery] = useState("");
   const [editingWatchPurpose, setEditingWatchPurpose] = useState("");
   const [busyExplorationId, setBusyExplorationId] = useState<string | null>(null);
   const [objectiveDrafts, setObjectiveDrafts] = useState<Record<string, string>>({});
   const [selectedExplorationSessionId, setSelectedExplorationSessionId] = useState<string | null>(null);
+  const [watchNow, setWatchNow] = useState(() => Date.now());
+  useEffect(() => {
+    const timer = window.setInterval(() => setWatchNow(Date.now()), 1_000);
+    return () => window.clearInterval(timer);
+  }, []);
   if (!presence) return null;
   const preview = watchPreview(query);
   const kindLabel = preview.kind === "creator" ? "Creator" : preview.kind === "opportunity" ? "Opportunity" : "Topic or conversation";
@@ -5531,6 +5718,7 @@ function WatchingView({ state, mutate, refreshState, setView }: { state: OpenPre
   const removeWatch = async (watchId: string) => {
     if (busyWatchId) return;
     setBusyWatchId(watchId);
+    setBusyWatchAction("remove");
     try {
       let latest = await refreshState();
       const next = await mutate({ type: "deleteWatch", id: watchId }, latest);
@@ -5542,6 +5730,7 @@ function WatchingView({ state, mutate, refreshState, setView }: { state: OpenPre
       }
     } finally {
       setBusyWatchId(null);
+      setBusyWatchAction(null);
     }
   };
   const beginEditWatch = (watch: Watch) => {
@@ -5557,11 +5746,23 @@ function WatchingView({ state, mutate, refreshState, setView }: { state: OpenPre
   const saveWatch = async () => {
     if (!editingWatchId || editingWatchQuery.trim().length < 2 || busyWatchId) return;
     setBusyWatchId(editingWatchId);
+    setBusyWatchAction("edit");
     try {
       const next = await mutate({ type: "updateWatch", id: editingWatchId, query: editingWatchQuery.trim(), purpose: editingWatchPurpose.trim() || undefined });
       if (next) cancelEditWatch();
     } finally {
       setBusyWatchId(null);
+      setBusyWatchAction(null);
+    }
+  };
+  const setWatchState = async (watch: Watch) => {
+    if (busyWatchId) return;
+    setBusyWatchId(watch.id);
+    setBusyWatchAction("pause");
+    try { await mutate({ type: "setWatchState", id: watch.id, state: (watch.state ?? "active") === "active" ? "paused" : "active" }); }
+    finally {
+      setBusyWatchId(null);
+      setBusyWatchAction(null);
     }
   };
   const startExploration = async () => {
@@ -5572,7 +5773,11 @@ function WatchingView({ state, mutate, refreshState, setView }: { state: OpenPre
       if (next) { setExplorationBrief(""); setReviewing(false); setTab("explorations"); }
     } finally { setBusy(false); }
   };
-  const presenceSignals = uniqueWatchSignals(state, state.watchSignals.filter((signal) => signal.presenceId === presence.id)).slice(0, 5);
+  const watchIds = new Set(watches.map((watch) => watch.id));
+  const presenceWatchSignals = uniqueWatchSignals(state, state.watchSignals.filter((signal) => signal.presenceId === presence.id && watchIds.has(signal.watchId)));
+  const presenceSignals = presenceWatchSignals.slice(0, 5);
+  const waitingWatchSignalCount = presenceWatchSignals.filter((signal) => signal.disposition === "pending").length;
+  const opportunityWatchSignalCount = presenceWatchSignals.filter((signal) => signal.disposition === "social_opportunity").length;
   const selectedExploration = explorations.find((item) => item.id === selectedExplorationId) ?? explorations[0];
   const findings = selectedExploration ? state.explorationFindings.filter((item) => item.explorationId === selectedExploration.id && state.mirrorObjects.some((object) => object.id === item.mirrorObjectId && isCognitionEligibleMirrorObject(object, presence.language))).slice(0, 5) : [];
   const explorationSessions = selectedExploration ? state.explorationSessions.filter((item) => item.explorationId === selectedExploration.id).sort((a, b) => b.startedAt.localeCompare(a.startedAt)) : [];
@@ -5608,7 +5813,7 @@ function WatchingView({ state, mutate, refreshState, setView }: { state: OpenPre
       className="watching-header"
       eyebrow="Presence attention"
       title="Watching"
-      description={<>Things you specifically asked {presence.name} to pay extra attention to. Watchlist follows known people and sources; Explorations investigate questions and territories. <button type="button" className="inline-text-link" onClick={() => setView("presence")}>Manage {presence.name}&apos;s attention →</button></>}
+      description={<><span>Things you specifically asked {presence.name} to pay extra attention to. Watchlist follows known people and sources; Explorations investigate questions and territories.</span><span className="watching-attention-status" role="status"><span className="status-dot" />{watchAttentionStatus(state, presence, watchNow)}<small>One Presence pass checks all active Watches.</small></span><button type="button" className="inline-text-link" onClick={() => setView("presence")}>Manage {presence.name}&apos;s attention →</button></>}
       actionsClassName="heading-actions"
       actions={<Button variant="primary" onClick={() => { setReviewing((value) => !value); setTab("explorations"); }}><Plus size={14} /> New exploration</Button>}
     />
@@ -5618,16 +5823,13 @@ function WatchingView({ state, mutate, refreshState, setView }: { state: OpenPre
     </div>
     {tab === "watchlist" && <>
       <div className="watchlist-toolbar"><div><SectionEyebrow>Known things</SectionEyebrow><h2>People and sources this Presence intentionally follows.</h2></div><Button variant="secondary" onClick={() => setReviewing((value) => !value)}>Add watch</Button></div>
-      <section className="watch-request-access-note" aria-label="Public request access">
-        <ShieldCheck size={17} aria-hidden="true" />
-        <div><SectionEyebrow>Public requests</SectionEyebrow><p>Request access is managed in Presence Settings. <strong>Nobody can ask by default.</strong></p></div>
-        <button type="button" className="inline-text-link" onClick={() => setView("presence")}>Open Presence Settings →</button>
-      </section>
+      <div className="watchlist-processing-summary" role="status" aria-label="Watchlist processing status"><strong>{waitingWatchSignalCount ? `${waitingWatchSignalCount} waiting for consideration` : "No WatchSignals waiting for consideration"}</strong><span>{opportunityWatchSignalCount ? `${opportunityWatchSignalCount} social ${opportunityWatchSignalCount === 1 ? "opportunity" : "opportunities"} selected` : "No social opportunities selected"} · One attention pass judges up to 3 WatchSignals.</span></div>
       {reviewing && <section className="watch-composer" aria-label="Add a watch"><div><SectionEyebrow>New watch</SectionEyebrow><h2>What should {presence.name} notice?</h2><p>Describe a creator, source, or known conversation. This stays a Watchlist item, not a relationship memory.</p></div><label>Keep an eye on<textarea aria-label="What should this Presence watch?" value={query} onChange={(event) => setQuery(event.target.value)} placeholder="@AlexHormozi or a known community" rows={3} /></label><label>Why should {presence.name} watch this? <span className="optional-label">Optional</span><input aria-label="Why should this Presence watch this?" value={purpose} onChange={(event) => setPurpose(event.target.value)} placeholder="Learn from strong offers without imitating the voice" /></label>{query.trim() && <div className="watch-review" aria-label="Watch review"><div><SectionEyebrow>Here&apos;s what {presence.name} will watch</SectionEyebrow><strong>{kindLabel}</strong><p>{preview.clean}</p></div><div><span>Use</span><strong>Notice relevant material</strong></div><div><span>Boundary</span><strong>Watching does not imitate identity or voice</strong></div><div><span>Source</span><strong>{preview.kind === "creator" && presence.channel === "x" ? "Automatic where available" : "Manual material or connected source"}</strong></div></div>}<div className="watch-form-actions"><Button variant="ghost" onClick={() => { setReviewing(false); setQuery(""); setPurpose(""); }}>Cancel</Button><Button variant="primary" disabled={busy || !preview.clean} onClick={() => void startWatching()}>{busy ? "Starting…" : "Start watching"}</Button></div></section>}
       {watches.length ? <section className="watching-section"><div className="section-heading compact"><div><SectionEyebrow>Watchlist</SectionEyebrow><h2>{watches.length} {watches.length === 1 ? "watch" : "watches"}</h2></div></div><div className="watch-list">{watches.map((watch) => {
-        const observationCopy = watchObservationCopy(watch);
-        const removing = busyWatchId === watch.id;
+        const observationCopy = watchObservationCopy(state, watch);
+        const removing = busyWatchId === watch.id && busyWatchAction === "remove";
         const editing = editingWatchId === watch.id;
+        const blockedIdentity = blockedIdentityForWatch(state, watch);
         const policy = watchRelationshipPolicy(watch, state) ?? watchPolicyFromPurpose(watch.purpose);
         const plan = watchPlanSummary(watch, presence, policy);
         const targetLabel = watch.target?.handle ? `@${watch.target.handle.replace(/^@/, "")}` : watch.title;
@@ -5635,19 +5837,20 @@ function WatchingView({ state, mutate, refreshState, setView }: { state: OpenPre
           <div className="watch-card-main">
             <div className="watch-card-icon"><Eye size={17} /></div>
             <div>
-              <div className="watch-card-heading"><strong>{targetLabel}</strong><span className={`watch-status watch-status-${watch.observation.status}`}><span className="status-dot" /> {watch.state === "paused" ? "Paused" : watch.observation.status === "manual" ? "Manual source" : "Watching"}</span></div>
+              <div className="watch-card-heading"><strong>{targetLabel}</strong><span className={`watch-status watch-status-${watch.state === "paused" ? "paused" : watch.observation.status}`}><span className="status-dot" /> {watch.state === "paused" ? "Paused" : watch.observation.status === "manual" ? "Manual source" : "Watching"}</span></div>
               <small>{watch.kind === "creator" ? "Person / creator" : watch.kind === "opportunity" ? "Opportunity" : "Topic or conversation"} · {channelLabel(watch.channel, state.channelDefinitions)}{watch.target?.identityStatus === "verified" ? " · canonical Person linked" : " · awaiting identity link"}</small>
               <div className="watch-card-intent"><SectionEyebrow>Relationship goal</SectionEyebrow><p>{plan.goal}</p></div>
-              <div className="watch-card-plan"><SectionEyebrow>{presence.name}&apos;s approach</SectionEyebrow><div className="watch-plan-guidance"><div><strong>Look for</strong><p>{plan.lookFor}</p></div><div><strong>When engaging</strong><p>{plan.whenEngaging}</p></div></div><div className="watch-card-plan-facts"><span><strong>Keep up with</strong>{plan.attention}</span><span><strong>Relationship</strong>{plan.revisit}</span><span><strong>Learning</strong>{plan.learning}</span><span><strong>Action</strong>{plan.action}</span></div></div>
+              <div className="watch-card-plan"><SectionEyebrow>How {presence.name} will approach this relationship</SectionEyebrow><div className="watch-plan-guidance"><div><strong>Look for</strong><p>{plan.lookFor}</p></div><div><strong>When engaging</strong><p>{plan.whenEngaging}</p></div></div><div className="watch-card-plan-facts"><span><strong>Learning</strong>{plan.learning}</span><span><strong>Action threshold</strong>{plan.action}</span></div></div>
               <details className="watch-operator-instruction"><summary>Why?</summary><div className="watch-operator-instruction-body"><span>Operator instruction</span><p>{watch.purpose || watch.query}</p><span>Genny&apos;s interpretation</span><p>{plan.goal}</p></div></details>
-              <div className="watch-observation-state"><strong>{observationCopy.label}</strong><span>{watch.observation.observedCount > 0 ? watchOutcomeSummary(state, watch, presence.name) : observationCopy.detail}</span></div>
+              <div className="watch-observation-state"><strong>{observationCopy.label}</strong><span>{observationCopy.detail}</span></div>
+              {blockedIdentity && <div className={`watch-blocked-warning ${watch.state === "paused" ? "is-paused" : ""}`} role="alert"><CircleAlert size={16} /><div className="watch-blocked-warning-copy"><strong>{blockedIdentity.displayName ?? blockedIdentity.handle ?? targetLabel} has blocked this Presence on X.</strong><span>{watch.state === "paused" ? "This Watch was paused automatically. It will stay paused until verified evidence shows the relationship boundary has changed." : "Automatic interaction is stopped, but this Watch is still active. Pause it to stop observing this person."}</span></div>{watch.state !== "paused" && <Button variant="secondary" onClick={() => void setWatchState(watch)}>Pause Watch</Button>}</div>}
               {editing && <div className="watch-edit-form" aria-label={`Edit ${watch.title}`}><label>What should this Watch follow?<textarea aria-label={`Edit what ${watch.title} follows`} value={editingWatchQuery} onChange={(event) => setEditingWatchQuery(event.target.value)} rows={2} /></label><label>What should {presence.name} do with what it notices? <span className="optional-label">Optional</span><textarea aria-label={`Edit instructions for ${watch.title}`} value={editingWatchPurpose} onChange={(event) => setEditingWatchPurpose(event.target.value)} rows={3} /></label><div className="watch-form-actions"><Button variant="ghost" onClick={cancelEditWatch}>Cancel</Button><Button variant="primary" disabled={busyWatchId === watch.id || editingWatchQuery.trim().length < 2} onClick={() => void saveWatch()}>{busyWatchId === watch.id ? "Saving…" : "Save changes"}</Button></div></div>}
             </div>
           </div>
-          <div className="watch-card-actions"><Button variant="ghost" onClick={() => setView("people")} disabled={!watch.target?.personId}>View person</Button><Button variant="secondary" aria-label={`Edit ${watch.title}`} onClick={() => beginEditWatch(watch)} disabled={Boolean(busyWatchId)}><Pencil size={14} /> {editing ? "Editing" : "Edit"}</Button><Button variant="ghost" aria-label={`Remove ${watch.title}`} onClick={() => void removeWatch(watch.id)} disabled={Boolean(busyWatchId)}>{removing ? "Removing…" : "Remove"}</Button></div>
+          <div className="watch-card-actions"><Button variant="ghost" onClick={() => setView("people")} disabled={!watch.target?.personId}>View person</Button><Button variant="secondary" aria-label={`Edit ${watch.title}`} onClick={() => beginEditWatch(watch)} disabled={Boolean(busyWatchId)}><Pencil size={14} /> {editing ? "Editing" : "Edit"}</Button><Button variant="ghost" className={`watch-toggle-button ${watch.state === "paused" ? "is-resume" : "is-pause"}`} aria-label={`${watch.state === "paused" ? "Resume" : "Pause"} ${watch.title}`} onClick={() => void setWatchState(watch)} disabled={Boolean(busyWatchId)}>{busyWatchId === watch.id && busyWatchAction === "pause" ? (watch.state === "paused" ? "Resuming…" : "Pausing…") : watch.state === "paused" ? <><Play size={14} /> Resume</> : <><Pause size={14} /> Pause</>}</Button><Button variant="ghost" aria-label={`Remove ${watch.title}`} onClick={() => void removeWatch(watch.id)} disabled={Boolean(busyWatchId)}>{removing ? "Removing…" : "Remove"}</Button></div>
         </article>;
       })}</div></section> : <section className="watching-empty"><div className="watch-empty-mark"><Eye size={23} /></div><SectionEyebrow>Watchlist</SectionEyebrow><h2>No known things yet.</h2><p>Follow a specific person, account, or source here. Use an Exploration when the meaning matters more than who started the conversation.</p><Button variant="primary" onClick={() => setReviewing(true)}><Plus size={14} /> Add watch</Button></section>}
-      {presenceSignals.length > 0 && <section className="watch-evidence-section"><SectionEyebrow>Recent watch signals</SectionEyebrow><h2>What the Watchlist noticed</h2>{presenceSignals.map((signal) => { const object = state.mirrorObjects.find((item) => item.id === signal.mirrorObjectId); return <article key={signal.id}><div><strong>{object?.author?.handle ? `@${object.author.handle}` : object?.author?.displayName ?? "Watched person"}</strong><small>{signal.signalType.replaceAll("_", " ")} · {signal.disposition}</small></div><p>{object?.content?.text ?? "A signal was recorded, but its source is no longer available."}</p></article>; })}</section>}
+      {presenceSignals.length > 0 && <section className="watch-evidence-section"><SectionEyebrow>Recent watch signals</SectionEyebrow><h2>What the Watchlist noticed</h2>{presenceSignals.map((signal) => { const object = state.mirrorObjects.find((item) => item.id === signal.mirrorObjectId); return <article key={signal.id}><div><strong>{object?.author?.handle ? `@${object.author.handle}` : object?.author?.displayName ?? "Watched person"}</strong><small>{signal.signalType.replaceAll("_", " ")} · {watchSignalDispositionLabel(signal.disposition)}</small></div><p>{object?.content?.text ?? "A signal was recorded, but its source is no longer available."}</p></article>; })}</section>}
     </>}
     {tab === "explorations" && <>
       {reviewing && <section className="exploration-composer" aria-label="Create an Exploration"><div><SectionEyebrow>New Exploration</SectionEyebrow><h2>What should {presence.name} keep an eye on?</h2><p>Describe the conversations, problems, people, or developments that would be useful for {presence.name} to notice.</p></div><textarea aria-label="What should this Presence keep an eye on?" value={explorationBrief} onChange={(event) => setExplorationBrief(event.target.value)} placeholder="People struggling with agent infrastructure or asking how to deploy persistent agents." rows={4} />{explorationBrief.trim() && <div className="watch-review" aria-label="Exploration review"><div><SectionEyebrow>Genny understands this as</SectionEyebrow><p>{explorationInterpretation(explorationBrief)}</p></div><div><span>Use</span><strong>Discover social evidence</strong></div><div><span>Boundary</span><strong>Looking does not authorize speaking</strong></div><div><span>Scope</span><strong>{presence.name} · {channelLabel(presence.channel, state.channelDefinitions)}</strong></div></div>}<div className="watch-form-actions"><Button variant="ghost" onClick={() => { setReviewing(false); setExplorationBrief(""); }}>Cancel</Button><Button variant="primary" disabled={busy || explorationBrief.trim().length < 8} onClick={() => void startExploration()}>{busy ? "Starting…" : "Start exploring"}</Button></div></section>}
@@ -6443,6 +6646,224 @@ function KnowledgeCollectionLegacyView({ state, mutate, refreshState }: { state:
   </div>;
 }
 
+function AssetsView({ state, refreshState }: { state: OpenPresenceState; refreshState: () => Promise<OpenPresenceState> }) {
+  const agent = state.agent;
+  const presence = state.presence ?? state.presences[0];
+  const assets = state.assets.filter((asset) => asset.agentId === agent?.id && !asset.archivedAt && ["image", "gif", "video"].includes(asset.type) && (asset.sourceId || asset.sourceOccurrences?.length || asset.provenance.origin === "operator_upload"));
+  const collections = (state.assetCollections ?? []).filter((collection) => collection.agentId === agent?.id && collection.status === "active");
+  const [selectedId, setSelectedId] = useState<string | null>(assets[0]?.id ?? null);
+  const [selectedCollectionId, setSelectedCollectionId] = useState("");
+  const [query, setQuery] = useState("");
+  const [results, setResults] = useState<string[] | null>(null);
+  const [selectedFolderName, setSelectedFolderName] = useState("");
+  const [selectedFolderFiles, setSelectedFolderFiles] = useState<File[]>([]);
+  const [policy, setPolicy] = useState<"analyze-new" | "analyze-existing-and-new">("analyze-new");
+  const [observationDrafts, setObservationDrafts] = useState<Record<string, string>>({});
+  const [collectionName, setCollectionName] = useState("");
+  const [busy, setBusy] = useState<string | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [importProgress, setImportProgress] = useState<{ phase: "uploading" | "processing" | "complete" | "error"; label: string; fileCount: number; uploadedFileCount: number; importedCount: number; processingCount: number; processedCount: number; failedCount: number; uploadPercent: number; processingPercent: number; message?: string }>({ phase: "complete", label: "", fileCount: 0, uploadedFileCount: 0, importedCount: 0, processingCount: 0, processedCount: 0, failedCount: 0, uploadPercent: 0, processingPercent: 0 });
+  const fileInputRef = useRef<HTMLInputElement>(null);
+  const folderInputRef = useRef<HTMLInputElement>(null);
+  const collectionMemberships = state.assetCollectionMemberships ?? [];
+  const inSelectedCollection = (asset: typeof assets[number]) => !selectedCollectionId || collectionMemberships.some((membership) => membership.collectionId === selectedCollectionId && membership.assetId === asset.id && !membership.removedAt);
+  const scopedAssets = assets.filter(inSelectedCollection);
+  const selected = scopedAssets.find((asset) => asset.id === selectedId) ?? scopedAssets[0];
+  const observation = selected ? observationDrafts[selected.id] ?? selected.perception?.observation ?? "" : "";
+  const selectedCollection = collections.find((collection) => collection.id === selectedCollectionId);
+
+  const callAssetApi = async (path: string, init: RequestInit) => {
+    setError(null);
+    const response = await fetch(path, init);
+    const payload = await response.json().catch(() => ({})) as { error?: string };
+    if (!response.ok) throw new Error(payload.error ?? "The Asset Library request failed.");
+    return payload;
+  };
+  const waitForImportProcessing = async (assetIds: string[], importedCount: number, label: string) => {
+    if (!assetIds.length) {
+    setImportProgress((current) => ({ ...current, phase: "complete", label, importedCount, processingCount: 0, processedCount: importedCount, processingPercent: 1, message: `${importedCount} asset${importedCount === 1 ? "" : "s"} added.` }));
+      return;
+    }
+    for (let attempt = 0; attempt < 150; attempt += 1) {
+      const nextState = await refreshState();
+      const importedAssets = nextState.assets.filter((asset) => assetIds.includes(asset.id));
+      const importedJobs = (nextState.assetProcessingJobs ?? []).filter((job) => assetIds.includes(job.assetId));
+      const completed = importedJobs.filter((job) => ["completed", "failed"].includes(job.status)).length;
+      const failed = importedJobs.filter((job) => job.status === "failed").length;
+      const ready = importedAssets.filter((asset) => asset.status === "ready").length;
+      setImportProgress((current) => ({ ...current, phase: completed >= assetIds.length ? "complete" : "processing", label, importedCount, processingCount: assetIds.length, processedCount: completed, failedCount: failed, processingPercent: Math.min(1, completed / assetIds.length), message: completed >= assetIds.length ? `${ready} asset${ready === 1 ? "" : "s"} ready${failed ? ` · ${failed} failed` : ""}.` : undefined }));
+      if (completed >= assetIds.length) return;
+      await new Promise((resolve) => window.setTimeout(resolve, 400));
+    }
+    setImportProgress((current) => ({ ...current, phase: "processing", label, importedCount, message: "Still analyzing. You can keep this page open while processing finishes." }));
+  };
+  const importFiles = async (files: File[], options: { label: string; sourceName?: string; filePaths?: string[] }) => {
+    setError(null);
+    const totalBytes = files.reduce((total, file) => total + file.size, 0);
+    setImportProgress({ phase: "uploading", label: options.label, fileCount: files.length, uploadedFileCount: 0, importedCount: 0, processingCount: 0, processedCount: 0, failedCount: 0, uploadPercent: 0, processingPercent: 0 });
+    const form = new FormData();
+    files.forEach((file) => form.append("files", file, file.name));
+    if (options.sourceName) form.append("sourceName", options.sourceName);
+    if (options.filePaths) form.append("filePaths", JSON.stringify(options.filePaths));
+    form.append("analysisPolicy", policy);
+    if (selectedCollectionId) form.append("collectionId", selectedCollectionId);
+    const payload = await new Promise<{ assets?: Array<{ id: string }>; queuedAssetIds?: string[]; error?: string }>((resolve, reject) => {
+      const request = new XMLHttpRequest();
+      request.open("POST", "/api/assets/import");
+      request.withCredentials = true;
+      request.upload.onprogress = (event) => {
+        if (!event.lengthComputable) return;
+        const percent = Math.min(1, event.loaded / event.total);
+        const uploadedBytes = percent * totalBytes;
+        let uploadedFileCount = 0;
+        let cumulativeBytes = 0;
+        for (const file of files) { cumulativeBytes += file.size; if (cumulativeBytes <= uploadedBytes) uploadedFileCount += 1; }
+        setImportProgress((current) => ({ ...current, phase: "uploading", uploadPercent: percent, uploadedFileCount: Math.min(files.length, uploadedFileCount) }));
+      };
+      request.onerror = () => reject(new Error("The upload could not reach OpenPresence."));
+      request.onload = () => {
+        let response: { assets?: Array<{ id: string }>; queuedAssetIds?: string[]; error?: string } = {};
+        try { response = JSON.parse(request.responseText) as typeof response; } catch { /* handled as a generic request failure below */ }
+        if (request.status < 200 || request.status >= 300) { reject(new Error(response.error ?? "The upload failed.")); return; }
+        resolve(response);
+      };
+      request.send(form);
+    });
+    const importedCount = payload.assets?.length ?? 0;
+    const queuedAssetIds = payload.queuedAssetIds ?? [];
+    setImportProgress((current) => ({ ...current, phase: queuedAssetIds.length ? "processing" : "complete", uploadedFileCount: files.length, importedCount, processingCount: queuedAssetIds.length, processingPercent: queuedAssetIds.length ? 0 : 1, processedCount: queuedAssetIds.length ? 0 : importedCount, message: queuedAssetIds.length ? undefined : `${importedCount} asset${importedCount === 1 ? "" : "s"} added.` }));
+    setSelectedId(payload.assets?.[0]?.id ?? null);
+    await waitForImportProcessing(queuedAssetIds, importedCount, options.label);
+  };
+  const upload = async (files: FileList | null) => {
+    if (!files?.length) return;
+    setBusy("upload");
+    try { await importFiles(Array.from(files), { label: "Uploading assets" }); await refreshState(); }
+    catch (caught) { const message = caught instanceof Error ? caught.message : "The upload failed."; setError(message); setImportProgress((current) => ({ ...current, phase: "error", message })); }
+    finally { setBusy(null); if (fileInputRef.current) fileInputRef.current.value = ""; }
+  };
+  const selectFolder = (files: FileList | null) => {
+    const candidates = Array.from(files ?? []);
+    const visualFiles = candidates.filter((file) => Boolean(detectLibraryMedia(file.name, file.type)));
+    const firstPath = candidates[0]?.webkitRelativePath;
+    const folderName = firstPath?.split("/")[0] || "Selected folder";
+    setSelectedFolderName(folderName);
+    setSelectedFolderFiles(visualFiles);
+    if (candidates.length && !visualFiles.length) setError(`That folder does not contain a supported asset. OpenPresence accepts ${supportedLibraryMediaLabel}.`);
+    else if (visualFiles.length < candidates.length) setError(`${candidates.length - visualFiles.length} other file${candidates.length - visualFiles.length === 1 ? "" : "s"} skipped. Assets are accepted in ${supportedLibraryMediaLabel}.`);
+    else setError(null);
+  };
+  const connectFolder = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!selectedFolderFiles.length) return;
+    setBusy("folder");
+    try {
+      if (selectedFolderFiles.length) {
+        const folderName = selectedFolderName || "Selected folder";
+        await importFiles(selectedFolderFiles, { label: `Adding ${folderName}`, sourceName: folderName, filePaths: selectedFolderFiles.map((file) => file.webkitRelativePath || file.name) });
+        setSelectedFolderName("");
+        setSelectedFolderFiles([]);
+        await refreshState();
+      }
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "The folder could not be added."); }
+    finally { setBusy(null); }
+  };
+  const search = async (event: React.FormEvent) => {
+    event.preventDefault();
+    setBusy("search");
+    try {
+      const payload = await callAssetApi(`/api/assets/search?q=${encodeURIComponent(query)}`, { method: "GET" }) as { results?: Array<{ assetId: string }> };
+      setResults((payload.results ?? []).map((result) => result.assetId));
+    } catch (caught) { setError(caught instanceof Error ? caught.message : "The Asset search failed."); }
+    finally { setBusy(null); }
+  };
+  const updateAsset = async (operation: Record<string, unknown>) => {
+    setBusy(String(operation.type));
+    try { await callAssetApi("/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify(operation) }); return await refreshState(); }
+    catch (caught) { setError(caught instanceof Error ? caught.message : "The Asset Library could not be updated."); }
+    finally { setBusy(null); }
+  };
+  const createCollection = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!collectionName.trim()) return;
+    const createdName = collectionName.trim();
+    const nextState = await updateAsset({ type: "createAssetCollection", name: createdName, defaultAccessScope: { mode: "all_agent_presences" } });
+    const created = nextState?.assetCollections?.find((collection) => collection.agentId === agent?.id && collection.name === createdName && collection.status === "active");
+    if (created) setSelectedCollectionId(created.id);
+    setCollectionName("");
+  };
+  const readiness = (asset: typeof assets[number]) => {
+    if (asset.status === "failed") return "Failed";
+    if (asset.status === "queued" || asset.status === "processing") return "Processing";
+    if (asset.archivedAt || !asset.storage?.storeKey) return "Unavailable";
+    if (asset.metadataReview?.status === "open") return "Needs review";
+    if (asset.metadataReview?.status === "resolved") return "Ready";
+    if (asset.perception?.observation && !asset.perception.uncertainty?.some((item) => /uncertain|insufficient|unknown|high|poor|incomplete|unreadable/i.test(item))) return "Ready";
+    return "Needs review";
+  };
+  const eligibleForPresence = (asset: typeof assets[number]) => !presence || asset.accessScope?.mode !== "selected_presences" || asset.accessScope.presenceIds.includes(presence.id);
+  const visibleAssets = (results ? scopedAssets.filter((asset) => results.includes(asset.id)) : scopedAssets);
+  const usage = (assetId: string) => new Set(state.assetUsages.filter((item) => item.assetId === assetId && item.environment === "live").map((item) => item.publicationId)).size;
+  const scopeLabel = selected?.accessScope?.mode === "selected_presences" ? `${selected.accessScope.presenceIds.length} selected Presence${selected.accessScope.presenceIds.length === 1 ? "" : "s"}` : "All Agent Presences";
+  const readyCount = scopedAssets.filter((asset) => eligibleForPresence(asset) && readiness(asset) === "Ready").length;
+  const reviewCount = scopedAssets.filter((asset) => eligibleForPresence(asset) && readiness(asset) === "Needs review").length;
+  const usedCount = scopedAssets.filter((asset) => usage(asset.id) > 0).length;
+  const fileNameFor = (asset: typeof assets[number]) => asset.sourceOccurrences?.[0]?.fileName ?? "Imported visual";
+  const titleFor = (asset: typeof assets[number]) => {
+    const observationText = asset.perception?.observation?.trim();
+    if (!observationText) return fileNameFor(asset);
+    const firstSentence = observationText.split(/(?<=[.!?])\s+/)[0] ?? observationText;
+    return firstSentence.length > 66 ? `${firstSentence.slice(0, 63).trimEnd()}…` : firstSentence;
+  };
+
+  const previewFor = (asset: typeof assets[number], alt: string) => asset.type === "video"
+    ? <video src={`/api/assets/${asset.id}`} controls muted playsInline preload="metadata" aria-label={alt} />
+    : <Image src={`/api/assets/${asset.id}`} alt={alt} width={640} height={420} unoptimized />;
+  const importPercent = importProgress.phase === "uploading"
+    ? importProgress.uploadPercent * 45
+    : importProgress.phase === "processing"
+      ? 45 + importProgress.processingPercent * 55
+      : importProgress.phase === "error" ? importProgress.uploadPercent * 45 : 100;
+  const importStatus = importProgress.phase === "uploading"
+    ? `${importProgress.uploadedFileCount} of ${importProgress.fileCount} files uploaded`
+    : importProgress.phase === "processing"
+      ? `${importProgress.processedCount} of ${importProgress.processingCount} files analyzed`
+      : importProgress.phase === "error" ? "Import stopped" : "Import complete";
+  const importDetail = importProgress.phase === "uploading"
+    ? "Copying the selected files into the Agent library…"
+    : importProgress.phase === "processing"
+      ? "Vision is creating durable descriptions so the Agent can reuse these assets without another vision call."
+      : importProgress.message ?? `${importProgress.importedCount} asset${importProgress.importedCount === 1 ? "" : "s"} added.`;
+  const importProgressPanel = importProgress.fileCount > 0 && <section className={`assets-panel asset-import-progress asset-import-progress-${importProgress.phase}`} data-testid="asset-import-progress" role="status" aria-live="polite" aria-busy={importProgress.phase === "uploading" || importProgress.phase === "processing"}><div className="asset-import-progress-heading"><div><SectionEyebrow>{importProgress.phase === "complete" ? "Assets added" : importProgress.phase === "error" ? "Import needs attention" : "Adding assets"}</SectionEyebrow><strong>{importProgress.label}</strong></div><span>{Math.round(importPercent)}%</span></div><div className="asset-import-progress-track" data-testid="asset-import-progress-bar" aria-hidden="true"><span style={{ width: `${Math.max(2, Math.min(100, importPercent))}%` }} /></div><div className="asset-import-progress-footer"><span>{importStatus}</span><small>{importDetail}</small>{(importProgress.phase === "complete" || importProgress.phase === "error") && <Button type="button" variant="ghost" onClick={() => setImportProgress({ phase: "complete", label: "", fileCount: 0, uploadedFileCount: 0, importedCount: 0, processingCount: 0, processedCount: 0, failedCount: 0, uploadPercent: 0, processingPercent: 0 })}>{importProgress.phase === "complete" ? "Done" : "Dismiss"}</Button>}</div></section>;
+
+  return <div className="page assets-page">
+    <PageHeader eyebrow={`${agent?.name ?? "Agent"} · Visual memory`} title="Asset library" description={`Give ${agent?.name ?? "this Agent"} the right visual for the moment. Search what an image shows, check where it may appear, and keep the useful ones ready.`} actions={<><input ref={fileInputRef} className="sandbox-file-input" type="file" accept="*/*" multiple aria-label="Upload assets" onChange={(event) => void upload(event.target.files)} /><Button type="button" variant="primary" onClick={() => fileInputRef.current?.click()} disabled={busy === "upload"}><Plus size={14} /> {busy === "upload" ? "Uploading…" : "Add assets"}</Button></>} />
+    {error && <div className="toast-error" role="alert"><CircleAlert size={16} /> {error}</div>}
+    <section className="asset-overview" aria-label="Asset library overview">
+      <div className="asset-overview-intro"><div className="asset-overview-mark"><Layers size={18} /></div><div><SectionEyebrow>At a glance</SectionEyebrow><strong>{agent?.name ?? "This Agent"}&apos;s visual library</strong><p>{presence?.name ?? "Active Presence"} can use assets that are ready and in scope.</p></div></div>
+      <dl className="asset-overview-stats"><div><dt>In view</dt><dd>{scopedAssets.length}</dd><small>{selectedCollection?.name ?? "All folders"}</small></div><div className="is-ready"><dt>Ready to use</dt><dd>{readyCount}</dd><small>{readyCount === scopedAssets.length && scopedAssets.length ? "Nothing waiting" : "Available now"}</small></div><div className={reviewCount ? "is-review" : ""}><dt>Needs review</dt><dd>{reviewCount}</dd><small>{reviewCount ? "Check before publishing" : "All caught up"}</small></div><div><dt>Used publicly</dt><dd>{usedCount}</dd><small>Verified publications</small></div></dl>
+    </section>
+    <div className={`assets-layout ${!selected ? "assets-layout-empty" : ""}`}>
+      <main className="assets-main">
+        <section className="assets-panel assets-toolbar-panel">
+          <div className="assets-toolbar-heading"><div><SectionEyebrow>Browse library</SectionEyebrow><h2>Find the right visual</h2></div><span className="asset-context-pill"><Eye size={13} /> {presence?.name ?? "Active Presence"}</span></div>
+          <form className="assets-search" onSubmit={(event) => void search(event)}><div className="assets-search-field"><Filter size={16} aria-hidden="true" /><input aria-label="Search Agent assets" placeholder="Search by what the asset shows…" value={query} onChange={(event) => setQuery(event.target.value)} /></div><Button type="submit" variant="secondary" disabled={busy === "search"}>{busy === "search" ? "Searching…" : "Search"}</Button>{results && <Button type="button" variant="ghost" onClick={() => setResults(null)}>Clear</Button>}</form>
+          <div className="asset-library-scope"><label>Folder<select aria-label="Asset folder" value={selectedCollectionId} onChange={(event) => { setSelectedCollectionId(event.target.value); setResults(null); setSelectedId(null); }}><option value="">All assets</option>{collections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}</select></label><form className="asset-scope-create" onSubmit={(event) => void createCollection(event)}><label htmlFor="new-asset-folder">New folder</label><div><input id="new-asset-folder" aria-label="New asset folder" placeholder="e.g. Product launch" value={collectionName} onChange={(event) => setCollectionName(event.target.value)} /><Button type="submit" variant="secondary" disabled={!collectionName.trim() || busy === "createAssetCollection"}><Plus size={14} /> Create</Button></div></form></div>
+          <div className="assets-summary"><span>{visibleAssets.length} shown</span>{results && <span className="assets-summary-filter">Search results</span>}<span>{agent?.name ?? "Agent"} · {presence?.name ?? "Active Presence"}</span>{selectedCollection && <span>Folder: {selectedCollection.name}</span>}</div>
+        </section>
+        <section className="assets-panel" aria-labelledby="assets-library-title"><div className="assets-section-heading"><div><SectionEyebrow>Agent-owned library</SectionEyebrow><h2 id="assets-library-title">{agent?.name ?? "Agent"}&apos;s visuals</h2><p className="muted">Select a visual to inspect its evidence, provenance, and Presence access.</p></div><span className="asset-library-count">{visibleAssets.length} {visibleAssets.length === 1 ? "visual" : "visuals"}</span></div>
+          <div className="asset-card-grid">{visibleAssets.map((asset) => { const eligible = eligibleForPresence(asset); return <button type="button" className={`asset-card ${selected?.id === asset.id ? "selected" : ""} ${!eligible ? "asset-card-ineligible" : ""}`} key={asset.id} onClick={() => setSelectedId(asset.id)}><div className="asset-card-preview">{eligible ? previewFor(asset, titleFor(asset)) : <><ShieldCheck size={22} /><span>Unavailable to {presence?.name ?? "this Presence"}</span></>}</div><div className="asset-card-body"><div className="asset-card-topline"><strong title={fileNameFor(asset)}>{titleFor(asset)}</strong><span className={`asset-status asset-status-${(eligible ? readiness(asset) : "Unavailable").toLowerCase().replaceAll(" ", "-")}`}>{eligible ? readiness(asset) : "Unavailable"}</span></div><p>{eligible ? (asset.perception?.observation ?? "Asset metadata is waiting for review.") : "This visual is Agent-owned but outside the active Presence scope."}</p><small>{fileNameFor(asset)} · Used {usage(asset.id)}×</small></div></button>; })}{!visibleAssets.length && <div className={`assets-empty ${assets.length ? "assets-empty-filtered" : "assets-empty-first-run"}`}><div className="assets-empty-mark"><Layers size={24} strokeWidth={1.7} /></div><div className="assets-empty-copy"><strong>{assets.length ? "No assets match that search" : `No assets for ${agent?.name ?? "this Agent"} yet`}</strong><p>{assets.length ? "Try a different search, or clear the filter." : `Add assets so ${agent?.name ?? "this Agent"} can find the right visual when a post needs one.`}</p></div>{!assets.length && <div className="assets-empty-actions"><Button type="button" variant="primary" onClick={() => fileInputRef.current?.click()}><Plus size={14} /> Add assets</Button><Button type="button" variant="secondary" onClick={() => folderInputRef.current?.click()}><FolderOpen size={14} /> Choose a folder</Button></div>}</div>}</div>
+        </section>
+        <section className="assets-panel"><div className="assets-section-heading"><div><SectionEyebrow>Add assets{selectedCollection ? ` to ${selectedCollection.name}` : ` to ${agent?.name ?? "this Agent"}`}</SectionEyebrow><h2>Choose a folder</h2><p className="muted">Select a folder from your computer. Its images are copied into this Agent&apos;s library and analyzed with vision so the Agent can reuse them when creating posts.</p></div><FolderOpen size={20} /></div>{importProgressPanel}<form className="asset-folder-form" onSubmit={(event) => void connectFolder(event)}><input ref={folderInputRef} className="sandbox-file-input" type="file" accept="*/*" multiple aria-label="Choose a folder of assets" onChange={(event) => { selectFolder(event.target.files); event.target.value = ""; }} {...({ webkitdirectory: "", directory: "" } as unknown as React.InputHTMLAttributes<HTMLInputElement>)} /><div className={`asset-folder-picker ${selectedFolderFiles.length ? "selected" : ""}`}><FolderOpen size={18} /><span><strong>{selectedFolderName || "No folder selected"}</strong><small>{selectedFolderFiles.length ? `${selectedFolderFiles.length} asset${selectedFolderFiles.length === 1 ? "" : "s"} ready to add` : "Click Choose folder to browse your computer"}</small></span><Button type="button" variant="secondary" onClick={() => folderInputRef.current?.click()} disabled={busy === "folder"}><FolderOpen size={14} /> Choose folder</Button></div><label>Vision analysis<select value={policy} onChange={(event) => setPolicy(event.target.value as typeof policy)}><option value="analyze-new">Analyze new files</option><option value="analyze-existing-and-new">Analyze all files</option></select></label><Button type="submit" variant="secondary" disabled={busy === "folder" || !selectedFolderFiles.length}>{busy === "folder" ? "Adding…" : "Add folder"}</Button></form></section>
+      </main>
+      <aside className="assets-sidebar" aria-label="Asset detail and controls">{selected ? <><section className="assets-panel asset-detail-panel"><div className="assets-section-heading"><div><SectionEyebrow>Asset detail</SectionEyebrow><h2>{titleFor(selected)}</h2><small className="asset-detail-filename" title={fileNameFor(selected)}>{fileNameFor(selected)}</small></div><span className={`asset-status asset-status-${(eligibleForPresence(selected) ? readiness(selected) : "Unavailable").toLowerCase().replaceAll(" ", "-")}`}>{eligibleForPresence(selected) ? readiness(selected) : "Unavailable"}</span></div>{eligibleForPresence(selected) ? <div className="asset-detail-image">{previewFor(selected, titleFor(selected))}</div> : <div className="asset-detail-unavailable"><ShieldCheck size={20} /><strong>Unavailable to {presence?.name ?? "the active Presence"}</strong><p>This Asset remains in {agent?.name ?? "the Agent"}&apos;s private library, but its AssetAccessScope does not include the active Presence. The media route will refuse access too.</p></div>}<dl className="asset-detail-facts"><div><dt>Observation</dt><dd>{selected.perception?.observation ?? "Not yet available"}</dd></div><div><dt>Visible text</dt><dd>{selected.perception?.visibleText?.join(" · ") ?? "None recorded"}</dd></div><div><dt>Rights</dt><dd>{selected.rights?.status ?? "unknown"}</dd></div><div><dt>Presence eligibility</dt><dd>{scopeLabel}</dd></div><div><dt>Usage</dt><dd>Used {usage(selected.id)}×</dd></div></dl><div className="asset-occurrences"><strong>Source occurrences</strong>{(selected.sourceOccurrences ?? []).map((occurrence) => <small key={occurrence.id}>{occurrence.fileName ?? occurrence.path ?? "Observed source"} · {occurrence.path ?? "upload"} · {new Date(occurrence.observedAt).toLocaleString()}</small>)}</div></section>
+        <section className="assets-panel asset-inline-edit-panel"><div className="assets-section-heading"><div><SectionEyebrow>Edit asset details</SectionEyebrow><h2>What should {agent?.name ?? "the Agent"} know?</h2></div><Pencil size={18} /></div><label className="asset-inline-description"><span>Description</span><textarea aria-label="Asset observation" value={observation} onChange={(event) => setObservationDrafts((drafts) => ({ ...drafts, [selected.id]: event.target.value }))} rows={4} placeholder="Describe what is visibly present…" /></label><div className="asset-detail-actions"><Button type="button" variant="secondary" disabled={busy === "resolveAssetReview" || !observation.trim()} onClick={() => void updateAsset({ type: "resolveAssetReview", assetId: selected.id, observation })}>{busy === "resolveAssetReview" ? "Saving…" : "Save changes"}</Button><Button type="button" variant="ghost" disabled={busy === "reanalyzeAsset"} onClick={() => void updateAsset({ type: "reanalyzeAsset", assetId: selected.id })}>{busy === "reanalyzeAsset" ? "Queueing…" : "Reanalyze with vision"}</Button></div></section>
+        <section className="assets-panel"><div className="assets-section-heading"><div><SectionEyebrow>Presence eligibility</SectionEyebrow><h2>Where may this visual appear?</h2></div><ShieldCheck size={18} /></div><select aria-label="Asset Presence eligibility" value={selected.accessScope?.mode === "selected_presences" ? "selected" : "all"} onChange={(event) => void updateAsset({ type: "setAssetAccessScope", assetId: selected.id, accessScope: event.target.value === "selected" && presence ? { mode: "selected_presences", presenceIds: [presence.id] } : { mode: "all_agent_presences" } })}><option value="all">All {agent?.name ?? "Agent"} Presences</option><option value="selected">Only {presence?.name ?? "active Presence"}</option></select><small className="form-hint">Choose an asset folder above to browse another group. Folder membership does not change this access setting.</small></section>
+      </> : <div className="assets-empty"><Layers size={24} /><strong>Select an Asset</strong><p>Asset metadata, provenance, rights, and Presence eligibility will appear here.</p></div>}</aside>
+    </div>
+  </div>;
+}
+
 function KnowledgeView({ state, mutate }: { state: OpenPresenceState; mutate: Mutate; refreshState: () => Promise<OpenPresenceState> }) {
   const agent = state.agent;
   const presence = state.presence;
@@ -6990,8 +7411,8 @@ function OldChatView({
 
 function operatorNudgeStatusLabel(status: OperatorNudgeStatus, presenceName: string, assignmentStatus?: AssignmentStatus) {
   if (status === "held_paused") return "Saved · waiting for Wake";
-  if (status === "queued") return "";
-  if (status === "acknowledged") return "";
+  if (status === "queued") return `${presenceName} will consider this next`;
+  if (status === "acknowledged") return `${presenceName} received this`;
   if (status === "working") return `${presenceName} is considering this`;
   if (status === "resolved") return "Considered";
   if (status === "assignment_created") {
@@ -7049,11 +7470,12 @@ function OperatorChatView({ state, mutate, refreshState }: { state: OpenPresence
   const presence = state.presence ?? state.presences[0]!;
   const conversation = (state.operatorConversations ?? []).find((item) => item.presenceId === presence.id);
   const nudges = state.operatorNudges ?? [];
+  const [pendingMessages, setPendingMessages] = useState<OperatorConversationMessage[]>([]);
   const conversationActionEvents = operatorConversationActionEvents(state, presence.id);
   const terminalAssignmentStatuses = new Set<AssignmentStatus>(["completed", "completed_with_adaptation", "failed", "expired_incomplete", "cancelled"]);
   const hasUnfinishedNudges = conversationActionEvents.some((event) => !["verified", "failed"].includes(event.status)) || nudges.some((nudge) => nudge.presenceId === presence.id && (["queued", "acknowledged", "working"].includes(nudge.status)
     || nudge.status === "assignment_created" && Boolean(nudge.assignmentId && !terminalAssignmentStatuses.has(state.assignments.find((assignment) => assignment.id === nudge.assignmentId)?.status ?? "draft"))));
-  const visibleMessages = (conversation?.messages ?? []).filter((item, index, messages) => {
+  const persistedVisibleMessages = (conversation?.messages ?? []).filter((item, index, messages) => {
     // Older runtimes put execution rationale and routine observation summaries
     // in Genny's mouth. Keep those records durable, but do not render machinery
     // as conversation now that truthful action events exist beside the thread.
@@ -7065,6 +7487,10 @@ function OperatorChatView({ state, mutate, refreshState }: { state: OpenPresence
     if (item.role !== "presence" || !item.nudgeId || !item.milestone) return true;
     return messages.findLastIndex((candidate) => candidate.role === "presence" && candidate.nudgeId === item.nudgeId && candidate.milestone === item.milestone) === index;
   });
+  // The server persists the operator turn before returning. Do not render the
+  // optimistic copy beside that acknowledged copy during the refresh window.
+  const visiblePendingMessages = pendingMessages.filter((pending) => !persistedVisibleMessages.some((saved) => pending.clientRequestId && saved.clientRequestId === pending.clientRequestId));
+  const visibleMessages = [...persistedVisibleMessages, ...visiblePendingMessages];
   const actionAnchorByNudge = new Map<string, string>();
   for (const messageItem of visibleMessages) {
     if (!messageItem.nudgeId) continue;
@@ -7073,6 +7499,7 @@ function OperatorChatView({ state, mutate, refreshState }: { state: OpenPresence
   const [message, setMessage] = useState("");
   const [attachments, setAttachments] = useState<SandboxAssetInput[]>([]);
   const [sending, setSending] = useState(false);
+  const sendingRef = useRef(false);
   const [conversationCopied, setConversationCopied] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
@@ -7101,14 +7528,28 @@ function OperatorChatView({ state, mutate, refreshState }: { state: OpenPresence
   };
   const send = async (event?: React.FormEvent) => {
     event?.preventDefault();
-    if (!message.trim() || sending) return;
+    if (!message.trim() || sending || sendingRef.current) return;
+    const submittedContent = message.trim();
+    const clientRequestId = `operator_send_${crypto.randomUUID()}`;
+    const pendingId = `pending_operator_message_${clientRequestId}`;
+    sendingRef.current = true;
+    setPendingMessages((items) => [...items, { id: pendingId, role: "operator", content: submittedContent, timestamp: new Date().toISOString(), clientRequestId }]);
+    setMessage("");
+    setAttachments([]);
     setSending(true);
     try {
-      await mutate({ type: "sendPresenceNudge", presenceId: presence.id, content: message.trim(), attachments });
-      setMessage("");
-      setAttachments([]);
-      void refreshState().catch(() => undefined);
-    } finally { setSending(false); }
+      const result = await mutate({ type: "sendPresenceNudge", presenceId: presence.id, content: submittedContent, attachments, clientRequestId });
+      // The server records the operator turn before it invokes the model. If
+      // the browser request is interrupted after that durable write, reconcile
+      // the thread so the submitted message and its current status do not
+      // disappear from this view until a manual reload.
+      if (!result) await refreshState().catch(() => undefined);
+      else void refreshState().catch(() => undefined);
+    } finally {
+      setPendingMessages((items) => items.filter((item) => item.id !== pendingId));
+      sendingRef.current = false;
+      setSending(false);
+    }
   };
   const copyConversation = async () => {
     const transcriptMessages = visibleMessages.length ? visibleMessages : conversation?.messages ?? [];
@@ -7166,12 +7607,12 @@ function OperatorChatView({ state, mutate, refreshState }: { state: OpenPresence
     }
   };
   return <div className="page page-chat operator-chat-page">
-    <PageHeader className="chat-heading" eyebrow="Private operator conversation" title={`Chat with ${presence.name}`} titleAdornment={<button type="button" className="operator-chat-copy-button" aria-label={conversationCopied ? "Conversation copied" : "Copy conversation"} title={conversationCopied ? "Conversation copied" : "Copy conversation"} onClick={() => void copyConversation()}>{conversationCopied ? <Check size={16} /> : <Copy size={16} />}<span className="sr-only">{conversationCopied ? "Conversation copied" : "Copy conversation"}</span></button>} description="Share context, a link, or a thought. This is a nudge—not an obligation or a silent change to identity." />
+    <PageHeader className="chat-heading" eyebrow="Private operator conversation" title={`Chat with ${presence.name}`} titleAdornment={<button type="button" className="operator-chat-copy-button" aria-label={conversationCopied ? "Conversation copied" : "Copy conversation"} title={conversationCopied ? "Conversation copied" : "Copy conversation"} onClick={() => void copyConversation()}>{conversationCopied ? <Check size={16} /> : <Copy size={16} />}<span className="sr-only">{conversationCopied ? "Conversation copied" : "Copy conversation"}</span></button>} description={`Talk with ${presence.name} about what is happening, share something interesting, or suggest a next move. ${presence.name} will work out whether to answer, look closer, or act.`} />
     <div className="chat-layout operator-chat-layout">
       <section className="chat-thread operator-chat-thread">
         {presence.status === "paused" && <div className="operator-chat-paused" role="status"><Pause size={15} /> {presence.name} is paused. Messages will be delivered and held without waking or invoking her.</div>}
         <div className="chat-history operator-chat-history" aria-live="polite">
-        {!conversation?.messages.length && <div className="operator-chat-empty"><MessageSquare size={24} /><strong>Start a private thread</strong><span>Paste an X post, share a general link, attach context, or simply say what is on your mind.</span></div>}
+        {!visibleMessages.length && <div className="operator-chat-empty"><MessageSquare size={24} /><strong>Start a private thread</strong><span>Ask a question, check in, share a post, or tell {presence.name} what caught your attention.</span></div>}
         {visibleMessages.map((item) => {
           const nudge = item.nudgeId ? nudges.find((candidate) => candidate.id === item.nudgeId) : undefined;
           const linkedAssignment = nudge?.assignmentId ? state.assignments.find((assignment) => assignment.id === nudge.assignmentId) : undefined;
@@ -7181,9 +7622,14 @@ function OperatorChatView({ state, mutate, refreshState }: { state: OpenPresence
             <p>{item.content}</p>
             {item.role === "operator" && <OperatorChatLinkPreview content={item.content} />}
             {item.attachments?.length ? <div className="operator-chat-attachments">{item.attachments.map((attachment) => <span key={attachment.id}>{attachment.name}</span>)}</div> : null}
-            {item.role === "operator" && nudge && <div className="operator-chat-message-actions">{operatorNudgeStatusLabel(nudge.status, presence.name, linkedAssignment?.status) && <span className={`operator-nudge-status is-${nudge.status}`} role="status">{operatorNudgeStatusLabel(nudge.status, presence.name, linkedAssignment?.status)}</span>}{nudge.status === "failed" && !nudge.assignmentId && <button type="button" onClick={() => void mutate({ type: "retryPresenceNudge", presenceId: presence.id, nudgeId: nudge.id })}>Retry look</button>}{!nudge.assignmentId && <button type="button" onClick={() => void mutate({ type: "createAssignmentFromNudge", presenceId: presence.id, nudgeId: nudge.id })}>Create Assignment</button>}</div>}
+            {item.role === "operator" && nudge && <div className="operator-chat-message-actions">{operatorNudgeStatusLabel(nudge.status, presence.name, linkedAssignment?.status) && <span className={`operator-nudge-status is-${nudge.status}`} role="status">{operatorNudgeStatusLabel(nudge.status, presence.name, linkedAssignment?.status)}</span>}{nudge.status === "failed" && !nudge.assignmentId && <button type="button" onClick={() => void mutate({ type: "retryPresenceNudge", presenceId: presence.id, nudgeId: nudge.id })}>Retry look</button>}{!nudge.assignmentId && <button type="button" onClick={() => void mutate({ type: "createAssignmentFromNudge", presenceId: presence.id, nudgeId: nudge.id })}>Take this on</button>}</div>}
           </article>{anchoredActions.length > 0 && <div className="operator-chat-action-timeline" aria-label="Actions from this conversation">{anchoredActions.map((event) => <OperatorChatActionTimelineEvent key={event.id} event={event} />)}</div>}</Fragment>;
         })}
+        {sending && presence.status !== "paused" && <div className="operator-chat-thinking" role="status" aria-live="polite" data-testid="operator-chat-thinking">
+          <PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} />
+          <span>{presence.name} is thinking</span>
+          <span className="thinking-dots" aria-hidden="true"><i /> <i /> <i /></span>
+        </div>}
         <div ref={endRef} />
         </div>
         {attachments.length > 0 && <div className="attachment-list operator-chat-attachments">{attachments.map((attachment, index) => <span key={`${attachment.name}-${index}`}>{attachment.name}<button type="button" aria-label={`Remove ${attachment.name}`} onClick={() => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X size={11} /></button></span>)}</div>}
@@ -8259,13 +8705,19 @@ void TeachView;
 function scheduledAssignmentIsDue(assignment: Assignment, now = new Date()) {
   if (!["accepted", "planning", "active"].includes(assignment.status) || !assignment.schedule?.day || !assignment.schedule?.time) return false;
   const days = ["Sunday", "Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday"];
-  const currentDay = days[now.getUTCDay()];
+  const currentDay = days[now.getDay()];
   if (assignment.schedule.day !== "Daily" && assignment.schedule.day !== currentDay) return false;
   const [targetHour, targetMinute] = assignment.schedule.time.split(":").map((v) => Number.parseInt(v, 10));
   if (Number.isNaN(targetHour) || Number.isNaN(targetMinute)) return false;
-  const currentMinutes = now.getUTCHours() * 60 + now.getUTCMinutes();
+  const currentMinutes = now.getHours() * 60 + now.getMinutes();
   const targetMinutes = targetHour * 60 + targetMinute;
-  return currentMinutes >= targetMinutes && currentMinutes <= targetMinutes + 120;
+  const [, rawEnd] = (assignment.schedule.executionWindow ?? "").split(/[–-]/).map((part) => part.trim());
+  const endMatch = /^([01]\d|2[0-3]):[0-5]\d$/.exec(rawEnd ?? "");
+  if (!endMatch) return currentMinutes >= targetMinutes;
+  const [endHour, endMinute] = rawEnd.split(":").map(Number);
+  const endMinutes = endHour * 60 + endMinute;
+  if (endMinutes >= targetMinutes) return currentMinutes >= targetMinutes && currentMinutes <= endMinutes;
+  return currentMinutes >= targetMinutes || currentMinutes <= endMinutes;
 }
 
 function LiveView({
@@ -8274,6 +8726,7 @@ function LiveView({
   pendingOperation,
   operationalHealth,
   healthFocusKey,
+  refreshHealth,
   runtimeError,
   refreshState,
   setView,
@@ -8283,6 +8736,7 @@ function LiveView({
   pendingOperation?: string | null;
   operationalHealth?: OperationalHealthSnapshot | null;
   healthFocusKey?: number;
+  refreshHealth?: () => void;
   runtimeError?: boolean;
   refreshState: () => Promise<OpenPresenceState>;
   setView: (view: View) => void;
@@ -8324,6 +8778,8 @@ function LiveView({
   const runningAssignment = !runtimeUnavailable && pendingOperation === "runLiveAssignment";
   const activity = deriveActivitySummary(state, selected?.id);
   const attentionPlan = compileAgendaWork(state, selected?.id);
+  const pendingMentionItems = (attentionPlan.workItems ?? []).filter((item) => item.source === "mention");
+  const pendingMentionCount = attentionPlan.pendingMentionCount ?? pendingMentionItems.length;
   const [selectedContext, setSelectedContext] = useState<MirrorObject | null>(null);
   const [selectedDecisionId, setSelectedDecisionId] = useState<string | null>(null);
   const [selectedEventId, setSelectedEventId] = useState<string | null>(null);
@@ -8334,6 +8790,7 @@ function LiveView({
   const [countdownNow, setCountdownNow] = useState<number>(() => Date.now());
   const presenceCopy = (text: string) => text.replaceAll("Jenny", presenceName).replaceAll(state.agent?.name ?? "Jenny", presenceName);
   const activityEnvironment: PresenceEnvironment = selected?.environment ?? "live";
+  const activityBoundary = selected ? presenceGrowthBoundary(state, selected.id) : undefined;
   const scopedAttentionEpisodes = (state.attentionEpisodes ?? [])
     .filter((episode) => episode.presenceId === selected?.id && episode.environment === activityEnvironment)
     .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
@@ -8439,13 +8896,16 @@ function LiveView({
       .filter((session) => session.presenceId === selected?.id && session.channelId === selected?.channel && session.status !== "completed")
       .map((session) => session.id),
   );
+  const activityEvidenceIsInPresenceScope = (observedAt?: string) => Boolean(
+    selected && growthEvidenceIsInPresenceScope(state, selected.id, observedAt),
+  );
   const isScopedMirror = (item: MirrorObject) => {
     if (!selected || item.presenceId !== selected.id || item.channelId !== selected.channel) return false;
     if (activityEnvironment === "sandbox") return item.environment === "sandbox" && Boolean(item.sessionId && activitySessionIds.has(item.sessionId));
     return item.environment !== "sandbox" && !item.sessionId;
   };
   const visibleEvents = state.events.filter(
-    (item) => item.presenceId === selected?.id && (activityEnvironment === "sandbox" ? (!item.sessionId || activitySessionIds.has(item.sessionId)) : !item.sessionId),
+    (item) => item.presenceId === selected?.id && activityEvidenceIsInPresenceScope(item.time) && (activityEnvironment === "sandbox" ? (!item.sessionId || activitySessionIds.has(item.sessionId)) : !item.sessionId),
   );
   const dedupedActivityEvents = visibleEvents.filter(isActivityDecisionEvent).filter((item, index, events) => {
     const itemTime = new Date(item.time).getTime();
@@ -8565,7 +9025,7 @@ function LiveView({
   const publicationEvidenceForEvent = (item: OpenPresenceState["events"][number]) => {
     if (item.title !== "Publication performance observed") return undefined;
     return state.publicationMetricSnapshots
-      .filter((snapshot) => snapshot.presenceId === item.presenceId && (!item.sourceObjectId || snapshot.mirrorObjectId === item.sourceObjectId))
+      .filter((snapshot) => snapshot.presenceId === item.presenceId && growthPublicationIsInPresenceScope(state, item.presenceId!, snapshot) && (!item.sourceObjectId || snapshot.mirrorObjectId === item.sourceObjectId))
       .sort((left, right) => new Date(right.observedAt).getTime() - new Date(left.observedAt).getTime())[0];
   };
   const decisionTraceForEvent = (item: OpenPresenceState["events"][number]) => {
@@ -8615,7 +9075,7 @@ function LiveView({
     return { observed, judgment, delivery, performance: item.title === "Publication performance observed" ? publicationEvidenceForEvent(item) ?? null : undefined };
   };
   const relevantExecution = state.executions
-    .filter((item) => !selected?.id || (item.presenceId === selected.id && (activityEnvironment === "sandbox" ? item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && activitySessionIds.has(item.sessionId))) : item.environment !== "sandbox" && !item.sessionId)))
+    .filter((item) => !selected?.id || (item.presenceId === selected.id && activityEvidenceIsInPresenceScope(item.createdAt) && (activityEnvironment === "sandbox" ? item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && activitySessionIds.has(item.sessionId))) : item.environment !== "sandbox" && !item.sessionId)))
     .filter((item) => {
       const intent = state.socialIntents.find((candidate) => candidate.id === item.socialIntentId);
       return !intent || (intent.state === "active" && (!intent.validity.expiresAt || new Date(intent.validity.expiresAt).getTime() > countdownNow));
@@ -8623,7 +9083,7 @@ function LiveView({
     .sort((left, right) => new Date(left.createdAt).getTime() - new Date(right.createdAt).getTime())
     .find((item) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"].includes(item.status));
   const inFlightExecutions = state.executions
-    .filter((item) => !selected?.id || (item.presenceId === selected.id && (activityEnvironment === "sandbox" ? item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && activitySessionIds.has(item.sessionId))) : item.environment !== "sandbox" && !item.sessionId)))
+    .filter((item) => !selected?.id || (item.presenceId === selected.id && activityEvidenceIsInPresenceScope(item.createdAt) && (activityEnvironment === "sandbox" ? item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && activitySessionIds.has(item.sessionId))) : item.environment !== "sandbox" && !item.sessionId)))
     .filter((item) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"].includes(item.status))
     .filter((item) => {
       const intent = state.socialIntents.find((candidate) => candidate.id === item.socialIntentId);
@@ -8655,6 +9115,9 @@ function LiveView({
       : context?.content?.text
       ? `to “${context.content.text.slice(0, 36)}…”`
       : "to public post";
+    const publicationPayload = execution.publication?.payload;
+    const expressionPreview = execution.publication?.publicExpression?.text
+      ?? (publicationPayload && typeof publicationPayload === "object" && !Array.isArray(publicationPayload) && typeof publicationPayload.text === "string" ? publicationPayload.text : undefined);
     return {
       execution,
       intent,
@@ -8664,6 +9127,7 @@ function LiveView({
       action,
       targetDisplay,
       snippet: context?.content?.text?.trim(),
+      expressionPreview: expressionPreview?.trim(),
     };
   });
   const selectedActionRecords = activityActionRecords.filter((record) => Boolean(record.decision || record.intent));
@@ -8703,6 +9167,7 @@ function LiveView({
   // failure; showing it as STUCK hides the actual waiting condition.
   const hasPendingLiveDelivery = state.executions.some((item) =>
     (!selected?.id || item.presenceId === selected.id) &&
+    (!selected?.id || activityEvidenceIsInPresenceScope(item.createdAt)) &&
     activityEnvironment !== "sandbox" &&
     item.environment !== "sandbox" &&
     !item.sessionId &&
@@ -8711,6 +9176,7 @@ function LiveView({
   const expiredDeliveryIsRecoverable = hasPendingLiveDelivery && ["needs_you", "recovering", "waiting"].includes(operationalHealth?.status ?? "");
   const latestFailedExecution = state.executions
     .filter((item) => !selected?.id || item.presenceId === selected.id)
+    .filter((item) => !selected?.id || activityEvidenceIsInPresenceScope(item.createdAt))
     .filter((item) => ["failed", "blocked", "expired"].includes(item.status))
     .filter((item) => !item.failure?.reviewedAt)
     .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())[0];
@@ -8728,6 +9194,7 @@ function LiveView({
   const scopedAssignments = state.assignments.filter(
     (item) =>
       (!selected?.id || item.presenceId === selected.id) &&
+      (!selected?.id || activityEvidenceIsInPresenceScope(item.createdAt)) &&
       (activityEnvironment === "sandbox"
         ? item.environment === "sandbox" && (!item.sessionId || activitySessionIds.has(item.sessionId))
         : item.environment !== "sandbox" && !item.sessionId)
@@ -8735,6 +9202,7 @@ function LiveView({
   const openAssignments = scopedAssignments.filter((item) => !["completed", "completed_with_adaptation", "cancelled"].includes(item.status));
   const recentlyCompletedAssignment = (state.assignments ?? []).find((assignment) =>
     assignment.presenceId === selected?.id &&
+    activityEvidenceIsInPresenceScope(assignment.createdAt) &&
     ["completed", "completed_with_adaptation"].includes(assignment.status) &&
     assignment.updatedAt &&
     countdownNow - new Date(assignment.updatedAt).getTime() < 5 * 60_000,
@@ -8772,6 +9240,23 @@ function LiveView({
     } finally {
       setCancellingAll(false);
     }
+  };
+  const clearUnverifiedExecution = async (execution: OpenPresenceState["executions"][number]) => {
+    if (execution.status !== "verification-pending" || stoppingExecutionId === execution.id) return;
+    if (!window.confirm("Clear this action from the waiting list? It will remain unresolved in history and will not be counted as sent.")) return;
+    setStoppingExecutionId(execution.id);
+    try {
+      await mutate({ type: "closeUnverifiedExecutions", ids: [execution.id], note: "Cleared from the Activity waiting list. The external outcome remains unverified and was not counted as sent." });
+    } finally { setStoppingExecutionId(null); }
+  };
+  const clearAllUnverifiedExecutions = async () => {
+    const ids = activityActionRecords.map((record) => record.execution).filter((execution) => execution.status === "verification-pending").map((execution) => execution.id);
+    if (!ids.length || cancellingAll) return;
+    if (!window.confirm(`Clear ${ids.length} unresolved action${ids.length === 1 ? "" : "s"} from the waiting list? None will be counted as sent.`)) return;
+    setCancellingAll(true);
+    try {
+      await mutate({ type: "closeUnverifiedExecutions", ids, note: "Cleared from the Activity waiting list. External outcomes remain unverified and were not counted as sent." });
+    } finally { setCancellingAll(false); }
   };
   const stopExecution = async (execution: OpenPresenceState["executions"][number]) => {
     if (!executionCanBeStopped(execution.status) || stoppingExecutionId === execution.id) return;
@@ -9066,6 +9551,7 @@ function LiveView({
   const verifiedFollowExecutions = selected
     ? state.executions
       .filter((item) => item.presenceId === selected.id && item.affordance === "x.follow" && item.status === "succeeded")
+      .filter((item) => activityEvidenceIsInPresenceScope(item.executedAt ?? item.updatedAt ?? item.createdAt))
       .filter((item) => (item.environment ?? "live") === activityEnvironment)
       .filter((item) => state.outcomes.some((outcome) => outcome.executionId === item.id && outcome.status === "succeeded"))
       .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))
@@ -9323,7 +9809,8 @@ function LiveView({
               <Button
                 onClick={() => selected && mutate({ type: "lookNow", presenceId: selected.id })}
                 variant="primary"
-                disabled={!selected}
+                disabled={!selected || pendingOperation === "lookNow"}
+                aria-busy={pendingOperation === "lookNow"}
                 title="Advance the next normal attention pass to now. If one is active, queue one follow-up pass."
               >
                 <Play size={15} /> {pendingOperation === "lookNow" ? "Queueing…" : activityNow?.state === "working" ? "Look again next" : "Look now"}
@@ -9373,11 +9860,48 @@ function LiveView({
         </section>
       )}
 
+      {selected && (() => {
+        const pursuit = (state.assignmentPursuitWindows ?? []).find((item) => item.presenceId === selected.id && ["active", "paused"].includes(item.status));
+        if (!pursuit) return null;
+        const assignment = state.assignments.find((item) => item.id === pursuit.assignmentId);
+        const usage = assignmentPursuitUsage(state, pursuit);
+        const counts = assignmentPursuitVerifiedCounts(state, pursuit);
+        const pursuitRuns = (state.assignmentRuns ?? []).filter((run) => run.pursuitWindowId === pursuit.id);
+        return <section className="activity-glance-card activity-pursuit-card" aria-label="Distribution push progress"><div className="activity-glance-heading"><div><SectionEyebrow>Distribution push</SectionEyebrow><h2>{pursuit.status === "active" ? "Burst is active" : "Burst is paused"}</h2></div><Activity size={21} aria-hidden="true" /></div><p>{assignment?.title ?? "Existing distribution responsibility"}</p><div className="activity-pursuit-grid"><div><strong>{counts.verified}</strong><span>verified actions · {pursuit.maxVerifiedActions} max</span></div><div><strong>{pursuitRuns.length}</strong><span>scan passes</span></div><div><strong>{usage.channelReads}</strong><span>channel reads</span></div><div><strong>{usage.modelCalls}</strong><span>model calls</span></div></div><small>{pursuit.status === "active" ? "The Agent is scanning in short passes and will keep going until the window ends or capacity is reached." : "The burst is paused."} Qualified opportunities only; silence is recorded when a conversation does not earn an action.</small><div className="activity-pursuit-controls">{pursuit.status === "active" ? <Button variant="secondary" onClick={() => void mutate({ type: "pauseAssignmentPursuit", id: pursuit.id })}>Pause push</Button> : <Button variant="secondary" onClick={() => void mutate({ type: "resumeAssignmentPursuit", id: pursuit.id })}>Resume push</Button>}<Button variant="ghost" onClick={() => void mutate({ type: "cancelAssignmentPursuit", id: pursuit.id })}>Stop push</Button></div></section>;
+      })()}
+
       {selected && (
-        <div className="activity-pulse-summary" aria-label="Presence pulse">
+        <div className="activity-pulse-summary" aria-label="Presence pulse" aria-live="polite">
           <span className="activity-pulse-label">Recently</span>
-          <span className="activity-pulse-copy">{liveAttentionEpisode ? `${liveAttentionEpisode.newCount} new · reviewing now` : lastLookCopy ?? (pulseEvents.length ? `Last attention pass ${formatRelativeTime(pulseEvents[0].time)}` : "No attention pass recorded yet")}</span>
+          <span className="activity-pulse-copy">{pendingOperation === "lookNow" ? "Saving a fresh attention pass…" : liveAttentionEpisode ? `${liveAttentionEpisode.newCount} new · reviewing now` : lastLookCopy ?? (pulseEvents.length ? `Last attention pass ${formatRelativeTime(pulseEvents[0].time)}` : "No attention pass recorded yet")}</span>
         </div>
+      )}
+
+      {selected && pendingMentionCount > 0 && (
+        <section className="activity-pending-mentions" aria-label="Pending mentions" data-testid="activity-pending-mentions">
+          <div className="activity-pending-mentions-icon" aria-hidden="true"><MessageCircle size={18} /></div>
+          <div className="activity-pending-mentions-copy">
+            <div className="activity-pending-mentions-heading"><SectionEyebrow>Pending mentions</SectionEyebrow><span>{pendingMentionCount} awaiting a response</span></div>
+            <h2>People are waiting for {presenceName} to decide.</h2>
+            <p>These mentions are observed but have no recorded response yet. A mention is an invitation to judge, not an automatic reply.</p>
+            <div className="activity-pending-mentions-list">
+              {pendingMentionItems.map((item) => {
+                const object = item.targetMirrorObjectId ? state.mirrorObjects.find((mirror) => mirror.id === item.targetMirrorObjectId) : undefined;
+                const author = object?.author?.handle ?? object?.author?.displayName ?? "Someone";
+                const label = author.startsWith("@") ? author : `@${author}`;
+                const text = object?.content?.text?.trim();
+                return (
+                  <button type="button" className="activity-pending-mention-row" key={item.id} onClick={() => object && setSelectedContext(object)} aria-label={`View pending mention from ${label}`}>
+                    <span className="activity-pending-mention-dot" aria-hidden="true" />
+                    <span className="activity-pending-mention-content"><strong>{label}</strong><small>{text ? `“${text.slice(0, 140)}${text.length > 140 ? "…" : "”"}` : "Observed mention · awaiting judgment"}</small></span>
+                    <ChevronRight size={14} aria-hidden="true" />
+                  </button>
+                );
+              })}
+            </div>
+            <button type="button" className="activity-pending-mentions-link" onClick={() => { setShowActivityDetails(true); setActiveSubtab("queue"); }}>Open mention queue <ChevronRight size={13} aria-hidden="true" /></button>
+          </div>
+        </section>
       )}
 
       {/* One human-readable current state. Implementation detail stays behind View details. */}
@@ -9664,6 +10188,9 @@ function LiveView({
                     <X size={13} /> {cancellingAll ? "Cancelling…" : "Cancel all unsent"}
                   </Button>
                 )}
+                {activityActionRecords.some((record) => record.execution.status === "verification-pending") && (
+                  <button type="button" className="activity-in-flight-clear" disabled={cancellingAll} onClick={() => void clearAllUnverifiedExecutions()}>{cancellingAll ? "Clearing…" : "Clear waiting"}</button>
+                )}
               </div>
               <div className="activity-in-flight-list">
                 {activityActionRecords.map((record) => {
@@ -9711,6 +10238,12 @@ function LiveView({
                             “{record.snippet.slice(0, 160)}{record.snippet.length > 160 ? "…" : ""}”
                           </p>
                         )}
+                        {record.expressionPreview && (
+                          <div className="activity-in-flight-expression-preview">
+                            <small>{record.action === "Reply" ? "Reply preview" : "Expression preview"}</small>
+                            <p>“{record.expressionPreview.slice(0, 220)}{record.expressionPreview.length > 220 ? "…" : ""}”</p>
+                          </div>
+                        )}
                         <div className="activity-in-flight-detail">
                           <span>
                             {isPostDispatch
@@ -9731,6 +10264,9 @@ function LiveView({
                           >
                             {stoppingExecutionId === record.execution.id ? "Cancelling…" : "Cancel action"}
                           </Button>
+                        )}
+                        {record.execution.status === "verification-pending" && (
+                          <button type="button" className="activity-in-flight-clear" disabled={stoppingExecutionId === record.execution.id} onClick={() => void clearUnverifiedExecution(record.execution)}>{stoppingExecutionId === record.execution.id ? "Clearing…" : "Clear"}</button>
                         )}
                         {record.context && (
                           <button
@@ -9769,6 +10305,7 @@ function LiveView({
               <span className="quiet-label">Decided actions being sent or confirmed</span>
             </div>
             {activityActionRecords.some((record) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued"].includes(record.execution.status)) && <Button variant="secondary" disabled={cancellingAll} onClick={() => void cancelAllPreDispatchExecutions()}>{cancellingAll ? "Cancelling…" : "Cancel unsent"}</Button>}
+            {activityActionRecords.some((record) => record.execution.status === "verification-pending") && <button type="button" className="activity-in-flight-clear" disabled={cancellingAll} onClick={() => void clearAllUnverifiedExecutions()}>{cancellingAll ? "Clearing…" : "Clear waiting"}</button>}
           </div>
           <div className="activity-in-flight-list">
             {activityActionRecords.map((record) => {
@@ -9779,8 +10316,9 @@ function LiveView({
                   <div className="activity-in-flight-card-topline"><span className={`activity-state-chip ${sent ? "chip-sent" : "chip-preparing"}`}>{sent ? "Confirming" : "Publishing"}</span><span className="activity-in-flight-time">{record.execution.executedAt ? `Sent ${formatTime(record.execution.executedAt)}` : `Started ${formatTime(record.execution.createdAt)}`}</span></div>
                   <h3 className="activity-in-flight-title">{record.action} {record.targetDisplay}</h3>
                   {record.snippet && <p className="activity-in-flight-snippet">“{record.snippet.slice(0, 140)}{record.snippet.length > 140 ? "…" : ""}”</p>}
+                  {record.expressionPreview && <div className="activity-in-flight-expression-preview"><small>{record.action === "Reply" ? "Reply preview" : "Expression preview"}</small><p>“{record.expressionPreview.slice(0, 220)}{record.expressionPreview.length > 220 ? "…" : ""}”</p></div>}
                 </div>
-                <div className="activity-in-flight-actions">{preDispatch && <Button variant="ghost" disabled={stoppingExecutionId === record.execution.id} onClick={() => void cancelPreDispatchExecution(record.execution)}>{stoppingExecutionId === record.execution.id ? "Cancelling…" : "Cancel"}</Button>}{record.context && <button type="button" className="now-assignment-btn" onClick={() => setSelectedContext(record.context!)}>View source</button>}</div>
+                <div className="activity-in-flight-actions">{preDispatch && <Button variant="ghost" disabled={stoppingExecutionId === record.execution.id} onClick={() => void cancelPreDispatchExecution(record.execution)}>{stoppingExecutionId === record.execution.id ? "Cancelling…" : "Cancel"}</Button>}{record.execution.status === "verification-pending" && <button type="button" className="activity-in-flight-clear" disabled={stoppingExecutionId === record.execution.id} onClick={() => void clearUnverifiedExecution(record.execution)}>{stoppingExecutionId === record.execution.id ? "Clearing…" : "Clear"}</button>}{record.context && <button type="button" className="now-assignment-btn" onClick={() => setSelectedContext(record.context!)}>View source</button>}</div>
               </article>;
             })}
           </div>
@@ -9811,7 +10349,6 @@ function LiveView({
 
       {showActivityDetails && activeSubtab === "activity" && (
         <div className="activity-tab-content">
-          {selected && <div className="activity-history-note">Activity history is available below when you need the why behind a public act.</div>}
           {activityIdentityPending && (
             <div className="activity-connection-notice" role="status" aria-live="polite">
               <CircleAlert size={17} aria-hidden="true" />
@@ -9847,6 +10384,12 @@ function LiveView({
               </div>
               <button type="button" className="button button-secondary activity-attention-link" onClick={() => setActiveSubtab("queue")}>Open Agenda & Review</button>
             </section>
+          )}
+          {selected && activityBoundary && (
+            <div className="growth-scope-note activity-scope-note" role="note">
+              <strong>Activity window</strong>
+              <span>{activityBoundary.startAt ? `${activityBoundary.source === "recorded" ? "Presence created" : "Presence start inferred"} ${formatHistoryTimestamp(activityBoundary.startAt)} · Earlier account history is excluded.` : "Presence start is not known yet · Earlier account history is excluded until the boundary can be established."}</span>
+            </div>
           )}
           {selected && <ActivityRecentDone history={activityHistory} followExecutions={verifiedFollowExecutions} state={state} presenceName={presenceName} now={countdownNow} onOpenFeed={() => setView("feed")} />}
           <div className="activity-main-grid">
@@ -10104,9 +10647,34 @@ function LiveView({
 
       {activeSubtab === "requests" && (
         <div className="activity-tab-content requests-tab-layout">
-          <section className="watch-evidence-section watch-request-inbox activity-request-inbox" aria-label="Public request inbox">
-            <div className="section-heading compact"><div><SectionEyebrow>Public request inbox</SectionEyebrow><h2>Requests received by {presenceName}</h2><p className="muted">Review actual requests here. Watchlist attention and request authority remain separate.</p></div><ShieldCheck size={17} /></div>
-            {publicRequests.length ? publicRequests.map((request) => <article key={request.id}><div><strong>@{request.requesterExternalActorId ?? "unknown"}</strong><small>{requestStatusLabel(request)} · {request.requestType}</small></div><p>{request.text}</p>{request.eligibility === "eligible" && request.disposition === "needs_operator_review" && <div className="watch-form-actions"><Button variant="primary" onClick={() => void mutate({ type: "decidePublicRequest", id: request.id, disposition: "accepted" })}>Accept as Assignment</Button><Button variant="ghost" onClick={() => void mutate({ type: "decidePublicRequest", id: request.id, disposition: "declined" })}>Decline</Button></div>}</article>) : <EmptyState title="No public requests yet" body="Requests will appear here when the connected channel supplies a direct request. Nobody can ask this Presence by default." />}
+          <section className="public-request-inbox" aria-label="Public request inbox">
+            <div className="public-request-inbox-heading">
+              <div className="section-heading compact">
+                <div><SectionEyebrow>Public requests</SectionEyebrow><h2>Requests for {presenceName}</h2><p className="muted">Decide which requests become work for {presenceName}. Accepting creates an Assignment; it does not publish a reply by itself.</p></div>
+                <ShieldCheck size={17} aria-hidden="true" />
+              </div>
+              <div className="public-request-inbox-summary" role="status">
+                <strong>{pendingPublicRequestCount}</strong>
+                <span>{pendingPublicRequestCount === 1 ? "request needs your decision" : "requests need your decision"}</span>
+              </div>
+            </div>
+            {publicRequests.length ? (
+              <div className="public-request-list">
+                {publicRequests.map((request) => {
+                  const state = publicRequestState(request);
+                  const requester = request.requesterExternalActorId ? `@${request.requesterExternalActorId}` : "Unknown requester";
+                  return <article className={`public-request-card public-request-card-${state.tone}`} key={request.id}>
+                    <header className="public-request-card-header">
+                      <div className="public-request-requester"><span>From</span><strong>{requester}</strong></div>
+                      <div className="public-request-card-meta"><span className={`public-request-status public-request-status-${state.tone}`}>{state.label}</span><span className="public-request-type">{publicRequestTypeLabel(request.requestType)}</span></div>
+                    </header>
+                    <p className="public-request-copy">{request.text}</p>
+                    <div className="public-request-state"><strong>{request.disposition === "needs_operator_review" ? "What happens next" : "Request status"}</strong><span>{state.detail}</span></div>
+                    {request.eligibility === "eligible" && request.disposition === "needs_operator_review" && <div className="public-request-actions"><Button variant="primary" onClick={() => void mutate({ type: "decidePublicRequest", id: request.id, disposition: "accepted" })}>Take responsibility</Button><Button variant="ghost" onClick={() => void mutate({ type: "decidePublicRequest", id: request.id, disposition: "declined" })}>Decline request</Button></div>}
+                  </article>;
+                })}
+              </div>
+            ) : <EmptyState title="No public requests yet" body="Requests will appear here when the connected channel supplies a direct request. Nobody can ask this Presence by default." />}
           </section>
         </div>
       )}
@@ -10134,9 +10702,10 @@ function LiveView({
              executions={scopedExecutions}
              health={operationalHealth}
              mutate={mutate}
+            onRefreshHealth={refreshHealth}
             onContext={setSelectedContext}
             onOpenSettings={() => setView("presence")}
-            onOpenSchedule={() => setView("calendar")}
+            onOpenSchedule={() => setView("schedule")}
           />
         </div>
       )}
@@ -10180,8 +10749,8 @@ function ActivityRecentDone({
     return target?.author?.handle ?? target?.author?.displayName ?? "an account";
   };
   const individualActions = [
-    ...history.map((item) => ({ key: `history:${item.id}`, kind: item.kind, target: targetFor(item), text: item.text, time: historyDisplayAt(item), externalUrl: item.externalUrl })),
-    ...followExecutions.map((execution) => ({ key: `execution:${execution.id}`, kind: "follow", target: followTargetFor(execution), text: undefined, time: execution.executedAt ?? execution.updatedAt ?? execution.createdAt, externalUrl: undefined })),
+    ...history.map((item) => ({ key: `history:${item.id}`, kind: item.kind, target: targetFor(item), text: item.text, time: historyDisplayAt(item), externalUrl: item.externalUrl, availability: item.availability })),
+    ...followExecutions.map((execution) => ({ key: `execution:${execution.id}`, kind: "follow", target: followTargetFor(execution), text: undefined, time: execution.executedAt ?? execution.updatedAt ?? execution.createdAt, externalUrl: undefined, availability: undefined })),
   ].sort((left, right) => right.time.localeCompare(left.time)).slice(0, 24);
   const actionGroups = individualActions.reduce<Array<{ key: string; label: string; items: typeof individualActions }>>((groups, item) => {
     const key = localDateKey(item.time);
@@ -10203,14 +10772,15 @@ function ActivityRecentDone({
             <div className="activity-date-group-items">
               {group.items.map((item) => {
                 const expression = ["post", "reply", "comment", "quote"].includes(item.kind);
+                const isDeleted = item.availability === "deleted";
                 const target = item.target
                   ? item.kind === "follow" && item.target !== "an account" && !item.target.startsWith("@") ? `@${item.target}` : item.target
                   : undefined;
-                return <article className={`activity-done-card ${expression ? "activity-done-card-expression" : "activity-done-card-action"}`} key={item.key}>
-                  <div className="activity-done-card-topline"><span>{labelFor(item.kind)}</span><time dateTime={item.time} title={formatHistoryTimestamp(item.time)}>{formatRecentPostTimestamp(item.time, now)}</time></div>
+                return <article className={`activity-done-card ${expression ? "activity-done-card-expression" : "activity-done-card-action"} ${isDeleted ? "activity-done-card-deleted" : ""}`} key={item.key}>
+                  <div className="activity-done-card-topline"><span>{labelFor(item.kind)}{isDeleted && <span className="activity-done-card-availability"><Trash2 size={10} /> Deleted on X</span>}</span><time dateTime={item.time} title={formatHistoryTimestamp(item.time)}>{formatRecentPostTimestamp(item.time, now)}</time></div>
                   <strong>{presenceName} {verbFor(item.kind)}{target ? ` ${target}` : ""}</strong>
                   {item.text && <p>“{item.text.slice(0, 260)}{item.text.length > 260 ? "…" : ""}”</p>}
-                  <div className="activity-done-card-footer">{item.externalUrl ? <a href={item.externalUrl} target="_blank" rel="noreferrer">Open X <ArrowUpRight size={12} /></a> : <button type="button" onClick={onOpenFeed}>View details <ChevronRight size={12} /></button>}</div>
+                  <div className="activity-done-card-footer">{item.externalUrl ? <a href={item.externalUrl} target="_blank" rel="noreferrer">{isDeleted ? "Open original URL · deleted on X" : "Open X"} <ArrowUpRight size={12} /></a> : <button type="button" onClick={onOpenFeed}>View details <ChevronRight size={12} /></button>}</div>
                 </article>;
               })}
             </div>
@@ -10788,7 +11358,7 @@ function ActivityContextInspector({ object, state, mutate, onClose, onOpenSettin
             <div className="operator-requested-state">{presenceName} is preparing the expression through the existing reply envelope.</div>
           ) : replyFailed ? (() => {
             const explanation = deliveryFailureExplanation(replyExecution?.failure, presence?.handle);
-            const canRetryExact = replyExecution?.failure?.retryable !== false;
+            const canRetryExact = replyExecution?.failure?.retryable !== false || replyExecution?.failure?.code === "TARGET_LANGUAGE_MISMATCH";
             return (
               <div className="operator-failed-actions-wrap" style={{ display: "grid", gap: "0.75rem" }}>
                 <div className="operator-requested-state operator-requested-failure" role="alert">
@@ -10944,7 +11514,7 @@ const deliveryFailureExplanation = (failure?: { code?: string; message: string; 
       title: "Target language was not confirmed as English",
       reason: "The English-only Presence policy could not confirm that the target content belonged in the feed.",
       consequence: "The action was blocked before delivery.",
-      fix: "Keep the English-only policy and wait for an English target, or change the Presence language setting deliberately.",
+      fix: "Retry this action to refresh the target directly from X. If X confirms the post as English, delivery can continue without changing the Presence language.",
     };
   }
   if (normalized.includes("duplicate content") || normalized.includes("duplicate tweet")) {
@@ -11107,7 +11677,9 @@ function RecentPublicAttempts({
             const externalUrl = object ? externalUrlForMirrorObject(object, object.author?.handle) : undefined;
             const timestamp = execution.executedAt ?? execution.updatedAt ?? execution.createdAt;
             const failure = !succeeded ? deliveryFailureExplanation(execution.failure, presence?.handle) : undefined;
-            const retryable = ["failed", "blocked", "expired"].includes(execution.status) && execution.failure?.retryable !== false;
+            const retryable = ["failed", "blocked", "expired"].includes(execution.status)
+              && (execution.failure?.retryable !== false || execution.failure?.code === "TARGET_LANGUAGE_MISMATCH")
+              && !execution.failure?.reviewedAt;
             return (
               <article className={`recent-public-attempt recent-public-attempt-${succeeded ? "succeeded" : "failed"}`} key={execution.id}>
                 <div className="recent-public-attempt-topline">
@@ -11156,6 +11728,7 @@ function FailedAttemptsReview({
   executions,
   health,
   mutate,
+  onRefreshHealth,
   onContext,
   onOpenSettings,
   onOpenSchedule,
@@ -11164,6 +11737,7 @@ function FailedAttemptsReview({
   executions: OpenPresenceState["executions"];
   health?: OperationalHealthSnapshot | null;
   mutate: Mutate;
+  onRefreshHealth?: () => void;
   onContext?: (object: MirrorObject) => void;
   onOpenSettings?: () => void;
   onOpenSchedule?: () => void;
@@ -11172,6 +11746,8 @@ function FailedAttemptsReview({
   const [reviewingExecutionId, setReviewingExecutionId] = useState<string | null>(null);
   const [bulkDismissing, setBulkDismissing] = useState(false);
   const [bulkClearing, setBulkClearing] = useState(false);
+  const [checkingIncidentId, setCheckingIncidentId] = useState<string | null>(null);
+  const [assignmentActionId, setAssignmentActionId] = useState<string | null>(null);
   const [failedPage, setFailedPage] = useState(1);
   const [reviewedPage, setReviewedPage] = useState(1);
   const failedExecutions = executions
@@ -11231,6 +11807,52 @@ function FailedAttemptsReview({
   const statusOnlyLabel = health?.status === "needs_you" ? "Needs You" : health?.status === "recovering" ? "Recovering" : "Waiting";
   const statusOnlyColor = health?.status === "needs_you" ? "#ef4444" : health?.status === "recovering" ? "#f59e0b" : "#3b82f6";
   const statusOnlyBackground = health?.status === "needs_you" ? "rgba(239, 68, 68, 0.08)" : health?.status === "recovering" ? "rgba(245, 158, 11, 0.08)" : "rgba(59, 130, 246, 0.08)";
+  const scheduleDecisionAssignment = state.assignments.find((assignment) =>
+    (!health?.presenceId || assignment.presenceId === health.presenceId)
+    && ["needs_operator", "blocked"].includes(assignment.status),
+  );
+  const retryScheduleDecision = async () => {
+    if (!scheduleDecisionAssignment || assignmentActionId) return;
+    setAssignmentActionId(scheduleDecisionAssignment.id);
+    try {
+      await mutate({ type: "runLiveAssignment", assignmentId: scheduleDecisionAssignment.id, presenceId: scheduleDecisionAssignment.presenceId });
+      onRefreshHealth?.();
+    } finally {
+      setAssignmentActionId(null);
+    }
+  };
+  const closeScheduleDecision = async () => {
+    if (!scheduleDecisionAssignment || assignmentActionId || !window.confirm(`Close this Assignment?\n\n${cleanUserFacingAssignmentInstruction(scheduleDecisionAssignment.instruction)}`)) return;
+    setAssignmentActionId(scheduleDecisionAssignment.id);
+    try {
+      await mutate({ type: "cancelAssignment", id: scheduleDecisionAssignment.id });
+      onRefreshHealth?.();
+    } finally {
+      setAssignmentActionId(null);
+    }
+  };
+  const recheckIncident = async (incident: NonNullable<OperationalHealthSnapshot["incidents"]>[number]) => {
+    if (checkingIncidentId) return;
+    const presenceId = state.presence?.id;
+    if (!presenceId) return;
+    const nativeConnection = state.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x");
+    const shouldCheckNativeX = incident.rootCauseKey.startsWith("native_x.") || (
+      incident.rootCauseKey === "runtime.credits_exhausted" &&
+      state.presences.some((item) => item.id === presenceId && item.channel === "x") &&
+      xCreditsExhausted(nativeConnection)
+    );
+    setCheckingIncidentId(incident.id);
+    try {
+      await mutate(
+        shouldCheckNativeX
+          ? { type: "syncNativeX", presenceId, manual: true, incidentId: incident.id }
+          : { type: "recheckModelProvider", presenceId, incidentId: incident.id },
+      );
+      onRefreshHealth?.();
+    } finally {
+      setCheckingIncidentId(null);
+    }
+  };
 
   return (
     <section className="failed-attempts-review" id="failed-attempts-review" aria-label="Operating Health & Incident Overview">
@@ -11255,7 +11877,17 @@ function FailedAttemptsReview({
               <p style={{ margin: "8px 0 10px", fontSize: "12px", color: "var(--muted)" }}>
                 {health?.summary ?? "The current operating state has no separate incident record yet."}
               </p>
-              {health?.status === "needs_you" && (health.operatorAction?.kind === "schedule" ? onOpenSchedule : onOpenSettings) && (
+              {health?.status === "needs_you" && health.operatorAction?.kind === "schedule" && scheduleDecisionAssignment ? (
+                <div style={{ display: "flex", flexWrap: "wrap", gap: "6px" }}>
+                  <button type="button" className="action-button secondary" style={{ fontSize: "11px", padding: "5px 10px" }} onClick={() => void retryScheduleDecision()} disabled={assignmentActionId !== null}>
+                    {assignmentActionId === scheduleDecisionAssignment.id ? "Retrying…" : "Retry Assignment"}
+                  </button>
+                  <button type="button" className="action-button secondary" style={{ fontSize: "11px", padding: "5px 10px" }} onClick={() => void closeScheduleDecision()} disabled={assignmentActionId !== null}>
+                    Close Assignment
+                  </button>
+                  {onOpenSchedule && <button type="button" className="action-button secondary" style={{ fontSize: "11px", padding: "5px 10px" }} onClick={onOpenSchedule}>Open details</button>}
+                </div>
+              ) : health?.status === "needs_you" && (health.operatorAction?.kind === "schedule" ? onOpenSchedule : onOpenSettings) && (
                 <button type="button" className="action-button secondary" style={{ fontSize: "11px", padding: "5px 10px" }} onClick={health.operatorAction?.kind === "schedule" ? onOpenSchedule : onOpenSettings}>
                   {health.operatorAction?.label ?? "Review Settings"}
                 </button>
@@ -11275,6 +11907,11 @@ function FailedAttemptsReview({
               {needsYou && onOpenSettings && (
                 <button type="button" className="action-button secondary" style={{ fontSize: "11px", padding: "5px 10px", marginTop: "4px" }} onClick={onOpenSettings}>
                   Review Settings
+                </button>
+              )}
+              {needsYou && incident.rootCauseKey.endsWith(".credits_exhausted") && (
+                <button type="button" className="action-button secondary" style={{ fontSize: "11px", padding: "5px 10px", marginTop: "4px", marginLeft: "6px" }} onClick={() => void recheckIncident(incident)} disabled={checkingIncidentId !== null} aria-busy={checkingIncidentId === incident.id}>
+                  {checkingIncidentId === incident.id ? "Checking…" : "Check again"}
                 </button>
               )}
               <div style={{ fontSize: "11px", color: "var(--faint)", font: "10px 'DM Mono', monospace", marginTop: "6px" }}>Root cause: {incident.rootCauseKey} · Recovery attempt {incident.recoveryAttempts} · {needsYou ? "Operator action required" : "Operator action: None"}</div>
@@ -11351,8 +11988,8 @@ function FailedAttemptsReview({
           const action = execution.affordance.split(".").at(-1) === "reply" ? "Reply" : execution.affordance.split(".").at(-1) === "post" ? "Original post" : formatActivityAffordance(execution.affordance);
           const recipient = object?.author?.handle ?? object?.author?.displayName;
           const externalUrl = object ? externalUrlForMirrorObject(object, object.author?.handle) : undefined;
-          const retryable = execution.failure?.retryable !== false && execution.attempts < 5;
-          const retryUnavailableReason = execution.attempts >= 5 ? "Retry limit reached" : "Retry requires the underlying issue to be fixed first";
+          const retryable = (execution.failure?.retryable !== false || execution.failure?.code === "TARGET_LANGUAGE_MISMATCH") && execution.attempts < 5 && !execution.failure?.reviewedAt;
+          const retryUnavailableReason = execution.attempts >= 5 ? "Retry limit reached" : execution.failure?.reviewedAt ? "Closed after review" : "Retry requires the underlying issue to be fixed first";
           const suggestedReview = suggestedFailureReview(execution.failure);
           const reviewFailure = () => {
             setReviewingExecutionId(execution.id);
@@ -12484,6 +13121,7 @@ function ExecutionLedger({
 }
 
 const calendarWeekDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
+const assignmentOccursOnDay = (assignment: Assignment, day: string) => assignment.schedule?.day === "Daily" || assignment.schedule?.day === day;
 const scheduleDayFilters = [
   { value: "Monday", label: "M" },
   { value: "Tuesday", label: "T" },
@@ -13007,9 +13645,10 @@ function ScheduleLayerToolbar({
     <section className="schedule-layer-toolbar" aria-label="Calendar layers">
       <div className="schedule-layer-intro">
         <SectionEyebrow>Calendar layers</SectionEyebrow>
-        <p>Assignments are commitments. Use the optional Genny&apos;s plan layer to inspect flexible publishing and attention intentions.</p>
+        <p>You and {presenceName} share this schedule. Assignments stay visible beside {presenceName}&apos;s own growth work, with the authority to pause or cancel either.</p>
       </div>
       <div className="schedule-layer-controls">
+        <button type="button" className={`schedule-plan-header-toggle schedule-layer-toggle-plan ${layers.plan ? "active" : ""} ${plan ? "" : "unavailable"}`} aria-pressed={layers.plan} disabled={!plan} onClick={() => onToggle("plan")}>◇ {presenceName}&apos;s plan</button>
         {(["assignments"] as const).map((layer) => {
           const labels = { assignments: "Assignments" };
           return <label className={`schedule-layer-toggle schedule-layer-toggle-${layer} ${layers[layer] ? "selected" : ""}`} key={layer}>
@@ -13035,85 +13674,6 @@ function ScheduleLegend({ plan, layers }: { plan?: PublishingPlan; layers: Sched
     {plan && layers.plan && <span><i className="legend-dot plan-legend-dot" />Publishing plan</span>}
     {layers.assignments && <span><i className="legend-dot assignment-legend-dot" />Assignment</span>}
   </div>;
-}
-
-function PublishingPlanScheduleSummary({ plan, presenceName }: { plan: PublishingPlan; presenceName: string }) {
-  // The plan is useful context, not a second schedule to read through. Start
-  // with the decision that matters and reveal working detail only on request.
-  const [expanded, setExpanded] = useState(false);
-  const [now, setNow] = useState(() => Date.now());
-  useEffect(() => {
-    const timer = window.setInterval(() => setNow(Date.now()), 1_000);
-    return () => window.clearInterval(timer);
-  }, []);
-  const activeWindow = plan.windows.find((window) => window.status === "active") ?? plan.windows.find((window) => window.status === "future");
-  const formatPlanDateTime = (value: string) => new Intl.DateTimeFormat("en-US", { weekday: "short", month: "short", day: "numeric", hour: "numeric", minute: "2-digit", timeZone: plan.timezone }).format(new Date(value));
-  const formatPlanDate = (value: string) => new Intl.DateTimeFormat("en-US", { month: "short", day: "numeric", timeZone: plan.timezone }).format(new Date(value));
-  const pace = plan.initiativeMode === "pace" && plan.operatorTarget
-    ? `About ${plan.operatorTarget.quantity} original posts per ${plan.operatorTarget.period}`
-    : plan.expectedOriginals
-      ? plan.expectedOriginals.min === plan.expectedOriginals.max
-        ? `${plan.expectedOriginals.min} possible original${plan.expectedOriginals.max === 1 ? "" : "s"} in this plan`
-        : `${plan.expectedOriginals.min}–${plan.expectedOriginals.max} possible originals in this plan`
-      : "No fixed original count";
-  const paceNote = plan.initiativeMode === "adaptive"
-    ? `${presenceName} chooses whether a window earns a publication.`
-    : "An expectation, not a forced quota; silence remains allowed.";
-  const workStatus = (status: NonNullable<PublishingPlan["currentWork"]>[number]["status"]) => status.replaceAll("_", " ");
-  const visibleWindows = plan.windows.filter((window) => !["completed", "missed", "superseded"].includes(window.status));
-  const isReassessmentDue = Boolean((plan.nextReassessmentAt && new Date(plan.nextReassessmentAt).getTime() <= now) || (plan.horizonEnd && new Date(plan.horizonEnd).getTime() <= now));
-  const nextConsiderationLabel = activeWindow
-    ? `${activeWindow.purpose[0].toUpperCase()}${activeWindow.purpose.slice(1)}`
-    : isReassessmentDue
-      ? "Reassessment due"
-      : "Resting · No window queued";
-  const nextConsiderationNote = activeWindow
-    ? formatPlanDateTime(activeWindow.startAt)
-    : isReassessmentDue
-      ? "Eligible for reconsideration"
-      : plan.nextReassessmentAt
-        ? `Reassessing at ${formatPlanDateTime(plan.nextReassessmentAt)}`
-        : "The plan has no queued windows.";
-  return <section className={`publishing-plan-schedule-summary ${expanded ? "is-expanded" : "is-collapsed"}`} aria-label="Agent publishing plan">
-    <div className="publishing-plan-schedule-header">
-      <div className="publishing-plan-schedule-header-main">
-        <div className="publishing-plan-schedule-title-line">
-          <SectionEyebrow>{presenceName}&apos;s flexible plan</SectionEyebrow>
-          <span className="publishing-plan-schedule-pill">{plan.status === "active" ? "Active" : plan.status}</span>
-          <h2 className="publishing-plan-schedule-title">Genny&apos;s flexible plan</h2>
-        </div>
-        <p className="publishing-plan-schedule-rationale" title={plan.rationaleSummary ?? ""}>{plan.rationaleSummary ?? `${presenceName} is deciding what deserves to be published from the available evidence.`}</p>
-      </div>
-      <div className="publishing-plan-schedule-header-actions">
-        <button type="button" className="publishing-plan-toggle" aria-expanded={expanded} onClick={() => setExpanded((value) => !value)}>
-          <span>{expanded ? "Minimize plan" : "Expand plan"}</span>
-          <ChevronDown size={14} className={expanded ? "publishing-plan-toggle-icon is-open" : "publishing-plan-toggle-icon"} aria-hidden="true" />
-        </button>
-      </div>
-    </div>
-    {!expanded && <div className="publishing-plan-schedule-collapsed-summary" aria-label="Publishing plan summary">
-      <div><span>Focus</span><strong>{nextConsiderationLabel}</strong></div>
-      <div><span>Next review</span><strong>{nextConsiderationNote}</strong></div>
-      <div><span>Pace</span><strong>{pace}</strong></div>
-    </div>}
-    {expanded && <>
-    <div className="publishing-plan-schedule-facts">
-      <div><span>Chosen pace</span><strong>{pace}</strong><small>{paceNote}</small></div>
-      <div><span>Plan horizon</span><strong>{formatPlanDate(plan.horizonStart)}–{formatPlanDate(plan.horizonEnd)}</strong><small>{plan.timezone}</small></div>
-      <div><span>Next consideration</span><strong>{nextConsiderationLabel}</strong><small>{nextConsiderationNote}</small></div>
-      <div><span>Reassess</span><strong>{isReassessmentDue ? "Due now" : plan.nextReassessmentAt ? formatPlanDateTime(plan.nextReassessmentAt) : "Not scheduled"}</strong><small>{plan.verifiedOriginals} verified original{plan.verifiedOriginals === 1 ? "" : "s"} in this plan</small></div>
-    </div>
-    <div className="publishing-plan-schedule-work">
-      <div className="publishing-plan-schedule-subheading"><SectionEyebrow>Current work</SectionEyebrow><span>{plan.currentWork?.length ?? 0} item{(plan.currentWork?.length ?? 0) === 1 ? "" : "s"}</span></div>
-      {plan.currentWork?.length ? <div className="publishing-plan-schedule-work-list">{plan.currentWork.map((work) => <div key={work.id}><strong>{workStatus(work.status)}</strong><span>{work.summary}</span></div>)}</div> : <p className="muted">No work item is currently recorded.</p>}
-    </div>
-    <details className="publishing-plan-schedule-details">
-      <summary><span>Full consideration windows</span><small>{visibleWindows.length} window{visibleWindows.length === 1 ? "" : "s"} · flexible work, not guaranteed posts</small></summary>
-      <div className="publishing-plan-schedule-window-list">{visibleWindows.map((window) => <div key={window.id}><div><strong>{window.purpose}</strong><span>{formatPlanDateTime(window.startAt)} → {formatPlanDateTime(window.endAt)}</span></div><p>{window.summary}</p><small>{window.desiredContribution ? `${window.desiredContribution.min}–${window.desiredContribution.max} possible contribution${window.desiredContribution.max === 1 ? "" : "s"}` : "No contribution count set"} · {window.status === "active" ? "Active now" : "Future"}</small></div>)}</div>
-    </details>
-    <p className="publishing-plan-schedule-note">This is {presenceName}&apos;s current working plan. It explains when the Agent may consider publishing; it does not prewrite posts or turn every window into an obligation.</p>
-    </>}
-  </section>;
 }
 
 function GrowthTrendChart({
@@ -13708,17 +14268,18 @@ function GrowthView({ state, mutate, setView: _setView }: { state: OpenPresenceS
   const [now] = useState(() => Date.now());
   if (!presence) return <div className="page"><PageHeader eyebrow="Growth" title="No Presence selected" description="Select a Presence before reviewing growth evidence." /></div>;
 
+  const growthBoundary = presenceGrowthBoundary(state, presence.id);
   const assignment = state.assignments.find((item) => item.presenceId === presence.id && item.successEvidence?.metric === "followers" && assignmentIsOpen(item));
-  const snapshots = collapseAudienceSnapshots((state.audienceSnapshots ?? []).filter((item) => item.presenceId === presence.id));
+  const snapshots = collapseAudienceSnapshots((state.audienceSnapshots ?? []).filter((item) => item.presenceId === presence.id && growthEvidenceIsInPresenceScope(state, presence.id, item.observedAt)));
   const latest = snapshots[0];
   const nativeX = state.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x");
-  const historicalGrowth = deriveHistoricalGrowthContext(state);
+  const historicalGrowth = deriveHistoricalGrowthContext(state, presence.id);
   const currentAccountFollowers = (nativeX?.account as { followers?: number } | undefined)?.followers;
   const displayedFollowerCount = latest?.followers ?? currentAccountFollowers ?? historicalGrowth?.currentFollowers;
   const deltas = audienceDeltas(state, presence.id);
-  const publicationSnapshots = (state.publicationMetricSnapshots ?? []).filter((item) => item.presenceId === presence.id).sort((left, right) => right.observedAt.localeCompare(left.observedAt));
+  const publicationSnapshots = (state.publicationMetricSnapshots ?? []).filter((item) => item.presenceId === presence.id && growthPublicationIsInPresenceScope(state, presence.id, item)).sort((left, right) => right.observedAt.localeCompare(left.observedAt));
   const latestPublication = publicationSnapshots[0];
-  const reviewHistory = (state.growthReviews ?? []).filter((item) => item.presenceId === presence.id).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
+  const reviewHistory = (state.growthReviews ?? []).filter((item) => item.presenceId === presence.id && growthEvidenceIsInPresenceScope(state, presence.id, item.createdAt)).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   const review = reviewHistory[0];
   const unreviewedAudienceCount = review ? snapshots.filter((item) => !(review.evidenceIds ?? []).includes(item.id)).length : 0;
   const unreviewedPublicationCount = review ? publicationSnapshots.filter((item) => !(review.evidenceIds ?? []).includes(item.id)).length : 0;
@@ -13733,15 +14294,15 @@ function GrowthView({ state, mutate, setView: _setView }: { state: OpenPresenceS
   const bodyHeading = manifest.bodyStatus === "degraded" ? "Degraded" : manifest.bodyStatus === "ready" ? limitations.length ? "Ready with limits" : "Ready to work" : "Unavailable";
 
   // Autonomy derivations
-  const verifiedHistory = derivePublicHistory(state, presence.id).filter((item) => item.environment !== "sandbox");
-  const autonomousExecutions = state.executions.filter((e) => e.presenceId === presence.id && e.status === "succeeded" && e.environment !== "sandbox");
+  const verifiedHistory = derivePublicHistory(state, presence.id).filter((item) => item.environment !== "sandbox" && growthEvidenceIsInPresenceScope(state, presence.id, item.occurredAt));
+  const autonomousExecutions = state.executions.filter((e) => e.presenceId === presence.id && e.status === "succeeded" && e.environment !== "sandbox" && growthEvidenceIsInPresenceScope(state, presence.id, e.createdAt));
   const totalAutonomousActions = verifiedHistory.length;
-  const decisionsCount = state.socialDecisions.filter((d) => d.presenceId === presence.id).length;
-  const verifiedOutcomesCount = state.outcomes.filter((o) => o.presenceId === presence.id && o.status === "succeeded").length;
+  const decisionsCount = state.socialDecisions.filter((d) => d.presenceId === presence.id && growthEvidenceIsInPresenceScope(state, presence.id, d.createdAt)).length;
+  const verifiedOutcomesCount = state.outcomes.filter((o) => o.presenceId === presence.id && o.status === "succeeded" && growthEvidenceIsInPresenceScope(state, presence.id, o.observedAt)).length;
   const pendingReviewCount = pendingReviewExecutionsForCapabilities(state, presence.id, growthCapabilities).length;
   const incidentsRequiringOperator = state.recoveryIncidents?.filter((i) => (!i.presenceId || i.presenceId === presence.id) && i.operatorActionRequired && i.state !== "resolved").length ?? 0;
   const operatorInterventionsNeeded = pendingReviewCount + incidentsRequiringOperator + (manifest.bodyStatus === "unavailable" ? 1 : 0);
-  const recoveriesHandledCount = state.recoveryIncidents?.filter((i) => (!i.presenceId || i.presenceId === presence.id) && i.state === "resolved").length ?? 0;
+  const recoveriesHandledCount = state.recoveryIncidents?.filter((i) => (!i.presenceId || i.presenceId === presence.id) && i.state === "resolved" && growthEvidenceIsInPresenceScope(state, presence.id, i.resolvedAt ?? i.lastObservedAt)).length ?? 0;
 
   // 7-day activity breakdown
   const oneWeekAgo = now - 7 * 86_400_000;
@@ -13751,7 +14312,7 @@ function GrowthView({ state, mutate, setView: _setView }: { state: OpenPresenceS
     replies: weeklyHistory.filter((item) => item.kind === "reply" || item.kind === "comment").length,
     quotes: weeklyHistory.filter((item) => item.kind === "quote").length,
     likes: weeklyHistory.filter((item) => item.kind === "like").length,
-    follows: state.outcomes.filter((outcome) => outcome.presenceId === presence.id && outcome.status === "succeeded" && outcome.environment !== "sandbox" && new Date(outcome.observedAt).getTime() >= oneWeekAgo).filter((outcome) => state.executions.some((execution) => execution.id === outcome.executionId && execution.affordance === "x.follow")).length,
+    follows: state.outcomes.filter((outcome) => outcome.presenceId === presence.id && outcome.status === "succeeded" && outcome.environment !== "sandbox" && growthEvidenceIsInPresenceScope(state, presence.id, outcome.observedAt) && new Date(outcome.observedAt).getTime() >= oneWeekAgo).filter((outcome) => state.executions.some((execution) => execution.id === outcome.executionId && execution.affordance === "x.follow" && growthEvidenceIsInPresenceScope(state, presence.id, execution.createdAt))).length,
   };
 
   // Metric derivations
@@ -13760,8 +14321,9 @@ function GrowthView({ state, mutate, setView: _setView }: { state: OpenPresenceS
   const totalReplies = publicationSnapshots.reduce((sum, p) => sum + (p.replies ?? 0), 0);
   const totalQuotes = publicationSnapshots.reduce((sum, p) => sum + (p.quotes ?? 0), 0);
   const totalEngagement = totalLikes + totalReplies + totalQuotes;
-  const relationshipsCount = (state.relationships ?? []).filter((r) => r.state === "active").length;
-  const peopleEngagedCount = (state.people ?? []).filter((p) => p.memoryState === "active").length;
+  const scopedPersonIds = new Set((state.personIdentities ?? []).filter((identity) => identity.sourcePresenceId === presence.id && growthEvidenceIsInPresenceScope(state, presence.id, identity.createdAt)).map((identity) => identity.personId));
+  const relationshipsCount = (state.relationships ?? []).filter((r) => r.state === "active" && scopedPersonIds.has(r.personId)).length;
+  const peopleEngagedCount = (state.people ?? []).filter((p) => p.memoryState === "active" && scopedPersonIds.has(p.id)).length;
 
   const presencePaused = presence.status === "paused" || assignment?.status === "paused";
   const needsAttention = operatorInterventionsNeeded > 0 || assignment?.status === "blocked" || assignment?.status === "needs_operator" || presencePaused;
@@ -13815,6 +14377,10 @@ function GrowthView({ state, mutate, setView: _setView }: { state: OpenPresenceS
         title="Growth"
         description="Autonomous audience growth scoreboard and performance proof."
       />
+      <div className="growth-scope-note" role="note">
+        <strong>Growth window</strong>
+        <span>{growthBoundary.startAt ? `${growthBoundary.source === "recorded" ? "Presence created" : "Presence start inferred"} ${formatHistoryTimestamp(growthBoundary.startAt)} · Earlier account history is excluded.` : "Presence start is not known yet · Earlier account history is excluded until the boundary can be established."}</span>
+      </div>
 
       {!assignment ? (
         <section className="growth-empty settings-card">
@@ -13888,7 +14454,7 @@ function GrowthView({ state, mutate, setView: _setView }: { state: OpenPresenceS
                 <SectionEyebrow>Recovered context · historical</SectionEyebrow>
                 <h2>Earlier Growth evidence is still available</h2>
                 <p>
-                  The active database has no structured audience timeline yet, so this context comes from the saved Growth revision history. It is shown as historical evidence and is not treated as a current measurement.
+                  The active database has no structured audience timeline for this Presence yet, so this context comes from a saved Growth revision written after its start. It is shown as historical evidence and is not treated as a current measurement.
                 </p>
                 {historicalGrowth.latestReview && <blockquote>{historicalGrowth.latestReview}</blockquote>}
               </div>
@@ -14092,13 +14658,15 @@ function getAssignmentProcessingState(
   assignment: Assignment,
   assignmentRuns?: AssignmentRun[],
   activeRunningId?: string | null,
+  occurrenceDay?: string,
 ) {
   const latestRun = [...(assignmentRuns ?? [])]
     .filter((run) => run.assignmentId === assignment.id)
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
 
-  const isPendingMutate = activeRunningId === assignment.id;
-  const isProcessing = assignmentIsCurrentlyProcessing(assignment, assignmentRuns) || isPendingMutate;
+  const occurrenceIsToday = occurrenceDay === undefined || occurrenceDay === calendarWeekDays[(new Date().getDay() + 6) % 7];
+  const isPendingMutate = occurrenceIsToday && activeRunningId === assignment.id;
+  const isProcessing = occurrenceIsToday && (assignmentIsCurrentlyProcessing(assignment, assignmentRuns) || isPendingMutate);
 
   let phaseLabel = "Working";
   if (latestRun?.status === "researching" || (isProcessing && assignment.work?.phase === "researching")) {
@@ -14122,12 +14690,24 @@ function getAssignmentProcessingState(
   return { isProcessing, phaseLabel, run: latestRun };
 }
 
+function scheduleOccurrenceStatus(assignment: Assignment, day: string, processing: ReturnType<typeof getAssignmentProcessingState>) {
+  if (processing.isProcessing) return `Processing (${processing.phaseLabel})`;
+  const today = calendarWeekDays[(new Date().getDay() + 6) % 7];
+  if (day !== today && ["active", "working", "awaiting_execution"].includes(assignment.status)) return "Scheduled";
+  return assignment.status === "draft" ? "Not started" : assignment.status.replaceAll("_", " ");
+}
+
 function assignmentScheduleProgress(assignment: Assignment) {
   const progress = assignmentProgressLabel(assignment);
   return assignment.rejectedCandidates > 0
     ? `${progress} · ${assignment.rejectedCandidates} candidate${assignment.rejectedCandidates === 1 ? "" : "s"} rejected`
     : progress;
 }
+
+const flexibleAssignmentTiming = "Flexible · within a few hours";
+const assignmentTimingLabel = (assignment: Assignment) => assignment.schedule
+  ? `${assignment.schedule.day} · ${assignment.schedule.time}–${splitConsiderationWindow(assignment.schedule.executionWindow, assignment.schedule.time).end}`
+  : flexibleAssignmentTiming;
 
 function ScheduleView({
   state,
@@ -14138,11 +14718,24 @@ function ScheduleView({
   mutate: Mutate;
   setView: (view: View) => void;
 }) {
+  const presenceId = state.activePresenceId ?? state.presence?.id ?? "";
+  const selectedPresence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
+  const presenceName = selectedPresence?.name ?? "this Presence";
+  const publishingPlan = derivePublishingPlanProjection(state, selectedPresence?.id);
+  const assetCollections = (state.assetCollections ?? []).filter((collection) => collection.agentId === state.agent?.id && collection.status === "active");
   const [showForm, setShowForm] = useState(false);
+  const [promptMode, setPromptMode] = useState(false);
+  const [prompt, setPrompt] = useState("");
+  const [promptProposal, setPromptProposal] = useState<SchedulePromptProposal | null>(null);
+  const [promptError, setPromptError] = useState<string | null>(null);
+  const [analyzingPrompt, setAnalyzingPrompt] = useState(false);
+  const [confirmingPrompt, setConfirmingPrompt] = useState(false);
   const [instruction, setInstruction] = useState("");
   const [day, setDay] = useState("Tuesday");
   const [time, setTime] = useState("08:00");
   const [objective, setObjective] = useState("audience_growth");
+  const [assetConstraintCollectionId, setAssetConstraintCollectionId] = useState("");
+  const [assetConstraintRequired, setAssetConstraintRequired] = useState(false);
   const [executionWindow, setExecutionWindow] = useState("08:00–11:00");
   const [timingMode, setTimingMode] = useState<TimingMode>("flexible");
   const [timingOptionsOpen, setTimingOptionsOpen] = useState(false);
@@ -14151,23 +14744,39 @@ function ScheduleView({
   const [viewMode, setViewMode] = useState<"list" | "week">("list");
   const [scheduleDayFilter, setScheduleDayFilter] = useState<ScheduleDayFilter>("all");
   const [compactSchedule, setCompactSchedule] = useState(true);
-  const [calendarLayers, setCalendarLayers] = useState<ScheduleLayerVisibility>({ plan: false, intents: false, assignments: true });
+  const [calendarLayers, setCalendarLayers] = useState<ScheduleLayerVisibility>({ plan: Boolean(publishingPlan), intents: false, assignments: true });
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null);
+  const [editingAssignmentId, setEditingAssignmentId] = useState<string | null>(null);
+  const [editingAssignmentInstruction, setEditingAssignmentInstruction] = useState("");
+  const [editingAssignmentObjective, setEditingAssignmentObjective] = useState("");
+  const [editingAssignmentCollectionId, setEditingAssignmentCollectionId] = useState("");
+  const [editingAssignmentRequiresAsset, setEditingAssignmentRequiresAsset] = useState(false);
+  const [editingAssignmentSchedule, setEditingAssignmentSchedule] = useState<Assignment["schedule"]>();
+  const [savingAssignmentId, setSavingAssignmentId] = useState<string | null>(null);
   const [runningLiveAssignmentId, setRunningLiveAssignmentId] = useState<string | null>(null);
-  const presenceId = state.activePresenceId ?? state.presence?.id ?? "";
-  const selectedPresence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
-  const presenceName = selectedPresence?.name ?? "this Presence";
-  const publishingPlan = derivePublishingPlanProjection(state, selectedPresence?.id);
+  const pendingReviewCount = state.executions.filter((execution) => execution.presenceId === presenceId && execution.status === "awaiting-review").length;
   const resetForm = () => {
     setInstruction("");
     setDay("Tuesday");
     setTime("08:00");
     setObjective("audience_growth");
+    setAssetConstraintCollectionId("");
+    setAssetConstraintRequired(false);
     setExecutionWindow("08:00–11:00");
     setTimingMode("flexible");
     setTimingOptionsOpen(false);
     setConsiderationStart("08:00");
     setConsiderationEnd("11:00");
+  };
+  const resetPrompt = () => {
+    setPrompt("");
+    setPromptProposal(null);
+    setPromptError(null);
+    setPromptMode(false);
+  };
+  const revisePrompt = () => {
+    setPromptProposal(null);
+    setPromptError(null);
   };
   const chooseTimingMode = (nextMode: TimingMode) => {
     const current = splitConsiderationWindow(executionWindow, time);
@@ -14195,12 +14804,13 @@ function ScheduleView({
   const [activatingId, setActivatingId] = useState<string | null>(null);
   const [runningPlaygroundId, setRunningPlaygroundId] = useState<string | null>(null);
   const [cancellingId, setCancellingId] = useState<string | null>(null);
+  const [pausingId, setPausingId] = useState<string | null>(null);
   const add = async (event: React.FormEvent) => {
     event.preventDefault();
     if (creatingAssignment) return;
     setCreatingAssignment(true);
     try {
-      const next = await mutate({ type: "createAssignment", instruction, presenceId, environment: selectedPresence?.connectionMode === "sandbox" ? "sandbox" : "live", objective, schedule: { day, time, executionWindow } });
+      const next = await mutate({ type: "createAssignment", instruction, presenceId, environment: selectedPresence?.connectionMode === "sandbox" ? "sandbox" : "live", objective, schedule: { day, time, executionWindow }, assetConstraint: assetConstraintCollectionId || assetConstraintRequired ? { collectionId: assetConstraintCollectionId || undefined, required: assetConstraintRequired } : undefined });
       const created = next?.assignments.find((item) => item.instruction === instruction.trim() && item.presenceId === presenceId);
       if (next && created) {
         resetForm();
@@ -14211,8 +14821,53 @@ function ScheduleView({
       setCreatingAssignment(false);
     }
   };
+  const analyzePrompt = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (analyzingPrompt || !prompt.trim()) return;
+    setAnalyzingPrompt(true);
+    setPromptError(null);
+    try {
+      const response = await fetchRuntime("/api/state", {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(state.activeAgentId ? { "x-openpresence-agent-id": state.activeAgentId } : {}),
+          ...(presenceId ? { "x-openpresence-presence-id": presenceId } : {}),
+          ...(state.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(state.workspaceRevision) } : {}),
+        },
+        body: JSON.stringify({ type: "analyzeSchedulePrompt", prompt, presenceId }),
+      });
+      const proposal = await readJsonResponse<SchedulePromptProposal & { error?: string }>(response);
+      if (!response.ok) throw new Error(proposal.error ?? "The schedule could not be analyzed.");
+      setPromptProposal(proposal);
+    } catch (reason) {
+      setPromptError(clientErrorMessage(reason, "The schedule could not be analyzed."));
+    } finally {
+      setAnalyzingPrompt(false);
+    }
+  };
+  const confirmPrompt = async () => {
+    if (!promptProposal || confirmingPrompt) return;
+    setConfirmingPrompt(true);
+    try {
+      const next = await mutate({ type: "confirmSchedulePrompt", promptId: promptProposal.id, presenceId: promptProposal.presenceId, drafts: promptProposal.drafts });
+      if (next) {
+        resetPrompt();
+        setShowForm(false);
+      }
+    } finally {
+      setConfirmingPrompt(false);
+    }
+  };
   const visibleSlots: CalendarSlot[] = [];
   const visibleAssignments = state.assignments.filter((item) => item.presenceId === presenceId && assignmentIsOpen(item));
+  const scheduleDecisionAssignment = visibleAssignments.find((assignment) => ["needs_operator", "blocked"].includes(assignment.status));
+  const didAutoFocusDecision = useRef(false);
+  useEffect(() => {
+    if (didAutoFocusDecision.current || !scheduleDecisionAssignment) return;
+    didAutoFocusDecision.current = true;
+    setSelectedAssignmentId(scheduleDecisionAssignment.id);
+  }, [scheduleDecisionAssignment]);
   const processingAssignments = visibleAssignments.filter((assignment) => {
     const { isProcessing } = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId);
     return isProcessing;
@@ -14267,6 +14922,15 @@ function ScheduleView({
       setRunningLiveAssignmentId(null);
     }
   };
+  const toggleAssignmentPause = async (assignment: Assignment) => {
+    if (pausingId || ["completed", "completed_with_adaptation", "cancelled", "draft"].includes(assignment.status)) return;
+    setPausingId(assignment.id);
+    try {
+      await mutate({ type: assignment.status === "paused" ? "resumeAssignment" : "pauseAssignment", id: assignment.id });
+    } finally {
+      setPausingId(null);
+    }
+  };
   const assignmentInspectorRef = useRef<HTMLElement | null>(null);
   const scrollToInspector = useCallback(() => {
     window.requestAnimationFrame(() => {
@@ -14280,7 +14944,26 @@ function ScheduleView({
   }, [selectedAssignmentId, scrollToInspector]);
   const openAssignment = (assignment: Assignment) => {
     setSelectedAssignmentId(assignment.id);
+    setEditingAssignmentId(null);
     scrollToInspector();
+  };
+  const beginAssignmentEdit = (assignment: Assignment) => {
+    setEditingAssignmentId(assignment.id);
+    setEditingAssignmentInstruction(assignment.instruction);
+    setEditingAssignmentObjective(assignment.objective ?? "");
+    setEditingAssignmentCollectionId(assignment.assetConstraint?.collectionId ?? "");
+    setEditingAssignmentRequiresAsset(assignment.assetConstraint?.required === true);
+    setEditingAssignmentSchedule(assignment.schedule ?? { day: "Tuesday", time: "08:00", executionWindow: "08:00–11:00" });
+  };
+  const saveAssignmentEdit = async (assignment: Assignment) => {
+    if (savingAssignmentId || !editingAssignmentInstruction.trim()) return;
+    setSavingAssignmentId(assignment.id);
+    try {
+      const next = await mutate({ type: "updateAssignment", id: assignment.id, instruction: editingAssignmentInstruction, objective: editingAssignmentObjective || undefined, schedule: editingAssignmentSchedule ?? null, assetConstraint: editingAssignmentCollectionId || editingAssignmentRequiresAsset ? { collectionId: editingAssignmentCollectionId || undefined, required: editingAssignmentRequiresAsset } : undefined });
+      if (next) setEditingAssignmentId(null);
+    } finally {
+      setSavingAssignmentId(null);
+    }
   };
   const selectedAssignment = visibleAssignments.find((assignment) => assignment.id === selectedAssignmentId) ?? null;
   const resetCalendarLayers = () => setCalendarLayers({ plan: Boolean(publishingPlan), intents: false, assignments: true });
@@ -14302,12 +14985,19 @@ function ScheduleView({
         description={<>What {presenceName} expects to work on later. Add a responsibility when there is a clear outcome worth pursuing.</>}
         actionsClassName="heading-actions calendar-heading-actions"
         actions={<>
+          {pendingReviewCount > 0 && (
+            <Button variant="secondary" onClick={() => setView("live")} title="Open Activity to approve actions waiting for you">
+              <CircleAlert size={14} /> Review {pendingReviewCount} approval{pendingReviewCount === 1 ? "" : "s"} in Activity
+            </Button>
+          )}
           <div className="calendar-view-toggle" role="group" aria-label="Calendar view mode">
             <button type="button" aria-pressed={viewMode === "list"} className={viewMode === "list" ? "active" : ""} onClick={() => setViewMode("list")}>List</button>
             <button type="button" aria-pressed={viewMode === "week"} className={viewMode === "week" ? "active" : ""} onClick={() => setViewMode("week")}>Week</button>
           </div>
-          <button type="button" className={`schedule-plan-header-toggle ${calendarLayers.plan ? "active" : ""} ${publishingPlan ? "" : "unavailable"}`} aria-pressed={calendarLayers.plan} disabled={!publishingPlan} onClick={() => setCalendarLayers((current) => ({ ...current, plan: !current.plan }))}>◇ Genny&apos;s plan</button>
-          <Button variant="primary" onClick={() => { setShowForm(!showForm); if (showForm) resetForm(); }}>
+          <Button variant="secondary" onClick={() => { setPromptMode(!promptMode); setShowForm(false); if (promptMode) resetPrompt(); }}>
+            <Sparkles size={15} /> {promptMode ? "Close prompt" : "Create with a prompt"}
+          </Button>
+          <Button variant="primary" onClick={() => { setShowForm(!showForm); setPromptMode(false); if (showForm) resetForm(); }}>
             {showForm ? <X size={15} /> : <Plus size={15} />}{" "}
             {showForm ? "Close" : "Add assignment"}
           </Button>
@@ -14315,7 +15005,6 @@ function ScheduleView({
       />
       <section className="schedule-plan-overview" aria-label={`${presenceName}'s plan and calendar layers`}>
         <ScheduleLayerToolbar plan={publishingPlan} presenceName={presenceName} layers={calendarLayers} onToggle={toggleCalendarLayer} onReset={resetCalendarLayers} mutate={mutate} />
-        {publishingPlan && calendarLayers.plan && <PublishingPlanScheduleSummary plan={publishingPlan} presenceName={presenceName} />}
       </section>
       {processingAssignments.length > 0 && (
         <div className="schedule-live-progress-banner" role="status" aria-live="polite">
@@ -14387,6 +15076,17 @@ function ScheduleView({
               <option value="reflection">Reflection</option>
             </select>
           </label>
+          <fieldset className="assignment-asset-constraint">
+            <legend>Asset constraint <small>Optional · authorization still comes from the Asset</small></legend>
+            <label>Collection
+              <select aria-label="Assignment Asset Collection" value={assetConstraintCollectionId} onChange={(event) => setAssetConstraintCollectionId(event.target.value)}>
+                <option value="">Any eligible Asset</option>
+                {assetCollections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}
+              </select>
+            </label>
+            <label className="assignment-asset-required"><input type="checkbox" checked={assetConstraintRequired} onChange={(event) => setAssetConstraintRequired(event.target.checked)} /> Require an Asset for this Assignment</label>
+            <small className="form-hint">Collections organize and constrain the work; they never broaden an Asset&apos;s Presence eligibility.</small>
+          </fieldset>
           <div className="timing-options">
             <button
               type="button"
@@ -14429,6 +15129,43 @@ function ScheduleView({
           </Button>
         </form>
       )}
+      {promptMode && (
+        <section className="schedule-prompt-form" aria-label="Create schedule with a prompt">
+          <form onSubmit={analyzePrompt}>
+            <label className="instruction-field">
+              Describe the outcome you want to build
+              <textarea
+                aria-label="Describe the outcome you want to build"
+                value={prompt}
+                onChange={(event) => setPrompt(event.target.value)}
+                placeholder="Create 8 worthwhile daily interactions with founders, hiring managers, and developers."
+                rows={3}
+                required
+              />
+            </label>
+            <p className="schedule-prompt-help">I’ll turn the intent into reviewable responsibilities, timing, and the Agent’s proposed approach. You can review everything before anything is saved.</p>
+            {promptError && <p className="form-error" role="alert">{promptError}</p>}
+            <Button type="submit" variant="secondary" disabled={analyzingPrompt || Boolean(promptProposal)}>
+              {analyzingPrompt ? <><LoaderCircle size={14} className="spin" /> Building plan…</> : <><Sparkles size={14} /> Review proposed plan</>}
+            </Button>
+          </form>
+          {promptProposal && (
+            <div className="schedule-prompt-proposal" aria-label="Proposed schedule">
+              <div className="schedule-prompt-proposal-header">
+                <div><SectionEyebrow>Review before saving</SectionEyebrow><h2>{promptProposal.summary}</h2></div>
+                <button type="button" aria-label="Discard proposed schedule" onClick={resetPrompt}><X size={16} /></button>
+              </div>
+              <p className="schedule-prompt-original"><strong>Your intent</strong> “{promptProposal.prompt}”</p>
+              <div className="schedule-prompt-assumptions"><strong>Planning notes</strong>{promptProposal.assumptions.map((assumption) => <span key={assumption}>{assumption}</span>)}</div>
+            <p className="schedule-prompt-help"><strong>{promptProposal.previews.filter((draft) => ["ready", "ready_with_assumptions"].includes(draft.preflight?.status ?? "")).length} {promptProposal.previews.filter((draft) => ["ready", "ready_with_assumptions"].includes(draft.preflight?.status ?? "")).length === 1 ? "item is" : "items are"} ready to activate.</strong> Any item that needs input will be created as a visible draft to fix. The Agent owns the approach; public actions remain bounded by the Presence capabilities and approval policy.</p>
+              <div className="schedule-prompt-drafts">
+                {promptProposal.previews.map((draft, index) => <article key={`${draft.instruction}-${index}`} className="schedule-prompt-draft"><div className="schedule-prompt-draft-time">{draft.schedule?.day} · {draft.schedule?.time}<small>{draft.schedule?.executionWindow}</small></div><div><strong>{draft.instruction}</strong><small>{draft.objective?.replaceAll("_", " ")} · {draft.deliverable?.type === "meaningful_engagement" ? "adaptive social responsibility; no fixed quota" : `${draft.deliverable?.quantity ?? 1} considered outcome`}</small>{draft.plan?.capabilitiesConsidered?.length ? <small>Capabilities considered: {draft.plan.capabilitiesConsidered.join(", ")}</small> : null}</div></article>)}
+              </div>
+              <div className="schedule-prompt-actions"><Button type="button" variant="secondary" onClick={revisePrompt}>Revise prompt</Button><Button type="button" variant="secondary" onClick={resetPrompt}>Cancel</Button><Button type="button" variant="primary" disabled={confirmingPrompt} onClick={() => void confirmPrompt()}>{confirmingPrompt ? <><LoaderCircle size={14} className="spin" /> Saving plan…</> : <><Check size={14} /> Confirm plan · activate ready items</>}</Button></div>
+            </div>
+          )}
+        </section>
+      )}
       {selectedAssignment && (
         <aside
           ref={assignmentInspectorRef}
@@ -14456,11 +15193,53 @@ function ScheduleView({
               </div>
             );
           })()}
-          <p className="assignment-inspector-instruction">{cleanUserFacingAssignmentInstruction(selectedAssignment.instruction)}</p>
+          {editingAssignmentId === selectedAssignment.id ? (
+            <form className="assignment-edit-form" onSubmit={(event) => { event.preventDefault(); void saveAssignmentEdit(selectedAssignment); }}>
+              <label>What should {presenceName} accomplish?
+                <textarea aria-label="Edit Assignment instruction" value={editingAssignmentInstruction} onChange={(event) => setEditingAssignmentInstruction(event.target.value)} rows={4} required />
+              </label>
+              <label>Objective
+                <select aria-label="Edit Assignment objective" value={editingAssignmentObjective} onChange={(event) => setEditingAssignmentObjective(event.target.value)}>
+                  <option value="">Keep current objective</option>
+                  <option value="audience_growth">Audience growth</option>
+                  <option value="relationship">Relationships</option>
+                  <option value="education">Education</option>
+                  <option value="reflection">Reflection</option>
+                </select>
+              </label>
+              <fieldset className="assignment-asset-constraint">
+                <legend>Asset constraint</legend>
+                <label>Collection
+                  <select aria-label="Edit Assignment Asset Collection" value={editingAssignmentCollectionId} onChange={(event) => setEditingAssignmentCollectionId(event.target.value)}>
+                    <option value="">Any eligible Asset</option>
+                    {assetCollections.map((collection) => <option key={collection.id} value={collection.id}>{collection.name}</option>)}
+                  </select>
+                </label>
+                <label className="assignment-asset-required"><input type="checkbox" checked={editingAssignmentRequiresAsset} onChange={(event) => setEditingAssignmentRequiresAsset(event.target.checked)} /> Require an Asset</label>
+                <small className="form-hint">Collection membership is not an authorization grant.</small>
+              </fieldset>
+              <div className="assignment-edit-schedule">
+                <label>Day<select aria-label="Edit Assignment day" required value={editingAssignmentSchedule?.day ?? "Tuesday"} onChange={(event) => setEditingAssignmentSchedule((current) => ({ day: event.target.value, time: current?.time ?? "08:00", executionWindow: current?.executionWindow ?? "08:00–11:00" }))}>{calendarWeekDays.map((item) => <option key={item}>{item}</option>)}</select></label>
+                <label>Time<input aria-label="Edit Assignment time" type="time" disabled={!editingAssignmentSchedule} value={editingAssignmentSchedule?.time ?? "08:00"} onChange={(event) => setEditingAssignmentSchedule((current) => current ? { ...current, time: event.target.value, executionWindow: `${event.target.value}–${splitConsiderationWindow(current.executionWindow, current.time).end}` } : current)} /></label>
+                <label>Ends<input aria-label="Edit Assignment end time" type="time" disabled={!editingAssignmentSchedule} value={editingAssignmentSchedule ? splitConsiderationWindow(editingAssignmentSchedule.executionWindow, editingAssignmentSchedule.time).end : "11:00"} onChange={(event) => setEditingAssignmentSchedule((current) => current ? { ...current, executionWindow: `${splitConsiderationWindow(current.executionWindow, current.time).start}–${event.target.value}` } : current)} /></label>
+              </div>
+              <small className="assignment-edit-help">The Agent may work only inside this daily window; after the end time, that occurrence rolls forward. Updating the outcome refreshes its readiness review.</small>
+              <div className="assignment-edit-actions"><Button type="button" variant="ghost" onClick={() => setEditingAssignmentId(null)}>Keep current</Button><Button type="submit" variant="primary" disabled={savingAssignmentId === selectedAssignment.id || !editingAssignmentInstruction.trim()}>{savingAssignmentId === selectedAssignment.id ? <><LoaderCircle size={14} className="spin" /> Saving…</> : <><Check size={14} /> Save changes</>}</Button></div>
+            </form>
+          ) : <p className="assignment-inspector-instruction">{cleanUserFacingAssignmentInstruction(selectedAssignment.instruction)}</p>}
           <div className="assignment-inspector-meta">
-            <div><span>Window</span><strong>{selectedAssignment.activation?.type === "continuous" ? "Continuous responsibility" : selectedAssignment.schedule ? `${selectedAssignment.schedule.day} at ${selectedAssignment.schedule.time}` : "Unscheduled"}</strong><small>{selectedAssignment.activation?.type === "continuous" ? "Agent-authored plan · weekly and strategic review" : selectedAssignment.schedule?.executionWindow ?? "Ready to start when you choose."}</small></div>
+            <div><span>Window</span><strong>{selectedAssignment.activation?.type === "continuous" ? flexibleAssignmentTiming : selectedAssignment.schedule ? `${selectedAssignment.schedule.day} · ${selectedAssignment.schedule.time}–${splitConsiderationWindow(selectedAssignment.schedule.executionWindow, selectedAssignment.schedule.time).end}` : flexibleAssignmentTiming}</strong><small>{selectedAssignment.activation?.type === "continuous" ? "Agent-authored plan · work can happen within a few hours when useful." : selectedAssignment.schedule ? `Each ${selectedAssignment.schedule.day === "Daily" ? "day" : selectedAssignment.schedule.day.toLowerCase()} runs from ${selectedAssignment.schedule.time} until ${splitConsiderationWindow(selectedAssignment.schedule.executionWindow, selectedAssignment.schedule.time).end}; that occurrence closes then. The recurring Assignment continues until completed or canceled.` : "A bounded window chosen when the responsibility is ready to begin."}</small></div>
             <div><span>Status</span><strong>{selectedAssignment.status === "draft" ? "Review before activation" : selectedAssignment.status.replaceAll("_", " ")}</strong><small>{assignmentScheduleProgress(selectedAssignment)}</small></div>
           </div>
+          {(() => {
+            const pursuit = (state.assignmentPursuitWindows ?? []).find((item) => item.assignmentId === selectedAssignment.id && ["active", "paused"].includes(item.status));
+            if (!pursuit) return null;
+            const usage = assignmentPursuitUsage(state, pursuit);
+            const counts = assignmentPursuitVerifiedCounts(state, pursuit);
+            const pending = state.executions.filter((item) => item.assignmentId === selectedAssignment.id && !["failed", "blocked", "cancelled", "expired", "verification-closed"].includes(item.status)).length;
+            const minutesLeft = Math.max(0, Math.round((new Date(pursuit.deadlineAt).getTime() - Date.now()) / 60_000));
+            return <section className="assignment-pursuit" aria-label="Current distribution push"><div className="assignment-pursuit-header"><div><SectionEyebrow>Current push</SectionEyebrow><h3>{pursuit.status === "active" ? "Higher effort window" : "Push paused"}</h3></div><span>{pursuit.status}</span></div><p>{counts.verified} verified · up to {pursuit.maxVerifiedActions} qualified actions · {minutesLeft}m left</p><div className="assignment-pursuit-usage"><span>Resources</span><small>{usage.channelReads} reads · {usage.hydrations} hydrations · {usage.modelCalls} model calls{pending ? ` · ${pending} awaiting outcome` : ""}</small></div><div className="assignment-pursuit-actions">{pursuit.status === "active" ? <Button variant="secondary" onClick={() => void mutate({ type: "pauseAssignmentPursuit", id: pursuit.id })}>Pause push</Button> : <Button variant="secondary" onClick={() => void mutate({ type: "resumeAssignmentPursuit", id: pursuit.id })}>Resume push</Button>}<Button variant="ghost" onClick={() => void mutate({ type: "cancelAssignmentPursuit", id: pursuit.id })}>Stop push</Button></div></section>;
+          })()}
           {selectedAssignment.preflight && <section className={`assignment-preflight assignment-preflight-${selectedAssignment.preflight.status}`} aria-label="Assignment readiness review">
             <div className="assignment-preflight-header"><div><SectionEyebrow>Agent readiness review</SectionEyebrow><h3>{selectedAssignment.preflight.status === "ready" ? "Ready to activate" : selectedAssignment.preflight.status === "ready_with_assumptions" ? "Ready with assumptions" : selectedAssignment.preflight.status === "needs_input" ? "Needs input before activation" : "Blocked before activation"}</h3></div><span className="assignment-preflight-status">{selectedAssignment.preflight.status.replaceAll("_", " ")}</span></div>
             <p>{selectedAssignment.preflight.semanticSummary}</p>
@@ -14468,8 +15247,25 @@ function ScheduleView({
             <div className="assignment-readiness-checks">{selectedAssignment.preflight.checks.map((check) => <div key={check.label} className={`assignment-readiness-check assignment-readiness-${check.status}`}><span aria-hidden="true">{check.status === "pass" ? "✓" : check.status === "warning" ? "!" : "×"}</span><div><strong>{check.label}</strong><small>{check.detail}</small></div></div>)}</div>
             {selectedAssignment.preflight.issues.length > 0 && <div className="assignment-preflight-issues"><strong>Before activation</strong><ul>{selectedAssignment.preflight.issues.map((issue) => <li key={issue}>{issue}</li>)}</ul></div>}
           </section>}
-          <p className="assignment-inspector-note">The outcome is delegated; {presenceName} chooses the approach and may reject weak candidates. A rejection keeps the Assignment working. Only a verified deliverable, a bounded blocked result, or operator cancellation ends it.</p>
+          {selectedAssignment.lastOutcome && ["needs_operator", "blocked", "failed", "expired_incomplete"].includes(selectedAssignment.status) && (
+            <section className="assignment-outcome" role="alert" aria-label="Assignment needs operator action">
+              <div className="assignment-outcome-heading">
+                <span className="assignment-outcome-label">Operator action required</span>
+                <strong>{selectedAssignment.status === "needs_operator" ? "This Assignment is waiting for you" : "This Assignment cannot continue yet"}</strong>
+              </div>
+              <p>{selectedAssignment.lastOutcome.message}</p>
+              <small>
+                {selectedAssignment.status === "needs_operator"
+                  ? "Fix the account or connector in Settings, then return here and retry the Assignment. Nothing has been sent or counted as verified."
+                  : "Review the issue, then retry only after the underlying problem is resolved. Nothing has been counted as verified."}
+              </small>
+            </section>
+          )}
+          <p className="assignment-inspector-note">The outcome is delegated; {presenceName} chooses the approach and may reject weak candidates. A rejection keeps the Assignment working. Only a verified deliverable, a bounded blocked result, or operator cancellation ends it. Approvals for a drafted social action live in Activity → Agenda & Review; Schedule owns the responsibility and its readiness.</p>
           <div className="assignment-inspector-actions">
+            {editingAssignmentId !== selectedAssignment.id && selectedAssignment.status !== "completed" && selectedAssignment.status !== "cancelled" && !getAssignmentProcessingState(selectedAssignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing && (
+              <Button variant="secondary" onClick={() => beginAssignmentEdit(selectedAssignment)}><Pencil size={14} /> Edit Assignment</Button>
+            )}
             {selectedAssignment.status === "draft" && selectedAssignment.preflight && ["ready", "ready_with_assumptions"].includes(selectedAssignment.preflight.status) && (
               <Button variant="primary" disabled={activatingId === selectedAssignment.id} onClick={() => void activateAssignment(selectedAssignment)}>
                 {activatingId === selectedAssignment.id ? <><LoaderCircle size={14} className="spin" /> Activating…</> : "Activate Assignment"}
@@ -14477,7 +15273,7 @@ function ScheduleView({
             )}
             {selectedAssignment.status !== "completed" && selectedAssignment.status !== "cancelled" && selectedAssignment.status !== "draft" && (
               <Button variant="primary" disabled={runningLiveAssignmentId === selectedAssignment.id || getAssignmentProcessingState(selectedAssignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing} onClick={() => void runLiveAssignment(selectedAssignment)}>
-                {runningLiveAssignmentId === selectedAssignment.id || getAssignmentProcessingState(selectedAssignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing ? <><LoaderCircle size={14} className="spin" /> Working now…</> : <><Play size={14} /> Work now</>}
+                {runningLiveAssignmentId === selectedAssignment.id || getAssignmentProcessingState(selectedAssignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing ? <><LoaderCircle size={14} className="spin" /> Working now…</> : selectedAssignment.status === "needs_operator" || selectedAssignment.status === "blocked" ? <><RotateCcw size={14} /> Retry Assignment</> : <><Play size={14} /> Work now</>}
               </Button>
             )}
             {selectedAssignment.status !== "completed" && selectedAssignment.status !== "cancelled" && (
@@ -14485,9 +15281,14 @@ function ScheduleView({
                 {runningPlaygroundId === selectedAssignment.id ? <><LoaderCircle size={14} className="spin" /> Opening Playground…</> : selectedAssignment.status === "blocked" ? "Retry in Playground" : "Run in Playground"}
               </Button>
             )}
+            {selectedAssignment.origin === "publishing_initiative" && selectedAssignment.status !== "completed" && selectedAssignment.status !== "cancelled" && selectedAssignment.status !== "draft" && (
+              <Button variant="secondary" disabled={pausingId === selectedAssignment.id} onClick={() => void toggleAssignmentPause(selectedAssignment)}>
+                {pausingId === selectedAssignment.id ? <><LoaderCircle size={14} className="spin" /> Saving…</> : selectedAssignment.status === "paused" ? `Resume ${presenceName}'s assignment` : `Pause ${presenceName}'s assignment`}
+              </Button>
+            )}
             {selectedAssignment.status !== "completed" && (
               <Button variant="danger" disabled={cancellingId === selectedAssignment.id} onClick={() => void cancelAssignment(selectedAssignment)}>
-                {cancellingId === selectedAssignment.id ? <><LoaderCircle size={14} className="spin" /> Cancelling…</> : "Cancel Assignment"}
+                {cancellingId === selectedAssignment.id ? <><LoaderCircle size={14} className="spin" /> Closing…</> : selectedAssignment.status === "needs_operator" || selectedAssignment.status === "blocked" ? "Close Assignment" : "Cancel Assignment"}
               </Button>
             )}
           </div>
@@ -14496,7 +15297,7 @@ function ScheduleView({
       {viewMode === "week" ? (
         <WeekCalendar slots={visibleSlots} assignments={visibleAssignments} publishingPlan={publishingPlan} layers={calendarLayers} compact={compactSchedule} onToggleCompact={() => setCompactSchedule((current) => !current)} state={state} presenceName={presenceName} runningLiveAssignmentId={runningLiveAssignmentId} onEdit={beginEdit} onAssignment={openAssignment} onAdd={() => setShowForm(true)} onResetLayers={resetCalendarLayers} />
       ) : (
-        <ScheduleList assignments={visibleAssignments} publishingPlan={publishingPlan} layers={calendarLayers} presenceName={presenceName} state={state} runningLiveAssignmentId={runningLiveAssignmentId} dayFilter={scheduleDayFilter} onDayFilterChange={setScheduleDayFilter} onAssignment={openAssignment} onAdd={() => setShowForm(true)} onResetLayers={resetCalendarLayers} />
+        <ScheduleList assignments={visibleAssignments} publishingPlan={publishingPlan} layers={calendarLayers} presenceName={presenceName} state={state} mutate={mutate} runningLiveAssignmentId={runningLiveAssignmentId} dayFilter={scheduleDayFilter} onDayFilterChange={setScheduleDayFilter} onAssignment={openAssignment} onAdd={() => setShowForm(true)} onResetLayers={resetCalendarLayers} />
       )}
     </div>
   );
@@ -14508,6 +15309,7 @@ function ScheduleList({
   layers,
   presenceName,
   state,
+  mutate,
   runningLiveAssignmentId,
   dayFilter,
   onDayFilterChange,
@@ -14520,6 +15322,7 @@ function ScheduleList({
   layers: ScheduleLayerVisibility;
   presenceName: string;
   state: OpenPresenceState;
+  mutate: Mutate;
   runningLiveAssignmentId?: string | null;
   dayFilter: ScheduleDayFilter;
   onDayFilterChange: (filter: ScheduleDayFilter) => void;
@@ -14528,20 +15331,32 @@ function ScheduleList({
   onResetLayers: () => void;
 }) {
   const scheduledAssignments = assignments.filter((assignment) => assignmentIsOpen(assignment));
+  const today = calendarWeekDays[(new Date().getDay() + 6) % 7];
   const filteredAssignments = dayFilter === "all"
     ? scheduledAssignments
-    : scheduledAssignments.filter((assignment) => assignment.schedule?.day === dayFilter);
+    : scheduledAssignments.filter((assignment) => {
+        if (assignmentOccursOnDay(assignment, dayFilter)) return true;
+        if (dayFilter !== today) return false;
+        const processing = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId).isProcessing;
+        return processing || ["needs_operator", "blocked"].includes(assignment.status);
+      });
   const visiblePlanWindows = (publishingPlan?.windows ?? [])
     .filter((window) => !["completed", "missed", "superseded"].includes(window.status))
     .slice(0, 8);
   const selectedDayLabel = scheduleDayFilters.find((item) => item.value === dayFilter)?.value;
   const hasItems = (layers.assignments && filteredAssignments.length > 0) || (layers.plan && visiblePlanWindows.length > 0);
+  const gennyAssignment = state.assignments.find((assignment) => assignment.presenceId === publishingPlan?.presenceId && assignment.origin === "publishing_initiative");
+  const gennyPaused = gennyAssignment?.status === "paused" || publishingPlan?.status === "paused";
+  const toggleGennyAssignment = async () => {
+    if (!gennyAssignment) return;
+    await mutate({ type: gennyPaused ? "resumeAssignment" : "pauseAssignment", id: gennyAssignment.id });
+  };
   return <section className="schedule-list" aria-label="Schedule list">
     <div className="schedule-list-header">
       <div>
         <SectionEyebrow>List schedule</SectionEyebrow>
         <h2>Scheduled responsibilities</h2>
-        <p>Assignments with a specific outcome. Genny&apos;s flexible plan is optional and hidden until you turn it on.</p>
+        <p>Your assignments and {presenceName}&apos;s own growth assignment, together. Each row is a real responsibility with a visible owner and state.</p>
       </div>
       <div className="schedule-list-header-controls">
         <div className="schedule-day-filter-label">Show days</div>
@@ -14552,18 +15367,18 @@ function ScheduleList({
       </div>
     </div>
     {!hasItems ? <EmptyState title={!layers.assignments ? "Assignments are hidden" : dayFilter !== "all" ? `No responsibilities on ${selectedDayLabel}` : "No scheduled responsibilities"} body={!layers.assignments ? "Turn on Assignments above to see scheduled responsibilities." : dayFilter !== "all" ? "Try another day or show all scheduled responsibilities." : "Add an Assignment only when you want a specific outcome pursued."} action={!layers.assignments ? <Button onClick={onResetLayers} variant="secondary">Show assignments</Button> : dayFilter !== "all" ? <Button onClick={() => onDayFilterChange("all")} variant="secondary">Show all days</Button> : <Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add assignment</Button>} /> : <>
-      {layers.plan && visiblePlanWindows.length > 0 && <section className="schedule-flexible-plan-list" aria-label="Genny's flexible plan"><div className="schedule-flexible-plan-heading"><div><SectionEyebrow>Genny&apos;s flexible plan</SectionEyebrow><h3>Intentions, not commitments</h3></div><span>Optional layer</span></div>{visiblePlanWindows.map((window) => { const position = publishingWindowCalendarPosition(window, publishingPlan?.timezone); return <article className="schedule-flexible-plan-row" key={window.id}><span className="schedule-flexible-plan-mark" /><div><div className="schedule-list-row-kicker"><strong>{position.day} · {position.startTime}</strong><span>Flexible</span></div><h3>{window.purpose}</h3><small>{window.summary} · {window.status.replaceAll("_", " ")}</small></div></article>; })}</section>}
       <div className="schedule-list-rows">
+      {layers.plan && visiblePlanWindows.length > 0 && visiblePlanWindows.map((window, index) => { const position = publishingWindowCalendarPosition(window, publishingPlan?.timezone); return <article className="schedule-list-row schedule-list-row-plan" key={window.id} aria-label={`${presenceName} assignment window ${window.purpose}`}><div className="schedule-list-row-mark" aria-hidden="true" /><div className="schedule-list-row-copy"><div className="schedule-list-row-kicker"><strong>{position.day} · {position.startTime}–{position.endTime}</strong><span>{presenceName} · Agent-owned</span><span>{gennyPaused ? "Paused" : window.status === "active" ? "Working window" : "Scheduled"}</span></div><h3>{window.purpose[0].toUpperCase() + window.purpose.slice(1)} toward {presenceName}&apos;s mission</h3><small>{window.summary} · {gennyPaused ? "assignment paused" : window.status.replaceAll("_", " ")}</small></div><div className="schedule-plan-window-actions">{index === 0 && gennyAssignment && <><button type="button" className="schedule-inline-action" onClick={() => void toggleGennyAssignment()}>{gennyPaused ? "Resume" : "Pause"}</button><button type="button" className="schedule-inline-action" onClick={() => onAssignment(gennyAssignment)}>Details</button></>}<span aria-hidden="true"><ChevronRight size={16} /></span></div></article>; })}
       {layers.assignments && filteredAssignments.map((assignment) => {
         const objective = assignmentObjective(assignment);
-        const timing = assignment.activation?.type === "continuous" ? "Continuous responsibility" : assignment.schedule ? `${assignment.schedule.day} · ${assignment.schedule.time}–${splitConsiderationWindow(assignment.schedule.executionWindow, assignment.schedule.time).end}` : "Unscheduled · ready to start";
+        const timing = assignmentTimingLabel(assignment);
         const proc = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId);
         const status = proc.isProcessing ? `Processing (${proc.phaseLabel})` : assignment.status === "draft" ? "Not started" : objectiveLabel(assignment.status);
         return <button type="button" className={`schedule-list-row schedule-list-row-assignment${proc.isProcessing ? " is-processing schedule-list-row-processing" : ""}`} key={assignment.id} onClick={() => onAssignment(assignment)} aria-label={`Open Assignment ${assignment.instruction}`} aria-busy={proc.isProcessing}>
           <div className="schedule-list-row-mark" aria-hidden="true" />
           <div className="schedule-list-row-copy">
             <div className="schedule-list-row-kicker">
-              <strong>Scheduled work</strong>
+              <strong>{assignment.origin === "publishing_initiative" ? `${presenceName} · Agent-owned` : assignment.createdBy === "operator" ? "You · Operator assignment" : "Agent-owned assignment"}</strong>
               <span className="schedule-objective-badge">{objectiveLabel(objective)}</span>
               {proc.isProcessing && <span className="schedule-processing-badge"><LoaderCircle size={9} className="spin" /> Working now · {proc.phaseLabel}</span>}
             </div>
@@ -14608,16 +15423,19 @@ function WeekCalendar({
 }) {
   const scheduledSlots = slots.filter((slot) => slot.enabled);
   const scheduledAssignments = assignments.filter((assignment) => assignment.schedule && assignmentIsOpen(assignment));
+  const flexibleAssignments = assignments.filter((assignment) => !assignment.schedule && assignmentIsOpen(assignment));
   const scheduledPlanWindows = (publishingPlan?.windows ?? [])
     .filter((window) => !["completed", "missed", "superseded"].includes(window.status))
     .map((window) => publishingWindowCalendarPosition(window, publishingPlan?.timezone))
     .filter((window) => calendarWeekDays.includes(window.day) && window.startMinutes < 24 * 60);
   const dayPlanWindows = new Map(calendarWeekDays.map((day) => [day, scheduledPlanWindows.filter((window) => window.day === day)]));
   const daySlots = new Map(calendarWeekDays.map((day) => [day, scheduledSlots.filter((slot) => slot.day === day)]));
-  const dayAssignments = new Map(calendarWeekDays.map((day) => [day, scheduledAssignments.filter((assignment) => assignment.schedule?.day === day)]));
+  const dayAssignments = new Map(calendarWeekDays.map((day) => [day, scheduledAssignments.filter((assignment) => assignmentOccursOnDay(assignment, day))]));
   const gridHeight = calendarHours.length * 64;
-  const hasAnyItems = scheduledPlanWindows.length > 0 || scheduledSlots.length > 0 || scheduledAssignments.length > 0;
-  const hasItems = (layers.plan && scheduledPlanWindows.length > 0) || (layers.intents && scheduledSlots.length > 0) || (layers.assignments && scheduledAssignments.length > 0);
+  const hasAnyItems = scheduledPlanWindows.length > 0 || scheduledSlots.length > 0 || scheduledAssignments.length > 0 || flexibleAssignments.length > 0;
+  const hasDatedItems = (layers.plan && scheduledPlanWindows.length > 0) || (layers.intents && scheduledSlots.length > 0) || (layers.assignments && scheduledAssignments.length > 0);
+  const hasFlexibleItems = layers.assignments && flexibleAssignments.length > 0;
+  const hasItems = hasDatedItems || hasFlexibleItems;
   const calendarLabel = [layers.plan && "publishing plan", layers.intents && "legacy entries", layers.assignments && "Assignments"].filter(Boolean).join(", ");
   const compactDays = calendarWeekDays.map((day) => {
     const items = [
@@ -14646,12 +15464,8 @@ function WeekCalendar({
       }) : []),
       ...(layers.assignments ? (dayAssignments.get(day) ?? []).map((assignment) => {
         const schedule = assignment.schedule!;
-        const proc = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId);
-        const status = proc.isProcessing
-          ? `Processing (${proc.phaseLabel})`
-          : assignment.status === "draft"
-            ? "Not started"
-            : assignment.status.replaceAll("_", " ");
+        const proc = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId, day);
+        const status = scheduleOccurrenceStatus(assignment, day, proc);
         return {
           id: "assignment-" + assignment.id,
           kind: "assignment" as const,
@@ -14718,7 +15532,7 @@ function WeekCalendar({
         <div>
           <SectionEyebrow>Visual schedule</SectionEyebrow>
           <h2>When {presenceName} can notice and act</h2>
-          <p>The publishing plan shows flexible working windows underneath the Assignments that shape when {presenceName} can work toward an outcome. A plan window never counts as a verified result.</p>
+          <p>Genny&apos;s growth assignment shares this calendar with yours. Windows show when it will choose the next useful step; only verified outcomes count as done.</p>
         </div>
         <div className="week-calendar-toolbar-side">
           <div className="calendar-density-toggle" role="group" aria-label="Visual schedule density">
@@ -14728,8 +15542,11 @@ function WeekCalendar({
           <ScheduleLegend plan={publishingPlan} layers={layers} />
         </div>
       </div>
-      {!hasItems ? <EmptyState title={hasAnyItems ? "Nothing shown on this calendar" : "Nothing scheduled for this Presence"} body={hasAnyItems ? "Turn on a calendar layer to compare the Presence plan or Assignments." : `Add an Assignment to see when ${presenceName} is expected to work during the week.`} action={hasAnyItems ? <Button onClick={onResetLayers} variant="secondary">Show all layers</Button> : <Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add assignment</Button>} /> : <div className="week-grid-scroll"><div className="week-grid" style={{ "--week-grid-height": `${gridHeight}px` } as React.CSSProperties}><div className="week-grid-header"><span className="week-time-header">Local time</span>{calendarWeekDays.map((day) => <span key={day}>{day.slice(0, 3)}<small>{day}</small></span>)}</div><div className="week-grid-body"><div className="week-time-rail">{calendarHours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>{calendarWeekDays.map((day) => <div className="week-day-column" key={day}>{calendarHours.map((hour) => <div className="week-hour-cell" key={hour} />)}{layers.plan && (dayPlanWindows.get(day) ?? []).map((window) => { const style = blockStyle(window.startMinutes, window.endMinutes, 42); return <div className={`week-plan-window week-plan-window-${window.status}`} key={window.id} style={style} title={`${window.purpose} window · ${window.summary}`}><span className="week-plan-window-time">{window.startTime}–{window.endTime}</span><strong>Plan · {window.purpose}</strong><small>{window.summary}</small></div>; })}{layers.intents && (daySlots.get(day) ?? []).map((slot) => { const style = blockStyle(timeToMinutes(slot.time), timeToMinutes(splitConsiderationWindow(slot.executionWindow, slot.time).end), 54); const target = state.presences.find((item) => item.id === slot.presence); return <button type="button" key={slot.id} className={`week-intent objective-${objectiveTone(slot.objective)}`} style={style} onClick={() => onEdit(slot)} aria-label={`Edit ${slot.label}, ${slot.day} at ${slot.time}`} title={`${slot.label} · ${slot.day} ${slot.time} · ${considerationSummary(slot.time, slot.executionWindow)}`}><span className="week-intent-time">{slot.time}</span><strong>{slot.label}</strong><small>{target?.name ?? presenceName} · {objectiveLabel(slot.objective)}</small><em>{slot.mode === "auto" ? "Auto" : "Review"}</em></button>; })}{layers.assignments && (dayAssignments.get(day) ?? []).map((assignment) => { const schedule = assignment.schedule!; const objective = assignmentObjective(assignment); const style = blockStyle(timeToMinutes(schedule.time), timeToMinutes(splitConsiderationWindow(schedule.executionWindow, schedule.time).end), 58); const proc = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId); const status = proc.isProcessing ? `Processing (${proc.phaseLabel})` : assignment.status === "draft" ? "Not started" : assignment.status.replaceAll("_", " "); const progress = assignmentScheduleProgress(assignment); return <button type="button" key={assignment.id} className={`week-assignment${proc.isProcessing ? " is-processing week-assignment-processing" : ""}`} style={style} onClick={() => onAssignment(assignment)} aria-label={`Open Assignment ${assignment.instruction}, ${schedule.day} at ${schedule.time}`} title={`Open Assignment details · ${assignment.instruction} · ${schedule.day} ${schedule.time}`} aria-busy={proc.isProcessing}><span className="week-intent-time">{schedule.time}</span><strong>Assignment</strong><span className="week-assignment-objective">{objectiveLabel(objective)}</span><small>{assignment.instruction}</small>{proc.isProcessing ? <em className="week-assignment-processing-tag"><LoaderCircle size={8} className="spin" /> {progress} · {proc.phaseLabel}…</em> : <em>{progress} · {status}</em>}</button>; })}</div>)}</div></div></div>}
-      {hasItems && <div className="week-calendar-compact" aria-label="Compact weekly schedule">{compactDays.map(({ day, items }) => <section className="compact-calendar-day" key={day}><div className="compact-calendar-day-label"><strong>{day.slice(0, 3)}</strong><span>{day}</span></div><div className="compact-calendar-items">{items.map(renderCompactItem)}</div></section>)}</div>}
+      {!hasItems ? <EmptyState title={hasAnyItems ? "Nothing shown on this calendar" : "Nothing scheduled for this Presence"} body={hasAnyItems ? "Turn on a calendar layer to compare the Presence plan or Assignments." : `Add an Assignment to see when ${presenceName} is expected to work during the week.`} action={hasAnyItems ? <Button onClick={onResetLayers} variant="secondary">Show all layers</Button> : <Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add assignment</Button>} /> : <>
+        {hasDatedItems && <div className="week-grid-scroll"><div className="week-grid" style={{ "--week-grid-height": `${gridHeight}px` } as React.CSSProperties}><div className="week-grid-header"><span className="week-time-header">Local time</span>{calendarWeekDays.map((day) => <span key={day}>{day.slice(0, 3)}<small>{day}</small></span>)}</div><div className="week-grid-body"><div className="week-time-rail">{calendarHours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>{calendarWeekDays.map((day) => <div className="week-day-column" key={day}>{calendarHours.map((hour) => <div className="week-hour-cell" key={hour} />)}{layers.plan && (dayPlanWindows.get(day) ?? []).map((window) => { const style = blockStyle(window.startMinutes, window.endMinutes, 42); return <div className={`week-plan-window week-plan-window-${window.status}`} key={window.id} style={style} title={`${window.purpose} window · ${window.summary}`}><span className="week-plan-window-time">{window.startTime}–{window.endTime}</span><strong>Plan · {window.purpose}</strong><small>{window.summary}</small></div>; })}{layers.intents && (daySlots.get(day) ?? []).map((slot) => { const style = blockStyle(timeToMinutes(slot.time), timeToMinutes(splitConsiderationWindow(slot.executionWindow, slot.time).end), 54); const target = state.presences.find((item) => item.id === slot.presence); return <button type="button" key={slot.id} className={`week-intent objective-${objectiveTone(slot.objective)}`} style={style} onClick={() => onEdit(slot)} aria-label={`Edit ${slot.label}, ${slot.day} at ${slot.time}`} title={`${slot.label} · ${slot.day} ${slot.time} · ${considerationSummary(slot.time, slot.executionWindow)}`}><span className="week-intent-time">{slot.time}</span><strong>{slot.label}</strong><small>{target?.name ?? presenceName} · {objectiveLabel(slot.objective)}</small><em>{slot.mode === "auto" ? "Auto" : "Review"}</em></button>; })}{layers.assignments && (dayAssignments.get(day) ?? []).map((assignment) => { const schedule = assignment.schedule!; const objective = assignmentObjective(assignment); const style = blockStyle(timeToMinutes(schedule.time), timeToMinutes(splitConsiderationWindow(schedule.executionWindow, schedule.time).end), 58); const proc = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId, day); const status = scheduleOccurrenceStatus(assignment, day, proc); const progress = assignmentScheduleProgress(assignment); return <button type="button" key={assignment.id} className={`week-assignment${proc.isProcessing ? " is-processing week-assignment-processing" : ""}`} style={style} onClick={() => onAssignment(assignment)} aria-label={`Open Assignment ${assignment.instruction}, ${schedule.day} at ${schedule.time}`} title={`Open Assignment details · ${assignment.instruction} · ${schedule.day} ${schedule.time}`} aria-busy={proc.isProcessing}><span className="week-intent-time">{schedule.time}</span><strong>Assignment</strong><span className="week-assignment-objective">{objectiveLabel(objective)}</span><small>{assignment.instruction}</small>{proc.isProcessing ? <em className="week-assignment-processing-tag"><LoaderCircle size={8} className="spin" /> {progress} · {proc.phaseLabel}…</em> : <em>{progress} · {status}</em>}</button>; })}</div>)}</div></div></div>}
+        {hasFlexibleItems && <section className="week-unscheduled week-flexible-assignments" aria-label="Flexible assignment windows"><div className="week-unscheduled-heading"><div><SectionEyebrow>Flexible windows</SectionEyebrow><h3>Responsibilities within a few hours</h3></div><span>{flexibleAssignments.length} item{flexibleAssignments.length === 1 ? "" : "s"}</span></div><p>These responsibilities are time-bounded but event-driven. The Agent can take the next useful step within a few hours when the opportunity is right.</p><div className="week-unscheduled-list">{flexibleAssignments.map((assignment) => { const objective = assignmentObjective(assignment); const proc = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId); const status = proc.isProcessing ? `Processing (${proc.phaseLabel})` : assignment.status === "draft" ? "Not started" : assignment.status.replaceAll("_", " "); return <button type="button" key={assignment.id} className={`week-unscheduled-item${proc.isProcessing ? " is-processing" : ""}`} onClick={() => onAssignment(assignment)} aria-label={`Open flexible Assignment ${assignment.instruction}`} aria-busy={proc.isProcessing}><span className="week-unscheduled-mark" aria-hidden="true" /><span className="week-unscheduled-copy"><span className="week-unscheduled-kicker"><strong>{flexibleAssignmentTiming}</strong><span className="week-assignment-objective">{objectiveLabel(objective)}</span>{proc.isProcessing && <span>Working now · {proc.phaseLabel}</span>}</span><strong className="week-unscheduled-title">{cleanUserFacingAssignmentInstruction(assignment.instruction)}</strong><small>{assignmentScheduleProgress(assignment)} · {status}</small></span><ChevronRight size={16} aria-hidden="true" /></button>; })}</div></section>}
+      </>}
+      {hasDatedItems && <div className="week-calendar-compact" aria-label="Compact weekly schedule">{compactDays.map(({ day, items }) => <section className="compact-calendar-day" key={day}><div className="compact-calendar-day-label"><strong>{day.slice(0, 3)}</strong><span>{day}</span></div><div className="compact-calendar-items">{items.map(renderCompactItem)}</div></section>)}</div>}
     </section>
   );
 }
@@ -15271,9 +16088,9 @@ function ConversationStyleSettings({ presence, state, mutate, setView }: { prese
   const [feedback, setFeedback] = useState("");
   const fileRef = useRef<HTMLInputElement>(null);
   const selected = styles.find((style) => style.id === selectedId) ?? active;
-  useEffect(() => { setSelectedId(active.id); }, [active.id]);
+  const customVoiceSelected = selectedId === CUSTOM_CONVERSATION_STYLE_ID;
   const choose = (style: ConversationStyleProfile) => { setSelectedId(style.id); setCaseIndex(0); setFeedback(""); };
-  const useStyle = async () => { const saved = await mutate({ type: "setConversationStyle", presenceId: presence.id, styleId: selected.id }); setFeedback(saved ? `${selected.name} is now active for ${presence.name}.` : "Couldn’t save this style yet."); };
+  const applyStyle = async () => { const saved = await mutate({ type: "setConversationStyle", presenceId: presence.id, styleId: selected.id }); setFeedback(saved ? `${selected.name} is now active for ${presence.name}.` : "Couldn’t save this style yet."); };
   const importStyle = (file: File) => {
     const reader = new FileReader();
     reader.onload = async () => {
@@ -15290,18 +16107,19 @@ function ConversationStyleSettings({ presence, state, mutate, setView }: { prese
   const preview = selected.previews[caseIndex % selected.previews.length]!;
   return <section className="settings-card conversation-style-card" id="section-style" aria-labelledby="conversation-style-title">
     <div className="section-heading compact"><div><SectionEyebrow>Conversational style</SectionEyebrow><h2 id="conversation-style-title">How should {presence.name} sound?</h2></div><Sparkles size={17} /></div>
-    <p className="muted">Choose a written voice for social turns. It changes expression, not the Agent’s meaning, judgment, permissions, or facts. Browse the same everyday moments so the difference is easy to feel.</p>
+    <p className="muted">Choose a written voice for social turns. It changes expression, not the Agent’s meaning, judgment, permissions, or facts. Every voice uses plain punctuation by default, including no em or en dashes. Browse the same everyday moments so the difference is easy to feel.</p>
     <div className="conversation-style-picker" role="list" aria-label="Conversational styles">
-      {styles.map((style) => <button type="button" key={style.id} className={`conversation-style-option ${style.id === selected.id ? "selected" : ""}`} onClick={() => choose(style)} role="listitem" aria-pressed={style.id === selected.id}><span className="conversation-style-orbit">{style.name.slice(0, 1)}</span><span><strong>{style.name}</strong><small>{style.description}</small></span></button>)}
+      {styles.map((style) => <div role="listitem" key={style.id}><button type="button" className={`conversation-style-option ${style.id === selected.id ? "selected" : ""}`} onClick={() => choose(style)} aria-pressed={style.id === selected.id}><span className="conversation-style-orbit">{style.name.slice(0, 1)}</span><span><strong>{style.name}</strong><small>{style.description}</small></span></button></div>)}
+      <div role="listitem"><button type="button" className={`conversation-style-option custom ${customVoiceSelected ? "selected" : ""}`} onClick={() => { setSelectedId(CUSTOM_CONVERSATION_STYLE_ID); setCaseIndex(0); setFeedback(""); }} aria-pressed={customVoiceSelected}><span className="conversation-style-orbit">+</span><span><strong>Custom Voice</strong><small>Bring your own StylePrint and shape how this Presence sounds.</small></span></button></div>
     </div>
-    <div className="conversation-style-preview">
+    {!customVoiceSelected && <div className="conversation-style-preview">
       <div className="conversation-style-preview-header"><div><span className="style-preview-kicker">Preview this style · X</span><h3>{selected.name}</h3><p>{selected.description}</p></div><span className="conversation-style-status">{selected.id === active.id ? "Active" : "Preview"}</span></div>
       <div className="conversation-style-case-tabs">{selected.previews.map((item, index) => <button type="button" key={item.id} className={index === caseIndex ? "selected" : ""} onClick={() => setCaseIndex(index)}>{item.label}</button>)}</div>
       <div className="conversation-style-message"><span>Someone says</span><p>{preview.input}</p></div>
       <div className="conversation-style-reply"><span>{presence.name} replies</span><p>{preview.reply}</p></div>
-      <div className="conversation-style-actions"><button type="button" className="button button-secondary" onClick={() => setCaseIndex((index) => (index + 1) % selected.previews.length)}><RotateCcw size={14} /> Try another example</button><button type="button" className="button button-primary" onClick={() => void useStyle()}><Check size={14} /> Use this style</button>{setView && <button type="button" className="button button-quiet" onClick={() => setView("rehearsal")}>Preview as {presence.name}</button>}</div>
-    </div>
-    <div className="conversation-style-custom"><div><SectionEyebrow>Custom alternative</SectionEyebrow><h3>Use your own written voice</h3><p className="muted">Ask an external AI agent to create a StylePrint from your own X posts or email, then import the JSON here. We keep it as expression guidance, separate from Knowledge.</p></div><div className="conversation-style-custom-actions"><button type="button" className="button button-secondary" onClick={() => void copyPrompt()}><Copy size={14} /> Copy generator prompt</button><button type="button" className="button button-secondary" onClick={() => fileRef.current?.click()}><FileText size={14} /> Import StylePrint</button><input ref={fileRef} hidden type="file" accept=".json,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) importStyle(file); event.target.value = ""; }} /></div></div>
+      <div className="conversation-style-actions"><button type="button" className="button button-secondary" onClick={() => setCaseIndex((index) => (index + 1) % selected.previews.length)}><RotateCcw size={14} /> Try another example</button><button type="button" className="button button-primary" onClick={() => void applyStyle()}><Check size={14} /> Use this style</button>{setView && <button type="button" className="button button-quiet" onClick={() => setView("rehearsal")}>Preview as {presence.name}</button>}</div>
+    </div>}
+    {customVoiceSelected && <div className="conversation-style-custom"><div><SectionEyebrow>Custom alternative</SectionEyebrow><h3>Use your own written voice</h3><p className="muted">Ask an external AI agent to create a StylePrint from your own X posts or email, then import the JSON here. We keep it as expression guidance, separate from Knowledge.</p></div><div className="conversation-style-custom-actions"><button type="button" className="button button-secondary" onClick={() => void copyPrompt()}><Copy size={14} /> Copy generator prompt</button><button type="button" className="button button-secondary" onClick={() => fileRef.current?.click()}><FileText size={14} /> Import StylePrint</button><input ref={fileRef} hidden type="file" accept=".json,application/json" onChange={(event) => { const file = event.target.files?.[0]; if (file) importStyle(file); event.target.value = ""; }} /></div></div>}
     {feedback && <p className="conversation-style-feedback" role="status">{feedback}</p>}
   </section>;
 }
@@ -15639,6 +16457,9 @@ function PresenceView({
               <button type="button" className={`settings-nav-item ${activeNav === "request-access" ? "active" : ""}`} onClick={() => scrollToSection("section-request-access", "request-access")}>
                 <span className="nav-icon">🛡️</span> Public Request Access
               </button>
+              <button type="button" className={`settings-nav-item ${activeNav === "dms" ? "active" : ""}`} onClick={() => scrollToSection("section-dms", "dms")}>
+                <span className="nav-icon">💬</span> DMs / Private Messages
+              </button>
               <button type="button" className={`settings-nav-item ${activeNav === "brief" ? "active" : ""}`} onClick={() => scrollToSection("section-brief", "brief")}>
                 <span className="nav-icon">🎯</span> Presence Brief
               </button>
@@ -15756,7 +16577,7 @@ function PresenceView({
             </div>
           </section>
 
-          <ConversationStyleSettings presence={presence} state={state} mutate={mutate} setView={setView} />
+          <ConversationStyleSettings key={`${presence.id}:${presence.conversationStyleId ?? "default"}`} presence={presence} state={state} mutate={mutate} setView={setView} />
 
           <section className="settings-card public-self-card">
             <div className="section-heading compact">
@@ -16018,7 +16839,8 @@ function PresenceView({
             )}
           </section>
 
-          <PresenceRequestPolicySettings presence={presence} mutate={mutate} />
+          <PresenceRequestPolicySettings key={`${presence.id}:${presence.requestPolicy?.updatedAt ?? "default"}`} presence={presence} mutate={mutate} />
+          <PresenceDMSettings key={`${presence.id}:${presence.dmInstructions?.updatedAt ?? "default"}`} presence={presence} mutate={mutate} />
 
           {/* Content & Discovery Sources */}
           <section className="settings-card sources-settings-card" id="section-sources">

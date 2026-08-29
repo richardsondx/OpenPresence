@@ -1,0 +1,7 @@
+interface:
+  display_name: "OpenPresence Performance"
+  short_description: "Measure and improve runtime performance safely"
+  default_prompt: "Use $openpresence-performance to diagnose and fix the highest-impact performance or runtime reliability bottleneck in this OpenPresence app."
+
+policy:
+  allow_implicit_invocation: true

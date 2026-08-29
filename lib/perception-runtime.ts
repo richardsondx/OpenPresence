@@ -86,6 +86,35 @@ async function extractGifFrames(source: Buffer) {
   return Promise.all(indexes.map((page) => sharp(source, { animated: false, page }).png().toBuffer()));
 }
 
+async function normalizeStillImage(source: Buffer) {
+  try {
+    return await sharp(source).png().toBuffer();
+  } catch (sharpError) {
+    // Sharp covers the common formats. ImageMagick is a deliberately narrow
+    // fallback for still-image variants that the local libvips build cannot
+    // decode (for example some HEIC, JXL, JP2, or SVG files). The original
+    // bytes remain in the Asset Store; only the vision payload is normalized.
+    return new Promise<Buffer>((resolve, reject) => {
+      const child = spawn("magick", ["-", "png:-"], { stdio: ["pipe", "pipe", "pipe"] });
+      const chunks: Buffer[] = [];
+      let errorText = "";
+      const timer = setTimeout(() => {
+        child.kill("SIGKILL");
+        reject(new Error("Still-image normalization timed out."));
+      }, 12_000);
+      child.stdout.on("data", (chunk: Buffer) => chunks.push(chunk));
+      child.stderr.on("data", (chunk: Buffer) => { errorText += chunk.toString(); });
+      child.on("error", (error) => { clearTimeout(timer); reject(error); });
+      child.on("close", (code) => {
+        clearTimeout(timer);
+        if (code === 0 && chunks.length) resolve(Buffer.concat(chunks));
+        else reject(new Error(errorText.trim() || (sharpError instanceof Error ? sharpError.message : "The still image could not be decoded.")));
+      });
+      child.stdin.end(source);
+    });
+  }
+}
+
 async function composeFrames(frames: Buffer[]) {
   const tileSize = 512;
   const tiles = await Promise.all(frames.map((frame) => sharp(frame).resize({ width: tileSize, height: tileSize, fit: "contain", background: "#ffffff" }).png().toBuffer()));
@@ -113,7 +142,7 @@ async function imageParts(asset: Asset) {
   // ffmpeg and incorrectly reporting that the video is unreadable.
   const isVideoPreview = asset.type === "video" && Boolean(asset.provenance.sourceUrl?.match(/pbs\.twimg\.com\/(?:amplify_video_thumb|ext_tw_video_thumb|media)\//i));
   try {
-    const frames = asset.type === "video" && !isVideoPreview ? await extractVideoFrames(source) : asset.type === "gif" ? await extractGifFrames(source) : [source];
+    const frames = asset.type === "video" && !isVideoPreview ? await extractVideoFrames(source) : asset.type === "gif" ? await extractGifFrames(source) : [await normalizeStillImage(source)];
     if (!frames.length) return undefined;
     const resized = await composeFrames(frames);
     return { mimeType: "image/png", data: resized.toString("base64") };

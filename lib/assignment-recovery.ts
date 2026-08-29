@@ -73,6 +73,7 @@ export function recoverStaleAssignmentRuns(
         agentId: run.agentId,
         presenceId: run.presenceId,
         sessionId: run.sessionId,
+        pursuitWindowId: run.pursuitWindowId,
         status: "queued",
         currentStage: "candidate_review",
         attempts: run.attempts + 1,

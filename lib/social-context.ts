@@ -56,6 +56,13 @@ export interface SocialMediaEvidence {
   };
 }
 
+export interface SocialObjectMediaEvidence {
+  objectRef: EntityRef;
+  relation: "target" | "thread" | "referenced";
+  owner?: MirrorObject["author"];
+  media: SocialMediaEvidence[];
+}
+
 export interface SocialPresenceAction {
   socialIntentId: string;
   affordance: string;
@@ -97,6 +104,9 @@ export interface SocialEvidenceContext {
     missingExternalRefs: string[];
   };
   observedWorld: SocialEvidenceObject[];
+  /** Referenced quote cards are separate from reply ancestry, but remain
+   * first-class evidence so cognition can identify their author and claims. */
+  referencedWorld: SocialEvidenceObject[];
   authorHistory: SocialAuthorHistory[];
   priorPresenceActions: SocialPresenceAction[];
   priorPlannerActs: SocialPlannerActRecord[];
@@ -107,6 +117,8 @@ export interface SocialEvidenceContext {
     priorNetworkSearches: Array<{ id: string; status: string; query: string; limitation?: string; source: "network_search" }>;
   };
   media: SocialMediaEvidence[];
+  /** Media remains attached to its owning social object and author. */
+  contextMedia: SocialObjectMediaEvidence[];
   availableActions: string[];
   executionEnvelope: Record<string, string>;
   networkSearch?: {
@@ -207,13 +219,18 @@ export function buildSocialEvidenceContext(input: {
   const eligibleMirror = input.mirror.filter((item) => isCognitionEligibleMirrorObject(item, input.presence.language));
   const eligibleRelatedMirror = input.relatedMirror.filter((item) => isCognitionEligibleMirrorObject(item, input.presence.language));
   const eligibleInbound = input.inbound && isCognitionEligibleMirrorObject(input.inbound, input.presence.language) ? input.inbound : undefined;
+  const eligibleReferencedMirror = (input.threadContext?.referencedObjects ?? []).filter((item) => isCognitionEligibleMirrorObject(item, input.presence.language));
   const targetId = eligibleInbound?.externalRef.id;
   const target = eligibleInbound ? evidenceObject(eligibleInbound, targetId) : undefined;
-  const authorIds = new Set(eligibleInbound?.author?.externalRef?.id
-    ? [eligibleInbound.author.externalRef.id]
-    : eligibleMirror.filter((item) => item.actorPresenceId !== input.presence.id && item.author?.externalRef?.id).map((item) => item.author!.externalRef!.id));
+  const authorIds = new Set([
+    ...(eligibleInbound?.author?.externalRef?.id ? [eligibleInbound.author.externalRef.id] : []),
+    ...eligibleMirror.filter((item) => item.actorPresenceId !== input.presence.id && item.author?.externalRef?.id).map((item) => item.author!.externalRef!.id!),
+    ...eligibleReferencedMirror.filter((item) => item.author?.externalRef?.id).map((item) => item.author!.externalRef!.id!),
+  ]);
+  const evidenceMirror = [...new Map([...eligibleRelatedMirror, ...eligibleReferencedMirror].map((item) => [item.id, item])).values()];
+  const referencedIds = new Set(eligibleReferencedMirror.map((item) => item.id));
   const authorHistory = [...authorIds].map((authorId) => {
-    const contributions = eligibleMirror
+    const contributions = evidenceMirror
       .filter((item) => item.author?.externalRef?.id === authorId)
       .sort(latestMirrorFirst)
       .slice(0, 20);
@@ -272,7 +289,8 @@ export function buildSocialEvidenceContext(input: {
       objectRefs: input.threadContext.objects.map((item) => item.externalRef),
       missingExternalRefs: input.threadContext.missingExternalRefs,
     } : undefined,
-    observedWorld: eligibleRelatedMirror.map((item) => evidenceObject(item, targetId)),
+    observedWorld: evidenceMirror.map((item) => evidenceObject(item, targetId)),
+    referencedWorld: eligibleReferencedMirror.map((item) => evidenceObject(item, targetId)),
     authorHistory,
     priorPresenceActions: actionsFor(input.source, input.session, input.presence, eligibleInbound),
     priorPlannerActs,
@@ -283,6 +301,12 @@ export function buildSocialEvidenceContext(input: {
       priorNetworkSearches,
     },
     media: mediaEvidence(input.source.assets, input.source.perceptions, eligibleInbound),
+    contextMedia: evidenceMirror.filter((item) => item.assetRefs?.length).map((item) => ({
+      objectRef: item.externalRef,
+      relation: item.id === eligibleInbound?.id ? "target" as const : referencedIds.has(item.id) ? "referenced" as const : "thread" as const,
+      owner: item.author,
+      media: mediaEvidence(input.source.assets, input.source.perceptions, item),
+    })),
     availableActions: input.availableActions,
     executionEnvelope: Object.fromEntries(Object.entries(input.presence.execution ?? {})),
     networkSearch,

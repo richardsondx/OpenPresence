@@ -64,6 +64,15 @@ describe("shared social thread context", () => {
     expect(context.status).toBe("complete");
   });
 
+  it("hydrates quoted references for a standalone post when explicitly requested", async () => {
+    const quoted = object("quoted", { author: { displayName: "Edward", handle: "@edward40e" }, content: { text: "The quoted project context." } });
+    const focal = object("focal", { referencedExternalRefs: [quoted.externalRef] });
+    const fetchObjects = vi.fn(async (refs: EntityRef[]) => refs[0]?.id === "quoted" ? [quoted] : []);
+    const hydrated = await hydrateThreadContext({ mirror: [focal], observedObject: focal, fetchObjects, includeReferences: true });
+    expect(fetchObjects).toHaveBeenCalledWith([quoted.externalRef]);
+    expect(hydrated.objects.map((item) => item.author?.handle)).toEqual(["@edward40e"]);
+  });
+
   it("hydrates missing ancestors once and returns connector evidence for persistence", async () => {
     const root = object("root", { conversationExternalRef: "root" });
     const parent = object("parent", { parentExternalRef: root.externalRef, conversationExternalRef: "root" });

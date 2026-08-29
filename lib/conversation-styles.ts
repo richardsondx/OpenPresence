@@ -1,6 +1,8 @@
 import type { ConversationStyleDefinition, ConversationStylePreview, ConversationStyleProfile, OpenPresenceState } from "./types";
 
 export const DEFAULT_CONVERSATION_STYLE_ID = "kairos";
+export const CUSTOM_CONVERSATION_STYLE_ID = "custom-voice";
+export const DEFAULT_CONVERSATION_STYLE_ANTI_PATTERNS = ["em dashes", "en dashes"] as const;
 
 const cases: Array<Pick<ConversationStylePreview, "id" | "label" | "input">> = [
   { id: "good-news", label: "Good news", input: "I finally got the job!!" },
@@ -11,7 +13,12 @@ const cases: Array<Pick<ConversationStylePreview, "id" | "label" | "input">> = [
 
 const make = (id: string, name: string, description: string, corePrinciple: string, conversationSignature: string, style: Partial<ConversationStyleDefinition>, replies: string[]): ConversationStyleProfile => ({
   id, name, description, source: "built_in", channel: "x", schema: "taste.conversation_style.v1",
-  style: { corePrinciple, conversationSignature, ...style },
+  style: {
+    corePrinciple,
+    conversationSignature,
+    ...style,
+    antiPatterns: [...new Set([...DEFAULT_CONVERSATION_STYLE_ANTI_PATTERNS, ...(style.antiPatterns ?? [])])],
+  },
   previews: cases.map((item, index) => ({ ...item, reply: replies[index] ?? replies[0] ?? "That is worth sitting with." })),
 });
 
@@ -56,6 +63,7 @@ export function compileConversationStylePrompt(style: ConversationStyleProfile):
     compact(style.style.humorMoves) && `Humor: ${compact(style.style.humorMoves)}`,
     compact(style.style.formatting) && `Formatting: ${compact(style.style.formatting)}`,
     compact(style.style.antiPatterns) && `Avoid: ${compact(style.style.antiPatterns)}`,
+    "Default punctuation: avoid em dashes and en dashes; use commas, periods, or parentheses instead.",
     "This controls expression only. Meaning files, current evidence, safety, privacy, and authority remain higher priority. Do not imitate a source person's identity or distinctive phrases.",
   ].filter(Boolean).join("\n");
 }
@@ -71,7 +79,7 @@ export function normalizeImportedConversationStyle(raw: unknown): ConversationSt
   const definition: ConversationStyleDefinition = {
     corePrinciple: text(style.corePrinciple, "Make the social move clearly and stop when the contribution is complete."),
     conversationSignature: text(style.conversationSignature, text(packet.description, "A natural, human conversational style.")),
-    postMoves: list(style.postMoves), replyMoves: list(style.replyMoves), acknowledgmentMoves: list(style.acknowledgmentMoves), disagreementMoves: list(style.disagreementMoves), humorMoves: list(style.humorMoves), questionMoves: list(style.questionMoves), closureMoves: list(style.closureMoves), languageTexture: list(style.languageTexture), formatting: list(style.formatting), antiPatterns: list(style.antiPatterns), boundaries: list(style.boundaries),
+    postMoves: list(style.postMoves), replyMoves: list(style.replyMoves), acknowledgmentMoves: list(style.acknowledgmentMoves), disagreementMoves: list(style.disagreementMoves), humorMoves: list(style.humorMoves), questionMoves: list(style.questionMoves), closureMoves: list(style.closureMoves), languageTexture: list(style.languageTexture), formatting: list(style.formatting), antiPatterns: [...new Set([...DEFAULT_CONVERSATION_STYLE_ANTI_PATTERNS, ...(list(style.antiPatterns) ?? [])])], boundaries: list(style.boundaries),
   };
   return { id, name, description: text(packet.description, definition.conversationSignature), source: "custom", channel: "x", schema: "taste.conversation_style.v1", style: definition, previews: cases.map((item) => ({ ...item, reply: "Preview this custom style in Rehearsal." })), createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() };
 }

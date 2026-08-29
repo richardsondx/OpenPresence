@@ -167,7 +167,7 @@ export function readOperationalHealth(presenceId?: string, now = new Date()): Op
       Boolean(assignment.lastOutcome),
     );
     assignmentNeedsOperator = Boolean(blockedAssignment);
-    if (blockedAssignment) assignmentNeedsOperatorSummary = `Assignment “${blockedAssignment.title}” needs you: ${blockedAssignment.lastOutcome?.message ?? blockedAssignment.work?.blockedReason ?? "it cannot continue automatically"} Open Schedule to revise, retry, or close it.`;
+    if (blockedAssignment) assignmentNeedsOperatorSummary = `Assignment “${blockedAssignment.title}” needs you: ${blockedAssignment.lastOutcome?.message ?? blockedAssignment.work?.blockedReason ?? "it cannot continue automatically"} Retry or close it here, or open Schedule for details.`;
     const pendingStatuses = new Set(["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"]);
     const bridges = presenceId ? readBridgeHealthForPresence(presenceId) : [];
     // `bridges` already contains the indexed configuration plus live health;

@@ -43,6 +43,28 @@ function publishingFixture(summary: string, execution: "auto" | "review" = "auto
 }
 
 describe("Publishing Plan", () => {
+  it("treats Genny's publishing responsibility as a shared, persisted assignment", () => {
+    let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { publishingInitiative: { ...state.presence!.publishingInitiative, mode: "pace", target: { count: 2, period: "week" } } } });
+    state = replacePublishingPlan(state, { presenceId: state.presence!.id, draft: planWindow(new Date().toISOString(), "Develop one useful, evidence-led contribution.") });
+    const assignmentId = state.presence!.publishingInitiative.assignmentId;
+    expect(assignmentId).toBeDefined();
+    expect(state.assignments.find((item) => item.id === assignmentId)).toMatchObject({ origin: "publishing_initiative", createdBy: "agent", status: "active" });
+
+    const paused = applyOperation(state, { type: "pauseAssignment", id: assignmentId! });
+    expect(paused.assignments.find((item) => item.id === assignmentId)).toMatchObject({ status: "paused" });
+    expect(paused.publishingPlans[0]).toMatchObject({ status: "paused" });
+    expect(compileAgendaWork(paused, state.presence!.id).workItems?.some((item) => item.assignmentId === assignmentId)).toBe(false);
+
+    const resumed = applyOperation(paused, { type: "resumeAssignment", id: assignmentId! });
+    expect(resumed.assignments.find((item) => item.id === assignmentId)).toMatchObject({ status: "active" });
+    expect(resumed.publishingPlans[0]).toMatchObject({ status: "active" });
+
+    const cancelled = applyOperation(resumed, { type: "cancelAssignment", id: assignmentId! });
+    expect(cancelled.presence?.publishingInitiative).toMatchObject({ mode: "off" });
+    expect(cancelled.publishingPlans[0]).toMatchObject({ status: "superseded" });
+  });
+
   it("persists a Presence-scoped plan without turning windows into posts", () => {
     let state = createAgent(input);
     const presence = state.presence!;

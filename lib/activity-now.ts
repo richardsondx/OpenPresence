@@ -37,6 +37,7 @@ function assignmentSteps(run: NonNullable<OpenPresenceState["assignmentRuns"]>[n
 
 function wakePurpose(wake?: ScheduledWake) {
   if (!wake) return undefined;
+  if (wake.kind === "verification") return "Confirm delivery";
   const payload = wake.payload as { triggers?: string[]; scope?: string } | undefined;
   const triggers = payload?.triggers ?? [];
   if (triggers.includes("inbound_event")) return "Review new social activity";
@@ -66,10 +67,23 @@ function runDetail(run: OperationalRun, steps: AttentionStep[]) {
   return `A bounded pass is actively working through ${trigger}.`;
 }
 
+function truthfulAttentionSteps(state: OpenPresenceState, episode?: NonNullable<OpenPresenceState["attentionEpisodes"]>[number]) {
+  const steps = episode?.steps ?? [];
+  if (!episode) return steps;
+  const executions = state.executions.filter((execution) => execution.attentionEpisodeId === episode.id || episode.executionIds.includes(execution.id));
+  const reachedDelivery = executions.some((execution) => ["succeeded", "claimed", "executing", "verification-pending"].includes(execution.status));
+  if (reachedDelivery) return steps;
+  return steps
+    .filter((step) => step.kind !== "verifying")
+    .map((step) => step.label === "Delivery attempted"
+      ? { ...step, label: "No delivery attempted", detail: "No selected action reached the channel, so nothing was sent." }
+      : step);
+}
+
 export function deriveActivityNow(state: OpenPresenceState, presenceId: string, now = new Date()): ActivityNowProjection {
   const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   const runs = (state.operationalRuns ?? []).filter((run) => run.presenceId === presenceId);
-  const activeRun = latest(runs.filter((run) => ACTIVE_RUN_STATES.has(run.state)), (run) => run.lastProgressAt ?? run.startedAt ?? run.createdAt);
+  const activeRun = latest(runs.filter((run) => run.kind !== "verification" && ACTIVE_RUN_STATES.has(run.state)), (run) => run.lastProgressAt ?? run.startedAt ?? run.createdAt);
   const waitingAttentionRun = latest(runs.filter((run) => run.kind === "attention" && run.state === "waiting"), (run) => run.lastProgressAt ?? run.startedAt ?? run.createdAt);
   const activeAssignmentRun = latest((state.assignmentRuns ?? []).filter((run) => run.presenceId === presenceId && ["researching", "selecting", "writing", "delivering"].includes(run.status)), (run) => run.lastProgressAt ?? run.updatedAt);
   const queuedAssignmentRun = latest((state.assignmentRuns ?? []).filter((run) => run.presenceId === presenceId && run.status === "queued"), (run) => run.updatedAt);
@@ -92,7 +106,7 @@ export function deriveActivityNow(state: OpenPresenceState, presenceId: string, 
     && ["accepted", "planning", "active", "working", "awaiting_execution"].includes(assignment.status)
     && !(assignment.work?.maxAttempts && assignment.work.attempts >= assignment.work.maxAttempts)
     && assignment.nextDueAt && new Date(assignment.nextDueAt).getTime() <= now.getTime());
-  const steps = activeEpisode?.steps ?? [];
+  const steps = truthfulAttentionSteps(state, activeEpisode);
 
   if (presence?.status === "paused") return {
     presenceId,
@@ -127,22 +141,44 @@ export function deriveActivityNow(state: OpenPresenceState, presenceId: string, 
     };
   }
 
-  if (waitingAttentionRun) return {
-    presenceId,
-    state: "resting",
-    title: waitingAttentionRun.stage === "verifying" ? "Waiting for confirmation" : "Waiting for authorized delivery",
-    detail: "No cognition worker is running. The selected action is waiting on its delivery or verification route.",
-    since: waitingAttentionRun.startedAt ?? waitingAttentionRun.createdAt,
-    nextWakeAt: pendingWake?.wakeAt,
-    nextWakePurpose: wakePurpose(pendingWake),
-    activeRunId: waitingAttentionRun.id,
-    activeEpisodeId: waitingAttentionRun.attentionEpisodeId,
-    steps: waitingAttentionRun.attentionEpisodeId
-      ? state.attentionEpisodes?.find((episode) => episode.id === waitingAttentionRun.attentionEpisodeId)?.steps ?? []
-      : [],
-    pendingInboundCount,
-    pendingNudgeCount: pendingNudges.length,
-  };
+  if (waitingAttentionRun) {
+    // A non-retryable verification result is still intentionally ambiguous,
+    // but it is paused on an operator/provider dependency rather than
+    // silently looking like an abandoned worker.
+    const waitingExecutions = state.executions.filter((execution) =>
+      execution.presenceId === presenceId
+      && execution.attentionEpisodeId === waitingAttentionRun.attentionEpisodeId
+      && execution.status === "verification-pending",
+    );
+    const verificationPaused = waitingExecutions.some((execution) => execution.failure?.retryable === false);
+    const waitingEpisode = waitingAttentionRun.attentionEpisodeId
+      ? state.attentionEpisodes?.find((episode) => episode.id === waitingAttentionRun.attentionEpisodeId)
+      : undefined;
+    const waitingSteps = truthfulAttentionSteps(state, waitingEpisode);
+    const waitingEpisodeExecutions = waitingEpisode
+      ? state.executions.filter((execution) => execution.attentionEpisodeId === waitingEpisode.id || waitingEpisode.executionIds.includes(execution.id))
+      : [];
+    const deliveryReached = waitingEpisodeExecutions.some((execution) => ["succeeded", "claimed", "executing", "verification-pending"].includes(execution.status));
+    const deliveryWaiting = waitingEpisodeExecutions.filter((execution) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued"].includes(execution.status)).length;
+    return {
+      presenceId,
+      state: "resting",
+      title: deliveryReached && waitingAttentionRun.stage === "verifying" ? "Waiting for confirmation" : deliveryWaiting ? "Waiting for authorized delivery" : "No delivery was attempted",
+      detail: verificationPaused
+        ? "Confirmation is paused until the authorized verification route is available. Review the runtime notice to continue."
+        : deliveryWaiting
+          ? `${deliveryWaiting} selected action${deliveryWaiting === 1 ? " is" : "s are"} still waiting for an authorized delivery route. Nothing has reached the channel yet.`
+          : "The social world did not produce a selected action that reached delivery. Nothing was sent.",
+      since: waitingAttentionRun.startedAt ?? waitingAttentionRun.createdAt,
+      nextWakeAt: pendingWake?.wakeAt,
+      nextWakePurpose: wakePurpose(pendingWake),
+      activeRunId: waitingAttentionRun.id,
+      activeEpisodeId: waitingAttentionRun.attentionEpisodeId,
+      steps: waitingSteps,
+      pendingInboundCount,
+      pendingNudgeCount: pendingNudges.length,
+    };
+  }
 
   if (activeAssignmentRun) {
     const progressAt = activeAssignmentRun.heartbeatAt ?? activeAssignmentRun.lastProgressAt ?? activeAssignmentRun.startedAt ?? activeAssignmentRun.createdAt;

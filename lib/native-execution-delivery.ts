@@ -5,18 +5,38 @@ import {
   completeNativeExecution,
   failNativeExecution,
   isMentionRestrictedError,
+  isPersonBlockingError,
   languageValidationForExecution,
   markNativeConnectionNeedsAttention,
   nativeDeliveryFailureIsConnectionScoped,
+  existingPublicActionExecution,
   recordResourceUsageEvent,
   recordRuntimeEvent,
+  recordPersonBlockedFromExecution,
+  cancelExecutionForBlockedTarget,
+  targetIsBlockedByPerson,
   rerouteExecutionToBrowser,
   targetLanguageValidationForExecution,
+  isWatchPausedForExecution,
 } from "./runtime";
 import { followXUser, likeXPost, publishSealedXPost, readNativeXCredentials, repostXPost } from "./x";
 import { isTestRuntime } from "./test-runtime";
 import { PublicationSecurityError, sealExecutionForDelivery } from "./publication-security";
+import { detectDuplicateVerifiedExecutionOutcomes } from "./public-action-safety";
 import type { OpenPresenceState } from "./types";
+import { readStateSnapshotForContext, reservePublicActionDelivery, updatePublicActionDelivery } from "./db";
+import { authorizeAssetSelection } from "./asset-library";
+
+function cancelDuplicateDelivery(state: OpenPresenceState, executionId: string, representedBy: string) {
+  const execution = state.executions.find((item) => item.id === executionId);
+  if (!execution) return;
+  execution.status = "cancelled";
+  execution.failure = { code: "DUPLICATE_EXECUTION", message: `A durable delivery slot for this target is already owned by execution ${representedBy}; no second connector request was sent.`, retryable: false };
+  execution.reviewReason = "This Presence already has a public action in flight or verified for the same target.";
+  execution.updatedAt = new Date().toISOString();
+  const action = state.actions.find((item) => item.executionId === execution.id);
+  if (action) action.status = "failed";
+}
 
 function nativeConnectionCanWrite(connection: OpenPresenceState["nativeConnections"][number], expectedHandle?: string) {
   const identityMatches = !expectedHandle || Boolean(connection.account?.username && connection.account.username.replace(/^@/, "").trim().toLowerCase() === expectedHandle.replace(/^@/, "").trim().toLowerCase());
@@ -38,6 +58,41 @@ function nativeConnectionCanWrite(connection: OpenPresenceState["nativeConnectio
 export async function deliverNativeExecutions(source: OpenPresenceState, executionIds: Set<string>) {
   let next = source;
   for (const execution of next.executions.filter((item) => executionIds.has(item.id) && item.connector === "native" && ((item.status === "queued" && item.mode === "auto") || item.status === "approved"))) {
+    // A long provider/model pass can outlive its original snapshot. Re-read
+    // the durable target ledger immediately before crossing the external write
+    // boundary so a restarted worker cannot replay an action already verified
+    // by an earlier invocation of the same attention episode.
+    const durable = readStateSnapshotForContext({ presenceId: execution.presenceId });
+    if (targetIsBlockedByPerson(durable, execution.presenceId, execution.target) && !execution.operatorDirectiveId) {
+      const blocked = cancelExecutionForBlockedTarget(durable, execution.id);
+      Object.assign(next, blocked);
+      continue;
+    }
+    if (isWatchPausedForExecution(durable, execution)) {
+      const paused = next.executions.find((item) => item.id === execution.id);
+      if (paused) {
+        paused.status = "cancelled";
+        paused.failure = { code: "WATCH_PAUSED", message: "The source Watch was paused before delivery. No external action was attempted.", retryable: false };
+        paused.reviewReason = "The operator paused the source Watch before delivery.";
+        paused.updatedAt = new Date().toISOString();
+        const action = next.actions.find((item) => item.executionId === paused.id);
+        if (action) { action.status = "skipped"; action.reason = "The source Watch was paused before delivery; no external action was attempted."; }
+      }
+      continue;
+    }
+    const duplicateOf = existingPublicActionExecution(durable, execution) ?? existingPublicActionExecution(next, execution);
+    if (duplicateOf) {
+      const duplicate = next.executions.find((item) => item.id === execution.id);
+      if (duplicate) {
+        duplicate.status = "cancelled";
+        duplicate.failure = { code: "DUPLICATE_EXECUTION", message: `This public action is already represented by execution ${duplicateOf.id}; no second connector request was sent.`, retryable: false };
+        duplicate.reviewReason = "A matching public action is already in flight or verified.";
+        duplicate.updatedAt = new Date().toISOString();
+        const action = next.actions.find((item) => item.executionId === duplicate.id);
+        if (action) action.status = "failed";
+      }
+      continue;
+    }
     const expectedHandle = next.presences.find((item) => item.id === execution.presenceId)?.handle ?? next.presence?.handle;
     const connection = next.nativeConnections.find((item) => item.presenceId === execution.presenceId && item.access === "read-write" && nativeConnectionCanWrite(item, expectedHandle));
     // Test and mock runtimes never retrieve live write credentials. The sealed
@@ -51,6 +106,7 @@ export async function deliverNativeExecutions(source: OpenPresenceState, executi
     }
     if (execution.publication) {
       try {
+        authorizeAssetSelection(next, execution.publication.assetIds ?? [], { presenceId: execution.presenceId, requireReady: true });
         const sealed = sealExecutionForDelivery(execution);
         const targetLanguageResult = targetLanguageValidationForExecution(next, execution);
         if (!targetLanguageResult.valid) {
@@ -58,16 +114,26 @@ export async function deliverNativeExecutions(source: OpenPresenceState, executi
           continue;
         }
         if (!credentials) throw new Error("The native X connection is unavailable.");
+        const reservation = reservePublicActionDelivery(execution);
+        if (!reservation.acquired) {
+          cancelDuplicateDelivery(next, execution.id, reservation.slot.executionId);
+          continue;
+        }
         const replyTo = execution.affordance === "x.reply" && execution.target?.type === "x.post" ? execution.target.id : undefined;
         const quoteTweetId = execution.affordance === "x.quote" && execution.target?.type === "x.post" ? execution.target.id : undefined;
         next = recordResourceUsageEvent(next, { presenceId: execution.presenceId, invocationId: execution.id, originKind: execution.assignmentId ? "assignment" : "publishing_initiative", attentionSource: execution.assignmentId ? "assignment" : "publishing", category: "channel_write", action: execution.affordance, provider: "x", usage: { requests: 1 } });
+        updatePublicActionDelivery(execution.id, "handed_off");
         const externalRef = await publishSealedXPost(credentials, sealed.expression, sealed.permit, replyTo, next.assets, quoteTweetId);
+        updatePublicActionDelivery(execution.id, "verified", externalRef);
         next = completeNativeExecution(next, execution.id, externalRef);
+        next = detectDuplicateVerifiedExecutionOutcomes(next, execution.id);
         const publication = execution.publication;
         if (publication?.assetIds?.length) {
-          next.assetUsages = [...publication.assetIds.map((assetId) => ({ id: `asset-usage:${randomUUID()}`, assetId, agentId: next.agent?.id ?? "", presenceId: execution.presenceId, publicationId: publication.id, socialIntentId: execution.socialIntentId, assignmentId: execution.assignmentId, channelId: "x" as const, environment: "live" as const, usageType: "new" as const, publishedAt: new Date().toISOString() })), ...next.assetUsages];
+          const newUsage = publication.assetIds.filter((assetId) => !next.assetUsages.some((usage) => usage.assetId === assetId && usage.publicationId === publication.id && usage.environment === "live")).map((assetId) => ({ id: `asset-usage:${randomUUID()}`, assetId, agentId: next.agent?.id ?? "", presenceId: execution.presenceId, publicationId: publication.id, socialIntentId: execution.socialIntentId, assignmentId: execution.assignmentId, channelId: "x" as const, environment: "live" as const, usageType: "new" as const, publishedAt: new Date().toISOString() }));
+          next.assetUsages = [...newUsage, ...next.assetUsages];
         }
       } catch (error) {
+        updatePublicActionDelivery(execution.id, "uncertain");
         const message = error instanceof Error ? error.message : "X rejected the post.";
         if (error instanceof PublicationSecurityError) {
           const current = next.executions.find((item) => item.id === execution.id);
@@ -78,6 +144,9 @@ export async function deliverNativeExecutions(source: OpenPresenceState, executi
             current.updatedAt = new Date().toISOString();
           }
           next = recordRuntimeEvent(next, execution.presenceId, "Live publication blocked", "The native writer refused an execution that did not cross the sealed Public Expression boundary.", "warning", { executionId: execution.id, intentId: execution.socialIntentId });
+        } else if (isPersonBlockingError(message)) {
+          next = failNativeExecution(next, execution.id, message);
+          next = recordPersonBlockedFromExecution(next, execution.id, message, "native_delivery");
         } else if (isMentionRestrictedError(message)) {
           console.log("Native channel action rejected; learning browser fallback", execution.id);
           next = rerouteExecutionToBrowser(next, execution.id, message);
@@ -96,19 +165,31 @@ export async function deliverNativeExecutions(source: OpenPresenceState, executi
       }
       try {
         if (!credentials || !connection?.account?.id || !execution.target) throw new Error("The native X connection is unavailable or has no authenticated account context.");
+        const reservation = reservePublicActionDelivery(execution);
+        if (!reservation.acquired) {
+          cancelDuplicateDelivery(next, execution.id, reservation.slot.executionId);
+          continue;
+        }
         next = recordResourceUsageEvent(next, { presenceId: execution.presenceId, invocationId: execution.id, originKind: execution.assignmentId ? "assignment" : "standing_intent", attentionSource: execution.assignmentId ? "assignment" : "publishing", category: "channel_write", action: execution.affordance, provider: "x", usage: { requests: 1 } });
+        updatePublicActionDelivery(execution.id, "handed_off");
         let externalRef;
         if (execution.affordance === "x.like" && execution.target.type === "x.post") externalRef = await likeXPost(credentials, connection.account.id, execution.target.id);
         else if (execution.affordance === "x.repost" && execution.target.type === "x.post") externalRef = await repostXPost(credentials, connection.account.id, execution.target.id);
         else if (execution.affordance === "x.follow" && execution.target.type === "x.user") externalRef = await followXUser(credentials, connection.account.id, execution.target.id);
         else throw new Error(`The native X writer does not support ${execution.affordance} with target ${execution.target.type}.`);
+        updatePublicActionDelivery(execution.id, "verified", externalRef);
         next = completeNativeExecution(next, execution.id, externalRef);
+        next = detectDuplicateVerifiedExecutionOutcomes(next, execution.id);
       } catch (error) {
+        updatePublicActionDelivery(execution.id, "uncertain");
         const message = error instanceof Error ? error.message : "X rejected the action.";
         if (error instanceof PublicationSecurityError) {
           const current = next.executions.find((item) => item.id === execution.id);
           if (current) { current.status = "blocked"; current.failure = { code: error.code, message, retryable: false }; current.updatedAt = new Date().toISOString(); }
           next = recordRuntimeEvent(next, execution.presenceId, "Live action blocked", message, "warning", { executionId: execution.id, intentId: execution.socialIntentId });
+        } else if (isPersonBlockingError(message)) {
+          next = failNativeExecution(next, execution.id, message);
+          next = recordPersonBlockedFromExecution(next, execution.id, message, "native_delivery");
         } else if (isMentionRestrictedError(message)) {
           console.log("Native channel action rejected; learning browser fallback", execution.id);
           next = rerouteExecutionToBrowser(next, execution.id, message);

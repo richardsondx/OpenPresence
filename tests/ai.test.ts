@@ -1,10 +1,27 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { generateAgentReply, generateAgentSocialDecision, generateAssetResearchPlannerDecision, generatePlaygroundTestStimulus, generatePresenceChatReply, normalizeRehearsalReply, parseAgentSocialDecision, parseAgentSocialEdit, parseAgentSocialJudgment, parseAssetResearchPlannerDecision, parseGrowthReviewDecision, parsePlaygroundTestStimulus } from "../lib/ai";
+import { generateAgentReply, generateAgentSocialDecision, generateAssetResearchPlannerDecision, generatePlaygroundTestStimulus, generatePresenceChatReply, normalizeRehearsalReply, parseAgentSocialDecision, parseAgentSocialEdit, parseAgentSocialJudgment, parseAssetResearchPlannerDecision, parseGrowthReviewDecision, parsePlaygroundTestStimulus, promptFor } from "../lib/ai";
 import { saveProviderSecret } from "../lib/db";
 import { applyOperation, createAgent } from "../lib/runtime";
 import type { PresenceBrief } from "../lib/types";
 
 describe("Agent social decision parsing", () => {
+  it("keeps operator Chat conversational and supplies current runtime context", () => {
+    const state = createAgent({ name: "Genny", description: "Make useful founder observations.", audience: "Builders", mode: "agent", handle: "@genny_chat", accent: "#D68754" });
+    const prompt = promptFor(state, undefined, "What do you think of our growth right now?", {
+      operatorConversation: true,
+      operatorHistory: [{ role: "operator", content: "Hey, are you around?" }, { role: "presence", content: "I am." }],
+    });
+    expect(prompt.system).toContain("not a planning form");
+    expect(prompt.system).toContain("The runtime owns account identity, channel inspection, and transport selection");
+    expect(prompt.system).toContain("Recent runtime context");
+    expect(prompt.system).not.toContain("Return JSON only in the requested social-decision envelope");
+    expect(prompt.messages).toEqual([
+      { role: "user", content: "Hey, are you around?" },
+      { role: "assistant", content: "I am." },
+      { role: "user", content: "What do you think of our growth right now?" },
+    ]);
+  });
+
   it("parses bounded model-backed Growth Review decisions", () => {
     const decision = parseGrowthReviewDecision('```json\n{"summary":"Shift toward reply-led discovery.","working":["Evidence posts earn replies."],"uncertain":["Follower attribution is sparse."],"weak":[],"rationale":"Replies are the strongest observed signal.","plan":{"summary":"Reply-led discovery","dailyTargets":["Review 10 relevant conversations"],"discoveryDirections":["Prioritize AI builder threads"]}}\n```');
     expect(decision).toMatchObject({

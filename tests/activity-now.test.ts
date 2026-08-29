@@ -1,9 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { deriveActivityNow } from "../lib/activity-now";
-import { createOperatorNudge, recordNudgeAssignmentHandoff, releasePausedNudges, settleNudgeForEpisode, settleNudgeFromAssignment, startQueuedNudge } from "../lib/operator-chat";
+import { createOperatorNudge, directWatchQuery, isBurstStatusQuestion, operatorBurstStatusReply, operatorNudgeReceipt, operatorRequestsWatch, recordOperatorConversationMessage, recordNudgeAssignmentHandoff, releasePausedNudges, settleNudgeForEpisode, settleNudgeFromAssignment, startQueuedNudge } from "../lib/operator-chat";
 import { operatorConversationActionEvents } from "../lib/operator-chat-projection";
 import { createAgent, formXActionIntent } from "../lib/runtime";
-import { repairMissingAssignmentWakes, repairMissingOperatorNudgeWakes } from "../lib/temporal";
+import { dueLiveAssignmentsWithoutWorkers, repairMissingAssignmentWakes, repairMissingOperatorNudgeWakes, repairPendingBridgeVerificationWakes } from "../lib/temporal";
 import { listScheduledWakes, upsertOperationalRun } from "../lib/db";
 import type { OperationalRun } from "../lib/types";
 
@@ -62,12 +62,65 @@ describe("truthful Activity right-now projection", () => {
     expect(projection.detail).toContain("No cognition worker is running");
   });
 
+  it("shows confirmation as a durable waiting state and repairs its verification wake", () => {
+    const state = fixture();
+    const presence = state.presence!;
+    const timestamp = new Date().toISOString();
+    const executionId = `verification_${Date.now()}_${Math.random().toString(36).slice(2, 7)}`;
+    state.operationalRuns = [{ id: "waiting_confirmation", runId: "waiting_confirmation", presenceId: presence.id, kind: "attention", state: "waiting", stage: "verifying", createdAt: timestamp, startedAt: timestamp, lastProgressAt: timestamp, attemptCount: 1, recoveryCount: 0 } as OperationalRun];
+    state.executions.unshift({ id: executionId, presenceId: presence.id, connector: "bridge", bridgeId: "bridge_for_verification", status: "verification-pending", failure: { retryable: true }, createdAt: timestamp, updatedAt: timestamp } as never);
+
+    expect(repairPendingBridgeVerificationWakes(state, new Date(timestamp))).toBe(1);
+    expect(repairPendingBridgeVerificationWakes(state, new Date(timestamp))).toBe(0);
+    state.scheduledWakes = listScheduledWakes(presence.id);
+    const projection = deriveActivityNow(state, presence.id, new Date(timestamp));
+    expect(projection.title).toBe("Waiting for confirmation");
+    expect(projection.nextWakePurpose).toBe("Confirm delivery");
+    expect(listScheduledWakes(presence.id).some((wake) => wake.id === `wake_verification_${executionId}` && wake.kind === "verification")).toBe(true);
+  });
+
   it("detects overdue Assignment work without misrouting it through generic Attention", () => {
     const state = fixture();
     const presence = state.presence!;
     state.assignments.unshift({ id: `overdue_${Date.now()}_${Math.random()}`, presenceId: presence.id, status: "active", nextDueAt: "2020-01-01T00:00:00.000Z" } as never);
     expect(repairMissingAssignmentWakes(state)).toBe(1);
     expect(listScheduledWakes(presence.id).some((wake) => ((wake.payload as { triggers?: string[] })?.triggers ?? []).includes("assignment_due"))).toBe(false);
+  });
+
+  it("keeps an active burst moving after the parent Assignment is completed", () => {
+    const state = fixture();
+    const presence = { ...state.presence!, environment: "live" as const, status: "live" as const };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    state.assignments.unshift({
+      id: "completed_distribution_assignment",
+      agentId: state.agent!.id,
+      presenceId: presence.id,
+      channelId: "x",
+      environment: "live",
+      status: "completed",
+      deliverable: { type: "meaningful_engagement" },
+      progress: { required: 1, verified: 1 },
+      work: { phase: "completed", attempts: 4, maxAttempts: 4, storiesResearched: 1 },
+      lastOutcome: { class: "assignment_completed", message: "The normal daily deliverable is complete.", at: new Date().toISOString() },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as never);
+    state.assignmentPursuitWindows = [{
+      id: "active_burst",
+      assignmentId: "completed_distribution_assignment",
+      agentId: state.agent!.id,
+      presenceId: presence.id,
+      startsAt: "2026-08-29T00:00:00.000Z",
+      deadlineAt: "2099-08-29T00:00:00.000Z",
+      maxVerifiedActions: 10,
+      status: "active",
+      nextRunAt: "2026-08-29T00:00:00.000Z",
+      createdAt: "2026-08-29T00:00:00.000Z",
+      updatedAt: "2026-08-29T00:00:00.000Z",
+    }];
+
+    expect(dueLiveAssignmentsWithoutWorkers(state, new Date("2026-08-29T01:00:00.000Z")).map((item) => item.id)).toEqual(["completed_distribution_assignment"]);
   });
 
   it("does not present a due scheduler row as the next future wake", () => {
@@ -194,5 +247,65 @@ describe("operator nudges while paused", () => {
     expect(messages[1]).toMatchObject({ role: "system", milestone: "assignment" });
     expect(messages[2]).toMatchObject({ role: "presence", milestone: "decision", content: "The post did not warrant a public response." });
     expect(settled.operatorNudges?.[0]).toMatchObject({ status: "resolved", resultSummary: "The post did not warrant a public response." });
+  });
+});
+
+describe("natural operator conversation", () => {
+  it("describes shared context without claiming a judgment before inspection", () => {
+    expect(operatorNudgeReceipt("https://x.com/example/status/123 What do you think about this?")).toContain("I’m checking the post you shared now.");
+    expect(operatorNudgeReceipt("Please review this image")).toContain("I’m looking at what you shared now.");
+  });
+
+  it("recognizes burst timing questions without treating them as start commands", () => {
+    expect(isBurstStatusQuestion("Did you start that campaign yet?")).toBe(true);
+    expect(isBurstStatusQuestion("When are you starting the burst?")).toBe(true);
+    expect(isBurstStatusQuestion("Can you start the burst tonight?")).toBe(false);
+  });
+
+  it("answers burst status from durable state and separates pending from verified work", () => {
+    const state = createAgent({ name: "Burst Status", description: "Test", audience: "Testers", mode: "agent", handle: "@burst_status", accent: "#777777" });
+    const presence = state.presence!;
+    const startedAt = "2026-08-28T22:00:00.000Z";
+    const deadlineAt = "2026-08-29T03:59:59.999Z";
+    state.assignmentPursuitWindows = [{ id: "burst", assignmentId: "assignment", agentId: state.agent!.id, presenceId: presence.id, startsAt: startedAt, deadlineAt, maxVerifiedActions: 10, status: "active", updatedAt: startedAt, createdAt: startedAt }];
+    state.assignmentRuns = [{ id: "run", assignmentId: "assignment", agentId: state.agent!.id, presenceId: presence.id, sessionId: `live:${presence.id}`, pursuitWindowId: "burst", status: "delivery_pending", currentStage: "publishing", attempts: 1, maxAttempts: 4, rejectedCandidates: 0, startedAt, updatedAt: startedAt, createdAt: startedAt }];
+    state.executions = [{ id: "pending", assignmentId: "assignment", presenceId: presence.id, affordance: "x.reply", mode: "auto", status: "verification-pending", attempts: 1, idempotencyKey: "pending", createdAt: startedAt, updatedAt: startedAt } as never];
+
+    const reply = operatorBurstStatusReply(state, presence.id, new Date("2026-08-28T23:00:00.000Z"));
+    expect(reply).toContain("It’s active now");
+    expect(reply).toContain("0 verified actions");
+    expect(reply).toContain("awaiting confirmation");
+    expect(reply).not.toContain("Assignment instruction");
+  });
+
+  it("records a normal question without creating a nudge or attention wake", () => {
+    const state = createAgent({ name: "Conversational Agent", description: "Stay useful.", audience: "Builders", mode: "agent", handle: "@conversational_agent", accent: "#777777" });
+    const withOperator = recordOperatorConversationMessage(state, { presenceId: state.presence!.id, content: "What did you do recently?" });
+    const withReply = recordOperatorConversationMessage(withOperator, { presenceId: state.presence!.id, content: "I was reviewing the latest signal.", role: "presence" });
+    expect(withReply.operatorNudges ?? []).toHaveLength(0);
+    expect(withReply.operatorConversations?.[0]?.messages.map((message) => message.role)).toEqual(["operator", "presence"]);
+  });
+
+  it("treats a retried operator send as the same private turn", () => {
+    const state = createAgent({ name: "Retry-safe Agent", description: "Test", audience: "Testers", mode: "agent", handle: "@retry_safe", accent: "#777777" });
+    const first = createOperatorNudge(state, { presenceId: state.presence!.id, content: "Please inspect this post.", clientRequestId: "client-send-1" });
+    const second = createOperatorNudge(first.state, { presenceId: state.presence!.id, content: "Please inspect this post.", clientRequestId: "client-send-1" });
+    expect(second.duplicate).toBe(true);
+    expect(second.nudge.id).toBe(first.nudge.id);
+    expect(second.state.operatorNudges).toHaveLength(1);
+    expect(second.state.operatorConversations?.[0]?.messages).toHaveLength(1);
+  });
+
+  it("deduplicates a retried normal operator conversation turn", () => {
+    const state = createAgent({ name: "Conversation Retry", description: "Test", audience: "Testers", mode: "agent", handle: "@conversation_retry", accent: "#777777" });
+    const first = recordOperatorConversationMessage(state, { presenceId: state.presence!.id, content: "What did you do?", clientRequestId: "client-chat-1" });
+    const second = recordOperatorConversationMessage(first, { presenceId: state.presence!.id, content: "What did you do?", clientRequestId: "client-chat-1" });
+    expect(second.operatorConversations?.[0]?.messages).toHaveLength(1);
+  });
+
+  it("recognizes an explicit person-watch request for the private watch tool", () => {
+    expect(operatorRequestsWatch("Just came across this guy, we should start watching him")).toBe(true);
+    expect(directWatchQuery("Keep watching @builder_one")).toBe("builder_one");
+    expect(directWatchQuery("I like this post")).toBeUndefined();
   });
 });
