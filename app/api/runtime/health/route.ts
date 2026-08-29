@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
-import { recordOperationalSuccess } from "@/lib/incident-engine";
+import { databaseIntegrityCheck } from "@/lib/db";
+import { recordOperationalSuccess, resolveOperationalIncident } from "@/lib/incident-engine";
 import { readOperationalHealth } from "@/lib/operational-context";
 
 export const dynamic = "force-dynamic";
@@ -12,6 +13,13 @@ export async function GET(request: Request) {
   // connector failures must continue through the normal recovery ladder.
   if (before.incidents.some((incident) => incident.rootCauseKey === "native_x.transient_error" && incident.safeSummary.includes("workspace changed in another tab or worker"))) {
     recordOperationalSuccess("native_x", presenceId);
+  }
+  const recoveredDatabaseIncidents = before.incidents.filter((incident) => incident.rootCauseKey === "database.corruption");
+  if (recoveredDatabaseIncidents.length && databaseIntegrityCheck()) {
+    // The database loader already prevented startup against a malformed file;
+    // this explicit recheck makes a post-recovery health read retire only the
+    // historical corruption incident. Other operator boundaries remain intact.
+    for (const incident of recoveredDatabaseIncidents) resolveOperationalIncident(incident.id);
   }
   return NextResponse.json({ ...readOperationalHealth(presenceId), scheduler: { mode: "background" } }, { headers: { "Cache-Control": "no-store" } });
 }
