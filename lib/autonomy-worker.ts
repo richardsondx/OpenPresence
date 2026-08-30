@@ -271,6 +271,26 @@ function markAutonomyRunDegraded(runId: string | undefined, error: unknown) {
   upsertOperationalRun(run);
 }
 
+/**
+ * Initialization happens before the main execution try/catch because the
+ * attention receipt must be durable before provider/model work begins. A
+ * final workspace conflict here must still release the lease and leave the
+ * run recoverable; otherwise a transient competing write can orphan a run as
+ * running until the scheduler notices its expired lease.
+ */
+export function settleAutonomyInitializationFailure(runId: string, workerOwner: string, error: unknown) {
+  const run = getOperationalRun(runId);
+  if (run && run.state === "running" && run.leaseOwner === workerOwner) {
+    run.state = "recovering";
+    run.stage = "failed_initialization";
+    run.lastErrorCode = (error instanceof Error ? error.message : String(error)).slice(0, 240);
+    delete run.leaseOwner;
+    delete run.leaseExpiresAt;
+    upsertOperationalRun(run);
+  }
+  releaseOperationalRunLease(runId, workerOwner);
+}
+
 export function getAutonomyWorkerRun(key: string) {
   return activeAutonomyWorkers.get(key);
 }
@@ -441,24 +461,29 @@ export async function executeAutonomyRun(runId: string): Promise<OpenPresenceSta
   const executionPresenceId = run.presenceId;
   const runStartState = readStateSnapshotForContext({ presenceId: executionPresenceId });
   let attentionEpisodeId: string | undefined;
-  if (run.kind !== "verification") {
-    const episodeCreated = createAttentionEpisode(runStartState, {
-      presenceId: executionPresenceId,
-      environment: runStartState.presences.find((item) => item.id === executionPresenceId)?.environment,
-      source: run.metadata?.source === "operator" ? "operator" : run.kind === "discovery" ? "self_directed_discovery" : "scheduled",
-      runId,
-      stage: "looking",
-    });
-    attentionEpisodeId = episodeCreated.episode.id;
-    const nudgeStarted = run.attention?.triggers.includes("operator_nudge") ? startQueuedNudge(episodeCreated.state, executionPresenceId, episodeCreated.episode) : { state: episodeCreated.state, nudge: undefined };
-    run.attentionEpisodeId = attentionEpisodeId;
-    upsertOperationalRun(run);
-    // Persist the episode before provider/model work starts so Activity can show
-    // a truthful live look instead of waiting for the whole run to finish.
-    await writeStateWithRetry(runStartState, nudgeStarted.state);
-  } else {
-    run.stage = "verifying";
-    upsertOperationalRun(run);
+  try {
+    if (run.kind !== "verification") {
+      const episodeCreated = createAttentionEpisode(runStartState, {
+        presenceId: executionPresenceId,
+        environment: runStartState.presences.find((item) => item.id === executionPresenceId)?.environment,
+        source: run.metadata?.source === "operator" ? "operator" : run.kind === "discovery" ? "self_directed_discovery" : "scheduled",
+        runId,
+        stage: "looking",
+      });
+      attentionEpisodeId = episodeCreated.episode.id;
+      const nudgeStarted = run.attention?.triggers.includes("operator_nudge") ? startQueuedNudge(episodeCreated.state, executionPresenceId, episodeCreated.episode) : { state: episodeCreated.state, nudge: undefined };
+      run.attentionEpisodeId = attentionEpisodeId;
+      upsertOperationalRun(run);
+      // Persist the episode before provider/model work starts so Activity can show
+      // a truthful live look instead of waiting for the whole run to finish.
+      await writeStateWithRetry(runStartState, nudgeStarted.state);
+    } else {
+      run.stage = "verifying";
+      upsertOperationalRun(run);
+    }
+  } catch (error) {
+    settleAutonomyInitializationFailure(runId, workerOwner, error);
+    return null;
   }
 
   // A worker may legitimately spend longer than the lease duration inside a

@@ -35,6 +35,7 @@ import {
   scheduleRetryWake,
   scheduleWake,
 } from "../lib/temporal";
+import { settleAutonomyInitializationFailure } from "../lib/autonomy-worker";
 import { initialState } from "../lib/runtime";
 import type {
   Execution,
@@ -65,6 +66,19 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
     expect(releaseOperationalRunLease(runId, `${runId}:invocation-a`)).toBe(true);
     expect(claimOperationalRunLease(runId, `${runId}:invocation-b`)).toBe(true);
     expect(releaseOperationalRunLease(runId, `${runId}:invocation-b`)).toBe(true);
+  });
+
+  it("releases a run when its pre-work attention receipt cannot be persisted", () => {
+    const runId = `run_initialization_failure_${Date.now()}_${Math.random()}`;
+    const workerOwner = `${runId}:worker`;
+    upsertOperationalRun({ id: runId, presenceId, kind: "attention", state: "running", stage: "looking", createdAt: new Date().toISOString(), attemptCount: 1, recoveryCount: 0, leaseOwner: workerOwner, leaseExpiresAt: new Date(Date.now() + 60_000).toISOString() });
+
+    settleAutonomyInitializationFailure(runId, workerOwner, new Error("workspace changed while saving attention receipt"));
+
+    const recovered = getOperationalRun(runId);
+    expect(recovered).toMatchObject({ state: "recovering", stage: "failed_initialization" });
+    expect(recovered).not.toHaveProperty("leaseOwner");
+    expect(recovered).not.toHaveProperty("leaseExpiresAt");
   });
 
   // Invariant 1: Time and Durable Wakes
