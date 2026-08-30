@@ -98,7 +98,7 @@ function assetDiscoveryForState(state: OpenPresenceState) {
 const terminalAssignmentRunStatuses = new Set<AssignmentRunStatus>(["published", "deferred", "blocked", "failed", "cancelled"]);
 
 const activityProjectionKeys = new Set<keyof OpenPresenceState>([
-  "agent", "agents", "activeAgentId", "activePresenceId", "presence", "presences", "onboarded", "workspaceRevision", "files", "proposals",
+  "agent", "agents", "activeAgentId", "activePresenceId", "presence", "presences", "onboarded", "workspaceRevision", "proposals",
   "assignments", "assignmentRuns", "assignmentPursuitWindows", "actions", "events", "executions", "outcomes", "publications", "socialDecisions", "autobiographicalEvents", "autobiographicalReflections", "socialIntents", "attentionEpisodes", "resourceUsageEvents",
   "mirrorObjects", "nativeConnections", "bridges", "playgroundSessions", "originalPostRehearsals", "assetResearchSessions", "channelDefinitions", "operationalRuns", "scheduledWakes", "standingIntents",
   "publishingPlans", "growthRevisions", "growthFileVersions",

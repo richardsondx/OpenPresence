@@ -58,6 +58,7 @@ describe("state read projections", () => {
     expect(response.status).toBe(200);
     expect(body.responseProjection).toBe("activity");
     expect(body.presence).toBeTruthy();
+    expect(body.files).toBeUndefined();
     for (const presence of body.presences) {
       if (presence.id === body.presence.id) continue;
       expect(presence.brief).toBeUndefined();
