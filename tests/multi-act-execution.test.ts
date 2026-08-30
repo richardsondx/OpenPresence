@@ -116,13 +116,15 @@ describe("Composable Multi-Act Decisions and Discrete Intent Formation", () => {
   it("judges a Bridge-delivered inbound event from the persisted Mirror without a native reread", async () => {
     const state = createAgent({ name: "Jenny", description: "Explain AI agents.", mode: "agent", handle: "@jenny_ai", accent: "#D68754" });
     const calls: string[] = [];
+    let pulseOptions: { skipThreadHydration?: boolean } | undefined;
     const result = await runBridgeInboundAttentionPass(state.presence!.id, { runId: "run-bridge-inbound" }, {
       readState: () => { calls.push("read-mirror"); return state; },
-      pulse: async (_presenceId, _options, observed) => { calls.push("pulse"); return observed ?? state; },
+      pulse: async (_presenceId, options, observed) => { calls.push("pulse"); pulseOptions = options; return observed ?? state; },
       judgeWatches: async (observed) => { calls.push("judge-watches"); return observed; },
     });
 
     expect(calls).toEqual(["read-mirror", "pulse", "judge-watches"]);
+    expect(pulseOptions?.skipThreadHydration).toBe(true);
     expect(result).toBe(state);
   });
 });

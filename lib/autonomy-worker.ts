@@ -817,7 +817,7 @@ export async function runAutonomousObservation(
  */
 export async function runAutonomousPulse(
   presenceId: string,
-  options?: { runId?: string; invocationId?: string; attentionEpisodeId?: string; forceEligibility?: boolean; suppressAmbientInbound?: boolean; persist?: boolean },
+  options?: { runId?: string; invocationId?: string; attentionEpisodeId?: string; forceEligibility?: boolean; suppressAmbientInbound?: boolean; persist?: boolean; skipThreadHydration?: boolean },
   sourceState?: OpenPresenceState,
 ): Promise<OpenPresenceState> {
   const current = sourceState ?? readStateSnapshotForContext({ presenceId });
@@ -834,7 +834,7 @@ export async function runAutonomousPulse(
   const observedMentions = options?.suppressAmbientInbound ? [] : selectUnjudgedNativeInbound(next, presenceId);
   if (observedMentions.length) {
     let inbound = observedMentions[0]!;
-    if (inbound.parentExternalRef) {
+    if (inbound.parentExternalRef && !options?.skipThreadHydration) {
       try {
         next = await hydrateNativeXThreadContext(next, presenceId, inbound, { originKind: "inbound_social", attentionSource: "inbound_social", invocationId: options?.invocationId, runId: options?.runId, attentionEpisodeId: options?.attentionEpisodeId });
       } catch (error) {
@@ -1136,7 +1136,7 @@ export async function runBridgeInboundAttentionPass(
       detail: "The connected browser already supplied authenticated Social Mirror evidence; no second channel read was needed.",
     });
   }
-  const pulsed = await dependencies.pulse(presenceId, options, observed);
+  const pulsed = await dependencies.pulse(presenceId, { ...options, skipThreadHydration: true }, observed);
   return dependencies.judgeWatches(pulsed, presenceId, options);
 }
 
