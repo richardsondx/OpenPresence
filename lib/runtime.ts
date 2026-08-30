@@ -1393,10 +1393,14 @@ export function recordNativeMirror(source: OpenPresenceState, input: { connectio
  * ordinary callers; high-volume observation uses one normalization pass and
  * applies the same canonical mirror logic in place.
  */
-export function recordNativeMirrors(source: OpenPresenceState, inputs: Array<Parameters<typeof recordNativeMirror>[1]>, options?: Parameters<typeof recordNativeMirror>[2]) {
-  let state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+export function recordNativeMirrorsInPlace(source: OpenPresenceState, inputs: Array<Parameters<typeof recordNativeMirror>[1]>, options?: Parameters<typeof recordNativeMirror>[2]) {
+  let state = source;
   for (const input of inputs) state = recordNativeMirror(state, input, { normalized: true, ...options });
   return state;
+}
+
+export function recordNativeMirrors(source: OpenPresenceState, inputs: Array<Parameters<typeof recordNativeMirror>[1]>, options?: Parameters<typeof recordNativeMirror>[2]) {
+  return recordNativeMirrorsInPlace(cloneState(source), inputs, options);
 }
 
 /** Record an operator-supplied public post without pretending it arrived from a connected connector. */
@@ -2354,7 +2358,7 @@ function makeSandboxEnvironment(presence: Presence): SandboxEnvironment {
   return { id: id("sandbox"), presenceId: presence.id, channelId: presence.channel, connectorId: `sandbox-connector:${presence.id}`, status: "ready", createdAt: timestamp, updatedAt: timestamp };
 }
 
-function cloneState(source: OpenPresenceState) { return normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState); }
+export function cloneState(source: OpenPresenceState) { return normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState); }
 
 function scenarioVersionFor(state: OpenPresenceState, scenarioId: string, versionId?: string) {
   const scenario = state.scenarios.find((item) => item.id === scenarioId);
@@ -2776,7 +2780,10 @@ export function compileExploration(source: OpenPresenceState, brief: string, pre
 }
 
 export function startExplorationSession(source: OpenPresenceState, explorationId: string, discoverySource: ExplorationSession["discoverySource"] = "mirror") {
-  const state = cloneState(source);
+  return startExplorationSessionInPlace(cloneState(source), explorationId, discoverySource);
+}
+
+export function startExplorationSessionInPlace(state: OpenPresenceState, explorationId: string, discoverySource: ExplorationSession["discoverySource"] = "mirror") {
   const exploration = state.explorations.find((item) => item.id === explorationId);
   if (!exploration || exploration.status !== "active" || !state.agent) throw new Error("That Exploration is not active.");
   const presence = state.presences.find((item) => item.id === exploration.presenceId);
@@ -2795,7 +2802,10 @@ export function startExplorationSession(source: OpenPresenceState, explorationId
 }
 
 export function finishExplorationSession(source: OpenPresenceState, sessionId: string, input: { status: ExplorationSessionStatus; candidatesSeen: number; candidatesHydrated: number; findings: Array<{ mirrorObjectId: string; safeSummary: string; whyItMayMatter: string }>; failureReason?: string }) {
-  const state = cloneState(source);
+  return finishExplorationSessionInPlace(cloneState(source), sessionId, input);
+}
+
+export function finishExplorationSessionInPlace(state: OpenPresenceState, sessionId: string, input: { status: ExplorationSessionStatus; candidatesSeen: number; candidatesHydrated: number; findings: Array<{ mirrorObjectId: string; safeSummary: string; whyItMayMatter: string }>; failureReason?: string }) {
   const session = state.explorationSessions.find((item) => item.id === sessionId);
   if (!session) throw new Error("That Exploration session no longer exists.");
   const timestamp = now();

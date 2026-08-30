@@ -1,13 +1,14 @@
 import { randomUUID } from "node:crypto";
 import {
+  cloneState,
   derivePresenceCapabilityManifest,
-  finishExplorationSession,
+  finishExplorationSessionInPlace,
   formXActionIntent,
   formXReplyIntent,
-  recordNativeMirrors,
-  recordResourceUsageEvent,
+  recordNativeMirrorsInPlace,
+  recordResourceUsageEventInPlace,
   recordRuntimeEvent,
-  startExplorationSession,
+  startExplorationSessionInPlace,
   nativeDeliveryFailureIsConnectionScoped,
   xTargetAllowsQuotedExpression,
 } from "./runtime";
@@ -210,7 +211,12 @@ export async function runLiveExplorationWorker(source: OpenPresenceState, explor
   if (!exploration || !presence || presence.channel !== "x" || presence.environment === "sandbox") return source;
   if (exploration.nextEligibleAt && Date.parse(exploration.nextEligibleAt) > Date.now()) return source;
   options.onStage?.("exploration.search");
-  const started = startExplorationSession(source, exploration.id, "mirror");
+  // This worker owns the state until its async provider work completes. Make
+  // one defensive copy at the boundary, then mutate the exploration session
+  // in place instead of cloning the full compatibility workspace at every
+  // accounting and lifecycle transition.
+  const working = cloneState(source);
+  const started = startExplorationSessionInPlace(working, exploration.id, "mirror");
   let next = started.state;
   const session = started.session;
   const connection = next.nativeConnections.find((item) => item.presenceId === presence.id && item.channelId === "x");
@@ -222,15 +228,15 @@ export async function runLiveExplorationWorker(source: OpenPresenceState, explor
   if (currentSession) currentSession.searchQuery = query;
   if (connection && credentials && query) {
     try {
-      next = recordResourceUsageEvent(next, { presenceId: presence.id, invocationId, runId: options.runId, originKind: "exploration", originId: exploration.id, attentionSource: "exploration", category: "channel_read", provider: "x", usage: { requests: 1 }, attentionEpisodeId: options.attentionEpisodeId });
+      next = recordResourceUsageEventInPlace(next, { presenceId: presence.id, invocationId, runId: options.runId, originKind: "exploration", originId: exploration.id, attentionSource: "exploration", category: "channel_read", provider: "x", usage: { requests: 1 }, attentionEpisodeId: options.attentionEpisodeId });
       const posts = await searchRecentXPosts(credentials, query, 25);
-      next = recordNativeMirrors(next, posts.map((post) => ({ connectionId: connection.id, presenceId: presence.id, post })), { attentionEpisodeId: options.attentionEpisodeId, attentionRunId: options.runId, attentionInvocationId: invocationId });
+      next = recordNativeMirrorsInPlace(next, posts.map((post) => ({ connectionId: connection.id, presenceId: presence.id, post })), { attentionEpisodeId: options.attentionEpisodeId, attentionRunId: options.runId, attentionInvocationId: invocationId });
       const imported = new Set(posts.map((post) => post.id));
       candidates = next.mirrorObjects.filter((item) => item.presenceId === presence.id && item.visibility === "public" && item.objectType === "post" && imported.has(item.externalRef.id) && isCognitionEligibleMirrorObject(item, presence.language));
       const running = next.explorationSessions.find((item) => item.id === session?.id);
       if (running) { running.discoverySource = "native"; running.artifactIds = candidates.map((item) => item.id); }
     } catch (error) {
-      return finishExplorationSession(next, session.id, { status: "degraded", candidatesSeen: candidates.length, candidatesHydrated: 0, findings: [], failureReason: error instanceof Error ? error.message : "The connected discovery source could not be checked." });
+      return finishExplorationSessionInPlace(next, session.id, { status: "degraded", candidatesSeen: candidates.length, candidatesHydrated: 0, findings: [], failureReason: error instanceof Error ? error.message : "The connected discovery source could not be checked." });
     }
   } else {
     const running = next.explorationSessions.find((item) => item.id === session?.id);
@@ -242,9 +248,9 @@ export async function runLiveExplorationWorker(source: OpenPresenceState, explor
     const triage = await generateExplorationTriage(next, exploration.brief, candidates.map((item) => ({ id: item.id, author: item.author?.displayName, text: item.content?.text ?? "" })), { usageOrigin: "exploration", attentionSource: "exploration", operational: true, runId: options.runId, presenceId: presence.id, invocationId });
     findings = triage.filter((item) => item.relevant).map((item) => ({ mirrorObjectId: item.id, safeSummary: item.summary, whyItMayMatter: item.whyItMayMatter }));
   } catch (error) {
-    return finishExplorationSession(next, session.id, { status: "degraded", candidatesSeen: candidates.length, candidatesHydrated: candidates.length, findings: [], failureReason: error instanceof Error ? error.message : "Exploration triage was unavailable." });
+    return finishExplorationSessionInPlace(next, session.id, { status: "degraded", candidatesSeen: candidates.length, candidatesHydrated: candidates.length, findings: [], failureReason: error instanceof Error ? error.message : "Exploration triage was unavailable." });
   }
-  next = finishExplorationSession(next, session.id, { status: "completed", candidatesSeen: candidates.length, candidatesHydrated: candidates.length, findings });
+  next = finishExplorationSessionInPlace(next, session.id, { status: "completed", candidatesSeen: candidates.length, candidatesHydrated: candidates.length, findings });
   options.onStage?.("exploration.decide");
   const linkedAssignmentId = next.explorations.find((item) => item.id === exploration.id)?.engagement?.assignmentId;
   const assignment = linkedAssignmentId ? next.assignments.find((item) => item.id === linkedAssignmentId && item.status === "active") : undefined;

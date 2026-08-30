@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { applyOperation, compileExploration, createAgent, finishExplorationSession, formXActionIntent, startExplorationSession } from "../lib/runtime";
+import { applyOperation, cloneState, compileExploration, createAgent, finishExplorationSession, finishExplorationSessionInPlace, formXActionIntent, startExplorationSession, startExplorationSessionInPlace } from "../lib/runtime";
 import { listOperationalRuns, readState, writeState, writeState as writeDbState } from "../lib/db";
 import { POST } from "../app/api/state/route";
 import { POST as xManagePost } from "../app/api/x/manage/route";
@@ -30,6 +30,29 @@ describe("Presence-scoped Explorations", () => {
     const refined = applyOperation(created, { type: "updateExploration", id: created.explorations[0]!.id, brief: "Focus more on people actually deploying persistent agents." });
     expect(refined.explorations[0]).toMatchObject({ revision: 2, brief: "Focus more on people actually deploying persistent agents." });
     expect(refined.discoveryPlans).toHaveLength(0);
+  });
+
+  it("keeps the public session helpers defensive while supporting one owned mutable lifecycle", () => {
+    const source = applyOperation(createAgent(input), { type: "createExploration", brief: "Keep an eye on builders struggling with agent infrastructure." });
+    const exploration = source.explorations[0]!;
+    const sourceBefore = JSON.stringify(source);
+
+    const publicStart = startExplorationSession(source, exploration.id);
+    expect(publicStart.state).not.toBe(source);
+    expect(JSON.stringify(source)).toBe(sourceBefore);
+
+    const working = cloneState(source);
+    const ownedStart = startExplorationSessionInPlace(working, exploration.id);
+    expect(ownedStart.state).toBe(working);
+    expect(working.explorationSessions[0]?.status).toBe("running");
+
+    const ownedFinish = finishExplorationSessionInPlace(working, ownedStart.session.id, { status: "completed", candidatesSeen: 0, candidatesHydrated: 0, findings: [] });
+    expect(ownedFinish).toBe(working);
+    expect(working.explorationSessions[0]?.status).toBe("completed");
+
+    const publicFinish = finishExplorationSession(publicStart.state, publicStart.session.id, { status: "completed", candidatesSeen: 0, candidatesHydrated: 0, findings: [] });
+    expect(publicFinish).not.toBe(publicStart.state);
+    expect(publicStart.state.explorationSessions[0]?.status).toBe("running");
   });
 
   it("preserves Presence isolation and pause/archive lifecycle", () => {
