@@ -4785,6 +4785,23 @@ export function assignmentPursuitVerifiedCounts(source: OpenPresenceState, windo
   return { verified: [...verifiedIds].length, counts };
 }
 
+/**
+ * Every configured resource limit is a scheduler boundary for an explicit
+ * distribution push. Model calls are included so a burst cannot keep
+ * redispatching after its provider budget is exhausted.
+ */
+export const assignmentPursuitHardResourceCategories = [
+  "maxChannelReads",
+  "maxHydrations",
+  "maxModelCalls",
+  "maxVisionCalls",
+  "maxEstimatedCostCents",
+] as const;
+
+export function assignmentPursuitHasHardResourceCapacity(source: OpenPresenceState, window: AssignmentPursuitWindow, at = Date.now()) {
+  return assignmentPursuitHardResourceCategories.every((category) => assignmentPursuitCanSpend(source, window, category, at));
+}
+
 export function assignmentPursuitCanSpend(source: OpenPresenceState, window: AssignmentPursuitWindow, category: keyof AssignmentPursuitResourceBudget, at = Date.now()) {
   const limit = window.resourceBudget?.[category];
   if (limit === undefined) return true;

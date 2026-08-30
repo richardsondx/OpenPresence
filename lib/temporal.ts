@@ -18,7 +18,7 @@ import {
 import { attentionRequestFromWake, attentionRunAcceptsSignal, mergeAttentionRequests, requestAttention } from "./attention-coordinator";
 import { settleAttentionResponsibility } from "./attention-responsibility";
 import { bridgeExecutionStatus } from "./bridge-contract";
-import { assignmentPursuitCanSpend, assignmentPursuitUsage, recordRuntimeEvent, scheduledAssignmentIsDue } from "./runtime";
+import { assignmentPursuitHasHardResourceCapacity, assignmentPursuitUsage, recordRuntimeEvent, scheduledAssignmentIsDue } from "./runtime";
 import { assignmentRunBlocksNewWork, isAutonomousPreWriteDeliveryFailure, reconcileLiveAssignmentRuns } from "./live-assignment-run";
 import { reconcileOrphanedAttentionEpisodes } from "./attention-episodes";
 import type {
@@ -156,7 +156,7 @@ export function dueLiveAssignmentsWithoutWorkers(state: OpenPresenceState, now =
     // a concurrent worker writes an older snapshot after the sweep's pause,
     // an exhausted pursuit must still be unable to generate another dispatch
     // attempt or an HTTP 400 retry storm.
-    if (pursuitDue && pursuit && !assignmentPursuitResourceCategories.every((category) => assignmentPursuitCanSpend(state, pursuit, category, now.getTime()))) return false;
+    if (pursuitDue && pursuit && !assignmentPursuitHasHardResourceCapacity(state, pursuit, now.getTime())) return false;
     // A temporary distribution push is its own execution window. The parent
     // Assignment may already have satisfied its ordinary daily deliverable,
     // and its bounded retry budget must not silence the explicitly requested
