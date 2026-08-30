@@ -769,12 +769,15 @@ function createSocialDecision(state: OpenPresenceState, input: SocialDecisionInp
   };
 }
 
-export function recordResourceUsageEvent(source: OpenPresenceState, input: Omit<ResourceUsageEvent, "id" | "agentId" | "createdAt">) {
-  const state = cloneState(source);
+export function recordResourceUsageEventInPlace(state: OpenPresenceState, input: Omit<ResourceUsageEvent, "id" | "agentId" | "createdAt">) {
   if (!state.agent) return state;
   state.resourceUsageEvents.unshift({ ...input, id: id("resource-usage"), agentId: state.agent.id, createdAt: now() });
   state.resourceUsageEvents = state.resourceUsageEvents.slice(0, 5_000);
   return state;
+}
+
+export function recordResourceUsageEvent(source: OpenPresenceState, input: Omit<ResourceUsageEvent, "id" | "agentId" | "createdAt">) {
+  return recordResourceUsageEventInPlace(cloneState(source), input);
 }
 
 export function deriveSelfDirectedDiscoveryPlan(source: OpenPresenceState, presenceId: string) {

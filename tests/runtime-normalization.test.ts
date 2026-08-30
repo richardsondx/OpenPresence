@@ -1,6 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
 import { deleteBridgeIdentity, readRuntimeHealthProjection, readStateSnapshot, writeState } from "../lib/db";
-import { applyOperation, createAgent, initialState, isStateNormalized } from "../lib/runtime";
+import { applyOperation, createAgent, initialState, isStateNormalized, recordResourceUsageEvent, recordResourceUsageEventInPlace } from "../lib/runtime";
 
 describe("runtime normalization boundary", () => {
   it("marks operation results as reusable only for the short transition window", () => {
@@ -28,6 +28,20 @@ describe("runtime normalization boundary", () => {
     } finally {
       writeState(initialState());
     }
+  });
+
+  it("keeps the public usage helper immutable while allowing private connector batches to append in place", () => {
+    const state = createAgent({ name: "Jenny", description: "A test Agent.", mode: "agent", handle: "@jenny_usage", accent: "#D68754" });
+    const input = { presenceId: state.presence!.id, invocationId: "usage:test", originKind: "inbound_social" as const, attentionSource: "inbound_social" as const, category: "channel_read" as const, provider: "x" as const, usage: { requests: 1 } };
+
+    const copied = recordResourceUsageEvent(state, input);
+    expect(state.resourceUsageEvents).toHaveLength(0);
+    expect(copied.resourceUsageEvents).toHaveLength(1);
+
+    const working = structuredClone(state);
+    const returned = recordResourceUsageEventInPlace(working, input);
+    expect(returned).toBe(working);
+    expect(working.resourceUsageEvents).toHaveLength(1);
   });
 
   it("serves health from the revision-matched compact projection after cache invalidation", () => {
