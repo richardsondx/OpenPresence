@@ -5,6 +5,7 @@ import { GET as stateGet } from "../app/api/state/route";
 import { readStateReadToken, readStateVersion } from "../lib/db";
 import { initialState } from "../lib/runtime";
 import { expireElapsedPursuitWindows } from "../lib/state-projection";
+import { browserWorkspaceProjection } from "../lib/state-browser-projection";
 
 describe("state read projections", () => {
   it("does not clone the workspace when no pursuit window has expired", () => {
@@ -21,6 +22,38 @@ describe("state read projections", () => {
 
     expect(result.changed).toBe(false);
     expect(result.state).toBe(state);
+  });
+
+  it("bounds full browser history while retaining current target mirrors", () => {
+    const state = initialState();
+    state.mirrorObjects = Array.from({ length: 700 }, (_, index) => ({
+      id: `mirror-${index}`,
+      presenceId: "presence",
+      externalRef: { type: "post", id: `external-${index}` },
+      observedAt: new Date(index).toISOString(),
+    })) as never;
+    state.assignments = [{
+      id: "assignment-current",
+      target: { mirrorObjectId: "mirror-0" },
+    }] as never;
+    state.events = Array.from({ length: 700 }, (_, index) => ({
+      id: `event-${index}`,
+      occurredAt: new Date(index).toISOString(),
+    })) as never;
+    state.resourceUsageEvents = Array.from({ length: 700 }, (_, index) => ({
+      id: `usage-${index}`,
+      occurredAt: new Date(index).toISOString(),
+    })) as never;
+
+    const projection = browserWorkspaceProjection(state);
+
+    expect(projection).not.toBe(state);
+    expect(projection.mirrorObjects).toHaveLength(600);
+    expect(projection.mirrorObjects.some((item) => item.id === "mirror-0")).toBe(true);
+    expect(projection.events).toHaveLength(500);
+    expect(projection.resourceUsageEvents).toHaveLength(500);
+    expect(projection.mirrorEvents).toHaveLength(0);
+    expect(projection.agentWorkspaces).toHaveLength(0);
   });
 
   it("clones only when an active or paused pursuit window has expired", () => {

@@ -59,6 +59,7 @@ import { readRuntimeScopeCookie, setRuntimeScopeCookie } from "@/lib/runtime-sco
 import { authorizeAssetSelection, isLibraryAsset, searchEligibleAssets } from "@/lib/asset-library";
 import { socialReplyAttributionIssue, socialReplyQualityIssue } from "@/lib/social-quality";
 import { runLiveExplorationEngagement as runSharedLiveExplorationEngagement } from "@/lib/exploration-worker";
+import { browserWorkspaceProjection } from "@/lib/state-browser-projection";
 
 export const dynamic = "force-dynamic";
 
@@ -330,7 +331,7 @@ function stateForResponse(request: Request, state: OpenPresenceState, forceActiv
     ? activityProjection(state)
     : projection === "chat"
       ? chatProjection(state)
-    : { ...state, responseProjection: "full" as const, agentWorkspaces: [] };
+    : browserWorkspaceProjection(state);
 }
 
 function stateResponse(request: Request, state: OpenPresenceState, options?: { runId?: string; activity?: boolean; receiptOnly?: boolean }) {
@@ -4677,7 +4678,7 @@ export async function GET(request: Request) {
         ? activityProjection(contextualState)
         : projection === "chat"
           ? chatProjection(contextualState)
-          : { ...contextualState, responseProjection: "full" as const, agentWorkspaces: [], mirrorEvents: [] };
+          : browserWorkspaceProjection(contextualState);
       const payload = { ...browserState, runtimeIdentity: { dbPath: resolvedDbPath, dbSelectionSource, agentId: contextualState.agent?.id ?? null, presenceId: contextualState.presence?.id ?? null, handle: contextualState.presence?.handle ?? null } };
       if (!["activity", "chat"].includes(projection ?? "")) return stateBodyResponse(request, JSON.stringify(payload), { headers: responseHeaders });
       const body = JSON.stringify(payload);
