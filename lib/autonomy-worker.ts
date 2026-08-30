@@ -301,13 +301,18 @@ export function dispatchAutonomyWorker(runId: string): Promise<OpenPresenceState
   if (activeAutonomyWorkers.size >= autonomyWorkerConcurrencyLimit()) return Promise.resolve(null);
 
   const promise = new Promise<OpenPresenceState | null>((resolve) => {
-    setTimeout(async () => {
-      try {
-        const result = await executeAutonomyRun(runId);
-        resolve(result);
-      } finally {
-        activeAutonomyWorkers.delete(runId);
-      }
+    setTimeout(() => {
+      void executeAutonomyRun(runId)
+        .then(resolve)
+        .catch(() => {
+          // A background run must never become an unhandled rejection. The
+          // run's normal error path records recovery state; this boundary
+          // protects the scheduler from unexpected failures in that path.
+          resolve(null);
+        })
+        .finally(() => {
+          activeAutonomyWorkers.delete(runId);
+        });
     }, 0);
   });
 

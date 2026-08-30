@@ -4,6 +4,11 @@ const nextConfig: NextConfig = {
   typedRoutes: true,
   distDir: process.env.OPENPRESENCE_NEXT_DIST_DIR ?? ".next",
   serverExternalPackages: ["better-sqlite3", "playwright", "@playwright/test", "playwright-core"],
+  turbopack: {
+    // Keep the local compiler from consuming the same memory budget as the
+    // application process when the large Activity graph is rebuilt.
+    memoryLimit: 2 * 1024 * 1024 * 1024,
+  },
   ...(process.env.OPENPRESENCE_USE_TURBO === "1" ? {} : {
     webpack: (config: Parameters<NonNullable<NextConfig["webpack"]>>[0]) => {
       // Local SQLite WAL/SHM files are high-frequency runtime data. Watching

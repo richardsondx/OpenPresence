@@ -118,7 +118,7 @@ describe("Composable Multi-Act Decisions and Discrete Intent Formation", () => {
     const calls: string[] = [];
     const result = await runBridgeInboundAttentionPass(state.presence!.id, { runId: "run-bridge-inbound" }, {
       readState: () => { calls.push("read-mirror"); return state; },
-      pulse: async (_presenceId, _options, observed) => { calls.push("pulse"); return observed; },
+      pulse: async (_presenceId, _options, observed) => { calls.push("pulse"); return observed ?? state; },
       judgeWatches: async (observed) => { calls.push("judge-watches"); return observed; },
     });
 
