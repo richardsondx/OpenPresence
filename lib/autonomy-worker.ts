@@ -103,7 +103,7 @@ import { bridgeExecutionStatus } from "./bridge-contract";
 import { verifyChromeExecution } from "./bridge";
 import { readNativeXCredentials, readPublicXPostByUrl, readXPostsByIds, searchRecentXPosts, xPostIdFromUrl } from "./x";
 import { nextSelfDirectedAttentionAt, selectBridgeDiscoveryCandidates, selectGrowthDiscoverySource } from "./growth-scheduler";
-import { createAttentionEpisode, recordAttentionStep, summarizeAttentionEpisode, updateAttentionEpisode } from "./attention-episodes";
+import { createAttentionEpisode, recordAttentionStepInPlace, summarizeAttentionEpisode, updateAttentionEpisode } from "./attention-episodes";
 import { deliverNativeExecutions } from "./native-execution-delivery";
 import { requestAttentionCapacity } from "./attention-governor";
 import { requestAttention } from "./attention-coordinator";
@@ -628,7 +628,7 @@ export async function executeAutonomyRun(runId: string): Promise<OpenPresenceSta
       .filter((execution) => execution.attentionEpisodeId === attentionEpisodeId)
       .map((execution) => execution.id) : []);
     if (attentionEpisodeId && autonomousExecutionIds.size) {
-      resultState = recordAttentionStep(resultState, attentionEpisodeId, "acting", { label: "Sending the chosen action", detail: `${autonomousExecutionIds.size} public action${autonomousExecutionIds.size === 1 ? "" : "s"} entered delivery.`, current: 0, total: autonomousExecutionIds.size });
+      resultState = recordAttentionStepInPlace(resultState, attentionEpisodeId, "acting", { label: "Sending the chosen action", detail: `${autonomousExecutionIds.size} public action${autonomousExecutionIds.size === 1 ? "" : "s"} entered delivery.`, current: 0, total: autonomousExecutionIds.size });
       resultState = await deliverNativeExecutions(resultState, autonomousExecutionIds);
       const episodeExecutions = resultState.executions.filter((execution) => autonomousExecutionIds.has(execution.id));
       const reachedDelivery = episodeExecutions.filter((execution) => ["succeeded", "claimed", "executing", "verification-pending"].includes(execution.status)).length;
@@ -642,9 +642,9 @@ export async function executeAutonomyRun(runId: string): Promise<OpenPresenceSta
           : failedBeforeDelivery > 0
             ? `No selected action reached the channel. ${failedBeforeDelivery} action${failedBeforeDelivery === 1 ? " was" : "s were"} stopped before delivery.`
             : "No selected action reached the channel, so nothing was sent.";
-      resultState = recordAttentionStep(resultState, attentionEpisodeId, "acting", { label: deliveryLabel, detail: deliveryDetail, current: reachedDelivery, total: autonomousExecutionIds.size, status: "completed" });
+      resultState = recordAttentionStepInPlace(resultState, attentionEpisodeId, "acting", { label: deliveryLabel, detail: deliveryDetail, current: reachedDelivery, total: autonomousExecutionIds.size, status: "completed" });
       if (reachedDelivery > 0) {
-        resultState = recordAttentionStep(resultState, attentionEpisodeId, "verifying", { label: "Verifying what happened", detail: "Checking the Social Mirror for authoritative outcomes.", current: resultState.outcomes.filter((outcome) => outcome.attentionEpisodeId === attentionEpisodeId && outcome.status === "succeeded").length, total: autonomousExecutionIds.size });
+        resultState = recordAttentionStepInPlace(resultState, attentionEpisodeId, "verifying", { label: "Verifying what happened", detail: "Checking the Social Mirror for authoritative outcomes.", current: resultState.outcomes.filter((outcome) => outcome.attentionEpisodeId === attentionEpisodeId && outcome.status === "succeeded").length, total: autonomousExecutionIds.size });
       }
     }
 
@@ -761,7 +761,7 @@ export async function runAutonomousObservation(
   try {
     touchAutonomyRun(options?.runId, "native.observe");
     const beforeMirrors = new Map(current.mirrorObjects.filter((item) => item.presenceId === presenceId && item.channelId === "x").map((item) => [item.externalRef.id, item]));
-    const observing = options?.attentionEpisodeId ? recordAttentionStep(current, options.attentionEpisodeId, "observing", { label: "Checking what changed", detail: "Refreshing mentions, conversations, and known publications." }) : current;
+    const observing = options?.attentionEpisodeId ? recordAttentionStepInPlace(current, options.attentionEpisodeId, "observing", { label: "Checking what changed", detail: "Refreshing mentions, conversations, and known publications." }) : current;
     let next = await reconcileNativeX(observing, presenceId, options);
     const observation = next.nativeConnections.find((c) => c.presenceId === presenceId && c.channelId === "x")?.observation;
     if (observation?.status === "error") {
@@ -782,7 +782,7 @@ export async function runAutonomousObservation(
         knownCount: Math.max(0, ((observation?.ownPostCount ?? 0) + (observation?.mentionCount ?? 0)) - newMirrors.length - changedMirrors.length),
         currentMirrorObjectId: observedMirrors[0]?.id,
       });
-      next = recordAttentionStep(next, options.attentionEpisodeId, "observing", {
+      next = recordAttentionStepInPlace(next, options.attentionEpisodeId, "observing", {
         label: "Checked the live social world",
         detail: newMirrors.length ? `${newMirrors.length} new social item${newMirrors.length === 1 ? "" : "s"} found.` : "No new eligible social item was found.",
         current: (observation?.ownPostCount ?? 0) + (observation?.mentionCount ?? 0),
@@ -802,7 +802,7 @@ export async function runAutonomousObservation(
 
     const inbound = options?.suppressAmbientInbound ? undefined : selectUnjudgedNativeInbound(next, presenceId)[0];
     if (inbound) {
-      if (options?.attentionEpisodeId) next = recordAttentionStep(next, options.attentionEpisodeId, "judging", { label: "Judging a new conversation", detail: inbound.author?.handle ? `Reviewing @${inbound.author.handle.replace(/^@/, "")}` : "Reviewing the newest inbound post", current: 0, total: 1, evidenceRefs: [inbound.externalRef] });
+      if (options?.attentionEpisodeId) next = recordAttentionStepInPlace(next, options.attentionEpisodeId, "judging", { label: "Judging a new conversation", detail: inbound.author?.handle ? `Reviewing @${inbound.author.handle.replace(/^@/, "")}` : "Reviewing the newest inbound post", current: 0, total: 1, evidenceRefs: [inbound.externalRef] });
       next = recordRuntimeEvent(next, presenceId, "New mention received", "A new public mention entered the Social Mirror, so Genny is considering it now.", "positive", { sourceObjectId: inbound.id });
     }
 
@@ -1141,7 +1141,7 @@ export async function runBridgeInboundAttentionPass(
 ): Promise<OpenPresenceState> {
   let observed = dependencies.readState(presenceId);
   if (options?.attentionEpisodeId) {
-    observed = recordAttentionStep(observed, options.attentionEpisodeId, "observing", {
+    observed = recordAttentionStepInPlace(observed, options.attentionEpisodeId, "observing", {
       label: "Using the Bridge's observed mention",
       detail: "The connected browser already supplied authenticated Social Mirror evidence; no second channel read was needed.",
     });
@@ -1225,7 +1225,7 @@ export async function runAutonomousSelfDirectedDiscovery(
 
   if (discoverySource === "native") {
     touchAutonomyRun(options?.runId, "discovery.search");
-    if (options?.attentionEpisodeId) next = recordAttentionStep(next, options.attentionEpisodeId, "searching", { label: "Searching for worthwhile signals", detail: `${queries.length} focused search direction${queries.length === 1 ? "" : "s"}.`, current: 0, total: queries.length });
+    if (options?.attentionEpisodeId) next = recordAttentionStepInPlace(next, options.attentionEpisodeId, "searching", { label: "Searching for worthwhile signals", detail: `${queries.length} focused search direction${queries.length === 1 ? "" : "s"}.`, current: 0, total: queries.length });
     let completedQueries = 0;
     for (const direction of queries) {
       try {
@@ -1235,7 +1235,7 @@ export async function runAutonomousSelfDirectedDiscovery(
         const posts = await searchRecentXPosts(credentials!, direction, 15);
         for (const post of posts) if (!rawPosts.has(post.id)) rawPosts.set(post.id, post);
         completedQueries += 1;
-        if (options?.attentionEpisodeId) next = recordAttentionStep(next, options.attentionEpisodeId, "searching", { label: "Searching for worthwhile signals", detail: `${rawPosts.size} unique lead${rawPosts.size === 1 ? "" : "s"} found so far.`, current: completedQueries, total: queries.length, status: completedQueries >= queries.length ? "completed" : "active" });
+        if (options?.attentionEpisodeId) next = recordAttentionStepInPlace(next, options.attentionEpisodeId, "searching", { label: "Searching for worthwhile signals", detail: `${rawPosts.size} unique lead${rawPosts.size === 1 ? "" : "s"} found so far.`, current: completedQueries, total: queries.length, status: completedQueries >= queries.length ? "completed" : "active" });
       } catch (error) {
         recordOperationalFailure({
           dependency: "native_x",
@@ -1275,7 +1275,7 @@ export async function runAutonomousSelfDirectedDiscovery(
       : { type: "x.post", id: post.id }));
 
   if (!candidates.length) {
-    if (options?.attentionEpisodeId) next = recordAttentionStep(next, options.attentionEpisodeId, "triaging", { label: "No fresh candidates to review", detail: "Known or ineligible results were filtered before judgment.", current: 0, total: 0, status: "completed" });
+    if (options?.attentionEpisodeId) next = recordAttentionStepInPlace(next, options.attentionEpisodeId, "triaging", { label: "No fresh candidates to review", detail: "Known or ineligible results were filtered before judgment.", current: 0, total: 0, status: "completed" });
     // Keep the autonomous loop alive even when this pass finds no candidate.
     return deferDiscovery(next, 30 * 60_000);
   }
@@ -1284,7 +1284,7 @@ export async function runAutonomousSelfDirectedDiscovery(
   try {
     if (!requestAttentionCapacity(next, presence.id, "candidate_evaluation", "model").allowed) return deferDiscovery(next, 60 * 60_000);
     touchAutonomyRun(options?.runId, "discovery.triage");
-    if (options?.attentionEpisodeId) next = recordAttentionStep(next, options.attentionEpisodeId, "triaging", { label: "Narrowing the candidates", detail: `Reviewing ${candidates.length} fresh lead${candidates.length === 1 ? "" : "s"}.`, current: 0, total: candidates.length });
+    if (options?.attentionEpisodeId) next = recordAttentionStepInPlace(next, options.attentionEpisodeId, "triaging", { label: "Narrowing the candidates", detail: `Reviewing ${candidates.length} fresh lead${candidates.length === 1 ? "" : "s"}.`, current: 0, total: candidates.length });
     triage = await generateExplorationTriage(
       next,
       plan.directions.join("; "),
@@ -1318,7 +1318,7 @@ export async function runAutonomousSelfDirectedDiscovery(
   const promising = candidates
     .filter((post) => nudgePostIds.has(post.id) || triage.some((item) => item.id === post.id && item.relevant))
     .slice(0, 4);
-  if (options?.attentionEpisodeId) next = recordAttentionStep(next, options.attentionEpisodeId, "triaging", { label: "Candidate review complete", detail: `${promising.length} of ${candidates.length} earned closer attention.`, current: candidates.length, total: candidates.length, status: "completed" });
+  if (options?.attentionEpisodeId) next = recordAttentionStepInPlace(next, options.attentionEpisodeId, "triaging", { label: "Candidate review complete", detail: `${promising.length} of ${candidates.length} earned closer attention.`, current: candidates.length, total: candidates.length, status: "completed" });
 
   if (discoverySource === "native" && connection && promising.length) {
     next = recordNativeMirrors(next, promising.map((post) => ({ connectionId: connection.id, presenceId: presence.id, post })), { attentionEpisodeId: options?.attentionEpisodeId, attentionRunId: options?.runId, attentionInvocationId: invocationId });
@@ -1329,7 +1329,7 @@ export async function runAutonomousSelfDirectedDiscovery(
     let mirror = next.mirrorObjects.find((item) => item.externalRef.type === "x.post" && item.externalRef.id === post.id);
     if (!mirror) continue;
     if (hasEpisodeRepresentation(next, presence.id, post.id, options?.attentionEpisodeId)) continue;
-    if (options?.attentionEpisodeId) next = recordAttentionStep(next, options.attentionEpisodeId, "judging", { label: "Judging the shortlist", detail: mirror.author?.handle ? `Considering @${mirror.author.handle.replace(/^@/, "")}` : "Considering a shortlisted post", current: candidateIndex, total: promising.length, evidenceRefs: [mirror.externalRef] });
+    if (options?.attentionEpisodeId) next = recordAttentionStepInPlace(next, options.attentionEpisodeId, "judging", { label: "Judging the shortlist", detail: mirror.author?.handle ? `Considering @${mirror.author.handle.replace(/^@/, "")}` : "Considering a shortlisted post", current: candidateIndex, total: promising.length, evidenceRefs: [mirror.externalRef] });
 
     if (mirror.parentExternalRef && discoverySource === "native") {
       try {
@@ -1364,7 +1364,7 @@ export async function runAutonomousSelfDirectedDiscovery(
         attentionSource: "self_directed_discovery",
       },
     );
-    if (options?.attentionEpisodeId) next = recordAttentionStep(next, options.attentionEpisodeId, "judging", { label: "Judging the shortlist", detail: decision.rationale?.trim() || "A social judgment was recorded.", current: candidateIndex + 1, total: promising.length, status: candidateIndex + 1 >= promising.length ? "completed" : "active", evidenceRefs: [mirror.externalRef] });
+    if (options?.attentionEpisodeId) next = recordAttentionStepInPlace(next, options.attentionEpisodeId, "judging", { label: "Judging the shortlist", detail: decision.rationale?.trim() || "A social judgment was recorded.", current: candidateIndex + 1, total: promising.length, status: candidateIndex + 1 >= promising.length ? "completed" : "active", evidenceRefs: [mirror.externalRef] });
 
     const acts = (decision.acts ?? [{ action: decision.action, text: decision.text, rationale: decision.rationale }]).filter((act) => allowedActions.includes(act.action) && act.action !== "no_op");
     const decisionInput = {
@@ -1554,7 +1554,7 @@ export async function hydrateOperatorNudgeSources(
       }
     }
     if (countAvailableOperatorTargets(state, presenceId, [postId]) > 0) {
-      if (options?.attentionEpisodeId) state = recordAttentionStep(state, options.attentionEpisodeId, "observing", { label: "Opened the post you shared", detail: "The post is now available as social evidence.", evidenceRefs: [{ type: "x.post", id: postId }] });
+      if (options?.attentionEpisodeId) state = recordAttentionStepInPlace(state, options.attentionEpisodeId, "observing", { label: "Opened the post you shared", detail: "The post is now available as social evidence.", evidenceRefs: [{ type: "x.post", id: postId }] });
     } else {
       const readerFailure = [nativeFailure, publicFailure].filter(Boolean).join(" Public fallback: ");
       failures.push(readerFailure || "X returned only partial evidence that was not safe to admit to the Social Mirror.");
@@ -1599,13 +1599,13 @@ export async function judgeOperatorNudgeTargets(
     if (!requestAttentionCapacity(next, presenceId, "social_action", "model").allowed) throw new Error("The model-judgment budget is unavailable, so the shared post remains unjudged.");
     let mediaEvidence = "No attached media was observed on this post.";
     if (mirror.assetRefs?.length) {
-      if (options?.attentionEpisodeId) next = recordAttentionStep(next, options.attentionEpisodeId, "observing", { label: "Inspecting the post's attached media", detail: "Reading the actual asset before deciding what the post means.", current: index, total: targetPostIds.length, evidenceRefs: [mirror.externalRef] });
+      if (options?.attentionEpisodeId) next = recordAttentionStepInPlace(next, options.attentionEpisodeId, "observing", { label: "Inspecting the post's attached media", detail: "Reading the actual asset before deciding what the post means.", current: index, total: targetPostIds.length, evidenceRefs: [mirror.externalRef] });
       next = await inspectSandboxObject(next, mirror, "inspect");
       mediaEvidence = cognitionSafeAssetSummary(next.assets, next.perceptions, mirror);
       const inspected = mirror.assetRefs.every((ref) => hasUsablePerception(next.perceptions, ref.assetId, "inspect"));
-      if (options?.attentionEpisodeId) next = recordAttentionStep(next, options.attentionEpisodeId, "observing", { label: inspected ? "Attached media inspected" : "Attached media remains unreadable", detail: mediaEvidence, current: index + 1, total: targetPostIds.length, evidenceRefs: [mirror.externalRef] });
+      if (options?.attentionEpisodeId) next = recordAttentionStepInPlace(next, options.attentionEpisodeId, "observing", { label: inspected ? "Attached media inspected" : "Attached media remains unreadable", detail: mediaEvidence, current: index + 1, total: targetPostIds.length, evidenceRefs: [mirror.externalRef] });
     }
-    if (options?.attentionEpisodeId) next = recordAttentionStep(next, options.attentionEpisodeId, "judging", { label: "Judging the post you shared", detail: mirror.author?.handle ? `Considering @${mirror.author.handle.replace(/^@/, "")}` : "Considering the shared post", current: index, total: targetPostIds.length, evidenceRefs: [mirror.externalRef] });
+    if (options?.attentionEpisodeId) next = recordAttentionStepInPlace(next, options.attentionEpisodeId, "judging", { label: "Judging the post you shared", detail: mirror.author?.handle ? `Considering @${mirror.author.handle.replace(/^@/, "")}` : "Considering the shared post", current: index, total: targetPostIds.length, evidenceRefs: [mirror.externalRef] });
     touchAutonomyRun(options?.runId, "discovery.decide");
     const liveCapabilities = derivePresenceCapabilityManifest(next, presenceId, { target: mirror.externalRef }).items;
     const allowedActions = ["reply", "like", "repost", "quote", "follow", "no_op"].filter((action) => action === "no_op" || (liveCapabilities.some((item) => item.capability === action && item.canExecute) && (presence.execution[action] ?? "off") !== "off"));
@@ -1632,7 +1632,7 @@ export async function judgeOperatorNudgeTargets(
       attentionSource: "inbound_social",
       operatorConversation: true,
     });
-    if (options?.attentionEpisodeId) next = recordAttentionStep(next, options.attentionEpisodeId, "judging", { label: "Judged the post you shared", detail: decision.rationale?.trim() || "A targeted judgment was recorded.", current: index + 1, total: targetPostIds.length, status: index + 1 >= targetPostIds.length ? "completed" : "active", evidenceRefs: [mirror.externalRef] });
+    if (options?.attentionEpisodeId) next = recordAttentionStepInPlace(next, options.attentionEpisodeId, "judging", { label: "Judged the post you shared", detail: decision.rationale?.trim() || "A targeted judgment was recorded.", current: index + 1, total: targetPostIds.length, status: index + 1 >= targetPostIds.length ? "completed" : "active", evidenceRefs: [mirror.externalRef] });
     const acts = (decision.acts ?? [{ action: decision.action, text: decision.text, rationale: decision.rationale }]).filter((act) => allowedActions.includes(act.action) && act.action !== "no_op");
     const decisionInput = {
       focalMirrorObjectIds: [mirror.id],

@@ -91,13 +91,12 @@ export function updateAttentionEpisode(source: OpenPresenceState, id: string, pa
   return state;
 }
 
-export function recordAttentionStep(
-  source: OpenPresenceState,
+export function recordAttentionStepInPlace(
+  state: OpenPresenceState,
   id: string,
   kind: AttentionStepKind,
   input: Pick<AttentionStep, "label"> & Partial<Pick<AttentionStep, "detail" | "current" | "total" | "evidenceRefs" | "status">>,
 ) {
-  const state = clone(source);
   const episode = state.attentionEpisodes?.find((item) => item.id === id);
   if (!episode) return state;
   const now = isoNow();
@@ -119,6 +118,15 @@ export function recordAttentionStep(
   episode.steps = steps;
   episode.updatedAt = now;
   return state;
+}
+
+export function recordAttentionStep(
+  source: OpenPresenceState,
+  id: string,
+  kind: AttentionStepKind,
+  input: Pick<AttentionStep, "label"> & Partial<Pick<AttentionStep, "detail" | "current" | "total" | "evidenceRefs" | "status">>,
+) {
+  return recordAttentionStepInPlace(clone(source), id, kind, input);
 }
 
 /** Attach the episode to records created by a stage, preserving forward lineage. */
