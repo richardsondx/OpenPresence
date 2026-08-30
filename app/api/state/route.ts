@@ -211,7 +211,13 @@ function activityProjection(state: OpenPresenceState): OpenPresenceState {
     steps: episode.steps?.slice(-8) ?? [],
   })) as never;
   projection.resourceUsageEvents = [];
-  projection.operationalRuns = scopedRecent(state.operationalRuns, 60, activeRun) as never;
+  projection.operationalRuns = scopedRecent(state.operationalRuns, 60, activeRun).map((run) => {
+    if (activeRun(run)) return run;
+    const compact = { ...run };
+    delete compact.attention;
+    delete compact.result;
+    return compact;
+  }) as never;
   projection.scheduledWakes = scopedRecent(state.scheduledWakes, 50) as never;
   projection.publicRequests = scopedRecent(state.publicRequests, 30) as never;
   projection.publicationMetricSnapshots = scopedRecent(state.publicationMetricSnapshots, 50) as never;
