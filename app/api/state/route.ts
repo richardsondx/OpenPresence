@@ -102,6 +102,7 @@ const activityProjectionKeys = new Set<keyof OpenPresenceState>([
   "assignments", "assignmentRuns", "assignmentPursuitWindows", "actions", "events", "executions", "outcomes", "publications", "socialDecisions", "autobiographicalEvents", "autobiographicalReflections", "socialIntents", "attentionEpisodes", "resourceUsageEvents",
   "mirrorObjects", "nativeConnections", "bridges", "playgroundSessions", "originalPostRehearsals", "assetResearchSessions", "channelDefinitions", "operationalRuns", "scheduledWakes", "standingIntents",
   "growthRevisions", "growthFileVersions",
+  "publishingPlans",
   "operatorConversations", "operatorNudges",
   "operatorDirectives", "explorations", "watches", "capabilityTrials", "explorationFindings", "explorationSessions", "calendar",
   "publicRequests", "publicationMetricSnapshots",
@@ -201,6 +202,10 @@ function activityProjection(state: OpenPresenceState): OpenPresenceState {
   projection.publications = scopedRecent(state.publications, 60) as never;
   projection.socialIntents = scopedRecent(state.socialIntents, 60) as never;
   projection.socialDecisions = scopedRecent(state.socialDecisions, 60) as never;
+  // LiveView derives the selected Presence's current Publishing Initiative
+  // from this collection. Keep only the active plan and a few recent records
+  // so the projection stays bounded without crashing or hiding the plan.
+  projection.publishingPlans = scopedRecent(state.publishingPlans, 4, (plan) => plan.status === "active") as never;
   projection.attentionEpisodes = scopedRecent(state.attentionEpisodes, 16, activeEpisode).map((episode) => ({
     ...episode,
     mirrorObjectIds: [],
