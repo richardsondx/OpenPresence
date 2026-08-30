@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 
 import fs from "node:fs";
+import crypto from "node:crypto";
 import os from "node:os";
 import path from "node:path";
 import process from "node:process";
@@ -81,9 +82,16 @@ function checkDatabase(dbPath, readonly = true) {
     if (quickCheck !== "ok") throw new Error(`SQLite quick_check failed for ${dbPath}: ${quickCheck}`);
     const integrityCheck = database.pragma("integrity_check", { simple: true });
     if (integrityCheck !== "ok") throw new Error(`SQLite integrity_check failed for ${dbPath}: ${integrityCheck}`);
-    const appState = database.prepare("SELECT length(payload) AS bytes FROM app_state WHERE id = 1").get();
+    const appState = database.prepare("SELECT payload FROM app_state WHERE id = 1").get();
     const counts = database.prepare("SELECT COUNT(*) AS tables FROM sqlite_master WHERE type = 'table'").get();
-    return { quickCheck, integrityCheck, appStateBytes: Number(appState?.bytes ?? 0), tableCount: Number(counts?.tables ?? 0) };
+    const appStatePayload = typeof appState?.payload === "string" ? appState.payload : "";
+    return {
+      quickCheck,
+      integrityCheck,
+      appStateBytes: Buffer.byteLength(appStatePayload),
+      appStateHash: crypto.createHash("sha256").update(appStatePayload).digest("hex"),
+      tableCount: Number(counts?.tables ?? 0),
+    };
   } finally {
     database.close();
   }
@@ -156,8 +164,8 @@ try {
   const after = checkDatabase(candidatePath);
   const beforeSize = fs.statSync(sourcePath).size;
   const afterSize = fs.statSync(candidatePath).size;
-  if (after.appStateBytes !== before.appStateBytes || after.tableCount !== before.tableCount) {
-    throw new Error(`candidate metadata differs: app_state ${before.appStateBytes} → ${after.appStateBytes}, tables ${before.tableCount} → ${after.tableCount}`);
+  if (after.appStateBytes !== before.appStateBytes || after.appStateHash !== before.appStateHash || after.tableCount !== before.tableCount) {
+    throw new Error(`candidate metadata differs: app_state ${before.appStateBytes}B/${before.appStateHash} → ${after.appStateBytes}B/${after.appStateHash}, tables ${before.tableCount} → ${after.tableCount}`);
   }
   console.log(JSON.stringify({ sourcePath, candidatePath, backupDirectory, confirmed: args.confirm, before: { ...before, bytes: beforeSize }, after: { ...after, bytes: afterSize }, reclaimedBytes: beforeSize - afterSize }, null, 2));
   if (args.confirm) {
