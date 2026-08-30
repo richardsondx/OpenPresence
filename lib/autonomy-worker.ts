@@ -76,6 +76,7 @@ import {
   publishingPlanNeedsReassessment,
   recordCapabilityFeedback,
   recordNativeMirror,
+  recordNativeMirrors,
   recordResourceUsageEvent,
   recordRuntimeEvent,
   recordSocialDecision,
@@ -1132,9 +1133,12 @@ export async function runAutonomousSelfDirectedDiscovery(
     .slice(0, 4);
   if (options?.attentionEpisodeId) next = recordAttentionStep(next, options.attentionEpisodeId, "triaging", { label: "Candidate review complete", detail: `${promising.length} of ${candidates.length} earned closer attention.`, current: candidates.length, total: candidates.length, status: "completed" });
 
+  if (discoverySource === "native" && connection && promising.length) {
+    next = recordNativeMirrors(next, promising.map((post) => ({ connectionId: connection.id, presenceId: presence.id, post })), { attentionEpisodeId: options?.attentionEpisodeId, attentionRunId: options?.runId, attentionInvocationId: invocationId });
+  }
+
   for (const [candidateIndex, post] of promising.entries()) {
     touchAutonomyRun(options?.runId, "discovery.decide");
-    if (discoverySource === "native") next = recordNativeMirror(next, { connectionId: connection!.id, presenceId: presence.id, post }, { attentionEpisodeId: options?.attentionEpisodeId, attentionRunId: options?.runId, attentionInvocationId: invocationId });
     let mirror = next.mirrorObjects.find((item) => item.externalRef.type === "x.post" && item.externalRef.id === post.id);
     if (!mirror) continue;
     if (hasEpisodeRepresentation(next, presence.id, post.id, options?.attentionEpisodeId)) continue;

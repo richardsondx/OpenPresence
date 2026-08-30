@@ -4,7 +4,7 @@ import {
   finishExplorationSession,
   formXActionIntent,
   formXReplyIntent,
-  recordNativeMirror,
+  recordNativeMirrors,
   recordResourceUsageEvent,
   recordRuntimeEvent,
   startExplorationSession,
@@ -224,7 +224,7 @@ export async function runLiveExplorationWorker(source: OpenPresenceState, explor
     try {
       next = recordResourceUsageEvent(next, { presenceId: presence.id, invocationId, runId: options.runId, originKind: "exploration", originId: exploration.id, attentionSource: "exploration", category: "channel_read", provider: "x", usage: { requests: 1 }, attentionEpisodeId: options.attentionEpisodeId });
       const posts = await searchRecentXPosts(credentials, query, 25);
-      for (const post of posts) next = recordNativeMirror(next, { connectionId: connection.id, presenceId: presence.id, post }, { attentionEpisodeId: options.attentionEpisodeId, attentionRunId: options.runId, attentionInvocationId: invocationId });
+      next = recordNativeMirrors(next, posts.map((post) => ({ connectionId: connection.id, presenceId: presence.id, post })), { attentionEpisodeId: options.attentionEpisodeId, attentionRunId: options.runId, attentionInvocationId: invocationId });
       const imported = new Set(posts.map((post) => post.id));
       candidates = next.mirrorObjects.filter((item) => item.presenceId === presence.id && item.visibility === "public" && item.objectType === "post" && imported.has(item.externalRef.id) && isCognitionEligibleMirrorObject(item, presence.language));
       const running = next.explorationSessions.find((item) => item.id === session?.id);
