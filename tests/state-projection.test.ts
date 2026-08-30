@@ -56,6 +56,66 @@ describe("state read projections", () => {
     expect(projection.agentWorkspaces).toHaveLength(0);
   });
 
+  it("bounds linked social history while retaining in-flight execution records", () => {
+    const state = initialState();
+    state.executions = Array.from({ length: 300 }, (_, index) => ({
+      id: `execution-${index}`,
+      socialIntentId: `intent-${index}`,
+      presenceId: "presence",
+      affordance: "x.reply",
+      mode: "manual",
+      status: index === 299 ? "executing" : "succeeded",
+      attempts: 1,
+      idempotencyKey: `key-${index}`,
+      createdAt: new Date(index).toISOString(),
+      updatedAt: new Date(index).toISOString(),
+    })) as never;
+    state.socialIntents = Array.from({ length: 400 }, (_, index) => ({
+      id: `intent-${index}`,
+      agentId: "agent",
+      presenceId: "presence",
+      affordance: "x.reply",
+      priority: 1,
+      validity: {},
+      state: index === 299 ? "active" : "withdrawn",
+      formedAt: new Date(index).toISOString(),
+      updatedAt: new Date(index).toISOString(),
+    })) as never;
+    state.socialDecisions = Array.from({ length: 400 }, (_, index) => ({
+      id: `decision-${index}`,
+      agentId: "agent",
+      presenceId: "presence",
+      environment: "sandbox",
+      focalMirrorObjectIds: [],
+      decision: "reply",
+      summary: `Decision ${index}`,
+      influences: [],
+      socialIntentId: `intent-${index}`,
+      createdAt: new Date(index).toISOString(),
+    })) as never;
+    state.actions = Array.from({ length: 400 }, (_, index) => ({
+      id: `action-${index}`,
+      intent: "reply",
+      summary: `Action ${index}`,
+      status: "executed",
+      reason: "test",
+      createdAt: new Date(index).toISOString(),
+      executionId: `execution-${index}`,
+      socialIntentId: `intent-${index}`,
+    })) as never;
+
+    const projection = browserWorkspaceProjection(state);
+
+    expect(projection.executions).toHaveLength(120);
+    expect(projection.executions.some((execution) => execution.id === "execution-299")).toBe(true);
+    expect(projection.socialIntents.length).toBeLessThanOrEqual(240);
+    expect(projection.socialIntents.some((intent) => intent.id === "intent-299")).toBe(true);
+    expect(projection.socialDecisions.length).toBeLessThanOrEqual(240);
+    expect(projection.socialDecisions.some((decision) => decision.socialIntentId === "intent-299")).toBe(true);
+    expect(projection.actions.length).toBeLessThanOrEqual(240);
+    expect(projection.actions.some((action) => action.executionId === "execution-299")).toBe(true);
+  });
+
   it("clones only when an active or paused pursuit window has expired", () => {
     const state = initialState();
     state.assignmentPursuitWindows = [{

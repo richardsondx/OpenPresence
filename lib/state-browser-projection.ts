@@ -57,6 +57,48 @@ export function browserWorkspaceProjection(state: OpenPresenceState): OpenPresen
   projection.recoveryAttempts = boundedRecent(state.recoveryAttempts, 150) as never;
   projection.recoveryIncidents = boundedRecent(state.recoveryIncidents, 150) as never;
 
+  // These collections are durable history, not configuration. A full browser
+  // navigation used to carry every old decision, intent, action, publication,
+  // and outcome even though the Live and Chat views have their own projections.
+  // Keep active work and records linked to the retained execution window, then
+  // bound the rest. This reduces browser parse/GC pressure without deleting
+  // history or weakening server-side cognition and reconciliation.
+  const retainedExecutionIds = new Set(projection.executions.map((execution) => execution.id));
+  const retainedIntentIds = new Set(
+    projection.executions.map((execution) => execution.socialIntentId),
+  );
+  const currentIntent = (intent: OpenPresenceState["socialIntents"][number]) =>
+    intent.state === "active" || retainedIntentIds.has(intent.id);
+  projection.socialIntents = boundedRecent(state.socialIntents, 240, currentIntent) as never;
+  const retainedProjectionIntentIds = new Set(projection.socialIntents.map((intent) => intent.id));
+  projection.socialDecisions = boundedRecent(
+    state.socialDecisions,
+    240,
+    (decision) => Boolean(decision.socialIntentId && retainedProjectionIntentIds.has(decision.socialIntentId)),
+  ) as never;
+  projection.actions = boundedRecent(
+    state.actions,
+    240,
+    (action) => Boolean(
+      (action.executionId && retainedExecutionIds.has(action.executionId))
+      || (action.socialIntentId && retainedProjectionIntentIds.has(action.socialIntentId))
+      || ["queued", "review"].includes(action.status),
+    ),
+  ) as never;
+  projection.outcomes = boundedRecent(
+    state.outcomes,
+    180,
+    (outcome) => Boolean(outcome.executionId && retainedExecutionIds.has(outcome.executionId)),
+  ) as never;
+  const retainedPublicationIds = new Set(
+    projection.socialIntents.map((intent) => intent.publicationId).filter((id): id is string => Boolean(id)),
+  );
+  projection.publications = boundedRecent(
+    state.publications,
+    180,
+    (publication) => retainedPublicationIds.has(publication.id),
+  ) as never;
+
   // Preserve objects that current assignments, executions, publications, or
   // operator directives point at even when those objects are older than the
   // recent browser window.
