@@ -162,11 +162,11 @@ let recycling = false;
 let child;
 let scheduler;
 let schedulerRestartTimer;
-let devMemoryWatchdog;
+let memoryWatchdog;
 let childStartedAt = 0;
-const devRssLimitMb = Number(process.env.OPENPRESENCE_DEV_RSS_LIMIT_MB || "1536");
-const devRssCheckMs = Math.max(5_000, Number(process.env.OPENPRESENCE_DEV_RSS_CHECK_MS || "15_000"));
-const devRssGraceMs = Math.max(0, Number(process.env.OPENPRESENCE_DEV_RSS_GRACE_MS || "60_000"));
+const serverRssLimitMb = Number(process.env.OPENPRESENCE_SERVER_RSS_LIMIT_MB || process.env.OPENPRESENCE_DEV_RSS_LIMIT_MB || "1536");
+const serverRssCheckMs = Math.max(5_000, Number(process.env.OPENPRESENCE_SERVER_RSS_CHECK_MS || process.env.OPENPRESENCE_DEV_RSS_CHECK_MS || "15_000"));
+const serverRssGraceMs = Math.max(0, Number(process.env.OPENPRESENCE_SERVER_RSS_GRACE_MS || process.env.OPENPRESENCE_DEV_RSS_GRACE_MS || "60_000"));
 
 function childRssMb() {
   if (!child?.pid || process.platform === "win32") return undefined;
@@ -198,10 +198,10 @@ function childRssMb() {
   }
 }
 
-function recycleDevCompiler(rssMb) {
-  if (mode !== "dev" || stopping || recycling || !child) return;
+function recycleNextChild(rssMb) {
+  if (stopping || recycling || !child) return;
   recycling = true;
-  console.warn(`[openpresence-server] dev compiler RSS reached ${Math.round(rssMb)} MB; recycling Next to release native compiler memory.`);
+  console.warn(`[openpresence-server] ${mode} Next RSS reached ${Math.round(rssMb)} MB; recycling the child to release retained memory.`);
   child.kill("SIGTERM");
 }
 
@@ -226,7 +226,7 @@ function startDevScheduler() {
 function stopChildren(signal) {
   stopping = true;
   if (schedulerRestartTimer) clearTimeout(schedulerRestartTimer);
-  if (devMemoryWatchdog) clearInterval(devMemoryWatchdog);
+  if (memoryWatchdog) clearInterval(memoryWatchdog);
   if (child) child.kill(signal);
   if (scheduler) scheduler.kill(signal);
 }
@@ -264,7 +264,7 @@ function startNextChild() {
     stopping = true;
     if (schedulerRestartTimer) clearTimeout(schedulerRestartTimer);
     if (scheduler) scheduler.kill(signal || "SIGTERM");
-    if (devMemoryWatchdog) clearInterval(devMemoryWatchdog);
+    if (memoryWatchdog) clearInterval(memoryWatchdog);
     releaseServerLock();
     if (signal) process.kill(process.pid, signal);
     process.exit(code ?? 1);
@@ -272,10 +272,10 @@ function startNextChild() {
 }
 
 startNextChild();
-if (mode === "dev" && Number.isFinite(devRssLimitMb) && devRssLimitMb > 0 && process.platform !== "win32") {
-  devMemoryWatchdog = setInterval(() => {
-    if (Date.now() - childStartedAt < devRssGraceMs) return;
+if (Number.isFinite(serverRssLimitMb) && serverRssLimitMb > 0 && process.platform !== "win32") {
+  memoryWatchdog = setInterval(() => {
+    if (Date.now() - childStartedAt < serverRssGraceMs) return;
     const rssMb = childRssMb();
-    if (rssMb !== undefined && rssMb >= devRssLimitMb) recycleDevCompiler(rssMb);
-  }, devRssCheckMs);
+    if (rssMb !== undefined && rssMb >= serverRssLimitMb) recycleNextChild(rssMb);
+  }, serverRssCheckMs);
 }
