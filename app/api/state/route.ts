@@ -246,16 +246,12 @@ function activityProjection(state: OpenPresenceState): OpenPresenceState {
   const targetObjects = scopedMirrors.filter((object) => targetMirrorIds.has(object.id));
   const recentObjects = scopedMirrors.filter((object) => !targetMirrorIds.has(object.id)).slice(0, 120);
   const compactMirror = (object: OpenPresenceState["mirrorObjects"][number]) => {
-    const compact = { ...object };
     // Activity needs identity, relationship, and public text evidence. These
     // ingestion/authorization fields are server-side detail and are not read
     // by LiveView; omitting them prevents each heartbeat from shipping the
     // same connector envelope again.
-    delete compact.assetRefs;
-    delete compact.sourceEventId;
-    delete compact.bridgeId;
-    delete compact.trust;
-    delete compact.shareability;
+    const compact = { ...object };
+    for (const key of ["assetRefs", "sourceEventId", "bridgeId", "trust", "shareability"] as const) Reflect.deleteProperty(compact, key);
     return compact;
   };
   projection.mirrorObjects = [...targetObjects, ...recentObjects].map(compactMirror) as never;
