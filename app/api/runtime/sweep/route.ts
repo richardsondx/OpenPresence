@@ -21,14 +21,18 @@ function responseHeaders() {
   return { "Cache-Control": "no-store" };
 }
 
-function schedulerTelemetry(request: Request) {
+function schedulerTelemetry(request: Request): Record<string, number> | undefined {
   const header = request.headers.get("x-openpresence-scheduler-telemetry");
   if (!header) return undefined;
   try {
     const parsed = JSON.parse(header) as { heapUsedMb?: unknown; rssMb?: unknown };
     const heapUsedMb = typeof parsed.heapUsedMb === "number" && Number.isFinite(parsed.heapUsedMb) && parsed.heapUsedMb >= 0 ? Math.round(parsed.heapUsedMb) : undefined;
     const rssMb = typeof parsed.rssMb === "number" && Number.isFinite(parsed.rssMb) && parsed.rssMb >= 0 ? Math.round(parsed.rssMb) : undefined;
-    return heapUsedMb === undefined && rssMb === undefined ? undefined : { heapUsedMb, rssMb };
+    if (heapUsedMb === undefined && rssMb === undefined) return undefined;
+    return {
+      ...(heapUsedMb === undefined ? {} : { heapUsedMb }),
+      ...(rssMb === undefined ? {} : { rssMb }),
+    };
   } catch {
     return undefined;
   }
