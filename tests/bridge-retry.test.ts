@@ -1,6 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { claimExecutions, closeChromeVerification, createBridgeWithKey, failExecution, ingestEvents, recordVerifiedBridgeReaction, reportBridgeIdentity } from "../lib/bridge";
-import { applyOperation, createAgent, formXReplyIntent } from "../lib/runtime";
+import { applyOperation, createAgent, formXReplyIntent, recordNativeMirror } from "../lib/runtime";
 import { readState, readStateForBridge, readStateVersion, WorkspaceConflictError, writeState } from "../lib/db";
 import type { Execution } from "../lib/types";
 
@@ -26,6 +26,21 @@ describe("Bridge browser retry lifecycle", () => {
     const second = readStateForBridge(bridgeResult.bridge!.id);
     expect(second.bridges.find((bridge) => bridge.id === bridgeResult.bridge!.id)?.state).not.toBe("offline");
     expect(second.presences.find((presence) => presence.id === state.presence!.id)?.status).not.toBe("paused");
+  });
+
+  it("does not amplify unchanged native reconciliation into mirror events", () => {
+    const state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    const input = { connectionId: "native-test", presenceId: state.presence!.id, own: false, post: { id: "post-replayed", text: "A stable observed post", createdAt: new Date().toISOString(), authorUsername: "someone" } };
+    const withObject = recordNativeMirror(state, input);
+    const legacyWithoutCreate = { ...withObject, mirrorEvents: [] };
+    const changedInput = { ...input, post: { ...input.post, text: "A materially changed observed post" } };
+    const firstReplay = recordNativeMirror(legacyWithoutCreate, changedInput);
+    const secondReplay = recordNativeMirror(firstReplay, changedInput);
+
+    expect(firstReplay.mirrorEvents).toHaveLength(1);
+    expect(firstReplay.mirrorEvents[0]?.event).toBe("updated");
+    expect(secondReplay.mirrorEvents).toHaveLength(1);
+    expect(secondReplay.mirrorEvents[0]?.sourceEventId).toBe(firstReplay.mirrorEvents[0]?.sourceEventId);
   });
 
   it("does not rewrite the workspace for a fresh unchanged identity probe", () => {

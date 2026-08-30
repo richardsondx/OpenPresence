@@ -1312,13 +1312,38 @@ export function recordNativeMirror(source: OpenPresenceState, input: { connectio
         ? "reply"
         : existing?.objectType ?? "post";
   const object = { id: existing?.id ?? id("mirror"), bridgeId: `native:${input.connectionId}`, presenceId: input.presenceId, channelId: "x" as const, externalRef: { type: "x.post", id: input.post.id }, parentExternalRef: input.post.parentId ? { type: "x.post", id: input.post.parentId } : undefined, conversationExternalRef: input.post.conversationId, referencedExternalRefs: input.post.referencedPosts?.map((reference) => ({ type: "x.post", id: reference.id })), objectType, language: visualLanguageEligible && input.post.language !== undefined && !languagesMatch(presence?.language, input.post.language) ? presence?.language : input.post.language, author: { externalRef: input.post.authorId ? { type: "x.user", id: input.post.authorId } : undefined, displayName: input.post.authorName ?? (input.post.authorUsername ? `@${input.post.authorUsername}` : "X user"), handle: input.post.authorUsername, avatarUrl: input.post.authorAvatarUrl }, content: { text: input.post.text }, assetRefs: mediaRefs.length ? mediaRefs : existing?.assetRefs, occurredAt: input.post.createdAt, observedAt: receivedAt, visibility: "public" as const, shareability: "presence-only" as const, originExecutionId: matchingExecution?.id ?? existing?.originExecutionId, assignmentId: verifiedAssignmentId, actorPresenceId: existing?.actorPresenceId ?? (input.own ? input.presenceId : undefined), sourceEventId, archived: false, environment: "live" as const, source: "native" as const, trust: "untrusted_world_content" as const, attentionEpisodeId: options?.attentionEpisodeId, attentionRunId: options?.attentionRunId, attentionInvocationId: options?.attentionInvocationId };
-  if (existing) {
+  const changeFingerprint = (item: Pick<MirrorObject, "objectType" | "language" | "author" | "content" | "assetRefs" | "parentExternalRef" | "conversationExternalRef" | "referencedExternalRefs" | "visibility" | "shareability" | "originExecutionId" | "actorPresenceId" | "archived" | "environment">) => JSON.stringify({
+    objectType: item.objectType,
+    language: item.language,
+    author: item.author,
+    content: item.content,
+    assetRefs: item.assetRefs,
+    parentExternalRef: item.parentExternalRef,
+    conversationExternalRef: item.conversationExternalRef,
+    referencedExternalRefs: item.referencedExternalRefs,
+    visibility: item.visibility,
+    shareability: item.shareability,
+    originExecutionId: item.originExecutionId,
+    actorPresenceId: item.actorPresenceId,
+    archived: item.archived,
+    environment: item.environment,
+  });
+  const changed = !existing || changeFingerprint(existing) !== changeFingerprint(object);
+  if (existing && changed) {
     state.mirrorObjects = state.mirrorObjects.map((item) => item.id === existing.id ? object : item);
-  } else {
+  } else if (!existing) {
     state.mirrorObjects.unshift(object);
   }
-  if (!state.mirrorEvents.some((item) => item.externalRef.type === "x.post" && item.externalRef.id === input.post.id && item.event === "created")) {
-    state.mirrorEvents.unshift({ id: id("mirror-event"), bridgeId: `native:${input.connectionId}`, presenceId: input.presenceId, sourceEventId, event: existing ? "updated" : "created", externalRef: { type: "x.post", id: input.post.id }, receivedAt });
+  if (!existing) {
+    state.mirrorEvents.unshift({ id: id("mirror-event"), bridgeId: `native:${input.connectionId}`, presenceId: input.presenceId, sourceEventId, event: "created", externalRef: { type: "x.post", id: input.post.id }, receivedAt });
+  } else if (changed) {
+    // A legacy object may have no `created` event. Emit one update for a real
+    // content/relationship change, keyed by its resulting fingerprint, so a
+    // replay of unchanged reconciliation cannot grow the append-only log.
+    const updateSourceEventId = `${sourceEventId}:updated:${stableHash(changeFingerprint(object))}`;
+    if (!state.mirrorEvents.some((item) => item.sourceEventId === updateSourceEventId)) {
+      state.mirrorEvents.unshift({ id: id("mirror-event"), bridgeId: `native:${input.connectionId}`, presenceId: input.presenceId, sourceEventId: updateSourceEventId, event: "updated", externalRef: { type: "x.post", id: input.post.id }, receivedAt });
+    }
   }
   if (matchingExecution?.assignmentId && !existing?.originExecutionId) {
     const assignment = state.assignments.find((item) => item.id === matchingExecution.assignmentId);
