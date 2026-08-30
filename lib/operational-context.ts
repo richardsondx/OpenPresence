@@ -1,4 +1,4 @@
-import { databaseIntegrityVerifiedAt, getDependencyHealth, getDueScheduledWakes, getOperationalRun, getProcessHeartbeats, listDependencyHealth, listOperationalRuns, listRecoveryIncidents, readBridgeHealthForPresence, readChannelSecret, readRuntimeHealthProjection, upsertDependencyHealth, upsertOperationalRun, upsertRecoveryIncident } from "./db";
+import { databaseIntegrityVerifiedAt, getDependencyHealth, getDueScheduledWakes, getOperationalRun, getProcessHeartbeats, getRecoveryIncident, listDependencyHealth, listOperationalRuns, listRecoveryIncidents, readBridgeHealthForPresence, readChannelSecret, readRuntimeHealthProjection, upsertDependencyHealth, upsertOperationalRun, upsertRecoveryIncident } from "./db";
 import type { Bridge, OperationalHealthSnapshot } from "./types";
 import { xCreditsExhausted } from "./x-credits";
 import { bridgeExecutionStatus, bridgeIdentityReady } from "./bridge-contract";
@@ -32,6 +32,42 @@ function normalizeLegacyRuntimeIncidents(presenceId?: string) {
   }
   for (const incident of listRecoveryIncidents(presenceId)) {
     if (incident.state === "resolved") continue;
+
+    // The database was verified before this process began serving requests.
+    // Retire only incidents that predate that verified open; a corruption
+    // discovered after startup must remain a hard operator boundary.
+    if (incident.rootCauseKey === "database.corruption" && incident.openedAt < databaseIntegrityVerifiedAt) {
+      const affectedRuns = incident.affectedRunIds
+        .map((runId) => getOperationalRun(runId))
+        .filter((run): run is NonNullable<typeof run> => Boolean(run));
+      for (const run of affectedRuns) {
+        if (run.state !== "needs_operator" || !run.stage.startsWith("incident_database.corruption")) continue;
+        run.state = "cancelled";
+        run.stage = "superseded_by_verified_database_recovery";
+        run.blockedReason = "The database passed startup integrity checks after recovery; the pre-recovery run was superseded without re-running external work.";
+        run.lastProgressAt = now;
+        delete run.leaseOwner;
+        delete run.leaseExpiresAt;
+        upsertOperationalRun(run);
+      }
+      incident.state = "resolved";
+      incident.resolvedAt = now;
+      incident.operatorActionRequired = false;
+      incident.updatedAt = now;
+      delete incident.nextAttemptAt;
+      upsertRecoveryIncident(incident);
+      const databaseHealth = getDependencyHealth("database", incident.presenceId);
+      if (databaseHealth?.currentIncidentId === incident.id) {
+        databaseHealth.state = "healthy";
+        databaseHealth.consecutiveFailures = 0;
+        databaseHealth.lastHealthyAt = now;
+        databaseHealth.updatedAt = now;
+        delete databaseHealth.currentIncidentId;
+        delete databaseHealth.circuitUntil;
+        upsertDependencyHealth(databaseHealth);
+      }
+      continue;
+    }
 
     // A pre-existing SQLite corruption incident may have been recorded by an
     // older build as a recoverable runtime error. Preserve the incident and
@@ -170,6 +206,22 @@ function normalizeLegacyRuntimeIncidents(presenceId?: string) {
       upsertDependencyHealth(health);
     }
     requestAttention(targetPresenceId, "recovery", now, "recovery");
+  }
+
+  // A resolved incident must not leave its old operator-blocked run looking
+  // active. This contradiction made the health banner stay stuck after a
+  // recovery action had already closed the underlying incident.
+  for (const run of listOperationalRuns(presenceId, ["needs_operator"])) {
+    if (!run.stage.startsWith("incident_") || !run.incidentId) continue;
+    const incident = getRecoveryIncident(run.incidentId);
+    if (incident && incident.state !== "resolved") continue;
+    run.state = "cancelled";
+    run.stage = "superseded_by_resolved_incident";
+    run.blockedReason = "The run's incident is already resolved; the stale operator-blocked run was closed without repeating external work.";
+    run.lastProgressAt = now;
+    delete run.leaseOwner;
+    delete run.leaseExpiresAt;
+    upsertOperationalRun(run);
   }
 }
 

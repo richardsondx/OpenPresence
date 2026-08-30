@@ -265,6 +265,39 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
     expect(health.counts.activeIncidents).toBe(0);
   });
 
+  it("does not keep a needs-operator run active after its incident is resolved", () => {
+    const uniquePresence = `presence_resolved_run_${Date.now()}`;
+    const { incident } = recordOperationalFailure({
+      dependency: "runtime",
+      presenceId: uniquePresence,
+      runId: "run_resolved_incident",
+      error: "temporary runtime failure",
+    });
+    const now = new Date().toISOString();
+    upsertOperationalRun({
+      id: "run_resolved_incident",
+      runId: "run_resolved_incident",
+      presenceId: uniquePresence,
+      kind: "attention",
+      state: "needs_operator",
+      stage: "incident_runtime.transient_error",
+      incidentId: incident.id,
+      createdAt: now,
+      eligibleAt: now,
+      lastProgressAt: now,
+      attemptCount: 1,
+      recoveryCount: 0,
+    });
+    incident.state = "resolved";
+    incident.operatorActionRequired = false;
+    incident.resolvedAt = now;
+    upsertRecoveryIncident(incident);
+
+    const health = readOperationalHealth(uniquePresence);
+
+    expect(health.activeRuns.find((run) => run.id === "run_resolved_incident")).toBeUndefined();
+  });
+
   it("Invariant: an existing recovery incident escalates immediately when credits become operator-blocked", () => {
     const uniquePresence = `presence_credit_escalation_${Date.now()}`;
     const first = recordOperationalFailure({ dependency: "runtime", presenceId: uniquePresence, runId: "run_credit_1", error: "X has no API credits remaining. Add credits or choose an API plan to continue." });
