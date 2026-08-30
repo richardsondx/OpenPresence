@@ -100,6 +100,13 @@ function touchBridge(state: OpenPresenceState, bridge: Bridge, synced = false) {
 
 const normalizedHandle = (value: string | undefined) => String(value ?? "").replace(/^@/, "").trim().toLowerCase();
 
+function includesDirectMention(text: string | undefined, handle: string | undefined) {
+  const normalized = normalizedHandle(handle);
+  if (!normalized || !text) return false;
+  const escaped = normalized.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+  return new RegExp(`(^|[^a-z0-9_])@${escaped}(?=$|[^a-z0-9_])`, "i").test(text);
+}
+
 function observedActorPresenceId(presence: OpenPresenceState["presence"], input: z.infer<typeof mirrorObjectInput>) {
   // Connector observations are world data by default. Only attribute an
   // observation to the current Presence when the provider says it came from
@@ -109,6 +116,24 @@ function observedActorPresenceId(presence: OpenPresenceState["presence"], input:
   const expected = normalizedHandle(presence?.handle);
   const observed = normalizedHandle(input.author?.handle);
   return expected && observed && expected === observed ? presence?.id : undefined;
+}
+
+function isInboundAttentionObject(bridge: Bridge, state: OpenPresenceState, presence: OpenPresenceState["presence"], object: MirrorObject) {
+  // Non-X Bridges represent their connector's inbound stream directly. The
+  // Chrome X Bridge also observes ambient timeline posts, so only wake
+  // cognition for an explicit handle mention or a reply to this Presence's
+  // own authored object. Ambient evidence remains available for later
+  // exploration without competing with a real inbound conversation.
+  if (bridge.channelId !== "x") return object.actorPresenceId !== bridge.presenceId;
+  if (object.actorPresenceId === bridge.presenceId) return false;
+  if (includesDirectMention(object.content?.text, presence?.handle)) return true;
+  const parent = object.parentExternalRef;
+  if (!parent) return false;
+  const parentObject = state.mirrorObjects.find((item) => item.presenceId === bridge.presenceId
+    && item.externalRef.type === parent.type
+    && item.externalRef.id === parent.id);
+  return parentObject?.actorPresenceId === bridge.presenceId
+    || normalizedHandle(parentObject?.author?.handle) === normalizedHandle(presence?.handle);
 }
 
 export function reportBridgeIdentity(bridge: Bridge, input: z.infer<typeof identityInput>) {
@@ -304,7 +329,7 @@ export function ingestEvents(bridge: Bridge, payload: z.infer<typeof eventsInput
     if (seenSourceEventIds.has(item.sourceEventId)) continue;
     seenSourceEventIds.add(item.sourceEventId);
     const object = upsertObject(state, current, { ...item.object, actorPresenceId: observedActorPresenceId(presence, item.object) }, item.sourceEventId, item.event === "deleted", mirrorIndex);
-    if (item.event !== "deleted" && object.actorPresenceId !== bridge.presenceId) {
+    if (item.event !== "deleted" && isInboundAttentionObject(current, state, presence, object)) {
       receivedInbound = true;
       receivedInboundIds.push(object.externalRef.id);
     }

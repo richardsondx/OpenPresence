@@ -2,7 +2,7 @@ import { afterEach, describe, expect, it, vi } from "vitest";
 import { createBridgeWithKey, ingestEvents, reportBridgeIdentity } from "../lib/bridge";
 import { applyOperation, createAgent } from "../lib/runtime";
 import { runAutonomousObservation } from "../lib/autonomy-worker";
-import { readState, writeState } from "../lib/db";
+import { listScheduledWakes, readState, writeState } from "../lib/db";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -71,6 +71,33 @@ describe("Bridge world-observation authorship", () => {
     expect(observed?.actorPresenceId).toBeUndefined();
   });
 
+  it("keeps ambient X timeline evidence from waking the inbound attention loop", () => {
+    const state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    state.presence!.environment = "live";
+    state.presence!.connectionMode = "bridge";
+    state.presences = state.presences.map((presence) => presence.id === state.presence!.id ? { ...presence, environment: "live", connectionMode: "bridge" } : presence);
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });
+    writeState(bridgeResult.state);
+    const bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge?.id)!;
+
+    ingestEvents(bridge, { events: [{
+      sourceEventId: "ambient-timeline-post-1",
+      event: "created",
+      object: {
+        externalRef: { type: "x.post", id: "ambient-timeline-post-1" },
+        objectType: "post",
+        language: "en",
+        author: { displayName: "Other Author", handle: "other_author" },
+        content: { text: "A useful post from the timeline." },
+        visibility: "public",
+        shareability: "presence-only",
+      },
+    }] });
+
+    expect(listScheduledWakes(state.presence!.id).filter((wake) => wake.kind === "attention" && wake.state === "pending")).toHaveLength(0);
+    expect(readState().presence?.context.publicFooting?.recentInboundIds ?? []).not.toContain("ambient-timeline-post-1");
+  });
+
   it("indexes a Bridge mention so the next attention pass can judge it without a native read", () => {
     const state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
     state.presence!.environment = "live";
@@ -95,6 +122,7 @@ describe("Bridge world-observation authorship", () => {
     }] });
 
     expect(readState().presence?.context.publicFooting?.recentInboundIds).toContain("mention-1");
+    expect(listScheduledWakes(state.presence!.id).some((wake) => wake.kind === "attention" && wake.state === "pending")).toBe(true);
   });
 
   it("continues a Bridge mention into cognition when native X is unavailable", async () => {
