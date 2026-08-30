@@ -518,13 +518,14 @@ function recordModelUsage(
   state.resourceUsageEvents = state.resourceUsageEvents.slice(0, 5_000);
 }
 
-async function runOpenAiCompatible(provider: ModelProvider, endpoint: string, secret: string, model: string, prompt: ReturnType<typeof promptFor>, reasoningEffort?: "low" | "medium" | "high") {
+async function runOpenAiCompatible(provider: ModelProvider, endpoint: string, secret: string, model: string, prompt: ReturnType<typeof promptFor>, reasoningEffort?: "low" | "medium" | "high", maxOutputTokens?: number) {
   const requestBody: Record<string, unknown> = {
     model: provider === "openai" ? openAiModel(model) : model,
     messages: [{ role: "system", content: prompt.system }, ...prompt.messages],
     stream: false,
   };
   if (provider === "openai" && reasoningEffort) requestBody.reasoning_effort = reasoningEffort;
+  if (maxOutputTokens !== undefined) requestBody[provider === "openai" ? "max_completion_tokens" : "max_tokens"] = maxOutputTokens;
   const body = await requestJson(`${endpoint.replace(/\/+$/, "")}/chat/completions`, {
     method: "POST",
     headers: { "content-type": "application/json", authorization: `Bearer ${secret}` },
@@ -537,11 +538,11 @@ async function runOpenAiCompatible(provider: ModelProvider, endpoint: string, se
   return { text: content, usage: providerUsage(body, provider) };
 }
 
-async function runAnthropic(secret: string, model: string, prompt: ReturnType<typeof promptFor>) {
+async function runAnthropic(secret: string, model: string, prompt: ReturnType<typeof promptFor>, maxOutputTokens?: number) {
   const body = await requestJson("https://api.anthropic.com/v1/messages", {
     method: "POST",
     headers: { "content-type": "application/json", "x-api-key": secret, "anthropic-version": "2023-06-01" },
-    body: JSON.stringify({ model: anthropicModel(model), max_tokens: 1000, system: prompt.system, messages: prompt.messages }),
+    body: JSON.stringify({ model: anthropicModel(model), max_tokens: maxOutputTokens ?? 1000, system: prompt.system, messages: prompt.messages }),
   }, "Anthropic");
   const blocks = Array.isArray(body.content) ? body.content : [];
   const content = blocks.map((block) => block && typeof block === "object" ? textFrom((block as Record<string, unknown>).text) : undefined).filter(Boolean).join("\n");
@@ -549,7 +550,7 @@ async function runAnthropic(secret: string, model: string, prompt: ReturnType<ty
   return { text: content, usage: providerUsage(body, "anthropic") };
 }
 
-async function runOllama(endpoint: string, model: string, prompt: ReturnType<typeof promptFor>) {
+async function runOllama(endpoint: string, model: string, prompt: ReturnType<typeof promptFor>, maxOutputTokens?: number) {
   const base = endpoint.replace(/\/+$/, "");
   const catalog = await listOllamaModels(base);
   const resolvedModel = resolveOllamaModel(model, catalog);
@@ -560,7 +561,7 @@ async function runOllama(endpoint: string, model: string, prompt: ReturnType<typ
   const body = await requestJson(`${base}/api/chat`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ model: resolvedModel, messages: [{ role: "system", content: prompt.system }, ...prompt.messages], stream: false, think: false, options: { num_ctx: 8192, num_predict: 500, temperature: 0.4 } }),
+    body: JSON.stringify({ model: resolvedModel, messages: [{ role: "system", content: prompt.system }, ...prompt.messages], stream: false, think: false, options: { num_ctx: 8192, num_predict: maxOutputTokens ?? 500, temperature: 0.4 } }),
   }, "Ollama");
   const messageObject = body.message && typeof body.message === "object" ? body.message as Record<string, unknown> : undefined;
   const content = textFrom(messageObject?.content);
@@ -570,12 +571,12 @@ async function runOllama(endpoint: string, model: string, prompt: ReturnType<typ
   return { text: message, usage: { inputTokens: typeof body.prompt_eval_count === "number" ? body.prompt_eval_count : undefined, outputTokens: typeof body.eval_count === "number" ? body.eval_count : undefined, totalTokens: typeof body.prompt_eval_count === "number" || typeof body.eval_count === "number" ? (typeof body.prompt_eval_count === "number" ? body.prompt_eval_count : 0) + (typeof body.eval_count === "number" ? body.eval_count : 0) : undefined } };
 }
 
-async function runGemini(secret: string, model: string, prompt: ReturnType<typeof promptFor>) {
+async function runGemini(secret: string, model: string, prompt: ReturnType<typeof promptFor>, maxOutputTokens?: number) {
   const contents = prompt.messages.map((message) => ({ role: message.role === "assistant" ? "model" : "user", parts: [{ text: message.content }] }));
   const body = await requestJson(`https://generativelanguage.googleapis.com/v1beta/models/${encodeURIComponent(model)}:generateContent?key=${encodeURIComponent(secret)}`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ systemInstruction: { parts: [{ text: prompt.system }] }, contents }),
+    body: JSON.stringify({ systemInstruction: { parts: [{ text: prompt.system }] }, contents, ...(maxOutputTokens !== undefined ? { generationConfig: { maxOutputTokens } } : {}) }),
   }, "Gemini");
   const candidates = Array.isArray(body.candidates) ? body.candidates : [];
   const parts = candidates[0] && typeof candidates[0] === "object" ? (candidates[0] as Record<string, unknown>).content : undefined;
@@ -622,7 +623,7 @@ export async function checkModelProviderAccess(state: OpenPresenceState, presenc
   }
 }
 
-export async function generateAgentReply(state: OpenPresenceState, content: string, conversationId?: string, options?: { social?: boolean; presence?: Presence; socialHistory?: Array<Pick<PresenceChatMessage, "role" | "content">>; operatorHistory?: Array<Pick<OperatorConversationMessage, "role" | "content">>; socialEvidence?: string; socialThreadContext?: string; socialGuidance?: string; autobiographicalContext?: string; knowledgeContext?: KnowledgeContextPacket; disableKnowledge?: boolean; assignmentMode?: boolean; briefOverride?: PresenceBrief; usageOrigin?: ResourceUsageEvent["originKind"]; attentionSource?: ResourceUsageEvent["attentionSource"]; operational?: boolean; runId?: string; presenceId?: string; invocationId?: string; originId?: string; operatorConversation?: boolean; peopleNote?: { presenceId: string; personId: string; markdown: string; revision: number; updatedAt: string } }) {
+export async function generateAgentReply(state: OpenPresenceState, content: string, conversationId?: string, options?: { social?: boolean; presence?: Presence; socialHistory?: Array<Pick<PresenceChatMessage, "role" | "content">>; operatorHistory?: Array<Pick<OperatorConversationMessage, "role" | "content">>; socialEvidence?: string; socialThreadContext?: string; socialGuidance?: string; autobiographicalContext?: string; knowledgeContext?: KnowledgeContextPacket; disableKnowledge?: boolean; assignmentMode?: boolean; briefOverride?: PresenceBrief; usageOrigin?: ResourceUsageEvent["originKind"]; attentionSource?: ResourceUsageEvent["attentionSource"]; operational?: boolean; runId?: string; presenceId?: string; invocationId?: string; originId?: string; operatorConversation?: boolean; maxOutputTokens?: number; peopleNote?: { presenceId: string; personId: string; markdown: string; revision: number; updatedAt: string } }) {
   if (isAiMockEnabled()) {
     if (options?.operatorConversation) {
       const lower = content.toLowerCase();
@@ -649,12 +650,12 @@ export async function generateAgentReply(state: OpenPresenceState, content: stri
   if (["openai", "anthropic", "gemini", "openrouter"].includes(profile.provider) && !secret) throw new AiRuntimeError(`${providerLabel(profile.provider)} is selected but no API key is stored. Open Brain → Provider access and save the key.`);
   const prompt = promptFor(state, conversationId, content, options);
   try {
-    const result = profile.provider === "ollama" ? await runOllama(connection.endpoint || "http://localhost:11434", profile.model, prompt)
-      : profile.provider === "anthropic" ? await runAnthropic(secret!, profile.model, prompt)
-        : profile.provider === "gemini" ? await runGemini(secret!, profile.model, prompt)
-          : profile.provider === "openrouter" ? await runOpenAiCompatible(profile.provider, connection.endpoint || "https://openrouter.ai/api/v1", secret!, profile.model, prompt)
-            : profile.provider === "custom" ? await runOpenAiCompatible(profile.provider, connection.endpoint || "http://localhost:11434/v1", secret || "", profile.model, prompt)
-              : await runOpenAiCompatible(profile.provider, connection.endpoint || "https://api.openai.com/v1", secret!, profile.model, prompt, profile.quality === "low" || profile.quality === "medium" || profile.quality === "high" ? profile.quality : undefined);
+    const result = profile.provider === "ollama" ? await runOllama(connection.endpoint || "http://localhost:11434", profile.model, prompt, options?.maxOutputTokens)
+      : profile.provider === "anthropic" ? await runAnthropic(secret!, profile.model, prompt, options?.maxOutputTokens)
+        : profile.provider === "gemini" ? await runGemini(secret!, profile.model, prompt, options?.maxOutputTokens)
+          : profile.provider === "openrouter" ? await runOpenAiCompatible(profile.provider, connection.endpoint || "https://openrouter.ai/api/v1", secret!, profile.model, prompt, undefined, options?.maxOutputTokens)
+            : profile.provider === "custom" ? await runOpenAiCompatible(profile.provider, connection.endpoint || "http://localhost:11434/v1", secret || "", profile.model, prompt, undefined, options?.maxOutputTokens)
+              : await runOpenAiCompatible(profile.provider, connection.endpoint || "https://api.openai.com/v1", secret!, profile.model, prompt, profile.quality === "low" || profile.quality === "medium" || profile.quality === "high" ? profile.quality : undefined, options?.maxOutputTokens);
     recordModelUsage(state, profile, result, options);
     if (options?.operational) {
       recordOperationalSuccess("model_provider", options.presenceId ?? options.presence?.id);
@@ -1205,7 +1206,7 @@ export async function generateExplorationTriage(
 }
 
 export async function generateAgentSocialEdit(state: OpenPresenceState, instruction: string, plannedAction: string, options?: SocialGenerationOptions) {
-  const raw = await generateAgentReply(state, `${instruction}\n\n${personToPersonLanguageGuidance}\n\nYou are an expression editor after an authoritative Social Planner has already selected the social act “${plannedAction}”. You may refine only the wording for that same act. Return JSON only in this shape: {"status":"ok","action":"${plannedAction}","text":"...","rationale":"short explanation"}. If the candidate contains a concrete contradiction that makes the selected act invalid in the supplied evidence, do not choose another act and do not choose silence; return {"status":"needs_replan","action":"${plannedAction}","text":"","contradiction":"specific contradiction in the evidence","rationale":"short explanation"}. A contradiction must name the conflicting evidence, not a stylistic preference. If the editor fails or has no concrete contradiction, the original planner act and draft remain authoritative.`, undefined, { social: true, presence: options?.presence ?? state.presence ?? undefined, socialHistory: options?.socialHistory, socialEvidence: options?.socialEvidence, socialThreadContext: options?.socialThreadContext, knowledgeContext: options?.knowledgeContext, disableKnowledge: options?.disableKnowledge, assignmentMode: options?.assignmentMode, briefOverride: options?.briefOverride, usageOrigin: options?.usageOrigin, attentionSource: options?.attentionSource, operational: options?.operational, runId: options?.runId, presenceId: options?.presenceId ?? options?.presence?.id, invocationId: options?.invocationId, originId: options?.originId, operatorConversation: options?.operatorConversation });
+  const raw = await generateAgentReply(state, `${instruction}\n\n${personToPersonLanguageGuidance}\n\nYou are an expression editor after an authoritative Social Planner has already selected the social act “${plannedAction}”. You may refine only the wording for that same act. Return JSON only in this shape: {"status":"ok","action":"${plannedAction}","text":"...","rationale":"short explanation"}. If the candidate contains a concrete contradiction that makes the selected act invalid in the supplied evidence, do not choose another act and do not choose silence; return {"status":"needs_replan","action":"${plannedAction}","text":"","contradiction":"specific contradiction in the evidence","rationale":"short explanation"}. A contradiction must name the conflicting evidence, not a stylistic preference. If the editor fails or has no concrete contradiction, the original planner act and draft remain authoritative.`, undefined, { social: true, presence: options?.presence ?? state.presence ?? undefined, socialHistory: options?.socialHistory, socialEvidence: options?.socialEvidence, socialThreadContext: options?.socialThreadContext, knowledgeContext: options?.knowledgeContext, disableKnowledge: options?.disableKnowledge, assignmentMode: options?.assignmentMode, briefOverride: options?.briefOverride, usageOrigin: options?.usageOrigin, attentionSource: options?.attentionSource, operational: options?.operational, runId: options?.runId, presenceId: options?.presenceId ?? options?.presence?.id, invocationId: options?.invocationId, originId: options?.originId, operatorConversation: options?.operatorConversation, maxOutputTokens: options?.maxOutputTokens ?? SOCIAL_EDIT_MAX_OUTPUT_TOKENS });
   return parseAgentSocialEdit(raw, plannedAction);
 }
 
@@ -1448,8 +1449,13 @@ export type SocialGenerationOptions = {
   originId?: string;
   /** Ask for a natural private reaction distinct from execution rationale. */
   operatorConversation?: boolean;
+  /** Bound public cognition output so a mention cannot become runaway model work. */
+  maxOutputTokens?: number;
   peopleNote?: { presenceId: string; personId: string; markdown: string; revision: number; updatedAt: string };
 };
+
+const SOCIAL_DECISION_MAX_OUTPUT_TOKENS = 320;
+const SOCIAL_EDIT_MAX_OUTPUT_TOKENS = 240;
 
 export async function generateAgentSocialDecision(state: OpenPresenceState, instruction: string, allowedActions: string[], options?: SocialGenerationOptions): Promise<AgentSocialDecision> {
   const actions = [...new Set(allowedActions.filter((action) => action && action.toLowerCase() !== "no_op"))];
@@ -1470,7 +1476,7 @@ export async function generateAgentSocialDecision(state: OpenPresenceState, inst
     ? `\n- Operator reaction: also return operatorReaction as one brief, natural private response about what you think of the post itself. Speak to the operator like a person. Do not narrate your decision, selected action, evidence process, or internal rationale; never say “I chose to,” “I decided to,” or “no public act is warranted.” This private reaction is separate from any public reply text.\n\nInclude "operatorReaction":"one natural sentence" in the top-level JSON.`
     : "";
     const plannerInstruction = `${instruction}\n\nEvaluate the social candidate and choose zero or more compatible acts from: ${actions.join(", ")}.\n- Repost: choose repost when the post is valuable as-is and should be shared directly with your audience.\n- Quote: choose quote only when a short, concrete response makes this specific source post more useful to this audience. Anchor the words to the source's claim, tension, or moment; never write a generic essay, product pitch, discovery brief, or abstract lesson. Keep the quote under 240 characters (the channel limit is 280).\n- Reply: choose reply when a direct conversational response to the author adds value; keep it specific and under 240 characters.\n- Like: choose like for quiet appreciation without needing to speak.\n- Follow: choose follow for continued awareness of this author.\n- Silence: return an empty acts array ([]) when sufficient context is present and no outward action earned its place.${operatorReactionInstruction}\n\n${personToPersonLanguageGuidance} Language quality: follow BRAIN.md for the Agent's reasoning stance and TASTE.md plus active Style Guidance for voice and surface choices. When BRAIN.md does not specify a stance, use the realistic-optimist default in AI-SLOP AVOIDANCE. Name the concrete detail first. Be honest about limits when that fits the selected stance. Avoid teacher voice, canned empathy, slang, workplace jargon, bureaucratic phrasing, stock formulas, repeated contrasts, negative parallelism (\"isn't X, it's Y\" and \"not just X, but Y\"), vague frames such as \"the interesting/useful bit\" or \"the real test\", and phrases about doing heroic or heavy lifting.\n\nReturn JSON only in this shape:\n{"acts":[{"action":"like|reply|repost|quote|follow","text":"reply or quote text when needed, otherwise empty","rationale":"concise reason for this act"}],"conversationDisposition":"continue|react_only|close_with_reply|close_silently|defer","rationale":"concise summary of the decision"}.`;
-    const raw = await generateAgentReply(state, options?.socialInput ?? plannerInstruction, undefined, { social: true, presence, socialHistory: options?.socialHistory, socialGuidance: options?.socialInput ? plannerInstruction : options?.socialGuidance, socialEvidence: options?.socialEvidence, socialThreadContext: options?.socialThreadContext, autobiographicalContext: options?.autobiographicalContext ?? autobiography?.text, knowledgeContext: options?.knowledgeContext, disableKnowledge: options?.disableKnowledge, assignmentMode: options?.assignmentMode, briefOverride: options?.briefOverride, usageOrigin: options?.usageOrigin, attentionSource: options?.attentionSource, operational: options?.operational, runId: options?.runId, presenceId: options?.presenceId ?? options?.presence?.id, invocationId: options?.invocationId, originId: options?.originId, operatorConversation: options?.operatorConversation, peopleNote: options?.peopleNote });
+    const raw = await generateAgentReply(state, options?.socialInput ?? plannerInstruction, undefined, { social: true, presence, socialHistory: options?.socialHistory, socialGuidance: options?.socialInput ? plannerInstruction : options?.socialGuidance, socialEvidence: options?.socialEvidence, socialThreadContext: options?.socialThreadContext, autobiographicalContext: options?.autobiographicalContext ?? autobiography?.text, knowledgeContext: options?.knowledgeContext, disableKnowledge: options?.disableKnowledge, assignmentMode: options?.assignmentMode, briefOverride: options?.briefOverride, usageOrigin: options?.usageOrigin, attentionSource: options?.attentionSource, operational: options?.operational, runId: options?.runId, presenceId: options?.presenceId ?? options?.presence?.id, invocationId: options?.invocationId, originId: options?.originId, operatorConversation: options?.operatorConversation, maxOutputTokens: options?.maxOutputTokens ?? SOCIAL_DECISION_MAX_OUTPUT_TOKENS, peopleNote: options?.peopleNote });
   return { ...parseAgentSocialDecision(raw, actions), autobiographicalEventIds: autobiography?.eventIds };
 }
 

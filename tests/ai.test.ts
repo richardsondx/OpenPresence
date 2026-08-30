@@ -626,6 +626,24 @@ describe("Agent social decision parsing", () => {
     await expect(generateAgentReply(state, "Say hello.")).resolves.toBe("Luna answered through the shared runtime.");
     expect(body?.model).toBe("gpt-5.6-luna");
     expect(body?.reasoning_effort).toBe("medium");
+    expect(body?.max_completion_tokens).toBeUndefined();
+  });
+
+  it("bounds live social cognition output without changing ordinary replies", async () => {
+    let state = createAgent({ name: "Ada", description: "Explain reliable AI agents.", mode: "agent", handle: "@ada_social", accent: "#D68754" });
+    state = applyOperation(state, { type: "configureProvider", provider: "openai", label: "OpenAI", hasSecret: true });
+    const connection = state.providerConnections.find((item) => item.provider === "openai");
+    saveProviderSecret(connection!.id, "test-openai-key");
+    state = applyOperation(state, { type: "setModel", provider: "openai", model: "gpt-5.6-luna", quality: "medium" });
+    let body: Record<string, unknown> | undefined;
+    vi.stubGlobal("fetch", vi.fn(async (_input: string | URL, init?: RequestInit) => {
+      body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      return new Response(JSON.stringify({ choices: [{ message: { content: '{"acts":[],"conversationDisposition":"close_silently","rationale":"No public act earned its place."}' } }] }), { status: 200 });
+    }));
+
+    await expect(generateAgentSocialDecision(state, "Judge this inbound mention.", ["reply", "no_op"], { presence: state.presence! })).resolves.toMatchObject({ acts: [] });
+    expect(body?.max_completion_tokens).toBe(320);
+    expect(body?.max_tokens).toBeUndefined();
   });
 
   it("parses structured Playground test stimuli", () => {
