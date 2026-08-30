@@ -60,6 +60,7 @@ import { authorizeAssetSelection, isLibraryAsset, searchEligibleAssets } from "@
 import { socialReplyAttributionIssue, socialReplyQualityIssue } from "@/lib/social-quality";
 import { runLiveExplorationEngagement as runSharedLiveExplorationEngagement } from "@/lib/exploration-worker";
 import { browserWorkspaceProjection } from "@/lib/state-browser-projection";
+import { compactActivityAssignment } from "@/lib/activity-projection";
 
 export const dynamic = "force-dynamic";
 
@@ -186,14 +187,7 @@ function activityProjection(state: OpenPresenceState): OpenPresenceState {
   // needed to explain the current pass and recent outcomes, but do not send
   // Agent-wide relationship/history stores or every old episode to the browser.
   const compactAssignment = (assignment: OpenPresenceState["assignments"][number]) => {
-    const compact = { ...assignment };
-    // Research history is useful when opening a current Assignment, but it
-    // is not part of the Activity timeline. Keep only a tiny current slice so
-    // one old research transcript cannot dominate every heartbeat response.
-    compact.storyResearch = activeAssignment(assignment) ? assignment.storyResearch?.slice(-3) : [];
-    compact.planHistory = activeAssignment(assignment) ? assignment.planHistory?.slice(-3) : [];
-    compact.attemptHistory = assignment.attemptHistory?.slice(-8);
-    return compact;
+    return compactActivityAssignment(assignment, activeAssignment(assignment));
   };
   projection.assignments = scopedRecent(state.assignments, 24, activeAssignment).map(compactAssignment) as never;
   projection.assignmentRuns = scopedRecent(state.assignmentRuns, 60) as never;
