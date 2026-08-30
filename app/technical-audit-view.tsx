@@ -4,6 +4,8 @@ import { Fragment, useEffect, useState } from "react";
 import { RotateCcw, Terminal } from "lucide-react";
 import type { AttentionEpisode } from "@/lib/types";
 
+const browserDocumentIsVisible = () => typeof document === "undefined" || document.visibilityState === "visible";
+
 export interface CorrelatedAuditRecordDTO {
   id: string;
   runId?: string;
@@ -126,6 +128,10 @@ export function TechnicalAuditView({ presenceId }: { presenceId?: string }) {
     let timerId: ReturnType<typeof setTimeout> | undefined;
 
     const load = async () => {
+      if (!browserDocumentIsVisible()) {
+        if (active) timerId = setTimeout(() => void load(), 4000);
+        return;
+      }
       try {
         const queryParams = new URLSearchParams();
         if (presenceId) queryParams.set("presenceId", presenceId);

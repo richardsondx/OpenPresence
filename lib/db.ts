@@ -1104,7 +1104,10 @@ function entityRows(state: OpenPresenceState): Record<string, { id: string; agen
     native_channel_connections: state.nativeConnections.map((item) => ({ id: item.id, parentId: item.presenceId, payload: item })),
     bridges: state.bridges.map((item) => ({ id: item.id, parentId: item.presenceId, payload: item })),
     mirror_objects: state.mirrorObjects.map((item) => ({ id: item.id, agentId, parentId: item.presenceId, payload: item })),
-    mirror_events: state.mirrorEvents.map((item) => ({ id: item.id, parentId: item.bridgeId, payload: item })),
+    // Mirror history is intentionally omitted from compact compatibility
+    // snapshots after it is indexed in `mirror_events`; rebuild only the
+    // history present in older snapshots and preserve the indexed remainder.
+    mirror_events: (state.mirrorEvents ?? []).map((item) => ({ id: item.id, parentId: item.bridgeId, payload: item })),
     bridge_sync: state.bridgeSync.map((item) => ({ id: item.bridgeId, payload: item })),
     conversation_episodes: state.conversationEpisodes.map((item) => ({ id: item.id, agentId: item.agentId, parentId: item.presenceId, payload: item })),
     assignment_contributions: state.assignmentContributions.map((item) => ({ id: item.id, parentId: item.assignmentId, payload: item })),

@@ -183,6 +183,7 @@ const PUBLIC_TECHNICAL_FACTS: { id: PublicTechnicalFact; label: string; detail: 
 // revision window. Give the caller enough room to adopt the newest snapshot
 // before surfacing a conflict, while keeping a hard bound against a hot loop.
 const WORKSPACE_CONFLICT_RETRY_LIMIT = 8;
+const browserDocumentIsVisible = () => typeof document === "undefined" || document.visibilityState === "visible";
 
 const fileOrder: FileKind[] = [
   "BRAIN",
@@ -1056,6 +1057,7 @@ export default function Home() {
   useEffect(() => {
     if (view !== "live" || !state?.onboarded || state.presence?.status !== "live") return;
     const timer = window.setInterval(() => {
+      if (!browserDocumentIsVisible()) return;
       void refreshState().catch(() => undefined);
     }, 15_000);
     return () => window.clearInterval(timer);
@@ -1065,6 +1067,7 @@ export default function Home() {
   useEffect(() => {
     if (view !== "schedule" || !state?.onboarded || !state?.presence) return;
     const timer = window.setInterval(() => {
+      if (!browserDocumentIsVisible()) return;
       if (refreshStateRef.current) void refreshStateRef.current().catch(() => undefined);
     }, 15_000);
     return () => window.clearInterval(timer);
@@ -1126,7 +1129,7 @@ export default function Home() {
     let timer: number | undefined;
     const poll = async () => {
       try {
-        await refreshState();
+        if (browserDocumentIsVisible()) await refreshState();
       } catch (reason: unknown) {
         if (active) setError(clientErrorMessage(reason, "Unable to refresh Assignment progress."));
       } finally {
@@ -1159,11 +1162,14 @@ export default function Home() {
     let timer: number | undefined;
     const poll = async () => {
       try {
-        await refreshState();
+        if (browserDocumentIsVisible()) await refreshState();
       } catch (reason: unknown) {
         if (active) setError(clientErrorMessage(reason, "Unable to refresh Check now progress."));
       } finally {
-        if (active) timer = window.setTimeout(() => void poll(), 1_000);
+        // A visible Check-now status should feel live without making every
+        // active run a one-second serialized workspace read. The durable run
+        // remains authoritative; the browser is only an observer.
+        if (active) timer = window.setTimeout(() => void poll(), 1_500);
       }
     };
     void poll();
@@ -1196,6 +1202,7 @@ export default function Home() {
       }
     };
     const timer = window.setInterval(() => {
+      if (!browserDocumentIsVisible()) return;
       void refreshBridgeHealth();
     }, 10_000);
     return () => window.clearInterval(timer);
