@@ -146,7 +146,7 @@ childEnv.OPENPRESENCE_USE_TURBO = useTurbo ? "1" : "0";
 // cannot consume the host's entire memory budget. Preserve an explicit
 // operator setting when one is already present.
 if (mode === "dev" && !/--max-old-space-size(?:=|\s)/.test(process.env.NODE_OPTIONS || "")) {
-  const maxOldSpaceSize = process.env.OPENPRESENCE_NODE_MAX_OLD_SPACE_SIZE || "2048";
+  const maxOldSpaceSize = process.env.OPENPRESENCE_NODE_MAX_OLD_SPACE_SIZE || "1024";
   childEnv.NODE_OPTIONS = [process.env.NODE_OPTIONS, `--max-old-space-size=${maxOldSpaceSize}`].filter(Boolean).join(" ");
 }
 // Production starts the canonical temporal owner from Next instrumentation.
