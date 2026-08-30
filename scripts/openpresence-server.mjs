@@ -137,6 +137,12 @@ const childEnv = {
   OPENPRESENCE_PUBLICATION_SIGNING_KEY: publicationSigningKey,
   OPENPRESENCE_NEXT_DIST_DIR: nextDistDir,
 };
+// A single local Next process owns the SQLite workspace and also carries the
+// full in-memory compatibility snapshot. Keep provider/model work serialized
+// by default so two large attention snapshots cannot exhaust the process
+// before the RSS watchdog can recover it. Operators running isolated workers
+// can still opt into a bounded higher value explicitly.
+if (!childEnv.OPENPRESENCE_AUTONOMY_MAX_CONCURRENCY) childEnv.OPENPRESENCE_AUTONOMY_MAX_CONCURRENCY = "1";
 // Turbopack keeps the large OpenPresence development graph substantially
 // smaller and less CPU-hungry than Webpack. Keep an escape hatch for a plugin
 // or debugging session that specifically requires Webpack.
