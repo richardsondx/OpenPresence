@@ -137,6 +137,11 @@ const childEnv = {
   OPENPRESENCE_PUBLICATION_SIGNING_KEY: publicationSigningKey,
   OPENPRESENCE_NEXT_DIST_DIR: nextDistDir,
 };
+// Turbopack keeps the large OpenPresence development graph substantially
+// smaller and less CPU-hungry than Webpack. Keep an escape hatch for a plugin
+// or debugging session that specifically requires Webpack.
+const useTurbo = mode === "dev" && process.env.OPENPRESENCE_USE_TURBO !== "0";
+childEnv.OPENPRESENCE_USE_TURBO = useTurbo ? "1" : "0";
 // Production starts the canonical temporal owner from Next instrumentation.
 // Development keeps that eager import disabled to avoid duplicating the large
 // runtime module graph, and instead gives the same durable sweep one child
@@ -144,7 +149,8 @@ const childEnv = {
 const schedulerToken = process.env.OPENPRESENCE_SCHEDULER_TOKEN || crypto.randomBytes(32).toString("base64url");
 childEnv.OPENPRESENCE_SCHEDULER_TOKEN = schedulerToken;
 
-const child = spawn("pnpm", ["exec", "next", mode, "-p", port], {
+const nextArgs = ["exec", "next", mode, ...(useTurbo ? ["--turbo"] : []), "-p", port];
+const child = spawn("pnpm", nextArgs, {
   cwd: projectRoot,
   env: childEnv,
   stdio: "inherit",
