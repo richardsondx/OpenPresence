@@ -643,18 +643,34 @@ export function readStateVersion() {
  * background services are healthy but busy.
  */
 export function readStateReadToken(projection?: "chat") {
-  const workspace = readStateVersion();
-  if (projection === "chat") {
-    const run = sqlite.prepare("SELECT MAX(updated_at) AS updated_at FROM operational_runs_idx").get() as { updated_at?: string | null } | undefined;
-    return `${workspace}:${run?.updated_at ?? "empty"}`;
-  }
-  const health = sqlite.prepare("SELECT MAX(updated_at) AS updated_at FROM bridge_health").get() as { updated_at?: string | null } | undefined;
-  const identity = sqlite.prepare("SELECT MAX(updated_at) AS updated_at FROM bridge_identity").get() as { updated_at?: string | null } | undefined;
-  const incident = sqlite.prepare("SELECT MAX(updated_at) AS updated_at FROM recovery_incidents_live").get() as { updated_at?: string | null } | undefined;
-  const run = sqlite.prepare("SELECT MAX(updated_at) AS updated_at FROM operational_runs_idx").get() as { updated_at?: string | null } | undefined;
-  const wake = sqlite.prepare("SELECT MAX(updated_at) AS updated_at FROM scheduled_wakes_idx").get() as { updated_at?: string | null } | undefined;
-  const dependency = sqlite.prepare("SELECT MAX(updated_at) AS updated_at FROM dependency_health_live").get() as { updated_at?: string | null } | undefined;
-  return `${workspace}:${health?.updated_at ?? "empty"}:${identity?.updated_at ?? "empty"}:${incident?.updated_at ?? "empty"}:${run?.updated_at ?? "empty"}:${wake?.updated_at ?? "empty"}:${dependency?.updated_at ?? "empty"}`;
+  // Conditional reads call this token before doing any workspace hydration.
+  // Fetch all clocks in one SQLite round trip; the previous one-query-per-clock
+  // implementation multiplied statement setup and native row conversion across
+  // every browser poll without changing the invalidation semantics.
+  const row = projection === "chat"
+    ? sqlite.prepare(`SELECT
+        (SELECT updated_at FROM app_state WHERE id = 1) AS workspace,
+        (SELECT MAX(updated_at) FROM operational_runs_idx) AS run`).get() as { workspace?: string | null; run?: string | null } | undefined
+    : sqlite.prepare(`SELECT
+        (SELECT updated_at FROM app_state WHERE id = 1) AS workspace,
+        (SELECT MAX(updated_at) FROM bridge_health) AS health,
+        (SELECT MAX(updated_at) FROM bridge_identity) AS identity,
+        (SELECT MAX(updated_at) FROM recovery_incidents_live) AS incident,
+        (SELECT MAX(updated_at) FROM operational_runs_idx) AS run,
+        (SELECT MAX(updated_at) FROM scheduled_wakes_idx) AS wake,
+        (SELECT MAX(updated_at) FROM dependency_health_live) AS dependency`).get() as {
+          workspace?: string | null;
+          health?: string | null;
+          identity?: string | null;
+          incident?: string | null;
+          run?: string | null;
+          wake?: string | null;
+          dependency?: string | null;
+        } | undefined;
+  const value = (part?: string | null) => part ?? "empty";
+  return projection === "chat"
+    ? `${value(row?.workspace)}:${value(row?.run)}`
+    : `${value(row?.workspace)}:${value(row?.health)}:${value(row?.identity)}:${value(row?.incident)}:${value(row?.run)}:${value(row?.wake)}:${value(row?.dependency)}`;
 }
 
 export function writeBridgeIdentity(input: { bridgeId: string; executorId: string; username?: string; status: NonNullable<Bridge["accountIdentity"]>["status"]; message?: string; observedAt: string }) {
