@@ -16,6 +16,25 @@ describe("Bridge browser retry lifecycle", () => {
     expect(scoped.agentWorkspaces).toEqual([]);
   });
 
+  it("does not hydrate the full Mirror event window for Bridge requests", () => {
+    const state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });
+    appendMirrorEvents([{
+      id: "bridge-read-history",
+      bridgeId: bridgeResult.bridge!.id,
+      presenceId: state.presence!.id,
+      sourceEventId: "bridge-read-history-source",
+      event: "created",
+      externalRef: { type: "x.post", id: "bridge-read-history-post" },
+      receivedAt: new Date().toISOString(),
+    } satisfies MirrorEvent]);
+
+    const scoped = readStateForBridge(bridgeResult.bridge!.id);
+
+    expect(scoped.mirrorEvents).toEqual([]);
+    expect(readState().mirrorEvents.some((event) => event.sourceEventId === "bridge-read-history-source")).toBe(true);
+  });
+
   it("isolates mutable Bridge reads from the cached canonical snapshot", () => {
     const state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
     const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });

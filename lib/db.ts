@@ -85,7 +85,7 @@ const sqlite = (() => {
 })();
 const db = drizzle(sqlite);
 
-type StateContext = { agentId?: string | null; presenceId?: string | null };
+type StateContext = { agentId?: string | null; presenceId?: string | null; includeMirrorEvents?: boolean };
 type StateViewOptions = { skipAssignmentPreflights?: boolean };
 type StateCache = { updatedAt: string; state: OpenPresenceState };
 let stateCache: StateCache | undefined;
@@ -393,7 +393,8 @@ function hydrateBridgeCredentials(state: OpenPresenceState): OpenPresenceState {
 }
 
 const mirrorEventReadWindow = 5_000;
-function hydrateMirrorEvents(state: OpenPresenceState): OpenPresenceState {
+function hydrateMirrorEvents(state: OpenPresenceState, includeMirrorEvents = true): OpenPresenceState {
+  if (!includeMirrorEvents) return { ...state, mirrorEvents: [] };
   try {
     // The table is append-only. Reading the oldest window meant the current
     // observation repeatedly failed to see its prior source event, appended a
@@ -847,7 +848,7 @@ export function readStateForContext(context: StateContext): OpenPresenceState {
   const scopedInput = structuredClone(workspace
     ? { ...snapshot, ...workspace, agents: snapshot.agents, activeAgentId: workspace.agent?.id ?? requestedAgentId, agentWorkspaces: [] }
     : { ...snapshot, agentWorkspaces: [] }) as OpenPresenceState;
-  const scoped = workspace ? hydrateMirrorEvents(normalizeState(scopedInput)) : scopedInput;
+  const scoped = workspace ? hydrateMirrorEvents(normalizeState(scopedInput), context.includeMirrorEvents !== false) : context.includeMirrorEvents === false ? { ...scopedInput, mirrorEvents: [] } : scopedInput;
   if (workspace || !requestedAgentId || requestedAgentId === snapshot.activeAgentId) {
     if (context.presenceId && scoped.presences.some((presence) => presence.id === context.presenceId)) {
       scoped.activePresenceId = context.presenceId;
@@ -883,7 +884,7 @@ export function readStateSnapshotForContext(context: StateContext): OpenPresence
     const scopedInput = workspace
       ? { ...compact, ...workspace, agents: compact.agents, activeAgentId: workspace.agent?.id ?? requestedAgentId, agentWorkspaces: [workspace] }
       : { ...compact, agentWorkspaces: [] };
-    const scoped = hydrateMirrorEvents(normalizeState(scopedInput as OpenPresenceState));
+    const scoped = hydrateMirrorEvents(normalizeState(scopedInput as OpenPresenceState), context.includeMirrorEvents !== false);
     // `scopedInput` is freshly parsed from SQLite, so normalization already
     // gives callers an isolated mutable context. Re-running stateForContext
     // here used to deep-clone and normalize the same multi-megabyte workspace
@@ -1048,7 +1049,12 @@ export function readStateForBridge(bridgeId: string): OpenPresenceState {
   // has not been populated yet.
   const owner = sqlite.prepare("SELECT agent_id, parent_id FROM bridges WHERE id = ?").get(bridgeId) as { agent_id?: string | null; parent_id?: string | null } | undefined;
   if (owner?.parent_id) {
-    const scoped = readStateForContext({ agentId: owner.agent_id, presenceId: owner.parent_id });
+    // Use the read-only scoped parser here instead of the mutable context
+    // helper. The latter starts from the general snapshot cache, which keeps
+    // a 5,000-event cognition window for other callers and would clone that
+    // history before dropping it. Bridge requests need the workspace records,
+    // not the append-only event window.
+    const scoped = readStateSnapshotForContext({ agentId: owner.agent_id, presenceId: owner.parent_id, includeMirrorEvents: false });
     if (scoped.bridges.some((bridge) => bridge.id === bridgeId)) return scoped;
   }
   const state = readState();

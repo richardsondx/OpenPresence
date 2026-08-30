@@ -269,7 +269,9 @@ function recordVerifiedBridgeAttention(state: OpenPresenceState, bridge: Bridge,
     actorPresenceId: execution.presenceId,
     occurredAt: execution.executedAt ?? timestamp(),
   }, `execution:${execution.id}:${affordance}:${externalRef.id}`);
-  if (!state.mirrorEvents.some((event) => event.bridgeId === bridge.id && event.sourceEventId === object.sourceEventId)) {
+  const alreadyRecorded = state.mirrorEvents.some((event) => event.bridgeId === bridge.id && event.sourceEventId === object.sourceEventId)
+    || Boolean(object.sourceEventId && readMirrorEventSourceIds(bridge.id, [object.sourceEventId]).has(object.sourceEventId));
+  if (!alreadyRecorded) {
     state.mirrorEvents.unshift({ id: localId("mirr_evt"), bridgeId: bridge.id, presenceId: execution.presenceId, sourceEventId: object.sourceEventId ?? `execution:${execution.id}`, event: "created", externalRef, object, receivedAt: timestamp() });
   }
 }
@@ -289,6 +291,7 @@ export function ingestEvents(bridge: Bridge, payload: z.infer<typeof eventsInput
   // The indexed SQLite source-ID lookup covers the complete history. Scanning
   // the 5,000-event compatibility window here duplicated that work for every
   // inbound batch and made mention delivery pay an avoidable allocation cost.
+  const seenSourceEventIds = readMirrorEventSourceIds(bridge.id, payload.events.map((item) => item.sourceEventId));
   const mirrorIndex = new Map(state.mirrorObjects.filter((item) => item.bridgeId === bridge.id).map((item) => [mirrorObjectKey(bridge.id, item.externalRef), item]));
   let receivedInbound = false;
   let acceptedEvents = 0;
