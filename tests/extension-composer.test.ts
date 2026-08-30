@@ -268,4 +268,27 @@ describe("Chrome extension composer and execution helpers", () => {
     expect(channelSource).toContain("X mounts the account menu/profile link after the initial document");
     expect(channelSource).toContain('sendMessage({ type: "OPENPRESENCE_CHANNEL_READY" })');
   });
+
+  it("labels controlled Chrome tab groups with the Presence name", () => {
+    const backgroundSource = readFileSync(join(process.cwd(), "extension/background.js"), "utf8");
+    expect(backgroundSource).toContain('const tabGroupTitle = (presence) => String(presence?.name || "Presence").trim() || "Presence";');
+    expect(backgroundSource).toContain('title: tabGroupTitle(presence)');
+    expect(backgroundSource).toContain('title: tabGroupTitle(current.presence)');
+    expect(backgroundSource).not.toContain('title: `OpenPresence · ${presence.name} · ${presence.channel}`');
+  });
+
+  it("labels the controlled channel tab with the active Presence name", () => {
+    const channelSource = readFileSync(join(process.cwd(), "extension/channel-x.js"), "utf8");
+    expect(channelSource).toContain("const syncTabTitle = () =>");
+    expect(channelSource).toContain("document.title !== label");
+    expect(channelSource).toContain("window.setInterval(syncTabTitle, 1_000)");
+  });
+
+  it("labels the OpenPresence app tab with the selected Presence name", () => {
+    const appSource = readFileSync(join(process.cwd(), "app/page.tsx"), "utf8");
+    const clientSource = readFileSync(join(process.cwd(), "app/client-page.tsx"), "utf8");
+    const titleSource = `${appSource}\n${clientSource}`;
+    expect(titleSource).toContain("document.title = presenceName;");
+    expect(titleSource).not.toContain("document.title = `${presenceName} · OpenPresence`");
+  });
 });
