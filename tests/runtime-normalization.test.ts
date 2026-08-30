@@ -1,5 +1,6 @@
 import { describe, expect, it, vi } from "vitest";
-import { applyOperation, initialState, isStateNormalized } from "../lib/runtime";
+import { readStateSnapshot, writeState } from "../lib/db";
+import { applyOperation, createAgent, initialState, isStateNormalized } from "../lib/runtime";
 
 describe("runtime normalization boundary", () => {
   it("marks operation results as reusable only for the short transition window", () => {
@@ -13,6 +14,19 @@ describe("runtime normalization boundary", () => {
       expect(isStateNormalized(next)).toBe(false);
     } finally {
       vi.useRealTimers();
+    }
+  });
+
+  it("reuses the normalized object after a successful durable write", () => {
+    const created = createAgent({ name: "Jenny", description: "A test Agent.", mode: "agent", handle: "@jenny_test", accent: "#D68754" });
+    try {
+      writeState(created);
+      readStateSnapshot();
+      const next = applyOperation(readStateSnapshot(), { type: "setPresence", patch: {} });
+      writeState(next);
+      expect(readStateSnapshot()).toBe(next);
+    } finally {
+      writeState(initialState());
     }
   });
 });

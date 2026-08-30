@@ -1320,10 +1320,19 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
     }
     writeActiveBridgeProjection(normalized, persistedAt);
   })();
-  stateCache = undefined;
-  // Keep direct in-process callers aligned with the durable token as well;
-  // API callers still receive the same token in the JSON response/header.
+  // The just-committed object has already crossed the normalization and
+  // hydration boundaries used by readStateSnapshot(). Reuse it as the new
+  // process-local snapshot instead of reparsing the full compatibility JSON
+  // on the next Activity/health/worker read. A write from another process
+  // still invalidates this entry through the updated_at comparison above.
   state.workspaceRevision = normalized.workspaceRevision;
+  // Agent switches also update the durable inactive-Agent directory. Keep the
+  // conservative re-read for that boundary so a stale tab cannot replace a
+  // newer workspace copy in the in-process cache; ordinary same-Agent worker
+  // writes do not alter those directory records and can reuse the object.
+  const sameAgentWrite = stateCache?.state.activeAgentId === normalized.activeAgentId
+    && stateCache?.state.agent?.id === normalized.agent?.id;
+  stateCache = sameAgentWrite ? { updatedAt: persistedAt, state: normalized } : undefined;
   if (syncNormalized) scheduleNormalizedSync(normalized);
 }
 
