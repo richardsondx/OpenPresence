@@ -202,7 +202,20 @@ function recycleNextChild(rssMb) {
   if (stopping || recycling || !child) return;
   recycling = true;
   console.warn(`[openpresence-server] ${mode} Next RSS reached ${Math.round(rssMb)} MB; recycling the child to release retained memory.`);
-  child.kill("SIGTERM");
+  signalNextChild("SIGTERM");
+}
+
+function signalNextChild(signal) {
+  if (!child?.pid) return;
+  if (process.platform !== "win32") {
+    try {
+      // `pnpm` is a wrapper around Next. Signal the whole detached process
+      // group so a recycled wrapper cannot leave next-server holding the port.
+      process.kill(-child.pid, signal);
+      return;
+    } catch { /* Fall back to the wrapper when the group already exited. */ }
+  }
+  child.kill(signal);
 }
 
 function startDevScheduler() {
@@ -227,7 +240,7 @@ function stopChildren(signal) {
   stopping = true;
   if (schedulerRestartTimer) clearTimeout(schedulerRestartTimer);
   if (memoryWatchdog) clearInterval(memoryWatchdog);
-  if (child) child.kill(signal);
+  signalNextChild(signal);
   if (scheduler) scheduler.kill(signal);
 }
 
@@ -244,6 +257,7 @@ function startNextChild() {
     cwd: projectRoot,
     env: childEnv,
     stdio: "inherit",
+    detached: process.platform !== "win32",
   });
   childStartedAt = Date.now();
   child.on("error", (error) => {
