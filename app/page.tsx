@@ -880,6 +880,11 @@ export default function Home() {
     // Do not immediately issue a second identical GET when `loading` flips
     // false; only route changes need a follow-up projection refresh.
     if (!state || loading || !initialStateLoaded.current) return;
+    // Full-data views share the same complete workspace snapshot. Reusing it
+    // avoids reparsing and downloading the multi-megabyte compatibility state
+    // on every Settings/Growth/People/etc. navigation; compact Activity and
+    // Chat views still intentionally refresh when entering or leaving them.
+    if (state.responseProjection === "full" && view !== "live" && view !== "chat") return;
     // Activity uses a small projection; hydrate the full workspace when an
     // information-heavy view is opened instead of making the first Activity
     // paint wait for unrelated Agent history.
