@@ -237,7 +237,20 @@ function activityProjection(state: OpenPresenceState): OpenPresenceState {
   const scopedMirrors = state.mirrorObjects.filter((object) => !presenceId || object.presenceId === presenceId);
   const targetObjects = scopedMirrors.filter((object) => targetMirrorIds.has(object.id));
   const recentObjects = scopedMirrors.filter((object) => !targetMirrorIds.has(object.id)).slice(0, 120);
-  projection.mirrorObjects = [...targetObjects, ...recentObjects] as never;
+  const compactMirror = (object: OpenPresenceState["mirrorObjects"][number]) => {
+    const compact = { ...object };
+    // Activity needs identity, relationship, and public text evidence. These
+    // ingestion/authorization fields are server-side detail and are not read
+    // by LiveView; omitting them prevents each heartbeat from shipping the
+    // same connector envelope again.
+    delete compact.assetRefs;
+    delete compact.sourceEventId;
+    delete compact.bridgeId;
+    delete compact.trust;
+    delete compact.shareability;
+    return compact;
+  };
+  projection.mirrorObjects = [...targetObjects, ...recentObjects].map(compactMirror) as never;
   // Resource usage is intentionally truncated below to keep Activity quick.
   // Budget totals must nevertheless be computed from the complete active-day
   // ledger, otherwise a refresh can display a different budget after older
