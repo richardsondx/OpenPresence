@@ -477,6 +477,67 @@ export function scheduleRecoveryCooldownWake(
 
 const verificationRunStates = new Set<OperationalRun["state"]>(["queued", "running", "waiting", "recovering", "reconciling"]);
 
+const pendingExecutionStates = new Set<Execution["status"]>([
+  "awaiting-review",
+  "approved",
+  "awaiting-manual",
+  "awaiting-connector",
+  "queued",
+  "claimed",
+  "executing",
+  "verification-pending",
+]);
+
+/**
+ * Close old waiting records that no longer have a durable execution to own.
+ *
+ * Waiting delivery/verification is legitimate only while a matching pending
+ * execution remains. After a restart or recovery, an index row can outlive
+ * its episode/execution. Leaving that row active makes Activity and health
+ * report work that cannot possibly make progress, so close it explicitly
+ * without claiming that an external action succeeded.
+ */
+export function reconcileOrphanedWaitingRuns(source: OpenPresenceState, now = new Date(), presenceId?: string): number {
+  const staleBefore = now.getTime() - 120_000;
+  let closed = 0;
+  for (const run of listOperationalRuns(undefined, ["waiting"])) {
+    if (presenceId && run.presenceId !== presenceId) continue;
+    if (!["attention", "verification"].includes(run.kind)) continue;
+    const progressAt = new Date(run.lastProgressAt ?? run.startedAt ?? run.createdAt).getTime();
+    if (!Number.isFinite(progressAt) || progressAt > staleBefore) continue;
+    if (run.nextWakeAt && new Date(run.nextWakeAt).getTime() > now.getTime() - 60_000) continue;
+    const linkedExecutions = (source.executions ?? []).filter((execution) =>
+      execution.id === run.executionId
+      || execution.runId === run.id
+      || (run.attentionEpisodeId && execution.attentionEpisodeId === run.attentionEpisodeId)
+    );
+    if (linkedExecutions.some((execution) => pendingExecutionStates.has(execution.status))) continue;
+
+    run.state = "failed";
+    run.stage = "recovered_orphaned_wait";
+    run.lastErrorCode = "STALE_WAITING_RUN";
+    run.blockedReason = "This waiting responsibility had no matching pending execution after restart/recovery; no external action was claimed as successful.";
+    run.lastProgressAt = now.toISOString();
+    delete run.nextWakeAt;
+    delete run.leaseOwner;
+    delete run.leaseExpiresAt;
+    if (run.result) {
+      run.result = {
+        ...run.result,
+        disposition: "failed",
+        reasonCode: "STALE_WAITING_RUN",
+        summary: "The waiting record was closed because its pending execution evidence was not recoverable; no external success was claimed.",
+        pendingExecutionCount: 0,
+        failedExecutionCount: Math.max(1, run.result.failedExecutionCount),
+        completedAt: now.toISOString(),
+      };
+    }
+    upsertOperationalRun(run);
+    closed += 1;
+  }
+  return closed;
+}
+
 /**
  * Repair verification responsibility after a server or browser restart. The
  * browser's bounded retry loop is only a delivery hint; the server must retain
@@ -538,6 +599,7 @@ export interface SweepResult {
   staleRunsDetected: OperationalRun[];
   dispatchedWakes: ScheduledWake[];
   closedNonRetryableVerifications: number;
+  closedOrphanedWaitingRuns: number;
   timestamp: string;
 }
 
@@ -597,6 +659,7 @@ export function runOperationalSweep(now = new Date()): SweepResult {
     writeState(state, { advanceWorkspaceRevision: false });
   }
   repairPendingBridgeVerificationWakes(state, now);
+  const closedOrphanedWaitingRuns = reconcileOrphanedWaitingRuns(state, now);
   dispatchDueAssignmentWorkers(state, now);
   repairMissingOperatorNudgeWakes(state, now);
   // Sandbox Presences are advanced by Playground's deterministic clock. They
@@ -828,6 +891,7 @@ export function runOperationalSweep(now = new Date()): SweepResult {
     reclaimedLeases,
     staleRunsDetected,
     dispatchedWakes,
+    closedOrphanedWaitingRuns,
     timestamp: nowIso,
   };
 }

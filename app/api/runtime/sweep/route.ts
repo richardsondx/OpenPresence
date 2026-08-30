@@ -49,6 +49,7 @@ export async function POST(request: Request) {
       reclaimedLeases: sweep.reclaimedLeases,
       staleRuns: sweep.staleRunsDetected.length,
       dispatchedWakes: sweep.dispatchedWakes.length,
+      closedOrphanedWaitingRuns: sweep.closedOrphanedWaitingRuns,
       timestamp: sweep.timestamp,
       durationMs,
     }, { headers: responseHeaders() });

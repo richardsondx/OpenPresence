@@ -30,6 +30,7 @@ import {
   calculateStaleAt,
   closeStaleBridgeExecutions,
   evaluateOperationalRunProgress,
+  reconcileOrphanedWaitingRuns,
   isLiveTemporalPresence,
   runOperationalSweep,
   scheduleRetryWake,
@@ -79,6 +80,21 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
     expect(recovered).toMatchObject({ state: "recovering", stage: "failed_initialization" });
     expect(recovered).not.toHaveProperty("leaseOwner");
     expect(recovered).not.toHaveProperty("leaseExpiresAt");
+  });
+
+  it("closes stale waiting runs only when no pending execution evidence remains", () => {
+    const now = new Date("2026-08-30T16:00:00.000Z");
+    const orphanId = `run_orphaned_wait_${Date.now()}_${Math.random()}`;
+    const pendingId = `run_pending_wait_${Date.now()}_${Math.random()}`;
+    const staleAt = new Date(now.getTime() - 10 * 60_000).toISOString();
+    upsertOperationalRun({ id: orphanId, presenceId, kind: "attention", state: "waiting", stage: "delivering", createdAt: staleAt, lastProgressAt: staleAt, attemptCount: 1, recoveryCount: 0, result: { disposition: "waiting_delivery", summary: "waiting", selectedActionCount: 1, pendingExecutionCount: 1, failedExecutionCount: 0, verifiedOutcomeCount: 0 } });
+    upsertOperationalRun({ id: pendingId, presenceId, kind: "attention", state: "waiting", stage: "delivering", createdAt: staleAt, lastProgressAt: staleAt, attemptCount: 1, recoveryCount: 0, result: { disposition: "waiting_delivery", summary: "waiting", selectedActionCount: 1, pendingExecutionCount: 1, failedExecutionCount: 0, verifiedOutcomeCount: 0 } });
+    const source = initialState();
+    source.executions = [{ id: "execution-still-pending", presenceId, runId: pendingId, status: "queued" }] as never;
+
+    expect(reconcileOrphanedWaitingRuns(source, now, presenceId)).toBe(1);
+    expect(getOperationalRun(orphanId)).toMatchObject({ state: "failed", stage: "recovered_orphaned_wait", lastErrorCode: "STALE_WAITING_RUN" });
+    expect(getOperationalRun(pendingId)?.state).toBe("waiting");
   });
 
   // Invariant 1: Time and Durable Wakes
