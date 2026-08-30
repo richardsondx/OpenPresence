@@ -604,11 +604,22 @@ export async function executeAutonomyRun(runId: string): Promise<OpenPresenceSta
       upsertOperationalRun(updatedRun);
     }
     if (!attentionEpisodeId) {
-      await writeStateWithRetry(runStartState, readStateSnapshotForContext({ presenceId: currentRun?.presenceId ?? executionPresenceId }));
+      try {
+        await writeStateWithRetry(runStartState, readStateSnapshotForContext({ presenceId: currentRun?.presenceId ?? executionPresenceId }));
+      } catch {
+        // The run is already durably marked recovering above. A competing
+        // writer must not turn this background failure settlement into an
+        // unhandled rejection that starves the server event loop.
+      }
       return null;
     }
     const failedState = settleNudgeForEpisode(updateAttentionEpisode(runStartState, attentionEpisodeId, { status: "failed", stage: "completed", lastError: errorMsg, summary: "The attention episode stopped before its look could complete." }), attentionEpisodeId, `I couldn't finish that look: ${errorMsg}`, true);
-    await writeStateWithRetry(runStartState, failedState);
+    try {
+      await writeStateWithRetry(runStartState, failedState);
+    } catch {
+      // Recovery is authoritative when the final episode projection races a
+      // browser/UI write. The next bounded sweep can reconcile the episode.
+    }
     return null;
   } finally {
     clearInterval(heartbeatTimer);
