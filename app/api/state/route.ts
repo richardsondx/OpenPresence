@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
+import { gzipSync } from "node:zlib";
 import { z } from "zod";
 import { dbSelectionSource, deleteBridgeCredential, deleteChannelSecret, deleteProviderSecret, getRecoveryIncident, listOperationalRuns, readProviderSecret, readState, readStateForContext, readStateReadToken, readStateSnapshotForContext, readStateViewForContext, resolvedDbPath, saveProviderSecret, WorkspaceConflictError, writeState } from "@/lib/db";
 import { EvidenceVisualAssetDiscoveryProvider, materializeCandidate, previewCandidate, TavilyAssetDiscoveryProvider } from "@/lib/asset-discovery";
@@ -72,6 +73,19 @@ const assignmentWorkerLeaseMs = 120_000;
 type ActivityResponseCacheEntry = { etag: string; body: string };
 const activityResponseCache = new Map<string, ActivityResponseCacheEntry>();
 const activityResponseCacheLimit = 8;
+const stateCompressionThresholdBytes = 16_384;
+
+function stateBodyResponse(request: Request, body: string, options?: { status?: number; headers?: HeadersInit }) {
+  const headers = new Headers(options?.headers);
+  headers.set("Content-Type", "application/json");
+  const acceptsGzip = request.headers.get("accept-encoding")?.toLowerCase().includes("gzip") ?? false;
+  if (acceptsGzip && Buffer.byteLength(body) >= stateCompressionThresholdBytes) {
+    headers.set("Content-Encoding", "gzip");
+    headers.set("Vary", "Accept-Encoding");
+    return new NextResponse(gzipSync(Buffer.from(body)), { status: options?.status, headers });
+  }
+  return new NextResponse(body, { status: options?.status, headers });
+}
 
 function rememberActivityResponse(key: string, entry: ActivityResponseCacheEntry) {
   activityResponseCache.delete(key);
@@ -329,9 +343,9 @@ function stateResponse(request: Request, state: OpenPresenceState, options?: { r
     return response;
   }
   const browserState = stateForResponse(request, state, options?.activity);
-  const response = options?.runId
-    ? NextResponse.json(browserState, { headers: { "X-OpenPresence-Run-Id": options.runId } })
-    : NextResponse.json(browserState);
+  const response = stateBodyResponse(request, JSON.stringify(browserState), {
+    headers: options?.runId ? { "X-OpenPresence-Run-Id": options.runId } : undefined,
+  });
   try { setRuntimeScopeCookie(response, createRuntimeScope(state, { presenceId: state.presence?.id })); } catch { /* onboarding has no RuntimeScope yet */ }
   return response;
 }
@@ -4657,7 +4671,7 @@ export async function GET(request: Request) {
   const activityCacheKey = `${projection ?? "full"}:${resolvedAgentId ?? ""}:${requestedPresenceId ?? ""}`;
   const cachedActivity = ["activity", "chat"].includes(projection ?? "") ? activityResponseCache.get(activityCacheKey) : undefined;
   const response = cachedActivity?.etag === etag
-    ? new NextResponse(cachedActivity.body, { headers: { ...responseHeaders, "Content-Type": "application/json" } })
+    ? stateBodyResponse(request, cachedActivity.body, { headers: responseHeaders })
     : (() => {
       const browserState = projection === "activity"
         ? activityProjection(contextualState)
@@ -4665,10 +4679,10 @@ export async function GET(request: Request) {
           ? chatProjection(contextualState)
           : { ...contextualState, responseProjection: "full" as const, agentWorkspaces: [], mirrorEvents: [] };
       const payload = { ...browserState, runtimeIdentity: { dbPath: resolvedDbPath, dbSelectionSource, agentId: contextualState.agent?.id ?? null, presenceId: contextualState.presence?.id ?? null, handle: contextualState.presence?.handle ?? null } };
-      if (!["activity", "chat"].includes(projection ?? "")) return NextResponse.json(payload, { headers: responseHeaders });
+      if (!["activity", "chat"].includes(projection ?? "")) return stateBodyResponse(request, JSON.stringify(payload), { headers: responseHeaders });
       const body = JSON.stringify(payload);
       rememberActivityResponse(activityCacheKey, { etag, body });
-      return new NextResponse(body, { headers: { ...responseHeaders, "Content-Type": "application/json" } });
+      return stateBodyResponse(request, body, { headers: responseHeaders });
     })();
   try { setRuntimeScopeCookie(response, createRuntimeScope(contextualState, { presenceId: contextualState.presence?.id })); } catch { /* onboarding has no RuntimeScope yet */ }
   return response;

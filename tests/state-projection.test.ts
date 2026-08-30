@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { gunzipSync } from "node:zlib";
 import { GET as healthGet } from "../app/runtime/health/route";
 import { GET as stateGet } from "../app/api/state/route";
 import { readStateReadToken, readStateVersion } from "../lib/db";
@@ -90,6 +91,21 @@ describe("state read projections", () => {
     const second = await stateGet(new Request("http://localhost/api/state?projection=chat", { headers: { "if-none-match": etag! } }));
 
     expect(second.status).toBe(304);
+  });
+
+  it("compresses large state responses when the client supports gzip", async () => {
+    const response = await stateGet(new Request("http://localhost/api/state?read=gzip", {
+      headers: { "accept-encoding": "gzip" },
+    }));
+    const encoded = Buffer.from(await response.arrayBuffer());
+    const decoded = gunzipSync(encoded).toString("utf8");
+    const body = JSON.parse(decoded);
+
+    expect(response.status).toBe(200);
+    expect(response.headers.get("content-encoding")).toBe("gzip");
+    expect(response.headers.get("vary")).toBe("Accept-Encoding");
+    expect(body.responseProjection).toBe("full");
+    expect(encoded.length).toBeLessThan(Buffer.byteLength(decoded) * 0.5);
   });
 
   it("keeps unrelated operational clocks out of the Chat cache token", () => {
