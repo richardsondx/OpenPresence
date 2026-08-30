@@ -168,6 +168,10 @@ const PeopleViewLazy = dynamic(() => import("./people-view").then((module) => mo
   ssr: false,
   loading: () => <div className="loading-screen"><p>Opening People…</p></div>,
 });
+const GrowthViewLazy = dynamic(() => import("./growth-view").then((module) => module.GrowthView), {
+  ssr: false,
+  loading: () => <div className="loading-screen"><p>Opening Growth…</p></div>,
+});
 
 const PUBLIC_TECHNICAL_FACTS: { id: PublicTechnicalFact; label: string; detail: string }[] = [
   { id: "ai-presence", label: "This is an AI presence", detail: "Say so when the question makes it relevant." },
@@ -2228,7 +2232,7 @@ function AgentWorkspaceShell({
           {view === "feed" && (
             <PublicHistoryView state={state} setView={setView} mutate={mutate} />
           )}
-          {view === "growth" && <GrowthView state={state} mutate={mutate} setView={setView} />}
+          {view === "growth" && <GrowthViewLazy state={state} mutate={mutate} setView={setView} />}
           {view === "schedule" && (
             <ScheduleView state={state} mutate={mutate} setView={setView} />
           )}
@@ -2491,7 +2495,7 @@ function LegacyAppShell({
           {view === "feed" && (
             <PublicHistoryView state={state} setView={setView} mutate={mutate} />
           )}
-          {view === "growth" && <GrowthView state={state} mutate={mutate} setView={setView} />}
+          {view === "growth" && <GrowthViewLazy state={state} mutate={mutate} setView={setView} />}
           {view === "schedule" && (
             <ScheduleView state={state} mutate={mutate} setView={setView} />
           )}
@@ -15569,6 +15573,8 @@ function PresenceView({
   const [presenceProhibitedDraft, setPresenceProhibitedDraft] = useState((presence.languagePolicy?.prohibited ?? []).join("\n"));
   const [presenceLanguagePolicySaveState, setPresenceLanguagePolicySaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const [mediaPolicyDraft, setMediaPolicyDraft] = useState(presence.mediaPerceptionPolicy);
+  const [assetReuseCooldownDraft, setAssetReuseCooldownDraft] = useState(String(presence.assetReuseCooldownMonths ?? 6));
+  const [assetReuseCooldownSaveState, setAssetReuseCooldownSaveState] = useState<"idle" | "saving" | "saved" | "failed">("idle");
   const [publishingCountDraft, setPublishingCountDraft] = useState(String(presence.publishingInitiative?.target?.count ?? 5));
   const [publishingPeriodDraft, setPublishingPeriodDraft] = useState<"day" | "week">(presence.publishingInitiative?.target?.period ?? "day");
   const [sourcesDraft, setSourcesDraft] = useState<CurationSourceConfig[]>(() => presence.curationSources ?? getDefaultCurationSources(presence.brief));
