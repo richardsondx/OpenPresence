@@ -1,4 +1,4 @@
-import { spawn } from "node:child_process";
+import { execFileSync, spawn } from "node:child_process";
 import crypto from "node:crypto";
 import path from "node:path";
 import { fileURLToPath } from "node:url";
@@ -157,15 +157,53 @@ const schedulerToken = process.env.OPENPRESENCE_SCHEDULER_TOKEN || crypto.random
 childEnv.OPENPRESENCE_SCHEDULER_TOKEN = schedulerToken;
 
 const nextArgs = ["exec", "next", mode, ...(useTurbo ? ["--turbo"] : []), "-p", port];
-const child = spawn("pnpm", nextArgs, {
-  cwd: projectRoot,
-  env: childEnv,
-  stdio: "inherit",
-});
-
 let stopping = false;
+let recycling = false;
+let child;
 let scheduler;
 let schedulerRestartTimer;
+let devMemoryWatchdog;
+let childStartedAt = 0;
+const devRssLimitMb = Number(process.env.OPENPRESENCE_DEV_RSS_LIMIT_MB || "1536");
+const devRssCheckMs = Math.max(5_000, Number(process.env.OPENPRESENCE_DEV_RSS_CHECK_MS || "15_000"));
+const devRssGraceMs = Math.max(0, Number(process.env.OPENPRESENCE_DEV_RSS_GRACE_MS || "60_000"));
+
+function childRssMb() {
+  if (!child?.pid || process.platform === "win32") return undefined;
+  try {
+    // The launcher owns a pnpm wrapper which owns Next. Measure the complete
+    // descendant tree or the wrapper's small RSS would hide the compiler.
+    const output = execFileSync("ps", ["-axo", "pid=,ppid=,rss="], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
+    const processes = output.split("\n").map((line) => {
+      const values = line.trim().split(/\s+/).map(Number);
+      return values.length === 3 && values.every((value) => Number.isFinite(value))
+        ? { pid: values[0], ppid: values[1], rssKb: values[2] }
+        : undefined;
+    }).filter((process) => process !== undefined);
+    const descendants = new Set([child.pid]);
+    let changed = true;
+    while (changed) {
+      changed = false;
+      for (const process of processes) {
+        if (descendants.has(process.ppid) && !descendants.has(process.pid)) {
+          descendants.add(process.pid);
+          changed = true;
+        }
+      }
+    }
+    const rssKb = processes.filter((process) => descendants.has(process.pid)).reduce((total, process) => total + process.rssKb, 0);
+    return rssKb > 0 ? rssKb / 1024 : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
+function recycleDevCompiler(rssMb) {
+  if (mode !== "dev" || stopping || recycling || !child) return;
+  recycling = true;
+  console.warn(`[openpresence-server] dev compiler RSS reached ${Math.round(rssMb)} MB; recycling Next to release native compiler memory.`);
+  child.kill("SIGTERM");
+}
 
 function startDevScheduler() {
   if (mode !== "dev" || process.env.OPENPRESENCE_DISABLE_DEV_SCHEDULER === "1" || stopping) return;
@@ -188,17 +226,12 @@ function startDevScheduler() {
 function stopChildren(signal) {
   stopping = true;
   if (schedulerRestartTimer) clearTimeout(schedulerRestartTimer);
-  child.kill(signal);
+  if (devMemoryWatchdog) clearInterval(devMemoryWatchdog);
+  if (child) child.kill(signal);
   if (scheduler) scheduler.kill(signal);
 }
 
 startDevScheduler();
-
-child.on("error", (error) => {
-  stopChildren("SIGTERM");
-  releaseServerLock();
-  throw error;
-});
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
@@ -206,11 +239,43 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
   });
 }
 
-child.on("exit", (code, signal) => {
-  stopping = true;
-  if (schedulerRestartTimer) clearTimeout(schedulerRestartTimer);
-  if (scheduler) scheduler.kill(signal || "SIGTERM");
-  releaseServerLock();
-  if (signal) process.kill(process.pid, signal);
-  process.exit(code ?? 1);
-});
+function startNextChild() {
+  child = spawn("pnpm", nextArgs, {
+    cwd: projectRoot,
+    env: childEnv,
+    stdio: "inherit",
+  });
+  childStartedAt = Date.now();
+  child.on("error", (error) => {
+    stopChildren("SIGTERM");
+    releaseServerLock();
+    throw error;
+  });
+  child.on("exit", (code, signal) => {
+    if (stopping) {
+      if (signal) process.kill(process.pid, signal);
+      process.exit(code ?? 1);
+    }
+    if (recycling) {
+      recycling = false;
+      setTimeout(startNextChild, 250);
+      return;
+    }
+    stopping = true;
+    if (schedulerRestartTimer) clearTimeout(schedulerRestartTimer);
+    if (scheduler) scheduler.kill(signal || "SIGTERM");
+    if (devMemoryWatchdog) clearInterval(devMemoryWatchdog);
+    releaseServerLock();
+    if (signal) process.kill(process.pid, signal);
+    process.exit(code ?? 1);
+  });
+}
+
+startNextChild();
+if (mode === "dev" && Number.isFinite(devRssLimitMb) && devRssLimitMb > 0 && process.platform !== "win32") {
+  devMemoryWatchdog = setInterval(() => {
+    if (Date.now() - childStartedAt < devRssGraceMs) return;
+    const rssMb = childRssMb();
+    if (rssMb !== undefined && rssMb >= devRssLimitMb) recycleDevCompiler(rssMb);
+  }, devRssCheckMs);
+}
