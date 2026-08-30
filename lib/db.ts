@@ -647,7 +647,16 @@ export function readStateReadToken(projection?: "chat") {
   // Fetch all clocks in one SQLite round trip; the previous one-query-per-clock
   // implementation multiplied statement setup and native row conversion across
   // every browser poll without changing the invalidation semantics.
-  const row = projection === "chat"
+  type ReadTokenRow = {
+    workspace?: string | null;
+    health?: string | null;
+    identity?: string | null;
+    incident?: string | null;
+    run?: string | null;
+    wake?: string | null;
+    dependency?: string | null;
+  };
+  const row: ReadTokenRow | undefined = projection === "chat"
     ? sqlite.prepare(`SELECT
         (SELECT updated_at FROM app_state WHERE id = 1) AS workspace,
         (SELECT MAX(updated_at) FROM operational_runs_idx) AS run`).get() as { workspace?: string | null; run?: string | null } | undefined

@@ -603,7 +603,7 @@ export async function executeAutonomyRun(runId: string): Promise<OpenPresenceSta
       resultState = await runAutonomousSelfDirectedDiscovery(run.presenceId, undefined, { runId, invocationId, attentionEpisodeId, forceEligibility: run.attention?.triggers.includes("operator_check") || run.attention?.triggers.includes("operator_nudge") });
     } else if (run.kind === "attention" && (run.attention?.scope === "observe_inbound" || autonomyRunHasPriority(run))) {
       const attentionOptions = { runId, invocationId, attentionEpisodeId, suppressAmbientInbound: run.attention?.triggers.includes("operator_nudge"), inboundOnly: true };
-      resultState = run.attention.source === "bridge"
+      resultState = run.attention?.source === "bridge"
         ? await runBridgeInboundAttentionPass(run.presenceId, attentionOptions)
         : await runObservedAttentionPass(run.presenceId, attentionOptions);
     } else {

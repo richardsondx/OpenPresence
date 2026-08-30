@@ -45,6 +45,7 @@ import { recordVerifiedBridgeReaction } from "@/lib/bridge";
 import { reassessPublishingPlan } from "@/lib/publishing-plan-reassessment";
 import { nextSelfDirectedAttentionAt, selectBridgeDiscoveryCandidates, selectGrowthDiscoverySource } from "@/lib/growth-scheduler";
 import { recoverStaleAssignmentRuns } from "@/lib/assignment-recovery";
+import { expireElapsedPursuitWindows } from "@/lib/state-projection";
 import { assignmentRunBlocksNewWork, classifyLiveAssignmentRun, isAutonomousPreWriteDeliveryFailure, liveAssignmentRunStage, maxConcurrentPursuitDeliveries, reconcileLiveAssignmentRuns } from "@/lib/live-assignment-run";
 import { dispatchAutonomyWorker, queueAutonomyRun } from "@/lib/autonomy-worker";
 import { deliverNativeExecutions } from "@/lib/native-execution-delivery";
@@ -514,30 +515,6 @@ function parseIncreaseEffortRequest(content: string) {
   const targetMatches = [...normalized.matchAll(/https?:\/\/(?:www\.)?(?:x\.com|twitter\.com)\/[^/\s]+\/status\/(\d+)/gi)];
   const targetId = targetMatches.at(-1)?.[1];
   return { maxVerifiedActions, deadlineAt: deadline.toISOString(), targetId };
-}
-
-export function expireElapsedPursuitWindows(source: OpenPresenceState) {
-  const now = Date.now();
-  const expiredIds = new Set((source.assignmentPursuitWindows ?? [])
-    .filter((window) => ["active", "paused"].includes(window.status) && new Date(window.deadlineAt).getTime() <= now)
-    .map((window) => window.id));
-  // State reads are the hot path. Avoid cloning the complete compatibility
-  // workspace when there is nothing to expire; this check normally returns
-  // the immutable read projection unchanged.
-  if (!expiredIds.size) return { state: source, changed: false };
-  const next = structuredClone(source) as OpenPresenceState;
-  const timestamp = new Date(now).toISOString();
-  for (const window of next.assignmentPursuitWindows ?? []) {
-    // A paused burst still has a hard deadline. Leaving it paused after that
-    // deadline makes Activity render an old "1 / 40" burst indefinitely and
-    // offers Resume even though the execution window can no longer run.
-    if (!expiredIds.has(window.id)) continue;
-    window.status = "expired";
-    window.pauseReason = "The increased-effort window reached its deadline.";
-    window.nextRunAt = undefined;
-    window.updatedAt = timestamp;
-  }
-  return { state: next, changed: true };
 }
 
 function explorationMirrorCandidates(state: OpenPresenceState, explorationId: string, presenceId: string) {

@@ -1,8 +1,9 @@
 import { describe, expect, it } from "vitest";
 import { GET as healthGet } from "../app/runtime/health/route";
-import { GET as stateGet, expireElapsedPursuitWindows } from "../app/api/state/route";
+import { GET as stateGet } from "../app/api/state/route";
 import { readStateReadToken, readStateVersion } from "../lib/db";
 import { initialState } from "../lib/runtime";
+import { expireElapsedPursuitWindows } from "../lib/state-projection";
 
 describe("state read projections", () => {
   it("does not clone the workspace when no pursuit window has expired", () => {
