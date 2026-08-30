@@ -6567,8 +6567,19 @@ function capabilityTrialContract(capability: CapabilityTrial["capability"]) {
   };
 }
 
+// applyOperation is often used as a small state-transition reducer: one
+// operator action or worker stage can apply several operations in sequence.
+// Those results have already passed normalizeState, so re-running the full
+// migration/repair pass for every subsequent operation only adds allocation
+// and event-loop pressure. Keep the marker process-local; durable reads and
+// writeState remain normalization boundaries, so this never becomes persisted
+// compatibility metadata or a substitute for recovery validation.
+const normalizedOperationStates = new WeakSet<OpenPresenceState>();
+
 export function applyOperation(source: OpenPresenceState, operation: Operation | import("./types").ToolBindingOperation | import("./types").CapabilityOperation): OpenPresenceState {
-  let state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  let state = JSON.parse(JSON.stringify(source)) as OpenPresenceState;
+  if (!normalizedOperationStates.has(source)) state = normalizeState(state);
+  normalizedOperationStates.add(state);
   if (operation.type === "setPresenceBrowserAccess") {
     if (operation.presenceId && state.presence?.id !== operation.presenceId) return state;
     const selected = state.presence;
