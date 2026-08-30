@@ -1,5 +1,5 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { claimExecutions, closeChromeVerification, createBridgeWithKey, failExecution, ingestEvents, recordVerifiedBridgeReaction, reportBridgeIdentity } from "../lib/bridge";
+import { claimExecutions, closeChromeVerification, createBridgeWithKey, failExecution, ingestEvents, reconcileBridge, recordVerifiedBridgeReaction, reportBridgeIdentity } from "../lib/bridge";
 import { applyOperation, createAgent, formXReplyIntent, recordNativeMirror } from "../lib/runtime";
 import { readState, readStateForBridge, readStateVersion, WorkspaceConflictError, writeState } from "../lib/db";
 import type { Execution } from "../lib/types";
@@ -54,6 +54,28 @@ describe("Bridge browser retry lifecycle", () => {
     expect(repeated.identity).toMatchObject({ status: "verified", username: "example_agent" });
     expect(readStateVersion()).toBe(beforeVersion);
     expect(readState().workspaceRevision).toBe(beforeRevision);
+  });
+
+  it("keeps duplicate Bridge observations on the indexed health path", () => {
+    const state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });
+    writeState(bridgeResult.state);
+    let bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge!.id)!;
+    const event = { events: [{ sourceEventId: "duplicate-observation", event: "created" as const, object: { externalRef: { type: "x.post", id: "duplicate-observation-post" }, objectType: "post", language: "en", author: { displayName: "Target" }, content: { text: "A stable observed post." }, visibility: "public" as const, shareability: "presence-only" as const } }] };
+
+    ingestEvents(bridge, event);
+    const afterFirstEvent = readStateVersion();
+    bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge!.id)!;
+    ingestEvents(bridge, event);
+    expect(readStateVersion()).toBe(afterFirstEvent);
+
+    const reconciliation = { cursor: "cursor-1", objects: [{ externalRef: { type: "x.post", id: "duplicate-observation-post" }, objectType: "post", language: "en", author: { displayName: "Target" }, content: { text: "A stable observed post." }, visibility: "public" as const, shareability: "presence-only" as const }] };
+    bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge!.id)!;
+    reconcileBridge(bridge, reconciliation);
+    const afterFirstReconciliation = readStateVersion();
+    bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge!.id)!;
+    reconcileBridge(bridge, reconciliation);
+    expect(readStateVersion()).toBe(afterFirstReconciliation);
   });
 
   it("settles a verified Assignment quote and mirror object", () => {

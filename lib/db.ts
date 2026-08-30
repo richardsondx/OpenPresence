@@ -685,6 +685,17 @@ export function writeBridgeHeartbeat(input: { bridgeId: string; state: string; a
   );
 }
 
+/** Persist append-only Mirror history without rebuilding the full workspace. */
+export function appendMirrorEvents(events: MirrorEvent[]) {
+  if (!events.length) return;
+  const updatedAt = new Date().toISOString();
+  const insert = sqlite.prepare("INSERT OR REPLACE INTO mirror_events (id, agent_id, parent_id, payload, updated_at) VALUES (?, ?, ?, ?, ?)");
+  sqlite.transaction(() => {
+    for (const event of events) insert.run(event.id, null, event.bridgeId, JSON.stringify(event), updatedAt);
+  })();
+  stateCache = undefined;
+}
+
 export function readBridgeHealthForPresence(presenceId: string) {
   const rows = sqlite.prepare("SELECT payload FROM bridges WHERE parent_id = ?").all(presenceId) as Array<{ payload: string }>;
   const healthRows = sqlite.prepare("SELECT bridge_id, state, adapter_status, last_heartbeat_at, last_seen_at, last_sync_at FROM bridge_health").all() as Array<{ bridge_id: string; state: string; adapter_status: string; last_heartbeat_at?: string; last_seen_at?: string; last_sync_at?: string }>;
