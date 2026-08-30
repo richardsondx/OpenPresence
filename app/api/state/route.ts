@@ -126,6 +126,25 @@ function activityProjection(state: OpenPresenceState): OpenPresenceState {
   const projection = Object.fromEntries(Object.entries(state).filter(([key]) => activityProjectionKeys.has(key as keyof OpenPresenceState))) as OpenPresenceState;
   projection.responseProjection = "activity";
   const presenceId = state.presence?.id ?? state.activePresenceId ?? undefined;
+  // Activity needs the selected Presence's full execution envelope, but the
+  // sidebar only needs identity/status metadata for the other Presences. Do
+  // not make the initial operator read carry every Presence's briefs,
+  // policies, and historical configuration; the full workspace is fetched
+  // when the operator opens a configuration-heavy view.
+  projection.presences = state.presences.map((presence) => presence.id === presenceId ? presence : {
+    id: presence.id,
+    name: presence.name,
+    handle: presence.handle,
+    channel: presence.channel,
+    mode: presence.mode,
+    environment: presence.environment,
+    status: presence.status,
+    accent: presence.accent,
+    avatarLook: presence.avatarLook,
+    connectionMode: presence.connectionMode,
+    createdAt: presence.createdAt,
+    updatedAt: presence.updatedAt,
+  }) as never;
   const latestTimestamp = (item: Record<string, unknown>) => ["updatedAt", "time", "occurredAt", "observedAt", "createdAt"]
     .map((key) => typeof item[key] === "string" ? item[key] as string : undefined)
     .find((value): value is string => Boolean(value)) ?? "";

@@ -51,6 +51,21 @@ describe("state read projections", () => {
     expect(JSON.stringify(body).length).toBeLessThan(600_000);
   });
 
+  it("keeps non-selected Presence configuration out of the Activity read model", async () => {
+    const response = await stateGet(new Request("http://localhost/api/state?projection=activity"));
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.responseProjection).toBe("activity");
+    expect(body.presence).toBeTruthy();
+    for (const presence of body.presences) {
+      if (presence.id === body.presence.id) continue;
+      expect(presence.brief).toBeUndefined();
+      expect(presence.execution).toBeUndefined();
+      expect(presence.context).toBeUndefined();
+    }
+  });
+
   it("short-circuits an unchanged chat poll with its ETag", async () => {
     const first = await stateGet(new Request("http://localhost/api/state?projection=chat"));
     const etag = first.headers.get("etag");
