@@ -80,6 +80,21 @@ describe("Agent Knowledge", () => {
     expect(readKnowledge(state, { presenceId: fixtureData.presenceId, segmentId }).evidence[0]).toMatchObject({ documentId: document.id });
   });
 
+  it("records retrieval metadata without cloning or mutating the modern read source", () => {
+    const fixtureData = fixture();
+    let state = applyOperation(fixtureData.state, { type: "createKnowledgeDocument", name: "Launch principles", content: "Ship after review." });
+    state = applyOperation(state, { type: "setKnowledgeAccess", presenceId: fixtureData.presenceId, maximumUse: "internal" });
+    const retrievalCount = state.knowledgeRetrievalRuns.length;
+    const citationCount = state.knowledgeCitations.length;
+    const searched = searchKnowledge(state, { presenceId: fixtureData.presenceId, query: "launch review" });
+
+    expect(searched.result.results[0]).toMatchObject({ documentName: "Launch principles" });
+    expect(searched.state.knowledgeRetrievalRuns).toHaveLength(retrievalCount + 1);
+    expect(searched.state.knowledgeCitations).toHaveLength(citationCount + 1);
+    expect(state.knowledgeRetrievalRuns).toHaveLength(retrievalCount);
+    expect(state.knowledgeCitations).toHaveLength(citationCount);
+  });
+
   it("keeps style guidance internal and reports provenance and conflicts", () => {
     let state = fixture().state;
     state = applyOperation(state, { type: "createKnowledgeDocument", name: "Genny Conversation Style Guide", content: "## Replies\n\nUse one sentence per line and stop after the useful move.", sourceType: "markdown" });

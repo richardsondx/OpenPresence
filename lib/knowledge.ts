@@ -189,13 +189,46 @@ export function migrateKnowledgeState(source: OpenPresenceState): OpenPresenceSt
   return state;
 }
 
+function needsKnowledgeMigration(source: OpenPresenceState) {
+  const documents = source.knowledgeDocuments;
+  const accesses = source.presenceKnowledgeAccess;
+  const retrievalRuns = source.knowledgeRetrievalRuns;
+  const citations = source.knowledgeCitations;
+  if (!Array.isArray(documents) || !Array.isArray(accesses) || !Array.isArray(retrievalRuns) || !Array.isArray(citations)) return true;
+
+  // Modern normalized snapshots already contain the canonical read model.
+  // Only pay for the compatibility migration when legacy records still need
+  // to be projected into it.
+  const documentIds = new Set(documents.map((document) => document.id));
+  if ((source.knowledgeItems ?? []).some((item) => !documentIds.has(item.id))) return true;
+  if ((source.presenceKnowledgeBindings ?? []).some((binding) => !accesses.some((access) => access.agentId === binding.agentId && access.presenceId === binding.presenceId))) return true;
+  return false;
+}
+
+function knowledgeStateForRead(source: OpenPresenceState) {
+  return needsKnowledgeMigration(source) ? migrateKnowledgeState(source) : source;
+}
+
+function knowledgeStateForMutation(source: OpenPresenceState, migrated: boolean) {
+  if (migrated) return source;
+  // Search and context compilation append retrieval metadata. Keep the
+  // caller's state immutable without cloning unrelated chat, mirror, and
+  // execution history a second time on every model turn.
+  return {
+    ...source,
+    knowledgeRetrievalRuns: [...source.knowledgeRetrievalRuns],
+    knowledgeCitations: [...source.knowledgeCitations],
+  };
+}
+
 function currentRuntime(source: OpenPresenceState, presenceId: string) {
-  const state = migrateKnowledgeState(source);
+  const state = knowledgeStateForRead(source);
   const documents = state.knowledgeDocuments.filter((document) => document.agentId === state.agent?.id && document.status === "active");
   const allowed = documents.filter((document) => effectivePresenceKnowledgeUse(state, presenceId, document) !== "none");
   const documentById = new Map(allowed.map((document) => [document.id, document]));
   const versions = state.knowledgeVersions.filter((version) => documentById.get(version.itemId)?.currentVersionId === version.id && version.parseStatus === "ready");
-  return { state, documents, allowed, documentById, versions };
+  const versionById = new Map(versions.map((version) => [version.id, version]));
+  return { state, documents, allowed, documentById, versions, versionById, migrated: state !== source };
 }
 
 function evidenceFor(state: OpenPresenceState, presenceId: string, segment: KnowledgeSegment, version: KnowledgeVersion, sourceUse?: KnowledgeUse): KnowledgeEvidence | undefined {
@@ -248,10 +281,11 @@ export interface KnowledgeSearchInput { presenceId: string; query: string; purpo
 
 export function searchKnowledge(source: OpenPresenceState, input: KnowledgeSearchInput): { state: OpenPresenceState; result: KnowledgeSearchResult } {
   const runtime = currentRuntime(source, input.presenceId);
+  const state = knowledgeStateForMutation(runtime.state, runtime.migrated);
   const queryTokens = normalizeTokens(input.query);
-  const segments = runtime.state.knowledgeSegments.filter((segment) => runtime.versions.some((version) => version.id === segment.knowledgeVersionId));
+  const segments = state.knowledgeSegments.filter((segment) => runtime.versionById.has(segment.knowledgeVersionId));
   const scored = segments.map((segment) => {
-    const version = runtime.versions.find((candidate) => candidate.id === segment.knowledgeVersionId)!;
+    const version = runtime.versionById.get(segment.knowledgeVersionId)!;
     const document = runtime.documentById.get(version.itemId)!;
     const searchable = `${document.name} ${(segment.headingPath ?? []).join(" ")} ${segment.text}`;
     const tokens = new Set(normalizeTokens(searchable));
@@ -260,16 +294,16 @@ export function searchKnowledge(source: OpenPresenceState, input: KnowledgeSearc
     const headingBoost = queryTokens.filter((token) => (segment.headingPath ?? []).some((heading) => normalizeTokens(heading).includes(token))).length * 2;
     return { segment, version, score: overlap * 3 + phraseBoost + headingBoost };
   }).filter((candidate) => candidate.score > 0).sort((left, right) => right.score - left.score || left.segment.ordinal - right.segment.ordinal).slice(0, Math.max(1, Math.min(12, input.limit ?? 6)));
-  const results = scored.map(({ segment, version }) => evidenceFor(runtime.state, input.presenceId, segment, version)).filter((item): item is KnowledgeEvidence => Boolean(item));
+  const results = scored.map(({ segment, version }) => evidenceFor(state, input.presenceId, segment, version)).filter((item): item is KnowledgeEvidence => Boolean(item));
   const retrievalRunId = id("knowledge-retrieval");
-  const access = accessFor(runtime.state, input.presenceId, runtime.state.agent?.id ?? "");
-  const run = { id: retrievalRunId, agentId: runtime.state.agent?.id ?? "", presenceId: input.presenceId, invocationId: input.invocationId ?? id("invocation"), purpose: input.purpose ?? "operator_chat", query: input.query, knowledgeAccess: access?.maximumUse ?? "none", accessibleDocumentIds: runtime.allowed.map((document) => document.id), accessibleCollectionIds: runtime.allowed.map((document) => document.legacyCollectionId).filter((value): value is string => Boolean(value)), candidateSegmentIds: segments.map((segment) => segment.id), selectedSegmentIds: results.map((result) => result.segmentId), createdAt: now() };
-  runtime.state.knowledgeRetrievalRuns.unshift(run);
-  for (const result of results) runtime.state.knowledgeCitations.unshift({ id: id("knowledge-citation"), retrievalRunId, knowledgeDocumentId: result.documentId, knowledgeItemId: result.documentId, knowledgeVersionId: result.versionId, knowledgeSegmentId: result.segmentId, usage: "retrieved", createdAt: now() });
+  const access = accessFor(state, input.presenceId, state.agent?.id ?? "");
+  const run = { id: retrievalRunId, agentId: state.agent?.id ?? "", presenceId: input.presenceId, invocationId: input.invocationId ?? id("invocation"), purpose: input.purpose ?? "operator_chat", query: input.query, knowledgeAccess: access?.maximumUse ?? "none", accessibleDocumentIds: runtime.allowed.map((document) => document.id), accessibleCollectionIds: runtime.allowed.map((document) => document.legacyCollectionId).filter((value): value is string => Boolean(value)), candidateSegmentIds: segments.map((segment) => segment.id), selectedSegmentIds: results.map((result) => result.segmentId), createdAt: now() };
+  state.knowledgeRetrievalRuns.unshift(run);
+  for (const result of results) state.knowledgeCitations.unshift({ id: id("knowledge-citation"), retrievalRunId, knowledgeDocumentId: result.documentId, knowledgeItemId: result.documentId, knowledgeVersionId: result.versionId, knowledgeSegmentId: result.segmentId, usage: "retrieved", createdAt: now() });
   const staleWarnings = results.filter((result) => result.reviewAfter && new Date(result.reviewAfter).getTime() < Date.now()).map((result) => `${result.documentName} is past its review date.`);
   const missingEvidence = results.length ? undefined : ["No accessible, current Knowledge source matched this question."];
   const unresolvedConflicts = conflictMessages(results);
-  return { state: runtime.state, result: { retrievalRunId, results, knowledgeAccess: run.knowledgeAccess, accessibleDocumentIds: run.accessibleDocumentIds, accessibleCollectionIds: run.accessibleCollectionIds, ...(missingEvidence ? { missingEvidence } : {}), ...(unresolvedConflicts.length ? { unresolvedConflicts } : {}), ...(staleWarnings.length ? { staleWarnings } : {}) } };
+  return { state, result: { retrievalRunId, results, knowledgeAccess: run.knowledgeAccess, accessibleDocumentIds: run.accessibleDocumentIds, accessibleCollectionIds: run.accessibleCollectionIds, ...(missingEvidence ? { missingEvidence } : {}), ...(unresolvedConflicts.length ? { unresolvedConflicts } : {}), ...(staleWarnings.length ? { staleWarnings } : {}) } };
 }
 
 export function compileKnowledgeContext(source: OpenPresenceState, input: KnowledgeSearchInput): { state: OpenPresenceState; packet: KnowledgeContextPacket } {
@@ -297,15 +331,16 @@ export function compileKnowledgeContext(source: OpenPresenceState, input: Knowle
 
 export function readKnowledge(source: OpenPresenceState, input: { presenceId: string; segmentId: string; invocationId?: string; purpose?: string }) {
   const runtime = currentRuntime(source, input.presenceId);
-  const segment = runtime.state.knowledgeSegments.find((candidate) => candidate.id === input.segmentId);
-  const version = segment && runtime.state.knowledgeVersions.find((candidate) => candidate.id === segment.knowledgeVersionId);
-  const document = version && runtime.state.knowledgeDocuments.find((candidate) => candidate.id === version.itemId);
-  if (!segment || !version || !document || effectivePresenceKnowledgeUse(runtime.state, input.presenceId, document) === "none" || document.currentVersionId !== version.id) throw new Error("That Knowledge passage is not available to this Presence.");
-  const adjacent = runtime.state.knowledgeSegments.filter((candidate) => candidate.knowledgeVersionId === version.id && Math.abs(candidate.ordinal - segment.ordinal) <= 1).sort((left, right) => left.ordinal - right.ordinal);
+  const state = knowledgeStateForMutation(runtime.state, runtime.migrated);
+  const segment = state.knowledgeSegments.find((candidate) => candidate.id === input.segmentId);
+  const version = segment && state.knowledgeVersions.find((candidate) => candidate.id === segment.knowledgeVersionId);
+  const document = version && state.knowledgeDocuments.find((candidate) => candidate.id === version.itemId);
+  if (!segment || !version || !document || effectivePresenceKnowledgeUse(state, input.presenceId, document) === "none" || document.currentVersionId !== version.id) throw new Error("That Knowledge passage is not available to this Presence.");
+  const adjacent = state.knowledgeSegments.filter((candidate) => candidate.knowledgeVersionId === version.id && Math.abs(candidate.ordinal - segment.ordinal) <= 1).sort((left, right) => left.ordinal - right.ordinal);
   const retrievalRunId = id("knowledge-read");
-  runtime.state.knowledgeRetrievalRuns.unshift({ id: retrievalRunId, agentId: runtime.state.agent?.id ?? "", presenceId: input.presenceId, invocationId: input.invocationId ?? id("invocation"), purpose: input.purpose ?? "operator_chat", query: `read:${segment.id}`, knowledgeAccess: effectivePresenceKnowledgeUse(runtime.state, input.presenceId, document), accessibleDocumentIds: [document.id], accessibleCollectionIds: document.legacyCollectionId ? [document.legacyCollectionId] : [], candidateSegmentIds: adjacent.map((candidate) => candidate.id), selectedSegmentIds: adjacent.map((candidate) => candidate.id), createdAt: now() });
-  for (const candidate of adjacent) runtime.state.knowledgeCitations.unshift({ id: id("knowledge-citation"), retrievalRunId, knowledgeDocumentId: document.id, knowledgeItemId: document.id, knowledgeVersionId: version.id, knowledgeSegmentId: candidate.id, usage: "relied_on", createdAt: now() });
-  return { state: runtime.state, retrievalRunId, evidence: adjacent.map((candidate) => evidenceFor(runtime.state, input.presenceId, candidate, version)).filter((item): item is KnowledgeEvidence => Boolean(item)) };
+  state.knowledgeRetrievalRuns.unshift({ id: retrievalRunId, agentId: state.agent?.id ?? "", presenceId: input.presenceId, invocationId: input.invocationId ?? id("invocation"), purpose: input.purpose ?? "operator_chat", query: `read:${segment.id}`, knowledgeAccess: effectivePresenceKnowledgeUse(state, input.presenceId, document), accessibleDocumentIds: [document.id], accessibleCollectionIds: document.legacyCollectionId ? [document.legacyCollectionId] : [], candidateSegmentIds: adjacent.map((candidate) => candidate.id), selectedSegmentIds: adjacent.map((candidate) => candidate.id), createdAt: now() });
+  for (const candidate of adjacent) state.knowledgeCitations.unshift({ id: id("knowledge-citation"), retrievalRunId, knowledgeDocumentId: document.id, knowledgeItemId: document.id, knowledgeVersionId: version.id, knowledgeSegmentId: candidate.id, usage: "relied_on", createdAt: now() });
+  return { state, retrievalRunId, evidence: adjacent.map((candidate) => evidenceFor(state, input.presenceId, candidate, version)).filter((item): item is KnowledgeEvidence => Boolean(item)) };
 }
 
 function sourceMime(name: string, sourceType: KnowledgeSourceType, explicit?: string) {
