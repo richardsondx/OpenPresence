@@ -72,6 +72,7 @@ describe("state read projections", () => {
       expect(mirror.trust).toBeUndefined();
       expect(mirror.shareability).toBeUndefined();
     }
+    expect(body.events.every((event: { detail: string }) => event.detail.length <= 360)).toBe(true);
     for (const presence of body.presences) {
       if (presence.id === body.presence.id) continue;
       expect(presence.brief).toBeUndefined();

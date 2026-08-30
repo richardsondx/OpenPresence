@@ -182,7 +182,10 @@ function activityProjection(state: OpenPresenceState): OpenPresenceState {
   projection.assignments = scopedRecent(state.assignments, 24, activeAssignment).map(compactAssignment) as never;
   projection.assignmentRuns = scopedRecent(state.assignmentRuns, 60) as never;
   projection.actions = scopedRecent(state.actions, 60) as never;
-  projection.events = scopedRecent(state.events, 120) as never;
+  const compactActivityEvent = (event: OpenPresenceState["events"][number]) => event.detail.length <= 360
+    ? event
+    : { ...event, detail: `${event.detail.slice(0, 359)}…` };
+  projection.events = scopedRecent(state.events, 120).map(compactActivityEvent) as never;
   const executionIsInFlight = (execution: OpenPresenceState["executions"][number]) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"].includes(execution.status);
   projection.executions = scopedRecent(state.executions, 60, executionIsInFlight).map((execution) => {
     const compact = { ...execution };
