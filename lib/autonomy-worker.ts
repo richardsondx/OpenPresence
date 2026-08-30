@@ -885,7 +885,7 @@ export async function runAutonomousPulse(
         error: error instanceof Error ? error : String(error),
       });
       next = deferInboundJudgment(next, presenceId, inbound.externalRef.id, new Date(Date.now() + 60_000).toISOString());
-      await writeStateWithRetry(current, next);
+      if (options?.persist !== false) await writeStateWithRetry(current, next);
       return next;
     }
 
