@@ -248,6 +248,23 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
     expect(readOperationalHealth(uniquePresence).status).toBe("needs_you");
   });
 
+  it("retires a pre-start database incident after the verified recovery is open", () => {
+    const uniquePresence = `presence_database_recovered_${Date.now()}`;
+    const { incident } = recordOperationalFailure({
+      dependency: "runtime",
+      presenceId: uniquePresence,
+      runId: "run_database_recovered",
+      error: "database disk image is malformed",
+    });
+    incident.openedAt = "2000-01-01T00:00:00.000Z";
+    upsertRecoveryIncident(incident);
+
+    const health = readOperationalHealth(uniquePresence);
+
+    expect(health.incidents.find((item) => item.id === incident.id)).toBeUndefined();
+    expect(health.counts.activeIncidents).toBe(0);
+  });
+
   it("Invariant: an existing recovery incident escalates immediately when credits become operator-blocked", () => {
     const uniquePresence = `presence_credit_escalation_${Date.now()}`;
     const first = recordOperationalFailure({ dependency: "runtime", presenceId: uniquePresence, runId: "run_credit_1", error: "X has no API credits remaining. Add credits or choose an API plan to continue." });

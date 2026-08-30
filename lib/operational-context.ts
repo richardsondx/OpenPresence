@@ -1,4 +1,4 @@
-import { getDependencyHealth, getDueScheduledWakes, getOperationalRun, getProcessHeartbeats, listDependencyHealth, listOperationalRuns, listRecoveryIncidents, readBridgeHealthForPresence, readChannelSecret, readRuntimeHealthProjection, upsertDependencyHealth, upsertOperationalRun, upsertRecoveryIncident } from "./db";
+import { databaseIntegrityVerifiedAt, getDependencyHealth, getDueScheduledWakes, getOperationalRun, getProcessHeartbeats, listDependencyHealth, listOperationalRuns, listRecoveryIncidents, readBridgeHealthForPresence, readChannelSecret, readRuntimeHealthProjection, upsertDependencyHealth, upsertOperationalRun, upsertRecoveryIncident } from "./db";
 import type { Bridge, OperationalHealthSnapshot } from "./types";
 import { xCreditsExhausted } from "./x-credits";
 import { bridgeExecutionStatus, bridgeIdentityReady } from "./bridge-contract";

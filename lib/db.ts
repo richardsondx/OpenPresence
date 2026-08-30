@@ -83,6 +83,10 @@ const sqlite = (() => {
   sqlitePool.set(resolvedDbPath, created);
   return created;
 })();
+// A database that reaches this point has passed the startup integrity gate.
+// Recovery reconciliation uses this timestamp to distinguish historical
+// corruption incidents from a new corruption discovered during this process.
+export const databaseIntegrityVerifiedAt = new Date().toISOString();
 const db = drizzle(sqlite);
 
 type StateContext = { agentId?: string | null; presenceId?: string | null; includeMirrorEvents?: boolean };
