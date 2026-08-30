@@ -16,6 +16,18 @@ describe("Bridge browser retry lifecycle", () => {
     expect(scoped.agentWorkspaces).toEqual([]);
   });
 
+  it("isolates mutable Bridge reads from the cached canonical snapshot", () => {
+    const state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });
+    const first = readStateForBridge(bridgeResult.bridge!.id);
+    first.bridges[0]!.state = "offline";
+    first.presences[0]!.status = "paused";
+
+    const second = readStateForBridge(bridgeResult.bridge!.id);
+    expect(second.bridges.find((bridge) => bridge.id === bridgeResult.bridge!.id)?.state).not.toBe("offline");
+    expect(second.presences.find((presence) => presence.id === state.presence!.id)?.status).not.toBe("paused");
+  });
+
   it("does not rewrite the workspace for a fresh unchanged identity probe", () => {
     const state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
     const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });

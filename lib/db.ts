@@ -461,12 +461,12 @@ function snapshotWorkspace(state: OpenPresenceState): AgentWorkspaceSnapshot {
   // Avoid cloning the full multi-Agent directory just to persist the active
   // workspace. The directory is already stored separately in
   // `agent_workspaces` and was the main source of multi-second writes.
-  const workspace = { ...state } as Partial<OpenPresenceState>;
+  const workspace = structuredClone(state) as Partial<OpenPresenceState>;
   delete workspace.agents;
   delete workspace.activeAgentId;
   delete workspace.agentWorkspaces;
   delete workspace.mirrorEvents;
-  return JSON.parse(JSON.stringify(workspace)) as AgentWorkspaceSnapshot;
+  return workspace as AgentWorkspaceSnapshot;
 }
 
 function hydrateAgentWorkspaces(state: OpenPresenceState): OpenPresenceState {
@@ -762,16 +762,42 @@ export function readStateSnapshot(): OpenPresenceState {
 }
 
 export function readState(): OpenPresenceState {
-  return JSON.parse(JSON.stringify(hydrateOperationalState(hydrateBridgeHealth(readStateSnapshot())))) as OpenPresenceState;
+  return structuredClone(hydrateOperationalState(hydrateBridgeHealth(readStateSnapshot()))) as OpenPresenceState;
 }
 
 /** Materialize a mutable context from the cached state with one clone. */
 export function readStateForContext(context: StateContext): OpenPresenceState {
-  const scoped = readStateSnapshotForContext(context);
+  const snapshot = readStateSnapshot();
+  const requestedAgentId = context.agentId ?? snapshot.activeAgentId ?? undefined;
+  const workspace = requestedAgentId && requestedAgentId !== snapshot.activeAgentId
+    ? snapshot.agentWorkspaces.find((item) => item.agent?.id === requestedAgentId)
+    : undefined;
+  // The active workspace is already parsed and normalized in stateCache. Build
+  // the requested Agent scope from that immutable snapshot instead of parsing
+  // both the 14 MB compatibility row and its equally large workspace row on
+  // every Bridge claim, identity, acknowledgement, or verification request.
+  // A structured clone keeps mutation isolation without the extra stringify /
+  // parse cycle that previously doubled event-loop and GC pressure.
+  const scopedInput = structuredClone(workspace
+    ? { ...snapshot, ...workspace, agents: snapshot.agents, activeAgentId: workspace.agent?.id ?? requestedAgentId, agentWorkspaces: [] }
+    : { ...snapshot, agentWorkspaces: [] }) as OpenPresenceState;
+  const scoped = workspace ? hydrateMirrorEvents(normalizeState(scopedInput)) : scopedInput;
+  if (workspace || !requestedAgentId || requestedAgentId === snapshot.activeAgentId) {
+    if (context.presenceId && scoped.presences.some((presence) => presence.id === context.presenceId)) {
+      scoped.activePresenceId = context.presenceId;
+      scoped.presence = scoped.presences.find((presence) => presence.id === context.presenceId) ?? scoped.presence;
+    }
+  } else {
+    // Preserve the existing compatibility fallback for an unknown Agent ID;
+    // callers still receive a complete canonical state rather than an empty
+    // workspace and can apply their normal ownership validation.
+    return readStateSnapshotForContext(context);
+  }
+  const hydrated = hydrateOperationalState(hydrateBridgeHealth(scoped));
   // Browser-facing mutations do not need the Agent directory snapshots. Keep
   // those durable rows server-side so POST responses stay small too.
-  scoped.agentWorkspaces = [];
-  return scoped;
+  hydrated.agentWorkspaces = [];
+  return hydrated;
 }
 
 /** Read-only context projection for GET responses; unchanged active reads share the cache. */
