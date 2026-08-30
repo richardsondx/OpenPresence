@@ -89,6 +89,7 @@ import {
 } from "./runtime";
 import { isCognitionEligibleMirrorObject } from "./social-context";
 import { cognitionSafePeopleNoteProjection } from "./people-notes";
+import { compileKnowledgeContext } from "./knowledge";
 import {
   generateAgentReply,
   generateAgentSocialDecision,
@@ -107,12 +108,13 @@ import { deliverNativeExecutions } from "./native-execution-delivery";
 import { requestAttentionCapacity } from "./attention-governor";
 import { requestAttention } from "./attention-coordinator";
 import { settleAttentionResponsibility } from "./attention-responsibility";
-import { operatorRequestsWatch, settleNudgeForEpisode, startQueuedNudge } from "./operator-chat";
+import { operatorRequestsWatch, recordOperatorConversationMessage, settleNudgeForEpisode, startQueuedNudge } from "./operator-chat";
 import { reassessPublishingPlan } from "./publishing-plan-reassessment";
 import { cognitionSafeAssetSummary, hasUsablePerception } from "./perception";
 import { inspectSandboxObject } from "./perception-runtime";
 import { applyConversationDisposition, conversationDispositionForAction, conversationEpisodeForObject, shouldEvaluateConversationObject } from "./conversation-episodes";
 import { socialReplyQualityIssue } from "./social-quality";
+import { formatReplyText } from "./public-expression";
 import { runLiveExplorationWorker } from "./exploration-worker";
 import type {
   JsonValue,
@@ -438,6 +440,75 @@ async function runAutonomousVerification(run: OperationalRun): Promise<OpenPrese
   }
 }
 
+/**
+ * Complete a private Chat turn in the durable worker. Provider latency must
+ * not hold the mutation request open, but the operator message is persisted
+ * before this run is queued so a restart can safely resume it.
+ */
+async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> {
+  const base = readStateSnapshotForContext({ presenceId: run.presenceId });
+  const messageId = typeof run.metadata?.operatorMessageId === "string" ? run.metadata.operatorMessageId : undefined;
+  const conversation = base.operatorConversations?.find((item) => item.presenceId === run.presenceId);
+  const messageIndex = messageId ? conversation?.messages.findIndex((item) => item.id === messageId) ?? -1 : -1;
+  const operatorMessage = messageIndex >= 0 ? conversation?.messages[messageIndex] : undefined;
+  const presence = base.presences.find((item) => item.id === run.presenceId) ?? base.presence;
+  if (!conversation || !operatorMessage || operatorMessage.role !== "operator" || !presence) {
+    run.state = "failed";
+    run.stage = "operator_chat.missing_message";
+    run.lastErrorCode = "OPERATOR_CHAT_MESSAGE_MISSING";
+    run.lastProgressAt = new Date().toISOString();
+    upsertOperationalRun(run);
+    return base;
+  }
+
+  run.stage = "operator_chat.generating";
+  run.lastProgressAt = new Date().toISOString();
+  upsertOperationalRun(run);
+
+  const operatorHistory = conversation.messages
+    .slice(Math.max(0, messageIndex - 16), messageIndex)
+    .map((item) => ({ role: item.role, content: item.content }));
+  let next = base;
+  try {
+    const knowledge = compileKnowledgeContext(base, { presenceId: run.presenceId, query: operatorMessage.content, purpose: "operator_chat" });
+    next = knowledge.state;
+    const reply = await generateAgentReply(next, operatorMessage.content, undefined, {
+      operatorConversation: true,
+      operatorHistory,
+      presence,
+      knowledgeContext: knowledge.packet,
+      presenceId: run.presenceId,
+      runId: run.id,
+      invocationId: run.invocationId,
+      operational: true,
+    });
+    next = recordOperatorConversationMessage(next, { presenceId: run.presenceId, content: formatReplyText(reply), role: "presence" });
+    await writeStateWithRetry(base, next);
+    run.state = "succeeded";
+    run.stage = "completed";
+    run.lastProgressAt = new Date().toISOString();
+    delete run.lastErrorCode;
+    upsertOperationalRun(run);
+    return next;
+  } catch (error) {
+    const detail = error instanceof Error ? error.message : "The selected AI provider could not answer.";
+    console.warn("Operator conversation runtime unavailable", detail);
+    const fallback = typeof run.metadata?.directWatch === "string" ? run.metadata.directWatch : undefined;
+    next = recordOperatorConversationMessage(next, {
+      presenceId: run.presenceId,
+      content: fallback ? `I’ll keep an eye on @${fallback.replace(/^@/, "")}. ${detail}` : `I’m not able to answer yet. ${detail}`,
+      role: "presence",
+    });
+    await writeStateWithRetry(base, next);
+    run.state = "failed";
+    run.stage = "operator_chat.failed";
+    run.lastErrorCode = detail.slice(0, 240);
+    run.lastProgressAt = new Date().toISOString();
+    upsertOperationalRun(run);
+    return next;
+  }
+}
+
 export async function executeAutonomyRun(runId: string): Promise<OpenPresenceState | null> {
   // A run may be dispatched by both the temporal loop and an API-triggered
   // sweep in the same process. Ownership must identify this invocation, not
@@ -467,7 +538,10 @@ export async function executeAutonomyRun(runId: string): Promise<OpenPresenceSta
   const runStartState = readStateSnapshotForContext({ presenceId: executionPresenceId });
   let attentionEpisodeId: string | undefined;
   try {
-    if (run.kind !== "verification") {
+    if (run.kind === "operator_chat") {
+      run.stage = "operator_chat.queued";
+      upsertOperationalRun(run);
+    } else if (run.kind !== "verification") {
       const episodeCreated = createAttentionEpisode(runStartState, {
         presenceId: executionPresenceId,
         environment: runStartState.presences.find((item) => item.id === executionPresenceId)?.environment,
@@ -503,7 +577,9 @@ export async function executeAutonomyRun(runId: string): Promise<OpenPresenceSta
   try {
     let resultState: OpenPresenceState;
 
-    if (run.kind === "verification") {
+    if (run.kind === "operator_chat") {
+      resultState = await runOperatorChat(run);
+    } else if (run.kind === "verification") {
       resultState = await runAutonomousVerification(run);
     } else if (run.kind === "observation") {
       resultState = await runAutonomousObservation(run.presenceId, { runId, invocationId, attentionEpisodeId, suppressAmbientInbound: run.attention?.triggers.includes("operator_nudge") });

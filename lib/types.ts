@@ -185,6 +185,7 @@ export type OperationalRunState =
 
 export type OperationalRunKind =
   | "attention"
+  | "operator_chat"
   | "delivery"
   | "verification"
   | "observation"

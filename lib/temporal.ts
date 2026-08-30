@@ -310,6 +310,7 @@ export const STAGE_EXPECTED_DURATIONS_SECONDS: Record<string, number> = {
   "discovery.search": 180,
   "discovery.triage": 120,
   "discovery.decide": 120,
+  "operator_chat.generating": 90,
   "woken_from_observation": 240,
   "woken_from_attention": 240,
   "woken_from_self_directed_discovery": 240,
@@ -740,7 +741,7 @@ export function runOperationalSweep(now = new Date()): SweepResult {
   // cognition runs with no lease and an old heartbeat; delivery-uncertain
   // work remains conservative because replaying a write could duplicate it.
   for (const run of listOperationalRuns(undefined, ["running", "reconciling"])) {
-    if (!["observation", "discovery", "attention"].includes(run.kind) || run.leaseOwner) continue;
+    if (!["observation", "discovery", "attention", "operator_chat"].includes(run.kind) || run.leaseOwner) continue;
     const lastHeartbeatMs = new Date(run.lastHeartbeatAt ?? run.lastProgressAt ?? run.startedAt ?? run.createdAt).getTime();
     if (Number.isFinite(lastHeartbeatMs) && now.getTime() - lastHeartbeatMs < 120_000) continue;
     run.state = "queued";

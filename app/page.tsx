@@ -7524,10 +7524,11 @@ function OperatorChatView({ state, mutate, refreshState }: { state: OpenPresence
   const presence = state.presence ?? state.presences[0]!;
   const conversation = (state.operatorConversations ?? []).find((item) => item.presenceId === presence.id);
   const nudges = state.operatorNudges ?? [];
+  const hasUnfinishedChatRun = (state.operationalRuns ?? []).some((run) => run.presenceId === presence.id && run.kind === "operator_chat" && ["queued", "running", "recovering", "reconciling"].includes(run.state));
   const [pendingMessages, setPendingMessages] = useState<OperatorConversationMessage[]>([]);
   const conversationActionEvents = operatorConversationActionEvents(state, presence.id);
   const terminalAssignmentStatuses = new Set<AssignmentStatus>(["completed", "completed_with_adaptation", "failed", "expired_incomplete", "cancelled"]);
-  const hasUnfinishedNudges = conversationActionEvents.some((event) => !["verified", "failed"].includes(event.status)) || nudges.some((nudge) => nudge.presenceId === presence.id && (["queued", "acknowledged", "working"].includes(nudge.status)
+  const hasUnfinishedNudges = hasUnfinishedChatRun || conversationActionEvents.some((event) => !["verified", "failed"].includes(event.status)) || nudges.some((nudge) => nudge.presenceId === presence.id && (["queued", "acknowledged", "working"].includes(nudge.status)
     || nudge.status === "assignment_created" && Boolean(nudge.assignmentId && !terminalAssignmentStatuses.has(state.assignments.find((assignment) => assignment.id === nudge.assignmentId)?.status ?? "draft"))));
   const persistedVisibleMessages = (conversation?.messages ?? []).filter((item, index, messages) => {
     // Older runtimes put execution rationale and routine observation summaries
@@ -7679,7 +7680,7 @@ function OperatorChatView({ state, mutate, refreshState }: { state: OpenPresence
             {item.role === "operator" && nudge && <div className="operator-chat-message-actions">{operatorNudgeStatusLabel(nudge.status, presence.name, linkedAssignment?.status) && <span className={`operator-nudge-status is-${nudge.status}`} role="status">{operatorNudgeStatusLabel(nudge.status, presence.name, linkedAssignment?.status)}</span>}{nudge.status === "failed" && !nudge.assignmentId && <button type="button" onClick={() => void mutate({ type: "retryPresenceNudge", presenceId: presence.id, nudgeId: nudge.id })}>Retry look</button>}{!nudge.assignmentId && <button type="button" onClick={() => void mutate({ type: "createAssignmentFromNudge", presenceId: presence.id, nudgeId: nudge.id })}>Take this on</button>}</div>}
           </article>{anchoredActions.length > 0 && <div className="operator-chat-action-timeline" aria-label="Actions from this conversation">{anchoredActions.map((event) => <OperatorChatActionTimelineEvent key={event.id} event={event} />)}</div>}</Fragment>;
         })}
-        {sending && presence.status !== "paused" && <div className="operator-chat-thinking" role="status" aria-live="polite" data-testid="operator-chat-thinking">
+        {(sending || hasUnfinishedChatRun) && presence.status !== "paused" && <div className="operator-chat-thinking" role="status" aria-live="polite" data-testid="operator-chat-thinking">
           <PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} />
           <span>{presence.name} is thinking</span>
           <span className="thinking-dots" aria-hidden="true"><i /> <i /> <i /></span>
@@ -7689,8 +7690,8 @@ function OperatorChatView({ state, mutate, refreshState }: { state: OpenPresence
         {attachments.length > 0 && <div className="attachment-list operator-chat-attachments">{attachments.map((attachment, index) => <span key={`${attachment.name}-${index}`}>{attachment.name}<button type="button" aria-label={`Remove ${attachment.name}`} onClick={() => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X size={11} /></button></span>)}</div>}
         <form className="chat-composer operator-chat-composer" onSubmit={send}>
           <label className="attach-button" aria-label="Attach context"><Plus size={16} /><input type="file" hidden multiple onChange={(event) => Array.from(event.target.files ?? []).forEach(addFile)} /></label>
-          <textarea ref={composerRef} aria-label={`Message ${presence.name}`} value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder={sending ? `Sending to ${presence.name}…` : `Message ${presence.name}…`} rows={1} disabled={sending} />
-          <button className="send-button" aria-label={presence.status === "paused" ? "Queue message" : "Send"} type="submit" disabled={!message.trim() || sending}>{sending ? <LoaderCircle size={17} className="spin" /> : <Send size={17} />}</button>
+          <textarea ref={composerRef} aria-label={`Message ${presence.name}`} value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder={sending || hasUnfinishedChatRun ? `Sending to ${presence.name}…` : `Message ${presence.name}…`} rows={1} disabled={sending || hasUnfinishedChatRun} />
+          <button className="send-button" aria-label={presence.status === "paused" ? "Queue message" : "Send"} type="submit" disabled={!message.trim() || sending || hasUnfinishedChatRun}>{sending || hasUnfinishedChatRun ? <LoaderCircle size={17} className="spin" /> : <Send size={17} />}</button>
         </form>
         <div className="composer-hint">Enter to send <span>·</span> Shift + Enter for a new line{presence.status === "paused" ? <><span>·</span> Queued until Wake</> : null}</div>
       </section>

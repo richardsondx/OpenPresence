@@ -4979,29 +4979,28 @@ export async function POST(request: Request) {
       if (conversationPresence?.status === "live" && !hasSharedContext) {
         let next = current;
         if (directWatch) next = applyOperation(next, { type: "createWatch", presenceId: parsed.presenceId, query: `@${directWatch}`, purpose: "The operator asked the Agent to keep this person in view." });
-        const conversation = next.operatorConversations?.find((item) => item.presenceId === parsed.presenceId);
-        const operatorHistory = conversation?.messages.slice(-16).map((item) => ({ role: item.role, content: item.content })) ?? [];
-        const knowledge = compileKnowledgeContext(next, { presenceId: parsed.presenceId, query: parsed.content, purpose: "operator_chat" });
-        next = knowledge.state;
         // Persist the operator's turn before invoking the model. The private
-        // conversation should remain truthful even if the model is slow or
-        // unavailable, and the UI can render the submitted turn immediately.
+        // conversation should remain truthful even if the model is slow,
+        // unavailable, or the process restarts while it is being generated.
         next = recordOperatorConversationMessage(next, { presenceId: parsed.presenceId, content: parsed.content, clientRequestId: parsed.clientRequestId });
         writeState(next);
-        const reply = await generateAgentReply(next, parsed.content, undefined, {
-          operatorConversation: true,
-          operatorHistory,
-          presence: conversationPresence,
-          knowledgeContext: knowledge.packet,
-          presenceId: parsed.presenceId,
-        }).catch((error: unknown) => {
-          const detail = error instanceof Error ? error.message : "The selected AI provider could not answer.";
-          console.warn("Operator conversation runtime unavailable", detail);
-          return directWatch ? `I’ll keep an eye on @${directWatch}. ${detail}` : `I’m not able to answer yet. ${detail}`;
+        const operatorMessage = next.operatorConversations?.find((item) => item.presenceId === parsed.presenceId)?.messages.at(-1);
+        if (!operatorMessage) throw new Error("The operator message could not be persisted.");
+        const queued = queueAutonomyRun(parsed.presenceId, "operator_chat", {
+          stage: "operator_chat.queued",
+          metadata: {
+            source: "operator",
+            operatorMessageId: operatorMessage.id,
+            ...(parsed.clientRequestId ? { clientRequestId: parsed.clientRequestId } : {}),
+            ...(directWatch ? { directWatch } : {}),
+          },
         });
-        next = recordOperatorConversationMessage(next, { presenceId: parsed.presenceId, content: formatReplyText(reply), role: "presence" });
-        writeState(next);
-        return stateResponse(request, next);
+        if (isTestRuntime()) {
+          await dispatchAutonomyWorker(queued.run.id);
+          return stateResponse(request, readStateSnapshotForContext({ presenceId: parsed.presenceId }), { runId: queued.run.id });
+        }
+        scheduleOperationalSweep();
+        return stateResponse(request, queued.state, { runId: queued.run.id });
       }
       const created = createOperatorNudge(current, parsed);
       if (created.duplicate) return stateResponse(request, created.state);
