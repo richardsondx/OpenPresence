@@ -536,6 +536,7 @@ export interface SweepResult {
   reclaimedLeases: number;
   staleRunsDetected: OperationalRun[];
   dispatchedWakes: ScheduledWake[];
+  closedNonRetryableVerifications: number;
   timestamp: string;
 }
 
