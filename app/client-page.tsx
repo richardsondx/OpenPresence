@@ -156,6 +156,7 @@ import { runtimeTimeoutForOperation, runtimeTimeoutMessage } from "@/lib/runtime
 import { deriveHistoricalGrowthContext } from "@/lib/growth-history";
 import { growthEvidenceIsInPresenceScope, growthPublicationIsInPresenceScope, presenceGrowthBoundary } from "@/lib/growth-scope";
 import { deriveActivityNow } from "@/lib/activity-now";
+import { activityRefreshIntervalMs } from "@/lib/activity-polling";
 import { operatorConversationActionEvents, type OperatorConversationActionEvent } from "@/lib/operator-chat-projection";
 import { conversationStyleGeneratorPrompt, conversationStylesFor, CUSTOM_CONVERSATION_STYLE_ID, normalizeImportedConversationStyle } from "@/lib/conversation-styles";
 import { AVATAR_LOOK_LABELS, AVATAR_LOOKS, avatarAssetPath, presenceAvatarLook, type AvatarLook } from "@/lib/avatars";
@@ -1059,9 +1060,9 @@ export default function Home() {
     const timer = window.setInterval(() => {
       if (!browserDocumentIsVisible()) return;
       void refreshState().catch(() => undefined);
-    }, 15_000);
+    }, activityRefreshIntervalMs(state));
     return () => window.clearInterval(timer);
-  }, [view, state?.onboarded, state?.presence?.status]);
+  }, [view, state?.onboarded, state?.presence?.status, state?.operationalRuns, state?.operatorNudges, state?.activePresenceId]);
   // Schedule is also a live operational surface: a background reassessment
   // must replace a due plan on screen without requiring navigation or reload.
   useEffect(() => {
@@ -1465,45 +1466,6 @@ function Onboarding({
         </form>
       </div>
     </main>
-  );
-}
-
-function ChatHistoryNav({
-  state,
-  mutate,
-}: {
-  state: OpenPresenceState;
-  mutate: Mutate;
-}) {
-  return (
-    <div className="chat-sidebar-section">
-      <div className="sidebar-section-heading">
-        <span className="sidebar-label">Chat</span>
-        <button
-          className="sidebar-add"
-          aria-label="New conversation"
-          onClick={() => mutate({ type: "newConversation" })}
-        >
-          <Plus size={14} />
-        </button>
-      </div>
-      <div className="conversation-list">
-        {state.conversations.map((item) => (
-          <button
-            key={item.id}
-            className={`conversation-nav-item ${item.id === state.activeConversationId ? "active" : ""}`}
-            onClick={() => mutate({ type: "selectConversation", id: item.id })}
-          >
-            <strong>{item.title}</strong>
-            <small>
-              {item.messages.length
-                ? `${item.messages.length} messages`
-                : "New"}
-            </small>
-          </button>
-        ))}
-      </div>
-    </div>
   );
 }
 
@@ -2296,269 +2258,6 @@ function AgentWorkspaceShell({
           {pendingAgentChangeCount > 0 && (
             <span className="nav-count">{pendingAgentChangeCount}</span>
           )}
-        </button>
-      </nav>
-      {showPresenceModal && (
-        <AddPresenceDialog
-          agentName={agent.name}
-          accent={agent.accent}
-          onClose={() => setShowPresenceModal(false)}
-          onCreate={async (input) => {
-            const next = await mutate({ type: "createPresence", input });
-            if (next) setShowPresenceModal(false);
-          }}
-        />
-      )}
-    </main>
-  );
-}
-
-function LegacyAppShell({
-  state,
-  view,
-  setView,
-  selectedFile,
-  setSelectedFile,
-  mutate,
-  refreshState,
-  manageBridge,
-  manageX,
-  error,
-}: {
-  state: OpenPresenceState;
-  view: View;
-  setView: (view: View) => void;
-  selectedFile: FileKind;
-  setSelectedFile: (file: FileKind) => void;
-  mutate: Mutate;
-  refreshState: () => Promise<OpenPresenceState>;
-  manageBridge: BridgeManage;
-  manageX: XManage;
-  error: string | null;
-}) {
-  const agent = state.agent!;
-  const presence = state.presence!;
-  const operationalHealth = useOperationalHealth(presence.id);
-  const [showPresenceModal, setShowPresenceModal] = useState(false);
-  const isPresenceView = presenceNavItems.some(({ id }) => id === view) || view === "calendar";
-  const contextIdentity = isPresenceView && presence
-    ? { name: presence.name, accent: presence.accent }
-    : { name: agent.name, accent: agent.accent };
-  const pageLabel =
-    view === "brain"
-      ? "Brain"
-      : view === "presence"
-        ? `${channelLabel(presence.channel, state.channelDefinitions)} · Settings`
-        : view === "usage"
-          ? "Usage"
-        : view === "live"
-          ? "Activity"
-          : view === "feed"
-            ? "Feed"
-        : view[0].toUpperCase() + view.slice(1);
-  const presenceBridge = presence.channel !== "x" ? state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline") : undefined;
-  const presenceBridgeStatus = presenceBridge ? bridgeExecutionStatus(presenceBridge) : "disconnected";
-  return (
-    <main className="app-shell">
-      <aside className="sidebar">
-        <div className="brand-lockup sidebar-brand">
-          <div className="brand-mark">◉</div>
-          <span>OpenPresence</span>
-        </div>
-        <div className="sidebar-label">Agent</div>
-        <button
-          className="agent-root agent-switcher"
-          aria-label={`Open agent workspace, ${agent.name}`}
-          onClick={() => setView("brain")}
-        >
-          <PresenceGlyph accent={agent.accent} name={agent.name} />
-          <span>
-            <strong>{agent.name}</strong>
-          </span>
-          <ChevronRight size={14} />
-        </button>
-        {view === "chat" && <ChatHistoryNav state={state} mutate={mutate} />}
-        <div className="sidebar-label presence-label">Presences</div>
-        <div className="presence-tree">
-          {state.presences.map((item) => (
-            <button
-              key={item.id}
-              className={`presence-switcher ${item.id === presence.id ? "active" : ""}`}
-              onClick={() => mutate({ type: "selectPresence", id: item.id })}
-            >
-              <span className="presence-nav-avatar">
-                <PresenceGlyph accent={item.accent} name={item.name} look={presenceAvatarLook(item)} />
-              </span>
-              <span>
-                <strong>{item.handle}</strong>
-                <small>
-                  {channelLabel(item.channel, state.channelDefinitions)} ·{" "}
-                  {item.mode === "ghost" ? "Ghost" : "Agent-owned"}
-                </small>
-              </span>
-              <span
-                className={`live-dot ${item.status === "paused" ? "paused-dot" : ""}`}
-              />
-            </button>
-          ))}
-        </div>
-        <button
-          className="add-presence"
-          onClick={() => setShowPresenceModal(true)}
-        >
-          <Plus size={15} /> Add a Presence
-        </button>
-        <nav className="main-nav" aria-label="Primary navigation">
-          {presenceNavItems.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => setView(id)}
-              className={view === id ? "active" : ""}
-            >
-              <Icon size={17} />
-              <span>{label}</span>
-              {id === "live" &&
-                state.proposals.some((item) => item.status === "pending") && (
-                  <span className="nav-count">
-                    {
-                      state.proposals.filter(
-                        (item) => item.status === "pending",
-                      ).length
-                    }
-                  </span>
-                )}
-            </button>
-          ))}
-        </nav>
-        <div className="sidebar-divider" />
-        <div className="sidebar-label">Mind</div>
-        <button
-          className={`secondary-nav ${view === "brain" ? "active" : ""}`}
-          onClick={() => setView("brain")}
-        >
-          <Brain size={17} />
-          <span>Brain</span>
-        </button>
-        <button
-          className={`secondary-nav ${view === "knowledge" ? "active" : ""}`}
-          onClick={() => setView("knowledge")}
-        >
-          <BookOpen size={17} />
-          <span>Knowledge</span>
-        </button>
-      </aside>
-      <section className={`${view === "chat" ? "workspace workspace-chat" : "workspace"} ${view === "knowledge" ? "workspace-knowledge" : ""}`}>
-        <header className="topbar">
-          <div className="mobile-brand">
-            <div className="brand-mark">◉</div>
-            <span>OpenPresence</span>
-          </div>
-          <div className="topbar-context">
-            <PresenceGlyph accent={contextIdentity.accent} name={contextIdentity.name} look={isPresenceView ? presenceAvatarLook(presence) : "core"} />
-            <span>{contextIdentity.name}</span>
-            <ChevronRight size={14} />
-            <strong>{pageLabel}</strong>
-          </div>
-          <div className="topbar-actions">
-            <OperationalHealthIndicator health={operationalHealth} onOpen={() => setView("live")} />
-            <span
-              className={`connection-label ${presence.status === "paused" ? "paused" : ""}`}
-            >
-              <span className="status-dot" />{" "}
-              {view === "presence"
-                ? presence.status === "paused"
-                  ? "Paused"
-                  : state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "needs-attention")
-                    ? "Needs attention"
-                  : presenceBridgeStatus === "stale"
-                    ? "Needs attention"
-                    : presenceBridgeStatus === "waiting"
-                      ? "Waiting for adapter"
-                      : presenceBridgeStatus === "connected"
-                        ? "Connected"
-                        : "Not connected"
-                : view === "brain"
-                  ? "Agent workspace"
-                  : "All Presences"}
-            </span>
-          </div>
-        </header>
-        {error && (
-          <div className="toast-error" role="alert">
-            <CircleAlert size={16} /> {error}
-          </div>
-        )}
-        <div className="workspace-content">
-          {view === "teach" && (
-            <TeachView state={state} mutate={mutate} setView={setView} />
-          )}
-          {view === "knowledge" && <KnowledgeView state={state} mutate={mutate} refreshState={refreshState} />}
-          {view === "usage" && <UsageView state={state} setView={setView} mutate={mutate} />}
-          {view === "live" && (
-            <LiveView key={`${state.presence?.id ?? "none"}-${state.presence?.channel ?? "none"}-${state.presence?.environment ?? "live"}`} state={state} mutate={mutate} operationalHealth={operationalHealth} runtimeError={Boolean(error && /OpenPresence (runtime could not be reached|service unavailable)/i.test(error))} refreshState={refreshState} setView={setView} />
-          )}
-          {view === "watching" && <WatchingView state={state} mutate={mutate} refreshState={refreshState} setView={setView} />}
-          {view === "people" && <PeopleViewLazy state={state} mutate={mutate} Button={Button} SectionEyebrow={SectionEyebrow} PageHeader={PageHeader} ChannelAvatar={ChannelAvatar} channelLabel={channelLabel} formatTime={formatTime} formatDateTime={formatDateTime} watchRelationshipPolicy={watchRelationshipPolicy} watchPolicyFromPurpose={watchPolicyFromPurpose} watchPlanSummary={watchPlanSummary} />}
-          {view === "feed" && (
-            <PublicHistoryView state={state} setView={setView} mutate={mutate} />
-          )}
-          {view === "growth" && <GrowthViewLazy state={state} mutate={mutate} setView={setView} />}
-          {view === "schedule" && (
-            <ScheduleView state={state} mutate={mutate} setView={setView} />
-          )}
-          {view === "brain" && (
-            <BrainView
-              key={`${selectedFile}-${state.files.find((file) => file.kind === selectedFile)?.revision ?? 0}`}
-              state={state}
-              mutate={mutate}
-              selectedFile={selectedFile}
-              setSelectedFile={setSelectedFile}
-              setView={setView}
-            />
-          )}
-          {view === "presence" && (
-            <PresenceView
-              key={presence.id}
-              state={state}
-              mutate={mutate}
-              refreshState={refreshState}
-              manageBridge={manageBridge}
-              manageX={manageX}
-            />
-          )}
-        </div>
-      </section>
-      <nav className="mobile-nav" aria-label="Mobile navigation">
-        {presenceNavItems.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => setView(id)}
-            className={view === id ? "active" : ""}
-          >
-            <Icon size={18} />
-            <span>{label}</span>
-          </button>
-        ))}
-        <button
-          onClick={() => setView("brain")}
-          className={view === "brain" ? "active" : ""}
-        >
-          <Brain size={18} />
-          <span>Brain</span>
-        </button>
-        <button
-          onClick={() => setView("knowledge")}
-          className={view === "knowledge" ? "active" : ""}
-        >
-          <BookOpen size={18} />
-          <span>Knowledge</span>
-        </button>
-        <button
-          onClick={() => setView("presence")}
-          className={view === "presence" ? "active" : ""}
-        >
-          <Settings2 size={18} />
-          <span>Settings</span>
         </button>
       </nav>
       {showPresenceModal && (
@@ -7997,7 +7696,6 @@ function ChatThinkingMessage({ name, accent, feed = false }: { name: string; acc
   );
 }
 
-void LegacyAppShell;
 void OldChatView;
 void TeachView;
 

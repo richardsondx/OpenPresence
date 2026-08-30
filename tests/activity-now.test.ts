@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { deriveActivityNow } from "../lib/activity-now";
+import { activityRefreshIntervalMs } from "../lib/activity-polling";
 import { createOperatorNudge, directWatchQuery, isBurstStatusQuestion, operatorBurstStatusReply, operatorNudgeReceipt, operatorRequestsWatch, recordOperatorConversationMessage, recordNudgeAssignmentHandoff, releasePausedNudges, settleNudgeForEpisode, settleNudgeFromAssignment, startQueuedNudge } from "../lib/operator-chat";
 import { operatorConversationActionEvents } from "../lib/operator-chat-projection";
 import { createAgent, formXActionIntent } from "../lib/runtime";
@@ -185,6 +186,33 @@ describe("truthful Activity right-now projection", () => {
     expect(projection.state).toBe("resting");
     expect(projection.nextWakeAt).toBeUndefined();
     expect(projection.nextWakePurpose).toBeUndefined();
+  });
+});
+
+describe("bounded Activity polling", () => {
+  const fixture = () => createAgent({ name: "Polling Test", description: "Test", audience: "Testers", mode: "agent", handle: "@polling_test", accent: "#777777" });
+
+  it("polls faster while an attention run is active", () => {
+    const state = fixture();
+    const presence = state.presence!;
+    state.operationalRuns = [{
+      id: "active-attention",
+      runId: "active-attention",
+      presenceId: presence.id,
+      kind: "attention",
+      state: "running",
+      stage: "runtime.pulse",
+      createdAt: new Date().toISOString(),
+      lastProgressAt: new Date().toISOString(),
+      eligibleAt: new Date().toISOString(),
+      attemptCount: 1,
+      recoveryCount: 0,
+    } as OperationalRun];
+    expect(activityRefreshIntervalMs(state)).toBe(2_000);
+  });
+
+  it("backs off when no durable work or nudge is active", () => {
+    expect(activityRefreshIntervalMs(fixture())).toBe(10_000);
   });
 });
 
