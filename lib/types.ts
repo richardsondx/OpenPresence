@@ -220,6 +220,8 @@ export interface AttentionRunRequest {
   scope: AttentionScope;
   requestedAt: string;
   signalIds: string[];
+  /** The connector already supplied authenticated evidence for this wake. */
+  source?: "bridge";
 }
 
 export interface AttentionRunResult {

@@ -505,7 +505,10 @@ export async function executeAutonomyRun(runId: string): Promise<OpenPresenceSta
     } else if (run.kind === "discovery") {
       resultState = await runAutonomousSelfDirectedDiscovery(run.presenceId, undefined, { runId, invocationId, attentionEpisodeId, forceEligibility: run.attention?.triggers.includes("operator_check") || run.attention?.triggers.includes("operator_nudge") });
     } else if (run.kind === "attention" && run.attention?.scope === "observe_inbound") {
-      resultState = await runObservedAttentionPass(run.presenceId, { runId, invocationId, attentionEpisodeId, suppressAmbientInbound: run.attention?.triggers.includes("operator_nudge"), inboundOnly: true });
+      const attentionOptions = { runId, invocationId, attentionEpisodeId, suppressAmbientInbound: run.attention?.triggers.includes("operator_nudge"), inboundOnly: true };
+      resultState = run.attention.source === "bridge"
+        ? await runBridgeInboundAttentionPass(run.presenceId, attentionOptions)
+        : await runObservedAttentionPass(run.presenceId, attentionOptions);
     } else {
       resultState = await runAutonomousAttention(run.presenceId, { runId, invocationId, attentionEpisodeId, forceEligibility: run.attention?.triggers.includes("operator_check") || run.attention?.triggers.includes("operator_nudge"), suppressAmbientInbound: run.attention?.triggers.includes("operator_nudge") });
     }
@@ -994,6 +997,36 @@ export async function runObservedAttentionPass(
 ): Promise<OpenPresenceState> {
   const observed = await dependencies.observe(presenceId, options);
   return dependencies.judgeWatches(observed, presenceId, options);
+}
+
+/**
+ * A Bridge inbound event is already authenticated Mirror evidence. Re-reading
+ * native X before judging it adds avoidable provider latency and can block a
+ * valid browser-delivered mention behind an unrelated native identity issue.
+ * Keep the normal Pulse and Watch stages, but start from the persisted Mirror.
+ */
+export async function runBridgeInboundAttentionPass(
+  presenceId: string,
+  options?: { runId?: string; invocationId?: string; attentionEpisodeId?: string; suppressAmbientInbound?: boolean; inboundOnly?: boolean },
+  dependencies: {
+    readState: (presenceId: string) => OpenPresenceState;
+    pulse: typeof runAutonomousPulse;
+    judgeWatches: typeof runAutonomousWatchSignals;
+  } = {
+    readState: (id) => readStateSnapshotForContext({ presenceId: id }),
+    pulse: runAutonomousPulse,
+    judgeWatches: runAutonomousWatchSignals,
+  },
+): Promise<OpenPresenceState> {
+  let observed = dependencies.readState(presenceId);
+  if (options?.attentionEpisodeId) {
+    observed = recordAttentionStep(observed, options.attentionEpisodeId, "observing", {
+      label: "Using the Bridge's observed mention",
+      detail: "The connected browser already supplied authenticated Social Mirror evidence; no second channel read was needed.",
+    });
+  }
+  const pulsed = await dependencies.pulse(presenceId, options, observed);
+  return dependencies.judgeWatches(pulsed, presenceId, options);
 }
 
 /**

@@ -695,7 +695,7 @@ export function runOperationalSweep(now = new Date()): SweepResult {
           upsertOperationalRun(existingRun);
         } else {
           for (const [index, trigger] of request.triggers.entries()) {
-            mergeAttentionWake({ presenceId, trigger, scope: request.scope, requestedAt: request.requestedAt, signalId: request.signalIds[index] ?? request.signalIds[0] ?? wake.id });
+            mergeAttentionWake({ presenceId, trigger, scope: request.scope, requestedAt: request.requestedAt, signalId: request.signalIds[index] ?? request.signalIds[0] ?? wake.id, source: request.source });
           }
         }
       } else {

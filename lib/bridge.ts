@@ -328,7 +328,7 @@ export function ingestEvents(bridge: Bridge, payload: z.infer<typeof eventsInput
   const presence = state.presences.find((item) => item.id === bridge.presenceId) ?? state.presence;
   // Inbound activity wakes a Resting Presence, never one the operator paused.
   if (receivedInbound && presence?.status === "live") {
-    requestAttention(bridge.presenceId, "inbound_event", new Date().toISOString(), "observe_inbound");
+    requestAttention(bridge.presenceId, "inbound_event", new Date().toISOString(), "observe_inbound", "bridge");
     // The durable wake remains authoritative, while this local hint avoids
     // making a fresh mention wait for the next five-second scheduler tick.
     // Import lazily to avoid a bridge ↔ temporal module cycle during startup.

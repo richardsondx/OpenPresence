@@ -1,7 +1,7 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { parseAgentSocialDecision } from "../lib/ai";
 import { applyOperation, createAgent, formXActionIntent } from "../lib/runtime";
-import { filterAutonomousSocialActs, runObservedAttentionPass, watchRelationshipGuidance } from "../lib/autonomy-worker";
+import { filterAutonomousSocialActs, runBridgeInboundAttentionPass, runObservedAttentionPass, watchRelationshipGuidance } from "../lib/autonomy-worker";
 import type { OpenPresenceState } from "../lib/types";
 
 afterEach(() => {
@@ -111,5 +111,18 @@ describe("Composable Multi-Act Decisions and Discrete Intent Formation", () => {
 
     expect(calls).toEqual(["observe", "judge-watches"]);
     expect(result.watchSignals[0]?.disposition).toBe("considered");
+  });
+
+  it("judges a Bridge-delivered inbound event from the persisted Mirror without a native reread", async () => {
+    const state = createAgent({ name: "Jenny", description: "Explain AI agents.", mode: "agent", handle: "@jenny_ai", accent: "#D68754" });
+    const calls: string[] = [];
+    const result = await runBridgeInboundAttentionPass(state.presence!.id, { runId: "run-bridge-inbound" }, {
+      readState: () => { calls.push("read-mirror"); return state; },
+      pulse: async (_presenceId, _options, observed) => { calls.push("pulse"); return observed; },
+      judgeWatches: async (observed) => { calls.push("judge-watches"); return observed; },
+    });
+
+    expect(calls).toEqual(["read-mirror", "pulse", "judge-watches"]);
+    expect(result).toBe(state);
   });
 });

@@ -1519,6 +1519,7 @@ export function mergeAttentionWake(input: {
   scope: AttentionScope;
   requestedAt: string;
   signalId: string;
+  source?: "bridge";
 }): ScheduledWake {
   const id = `wake_attention_${input.presenceId}`;
   return sqlite.transaction(() => {
@@ -1532,7 +1533,7 @@ export function mergeAttentionWake(input: {
     // A dispatched row is only an identity slot for the next follow-up. Its
     // delivered triggers belong to the prior run and must not leak into the
     // next episode.
-    const payload = existing?.state === "pending" && existing.payload ? JSON.parse(existing.payload) as { triggers?: AttentionTrigger[]; scope?: AttentionScope; signalIds?: string[] } : {};
+    const payload = existing?.state === "pending" && existing.payload ? JSON.parse(existing.payload) as { triggers?: AttentionTrigger[]; scope?: AttentionScope; signalIds?: string[]; source?: "bridge" } : {};
     const priorScope = payload.scope ?? "observe_inbound";
     const scope = attentionScopeRank[input.scope] > attentionScopeRank[priorScope] ? input.scope : priorScope;
     const wakeAt = existing?.state === "pending" && existing.wake_at < input.requestedAt ? existing.wake_at : input.requestedAt;
@@ -1541,6 +1542,7 @@ export function mergeAttentionWake(input: {
       triggers: [...new Set([...(payload.triggers ?? []), input.trigger])],
       scope,
       signalIds: [...new Set([...(payload.signalIds ?? []), input.signalId])].slice(-100),
+      ...(payload.source || input.source ? { source: payload.source ?? input.source } : {}),
     };
     const wake: ScheduledWake = {
       id,

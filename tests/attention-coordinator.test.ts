@@ -40,6 +40,12 @@ describe("durable Attention coordinator", () => {
     });
   });
 
+  it("persists Bridge evidence on an inbound wake for the fast path", () => {
+    const presenceId = `presence_bridge_source_${Date.now()}_${Math.random()}`;
+    const receipt = requestAttention(presenceId, "inbound_event", now(), "observe_inbound", "bridge");
+    expect(receipt.wake?.payload).toMatchObject({ source: "bridge", triggers: ["inbound_event"] });
+  });
+
   it("queues operator Look now behind active work and retains only one follow-up", () => {
     const presenceId = `presence_active_${Date.now()}_${Math.random()}`;
     const run = attentionRun(presenceId, { state: "running", stage: "observing", attention: { triggers: ["scheduled_observation"], scope: "observe_inbound", requestedAt: now(), signalIds: ["seed"] } });

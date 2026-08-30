@@ -41,6 +41,7 @@ export function mergeAttentionRequests(left: AttentionRunRequest | undefined, ri
     scope: scopeRank[right.scope] > scopeRank[left.scope] ? right.scope : left.scope,
     requestedAt: left.requestedAt < right.requestedAt ? left.requestedAt : right.requestedAt,
     signalIds: [...new Set([...left.signalIds, ...right.signalIds])].slice(-100),
+    source: left.source ?? right.source,
   };
 }
 
@@ -55,9 +56,10 @@ export function requestAttention(
   trigger: AttentionTrigger,
   requestedAt = new Date().toISOString(),
   scope: AttentionScope = defaultScope[trigger],
+  source?: AttentionRunRequest["source"],
 ): AttentionRequestReceipt {
   const signalId = `attention_signal_${randomUUID()}`;
-  const request: AttentionRunRequest = { triggers: [trigger], scope, requestedAt, signalIds: [signalId] };
+  const request: AttentionRunRequest = { triggers: [trigger], scope, requestedAt, signalIds: [signalId], ...(source ? { source } : {}) };
   const active = listOperationalRuns(presenceId).find((run) => run.kind === "attention" && activeAttentionStates.has(run.state));
   const dueNow = !Number.isFinite(Date.parse(requestedAt)) || Date.parse(requestedAt) <= Date.now() + 1_000;
   const requiresFollowUp = trigger === "operator_check" || trigger === "operator_nudge";
@@ -67,17 +69,18 @@ export function requestAttention(
     upsertOperationalRun(active);
     return { signalId, runId: active.id, coalesced: true };
   }
-  const wake = mergeAttentionWake({ presenceId, trigger, scope, requestedAt, signalId });
+  const wake = mergeAttentionWake({ presenceId, trigger, scope, requestedAt, signalId, source });
   return { signalId, wake, coalesced: Boolean(active) };
 }
 
 export function attentionRequestFromWake(wake: ScheduledWake): AttentionRunRequest {
-  const payload = wake.payload as { triggers?: AttentionTrigger[]; scope?: AttentionScope; signalIds?: string[] } | undefined;
+  const payload = wake.payload as { triggers?: AttentionTrigger[]; scope?: AttentionScope; signalIds?: string[]; source?: AttentionRunRequest["source"] } | undefined;
   const legacyTrigger: AttentionTrigger = wake.kind === "observation" ? "scheduled_observation" : "self_directed";
   return {
     triggers: payload?.triggers?.length ? payload.triggers : [legacyTrigger],
     scope: payload?.scope ?? defaultScope[legacyTrigger],
     requestedAt: wake.wakeAt,
     signalIds: payload?.signalIds?.length ? payload.signalIds : [wake.id],
+    ...(payload?.source ? { source: payload.source } : {}),
   };
 }
