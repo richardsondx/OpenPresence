@@ -21,6 +21,19 @@ function responseHeaders() {
   return { "Cache-Control": "no-store" };
 }
 
+function schedulerTelemetry(request: Request) {
+  const header = request.headers.get("x-openpresence-scheduler-telemetry");
+  if (!header) return undefined;
+  try {
+    const parsed = JSON.parse(header) as { heapUsedMb?: unknown; rssMb?: unknown };
+    const heapUsedMb = typeof parsed.heapUsedMb === "number" && Number.isFinite(parsed.heapUsedMb) && parsed.heapUsedMb >= 0 ? Math.round(parsed.heapUsedMb) : undefined;
+    const rssMb = typeof parsed.rssMb === "number" && Number.isFinite(parsed.rssMb) && parsed.rssMb >= 0 ? Math.round(parsed.rssMb) : undefined;
+    return heapUsedMb === undefined && rssMb === undefined ? undefined : { heapUsedMb, rssMb };
+  } catch {
+    return undefined;
+  }
+}
+
 /**
  * The dev launcher owns this endpoint through a separate, lightweight process.
  * Production uses instrumentation.ts instead, so there is still exactly one
@@ -35,15 +48,21 @@ export async function POST(request: Request) {
   try {
     const sweep = runOperationalSweep();
     const durationMs = Date.now() - startedAt;
-    const telemetry = {
+    const runtimeTelemetry = {
       staleRuns: sweep.staleRunsDetected.length,
       dispatchedWakes: sweep.dispatchedWakes.length,
       sweepDurationMs: durationMs,
       heapUsedMb: Math.round(process.memoryUsage().heapUsed / 1024 / 1024),
       rssMb: Math.round(process.memoryUsage().rss / 1024 / 1024),
     };
-    recordProcessHeartbeat("scheduler", "scheduler", telemetry);
-    recordProcessHeartbeat("runtime", "runtime", telemetry);
+    const reportedSchedulerTelemetry = schedulerTelemetry(request);
+    recordProcessHeartbeat("scheduler", "scheduler", {
+      staleRuns: runtimeTelemetry.staleRuns,
+      dispatchedWakes: runtimeTelemetry.dispatchedWakes,
+      sweepDurationMs: runtimeTelemetry.sweepDurationMs,
+      ...(reportedSchedulerTelemetry ?? runtimeTelemetry),
+    });
+    recordProcessHeartbeat("runtime", "runtime", runtimeTelemetry);
     return NextResponse.json({
       ok: true,
       reclaimedLeases: sweep.reclaimedLeases,

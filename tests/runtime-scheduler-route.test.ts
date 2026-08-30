@@ -45,4 +45,18 @@ describe("runtime scheduler sweep route", () => {
     expect(mocks.runOperationalSweep).toHaveBeenCalledTimes(1);
     expect(mocks.recordProcessHeartbeat).toHaveBeenCalledTimes(2);
   });
+
+  it("attributes scheduler memory to the scheduler process instead of the Next request process", async () => {
+    vi.stubEnv("OPENPRESENCE_SCHEDULER_TOKEN", "scheduler-secret");
+    const response = await POST(new Request("http://127.0.0.1:3015/api/runtime/sweep", {
+      method: "POST",
+      headers: {
+        "x-openpresence-scheduler-token": "scheduler-secret",
+        "x-openpresence-scheduler-telemetry": JSON.stringify({ heapUsedMb: 12.4, rssMb: 31.6 }),
+      },
+    }));
+    expect(response.status).toBe(200);
+    expect(mocks.recordProcessHeartbeat).toHaveBeenNthCalledWith(1, "scheduler", "scheduler", expect.objectContaining({ heapUsedMb: 12, rssMb: 32 }));
+    expect(mocks.recordProcessHeartbeat).toHaveBeenNthCalledWith(2, "runtime", "runtime", expect.objectContaining({ heapUsedMb: expect.any(Number), rssMb: expect.any(Number) }));
+  });
 });

@@ -45,9 +45,16 @@ async function runCycle() {
   if (stopping || cycleInFlight) return;
   cycleInFlight = true;
   try {
+    const memory = process.memoryUsage();
     const response = await fetchWithTimeout(`${baseUrl}/api/runtime/sweep`, {
       method: "POST",
-      headers: { ["x-openpresence-scheduler-token"]: token },
+      headers: {
+        ["x-openpresence-scheduler-token"]: token,
+        "x-openpresence-scheduler-telemetry": JSON.stringify({
+          heapUsedMb: Math.round(memory.heapUsed / 1024 / 1024),
+          rssMb: Math.round(memory.rss / 1024 / 1024),
+        }),
+      },
     });
     if (!response.ok) throw new Error(`sweep returned HTTP ${response.status}`);
     const result = await response.json();
