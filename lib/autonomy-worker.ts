@@ -800,7 +800,10 @@ export async function runAutonomousObservation(
     // database here used to discard the successful observation before it was
     // persisted, leaving the Social Mirror stale while the run said success.
     touchAutonomyRun(options?.runId, "runtime.pulse");
-    next = await runAutonomousPulse(presenceId, options, next);
+    // The observation owns the final persistence boundary. Avoid having the
+    // nested pulse serialize/write the same full workspace before capability
+    // feedback is added below.
+    next = await runAutonomousPulse(presenceId, { ...options, persist: false }, next);
     next = recordCapabilityFeedback(current, next, presenceId);
     await writeStateWithRetry(current, next);
     return next;
@@ -814,7 +817,7 @@ export async function runAutonomousObservation(
  */
 export async function runAutonomousPulse(
   presenceId: string,
-  options?: { runId?: string; invocationId?: string; attentionEpisodeId?: string; forceEligibility?: boolean; suppressAmbientInbound?: boolean },
+  options?: { runId?: string; invocationId?: string; attentionEpisodeId?: string; forceEligibility?: boolean; suppressAmbientInbound?: boolean; persist?: boolean },
   sourceState?: OpenPresenceState,
 ): Promise<OpenPresenceState> {
   const current = sourceState ?? readStateSnapshotForContext({ presenceId });
@@ -957,7 +960,7 @@ export async function runAutonomousPulse(
     }
   }
 
-  await writeStateWithRetry(current, next);
+  if (options?.persist !== false) await writeStateWithRetry(current, next);
   return next;
 }
 
