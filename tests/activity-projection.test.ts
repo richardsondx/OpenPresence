@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
-import { compactActivityAssignment } from "../lib/activity-projection";
+import { compactActivityAssignment, mergeActivityProjection } from "../lib/activity-projection";
 import type { Assignment } from "../lib/types";
+import { initialState } from "../lib/runtime";
 
 describe("bounded Activity Assignment projection", () => {
   const assignment = (): Assignment => ({
@@ -54,5 +55,27 @@ describe("bounded Activity Assignment projection", () => {
 
   it("omits research history for non-active cards", () => {
     expect(compactActivityAssignment(assignment(), false).storyResearch).toEqual([]);
+  });
+
+  it("replaces bounded collections when entering Activity from a full workspace", () => {
+    const previous = initialState();
+    previous.events = [{ id: "old-event", detail: "historical" }] as never;
+    previous.mirrorObjects = [{ id: "old-mirror", presenceId: "presence-1" }] as never;
+    previous.files = [{ kind: "BRAIN", revision: 7 }] as never;
+    previous.messages = [{ id: "old-message", content: "private history" }] as never;
+
+    const projection = initialState();
+    projection.responseProjection = "activity";
+    projection.events = [{ id: "new-event", detail: "current" }] as never;
+    projection.mirrorObjects = [{ id: "new-mirror", presenceId: "presence-1" }] as never;
+    delete (projection as Partial<OpenPresenceState>).files;
+    delete (projection as Partial<OpenPresenceState>).messages;
+
+    const merged = mergeActivityProjection(previous, projection);
+
+    expect(merged.events).toEqual(projection.events);
+    expect(merged.mirrorObjects).toEqual(projection.mirrorObjects);
+    expect(merged.files).toBeUndefined();
+    expect(merged.messages).toBeUndefined();
   });
 });

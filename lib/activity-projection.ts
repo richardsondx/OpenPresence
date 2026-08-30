@@ -1,4 +1,14 @@
-import type { Assignment } from "./types";
+import type { Assignment, OpenPresenceState } from "./types";
+
+/**
+ * Adopt the server's bounded Activity read model instead of merging it into
+ * a previously loaded full workspace. This keeps route changes from
+ * retaining private Agent history in the live Activity tree.
+ */
+export function mergeActivityProjection(previous: OpenPresenceState, projection: OpenPresenceState): OpenPresenceState {
+  void previous;
+  return { ...projection } as OpenPresenceState;
+}
 
 /**
  * Keep Activity's Assignment cards operationally useful without shipping the

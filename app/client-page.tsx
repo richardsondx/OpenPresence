@@ -157,6 +157,7 @@ import { deriveHistoricalGrowthContext } from "@/lib/growth-history";
 import { growthEvidenceIsInPresenceScope, growthPublicationIsInPresenceScope, presenceGrowthBoundary } from "@/lib/growth-scope";
 import { deriveActivityNow } from "@/lib/activity-now";
 import { activityRefreshIntervalMs } from "@/lib/activity-polling";
+import { mergeActivityProjection } from "@/lib/activity-projection";
 import { operatorConversationActionEvents, type OperatorConversationActionEvent } from "@/lib/operator-chat-projection";
 import { conversationStyleGeneratorPrompt, conversationStylesFor, CUSTOM_CONVERSATION_STYLE_ID, normalizeImportedConversationStyle } from "@/lib/conversation-styles";
 import { AVATAR_LOOK_LABELS, AVATAR_LOOKS, avatarAssetPath, presenceAvatarLook, type AvatarLook } from "@/lib/avatars";
@@ -239,24 +240,6 @@ function viewForLocation(location: Location): View {
   if (pathView) return pathView === "calendar" ? "schedule" : pathView;
   const requested = new URLSearchParams(location.search).get("view");
   return requested && Object.prototype.hasOwnProperty.call(viewPaths, requested) ? requested as View : "live";
-}
-const activityProjectionCollections = new Set([
-  "assignments", "assignmentRuns", "actions", "events", "executions", "outcomes", "publications", "socialDecisions", "autobiographicalEvents", "autobiographicalReflections", "socialIntents",
-  "mirrorObjects", "nativeConnections", "bridges", "playgroundSessions", "sandboxActors", "originalPostRehearsals", "assetResearchSessions", "operationalRuns", "attentionEpisodes", "operatorConversations", "operatorNudges", "resourceUsageEvents", "explorations", "watches", "capabilityTrials", "explorationFindings", "explorationSessions", "calendar",
-]);
-function mergeActivityProjection(previous: OpenPresenceState, projection: OpenPresenceState): OpenPresenceState {
-  const next = { ...previous, ...projection } as OpenPresenceState;
-  for (const key of activityProjectionCollections) {
-    const incoming = projection[key as keyof OpenPresenceState];
-    if (!Array.isArray(incoming)) continue;
-    const existing = (previous[key as keyof OpenPresenceState] ?? []) as Array<{ id: string }>;
-    const incomingById = new Map((incoming as Array<{ id: string }>).map((item) => [item.id, item]));
-    (next[key as keyof OpenPresenceState] as unknown as Array<{ id: string }>) = [
-      ...(incoming as Array<{ id: string }>),
-      ...existing.filter((item) => !incomingById.has(item.id)),
-    ];
-  }
-  return next;
 }
 const ACTIVITY_PAGE_SIZE = 20;
 const PUBLIC_HISTORY_PAGE_SIZE = 10;
