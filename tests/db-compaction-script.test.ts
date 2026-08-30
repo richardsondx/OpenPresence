@@ -14,8 +14,11 @@ function createFixture() {
   database.exec(`
     CREATE TABLE app_state (id INTEGER PRIMARY KEY, payload TEXT NOT NULL, updated_at TEXT NOT NULL);
     CREATE TABLE retained_records (id INTEGER PRIMARY KEY, payload TEXT NOT NULL);
+    CREATE TABLE mirror_events (id TEXT PRIMARY KEY, parent_id TEXT, payload TEXT NOT NULL, updated_at TEXT NOT NULL);
     INSERT INTO app_state VALUES (1, '{"activeAgentId":"agent-test","events":[]}', '2026-08-30T00:00:00.000Z');
     INSERT INTO retained_records VALUES (1, 'retained');
+    INSERT INTO mirror_events VALUES ('mirror-1', 'bridge-1', '{"sourceEventId":"source-1"}', '2026-08-30T00:00:00.000Z');
+    INSERT INTO mirror_events VALUES ('mirror-2', 'bridge-1', '{"sourceEventId":"source-1"}', '2026-08-30T00:01:00.000Z');
   `);
   database.close();
   // Make the source non-contiguous so VACUUM has observable work to do.
@@ -55,6 +58,19 @@ describe("SQLite compaction utility", () => {
     expect((installed.prepare("SELECT payload FROM app_state WHERE id = 1").get() as { payload: string }).payload).toContain("agent-test");
     installed.close();
     expect(readdirSync(fixture.directory).some((name) => name.startsWith("workspace.db.precompact-"))).toBe(true);
+  });
+
+  it("deduplicates mirror history only when explicitly requested", () => {
+    const fixture = createFixture();
+    const candidatePath = path.join(fixture.directory, "deduplicated.db");
+    const result = execFileSync(process.execPath, [scriptPath, "--db", fixture.databasePath, "--output", candidatePath, "--dedupe-mirror-events"], { encoding: "utf8" });
+    const candidate = new Database(candidatePath, { readonly: true });
+
+    expect(result).toContain('"deduplicatedMirrorEvents": 1');
+    expect((candidate.prepare("SELECT COUNT(*) AS count FROM mirror_events").get() as { count: number }).count).toBe(1);
+    expect((candidate.prepare("SELECT payload FROM app_state WHERE id = 1").get() as { payload: string }).payload).toContain("agent-test");
+    expect(candidate.pragma("integrity_check", { simple: true })).toBe("ok");
+    candidate.close();
   });
 
   it("rejects a database with an active server lock", () => {

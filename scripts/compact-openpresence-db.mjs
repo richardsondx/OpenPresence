@@ -9,7 +9,7 @@ import Database from "better-sqlite3";
 
 function usage(message) {
   if (message) console.error(`Error: ${message}\n`);
-  console.error("Usage: node scripts/compact-openpresence-db.mjs --db <path> [--output <path>] [--confirm]");
+  console.error("Usage: node scripts/compact-openpresence-db.mjs --db <path> [--output <path>] [--dedupe-mirror-events] [--confirm]");
   console.error("\nWithout --confirm, the script only creates and validates a compacted candidate.");
   if (message) process.exit(2);
   process.exitCode = 0;
@@ -23,6 +23,8 @@ function parseArgs(argv) {
       continue;
     } else if (value === "--confirm") {
       args.confirm = true;
+    } else if (value === "--dedupe-mirror-events") {
+      args.dedupeMirrorEvents = true;
     } else if (value === "--db" || value === "--output") {
       const next = argv[index + 1];
       if (!next || next.startsWith("--")) usage(`${value} requires a path`);
@@ -86,6 +88,7 @@ function checkDatabase(dbPath, readonly = true) {
     if (integrityCheck !== "ok") throw new Error(`SQLite integrity_check failed for ${dbPath}: ${integrityCheck}`);
     const appState = database.prepare("SELECT payload FROM app_state WHERE id = 1").get();
     const counts = database.prepare("SELECT COUNT(*) AS tables FROM sqlite_master WHERE type = 'table'").get();
+    const mirrorEvents = database.prepare("SELECT COUNT(*) AS rows, COUNT(DISTINCT json_extract(payload, '$.sourceEventId')) AS sources FROM mirror_events").get() ?? {};
     const appStatePayload = typeof appState?.payload === "string" ? appState.payload : "";
     return {
       quickCheck,
@@ -93,6 +96,8 @@ function checkDatabase(dbPath, readonly = true) {
       appStateBytes: Buffer.byteLength(appStatePayload),
       appStateHash: crypto.createHash("sha256").update(appStatePayload).digest("hex"),
       tableCount: Number(counts?.tables ?? 0),
+      mirrorEventRows: Number(mirrorEvents.rows ?? 0),
+      mirrorEventSources: Number(mirrorEvents.sources ?? 0),
     };
   } finally {
     database.close();
@@ -111,12 +116,28 @@ function sqliteString(value) {
   return `'${String(value).replaceAll("'", "''")}'`;
 }
 
-function compactDatabase(sourcePath, outputPath) {
+function compactDatabase(sourcePath, outputPath, { dedupeMirrorEvents = false } = {}) {
   const database = new Database(sourcePath, { readonly: false, fileMustExist: true });
   try {
     database.exec(`VACUUM INTO ${sqliteString(outputPath)}`);
   } finally {
     database.close();
+  }
+  if (!dedupeMirrorEvents) return 0;
+  const candidate = new Database(outputPath, { readonly: false, fileMustExist: true });
+  try {
+    const hasMirrorEvents = candidate.prepare("SELECT 1 FROM sqlite_master WHERE type = 'table' AND name = 'mirror_events'").get();
+    if (!hasMirrorEvents) return 0;
+    const result = candidate.prepare(`DELETE FROM mirror_events
+      WHERE rowid NOT IN (
+        SELECT MAX(rowid)
+        FROM mirror_events
+        GROUP BY parent_id, json_extract(payload, '$.sourceEventId')
+      )`).run();
+    if (result.changes > 0) candidate.exec("VACUUM");
+    return result.changes;
+  } finally {
+    candidate.close();
   }
 }
 
@@ -162,14 +183,14 @@ fs.mkdirSync(backupDirectory, { recursive: false });
 copyDatabaseFamily(sourcePath, backupDirectory);
 
 try {
-  compactDatabase(sourcePath, candidatePath);
+  const deduplicatedMirrorEvents = compactDatabase(sourcePath, candidatePath, { dedupeMirrorEvents: args.dedupeMirrorEvents });
   const after = checkDatabase(candidatePath);
   const beforeSize = fs.statSync(sourcePath).size;
   const afterSize = fs.statSync(candidatePath).size;
   if (after.appStateBytes !== before.appStateBytes || after.appStateHash !== before.appStateHash || after.tableCount !== before.tableCount) {
     throw new Error(`candidate metadata differs: app_state ${before.appStateBytes}B/${before.appStateHash} → ${after.appStateBytes}B/${after.appStateHash}, tables ${before.tableCount} → ${after.tableCount}`);
   }
-  console.log(JSON.stringify({ sourcePath, candidatePath, backupDirectory, confirmed: args.confirm, before: { ...before, bytes: beforeSize }, after: { ...after, bytes: afterSize }, reclaimedBytes: beforeSize - afterSize }, null, 2));
+  console.log(JSON.stringify({ sourcePath, candidatePath, backupDirectory, confirmed: args.confirm, dedupeMirrorEvents: args.dedupeMirrorEvents, deduplicatedMirrorEvents, before: { ...before, bytes: beforeSize }, after: { ...after, bytes: afterSize }, reclaimedBytes: beforeSize - afterSize }, null, 2));
   if (args.confirm) {
     installCandidate(sourcePath, candidatePath, backupDirectory);
     const installed = checkDatabase(sourcePath);
