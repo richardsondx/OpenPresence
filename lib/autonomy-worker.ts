@@ -140,6 +140,22 @@ export function autonomyWorkerConcurrencyLimit(): number {
   if (Number.isInteger(configured) && configured > 0) return Math.min(4, configured);
   return process.env.NODE_ENV === "development" ? 1 : 2;
 }
+
+/** Inbound Bridge evidence is already available locally and should not wait
+ * behind an unrelated broad discovery/model run in the local single-worker
+ * default. The extra lane remains bounded to one priority run. */
+export function autonomyRunHasPriority(run: Pick<OperationalRun, "kind" | "attention"> | undefined) {
+  return run?.kind === "attention"
+    && (run.attention?.source === "bridge" || run.attention?.triggers.includes("inbound_event") === true);
+}
+
+function canDispatchAutonomyRun(runId: string) {
+  const limit = autonomyWorkerConcurrencyLimit();
+  if (activeAutonomyWorkers.size < limit) return true;
+  const candidate = getOperationalRun(runId);
+  if (!autonomyRunHasPriority(candidate) || activeAutonomyWorkers.size >= limit + 1) return false;
+  return ![...activeAutonomyWorkers.keys()].some((activeRunId) => autonomyRunHasPriority(getOperationalRun(activeRunId)));
+}
 // A scheduled wake and an inbound-event wake can arrive together. Serialize
 // Watch judgment per Presence so both workers cannot select the same pending
 // signal before either one persists its disposition.
@@ -300,7 +316,7 @@ export function getAutonomyWorkerRun(key: string) {
 export function dispatchAutonomyWorker(runId: string): Promise<OpenPresenceState | null> {
   const existing = activeAutonomyWorkers.get(runId);
   if (existing) return existing;
-  if (activeAutonomyWorkers.size >= autonomyWorkerConcurrencyLimit()) return Promise.resolve(null);
+  if (!canDispatchAutonomyRun(runId)) return Promise.resolve(null);
 
   const promise = new Promise<OpenPresenceState | null>((resolve) => {
     setTimeout(() => {
@@ -585,7 +601,7 @@ export async function executeAutonomyRun(runId: string): Promise<OpenPresenceSta
       resultState = await runAutonomousObservation(run.presenceId, { runId, invocationId, attentionEpisodeId, suppressAmbientInbound: run.attention?.triggers.includes("operator_nudge") });
     } else if (run.kind === "discovery") {
       resultState = await runAutonomousSelfDirectedDiscovery(run.presenceId, undefined, { runId, invocationId, attentionEpisodeId, forceEligibility: run.attention?.triggers.includes("operator_check") || run.attention?.triggers.includes("operator_nudge") });
-    } else if (run.kind === "attention" && run.attention?.scope === "observe_inbound") {
+    } else if (run.kind === "attention" && (run.attention?.scope === "observe_inbound" || autonomyRunHasPriority(run))) {
       const attentionOptions = { runId, invocationId, attentionEpisodeId, suppressAmbientInbound: run.attention?.triggers.includes("operator_nudge"), inboundOnly: true };
       resultState = run.attention.source === "bridge"
         ? await runBridgeInboundAttentionPass(run.presenceId, attentionOptions)

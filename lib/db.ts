@@ -1564,11 +1564,12 @@ export function mergeAttentionWake(input: {
     const scope = attentionScopeRank[input.scope] > attentionScopeRank[priorScope] ? input.scope : priorScope;
     const wakeAt = existing?.state === "pending" && existing.wake_at < input.requestedAt ? existing.wake_at : input.requestedAt;
     const nowIso = new Date().toISOString();
+    const source = payload.source === "bridge" || input.source === "bridge" ? "bridge" : undefined;
     const nextPayload = {
       triggers: [...new Set([...(payload.triggers ?? []), input.trigger])],
       scope,
       signalIds: [...new Set([...(payload.signalIds ?? []), input.signalId])].slice(-100),
-      ...(payload.source || input.source ? { source: payload.source ?? input.source } : {}),
+      ...(source ? { source } : {}),
     };
     const wake: ScheduledWake = {
       id,

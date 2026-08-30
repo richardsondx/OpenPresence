@@ -1,5 +1,6 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { autonomyWorkerConcurrencyLimit } from "../lib/autonomy-worker";
+import { autonomyRunHasPriority, autonomyWorkerConcurrencyLimit } from "../lib/autonomy-worker";
+import type { OperationalRun } from "../lib/types";
 
 describe("autonomy worker concurrency", () => {
   afterEach(() => vi.unstubAllEnvs());
@@ -16,5 +17,11 @@ describe("autonomy worker concurrency", () => {
     expect(autonomyWorkerConcurrencyLimit()).toBe(3);
     vi.stubEnv("OPENPRESENCE_AUTONOMY_MAX_CONCURRENCY", "99");
     expect(autonomyWorkerConcurrencyLimit()).toBe(4);
+  });
+
+  it("marks Bridge inbound attention as priority without broadening the worker bound", () => {
+    const run = { kind: "attention", attention: { source: "bridge", triggers: ["inbound_event"], scope: "broad", requestedAt: new Date().toISOString(), signalIds: ["signal"] } } as OperationalRun;
+    expect(autonomyRunHasPriority(run)).toBe(true);
+    expect(autonomyRunHasPriority({ kind: "discovery" } as OperationalRun)).toBe(false);
   });
 });

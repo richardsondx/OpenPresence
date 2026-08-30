@@ -46,6 +46,15 @@ describe("durable Attention coordinator", () => {
     expect(receipt.wake?.payload).toMatchObject({ source: "bridge", triggers: ["inbound_event"] });
   });
 
+  it("preserves Bridge provenance when an inbound wake merges with broad work", () => {
+    const presenceId = `presence_bridge_merge_${Date.now()}_${Math.random()}`;
+    requestAttention(presenceId, "self_directed", now(), "broad");
+    requestAttention(presenceId, "inbound_event", now(), "observe_inbound", "bridge");
+
+    const pending = listScheduledWakes(presenceId).find((wake) => wake.state === "pending");
+    expect(pending?.payload).toMatchObject({ source: "bridge", triggers: expect.arrayContaining(["self_directed", "inbound_event"]) });
+  });
+
   it("queues operator Look now behind active work and retains only one follow-up", () => {
     const presenceId = `presence_active_${Date.now()}_${Math.random()}`;
     const run = attentionRun(presenceId, { state: "running", stage: "observing", attention: { triggers: ["scheduled_observation"], scope: "observe_inbound", requestedAt: now(), signalIds: ["seed"] } });

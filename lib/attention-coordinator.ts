@@ -36,12 +36,13 @@ export interface AttentionRequestReceipt {
 
 export function mergeAttentionRequests(left: AttentionRunRequest | undefined, right: AttentionRunRequest): AttentionRunRequest {
   if (!left) return right;
+  const source = left.source === "bridge" || right.source === "bridge" ? "bridge" : undefined;
   return {
     triggers: [...new Set([...left.triggers, ...right.triggers])],
     scope: scopeRank[right.scope] > scopeRank[left.scope] ? right.scope : left.scope,
     requestedAt: left.requestedAt < right.requestedAt ? left.requestedAt : right.requestedAt,
     signalIds: [...new Set([...left.signalIds, ...right.signalIds])].slice(-100),
-    source: left.source ?? right.source,
+    ...(source ? { source } : {}),
   };
 }
 
