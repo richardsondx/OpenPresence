@@ -19,7 +19,9 @@ function parseArgs(argv) {
   const args = { confirm: false };
   for (let index = 0; index < argv.length; index += 1) {
     const value = argv[index];
-    if (value === "--confirm") {
+    if (value === "--") {
+      continue;
+    } else if (value === "--confirm") {
       args.confirm = true;
     } else if (value === "--db" || value === "--output") {
       const next = argv[index + 1];
