@@ -20,7 +20,7 @@ import {
  * let a stale worker snapshot erase an unrelated operator update.
  */
 function mergeAutonomyState(base: OpenPresenceState, candidate: OpenPresenceState, latest: OpenPresenceState): OpenPresenceState {
-  const merged = JSON.parse(JSON.stringify(latest)) as OpenPresenceState;
+  const merged = structuredClone(latest) as OpenPresenceState;
   const collectionKeys = [
     "presences", "nativeConnections", "events", "mirrorObjects", "socialDecisions", "autobiographicalEvents", "autobiographicalReflections", "socialIntents", "executions", "outcomes", "publications", "actions", "assignments", "relationships", "relationshipFacts", "relationshipOpenLoops", "people", "peopleNotes", "personIdentities", "watches", "watchSignals", "relationshipPolicies", "relationshipStudies", "relationshipInsightSets", "presenceRequestPolicies", "delegationGrants", "publicRequests", "resourceUsageEvents", "operationalRuns", "scheduledWakes", "capabilityTrials", "discoveryPlans", "explorationSessions", "explorationFindings", "attentionEpisodes", "operatorConversations", "operatorNudges", "publishingPlans",
   ] as const;
@@ -984,7 +984,7 @@ async function judgeAutonomousWatchSignals(
     return !mirror || !targetIsBlockedByPerson(source, presenceId, mirror.externalRef);
   }).slice(0, 3);
   if (!pending.length) return source;
-  const base = JSON.parse(JSON.stringify(source)) as OpenPresenceState;
+  const base = structuredClone(source) as OpenPresenceState;
   let next = source;
   const invocationId = options?.invocationId ?? `watch:${Date.now()}`;
   for (const signal of pending) {
