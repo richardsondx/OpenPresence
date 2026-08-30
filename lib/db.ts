@@ -86,6 +86,7 @@ const sqlite = (() => {
 const db = drizzle(sqlite);
 
 type StateContext = { agentId?: string | null; presenceId?: string | null };
+type StateViewOptions = { skipAssignmentPreflights?: boolean };
 type StateCache = { updatedAt: string; state: OpenPresenceState };
 let stateCache: StateCache | undefined;
 type HotStateCache = { token: string; snapshot: OpenPresenceState; state: OpenPresenceState };
@@ -852,7 +853,7 @@ export function readStateSnapshotForContext(context: StateContext): OpenPresence
  * backed by the in-process snapshot cache and must not be mutated. Mutating
  * callers should continue using readStateSnapshotForContext/readStateForContext.
  */
-export function readStateViewForContext(context: StateContext): OpenPresenceState {
+export function readStateViewForContext(context: StateContext, options: StateViewOptions = {}): OpenPresenceState {
   const snapshot = readStateSnapshot();
   const hotToken = readStateReadToken();
   const hydratedHotState = hotStateCache?.snapshot === snapshot && hotStateCache.token === hotToken
@@ -886,6 +887,7 @@ export function readStateViewForContext(context: StateContext): OpenPresenceStat
       ? { ...source, assignments }
       : source;
   };
+  const projectAssignmentPreflights = (source: OpenPresenceState) => options.skipAssignmentPreflights ? source : refreshVisibleAssignmentPreflights(source);
   // The common browser path addresses the active Agent. `stateForContext`
   // defensively deep-clones and normalizes the entire workspace, which is
   // appropriate for mutations but catastrophic for a polling GET over a
@@ -894,8 +896,8 @@ export function readStateViewForContext(context: StateContext): OpenPresenceStat
   // pointers when a Presence was explicitly requested.
   if (!context.agentId || context.agentId === snapshot.activeAgentId) {
     if (!context.presenceId || snapshot.presences.some((presence) => presence.id === context.presenceId)) {
-      if (!context.presenceId || snapshot.activePresenceId === context.presenceId) return refreshVisibleAssignmentPreflights(hydratedHotState);
-      return refreshVisibleAssignmentPreflights({
+      if (!context.presenceId || snapshot.activePresenceId === context.presenceId) return projectAssignmentPreflights(hydratedHotState);
+      return projectAssignmentPreflights({
         ...hydratedHotState,
         activePresenceId: context.presenceId,
         presence: hydratedHotState.presences.find((presence) => presence.id === context.presenceId) ?? hydratedHotState.presence,
@@ -911,7 +913,7 @@ export function readStateViewForContext(context: StateContext): OpenPresenceStat
   if (context.presenceId && scoped.presences.some((presence) => presence.id === context.presenceId) && scoped.activePresenceId !== context.presenceId) {
     scoped = { ...scoped, activePresenceId: context.presenceId, presence: scoped.presences.find((presence) => presence.id === context.presenceId) ?? null };
   }
-  return refreshVisibleAssignmentPreflights({
+  return projectAssignmentPreflights({
     ...hydratedHotState,
     ...scoped,
   });

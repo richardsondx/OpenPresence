@@ -141,6 +141,17 @@ export function dueLiveAssignmentsWithoutWorkers(state: OpenPresenceState, now =
       && new Date(pursuit.startsAt).getTime() <= now.getTime()
       && new Date(pursuit.deadlineAt).getTime() > now.getTime()
       && (!pursuit.nextRunAt || new Date(pursuit.nextRunAt).getTime() <= now.getTime()));
+    // While an increased-effort window is open, the ordinary daily scheduler
+    // must not run the same Assignment outside that window. Otherwise a
+    // paused/spacing burst keeps consuming research and model capacity while
+    // its Activity card truthfully says that no further burst pass is queued.
+    const pursuitOwnsScheduling = (state.assignmentPursuitWindows ?? []).some((window) =>
+      window.assignmentId === assignment.id
+      && window.presenceId === assignment.presenceId
+      && new Date(window.deadlineAt).getTime() > now.getTime()
+      && ((window.status === "active" && new Date(window.startsAt).getTime() <= now.getTime())
+        || window.status === "paused" && window.pauseReason?.includes("budget reached")));
+    if (pursuitOwnsScheduling && !pursuitDue) return false;
     // Capacity is a scheduler gate, not merely a worker-time validation. If
     // a concurrent worker writes an older snapshot after the sweep's pause,
     // an exhausted pursuit must still be unable to generate another dispatch
@@ -541,7 +552,10 @@ export function runOperationalSweep(now = new Date()): SweepResult {
   // The normal sweep is read-only. Avoid deep-cloning the entire compatibility
   // snapshot every five seconds; only materialize mutable state when there is
   // an expired queued execution that actually requires a write.
-  const stateView = readStateViewForContext({});
+  // The scheduler only needs durable operational state. Assignment capability
+  // preflights are a browser-facing projection and recomputing them here on
+  // every five-second sweep creates avoidable allocation and GC pressure.
+  const stateView = readStateViewForContext({}, { skipAssignmentPreflights: true });
   const preDispatchStatuses = new Set<Execution["status"]>(["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued"]);
   const hasExpiredQueuedExecution = (stateView.executions ?? []).some((execution) => {
     if (!preDispatchStatuses.has(execution.status)) return false;
