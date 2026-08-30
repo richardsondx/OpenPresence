@@ -93,24 +93,23 @@ describe("Composable Multi-Act Decisions and Discrete Intent Formation", () => {
     expect(guidance).toContain("never act merely to increase activity");
   });
 
-  it("judges Watch Signals after narrow scheduled observation without entering discovery", async () => {
+  it("defers unrelated Watch cognition after narrow scheduled observation", async () => {
     const state = createAgent({ name: "Jenny", description: "Explain AI agents.", mode: "agent", handle: "@jenny_ai", accent: "#D68754" });
     const observed: OpenPresenceState = { ...state, watchSignals: [{ id: "watch-signal-1", watchId: "watch-1", presenceId: state.presence!.id, mirrorObjectId: "mirror-1", signalType: "new_content", disposition: "pending", createdAt: "2026-08-26T00:00:00.000Z", updatedAt: "2026-08-26T00:00:00.000Z" }] };
     const calls: string[] = [];
+    let scheduledAt = "";
 
     const result = await runObservedAttentionPass(state.presence!.id, { runId: "run-watch-scope" }, {
       observe: async () => {
         calls.push("observe");
         return observed;
       },
-      judgeWatches: async (next) => {
-        calls.push("judge-watches");
-        return { ...next, watchSignals: next.watchSignals.map((signal) => ({ ...signal, disposition: "considered" as const })) };
-      },
+      scheduleWatchJudgment: (_presenceId, requestedAt) => { calls.push("schedule-watch-judgment"); scheduledAt = requestedAt; },
     });
 
-    expect(calls).toEqual(["observe", "judge-watches"]);
-    expect(result.watchSignals[0]?.disposition).toBe("considered");
+    expect(calls).toEqual(["observe", "schedule-watch-judgment"]);
+    expect(result).toBe(observed);
+    expect(Date.parse(scheduledAt)).toBeGreaterThan(Date.now());
   });
 
   it("judges a Bridge-delivered inbound event from the persisted Mirror without a native reread", async () => {

@@ -1113,11 +1113,22 @@ export async function runObservedAttentionPass(
   options?: { runId?: string; invocationId?: string; attentionEpisodeId?: string; suppressAmbientInbound?: boolean; inboundOnly?: boolean },
   dependencies: {
     observe: typeof runAutonomousObservation;
-    judgeWatches: typeof runAutonomousWatchSignals;
-  } = { observe: runAutonomousObservation, judgeWatches: runAutonomousWatchSignals },
+    scheduleWatchJudgment: (presenceId: string, requestedAt: string) => unknown;
+  } = {
+    observe: runAutonomousObservation,
+    scheduleWatchJudgment: (id, requestedAt) => requestAttention(id, "watch_judgment", requestedAt, "judge_watches"),
+  },
 ): Promise<OpenPresenceState> {
   const observed = await dependencies.observe(presenceId, options);
-  return dependencies.judgeWatches(observed, presenceId, options);
+  const hasPendingWatchSignals = observed.watchSignals.some((signal) => signal.presenceId === presenceId && signal.disposition === "pending");
+  if (hasPendingWatchSignals) {
+    // Watch cognition is unrelated to the inbound mention's response. Keep
+    // it off the critical path, just as Bridge-delivered mentions already do.
+    // The delay is longer than the coordinator's due-now coalescing window,
+    // which makes this a durable follow-up wake after the inbound run settles.
+    dependencies.scheduleWatchJudgment(presenceId, new Date(Date.now() + 1_100).toISOString());
+  }
+  return observed;
 }
 
 /**
