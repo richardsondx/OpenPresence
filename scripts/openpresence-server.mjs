@@ -142,6 +142,13 @@ const childEnv = {
 // or debugging session that specifically requires Webpack.
 const useTurbo = mode === "dev" && process.env.OPENPRESENCE_USE_TURBO !== "0";
 childEnv.OPENPRESENCE_USE_TURBO = useTurbo ? "1" : "0";
+// Bound the development compiler/application heap so a hot-reload storm
+// cannot consume the host's entire memory budget. Preserve an explicit
+// operator setting when one is already present.
+if (mode === "dev" && !/--max-old-space-size(?:=|\s)/.test(process.env.NODE_OPTIONS || "")) {
+  const maxOldSpaceSize = process.env.OPENPRESENCE_NODE_MAX_OLD_SPACE_SIZE || "4096";
+  childEnv.NODE_OPTIONS = [process.env.NODE_OPTIONS, `--max-old-space-size=${maxOldSpaceSize}`].filter(Boolean).join(" ");
+}
 // Production starts the canonical temporal owner from Next instrumentation.
 // Development keeps that eager import disabled to avoid duplicating the large
 // runtime module graph, and instead gives the same durable sweep one child
