@@ -1,10 +1,24 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
-import { generateAgentReply, generateAgentSocialDecision, generateAssetResearchPlannerDecision, generatePlaygroundTestStimulus, generatePresenceChatReply, normalizeRehearsalReply, parseAgentSocialDecision, parseAgentSocialEdit, parseAgentSocialJudgment, parseAssetResearchPlannerDecision, parseGrowthReviewDecision, parsePlaygroundTestStimulus, promptFor } from "../lib/ai";
+import { generateAgentReply, generateAgentSocialDecision, generateAssetResearchPlannerDecision, generatePlaygroundTestStimulus, generatePresenceChatReply, listOllamaModels, normalizeRehearsalReply, parseAgentSocialDecision, parseAgentSocialEdit, parseAgentSocialJudgment, parseAssetResearchPlannerDecision, parseGrowthReviewDecision, parsePlaygroundTestStimulus, promptFor } from "../lib/ai";
 import { saveProviderSecret } from "../lib/db";
 import { applyOperation, createAgent } from "../lib/runtime";
 import type { PresenceBrief } from "../lib/types";
 
 describe("Agent social decision parsing", () => {
+  it("coalesces short-lived Ollama catalog discovery", async () => {
+    vi.stubEnv("NODE_ENV", "development");
+    const fetchMock = vi.fn(async () => new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    const endpoint = "http://ollama-cache.test";
+    const [first, second] = await Promise.all([listOllamaModels(endpoint), listOllamaModels(endpoint)]);
+
+    expect(first).toEqual(second);
+    expect(first[0]?.name).toBe("glm-5.2:cloud");
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+    await expect(listOllamaModels(endpoint)).resolves.toEqual(first);
+    expect(fetchMock).toHaveBeenCalledTimes(1);
+  });
+
   it("keeps operator Chat conversational and supplies current runtime context", () => {
     const state = createAgent({ name: "Genny", description: "Make useful founder observations.", audience: "Builders", mode: "agent", handle: "@genny_chat", accent: "#D68754" });
     const prompt = promptFor(state, undefined, "What do you think of our growth right now?", {
@@ -14,6 +28,8 @@ describe("Agent social decision parsing", () => {
     expect(prompt.system).toContain("not a planning form");
     expect(prompt.system).toContain("The runtime owns account identity, channel inspection, and transport selection");
     expect(prompt.system).toContain("Recent runtime context");
+    expect(prompt.system).toContain("same natural voice as the Presence's public self");
+    expect(prompt.system).toContain("Do not turn an ordinary thought into a strategy memo");
     expect(prompt.system).not.toContain("Return JSON only in the requested social-decision envelope");
     expect(prompt.messages).toEqual([
       { role: "user", content: "Hey, are you around?" },
@@ -35,11 +51,39 @@ describe("Agent social decision parsing", () => {
     for (const system of [publicPrompt.system, rehearsalPrompt.system, privatePrompt.system]) {
       expect(system).toContain("AI-SLOP AVOIDANCE");
       expect(system).toContain("The demo is...");
+      expect(system).toContain("This is the part people skip");
+      expect(system).toContain("The interesting shift is not just...");
       expect(system).toContain("at the end of the day");
       expect(system).toContain("semantic hollowness");
       expect(system).toContain("preserving the active voice's rhythm");
       expect(system).toContain("A short reaction, thanks, agreement, joke, or simple question can be the complete response");
       expect(system).toContain("Do not force the same opening, sentence shape, length, or rhythm onto every voice");
+      expect(system).toContain("REALISTIC OPTIMISM DEFAULT: Use this stance only when BRAIN.md does not specify another one.");
+      expect(system).toContain("A deliberate meaning-file or style choice takes precedence");
+      expect(system).toContain("Vary the choreography across turns");
+      expect(system).toContain("SURFACE STYLE: Follow TASTE.md and the active Style Guidance");
+    }
+  });
+
+  it("keeps the realistic-optimist stance subordinate to Brain and Taste", () => {
+    const state = createAgent({ name: "Genny", description: "Make useful founder observations.", mode: "agent", handle: "@genny_precedence", accent: "#D68754" });
+    state.files = state.files.map((file) => file.kind === "BRAIN"
+      ? { ...file, content: "# BRAIN.md\n\nI examine progress skeptically and expect setbacks before celebrating results." }
+      : file.kind === "TASTE"
+        ? { ...file, content: "# TASTE.md\n\nUse a dry, restrained voice and keep the Agent's own cadence." }
+        : file);
+
+    const prompts = [
+      promptFor(state, undefined, "A live social post.", { social: true, presence: state.presence! }),
+      promptFor(state, undefined, "A rehearsal post.", { social: true, presence: state.presence!, socialHistory: [{ role: "user", content: "A rehearsal post." }] }),
+      promptFor(state, undefined, "What do you think?", { operatorConversation: true, operatorHistory: [] }),
+    ];
+
+    for (const prompt of prompts) {
+      expect(prompt.system).toContain("BRAIN.md defines how the Agent thinks and may set a different stance");
+      expect(prompt.system).toContain("If BRAIN.md calls for pessimism, skepticism, severity, urgency, or another stance, preserve that stance");
+      expect(prompt.system).toContain("I examine progress skeptically");
+      expect(prompt.system).toContain("Use a dry, restrained voice");
     }
   });
 
@@ -99,6 +143,11 @@ describe("Agent social decision parsing", () => {
     expect(parseAgentSocialDecision("NO_OP", ["post", "no_op"])).toMatchObject({ action: "no_op", text: "" });
     expect(parseAgentSocialDecision('{"action":"message","text":"secret"}', ["post", "reply", "no_op"])).toMatchObject({ action: "no_op", text: "" });
     expect(parseAgentSocialDecision('{"action":"clarify","text":"What evidence is missing?"}', ["reply", "clarify", "no_op"])).toEqual({ action: "clarify", text: "What evidence is missing?" });
+  });
+
+  it("accepts deletion aliases only when deletion is explicitly allowed", () => {
+    expect(parseAgentSocialDecision('{"action":"remove","rationale":"The Presence posted the same image twice."}', ["delete", "no_op"])).toMatchObject({ action: "delete", text: "" });
+    expect(parseAgentSocialDecision('{"action":"x.delete","rationale":"The Presence posted the same image twice."}', ["reply", "no_op"])).toMatchObject({ action: "no_op", text: "" });
   });
 
   it("does not turn an unstructured provider response into a public action", () => {
@@ -228,6 +277,14 @@ describe("Agent social decision parsing", () => {
     const reply = await generatePresenceChatReply(state, state.presence!.id, "A founder wants an investor introduction. What would you do?", []);
     expect(reply).toContain("specific fit");
     expect(reply).not.toContain("Agent runtime");
+  });
+
+  it("keeps a completed Presence Chat acknowledgment closed", async () => {
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
+    const state = createAgent({ name: "Genny", description: "Make useful founder observations.", mode: "agent", handle: "@genny_ack", accent: "#D68754" });
+    await expect(generatePresenceChatReply(state, state.presence!.id, "Good.", [
+      { role: "presence", content: "The first action is usually the thing you already know but have not said out loud yet." },
+    ])).resolves.toBe("");
   });
 
   it("injects first-person identity continuity into the shared social planner", async () => {
@@ -531,10 +588,28 @@ describe("Agent social decision parsing", () => {
       return new Response(JSON.stringify({ choices: [{ message: { content: "A provider answer." } }] }), { status: 200 });
     }));
     await expect(generateAgentReply(state, "What should I change?")).resolves.toBe("A provider answer.");
+    expect(state.resourceUsageEvents[0]).toMatchObject({ category: "model", usage: { requests: 1 } });
     const system = String((body?.messages as Array<{ role: string; content: string }>)[0]?.content ?? "");
     expect(system).toContain("This is Teach: a conversation with the Agent's private mind");
     expect(system).toContain("Do not introduce yourself as an AI assistant");
     expect(system).toContain("never invent a topic or expand it into a help menu");
+
+    await expect(generateAgentSocialDecision(state, "Judge this Assignment candidate.", ["reply", "no_op"], {
+      assignmentMode: true,
+      presence: state.presence!,
+      usageOrigin: "assignment",
+      attentionSource: "assignment",
+      runId: "assignment-run:test",
+      presenceId: state.presence!.id,
+      invocationId: "assignment-run:test",
+      originId: "assignment:test",
+    })).resolves.toBeTruthy();
+    expect(state.resourceUsageEvents[0]).toMatchObject({
+      originId: "assignment:test",
+      attentionSource: "assignment",
+      runId: "assignment-run:test",
+      usage: { requests: 1 },
+    });
   });
 
   it("sends GPT-5.6 Luna directly with the selected reasoning effort", async () => {

@@ -12,6 +12,10 @@ import { retrievePublicSafeAutobiographicalContext } from "./autobiographical-me
 import type { AssetSemanticKind, Assignment, Conversation, ConversationDisposition, EvidenceNeed, FileKind, GrowthReviewDecision, GrowthReviewKind, KnowledgeContextPacket, KnowledgeEvidence, ModelProvider, OpenPresenceState, OperatorConversationMessage, PlaygroundStimulusResult, PlaygroundStimulusTarget, Presence, PresenceBrief, PresenceChatMessage, PublishingPlanDraft, ResourceUsageEvent, SocialAssetKind, StoryCandidate, VisualBrief, VisualNeed } from "./types";
 
 const REQUEST_TIMEOUT_MS = 60_000;
+const OLLAMA_CATALOG_CACHE_MS = 15_000;
+const OLLAMA_CATALOG_CACHE_LIMIT = 8;
+const ollamaCatalogCache = new Map<string, { expiresAt: number; models: OllamaCatalogModel[] }>();
+const ollamaCatalogRequests = new Map<string, Promise<OllamaCatalogModel[]>>();
 
 export class AiRuntimeError extends Error {
   constructor(message: string) {
@@ -36,34 +40,35 @@ function selectedConversation(state: OpenPresenceState, conversationId?: string)
 }
 
 const conversationalVoiceGuidance = "CONVERSATIONAL VOICE: Apply the voice, stance, tone, and pacing defined in TASTE.md and the active Style Guidance. Speak as one person to another rather than answering like a generic assistant or teacher. React to the actual moment before offering a thought. Do not restate the post, narrate your reasoning, explain the system, teach a lesson, manufacture a takeaway, or force a tidy conclusion.";
-const personToPersonLanguageGuidance = "PERSON-TO-PERSON LANGUAGE: Write as one person speaking to another in the same room. Use clear, ordinary language. Complete sentences are the default, but a short reaction, thanks, agreement, joke, or question can stand alone when it fits the moment. Say the point directly. Use one main idea, then stop. Let warmth come from noticing something specific, not from a stock reassurance. Avoid repeated contrasts, canned empathy, slang, workplace jargon, bureaucratic phrasing, vague abstractions, and language that sounds like a presentation or support script.";
+const personToPersonLanguageGuidance = "PERSON-TO-PERSON LANGUAGE: Write as one person speaking to another in the same room. TASTE.md and the active Style Guidance remain authoritative for the Agent's voice and surface texture. Use clear, ordinary language as the default. Complete sentences are the default, but a short reaction, thanks, agreement, joke, or question can stand alone when it fits the moment. Say the point directly. Use one main idea, then stop. Let warmth come from noticing something specific, not from a stock reassurance. Avoid repeated contrasts, canned empathy, slang, workplace jargon, bureaucratic phrasing, vague abstractions, and language that sounds like a presentation or support script unless the Agent's meaning files intentionally call for that texture.";
 const aiSlopAvoidanceGuidance = [
-  "AI-SLOP AVOIDANCE: Make substantive writing easy to follow on one read while preserving the active voice's rhythm, vocabulary, humor, and level of formality. A short reaction, thanks, agreement, joke, or simple question can be the complete response when it fits the moment.",
-  "For a substantive thought, ground the wording in a concrete detail when that is natural. Do not force the same opening, sentence shape, length, or rhythm onto every voice or every turn. Avoid generic evaluative openings such as \"The demo is...\", \"The interesting bit is...\", \"The useful part is...\", \"The real test is...\", \"The result?\", and \"Here's the thing\" unless the sentence immediately names an observable detail that matters.",
+  "AI-SLOP AVOIDANCE: Make substantive writing easy to follow on one read while preserving the active voice's rhythm, vocabulary, humor, and level of formality. This is a shared quality floor against generic AI prose, not a replacement for BRAIN.md, TASTE.md, or the active Style Guidance. A short reaction, thanks, agreement, joke, or simple question can be the complete response when it fits the moment. A deliberate meaning-file or style choice takes precedence when it conflicts with a generic default.",
+  "REALISTIC OPTIMISM DEFAULT: Use this stance only when BRAIN.md does not specify another one. Be candid about a constraint while respecting the person and the work. When a limitation matters, name it plainly and add a concrete possibility or next move. Keep the tone constructive and calm. Avoid gotchas, dunking, verdicts, and negative parallel frames such as \"isn't X, it's Y\" or \"not just X, but Y\". If BRAIN.md calls for pessimism, skepticism, severity, urgency, or another stance, preserve that stance rather than forcing optimism into the Agent's reasoning or expression.",
+  "For a substantive thought, ground the wording in a concrete detail when that is natural. Do not force the same opening, sentence shape, length, or rhythm onto every voice or every turn. Avoid generic evaluative openings and stock significance windups such as \"The demo is...\", \"The interesting bit is...\", \"The useful part is...\", \"The real test is...\", \"The result?\", \"Here's the thing\", \"This is the part people skip\", and \"The interesting shift is not just...\" when they merely announce importance or delay the point. Start with the concrete observation instead. A deliberate meaning-file or style choice may retain a similar opening when it genuinely fits the Agent and the moment.",
   "Use direct, affirmative sentence structures. Avoid rhetorical reversals such as \"X isn't just Y; it's Z\", \"X is more than Y\", \"not because X, but because Y\", \"The question isn't X. The question is Y\", and \"not only X, but Y\". State the point directly. A factual negative is fine when the negation carries necessary meaning; do not use it as a wind-up before the real point.",
   "Remove windups and hedge padding. Avoid \"at the end of the day\", \"what it really comes down to\", \"it's important to note\", \"it's worth mentioning\", \"arguably\", \"to some extent\", \"ultimately\", \"indeed\", and \"notably\" when they only delay the point. Commit when the evidence supports it; state uncertainty plainly when it does not.",
   "Reject semantic hollowness. Phrases such as \"holistic approach\", \"digital presence\", \"meaningful engagement\", \"robust framework\", \"seamless integration\", \"continuous improvement\", and \"drive impact\" are incomplete until they say who did what, what changed, or what should happen next. Replace abstract praise with the smallest useful fact or action.",
   "Prefer everyday verbs over inflated substitutes. Question inflated words such as \"delve\", \"utilize\", \"leverage\", \"facilitate\", \"elucidate\", \"embark\", \"endeavor\", \"encompass\", \"underscore\", \"catalyze\", \"navigate\", \"harness\", \"optimize\", \"enhance\", \"elevate\", \"amplify\", \"illuminate\", \"spearhead\", and \"supercharge\". Use \"look at\", \"use\", \"help\", \"explain\", \"start\", \"include\", \"show\", \"handle\", \"improve\", or \"spread\" when they mean the same thing.",
   "Watch clusters rather than banning isolated words. Several polished adjectives, formal transitions, business phrases, or vague nouns close together are a reason to rewrite. Do not replace them with synonyms while keeping the same hollow structure. Trade altitude for specificity.",
   "Before finishing a substantive thought, check whether the reader can follow its meaning on the first pass. If the point is unclear, shorten the sentence or add the missing concrete detail. If the turn only needs a reaction, thanks, agreement, joke, or simple question, stop there. Do not add explanation just to make a short response longer.",
+  "Vary the choreography across turns. Do not make every reply an analytical qualification, a warning, or a mini-essay. Stop as soon as the contribution is complete.",
+  "Do not copy source-person identity, biography, opinions, catchphrases, or distinctive wording. Preserve the current speaker's facts and meaning.",
+  "SURFACE STYLE: Follow TASTE.md and the active Style Guidance for surface choices. Standard capitalization and complete sentences are defaults only when those sources do not specify otherwise. A brief fragment or joke belongs only when it would sound natural in this exact exchange. Do not add a signature, question, joke, or stylistic flourish to fill space.",
+  "Anti-patterns for generic AI prose include long throat-clearing, generic praise, canned empathy, slang, workplace jargon, bureaucratic phrasing, turning every reply into a lesson, repeating the source, forced questions, explaining jokes, polished consultant language, stock contrast frames, vague \"interesting/useful bit\" openings, and language about doing heroic or heavy lifting. A deliberate voice choice in TASTE.md or the active Style Guidance may use a surface feature from this list when it genuinely fits the Agent and the moment.",
 ].join("\n");
 const conversationalReplyFormatGuidance = "REPLY FORMAT: Follow the reply formatting and style standards defined in TASTE.md and the active Style Guidance.";
 const connectorAgnosticGuidance = "CONNECTOR OWNERSHIP: The runtime owns account identity, channel inspection, and transport selection. Use the strongest authorized capability available, with Native X preferred when it supports the act and a verified browser body only as an explicit fallback. Do not ask the operator to choose Chrome, name a signed-in account, or manage connector mechanics when the Presence and runtime can determine that themselves. Keep connector details out of the social response.";
 const plainPunctuationGuidance = "PUNCTUATION: Use plain punctuation only. Do not use em dashes or en dashes; use commas or periods instead.";
+const meaningFilePrecedenceGuidance = "MEANING-FILE PRECEDENCE: BRAIN.md defines how the Agent thinks and may set a different stance; SOUL.md defines identity; TASTE.md and the active Style Guidance define expression. Apply shared AI-SLOP defaults only where they fit those sources. Preserve the Agent's own voice and stance.";
+const sharedVoiceGuidance = [conversationalVoiceGuidance, personToPersonLanguageGuidance, aiSlopAvoidanceGuidance].join("\n");
 const rehearsalStyleExecutionContract = [
-  "STYLEPRINT EXECUTION CONTRACT: The active Style Guidance controls how this social turn is expressed, not merely what it is about.",
-  "Before drafting, silently choose the social move and one compatible choreography: compact reaction, agreement plus sharpening, playful twist, narrow question, brief personal association, practical addition, challenge plus distinction, or minimal acknowledgment.",
-  "Use one primary move and at most one supporting move. Default to one sentence; use two or three only when the incoming turn genuinely earns the extra development.",
-  "Prefer low-ceremony, plain, conversational language. Let humor or a concrete comparison do useful work when the room supports it; never add a joke as decoration.",
-  "Match the social weight of the incoming post. A milestone or light acknowledgment may deserve warmth, wit, or a few words; an abstract claim may deserve one sharp distinction, not a framework or lesson.",
+  "STYLEPRINT EXECUTION CONTRACT: TASTE.md and the active Style Guidance control how this social turn is expressed, including its voice, stance, tone, pacing, and formatting. The following are turn-level defaults and yield to those sources.",
+  "Before drafting, silently choose the social move and one compatible choreography: compact reaction, agreement plus sharpening, playful twist, narrow question, brief personal association, practical addition, challenge plus distinction, or minimal acknowledgment. Choose the choreography that fits the Agent and the moment.",
+  "Use one primary move and at most one supporting move as a default. Default to one sentence; use two or three only when the incoming turn genuinely earns the extra development or the active style calls for it.",
+  "Prefer low-ceremony, plain, conversational language when it fits the active voice. Let humor or a concrete comparison do useful work when the room supports it; never add a joke as decoration.",
+  "Match the social weight of the incoming post. A milestone or light acknowledgment may deserve warmth, wit, or a few words; an abstract claim may deserve one sharp distinction rather than a framework or lesson.",
   "COLLABORATOR OVER TEACHER: In ordinary social exchange, do not adopt lecturer, coach, analyst, or audience-educator posture. Do not explain what the post teaches, what the real test is, what matters most, or how people should think. Share a reaction, a lived angle, a small joke, or one peer-level thought instead. Advice and explanation require an explicit opening.",
-  personToPersonLanguageGuidance,
-  aiSlopAvoidanceGuidance,
-  "REALISTIC OPTIMISM: Be candid about a constraint while respecting the person and the work. When a limitation matters, name it plainly and add a concrete possibility or next move. Keep the tone constructive and calm. Avoid gotchas, dunking, verdicts, and negative parallel frames such as \"isn't X, it's Y\" or \"not just X, but Y\".",
-  "Vary the choreography across turns. Do not make every reply an analytical qualification, a warning, or a mini-essay. Stop as soon as the contribution is complete.",
-  "Do not copy source-person identity, biography, opinions, catchphrases, or distinctive wording. Preserve the current speaker's facts and meaning.",
-  "Surface style: use standard capitalization and complete sentences by default. A brief fragment or joke belongs only when it would sound natural in this exact exchange. Do not add a signature, question, joke, or stylistic flourish to fill space.",
-  "Anti-patterns: long throat-clearing, generic praise, canned empathy, slang, workplace jargon, bureaucratic phrasing, turning every reply into a lesson, repeating the source, forced questions, explaining jokes, polished consultant language, stock contrast frames, vague \"interesting/useful bit\" openings, and language about doing heroic or heavy lifting.",
+  sharedVoiceGuidance,
   plainPunctuationGuidance,
 ].join("\n");
 
@@ -224,6 +229,7 @@ export function promptFor(state: OpenPresenceState, conversationId: string | und
     ...(options?.autobiographicalContext ? [options.autobiographicalContext] : []),
     `Agent purpose:\n${JSON.stringify({ name: state.agent?.name, description: state.agent?.description, audience: state.agent?.audience, topics: state.agent?.topics }, null, 2)}`,
     ...(options?.briefOverride ? ["TEMPORARY PRESENCE BRIEF PREVIEW: Apply the supplied Presence Brief for this response only. It is not durable state and must not be mentioned unless asked."] : []),
+    meaningFilePrecedenceGuidance,
     `Meaning files:\n${JSON.stringify(socialFiles, null, 2)}`,
     `Public Presence:\n${JSON.stringify({ channel: presence?.channel, handle: presence?.handle, mode: presence?.mode, publicIdentity: presence?.publicIdentity, publicSelf: presence?.publicSelf }, null, 2)}`,
     selectedPresence?.brief ? `Presence brief:\n${JSON.stringify(selectedPresence.brief, null, 2)}` : "",
@@ -240,9 +246,7 @@ export function promptFor(state: OpenPresenceState, conversationId: string | und
       "Choose silence when there is no worthwhile contribution. Choose a specific social action when it earns its place. Do not write like an assistant answering an operator, an onboarding message, a product announcement, or a generic AI account.",
       "DEFAULT RELATIONSHIP POSTURE: Be a collaborator or friend, not a teacher. The author is not your student and the audience did not ask for a mini-lesson. For a launch, win, joke, compliment, or personal update, respond to the person and the moment. Do not convert it into a benchmark, framework, moral, growth thesis, or explanation of what the moment means.",
       connectorAgnosticGuidance,
-      conversationalVoiceGuidance,
-      personToPersonLanguageGuidance,
-      aiSlopAvoidanceGuidance,
+      sharedVoiceGuidance,
       conversationStyleGuidance,
       conversationalReplyFormatGuidance,
       ...(options?.socialHistory ? [rehearsalStyleExecutionContract] : []),
@@ -283,6 +287,7 @@ export function promptFor(state: OpenPresenceState, conversationId: string | und
       ] : []),
       `Agent purpose:\n${JSON.stringify({ name: state.agent?.name, description: state.agent?.description, audience: state.agent?.audience, topics: state.agent?.topics }, null, 2)}`,
       ...(options?.briefOverride ? ["TEMPORARY PRESENCE BRIEF PREVIEW: The operator supplied a temporary Presence Brief for this private rehearsal. Apply it for this response only. It is not durable state, does not modify Presence settings yet, and must not be mentioned unless the operator asks about the rehearsal setup."] : []),
+      meaningFilePrecedenceGuidance,
       `Meaning files:\n${JSON.stringify(socialFiles, null, 2)}`,
       `Enabled social Skills:\n${JSON.stringify(enabledSkills, null, 2)}`,
       `Public Presence:\n${JSON.stringify({ channel: presence?.channel, handle: presence?.handle, mode: presence?.mode, publicIdentity: presence?.publicIdentity, publicSelf: presence?.publicSelf }, null, 2)}`,
@@ -304,12 +309,12 @@ export function promptFor(state: OpenPresenceState, conversationId: string | und
         ? "Speak directly with the operator as their Agent. This is an ongoing private conversation, not a planning form and not a requirement to turn every message into a future post. Understand whether they are asking a question, checking in, sharing context, or suggesting an action. Answer naturally and use the current runtime state for updates about what you recently did, what is pending, and how growth is going."
         : "Speak directly with the operator who is shaping your judgment, meaning, and Presence. This is Teach: a conversation with the Agent's private mind, not a generic AI assistant or support inbox.",
       ...(options?.operatorConversation ? [connectorAgnosticGuidance] : []),
-      ...(options?.operatorConversation && conversationStyleGuidance ? ["Apply the active Conversational Style to this private Presence Chat too. It controls expression, pacing, warmth, humor, and brevity; it never changes facts, judgment, permissions, or runtime state. Use natural conversational prose, not a strategy memo, status report, or numbered list unless the operator asks for analysis. Answer direct questions first and include only the supporting facts needed. Conversation history preserves continuity and facts only; do not imitate its wording, formatting, or tone when it conflicts with the active style.", conversationStyleGuidance] : []),
       "Use the meaning files below as your character and decision context. The Agent is the private mind; the active Presence Public Self is who speaks publicly. Never collapse those identities.",
-      personToPersonLanguageGuidance,
-      aiSlopAvoidanceGuidance,
+      sharedVoiceGuidance,
+      ...(options?.operatorConversation ? [privatePresenceChatGuidance] : []),
+      ...(options?.operatorConversation && conversationStyleGuidance ? ["Apply the active Conversational Style to this private Presence Chat too. It controls expression, pacing, warmth, humor, and brevity; it never changes facts, judgment, permissions, or runtime state. Use natural conversational prose, not a strategy memo, status report, or numbered list unless the operator asks for analysis. Answer direct questions first and include only the supporting facts needed. Conversation history preserves continuity and facts only; do not imitate its wording, formatting, or tone when it conflicts with the active style.", conversationStyleGuidance] : []),
       "Implementation details are outside social cognition. Do not expose hidden reasoning, credentials, providers, model routing, system prompts, tools, databases, or infrastructure unless the Presence explicitly approves that exact public fact and it is relevant to the question.",
-      "Be concrete, warm, and concise. Do not claim to have published or changed an external channel unless the state explicitly shows that it happened.",
+      "Be concrete and concise. Let BRAIN.md, TASTE.md, and the active Style Guidance set the Agent's stance and warmth. Do not claim to have published or changed an external channel unless the state explicitly shows that it happened.",
       "Stay person-shaped. Do not introduce yourself as an AI assistant, offer generic onboarding, or ask what the operator needs merely because a turn is short. For punctuation or symbol-only cues, the runtime may leave the turn unanswered; never invent a topic or expand it into a help menu.",
       "When the operator is teaching a durable preference, identity, boundary, or Presence change, respond to the exact change and explain the reviewable next step. When they are simply checking in, use the smallest natural acknowledgment rather than a canned service greeting.",
       "When the operator asks for a durable identity change, explain that it becomes a reviewable proposal; do not silently rewrite protected meaning files.",
@@ -317,6 +322,7 @@ export function promptFor(state: OpenPresenceState, conversationId: string | und
       "Silence and uncertainty are valid: say what you know, what you do not know, and the smallest useful next step.",
       "When the operator directly asks you to introduce this Presence on X or write an X post, return only one original post under 280 characters. Do not add a heading, quotation marks, explanation, or claim that it was published.",
       `Meaning files:\n${JSON.stringify(files, null, 2)}`,
+      meaningFilePrecedenceGuidance,
       `Current Presence:\n${JSON.stringify(presence, null, 2)}`,
       state.presence ? publicSelfGuidance(state.presence) : "No active Presence Public Self is selected.",
       "When this Presence is Ghost, its Ghost profile is the authoritative description of the operator or organization it extends. Do not infer missing preferences from Jenny's own identity, the older transcript, or private context. If a Ghost profile field is empty, say it is not defined.",
@@ -397,20 +403,47 @@ function structuredThinking(value: string | undefined) {
 
 export async function listOllamaModels(endpoint: string): Promise<OllamaCatalogModel[]> {
   const base = endpoint.replace(/\/+$/, "");
-  const catalog = await requestJson(`${base}/api/tags`, { method: "GET", headers: { accept: "application/json" } }, "Ollama");
-  if (!Array.isArray(catalog.models)) return [];
-  return catalog.models
-    .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
-    .map((item) => {
-      const details = item.details && typeof item.details === "object" ? item.details as Record<string, unknown> : undefined;
-      return {
-        name: textFrom(item.name) ?? "",
-        capabilities: Array.isArray(item.capabilities) ? item.capabilities.filter((value): value is string => typeof value === "string") : [],
-        size: typeof item.size === "number" ? item.size : undefined,
-        parameterSize: textFrom(details?.parameter_size),
-      };
-    })
-    .filter((item) => item.name && (item.capabilities.length === 0 || item.capabilities.includes("completion")));
+  // Model discovery is validation, not part of the completion itself. Avoid
+  // paying for a second local HTTP request on every mention while retaining a
+  // short refresh window for models installed or removed during development.
+  // Tests intentionally bypass the process cache so each provider fixture
+  // remains isolated.
+  if (process.env.NODE_ENV !== "test") {
+    const cached = ollamaCatalogCache.get(base);
+    if (cached && cached.expiresAt > Date.now()) return cached.models.slice();
+    const pending = ollamaCatalogRequests.get(base);
+    if (pending) return (await pending).slice();
+  }
+  const request = (async () => {
+    const catalog = await requestJson(`${base}/api/tags`, { method: "GET", headers: { accept: "application/json" } }, "Ollama");
+    if (!Array.isArray(catalog.models)) return [];
+    return catalog.models
+      .filter((item): item is Record<string, unknown> => Boolean(item && typeof item === "object"))
+      .map((item) => {
+        const details = item.details && typeof item.details === "object" ? item.details as Record<string, unknown> : undefined;
+        return {
+          name: textFrom(item.name) ?? "",
+          capabilities: Array.isArray(item.capabilities) ? item.capabilities.filter((value): value is string => typeof value === "string") : [],
+          size: typeof item.size === "number" ? item.size : undefined,
+          parameterSize: textFrom(details?.parameter_size),
+        };
+      })
+      .filter((item) => item.name && (item.capabilities.length === 0 || item.capabilities.includes("completion")));
+  })();
+  if (process.env.NODE_ENV === "test") return request;
+  ollamaCatalogRequests.set(base, request);
+  try {
+    const models = await request;
+    ollamaCatalogCache.set(base, { expiresAt: Date.now() + OLLAMA_CATALOG_CACHE_MS, models });
+    while (ollamaCatalogCache.size > OLLAMA_CATALOG_CACHE_LIMIT) {
+      const oldest = ollamaCatalogCache.keys().next().value;
+      if (oldest === undefined) break;
+      ollamaCatalogCache.delete(oldest);
+    }
+    return models.slice();
+  } finally {
+    ollamaCatalogRequests.delete(base);
+  }
 }
 
 export function resolveOllamaModel(model: string, catalog: OllamaCatalogModel[]) {
@@ -457,11 +490,15 @@ function recordModelUsage(
     runId?: string;
     invocationId?: string;
     presenceId?: string;
+    originId?: string;
     operational?: boolean;
   }
 ) {
-  if (!result.usage || !state.agent) return;
-  const usage = { ...result.usage, requests: 1 };
+  if (!state.agent) return;
+  // Some providers omit token metadata, but the request still counts against
+  // the runtime resource envelope. Keep the token fields when available and
+  // always record one model request.
+  const usage = { ...(result.usage ?? {}), requests: 1 };
   const eventId = `resource-usage:${randomUUID()}`;
   state.resourceUsageEvents.unshift({
     id: eventId,
@@ -470,6 +507,7 @@ function recordModelUsage(
     invocationId: options?.invocationId ?? eventId,
     runId: options?.runId,
     originKind: options?.usageOrigin ?? (options?.attentionSource === "self_directed_discovery" ? "self_directed_discovery" : options?.social ? "inbound_social" : "operator"),
+    originId: options?.originId,
     attentionSource: options?.attentionSource,
     category: "model",
     provider: profile.provider,
@@ -584,7 +622,7 @@ export async function checkModelProviderAccess(state: OpenPresenceState, presenc
   }
 }
 
-export async function generateAgentReply(state: OpenPresenceState, content: string, conversationId?: string, options?: { social?: boolean; presence?: Presence; socialHistory?: Array<Pick<PresenceChatMessage, "role" | "content">>; operatorHistory?: Array<Pick<OperatorConversationMessage, "role" | "content">>; socialEvidence?: string; socialThreadContext?: string; socialGuidance?: string; autobiographicalContext?: string; knowledgeContext?: KnowledgeContextPacket; disableKnowledge?: boolean; assignmentMode?: boolean; briefOverride?: PresenceBrief; usageOrigin?: ResourceUsageEvent["originKind"]; attentionSource?: ResourceUsageEvent["attentionSource"]; operational?: boolean; runId?: string; presenceId?: string; invocationId?: string; operatorConversation?: boolean; peopleNote?: { presenceId: string; personId: string; markdown: string; revision: number; updatedAt: string } }) {
+export async function generateAgentReply(state: OpenPresenceState, content: string, conversationId?: string, options?: { social?: boolean; presence?: Presence; socialHistory?: Array<Pick<PresenceChatMessage, "role" | "content">>; operatorHistory?: Array<Pick<OperatorConversationMessage, "role" | "content">>; socialEvidence?: string; socialThreadContext?: string; socialGuidance?: string; autobiographicalContext?: string; knowledgeContext?: KnowledgeContextPacket; disableKnowledge?: boolean; assignmentMode?: boolean; briefOverride?: PresenceBrief; usageOrigin?: ResourceUsageEvent["originKind"]; attentionSource?: ResourceUsageEvent["attentionSource"]; operational?: boolean; runId?: string; presenceId?: string; invocationId?: string; originId?: string; operatorConversation?: boolean; peopleNote?: { presenceId: string; personId: string; markdown: string; revision: number; updatedAt: string } }) {
   if (isAiMockEnabled()) {
     if (options?.operatorConversation) {
       const lower = content.toLowerCase();
@@ -702,10 +740,21 @@ export function normalizeRehearsalReply(value: string) {
     .trim();
 }
 
+const privatePresenceChatGuidance = "PRIVATE PRESENCE CHAT: Speak in the same natural voice as the Presence's public self while keeping the operator's context private. Answer the direct point first. Unless the operator asks for analysis, keep the response to one short paragraph or a few sentences. Do not turn an ordinary thought into a strategy memo, status report, framework, or closing offer such as ‘Want me to draft something?’. Do not narrate the planner, evidence process, or selected act; give the useful human response and stop.";
+
+function completedAcknowledgmentContext(content: string, history: Array<Pick<PresenceChatMessage, "role" | "content">>) {
+  const normalized = content.trim().toLowerCase().replace(/[.!?,]+$/g, "");
+  const completedAcknowledgments = new Set(["thanks", "thank you", "exactly", "agreed", "good point", "interesting", "absolutely", "for sure", "yep", "yes", "likewise", "appreciate it", "good"]);
+  if (!completedAcknowledgments.has(normalized) || history.at(-1)?.role !== "presence") return "";
+  return "LATEST SOCIAL STATE: The newest message is a brief acknowledgment after the Presence's preceding turn. Treat the exchange as complete. Return no_op unless this message contains a genuinely new question, request, or unresolved point.";
+}
+
 export async function generatePresenceChatReply(state: OpenPresenceState, presenceId: string, content: string, history: Array<Pick<PresenceChatMessage, "role" | "content">>, socialEvidence?: string, socialThreadContext?: string, briefOverride?: PresenceBrief) {
   const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   if (!presence) throw new AiRuntimeError("Choose a Presence before starting a Presence Chat.");
+  const closureContext = completedAcknowledgmentContext(content, history);
   if (isAiMockEnabled()) {
+    if (closureContext) return "";
     const normalized = content.toLowerCase().replace(/\s+/g, " ").trim();
     const publicName = presence.publicSelf?.displayName ?? presence.name;
     if (/(?:why are you responding|didn't mention|didn’t mention|not mention)/.test(normalized)) {
@@ -721,13 +770,14 @@ export async function generatePresenceChatReply(state: OpenPresenceState, presen
     if (normalized.includes("my name is")) return "That is a memorable introduction. I would keep the next move tied to what the person is actually trying to change, along with the relevant experience.";
     return "The post deserves an answer on its own terms. I would keep the next move tied to one concrete detail in the conversation and leave the system in the background.";
   }
+  const effectiveThreadContext = [socialThreadContext, closureContext].filter(Boolean).join("\n\n");
   const planner = await generateAgentSocialDecision(state, "This is a private Rehearsal turn. Evaluate the latest post as a person-to-person social exchange, choose whether a reply earns its place, and if so write the complete public reply. Use the active Conversational Style plus the Agent meaning files as the expression policy for this turn. Return one complete public reply in the structured envelope, or no_op. Do not create a rationale in the reply text.", ["reply", "no_op"], {
     presence,
     socialHistory: history,
     socialInput: content,
-    socialGuidance: rehearsalStyleExecutionContract,
+    socialGuidance: [rehearsalStyleExecutionContract, privatePresenceChatGuidance, closureContext].filter(Boolean).join("\n\n"),
     socialEvidence,
-    socialThreadContext,
+    socialThreadContext: effectiveThreadContext,
     briefOverride,
   });
   if (planner.action === "no_op") {
@@ -737,7 +787,7 @@ export async function generatePresenceChatReply(state: OpenPresenceState, presen
     if (planner.rationale !== "The Agent runtime did not return a valid structured social decision.") {
       return "";
     }
-    const recovered = await generateAgentReply(state, content, undefined, { social: true, presence, socialHistory: history, socialEvidence, socialThreadContext, briefOverride });
+    const recovered = await generateAgentReply(state, content, undefined, { social: true, presence, socialHistory: history, socialEvidence, socialThreadContext: effectiveThreadContext, socialGuidance: [privatePresenceChatGuidance, closureContext].filter(Boolean).join("\n\n"), briefOverride });
     const normalized = normalizeRehearsalReply(recovered);
     return normalized;
   }
@@ -822,6 +872,14 @@ const decisionAliases: Record<string, string> = {
   "x:reply": "reply",
   comment: "reply",
   comments: "reply",
+  delete: "delete",
+  remove: "delete",
+  delete_post: "delete",
+  delete_reply: "delete",
+  "delete-post": "delete",
+  "delete-reply": "delete",
+  "x.delete": "delete",
+  "x:delete": "delete",
   posts: "post",
   tweet: "post",
   tweets: "post",
@@ -1147,7 +1205,7 @@ export async function generateExplorationTriage(
 }
 
 export async function generateAgentSocialEdit(state: OpenPresenceState, instruction: string, plannedAction: string, options?: SocialGenerationOptions) {
-  const raw = await generateAgentReply(state, `${instruction}\n\n${personToPersonLanguageGuidance}\n\nYou are an expression editor after an authoritative Social Planner has already selected the social act “${plannedAction}”. You may refine only the wording for that same act. Return JSON only in this shape: {"status":"ok","action":"${plannedAction}","text":"...","rationale":"short explanation"}. If the candidate contains a concrete contradiction that makes the selected act invalid in the supplied evidence, do not choose another act and do not choose silence; return {"status":"needs_replan","action":"${plannedAction}","text":"","contradiction":"specific contradiction in the evidence","rationale":"short explanation"}. A contradiction must name the conflicting evidence, not a stylistic preference. If the editor fails or has no concrete contradiction, the original planner act and draft remain authoritative.`, undefined, { social: true, presence: options?.presence ?? state.presence ?? undefined, socialHistory: options?.socialHistory, socialEvidence: options?.socialEvidence, socialThreadContext: options?.socialThreadContext, knowledgeContext: options?.knowledgeContext, disableKnowledge: options?.disableKnowledge, assignmentMode: options?.assignmentMode, briefOverride: options?.briefOverride, usageOrigin: options?.usageOrigin, attentionSource: options?.attentionSource, operational: options?.operational, runId: options?.runId, presenceId: options?.presenceId ?? options?.presence?.id, invocationId: options?.invocationId, operatorConversation: options?.operatorConversation });
+  const raw = await generateAgentReply(state, `${instruction}\n\n${personToPersonLanguageGuidance}\n\nYou are an expression editor after an authoritative Social Planner has already selected the social act “${plannedAction}”. You may refine only the wording for that same act. Return JSON only in this shape: {"status":"ok","action":"${plannedAction}","text":"...","rationale":"short explanation"}. If the candidate contains a concrete contradiction that makes the selected act invalid in the supplied evidence, do not choose another act and do not choose silence; return {"status":"needs_replan","action":"${plannedAction}","text":"","contradiction":"specific contradiction in the evidence","rationale":"short explanation"}. A contradiction must name the conflicting evidence, not a stylistic preference. If the editor fails or has no concrete contradiction, the original planner act and draft remain authoritative.`, undefined, { social: true, presence: options?.presence ?? state.presence ?? undefined, socialHistory: options?.socialHistory, socialEvidence: options?.socialEvidence, socialThreadContext: options?.socialThreadContext, knowledgeContext: options?.knowledgeContext, disableKnowledge: options?.disableKnowledge, assignmentMode: options?.assignmentMode, briefOverride: options?.briefOverride, usageOrigin: options?.usageOrigin, attentionSource: options?.attentionSource, operational: options?.operational, runId: options?.runId, presenceId: options?.presenceId ?? options?.presence?.id, invocationId: options?.invocationId, originId: options?.originId, operatorConversation: options?.operatorConversation });
   return parseAgentSocialEdit(raw, plannedAction);
 }
 
@@ -1387,6 +1445,7 @@ export type SocialGenerationOptions = {
   runId?: string;
   presenceId?: string;
   invocationId?: string;
+  originId?: string;
   /** Ask for a natural private reaction distinct from execution rationale. */
   operatorConversation?: boolean;
   peopleNote?: { presenceId: string; personId: string; markdown: string; revision: number; updatedAt: string };
@@ -1410,8 +1469,8 @@ export async function generateAgentSocialDecision(state: OpenPresenceState, inst
   const operatorReactionInstruction = options?.operatorConversation
     ? `\n- Operator reaction: also return operatorReaction as one brief, natural private response about what you think of the post itself. Speak to the operator like a person. Do not narrate your decision, selected action, evidence process, or internal rationale; never say “I chose to,” “I decided to,” or “no public act is warranted.” This private reaction is separate from any public reply text.\n\nInclude "operatorReaction":"one natural sentence" in the top-level JSON.`
     : "";
-    const plannerInstruction = `${instruction}\n\nEvaluate the social candidate and choose zero or more compatible acts from: ${actions.join(", ")}.\n- Repost: choose repost when the post is valuable as-is and should be shared directly with your audience.\n- Quote: choose quote only when a short, concrete response makes this specific source post more useful to this audience. Anchor the words to the source's claim, tension, or moment; never write a generic essay, product pitch, discovery brief, or abstract lesson. Keep the quote under 240 characters (the channel limit is 280).\n- Reply: choose reply when a direct conversational response to the author adds value; keep it specific and under 240 characters.\n- Like: choose like for quiet appreciation without needing to speak.\n- Follow: choose follow for continued awareness of this author.\n- Silence: return an empty acts array ([]) when sufficient context is present and no outward action earned its place.${operatorReactionInstruction}\n\n${personToPersonLanguageGuidance} Language quality: write like a realistic optimist speaking to a peer. Name the concrete detail first. Be honest about limits and leave room for progress or a next move. Avoid teacher voice, canned empathy, slang, workplace jargon, bureaucratic phrasing, stock formulas, repeated contrasts, negative parallelism (\"isn't X, it's Y\" and \"not just X, but Y\"), vague frames such as \"the interesting/useful bit\" or \"the real test\", and phrases about doing heroic or heavy lifting.\n\nReturn JSON only in this shape:\n{"acts":[{"action":"like|reply|repost|quote|follow","text":"reply or quote text when needed, otherwise empty","rationale":"concise reason for this act"}],"conversationDisposition":"continue|react_only|close_with_reply|close_silently|defer","rationale":"concise summary of the decision"}.`;
-    const raw = await generateAgentReply(state, options?.socialInput ?? plannerInstruction, undefined, { social: true, presence, socialHistory: options?.socialHistory, socialGuidance: options?.socialInput ? plannerInstruction : options?.socialGuidance, socialEvidence: options?.socialEvidence, socialThreadContext: options?.socialThreadContext, autobiographicalContext: options?.autobiographicalContext ?? autobiography?.text, knowledgeContext: options?.knowledgeContext, disableKnowledge: options?.disableKnowledge, assignmentMode: options?.assignmentMode, briefOverride: options?.briefOverride, usageOrigin: options?.usageOrigin, attentionSource: options?.attentionSource, operational: options?.operational, runId: options?.runId, presenceId: options?.presenceId ?? options?.presence?.id, invocationId: options?.invocationId, operatorConversation: options?.operatorConversation, peopleNote: options?.peopleNote });
+    const plannerInstruction = `${instruction}\n\nEvaluate the social candidate and choose zero or more compatible acts from: ${actions.join(", ")}.\n- Repost: choose repost when the post is valuable as-is and should be shared directly with your audience.\n- Quote: choose quote only when a short, concrete response makes this specific source post more useful to this audience. Anchor the words to the source's claim, tension, or moment; never write a generic essay, product pitch, discovery brief, or abstract lesson. Keep the quote under 240 characters (the channel limit is 280).\n- Reply: choose reply when a direct conversational response to the author adds value; keep it specific and under 240 characters.\n- Like: choose like for quiet appreciation without needing to speak.\n- Follow: choose follow for continued awareness of this author.\n- Silence: return an empty acts array ([]) when sufficient context is present and no outward action earned its place.${operatorReactionInstruction}\n\n${personToPersonLanguageGuidance} Language quality: follow BRAIN.md for the Agent's reasoning stance and TASTE.md plus active Style Guidance for voice and surface choices. When BRAIN.md does not specify a stance, use the realistic-optimist default in AI-SLOP AVOIDANCE. Name the concrete detail first. Be honest about limits when that fits the selected stance. Avoid teacher voice, canned empathy, slang, workplace jargon, bureaucratic phrasing, stock formulas, repeated contrasts, negative parallelism (\"isn't X, it's Y\" and \"not just X, but Y\"), vague frames such as \"the interesting/useful bit\" or \"the real test\", and phrases about doing heroic or heavy lifting.\n\nReturn JSON only in this shape:\n{"acts":[{"action":"like|reply|repost|quote|follow","text":"reply or quote text when needed, otherwise empty","rationale":"concise reason for this act"}],"conversationDisposition":"continue|react_only|close_with_reply|close_silently|defer","rationale":"concise summary of the decision"}.`;
+    const raw = await generateAgentReply(state, options?.socialInput ?? plannerInstruction, undefined, { social: true, presence, socialHistory: options?.socialHistory, socialGuidance: options?.socialInput ? plannerInstruction : options?.socialGuidance, socialEvidence: options?.socialEvidence, socialThreadContext: options?.socialThreadContext, autobiographicalContext: options?.autobiographicalContext ?? autobiography?.text, knowledgeContext: options?.knowledgeContext, disableKnowledge: options?.disableKnowledge, assignmentMode: options?.assignmentMode, briefOverride: options?.briefOverride, usageOrigin: options?.usageOrigin, attentionSource: options?.attentionSource, operational: options?.operational, runId: options?.runId, presenceId: options?.presenceId ?? options?.presence?.id, invocationId: options?.invocationId, originId: options?.originId, operatorConversation: options?.operatorConversation, peopleNote: options?.peopleNote });
   return { ...parseAgentSocialDecision(raw, actions), autobiographicalEventIds: autobiography?.eventIds };
 }
 
