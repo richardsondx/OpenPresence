@@ -101,7 +101,7 @@ const activityProjectionKeys = new Set<keyof OpenPresenceState>([
   "agent", "agents", "activeAgentId", "activePresenceId", "presence", "presences", "onboarded", "workspaceRevision", "proposals",
   "assignments", "assignmentRuns", "assignmentPursuitWindows", "actions", "events", "executions", "outcomes", "publications", "socialDecisions", "autobiographicalEvents", "autobiographicalReflections", "socialIntents", "attentionEpisodes", "resourceUsageEvents",
   "mirrorObjects", "nativeConnections", "bridges", "playgroundSessions", "originalPostRehearsals", "assetResearchSessions", "channelDefinitions", "operationalRuns", "scheduledWakes", "standingIntents",
-  "publishingPlans", "growthRevisions", "growthFileVersions",
+  "growthRevisions", "growthFileVersions",
   "operatorConversations", "operatorNudges",
   "operatorDirectives", "explorations", "watches", "capabilityTrials", "explorationFindings", "explorationSessions", "calendar",
   "publicRequests", "publicationMetricSnapshots",
@@ -224,7 +224,6 @@ function activityProjection(state: OpenPresenceState): OpenPresenceState {
   projection.playgroundSessions = scopedRecent((state.playgroundSessions ?? []).filter((session) => session.status !== "completed"), 12) as never;
   projection.explorationFindings = scopedRecent(state.explorationFindings, 50) as never;
   projection.explorationSessions = scopedRecent(state.explorationSessions, 30) as never;
-  projection.publishingPlans = scopedRecent(state.publishingPlans, 6).map((plan) => ({ ...plan, windows: plan.windows.slice(0, 24), workHistory: plan.workHistory?.slice(-24) })) as never;
   projection.operatorConversations = [];
   projection.standingIntents = (state.standingIntents ?? []).slice(0, 40) as never;
   projection.calendar = (state.calendar ?? []).filter((slot) => !presenceId || slot.presence === presenceId) as never;
