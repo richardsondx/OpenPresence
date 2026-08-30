@@ -107,6 +107,7 @@ export function readUsageWorkspaces(): UsageWorkspace[] {
       json_extract(payload, '$.presences') AS presences,
       json_extract(payload, '$.resourceUsageEvents') AS resource_usage_events
     FROM agent_workspaces
+    WHERE agent_id <> COALESCE((SELECT json_extract(payload, '$.activeAgentId') FROM app_state WHERE id = 1), '')
   `).all() as Array<{ agent?: string | null; presences?: string | null; resource_usage_events?: string | null }>;
   return rows.flatMap((row) => {
     try {
@@ -285,7 +286,9 @@ function deliverySlotFromRow(row: Record<string, unknown>): PublicActionDelivery
 }
 
 function durableExecutionSnapshots(): Execution[] {
-  const rows = sqlite.prepare("SELECT payload FROM app_state WHERE id = 1 UNION ALL SELECT payload FROM agent_workspaces").all() as Array<{ payload?: string }>;
+  const rows = sqlite.prepare(`SELECT payload FROM app_state WHERE id = 1
+    UNION ALL SELECT payload FROM agent_workspaces
+    WHERE agent_id <> COALESCE((SELECT json_extract(payload, '$.activeAgentId') FROM app_state WHERE id = 1), '')`).all() as Array<{ payload?: string }>;
   const byId = new Map<string, Execution>();
   for (const row of rows) {
     if (!row.payload) continue;
@@ -1182,7 +1185,7 @@ function scheduleNormalizedSync(state: OpenPresenceState) {
   if (typeof normalizedSyncTimer.unref === "function") normalizedSyncTimer.unref();
 }
 
-export function writeState(state: OpenPresenceState, options?: { advanceWorkspaceRevision?: boolean; syncNormalized?: boolean; persistAgentWorkspaces?: boolean; force?: boolean }) {
+export function writeState(state: OpenPresenceState, options?: { advanceWorkspaceRevision?: boolean; syncNormalized?: boolean; persistAgentWorkspaces?: boolean; persistActiveWorkspace?: boolean; force?: boolean }) {
   const normalized = normalizeState(state);
   // Never overwrite a durable workspace with a partial or unlinked Assignment
   // collection. Known legacy records are repaired by normalizeState; anything
@@ -1215,8 +1218,15 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
       sqlite.prepare("DELETE FROM agent_workspaces").run();
       sqlite.prepare("DELETE FROM agent_workspace_revisions").run();
     } else {
-      const snapshot = snapshotWorkspace(normalized);
-      sqlite.prepare("INSERT INTO agent_workspaces (agent_id, payload, updated_at) VALUES (?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at").run(agentId, JSON.stringify(snapshot), persistedAt);
+      // The active Agent is already authoritative in app_state. Rewriting a
+      // second full snapshot here doubled serialization, GC, and SQLite WAL
+      // pressure for every Activity, Bridge, and worker mutation. Keep the
+      // old behavior available for recovery/migration callers that explicitly
+      // need a current active workspace copy.
+      if (options?.persistActiveWorkspace) {
+        const snapshot = snapshotWorkspace(normalized);
+        sqlite.prepare("INSERT INTO agent_workspaces (agent_id, payload, updated_at) VALUES (?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at").run(agentId, JSON.stringify(snapshot), persistedAt);
+      }
       sqlite.prepare("INSERT INTO agent_workspace_revisions (agent_id, revision, updated_at) VALUES (?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET revision = excluded.revision, updated_at = excluded.updated_at").run(agentId, normalized.workspaceRevision, persistedAt);
       if (options?.persistAgentWorkspaces) {
         for (const workspace of normalized.agentWorkspaces) {
