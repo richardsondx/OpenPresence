@@ -4553,7 +4553,7 @@ export async function GET(request: Request) {
   const earlyResolvedAgentId = requestedAgentId ?? "";
   const earlyEtag = `"${readToken}:${earlyResolvedAgentId}:${requestedPresenceId ?? ""}:${projection ?? "full"}"`;
   const conditionalTag = request.headers.get("if-none-match");
-  const cachedActivityEntry = !requestedAgentId && projection === "activity" && conditionalTag
+  const cachedActivityEntry = !requestedAgentId && ["activity", "chat"].includes(projection ?? "") && conditionalTag
     ? [...activityResponseCache.values()].find((entry) => entry.etag === conditionalTag && entry.etag.startsWith(`"${readToken}:`))
     : undefined;
   // Conditional Activity polls are common and should not parse/recover the
@@ -4626,8 +4626,8 @@ export async function GET(request: Request) {
   // browser-facing collection. Omitting that duplicated event envelope keeps
   // Activity reads fast without removing any durable data or mirror objects.
   const responseHeaders = { ETag: etag, "Cache-Control": "no-cache" };
-  const activityCacheKey = `${resolvedAgentId ?? ""}:${requestedPresenceId ?? ""}`;
-  const cachedActivity = projection === "activity" ? activityResponseCache.get(activityCacheKey) : undefined;
+  const activityCacheKey = `${projection ?? "full"}:${resolvedAgentId ?? ""}:${requestedPresenceId ?? ""}`;
+  const cachedActivity = ["activity", "chat"].includes(projection ?? "") ? activityResponseCache.get(activityCacheKey) : undefined;
   const response = cachedActivity?.etag === etag
     ? new NextResponse(cachedActivity.body, { headers: { ...responseHeaders, "Content-Type": "application/json" } })
     : (() => {
@@ -4637,7 +4637,7 @@ export async function GET(request: Request) {
           ? chatProjection(contextualState)
           : { ...contextualState, responseProjection: "full" as const, agentWorkspaces: [], mirrorEvents: [] };
       const payload = { ...browserState, runtimeIdentity: { dbPath: resolvedDbPath, dbSelectionSource, agentId: contextualState.agent?.id ?? null, presenceId: contextualState.presence?.id ?? null, handle: contextualState.presence?.handle ?? null } };
-      if (projection !== "activity") return NextResponse.json(payload, { headers: responseHeaders });
+      if (!["activity", "chat"].includes(projection ?? "")) return NextResponse.json(payload, { headers: responseHeaders });
       const body = JSON.stringify(payload);
       rememberActivityResponse(activityCacheKey, { etag, body });
       return new NextResponse(body, { headers: { ...responseHeaders, "Content-Type": "application/json" } });

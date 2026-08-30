@@ -13,4 +13,14 @@ describe("state read projections", () => {
     expect(body.operatorConversations).toBeInstanceOf(Array);
     expect(JSON.stringify(body).length).toBeLessThan(600_000);
   });
+
+  it("short-circuits an unchanged chat poll with its ETag", async () => {
+    const first = await stateGet(new Request("http://localhost/api/state?projection=chat"));
+    const etag = first.headers.get("etag");
+    expect(etag).toBeTruthy();
+
+    const second = await stateGet(new Request("http://localhost/api/state?projection=chat", { headers: { "if-none-match": etag! } }));
+
+    expect(second.status).toBe(304);
+  });
 });
