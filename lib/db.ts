@@ -195,6 +195,10 @@ const normalizedTables = [
 for (const table of normalizedTables) {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY, agent_id TEXT, parent_id TEXT, payload TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 }
+// Connector polling must deduplicate against the complete append-only history,
+// not only the bounded in-memory read window. Keep the lookup indexed so a
+// batch of observed events stays cheap even after a long-running workspace.
+sqlite.exec("CREATE INDEX IF NOT EXISTS mirror_events_bridge_source_idx ON mirror_events(parent_id, json_extract(payload, '$.sourceEventId'))");
 
 // Mirror history is already durably indexed in `mirror_events`. Keeping the
 // full append-only log inside app_state made every small autonomy write
@@ -733,6 +737,18 @@ export function appendMirrorEvents(events: MirrorEvent[]) {
     for (const event of events) insert.run(event.id, null, event.bridgeId, JSON.stringify(event), updatedAt);
   })();
   stateCache = undefined;
+}
+
+/** Return source IDs already accepted by one Bridge without hydrating history. */
+export function readMirrorEventSourceIds(bridgeId: string, sourceEventIds: string[]) {
+  const candidates = [...new Set(sourceEventIds.filter(Boolean))];
+  if (!candidates.length) return new Set<string>();
+  const placeholders = candidates.map(() => "?").join(", ");
+  const rows = sqlite.prepare(`SELECT json_extract(payload, '$.sourceEventId') AS source_event_id
+    FROM mirror_events
+    WHERE parent_id = ?
+      AND json_extract(payload, '$.sourceEventId') IN (${placeholders})`).all(bridgeId, ...candidates) as Array<{ source_event_id?: string | null }>;
+  return new Set(rows.flatMap((row) => row.source_event_id ? [row.source_event_id] : []));
 }
 
 export function readBridgeHealthForPresence(presenceId: string) {

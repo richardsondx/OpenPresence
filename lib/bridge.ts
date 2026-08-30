@@ -1,6 +1,7 @@
 import { z } from "zod";
 import { activeAssignmentPursuitWindow, applyOperation, assignmentIsSatisfied, blockExecutionForLanguage, blockExecutionForTargetLanguage, cancelExecutionForBlockedTarget, clearPersonBlockFromExecution, curateRelationshipFromMirror, ensureCapabilityRequests, existingPublicActionExecution, isPersonBlockingError, isWatchPausedForExecution, languageValidationForExecution, recordPersonBlockedFromExecution, recordVerifiedCapabilityTrial, recordVerifiedFollow, settleCapabilityTrialVerificationFailure, targetIsBlockedByPerson, targetLanguageValidationForExecution } from "./runtime";
 import { appendMirrorEvents, authenticateBridgeKey, cancelScheduledWake, deleteBridgeCredential, deleteBridgeIdentity, issueBridgeKey, readBridgeById, readBridgeCredentialMetadata, readBridgeIdentity, readBridgeIdentityForExecutor, readPublicActionDeliverySlot, readStateForBridge, releasePublicActionDelivery, reservePublicActionDelivery, revokeBridgeKey, updatePublicActionDelivery, upsertScheduledWake, writeBridgeHeartbeat, writeBridgeIdentity, writeState } from "./db";
+import { readMirrorEventSourceIds } from "./db";
 import type { Asset, Bridge, Execution, LiveEvent, MirrorObject, OpenPresenceState, Outcome } from "./types";
 import { bridgeAdapterStatus, bridgeIdentityReady } from "./bridge-contract";
 
@@ -286,6 +287,7 @@ function recordVerifiedLiveAssetUsage(state: OpenPresenceState, bridge: Bridge, 
 export function ingestEvents(bridge: Bridge, payload: z.infer<typeof eventsInput>) {
   const state = readStateForBridge(bridge.id); const current = state.bridges.find((item) => item.id === bridge.id); if (!current) throw new Error("Bridge not found");
   const seenSourceEventIds = new Set(state.mirrorEvents.filter((event) => event.bridgeId === bridge.id).map((event) => event.sourceEventId));
+  for (const sourceEventId of readMirrorEventSourceIds(bridge.id, payload.events.map((item) => item.sourceEventId))) seenSourceEventIds.add(sourceEventId);
   const mirrorIndex = new Map(state.mirrorObjects.filter((item) => item.bridgeId === bridge.id).map((item) => [mirrorObjectKey(bridge.id, item.externalRef), item]));
   let receivedInbound = false;
   let acceptedEvents = 0;

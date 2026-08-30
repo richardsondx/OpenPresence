@@ -1,8 +1,8 @@
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { claimExecutions, closeChromeVerification, createBridgeWithKey, failExecution, ingestEvents, reconcileBridge, recordVerifiedBridgeReaction, reportBridgeIdentity } from "../lib/bridge";
 import { applyOperation, createAgent, formXReplyIntent, recordNativeMirror } from "../lib/runtime";
-import { readState, readStateForBridge, readStateVersion, WorkspaceConflictError, writeState } from "../lib/db";
-import type { Execution } from "../lib/types";
+import { appendMirrorEvents, readState, readStateForBridge, readStateVersion, WorkspaceConflictError, writeState } from "../lib/db";
+import type { Execution, MirrorEvent } from "../lib/types";
 
 afterEach(() => vi.unstubAllEnvs());
 
@@ -77,6 +77,25 @@ describe("Bridge browser retry lifecycle", () => {
     bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge!.id)!;
     reconcileBridge(bridge, reconciliation);
     expect(readStateVersion()).toBe(afterFirstReconciliation);
+  });
+
+  it("deduplicates a Bridge event that has fallen outside the bounded read window", () => {
+    const state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });
+    const bridge = bridgeResult.bridge!;
+    const now = new Date().toISOString();
+    const event = { sourceEventId: "old-indexed-observation", event: "created" as const, object: { externalRef: { type: "x.post", id: "old-indexed-post" }, objectType: "post", language: "en", author: { displayName: "Target" }, content: { text: "A durable old observation." }, visibility: "public" as const, shareability: "presence-only" as const } };
+    const history = [
+      { id: "old-indexed-event", bridgeId: bridge.id, presenceId: state.presence!.id, sourceEventId: event.sourceEventId, event: event.event, externalRef: event.object.externalRef, receivedAt: now },
+      ...Array.from({ length: 5_000 }, (_, index) => ({ id: `read-window-filler-${index}`, bridgeId: bridge.id, presenceId: state.presence!.id, sourceEventId: `read-window-filler-${index}`, event: "created" as const, externalRef: { type: "x.post", id: `read-window-filler-${index}` }, receivedAt: now })),
+    ] satisfies MirrorEvent[];
+    appendMirrorEvents(history);
+
+    const beforeVersion = readStateVersion();
+    ingestEvents(bridge, { events: [event] });
+
+    expect(readStateVersion()).toBe(beforeVersion);
+    expect(readState().mirrorObjects.some((item) => item.externalRef.id === event.object.externalRef.id)).toBe(false);
   });
 
   it("settles a verified Assignment quote and mirror object", () => {
