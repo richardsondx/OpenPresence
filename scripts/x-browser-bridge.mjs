@@ -84,9 +84,21 @@ async function signedIn(page) {
   return body.includes(`@${expectedHandle}`) || body.includes(expectedHandle);
 }
 
+async function submitObservedObjects(objects) {
+  if (!objects.length) return;
+  // The v2 key lets the first observation after reply-provenance support
+  // update records created by the older adapter, whose event IDs contained
+  // no classification metadata and would otherwise be deduplicated forever.
+  await request("/api/bridge/v1/events", { events: objects.map((object) => ({ sourceEventId: `x-browser:v2:${object.externalRef.id}`, event: "updated", object })) });
+}
+
 async function observeX(page) {
   const objects = [];
-  for (const url of [discoveryUrl, "https://x.com/notifications/mentions"]) {
+  // Mentions are the latency-sensitive inbound path. Emit them as soon as
+  // that page is readable so the server can wake cognition while the slower
+  // discovery timeline is still being collected as a separate batch.
+  for (const url of ["https://x.com/notifications/mentions", discoveryUrl]) {
+    const countBeforePage = objects.length;
     await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
     if (!(await signedIn(page))) throw new Error(`The X browser session is not signed in as @${expectedHandle || "the expected account"}.`);
     await page.waitForTimeout(1_500);
@@ -114,12 +126,7 @@ async function observeX(page) {
         shareability: "presence-only",
       });
     }
-  }
-  if (objects.length) {
-    // The v2 key lets the first observation after reply-provenance support
-    // update records created by the older adapter, whose event IDs contained
-    // no classification metadata and would otherwise be deduplicated forever.
-    await request("/api/bridge/v1/events", { events: objects.map((object) => ({ sourceEventId: `x-browser:v2:${object.externalRef.id}`, event: "updated", object })) });
+    await submitObservedObjects(objects.slice(countBeforePage));
   }
   return objects.length;
 }
