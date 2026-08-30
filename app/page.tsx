@@ -344,6 +344,7 @@ const formatCountdown = (value: string | undefined, now = Date.now()) => {
 };
 function useOperationalHealth(presenceId?: string, refreshKey = 0) {
   const [health, setHealth] = useState<OperationalHealthSnapshot | null>(null);
+  const healthEtag = useRef<string | null>(null);
   useEffect(() => {
     if (!presenceId) return;
     let active = true;
@@ -351,11 +352,15 @@ function useOperationalHealth(presenceId?: string, refreshKey = 0) {
 
     const load = async () => {
       try {
-        const response = await fetch(`/api/runtime/health?presenceId=${encodeURIComponent(presenceId)}`, { cache: "no-store" });
-        if (response.ok && active) {
-          const payload = await response.json() as OperationalHealthSnapshot;
-          setHealth(payload);
-        }
+        const headers = new Headers();
+        if (healthEtag.current) headers.set("If-None-Match", healthEtag.current);
+        const response = await fetch(`/api/runtime/health?presenceId=${encodeURIComponent(presenceId)}`, { headers, cache: "no-store" });
+        if (response.status === 304) return;
+        if (!response.ok || !active) return;
+        const etag = response.headers.get("etag");
+        if (etag) healthEtag.current = etag;
+        const payload = await response.json() as OperationalHealthSnapshot;
+        setHealth(payload);
       } catch { /* Health is advisory; Activity remains usable when the probe is down. */ }
       finally {
         if (active) {

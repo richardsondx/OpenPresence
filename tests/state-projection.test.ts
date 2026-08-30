@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { GET as healthGet } from "../app/runtime/health/route";
 import { GET as stateGet } from "../app/api/state/route";
 import { readStateReadToken, readStateVersion } from "../lib/db";
 
@@ -31,5 +32,16 @@ describe("state read projections", () => {
 
     expect(chatToken.startsWith(`${readStateVersion()}:`)).toBe(true);
     expect(chatToken).not.toBe(fullToken);
+  });
+
+  it("short-circuits an unchanged runtime health poll with its ETag", async () => {
+    const first = await healthGet(new Request("http://localhost/runtime/health?presenceId=presence_genny"));
+    const etag = first.headers.get("etag");
+    expect(first.status).toBe(200);
+    expect(etag).toBeTruthy();
+
+    const second = await healthGet(new Request("http://localhost/runtime/health?presenceId=presence_genny", { headers: { "if-none-match": etag! } }));
+
+    expect(second.status).toBe(304);
   });
 });
