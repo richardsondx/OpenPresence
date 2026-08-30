@@ -61,10 +61,10 @@ export async function POST(request: Request) {
     };
     const reportedSchedulerTelemetry = schedulerTelemetry(request);
     recordProcessHeartbeat("scheduler", "scheduler", {
+      ...(reportedSchedulerTelemetry ?? runtimeTelemetry),
       staleRuns: runtimeTelemetry.staleRuns,
       dispatchedWakes: runtimeTelemetry.dispatchedWakes,
       sweepDurationMs: runtimeTelemetry.sweepDurationMs,
-      ...(reportedSchedulerTelemetry ?? runtimeTelemetry),
     });
     recordProcessHeartbeat("runtime", "runtime", runtimeTelemetry);
     return NextResponse.json({
