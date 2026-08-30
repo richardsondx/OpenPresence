@@ -199,6 +199,13 @@ const normalizedTables = [
 for (const table of normalizedTables) {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY, agent_id TEXT, parent_id TEXT, payload TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 }
+// Health polls only need a small, current slice of the active workspace. Keep
+// that slice durable and revision-tagged so a fresh process does not have to
+// parse and normalize the full compatibility snapshot just to answer a
+// liveness question. The compatibility snapshot remains authoritative; this
+// table is a change-sensitive read model with a safe fallback below.
+sqlite.exec("CREATE TABLE IF NOT EXISTS runtime_health_projection (category TEXT NOT NULL, id TEXT NOT NULL, presence_id TEXT, payload TEXT NOT NULL, workspace_updated_at TEXT NOT NULL, PRIMARY KEY (category, id))");
+sqlite.exec("CREATE TABLE IF NOT EXISTS runtime_health_projection_meta (id INTEGER PRIMARY KEY CHECK (id = 1), active_agent_id TEXT, workspace_updated_at TEXT NOT NULL)");
 // Connector polling must deduplicate against the complete append-only history,
 // not only the bounded in-memory read window. Keep the lookup indexed so a
 // batch of observed events stays cheap even after a long-running workspace.
@@ -983,20 +990,57 @@ export function readStateViewForContext(context: StateContext, options: StateVie
  * assignments slice instead.
  */
 export function readRuntimeHealthProjection(presenceId?: string) {
-  // The compatibility snapshot remains authoritative, but it is already
-  // parsed and cached by readStateSnapshot(). Calling SQLite json_extract on
-  // the full app_state payload here made every health poll scan ~43 MB and
-  // caused the Node process to spend most of its time in JSON1 parsing/GC.
-  // Use the cached canonical arrays; the cache invalidates on canonical writes
-  // and the indexed tables continue to supply high-frequency health records.
+  // Prefer the revision-tagged compact model. This avoids reparsing the full
+  // compatibility snapshot after a process restart or a Bridge identity write
+  // invalidates the in-memory state cache. A missing or stale model falls back
+  // to the authoritative canonical snapshot rather than serving stale health.
+  const workspaceUpdatedAt = readStateVersion();
+  const meta = sqlite.prepare("SELECT workspace_updated_at FROM runtime_health_projection_meta WHERE id = 1").get() as { workspace_updated_at?: string } | undefined;
+  if (meta?.workspace_updated_at === workspaceUpdatedAt) {
+    const rows = sqlite.prepare(`SELECT category, presence_id, payload
+      FROM runtime_health_projection
+      WHERE (? IS NULL OR presence_id = ?)`)
+      .all(presenceId ?? null, presenceId ?? null) as Array<{ category: string; presence_id?: string | null; payload?: string }>;
+    const parsed = new Map<string, unknown[]>();
+    let parseFailed = false;
+    for (const row of rows) {
+      if (!row.payload) continue;
+      try {
+        const values = parsed.get(row.category) ?? [];
+        values.push(JSON.parse(row.payload));
+        parsed.set(row.category, values);
+      } catch { parseFailed = true; }
+    }
+    const presences = (parsed.get("presence") ?? []) as OpenPresenceState["presences"];
+    // An explicit Presence must be represented by the current projection. If
+    // it is not, it may belong to an inactive Agent workspace, so preserve the
+    // existing canonical fallback instead of returning an empty health view.
+    if (!parseFailed && (!presenceId || presences.some((presence) => presence.id === presenceId))) {
+      return {
+        presences,
+        nativeConnections: (parsed.get("native_connection") ?? []) as OpenPresenceState["nativeConnections"],
+        executions: (parsed.get("execution") ?? []) as OpenPresenceState["executions"],
+        assignments: (parsed.get("assignment") ?? []) as OpenPresenceState["assignments"],
+      };
+    }
+  }
+
   const snapshot = readStateSnapshot();
-  const presences = (presenceId
-    ? snapshot.presences.filter((presence) => presence.id === presenceId)
-    : snapshot.presences);
-  const nativeConnections = snapshot.nativeConnections.filter((item) => !presenceId || item.presenceId === presenceId);
-  const executions = snapshot.executions.filter((item) => !presenceId || item.presenceId === presenceId);
-  const assignments = snapshot.assignments.filter((item) => !presenceId || item.presenceId === presenceId);
-  return { presences, nativeConnections, executions, assignments };
+  const result = {
+    presences: presenceId ? snapshot.presences.filter((presence) => presence.id === presenceId) : snapshot.presences,
+    nativeConnections: snapshot.nativeConnections.filter((item) => !presenceId || item.presenceId === presenceId),
+    executions: snapshot.executions.filter((item) => !presenceId || item.presenceId === presenceId),
+    assignments: snapshot.assignments.filter((item) => !presenceId || item.presenceId === presenceId),
+  };
+  // Existing databases may predate this derived table. Warm it only after a
+  // successful canonical read, and only when the workspace token is still
+  // unchanged; a concurrent write must remain authoritative. Failure to warm
+  // the optional model never changes the health result or the write path.
+  const latestWorkspaceUpdatedAt = readStateVersion();
+  if (latestWorkspaceUpdatedAt === workspaceUpdatedAt) {
+    try { sqlite.transaction(() => writeRuntimeHealthProjection(snapshot, latestWorkspaceUpdatedAt))(); } catch { /* retry from the canonical fallback later */ }
+  }
+  return result;
 }
 
 /** Cheap, read-only projection used by the Technical Audit ledger. */
@@ -1214,6 +1258,18 @@ function writeActiveBridgeProjection(state: OpenPresenceState, timestamp: string
   }
 }
 
+function writeRuntimeHealthProjection(state: OpenPresenceState, timestamp: string) {
+  sqlite.prepare("DELETE FROM runtime_health_projection").run();
+  const insert = sqlite.prepare("INSERT INTO runtime_health_projection (category, id, presence_id, payload, workspace_updated_at) VALUES (?, ?, ?, ?, ?)");
+  for (const presence of state.presences) insert.run("presence", presence.id, presence.id, JSON.stringify(presence), timestamp);
+  for (const connection of state.nativeConnections) insert.run("native_connection", connection.id, connection.presenceId ?? null, JSON.stringify(connection), timestamp);
+  for (const execution of state.executions) insert.run("execution", execution.id, execution.presenceId ?? null, JSON.stringify(execution), timestamp);
+  for (const assignment of state.assignments) insert.run("assignment", assignment.id, assignment.presenceId ?? null, JSON.stringify(assignment), timestamp);
+  sqlite.prepare(`INSERT INTO runtime_health_projection_meta (id, active_agent_id, workspace_updated_at)
+    VALUES (1, ?, ?)
+    ON CONFLICT(id) DO UPDATE SET active_agent_id = excluded.active_agent_id, workspace_updated_at = excluded.workspace_updated_at`).run(state.agent?.id ?? null, timestamp);
+}
+
 // The JSON compatibility snapshot is the authoritative write model. The
 // normalized tables are a derived projection used by indexed readers and
 // migrations; rebuilding every table after every UI heartbeat made a harmless
@@ -1319,6 +1375,7 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
       }
     }
     writeActiveBridgeProjection(normalized, persistedAt);
+    writeRuntimeHealthProjection(normalized, persistedAt);
   })();
   // The just-committed object has already crossed the normalization and
   // hydration boundaries used by readStateSnapshot(). Reuse it as the new
