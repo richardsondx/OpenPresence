@@ -215,8 +215,13 @@ function mirrorProjectionFingerprint(item: Pick<MirrorObject, "externalRef" | "p
   });
 }
 
-function upsertObject(state: OpenPresenceState, bridge: Bridge, input: z.infer<typeof mirrorObjectInput>, sourceEventId?: string, archived = false): MirrorObject {
-  const existing = state.mirrorObjects.find((item) => item.bridgeId === bridge.id && item.externalRef.type === input.externalRef.type && item.externalRef.id === input.externalRef.id);
+function mirrorObjectKey(bridgeId: string, externalRef: { type: string; id: string }) {
+  return `${bridgeId}:${externalRef.type}:${externalRef.id}`;
+}
+
+function upsertObject(state: OpenPresenceState, bridge: Bridge, input: z.infer<typeof mirrorObjectInput>, sourceEventId?: string, archived = false, objectIndex?: Map<string, MirrorObject>): MirrorObject {
+  const key = mirrorObjectKey(bridge.id, input.externalRef);
+  const existing = objectIndex?.get(key) ?? state.mirrorObjects.find((item) => item.bridgeId === bridge.id && item.externalRef.type === input.externalRef.type && item.externalRef.id === input.externalRef.id);
   const text = cleanMirrorText(bridge.channelId, input.content?.text);
   const incomingHandle = normalizedHandle(input.author?.handle);
   const existingHandle = normalizedHandle(existing?.author?.handle);
@@ -239,9 +244,11 @@ function upsertObject(state: OpenPresenceState, bridge: Bridge, input: z.infer<t
   // forcing a full workspace write) when its durable projection is unchanged.
   if (existing) {
     if (mirrorProjectionFingerprint(existing) !== mirrorProjectionFingerprint(object)) Object.assign(existing, object);
+    objectIndex?.set(key, existing);
     return existing;
   }
   state.mirrorObjects.unshift(object);
+  objectIndex?.set(key, object);
   return object;
 }
 
@@ -278,16 +285,19 @@ function recordVerifiedLiveAssetUsage(state: OpenPresenceState, bridge: Bridge, 
 
 export function ingestEvents(bridge: Bridge, payload: z.infer<typeof eventsInput>) {
   const state = readStateForBridge(bridge.id); const current = state.bridges.find((item) => item.id === bridge.id); if (!current) throw new Error("Bridge not found");
+  const seenSourceEventIds = new Set(state.mirrorEvents.filter((event) => event.bridgeId === bridge.id).map((event) => event.sourceEventId));
+  const mirrorIndex = new Map(state.mirrorObjects.filter((item) => item.bridgeId === bridge.id).map((item) => [mirrorObjectKey(bridge.id, item.externalRef), item]));
   let receivedInbound = false;
   let acceptedEvents = 0;
   const acceptedMirrorEvents: OpenPresenceState["mirrorEvents"] = [];
   const receivedInboundIds: string[] = [];
   for (const item of payload.events) {
-    if (state.mirrorEvents.some((event) => event.bridgeId === bridge.id && event.sourceEventId === item.sourceEventId)) continue;
     const presence = state.presences.find((candidate) => candidate.id === current.presenceId) ?? state.presence;
     const observedLanguage = item.object.language ?? item.object.content?.language;
     if (observedLanguage !== undefined && !languagesMatch(presence?.language, observedLanguage)) continue;
-    const object = upsertObject(state, current, { ...item.object, actorPresenceId: observedActorPresenceId(presence, item.object) }, item.sourceEventId, item.event === "deleted");
+    if (seenSourceEventIds.has(item.sourceEventId)) continue;
+    seenSourceEventIds.add(item.sourceEventId);
+    const object = upsertObject(state, current, { ...item.object, actorPresenceId: observedActorPresenceId(presence, item.object) }, item.sourceEventId, item.event === "deleted", mirrorIndex);
     if (item.event !== "deleted" && object.actorPresenceId !== bridge.presenceId) {
       receivedInbound = true;
       receivedInboundIds.push(object.externalRef.id);

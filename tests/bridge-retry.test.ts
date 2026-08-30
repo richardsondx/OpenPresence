@@ -61,7 +61,8 @@ describe("Bridge browser retry lifecycle", () => {
     const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });
     writeState(bridgeResult.state);
     let bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge!.id)!;
-    const event = { events: [{ sourceEventId: "duplicate-observation", event: "created" as const, object: { externalRef: { type: "x.post", id: "duplicate-observation-post" }, objectType: "post", language: "en", author: { displayName: "Target" }, content: { text: "A stable observed post." }, visibility: "public" as const, shareability: "presence-only" as const } }] };
+    const duplicateObservation = { sourceEventId: "duplicate-observation", event: "created" as const, object: { externalRef: { type: "x.post", id: "duplicate-observation-post" }, objectType: "post", language: "en", author: { displayName: "Target" }, content: { text: "A stable observed post." }, visibility: "public" as const, shareability: "presence-only" as const } };
+    const event = { events: [duplicateObservation, duplicateObservation] };
 
     ingestEvents(bridge, event);
     const afterFirstEvent = readStateVersion();
