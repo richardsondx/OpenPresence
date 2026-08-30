@@ -7,7 +7,10 @@ const bridgeKey = process.env.OPENPRESENCE_BRIDGE_KEY;
 const executorId = process.env.BRIDGE_EXECUTOR_ID || "x-browser-bridge";
 const discoveryUrl = process.env.X_BROWSER_DISCOVERY_URL || "https://x.com/home";
 const expectedHandle = (process.env.X_EXPECTED_HANDLE || "").replace(/^@/, "").toLowerCase();
-const pollMs = Number(process.env.BRIDGE_POLL_MS || 5_000);
+const configuredPollMs = Number(process.env.BRIDGE_POLL_MS || 1_000);
+// Delivery is a latency-sensitive queue, but it must still have a floor so a
+// misconfigured bridge cannot busy-loop against the local API.
+const pollMs = Number.isFinite(configuredPollMs) ? Math.max(250, configuredPollMs) : 1_000;
 const observeMs = Number(process.env.X_BROWSER_OBSERVE_MS || 30_000);
 const profileDir = process.env.X_BROWSER_PROFILE_DIR;
 const cdpUrl = process.env.X_BROWSER_CDP_URL;
@@ -92,43 +95,38 @@ async function submitObservedObjects(objects) {
   await request("/api/bridge/v1/events", { events: objects.map((object) => ({ sourceEventId: `x-browser:v2:${object.externalRef.id}`, event: "updated", object })) });
 }
 
-async function observeX(page) {
+async function observeXPage(page, url, seenIds = new Set()) {
   const objects = [];
-  // Mentions are the latency-sensitive inbound path. Emit them as soon as
-  // that page is readable so the server can wake cognition while the slower
-  // discovery timeline is still being collected as a separate batch.
-  for (const url of ["https://x.com/notifications/mentions", discoveryUrl]) {
-    const countBeforePage = objects.length;
-    await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
-    if (!(await signedIn(page))) throw new Error(`The X browser session is not signed in as @${expectedHandle || "the expected account"}.`);
-    await page.waitForTimeout(1_500);
-    const articles = page.locator('article[data-testid="tweet"], article');
-    const count = Math.min(await articles.count(), 40);
-    for (let index = 0; index < count; index += 1) {
-      const article = articles.nth(index);
-      const hrefs = await article.locator('a[href*="/status/"]').evaluateAll((links) => links.map((link) => link.getAttribute("href"))).catch(() => []);
-      const text = (await article.innerText().catch(() => "")).trim();
-      const ownStatusHref = await article.locator("time").first().evaluate((time) => time.closest("a")?.getAttribute("href") || undefined).catch(() => undefined);
-      const id = statusIdFromHref(ownStatusHref) ?? firstStatusId(hrefs, undefined);
-      const isReply = isReplyArticleText(text);
-      const parentId = isReply ? firstStatusId(hrefs, id) : undefined;
-      if (!id || text.length < 3 || objects.some((item) => item.externalRef.id === id)) continue;
-      const authorHandle = await article.locator('[data-testid="User-Name"] a').first().getAttribute("href").catch(() => undefined);
-      const handle = authorHandle?.replace(/^\//, "");
-      objects.push({
-        externalRef: { type: "x.post", id },
-        ...(parentId ? { parentExternalRef: { type: "x.post", id: parentId } } : {}),
-        objectType: isReply ? "reply" : "post",
-        author: { externalRef: handle ? { type: "x.user", id: handle } : undefined, displayName: handle ? `@${handle}` : "X user", handle },
-        content: { text },
-        occurredAt: new Date().toISOString(),
-        visibility: "public",
-        shareability: "presence-only",
-      });
-    }
-    await submitObservedObjects(objects.slice(countBeforePage));
+  await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
+  if (!(await signedIn(page))) throw new Error(`The X browser session is not signed in as @${expectedHandle || "the expected account"}.`);
+  await page.waitForTimeout(1_500);
+  const articles = page.locator('article[data-testid="tweet"], article');
+  const count = Math.min(await articles.count(), 40);
+  for (let index = 0; index < count; index += 1) {
+    const article = articles.nth(index);
+    const hrefs = await article.locator('a[href*="/status/"]').evaluateAll((links) => links.map((link) => link.getAttribute("href"))).catch(() => []);
+    const text = (await article.innerText().catch(() => "")).trim();
+    const ownStatusHref = await article.locator("time").first().evaluate((time) => time.closest("a")?.getAttribute("href") || undefined).catch(() => undefined);
+    const id = statusIdFromHref(ownStatusHref) ?? firstStatusId(hrefs, undefined);
+    const isReply = isReplyArticleText(text);
+    const parentId = isReply ? firstStatusId(hrefs, id) : undefined;
+    if (!id || text.length < 3 || seenIds.has(id)) continue;
+    seenIds.add(id);
+    const authorHandle = await article.locator('[data-testid="User-Name"] a').first().getAttribute("href").catch(() => undefined);
+    const handle = authorHandle?.replace(/^\//, "");
+    objects.push({
+      externalRef: { type: "x.post", id },
+      ...(parentId ? { parentExternalRef: { type: "x.post", id: parentId } } : {}),
+      objectType: isReply ? "reply" : "post",
+      author: { externalRef: handle ? { type: "x.user", id: handle } : undefined, displayName: handle ? `@${handle}` : "X user", handle },
+      content: { text },
+      occurredAt: new Date().toISOString(),
+      visibility: "public",
+      shareability: "presence-only",
+    });
   }
-  return objects.length;
+  await submitObservedObjects(objects);
+  return { count: objects.length, seenIds };
 }
 
 async function reportXMetrics(page) {
@@ -358,6 +356,20 @@ async function fail(execution, error) {
   await request(`/api/bridge/v1/executions/${execution.id}/fail`, { executorId, code: error?.code || "BROWSER_DELIVERY_FAILED", message: error instanceof Error ? error.message : String(error), retryable: false });
 }
 
+async function processClaimedExecutions(page) {
+  const result = await request("/api/bridge/v1/executions/claim", { executorId, limit: 5 });
+  for (const execution of result.executions ?? []) {
+    try {
+      const externalRef = await deliver(page, execution);
+      await request(`/api/bridge/v1/executions/${execution.id}/ack`, { executorId, externalRef, observedAt: new Date().toISOString() });
+      console.log(`Verified ${execution.affordance} ${externalRef.type}:${externalRef.id}.`);
+    } catch (error) {
+      console.warn(`Execution ${execution.id} failed:`, error instanceof Error ? error.message : String(error));
+      await fail(execution, error);
+    }
+  }
+}
+
 async function main() {
   const browser = cdpUrl ? await chromium.connectOverCDP(cdpUrl) : undefined;
   const context = browser?.contexts()[0] ?? await chromium.launchPersistentContext(profileDir, { headless: false });
@@ -369,23 +381,29 @@ async function main() {
     const now = Date.now();
     if (now - lastHeartbeat >= 45_000) { await heartbeat(); lastHeartbeat = now; }
     if (now - lastObservation >= observeMs) {
-      try { const count = await observeX(page); if (count) console.log(`Observed ${count} X post(s).`); }
+      let seenIds = new Set();
+      try {
+        // Mentions are the latency-sensitive inbound path. Claim any action
+        // produced by this batch before scanning the slower discovery page or
+        // metrics, so a queued response does not wait behind unrelated work.
+        const mentions = await observeXPage(page, "https://x.com/notifications/mentions", seenIds);
+        seenIds = mentions.seenIds;
+        if (mentions.count) console.log(`Observed ${mentions.count} X mention(s).`);
+      }
+      catch (error) { console.warn(error instanceof Error ? error.message : String(error)); }
+      lastObservation = Date.now();
+      try { await processClaimedExecutions(page); }
+      catch (error) { console.warn("Execution claim unavailable:", error instanceof Error ? error.message : String(error)); }
+      try {
+        const discovery = await observeXPage(page, discoveryUrl, seenIds);
+        if (discovery.count) console.log(`Observed ${discovery.count} X discovery post(s).`);
+      }
       catch (error) { console.warn(error instanceof Error ? error.message : String(error)); }
       try { await reportXMetrics(page); console.log("Reported X audience and publication metrics."); }
       catch (error) { console.warn("X metrics unavailable:", error instanceof Error ? error.message : String(error)); }
-      lastObservation = Date.now();
     }
-    const result = await request("/api/bridge/v1/executions/claim", { executorId, limit: 5 });
-    for (const execution of result.executions ?? []) {
-      try {
-        const externalRef = await deliver(page, execution);
-        await request(`/api/bridge/v1/executions/${execution.id}/ack`, { executorId, externalRef, observedAt: new Date().toISOString() });
-        console.log(`Verified ${execution.affordance} ${externalRef.type}:${externalRef.id}.`);
-      } catch (error) {
-        console.warn(`Execution ${execution.id} failed:`, error instanceof Error ? error.message : String(error));
-        await fail(execution, error);
-      }
-    }
+    try { await processClaimedExecutions(page); }
+    catch (error) { console.warn("Execution claim unavailable:", error instanceof Error ? error.message : String(error)); }
     await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
 }
