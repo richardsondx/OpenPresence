@@ -115,6 +115,12 @@ const activityProjectionKeys = new Set<keyof OpenPresenceState>([
   "agentWorkspaces", "mirrorEvents",
 ]);
 
+const chatProjectionKeys = new Set<keyof OpenPresenceState>([
+  "agent", "agents", "activeAgentId", "activePresenceId", "presence", "presences", "onboarded", "workspaceRevision",
+  "assignments", "actions", "executions", "outcomes", "socialIntents", "socialDecisions", "mirrorObjects", "nativeConnections", "bridges", "channelDefinitions",
+  "operationalRuns", "attentionEpisodes", "operatorConversations", "operatorNudges",
+]);
+
 function activityProjection(state: OpenPresenceState): OpenPresenceState {
   const projection = Object.fromEntries(Object.entries(state).filter(([key]) => activityProjectionKeys.has(key as keyof OpenPresenceState))) as OpenPresenceState;
   projection.responseProjection = "activity";
@@ -222,11 +228,52 @@ function activityProjection(state: OpenPresenceState): OpenPresenceState {
   return projection;
 }
 
+function chatProjection(state: OpenPresenceState): OpenPresenceState {
+  const projection = Object.fromEntries(Object.entries(state).filter(([key]) => chatProjectionKeys.has(key as keyof OpenPresenceState))) as OpenPresenceState;
+  projection.responseProjection = "chat";
+  const presenceId = state.presence?.id ?? state.activePresenceId ?? undefined;
+  const scoped = <T>(items: T[] | undefined, limit: number) => (items ?? [])
+    .filter((item) => !presenceId || (item as { presenceId?: string }).presenceId === undefined || (item as { presenceId?: string }).presenceId === presenceId)
+    .slice(-limit);
+  const compactAssignment = (assignment: OpenPresenceState["assignments"][number]) => ({
+    ...assignment,
+    storyResearch: assignment.storyResearch?.slice(-3),
+    planHistory: assignment.planHistory?.slice(-3),
+    attemptHistory: assignment.attemptHistory?.slice(-8),
+  });
+  projection.assignments = scoped(state.assignments, 24).map(compactAssignment) as never;
+  const executionIsInFlight = (execution: OpenPresenceState["executions"][number]) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"].includes(execution.status);
+  projection.executions = scoped(state.executions, 60).map((execution) => {
+    const compact = { ...execution };
+    delete compact.permit;
+    if (!executionIsInFlight(execution)) delete compact.publication;
+    return compact;
+  }) as never;
+  projection.actions = scoped(state.actions, 60) as never;
+  projection.outcomes = scoped(state.outcomes, 80) as never;
+  projection.socialIntents = scoped(state.socialIntents, 60) as never;
+  projection.socialDecisions = scoped(state.socialDecisions, 60) as never;
+  projection.operatorNudges = scoped(state.operatorNudges, 50) as never;
+  projection.operationalRuns = scoped(state.operationalRuns, 60) as never;
+  projection.attentionEpisodes = scoped(state.attentionEpisodes, 16) as never;
+  projection.operatorConversations = scoped(state.operatorConversations, 4).map((conversation) => ({
+    ...conversation,
+    messages: conversation.messages.slice(-100),
+  })) as never;
+
+  const targetIds = new Set((projection.executions ?? []).map((execution) => execution.target?.id).filter((id): id is string => Boolean(id)));
+  const mirrors = state.mirrorObjects.filter((object) => !presenceId || object.presenceId === presenceId);
+  projection.mirrorObjects = [...mirrors.filter((object) => targetIds.has(object.externalRef.id)), ...mirrors.filter((object) => !targetIds.has(object.externalRef.id)).slice(-60)] as never;
+  return projection;
+}
+
 /** Keep mutation responses bounded to the same browser scope as GET reads. */
 function stateForResponse(request: Request, state: OpenPresenceState, forceActivity = false) {
   const projection = request.headers.get("x-openpresence-projection");
   return forceActivity || projection === "activity"
     ? activityProjection(state)
+    : projection === "chat"
+      ? chatProjection(state)
     : { ...state, responseProjection: "full" as const, agentWorkspaces: [] };
 }
 
@@ -4586,7 +4633,9 @@ export async function GET(request: Request) {
     : (() => {
       const browserState = projection === "activity"
         ? activityProjection(contextualState)
-        : { ...contextualState, responseProjection: "full" as const, agentWorkspaces: [], mirrorEvents: [] };
+        : projection === "chat"
+          ? chatProjection(contextualState)
+          : { ...contextualState, responseProjection: "full" as const, agentWorkspaces: [], mirrorEvents: [] };
       const payload = { ...browserState, runtimeIdentity: { dbPath: resolvedDbPath, dbSelectionSource, agentId: contextualState.agent?.id ?? null, presenceId: contextualState.presence?.id ?? null, handle: contextualState.presence?.handle ?? null } };
       if (projection !== "activity") return NextResponse.json(payload, { headers: responseHeaders });
       const body = JSON.stringify(payload);

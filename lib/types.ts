@@ -2620,7 +2620,7 @@ export interface AgentWorkspaceSnapshot {
 export interface OpenPresenceState extends AgentWorkspaceSnapshot {
   agents: Agent[]; activeAgentId: string | null; agentWorkspaces: AgentWorkspaceSnapshot[]; assignmentRuns?: AssignmentRun[];
   /** Identifies whether an API response contains the complete workspace or the compact Activity read model. Never persisted. */
-  responseProjection?: "activity" | "full";
+  responseProjection?: "activity" | "chat" | "full";
   /** Activity-only compact summaries. They are derived from the full ledger and never persisted as workspace state. */
   activityAttentionUsageSnapshots?: Record<string, ActivityAttentionUsageSnapshot>;
   activityNow?: Record<string, ActivityNowProjection>;

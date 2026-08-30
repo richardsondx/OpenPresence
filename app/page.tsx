@@ -825,7 +825,7 @@ export default function Home() {
   const attentionConflictRevision = useRef<number | null>(null);
   const playgroundStartInFlight = useRef<string | null>(null);
   const playgroundClockSyncInFlight = useRef<string | null>(null);
-  const refreshStateInFlight = useRef<{ projection: "activity" | "full"; request: Promise<OpenPresenceState> } | null>(null);
+  const refreshStateInFlight = useRef<{ projection: "activity" | "chat" | "full"; request: Promise<OpenPresenceState> } | null>(null);
   const refreshStateRef = useRef<(() => Promise<OpenPresenceState>) | null>(null);
   const rememberStateResponse = useCallback((response: Response) => {
     const etag = response.headers.get("etag");
@@ -844,8 +844,9 @@ export default function Home() {
     const requestedAgentId = query.get("agentId");
     const requestedPresenceId = query.get("presenceId");
     query.set("read", Date.now().toString());
-    if (typeof window !== "undefined" && viewForLocation(window.location) === "live") {
-      query.set("projection", "activity");
+    if (typeof window !== "undefined") {
+      const initialView = viewForLocation(window.location);
+      if (initialView === "live" || initialView === "chat") query.set("projection", initialView === "live" ? "activity" : "chat");
     }
     fetchState<OpenPresenceState>(`/api/state?${query.toString()}`)
       .then((payload) => {
@@ -920,7 +921,7 @@ export default function Home() {
             ...(context?.activeAgentId ? { "x-openpresence-agent-id": context.activeAgentId } : {}),
             ...(context?.activePresenceId ? { "x-openpresence-presence-id": context.activePresenceId } : {}),
             ...(context?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(context.workspaceRevision) } : {}),
-            ...(view === "live" ? { "x-openpresence-projection": "activity" } : {}),
+            ...(view === "live" ? { "x-openpresence-projection": "activity" } : view === "chat" ? { "x-openpresence-projection": "chat" } : {}),
           },
           body: JSON.stringify(operation),
         }, runtimeTimeoutForOperation(operationType));
@@ -977,8 +978,10 @@ export default function Home() {
     }
   }
   async function refreshState(): Promise<OpenPresenceState> {
-    const useActivityProjection = typeof window !== "undefined" && viewForLocation(window.location) === "live";
-    const requestedProjection = useActivityProjection ? "activity" : "full";
+    const currentView = typeof window !== "undefined" ? viewForLocation(window.location) : "full";
+    const useActivityProjection = currentView === "live";
+    const useChatProjection = currentView === "chat";
+    const requestedProjection = useActivityProjection ? "activity" : useChatProjection ? "chat" : "full";
     // A navigation away from Activity must not reuse its smaller in-flight
     // response. That response deliberately omits view-specific collections
     // such as Growth history and is not a complete OpenPresenceState.
