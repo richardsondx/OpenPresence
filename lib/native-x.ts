@@ -138,6 +138,15 @@ export const nextObservationAt = (presence: Presence | undefined, from = Date.no
   return candidate.toISOString();
 };
 
+function newestXId(ids: string[]) {
+  return ids
+    .filter((id) => /^\d+$/.test(id))
+    .reduce<string | undefined>((newest, id) => {
+      if (!newest) return id;
+      return BigInt(id) > BigInt(newest) ? id : newest;
+    }, undefined);
+}
+
 function watchHandleForX(watch: OpenPresenceState["watches"][number]) {
   const direct = watch.target?.handle?.replace(/^@/, "").trim();
   if (direct) return direct.toLowerCase();
@@ -200,9 +209,11 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
       ...(targetPresence?.context.publicFooting?.recentPostIds ?? []),
       ...knownOwnMirrorPostIds,
     ]);
+    const previousInboundIds = targetPresence?.context.publicFooting?.recentInboundIds ?? [];
+    const inboundSinceId = newestXId(previousInboundIds);
     const [postsResult, mentionsResult] = await Promise.allSettled([
       options?.inboundOnly ? Promise.resolve([] as XRecentPost[]) : readRecentXPosts(credentials, accountId),
-      readRecentXMentions(credentials, accountId, connectedHandle ?? configuredHandle, options?.inboundOnly ? 25 : 100),
+      readRecentXMentions(credentials, accountId, connectedHandle ?? configuredHandle, options?.inboundOnly ? 25 : 100, { sinceId: inboundSinceId }),
     ]);
     next = recordResourceUsageEvent(next, { presenceId, invocationId: options?.invocationId ?? `x-reconcile:${randomUUID()}`, runId: options?.runId, originKind: "inbound_social", attentionSource: "inbound_social", category: "channel_read", provider: "x", usage: { requests: options?.inboundOnly ? 1 : 2 }, attentionEpisodeId: options?.attentionEpisodeId });
     if (postsResult.status === "rejected") throw postsResult.reason;
@@ -308,8 +319,8 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
     // inbound mention when cognition actually needs thread context.
     next = recordPublicFooting(next, presenceId, {
       postsPublished: posts.length,
-      recentPostIds: posts.map((post) => post.id),
-      recentInboundIds: mentions.map((mention) => mention.id),
+      recentPostIds: [...new Set([...posts.map((post) => post.id), ...(targetPresence?.context.publicFooting?.recentPostIds ?? [])])].slice(0, 100),
+      recentInboundIds: [...new Set([...mentions.map((mention) => mention.id), ...previousInboundIds])].slice(0, 100),
       judgedInboundIds: next.presences.find((item) => item.id === presenceId)?.context.publicFooting?.judgedInboundIds,
       observedAt,
     });

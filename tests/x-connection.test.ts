@@ -53,6 +53,19 @@ describe("native X connection", () => {
     }
   });
 
+  it("uses the newest known mention as an X delta cursor", async () => {
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    const fetchMock = vi.fn().mockResolvedValue(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await readRecentXMentions({ apiKey: "api", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" }, "account-1", "example_agent", 25, { sinceId: "2092177859288666350" });
+      expect(String(fetchMock.mock.calls[0]?.[0])).toContain("since_id=2092177859288666350");
+      expect(String(fetchMock.mock.calls[0]?.[0])).toContain("max_results=25");
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("preserves encrypted credentials when edit fields are left blank", () => {
     expect(mergeXCredentials({ apiKey: "saved-key", apiSecret: "saved-secret", bearerToken: "saved-bearer" }, { apiKey: "" })).toEqual({ apiKey: "saved-key", apiSecret: "saved-secret", bearerToken: "saved-bearer" });
     expect(mergeXCredentials({ apiKey: "saved-key", apiSecret: "saved-secret", bearerToken: "saved-bearer" }, { bearerToken: "replacement" })).toEqual({ apiKey: "saved-key", apiSecret: "saved-secret", bearerToken: "replacement" });

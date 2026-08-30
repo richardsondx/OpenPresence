@@ -267,6 +267,17 @@ function normalizeAccount(account: XAccountResponse): XAccount {
 export interface XAudienceSnapshot { followers: number; following?: number; observedAt: string; }
 export interface XPublicationMetrics { id: string; createdAt?: string; impressions?: number; likes?: number; replies?: number; reposts?: number; quotes?: number; }
 
+export interface XReadOptions {
+  /** Return only posts newer than this X snowflake when the endpoint supports it. */
+  sinceId?: string;
+}
+
+function withSinceId(query: Record<string, string>, options?: XReadOptions) {
+  return options?.sinceId && /^\d+$/.test(options.sinceId)
+    ? { ...query, since_id: options.sinceId }
+    : query;
+}
+
 export async function testXCredentials(credentials: XCredentials, presenceHandle: string) {
   const mocked = mockAccount(credentials, presenceHandle);
   if (mocked) return { account: mocked, access: credentials.accessToken && credentials.accessTokenSecret ? "read-write" as const : "read" as const };
@@ -350,9 +361,9 @@ export function followXUser(credentials: XCredentials, userId: string, targetUse
   return postXAction(credentials, `/2/users/${encode(userId)}/following`, { target_user_id: targetUserId }, "x.follow", targetUserId);
 }
 
-export async function readRecentXPosts(credentials: XCredentials, accountId: string, maxResults = 100): Promise<XRecentPost[]> {
+export async function readRecentXPosts(credentials: XCredentials, accountId: string, maxResults = 100, options?: XReadOptions): Promise<XRecentPost[]> {
   if (isXMockEnabled() && credentials.apiKey.startsWith("test_")) return [];
-  const query = { "tweet.fields": "created_at,conversation_id,referenced_tweets,attachments,lang", expansions: "author_id,attachments.media_keys,referenced_tweets.id", "user.fields": "name,username,profile_image_url", "media.fields": "type,url,preview_image_url,alt_text", max_results: String(Math.min(100, Math.max(5, maxResults))) };
+  const query = withSinceId({ "tweet.fields": "created_at,conversation_id,referenced_tweets,attachments,lang", expansions: "author_id,attachments.media_keys,referenced_tweets.id", "user.fields": "name,username,profile_image_url", "media.fields": "type,url,preview_image_url,alt_text", max_results: String(Math.min(100, Math.max(5, maxResults))) }, options);
   const queryString = new URLSearchParams(query).toString();
   const url = `${apiBase()}/2/users/${encode(accountId)}/tweets?${queryString}`;
   const response = await requestJson<XPostResponse>(`/2/users/${encode(accountId)}/tweets?${queryString}`, {
@@ -362,7 +373,7 @@ export async function readRecentXPosts(credentials: XCredentials, accountId: str
   return parseXPosts(response);
 }
 
-export async function readRecentXMentions(credentials: XCredentials, accountId: string, username?: string, maxResults = 100): Promise<XRecentPost[]> {
+export async function readRecentXMentions(credentials: XCredentials, accountId: string, username?: string, maxResults = 100, options?: XReadOptions): Promise<XRecentPost[]> {
   if (isXMockEnabled() && credentials.apiKey.startsWith("test_")) return [];
   const normalizedUsername = normalizeHandle(username ?? "");
   if (normalizedUsername) {
@@ -370,9 +381,9 @@ export async function readRecentXMentions(credentials: XCredentials, accountId: 
     // the Presence's posts without spelling out @handle. Search both forms
     // of inbound attention in one read so direct replies (including media-only
     // GIF replies) enter the Social Mirror as ordinary inbound objects.
-    return searchRecentXPosts(credentials, `(@${normalizedUsername} OR to:${normalizedUsername}) -from:${normalizedUsername}`, maxResults);
+    return searchRecentXPosts(credentials, `(@${normalizedUsername} OR to:${normalizedUsername}) -from:${normalizedUsername}`, maxResults, options);
   }
-  const query = { expansions: "author_id,attachments.media_keys,referenced_tweets.id", "tweet.fields": "created_at,conversation_id,referenced_tweets,attachments,lang", "user.fields": "name,username,profile_image_url", "media.fields": "type,url,preview_image_url,alt_text", max_results: String(Math.min(100, Math.max(5, maxResults))) };
+  const query = withSinceId({ expansions: "author_id,attachments.media_keys,referenced_tweets.id", "tweet.fields": "created_at,conversation_id,referenced_tweets,attachments,lang", "user.fields": "name,username,profile_image_url", "media.fields": "type,url,preview_image_url,alt_text", max_results: String(Math.min(100, Math.max(5, maxResults))) }, options);
   const queryString = new URLSearchParams(query).toString();
   const url = `${apiBase()}/2/users/${encode(accountId)}/mentions?${queryString}`;
   const response = await requestJson<XPostResponse>(`/2/users/${encode(accountId)}/mentions?${queryString}`, {
@@ -383,19 +394,19 @@ export async function readRecentXMentions(credentials: XCredentials, accountId: 
 }
 
 /** Search recent public X posts for an Exploration. The query is compiled by OpenPresence before it reaches X. */
-export async function searchRecentXPosts(credentials: XCredentials, query: string, maxResults = 25): Promise<XRecentPost[]> {
+export async function searchRecentXPosts(credentials: XCredentials, query: string, maxResults = 25, options?: XReadOptions): Promise<XRecentPost[]> {
   const clean = query.trim().slice(0, 512);
   if (!clean) return [];
   if (isXMockEnabled() && credentials.apiKey.startsWith("test_")) return [];
   const searchQuery = /(?:^|\s)-is:retweet(?:\s|$)/i.test(clean) ? clean : `${clean} -is:retweet`;
-  const params = {
+  const params = withSinceId({
     query: searchQuery,
     "tweet.fields": "created_at,conversation_id,author_id,referenced_tweets,attachments,lang",
     expansions: "author_id,attachments.media_keys,referenced_tweets.id",
     "user.fields": "name,username,profile_image_url",
     "media.fields": "type,url,preview_image_url,alt_text",
     max_results: String(Math.min(100, Math.max(10, maxResults))),
-  };
+  }, options);
   const queryString = new URLSearchParams(params).toString();
   const url = `${apiBase()}/2/tweets/search/recent?${queryString}`;
   const response = await requestJson<XPostResponse>(`/2/tweets/search/recent?${queryString}`, {
