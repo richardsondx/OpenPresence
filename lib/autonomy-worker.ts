@@ -601,6 +601,16 @@ export async function executeAutonomyRun(runId: string): Promise<OpenPresenceSta
       resultState = await runAutonomousObservation(run.presenceId, { runId, invocationId, attentionEpisodeId, suppressAmbientInbound: run.attention?.triggers.includes("operator_nudge") });
     } else if (run.kind === "discovery") {
       resultState = await runAutonomousSelfDirectedDiscovery(run.presenceId, undefined, { runId, invocationId, attentionEpisodeId, forceEligibility: run.attention?.triggers.includes("operator_check") || run.attention?.triggers.includes("operator_nudge") });
+    } else if (run.kind === "attention" && run.attention?.scope === "judge_watches") {
+      resultState = await runAutonomousWatchSignals(readStateSnapshotForContext({ presenceId: run.presenceId }), run.presenceId, { runId, invocationId, attentionEpisodeId });
+      const residualTriggers = run.attention.triggers.filter((trigger) => trigger !== "watch_judgment");
+      if (residualTriggers.some((trigger) => ["self_directed", "operator_check", "operator_nudge", "assignment_due", "recovery"].includes(trigger))) {
+        resultState = await runAutonomousAttention(run.presenceId, { runId, invocationId, attentionEpisodeId, forceEligibility: residualTriggers.includes("operator_check") || residualTriggers.includes("operator_nudge") });
+      } else if (residualTriggers.includes("inbound_event") && run.attention.source === "bridge") {
+        resultState = await runBridgeInboundAttentionPass(run.presenceId, { runId, invocationId, attentionEpisodeId });
+      } else if (residualTriggers.includes("scheduled_observation") || residualTriggers.includes("inbound_event")) {
+        resultState = await runObservedAttentionPass(run.presenceId, { runId, invocationId, attentionEpisodeId, inboundOnly: true });
+      }
     } else if (run.kind === "attention" && (run.attention?.scope === "observe_inbound" || autonomyRunHasPriority(run))) {
       const attentionOptions = { runId, invocationId, attentionEpisodeId, suppressAmbientInbound: run.attention?.triggers.includes("operator_nudge"), inboundOnly: true };
       resultState = run.attention?.source === "bridge"
@@ -1122,11 +1132,11 @@ export async function runBridgeInboundAttentionPass(
   dependencies: {
     readState: (presenceId: string) => OpenPresenceState;
     pulse: typeof runAutonomousPulse;
-    judgeWatches: typeof runAutonomousWatchSignals;
+    scheduleWatchJudgment: (presenceId: string, requestedAt: string) => unknown;
   } = {
     readState: (id) => readStateSnapshotForContext({ presenceId: id }),
     pulse: runAutonomousPulse,
-    judgeWatches: runAutonomousWatchSignals,
+    scheduleWatchJudgment: (id, requestedAt) => requestAttention(id, "watch_judgment", requestedAt, "judge_watches"),
   },
 ): Promise<OpenPresenceState> {
   let observed = dependencies.readState(presenceId);
@@ -1137,7 +1147,15 @@ export async function runBridgeInboundAttentionPass(
     });
   }
   const pulsed = await dependencies.pulse(presenceId, { ...options, skipThreadHydration: true }, observed);
-  return dependencies.judgeWatches(pulsed, presenceId, options);
+  const hasPendingWatchSignals = pulsed.watchSignals.some((signal) => signal.presenceId === presenceId && signal.disposition === "pending");
+  if (hasPendingWatchSignals) {
+    // Keep unrelated Watch cognition off the mention's critical path. The
+    // delay is longer than the coordinator's due-now coalescing window, so
+    // this becomes a durable follow-up wake even while the inbound run is
+    // still settling.
+    dependencies.scheduleWatchJudgment(presenceId, new Date(Date.now() + 1_100).toISOString());
+  }
+  return pulsed;
 }
 
 /**

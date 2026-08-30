@@ -200,10 +200,11 @@ export type AttentionTrigger =
   | "operator_check"
   | "operator_nudge"
   | "inbound_event"
+  | "watch_judgment"
   | "assignment_due"
   | "recovery";
 
-export type AttentionScope = "observe_inbound" | "broad" | "assignment" | "recovery";
+export type AttentionScope = "observe_inbound" | "judge_watches" | "broad" | "assignment" | "recovery";
 
 export type AttentionRunDisposition =
   | "observed_no_change"

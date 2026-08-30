@@ -755,7 +755,8 @@ export function runOperationalSweep(now = new Date()): SweepResult {
         ["queued", "running", "recovering", "delivery_uncertain", "reconciling"].includes(run.state)
       ));
       if (existingRun) {
-        if (attentionRunAcceptsSignal(existingRun)) {
+        const watchJudgmentMustRemainIndependent = request.scope === "judge_watches";
+        if (!watchJudgmentMustRemainIndependent && attentionRunAcceptsSignal(existingRun)) {
           existingRun.attention = mergeAttentionRequests(existingRun.attention, request);
           upsertOperationalRun(existingRun);
         } else {

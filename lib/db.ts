@@ -1538,9 +1538,10 @@ export function upsertScheduledWake(wake: ScheduledWake): void {
 
 const attentionScopeRank: Record<AttentionScope, number> = {
   observe_inbound: 0,
-  recovery: 1,
-  assignment: 2,
-  broad: 3,
+  judge_watches: 1,
+  recovery: 2,
+  assignment: 3,
+  broad: 4,
 };
 
 /**

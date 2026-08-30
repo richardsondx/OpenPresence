@@ -46,6 +46,17 @@ describe("durable Attention coordinator", () => {
     expect(receipt.wake?.payload).toMatchObject({ source: "bridge", triggers: ["inbound_event"] });
   });
 
+  it("keeps deferred Watch judgment in a separate follow-up wake", () => {
+    const presenceId = `presence_watch_follow_up_${Date.now()}_${Math.random()}`;
+    const run = attentionRun(presenceId, { state: "running", stage: "runtime.pulse", attention: { triggers: ["inbound_event"], scope: "observe_inbound", requestedAt: now(), signalIds: ["seed"], source: "bridge" } });
+    upsertOperationalRun(run);
+
+    const receipt = requestAttention(presenceId, "watch_judgment", new Date(Date.now() + 1_100).toISOString());
+    expect(receipt.coalesced).toBe(true);
+    expect(receipt.runId).toBeUndefined();
+    expect(receipt.wake?.payload).toMatchObject({ scope: "judge_watches", triggers: ["watch_judgment"] });
+  });
+
   it("preserves Bridge provenance when an inbound wake merges with broad work", () => {
     const presenceId = `presence_bridge_merge_${Date.now()}_${Math.random()}`;
     requestAttention(presenceId, "self_directed", now(), "broad");

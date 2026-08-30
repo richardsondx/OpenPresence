@@ -117,14 +117,36 @@ describe("Composable Multi-Act Decisions and Discrete Intent Formation", () => {
     const state = createAgent({ name: "Jenny", description: "Explain AI agents.", mode: "agent", handle: "@jenny_ai", accent: "#D68754" });
     const calls: string[] = [];
     let pulseOptions: { skipThreadHydration?: boolean } | undefined;
+    let scheduledAt = "";
     const result = await runBridgeInboundAttentionPass(state.presence!.id, { runId: "run-bridge-inbound" }, {
       readState: () => { calls.push("read-mirror"); return state; },
       pulse: async (_presenceId, options, observed) => { calls.push("pulse"); pulseOptions = options; return observed ?? state; },
-      judgeWatches: async (observed) => { calls.push("judge-watches"); return observed; },
+      scheduleWatchJudgment: (_presenceId, requestedAt) => { calls.push("schedule-watch-judgment"); scheduledAt = requestedAt; },
     });
 
-    expect(calls).toEqual(["read-mirror", "pulse", "judge-watches"]);
+    expect(calls).toEqual(["read-mirror", "pulse"]);
     expect(pulseOptions?.skipThreadHydration).toBe(true);
+    expect(scheduledAt).toBe("");
     expect(result).toBe(state);
+  });
+
+  it("defers unrelated Watch cognition after a Bridge mention", async () => {
+    const state = createAgent({ name: "Jenny", description: "Explain AI agents.", mode: "agent", handle: "@jenny_ai", accent: "#D68754" });
+    const calls: string[] = [];
+    let scheduledAt = "";
+    const observed: OpenPresenceState = {
+      ...state,
+      watchSignals: [{ id: "watch-signal-1", watchId: "watch-1", presenceId: state.presence!.id, mirrorObjectId: "mirror-1", signalType: "new_content", disposition: "pending", createdAt: "2026-08-26T00:00:00.000Z", updatedAt: "2026-08-26T00:00:00.000Z" }],
+    };
+
+    const result = await runBridgeInboundAttentionPass(state.presence!.id, {}, {
+      readState: () => observed,
+      pulse: async () => { calls.push("pulse"); return observed; },
+      scheduleWatchJudgment: (_presenceId, requestedAt) => { calls.push("schedule-watch-judgment"); scheduledAt = requestedAt; },
+    });
+
+    expect(result).toBe(observed);
+    expect(calls).toEqual(["pulse", "schedule-watch-judgment"]);
+    expect(Date.parse(scheduledAt)).toBeGreaterThan(Date.now());
   });
 });

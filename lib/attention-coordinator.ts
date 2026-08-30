@@ -12,9 +12,10 @@ const activeAttentionStates = new Set<OperationalRun["state"]>([
 
 const scopeRank: Record<AttentionScope, number> = {
   observe_inbound: 0,
-  recovery: 1,
-  assignment: 2,
-  broad: 3,
+  judge_watches: 1,
+  recovery: 2,
+  assignment: 3,
+  broad: 4,
 };
 
 const defaultScope: Record<AttentionTrigger, AttentionScope> = {
@@ -23,6 +24,7 @@ const defaultScope: Record<AttentionTrigger, AttentionScope> = {
   operator_check: "broad",
   operator_nudge: "broad",
   inbound_event: "observe_inbound",
+  watch_judgment: "judge_watches",
   assignment_due: "assignment",
   recovery: "recovery",
 };
@@ -63,7 +65,7 @@ export function requestAttention(
   const request: AttentionRunRequest = { triggers: [trigger], scope, requestedAt, signalIds: [signalId], ...(source ? { source } : {}) };
   const active = listOperationalRuns(presenceId).find((run) => run.kind === "attention" && activeAttentionStates.has(run.state));
   const dueNow = !Number.isFinite(Date.parse(requestedAt)) || Date.parse(requestedAt) <= Date.now() + 1_000;
-  const requiresFollowUp = trigger === "operator_check" || trigger === "operator_nudge";
+  const requiresFollowUp = trigger === "operator_check" || trigger === "operator_nudge" || trigger === "watch_judgment";
   if (active && dueNow && attentionRunAcceptsSignal(active) && !requiresFollowUp) {
     active.attention = mergeAttentionRequests(active.attention, request);
     active.lastProgressAt = active.lastProgressAt ?? requestedAt;
