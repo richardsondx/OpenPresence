@@ -156,7 +156,8 @@ if (mode === "dev" && !/--max-old-space-size(?:=|\s)/.test(process.env.NODE_OPTI
 const schedulerToken = process.env.OPENPRESENCE_SCHEDULER_TOKEN || crypto.randomBytes(32).toString("base64url");
 childEnv.OPENPRESENCE_SCHEDULER_TOKEN = schedulerToken;
 
-const nextArgs = ["exec", "next", mode, ...(useTurbo ? ["--turbo"] : []), "-p", port];
+const nextCliPath = path.join(projectRoot, "node_modules", "next", "dist", "bin", "next");
+const nextArgs = [nextCliPath, mode, ...(useTurbo ? ["--turbo"] : []), "-p", port];
 let stopping = false;
 let recycling = false;
 let child;
@@ -171,8 +172,8 @@ const serverRssGraceMs = Math.max(0, Number(process.env.OPENPRESENCE_SERVER_RSS_
 function childRssMb() {
   if (!child?.pid || process.platform === "win32") return undefined;
   try {
-    // The launcher owns a pnpm wrapper which owns Next. Measure the complete
-    // descendant tree or the wrapper's small RSS would hide the compiler.
+    // Measure the complete Next process tree so any compiler descendants are
+    // included in the RSS budget.
     const output = execFileSync("ps", ["-axo", "pid=,ppid=,rss="], { encoding: "utf8", stdio: ["ignore", "pipe", "ignore"] });
     const processes = output.split("\n").map((line) => {
       const values = line.trim().split(/\s+/).map(Number);
@@ -209,8 +210,8 @@ function signalNextChild(signal) {
   if (!child?.pid) return;
   if (process.platform !== "win32") {
     try {
-      // `pnpm` is a wrapper around Next. Signal the whole detached process
-      // group so a recycled wrapper cannot leave next-server holding the port.
+      // Signal the whole detached process group so a recycle cannot leave a
+      // Next descendant holding the port after the parent exits.
       process.kill(-child.pid, signal);
       return;
     } catch { /* Fall back to the wrapper when the group already exited. */ }
@@ -253,7 +254,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 function startNextChild() {
-  child = spawn("pnpm", nextArgs, {
+  child = spawn(process.execPath, nextArgs, {
     cwd: projectRoot,
     env: childEnv,
     stdio: "inherit",
