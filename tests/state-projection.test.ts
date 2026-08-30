@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { GET as stateGet } from "../app/api/state/route";
+import { readStateReadToken, readStateVersion } from "../lib/db";
 
 describe("state read projections", () => {
   it("keeps operator chat reads bounded and excludes full workspace stores", async () => {
@@ -22,5 +23,13 @@ describe("state read projections", () => {
     const second = await stateGet(new Request("http://localhost/api/state?projection=chat", { headers: { "if-none-match": etag! } }));
 
     expect(second.status).toBe(304);
+  });
+
+  it("keeps unrelated operational clocks out of the Chat cache token", () => {
+    const chatToken = readStateReadToken("chat");
+    const fullToken = readStateReadToken();
+
+    expect(chatToken.startsWith(`${readStateVersion()}:`)).toBe(true);
+    expect(chatToken).not.toBe(fullToken);
   });
 });

@@ -4549,7 +4549,7 @@ export async function GET(request: Request) {
   const requestedAgentId = url.searchParams.get("agentId") || process.env.OPENPRESENCE_DEFAULT_AGENT_ID;
   const requestedPresenceId = url.searchParams.get("presenceId");
   const projection = url.searchParams.get("projection");
-  const readToken = readStateReadToken();
+  const readToken = projection === "chat" ? readStateReadToken("chat") : readStateReadToken();
   const earlyResolvedAgentId = requestedAgentId ?? "";
   const earlyEtag = `"${readToken}:${earlyResolvedAgentId}:${requestedPresenceId ?? ""}:${projection ?? "full"}"`;
   const conditionalTag = request.headers.get("if-none-match");
@@ -4606,7 +4606,8 @@ export async function GET(request: Request) {
   const resolvedAgentId = requestedAgentId || stored.agents.find((agent) => agent.name.trim().toLowerCase() === (process.env.OPENPRESENCE_DEFAULT_AGENT_NAME?.trim().toLowerCase() || "genny"))?.id;
   // Projection is part of the representation. A cached Activity response
   // must never satisfy a later full Growth/Settings read with a 304.
-  const etag = `"${readStateReadToken()}:${resolvedAgentId ?? ""}:${requestedPresenceId ?? ""}:${projection ?? "full"}"`;
+  const etagReadToken = projection === "chat" ? readStateReadToken("chat") : readStateReadToken();
+  const etag = `"${etagReadToken}:${resolvedAgentId ?? ""}:${requestedPresenceId ?? ""}:${projection ?? "full"}"`;
   if (request.headers.get("if-none-match") === etag) {
     return new Response(null, { status: 304, headers: { ETag: etag, "Cache-Control": "no-cache" } });
   }

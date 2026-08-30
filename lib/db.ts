@@ -635,9 +635,19 @@ export function readStateVersion() {
  * Conditional browser reads must also notice operational bridge and incident changes.
  * Keep readStateVersion focused on workspace writes for conflict semantics,
  * while this read token includes the separate high-frequency health model.
+ *
+ * Chat is a deliberately smaller read model than Activity. It renders the
+ * durable conversation/action projection, not scheduled wakes, dependency
+ * diagnostics, or recovery/bridge heartbeat dashboards. Excluding those
+ * unrelated clocks keeps the Chat 1.5s unfinished-work poll conditional when
+ * background services are healthy but busy.
  */
-export function readStateReadToken() {
+export function readStateReadToken(projection?: "chat") {
   const workspace = readStateVersion();
+  if (projection === "chat") {
+    const run = sqlite.prepare("SELECT MAX(updated_at) AS updated_at FROM operational_runs_idx").get() as { updated_at?: string | null } | undefined;
+    return `${workspace}:${run?.updated_at ?? "empty"}`;
+  }
   const health = sqlite.prepare("SELECT MAX(updated_at) AS updated_at FROM bridge_health").get() as { updated_at?: string | null } | undefined;
   const identity = sqlite.prepare("SELECT MAX(updated_at) AS updated_at FROM bridge_identity").get() as { updated_at?: string | null } | undefined;
   const incident = sqlite.prepare("SELECT MAX(updated_at) AS updated_at FROM recovery_incidents_live").get() as { updated_at?: string | null } | undefined;
