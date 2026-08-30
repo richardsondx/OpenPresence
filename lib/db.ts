@@ -4,7 +4,7 @@ import crypto from "node:crypto";
 import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { sql } from "drizzle-orm";
-import { assertAssignmentPersistenceInvariant, initialState, normalizeState, preflightAssignment, stateForAgent } from "./runtime";
+import { assertAssignmentPersistenceInvariant, initialState, isStateNormalized, markStateNormalized, normalizeState, preflightAssignment, stateForAgent } from "./runtime";
 import type { AgentWorkspaceSnapshot, AttentionScope, AttentionTrigger, Bridge, BridgeAdapterStatus, BrowserBody, DependencyHealth, DependencyHealthKind, DependencyHealthState, Execution, JsonValue, MirrorEvent, OpenPresenceState, OperationalRun, OperationalRunState, ProcessHeartbeat, RecoveryAttempt, RecoveryIncident, RecoveryIncidentState, ScheduledWake } from "./types";
 
 const dataDir = path.join(process.cwd(), "data");
@@ -824,7 +824,7 @@ export function readStateSnapshot(): OpenPresenceState {
   const cachedState = stateCache;
   if (cachedState && cachedState.updatedAt === row.updated_at) return cachedState.state;
   try {
-    const state = hydrateBridgeCredentials(hydrateAgentWorkspaces(hydrateMirrorEvents(normalizeState(JSON.parse(row.payload) as OpenPresenceState))));
+    const state = markStateNormalized(hydrateBridgeCredentials(hydrateAgentWorkspaces(hydrateMirrorEvents(normalizeState(JSON.parse(row.payload) as OpenPresenceState)))));
     stateCache = { updatedAt: row.updated_at ?? "", state };
     return state;
   } catch (error) {
@@ -864,7 +864,7 @@ export function readStateForContext(context: StateContext): OpenPresenceState {
     // workspace and can apply their normal ownership validation.
     return readStateSnapshotForContext(context);
   }
-  const hydrated = hydrateOperationalState(hydrateBridgeHealth(scoped));
+  const hydrated = markStateNormalized(hydrateOperationalState(hydrateBridgeHealth(scoped)));
   // Browser-facing mutations do not need the Agent directory snapshots. Keep
   // those durable rows server-side so POST responses stay small too.
   hydrated.agentWorkspaces = [];
@@ -898,7 +898,7 @@ export function readStateSnapshotForContext(context: StateContext): OpenPresence
       scoped.activePresenceId = context.presenceId;
       scoped.presence = scoped.presences.find((presence) => presence.id === context.presenceId) ?? scoped.presence;
     }
-    return hydrateOperationalState(hydrateBridgeHealth(scoped));
+    return markStateNormalized(hydrateOperationalState(hydrateBridgeHealth(scoped)));
   } catch (error) {
     throw new Error(`OpenPresence database ${resolvedDbPath} contains an unreadable scoped workspace snapshot. ${error instanceof Error ? error.message : String(error)}`);
   }
@@ -1252,7 +1252,12 @@ function scheduleNormalizedSync(state: OpenPresenceState) {
 }
 
 export function writeState(state: OpenPresenceState, options?: { advanceWorkspaceRevision?: boolean; syncNormalized?: boolean; persistAgentWorkspaces?: boolean; persistActiveWorkspace?: boolean; force?: boolean }) {
-  const normalized = normalizeState(state);
+  // applyOperation and scoped read boundaries already performed the complete
+  // repair/migration pass. Reuse that fresh result for the immediate durable
+  // write; a state that has been held across a long provider call falls back
+  // to normalizeState through the freshness check.
+  const normalized = isStateNormalized(state) ? state : normalizeState(state);
+  markStateNormalized(normalized);
   // Never overwrite a durable workspace with a partial or unlinked Assignment
   // collection. Known legacy records are repaired by normalizeState; anything
   // still invalid fails closed before SQLite is touched.
