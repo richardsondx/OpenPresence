@@ -1589,6 +1589,12 @@ export function recordAttentionTestDecision(source: OpenPresenceState, input: { 
   test.target = input.target;
   test.targetUrl = input.targetUrl;
   test.quoteText = input.quoteText;
+  if (input.action === "no_op") {
+    // Silence is a terminal attention-test result. Leaving it queued makes a
+    // valid deliberate NO_OP look like a stalled worker in the operator UI.
+    test.status = "held";
+    attentionTelemetry(test, { stage: "held", action: undefined, targetId: input.target?.id, verificationResult: "not_run", persistenceResult: "pending", detail: "No public action was warranted, so nothing was sent or recorded as a public outcome.", transitionKey: `held:${test.id}` });
+  }
   test.decision = { action: input.action, rationale: input.rationale.trim() || "Genny made a judgment from the available social context.", at: decidedAt };
   test.updatedAt = decidedAt;
   attentionTelemetry(test, { stage: "decided", action: test.action, targetId: input.target?.id, verificationResult: "pending", persistenceResult: "pending", detail: input.action === "no_op" ? `Genny chose silence: ${test.decision.rationale}` : `Genny chose ${input.action}${input.target?.id ? ` for ${input.target.id}` : ""}. ${test.decision.rationale}`, transitionKey: `decided:${input.action}:${input.target?.id ?? "none"}` });

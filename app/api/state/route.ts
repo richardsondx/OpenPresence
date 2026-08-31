@@ -2604,7 +2604,10 @@ async function runOnDemandAttentionTest(source: OpenPresenceState, presenceId: s
   }
 
   for (const candidate of candidates) {
-    const candidateAllowedActions = allowedActions.filter((action) => action !== "quote" || xQuoteTargetHasAvailableRoute(next, presence, candidate.externalRef.id));
+    // Sandbox uses its deterministic simulated executor, so provider-specific
+    // native-X quote restrictions must not remove Quote from the test's
+    // affordance vocabulary. Apply that route check only to live execution.
+    const candidateAllowedActions = allowedActions.filter((action) => mode === "sandbox" || action !== "quote" || xQuoteTargetHasAvailableRoute(next, presence, candidate.externalRef.id));
     if (!candidateAllowedActions.length) continue;
     const threadContext = compileSocialThreadContext(next.mirrorObjects.filter((item) => item.presenceId === presenceId && isCognitionEligibleMirrorObject(item, presence.language)), candidate, { maxObjects: 8 });
     let decision: AgentSocialDecision;
@@ -5359,7 +5362,7 @@ export async function POST(request: Request) {
 
       const liveCapabilities = derivePresenceCapabilityManifest(current, presence.id).items;
       const allowedActions = ["reply", "quote", "repost", "like", "follow", "no_op"].filter((action) =>
-        action === "no_op" || (target.environment === "sandbox" ? (presence.execution[action] ?? "off") !== "off" : (liveCapabilities.some((item) => item.capability === action && item.canExecute) && (presence.execution[action] ?? "off") !== "off")) && (action !== "quote" || xQuoteTargetHasAvailableRoute(current, presence, target.externalRef.id))
+        action === "no_op" || ((target.environment === "sandbox" ? (presence.execution[action] ?? "off") !== "off" : (liveCapabilities.some((item) => item.capability === action && item.canExecute) && (presence.execution[action] ?? "off") !== "off")) && (target.environment === "sandbox" || action !== "quote" || xQuoteTargetHasAvailableRoute(current, presence, target.externalRef.id)))
       );
       const direction = parsed.optionalDirection?.trim();
       const threadContext = compileSocialThreadContext(current.mirrorObjects.filter((item) => item.presenceId === presence.id && item.environment === target.environment && item.sessionId === target.sessionId && isCognitionEligibleMirrorObject(item, presence.language)), target, { maxObjects: 8 });
