@@ -61,4 +61,31 @@ describe("runtime normalization boundary", () => {
       writeState(initialState());
     }
   });
+
+  it("rehydrates social intents from the indexed projection after cache invalidation", () => {
+    const created = createAgent({ name: "Jenny", description: "A test Agent.", mode: "agent", handle: "@jenny_social_intent", accent: "#D68754" });
+    const formedAt = new Date().toISOString();
+    created.socialIntents = [{
+      id: "social-intent-normalization-test",
+      agentId: created.agent!.id,
+      presenceId: created.presence!.id,
+      affordance: "x.reply",
+      target: { type: "x.post", id: "social-intent-target" },
+      priority: 1,
+      validity: {},
+      state: "active",
+      formedAt,
+      updatedAt: formedAt,
+    }];
+    try {
+      writeState(created);
+      deleteBridgeIdentity("bridge-not-present");
+      const rehydrated = readStateSnapshot();
+      expect(rehydrated.socialIntents).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "social-intent-normalization-test", affordance: "x.reply" }),
+      ]));
+    } finally {
+      writeState(initialState());
+    }
+  });
 });
