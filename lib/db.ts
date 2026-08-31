@@ -227,6 +227,8 @@ const highVolumeCollections: Array<{ key: HighVolumeCollection; table: string; p
   { key: "resourceUsageEvents", table: "resource_usage_events", path: "$.resourceUsageEvents" },
   { key: "publicationMetricSnapshots", table: "publication_metric_snapshots", path: "$.publicationMetricSnapshots" },
 ];
+let highVolumeProjectionReady = false;
+let mirrorObjectsProjectionReady = false;
 
 /** Move append-only histories out of the compatibility document once, safely and idempotently. */
 function migrateHighVolumeCollections() {
@@ -253,11 +255,43 @@ function migrateHighVolumeCollections() {
         sqlite.prepare(`UPDATE agent_workspaces SET payload = json_remove(payload, '${collection.path}') WHERE json_type(payload, '${collection.path}') = 'array'`).run();
       }
     })();
+    highVolumeProjectionReady = true;
   } catch (error) {
     // Do not prevent startup for an optional projection migration. The
     // compatibility row remains authoritative if a legacy SQLite build lacks
     // JSON1 or encounters one malformed historical item.
     console.warn(`OpenPresence high-volume projection migration deferred: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+/** Move the mutable mirror index out of the compatibility document once. */
+function migrateMirrorObjects() {
+  try {
+    sqlite.transaction(() => {
+      sqlite.prepare(`
+        INSERT OR REPLACE INTO mirror_objects (id, agent_id, parent_id, payload, updated_at)
+        SELECT json_extract(value, '$.id'),
+          COALESCE(json_extract(value, '$.agentId'), agent_workspaces.agent_id),
+          json_extract(value, '$.presenceId'), value, agent_workspaces.updated_at
+        FROM agent_workspaces, json_each(agent_workspaces.payload, '$.mirrorObjects')
+        WHERE json_extract(value, '$.id') IS NOT NULL
+      `).run();
+      sqlite.prepare(`
+        INSERT OR REPLACE INTO mirror_objects (id, agent_id, parent_id, payload, updated_at)
+        SELECT json_extract(value, '$.id'),
+          COALESCE(json_extract(value, '$.agentId'), json_extract(app_state.payload, '$.agent.id')),
+          json_extract(value, '$.presenceId'), value, app_state.updated_at
+        FROM app_state, json_each(app_state.payload, '$.mirrorObjects')
+        WHERE app_state.id = 1 AND json_extract(value, '$.id') IS NOT NULL
+      `).run();
+      sqlite.prepare("UPDATE app_state SET payload = json_remove(payload, '$.mirrorObjects') WHERE id = 1 AND json_type(payload, '$.mirrorObjects') = 'array'").run();
+      sqlite.prepare("UPDATE agent_workspaces SET payload = json_remove(payload, '$.mirrorObjects') WHERE json_type(payload, '$.mirrorObjects') = 'array'").run();
+    })();
+    mirrorObjectsProjectionReady = true;
+  } catch (error) {
+    // Keep the compatibility field authoritative if a legacy SQLite runtime
+    // cannot complete this optional migration.
+    console.warn(`OpenPresence mirror-object projection migration deferred: ${error instanceof Error ? error.message : String(error)}`);
   }
 }
 
@@ -285,6 +319,24 @@ function hydrateHighVolumeCollections<T extends HighVolumeState>(state: T, agent
   return hydrated;
 }
 
+function hydrateMirrorObjects<T extends Pick<OpenPresenceState, "agent" | "mirrorObjects">>(state: T, agentId = state.agent?.id): T {
+  if (!agentId) return state;
+  const rows = sqlite.prepare("SELECT payload FROM mirror_objects WHERE agent_id = ? ORDER BY updated_at DESC").all(agentId) as Array<{ payload?: string }>;
+  const projected = rows.flatMap((row) => {
+    if (!row.payload) return [];
+    try { return [JSON.parse(row.payload) as OpenPresenceState["mirrorObjects"][number]]; } catch { return []; }
+  });
+  const current = state.mirrorObjects;
+  const seen = new Set(current.map((item) => item.id));
+  const merged = [...current];
+  for (const item of projected) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    merged.push(item);
+  }
+  return { ...state, mirrorObjects: merged } as T;
+}
+
 function writeNewHighVolumeCollectionRows(state: OpenPresenceState, previous?: OpenPresenceState) {
   const agentId = state.agent?.id;
   if (!agentId) return;
@@ -301,10 +353,33 @@ function writeNewHighVolumeCollectionRows(state: OpenPresenceState, previous?: O
   }
 }
 
+function syncMirrorObjectRows(state: OpenPresenceState, previous?: OpenPresenceState) {
+  const agentId = state.agent?.id;
+  if (!agentId) return;
+  const existingRows = previous
+    ? undefined
+    : new Map((sqlite.prepare("SELECT id, payload FROM mirror_objects WHERE agent_id = ?").all(agentId) as Array<{ id: string; payload?: string }>).map((row) => [row.id, row.payload ?? ""]));
+  const previousById = new Map((previous?.mirrorObjects ?? []).map((item) => [item.id, item]));
+  const currentIds = new Set(state.mirrorObjects.map((item) => item.id));
+  const insert = sqlite.prepare("INSERT OR REPLACE INTO mirror_objects (id, agent_id, parent_id, payload, updated_at) VALUES (?, ?, ?, ?, ?)");
+  for (const item of state.mirrorObjects) {
+    const prior = previousById.get(item.id);
+    const payload = JSON.stringify(item);
+    if (prior === item || (prior && JSON.stringify(prior) === payload) || existingRows?.get(item.id) === payload) continue;
+    insert.run(item.id, agentId, item.presenceId ?? null, payload, item.observedAt ?? item.occurredAt ?? new Date().toISOString());
+  }
+  const storedIds = previous ? previousById.keys() : existingRows?.keys() ?? [];
+  const remove = sqlite.prepare("DELETE FROM mirror_objects WHERE agent_id = ? AND id = ?");
+  for (const id of storedIds) if (!currentIds.has(id)) remove.run(agentId, id);
+}
+
 // Next collects API routes in parallel during `next build`. Keep builds
 // read-only so independent route bundles do not race this write migration;
 // the long-lived server process performs it once during runtime startup.
-if (process.env.NEXT_PHASE !== "phase-production-build") migrateHighVolumeCollections();
+if (process.env.NEXT_PHASE !== "phase-production-build") {
+  migrateHighVolumeCollections();
+  migrateMirrorObjects();
+}
 // Health polls only need a small, current slice of the active workspace. Keep
 // that slice durable and revision-tagged so a fresh process does not have to
 // parse and normalize the full compatibility snapshot just to answer a
@@ -615,7 +690,7 @@ function hydrateAgentWorkspaces(state: OpenPresenceState): OpenPresenceState {
     // cold read; only hydrate other Agents for the switcher.
     if (row.agent_id === state.activeAgentId) continue;
     try {
-      const workspace = hydrateHighVolumeCollections(JSON.parse(row.payload) as AgentWorkspaceSnapshot, row.agent_id);
+      const workspace = hydrateMirrorObjects(hydrateHighVolumeCollections(JSON.parse(row.payload) as AgentWorkspaceSnapshot, row.agent_id), row.agent_id);
       stored.set(row.agent_id, { ...workspace, workspaceRevision: revisions.get(row.agent_id) ?? 0 });
     } catch { /* retain the compatibility snapshot below */ }
   }
@@ -948,7 +1023,7 @@ export function readStateSnapshot(): OpenPresenceState {
   const cachedState = stateCache;
   if (cachedState && cachedState.updatedAt === row.updated_at) return cachedState.state;
   try {
-    const state = markStateNormalized(hydrateHighVolumeCollections(hydrateBridgeCredentials(hydrateAgentWorkspaces(hydrateMirrorEvents(normalizeState(JSON.parse(row.payload) as OpenPresenceState))))));
+    const state = markStateNormalized(hydrateMirrorObjects(hydrateHighVolumeCollections(hydrateBridgeCredentials(hydrateAgentWorkspaces(hydrateMirrorEvents(normalizeState(JSON.parse(row.payload) as OpenPresenceState)))))));
     stateCache = { updatedAt: row.updated_at ?? "", state };
     return state;
   } catch (error) {
@@ -1031,7 +1106,7 @@ export function readStateSnapshotForContext(context: StateContext): OpenPresence
     const scopedInput = workspace
       ? { ...compact, ...workspace, agents: compact.agents, activeAgentId: workspace.agent?.id ?? durableRequestedAgentId, agentWorkspaces: [workspace] }
       : { ...compact, agentWorkspaces: [] };
-    const scoped = hydrateHighVolumeCollections(hydrateMirrorEvents(normalizeState(scopedInput as OpenPresenceState), context.includeMirrorEvents !== false));
+    const scoped = hydrateMirrorObjects(hydrateHighVolumeCollections(hydrateMirrorEvents(normalizeState(scopedInput as OpenPresenceState), context.includeMirrorEvents !== false)));
     // `scopedInput` is freshly parsed from SQLite, so normalization already
     // gives callers an isolated mutable context. Re-running stateForContext
     // here used to deep-clone and normalize the same multi-megabyte workspace
@@ -1209,7 +1284,7 @@ export function readRuntimeAuditProjection(presenceId?: string) {
     return normalized;
   };
   return {
-    mirrorObjects: filterPresence(parseRows<OpenPresenceState["mirrorObjects"][number]>(sqlite.prepare("SELECT payload FROM mirror_objects").all() as Array<{ payload?: string }>)),
+    mirrorObjects: readNormalizedOrCompatibility<OpenPresenceState["mirrorObjects"][number]>("mirror_objects", "$.mirrorObjects"),
     socialDecisions: filterPresence(parseJsonEach<OpenPresenceState["socialDecisions"][number]>("$.socialDecisions")),
     executions: readNormalizedOrCompatibility<OpenPresenceState["executions"][number]>("executions", "$.executions", presenceId ? "json_extract(payload, '$.presenceId') = ?" : undefined, presenceId ? [presenceId] : []),
     outcomes: readNormalizedOrCompatibility<OpenPresenceState["outcomes"][number]>("outcomes", "$.outcomes"),
@@ -1479,10 +1554,14 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
     const compatibilityState = { ...normalized } as Partial<OpenPresenceState>;
     delete compatibilityState.agentWorkspaces;
     delete compatibilityState.mirrorEvents;
-    if (agentId) {
+    if (agentId && highVolumeProjectionReady) {
       delete compatibilityState.resourceUsageEvents;
       delete compatibilityState.publicationMetricSnapshots;
       writeNewHighVolumeCollectionRows(normalized, previousHighVolumeState);
+    }
+    if (agentId && mirrorObjectsProjectionReady) {
+      delete compatibilityState.mirrorObjects;
+      syncMirrorObjectRows(normalized, previousHighVolumeState);
     }
     compatibilityPayload = JSON.stringify(compatibilityState);
     sqlite.prepare("INSERT INTO app_state (id, payload, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at").run(compatibilityPayload, persistedAt);
