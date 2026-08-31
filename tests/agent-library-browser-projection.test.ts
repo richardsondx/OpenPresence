@@ -121,4 +121,23 @@ describe("Agent library browser projections", () => {
     expect(projection.files).toHaveLength(2);
     expect(projection.mirrorObjects).toEqual([]);
   });
+
+  it("keeps Brain configuration and mind-file context without operational history", () => {
+    const state = createAgent({ name: "Genny", description: "An agent for useful software conversations.", audience: "AI builders", mode: "agent", handle: "@genny", accent: "#d88b57" });
+    state.files = [{ kind: "BRAIN", revision: 4 }] as never;
+    state.modelProfiles = [{ id: "model-1", agentId: state.agent!.id }] as never;
+    state.providerConnections = [{ id: "provider-1", provider: "openai" }] as never;
+    state.skills = [{ id: "skill-1", name: "Research" }] as never;
+    state.knowledgeDocuments = [{ id: "doc-1", agentId: state.agent!.id, status: "active" }] as never;
+    state.mirrorObjects = [{ id: "unrelated" }] as never;
+    const projection = agentLibraryBrowserProjection(state, "brain");
+    expect(projection.responseProjection).toBe("brain");
+    expect(projection.files).toHaveLength(1);
+    expect(projection.modelProfiles).toHaveLength(1);
+    expect(projection.providerConnections).toHaveLength(1);
+    expect(projection.skills).toHaveLength(1);
+    expect(projection.knowledgeDocuments).toHaveLength(1);
+    expect(projection.mirrorObjects).toEqual([]);
+    expect(projection.events).toEqual([]);
+  });
 });
