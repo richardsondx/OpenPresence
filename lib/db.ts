@@ -102,24 +102,46 @@ type UsageWorkspace = Pick<OpenPresenceState, "agent" | "presences" | "resourceU
 export function readUsageWorkspaces(): UsageWorkspace[] {
   const rows = sqlite.prepare(`
     SELECT
+      json_extract(payload, '$.agent.id') AS agent_id,
       json_extract(payload, '$.agent') AS agent,
       json_extract(payload, '$.presences') AS presences,
       json_extract(payload, '$.resourceUsageEvents') AS resource_usage_events
     FROM app_state WHERE id = 1
     UNION ALL
     SELECT
+      agent_id,
       json_extract(payload, '$.agent') AS agent,
       json_extract(payload, '$.presences') AS presences,
       json_extract(payload, '$.resourceUsageEvents') AS resource_usage_events
     FROM agent_workspaces
     WHERE agent_id <> COALESCE((SELECT json_extract(payload, '$.activeAgentId') FROM app_state WHERE id = 1), '')
-  `).all() as Array<{ agent?: string | null; presences?: string | null; resource_usage_events?: string | null }>;
+  `).all() as Array<{ agent_id?: string | null; agent?: string | null; presences?: string | null; resource_usage_events?: string | null }>;
+  const usageRows = sqlite.prepare("SELECT agent_id, payload FROM resource_usage_events ORDER BY updated_at DESC").all() as Array<{ agent_id?: string | null; payload?: string | null }>;
+  const usageByAgent = new Map<string, UsageWorkspace["resourceUsageEvents"]>();
+  for (const row of usageRows) {
+    if (!row.agent_id || !row.payload) continue;
+    try {
+      const values = usageByAgent.get(row.agent_id) ?? [];
+      values.push(JSON.parse(row.payload) as UsageWorkspace["resourceUsageEvents"][number]);
+      usageByAgent.set(row.agent_id, values);
+    } catch { /* ignore an invalid optional projection row */ }
+  }
   return rows.flatMap((row) => {
     try {
+      const agent = row.agent ? JSON.parse(row.agent) as UsageWorkspace["agent"] : null;
+      const agentId = row.agent_id ?? agent?.id;
+      const legacyUsage = row.resource_usage_events ? JSON.parse(row.resource_usage_events) as UsageWorkspace["resourceUsageEvents"] : [];
+      const projectedUsage = usageByAgent.get(agentId ?? "") ?? [];
+      const seenUsageIds = new Set<string>();
+      const resourceUsageEvents = [...projectedUsage, ...legacyUsage].filter((event) => {
+        if (!event.id || seenUsageIds.has(event.id)) return false;
+        seenUsageIds.add(event.id);
+        return true;
+      });
       return [{
-        agent: row.agent ? JSON.parse(row.agent) as UsageWorkspace["agent"] : null,
+        agent,
         presences: row.presences ? JSON.parse(row.presences) as UsageWorkspace["presences"] : [],
-        resourceUsageEvents: row.resource_usage_events ? JSON.parse(row.resource_usage_events) as UsageWorkspace["resourceUsageEvents"] : [],
+        resourceUsageEvents,
       }];
     } catch {
       return [];
@@ -194,11 +216,95 @@ sqlite.exec("INSERT OR IGNORE INTO bridge_executor_identity (bridge_id, executor
 sqlite.exec("INSERT INTO agent_workspace_revisions (agent_id, revision, updated_at) SELECT agent_id, 0, updated_at FROM agent_workspaces WHERE agent_id NOT IN (SELECT agent_id FROM agent_workspace_revisions)");
 const normalizedTables = [
   "agents", "agent_files", "provider_connections", "asset_provider_connections", "agent_model_profiles", "agent_tool_bindings", "presences", "execution_envelopes", "conversations", "presence_chat_sessions", "messages", "change_sets", "standing_intents", "publishing_plans", "social_intents", "executions", "outcomes", "publications", "asset_usages", "source_evidence", "claim_grounding", "library_sources", "assets", "asset_collections", "asset_collection_memberships", "asset_metadata_edits", "asset_processing_jobs", "assignment_runs", "skills", "agent_skills", "content_drops", "channel_definitions", "native_channel_connections", "bridges", "mirror_objects", "mirror_events", "bridge_sync", "conversation_episodes", "assignment_contributions", "people", "person_identities", "relationships", "relationship_facts", "relationship_open_loops", "recommendation_records", "introduction_records", "scenarios", "scenario_versions", "scenario_runs", "scenario_run_provenance", "scenario_evaluations", "attention_episodes",
-  "operational_runs", "scheduled_wakes", "dependency_health", "recovery_incidents", "recovery_attempts", "browser_bodies", "people_notes",
+  "operational_runs", "scheduled_wakes", "dependency_health", "recovery_incidents", "recovery_attempts", "browser_bodies", "people_notes", "resource_usage_events", "publication_metric_snapshots",
 ];
 for (const table of normalizedTables) {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY, agent_id TEXT, parent_id TEXT, payload TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 }
+
+type HighVolumeCollection = "resourceUsageEvents" | "publicationMetricSnapshots";
+const highVolumeCollections: Array<{ key: HighVolumeCollection; table: string; path: string }> = [
+  { key: "resourceUsageEvents", table: "resource_usage_events", path: "$.resourceUsageEvents" },
+  { key: "publicationMetricSnapshots", table: "publication_metric_snapshots", path: "$.publicationMetricSnapshots" },
+];
+
+/** Move append-only histories out of the compatibility document once, safely and idempotently. */
+function migrateHighVolumeCollections() {
+  try {
+    sqlite.transaction(() => {
+      for (const collection of highVolumeCollections) {
+        sqlite.prepare(`
+          INSERT OR IGNORE INTO ${collection.table} (id, agent_id, parent_id, payload, updated_at)
+          SELECT json_extract(value, '$.id'),
+            COALESCE(json_extract(value, '$.agentId'), json_extract(app_state.payload, '$.agent.id')),
+            json_extract(value, '$.presenceId'), value, app_state.updated_at
+          FROM app_state, json_each(app_state.payload, '${collection.path}')
+          WHERE app_state.id = 1 AND json_extract(value, '$.id') IS NOT NULL
+        `).run();
+        sqlite.prepare(`
+          INSERT OR IGNORE INTO ${collection.table} (id, agent_id, parent_id, payload, updated_at)
+          SELECT json_extract(value, '$.id'),
+            COALESCE(json_extract(value, '$.agentId'), agent_workspaces.agent_id),
+            json_extract(value, '$.presenceId'), value, agent_workspaces.updated_at
+          FROM agent_workspaces, json_each(agent_workspaces.payload, '${collection.path}')
+          WHERE json_extract(value, '$.id') IS NOT NULL
+        `).run();
+        sqlite.prepare(`UPDATE app_state SET payload = json_remove(payload, '${collection.path}') WHERE id = 1 AND json_type(payload, '${collection.path}') = 'array'`).run();
+        sqlite.prepare(`UPDATE agent_workspaces SET payload = json_remove(payload, '${collection.path}') WHERE json_type(payload, '${collection.path}') = 'array'`).run();
+      }
+    })();
+  } catch (error) {
+    // Do not prevent startup for an optional projection migration. The
+    // compatibility row remains authoritative if a legacy SQLite build lacks
+    // JSON1 or encounters one malformed historical item.
+    console.warn(`OpenPresence high-volume projection migration deferred: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
+type HighVolumeState = Pick<OpenPresenceState, "agent" | "resourceUsageEvents" | "publicationMetricSnapshots">;
+
+function hydrateHighVolumeCollections<T extends HighVolumeState>(state: T, agentId = state.agent?.id): T {
+  if (!agentId) return state;
+  const hydrated = { ...state } as T;
+  for (const collection of highVolumeCollections) {
+    const rows = sqlite.prepare(`SELECT payload FROM ${collection.table} WHERE agent_id = ? ORDER BY updated_at DESC`).all(agentId) as Array<{ payload?: string }>;
+    const projected = rows.flatMap((row) => {
+      if (!row.payload) return [];
+      try { return [JSON.parse(row.payload) as OpenPresenceState[typeof collection.key][number]]; } catch { return []; }
+    });
+    const current = hydrated[collection.key] as Array<{ id?: string }>;
+    const seen = new Set(current.map((item) => item.id).filter((id): id is string => Boolean(id)));
+    const merged = [...current];
+    for (const item of projected) {
+      if (item.id && seen.has(item.id)) continue;
+      if (item.id) seen.add(item.id);
+      merged.push(item);
+    }
+    hydrated[collection.key] = merged as never;
+  }
+  return hydrated;
+}
+
+function writeNewHighVolumeCollectionRows(state: OpenPresenceState, previous?: OpenPresenceState) {
+  const agentId = state.agent?.id;
+  if (!agentId) return;
+  for (const collection of highVolumeCollections) {
+    const previousIds = new Set((previous?.[collection.key] ?? []).map((item) => item.id));
+    const insert = sqlite.prepare(`INSERT OR REPLACE INTO ${collection.table} (id, agent_id, parent_id, payload, updated_at) VALUES (?, ?, ?, ?, ?)`);
+    for (const item of state[collection.key]) {
+      if (previousIds.has(item.id)) continue;
+      const itemUpdatedAt = collection.key === "publicationMetricSnapshots"
+        ? (item as OpenPresenceState["publicationMetricSnapshots"][number]).observedAt
+        : (item as OpenPresenceState["resourceUsageEvents"][number]).createdAt;
+      insert.run(item.id, agentId, item.presenceId ?? null, JSON.stringify(item), itemUpdatedAt ?? new Date().toISOString());
+    }
+  }
+}
+
+// Next collects API routes in parallel during `next build`. Keep builds
+// read-only so independent route bundles do not race this write migration;
+// the long-lived server process performs it once during runtime startup.
+if (process.env.NEXT_PHASE !== "phase-production-build") migrateHighVolumeCollections();
 // Health polls only need a small, current slice of the active workspace. Keep
 // that slice durable and revision-tagged so a fresh process does not have to
 // parse and normalize the full compatibility snapshot just to answer a
@@ -508,7 +614,10 @@ function hydrateAgentWorkspaces(state: OpenPresenceState): OpenPresenceState {
     // not parse and retain a second 20 MB copy of that same snapshot on every
     // cold read; only hydrate other Agents for the switcher.
     if (row.agent_id === state.activeAgentId) continue;
-    try { stored.set(row.agent_id, { ...(JSON.parse(row.payload) as AgentWorkspaceSnapshot), workspaceRevision: revisions.get(row.agent_id) ?? 0 }); } catch { /* retain the compatibility snapshot below */ }
+    try {
+      const workspace = hydrateHighVolumeCollections(JSON.parse(row.payload) as AgentWorkspaceSnapshot, row.agent_id);
+      stored.set(row.agent_id, { ...workspace, workspaceRevision: revisions.get(row.agent_id) ?? 0 });
+    } catch { /* retain the compatibility snapshot below */ }
   }
   const snapshots = state.agentWorkspaces.map((workspace) => workspace.agent?.id ? stored.get(workspace.agent.id) ?? workspace : workspace);
   for (const workspace of stored.values()) {
@@ -839,7 +948,7 @@ export function readStateSnapshot(): OpenPresenceState {
   const cachedState = stateCache;
   if (cachedState && cachedState.updatedAt === row.updated_at) return cachedState.state;
   try {
-    const state = markStateNormalized(hydrateBridgeCredentials(hydrateAgentWorkspaces(hydrateMirrorEvents(normalizeState(JSON.parse(row.payload) as OpenPresenceState)))));
+    const state = markStateNormalized(hydrateHighVolumeCollections(hydrateBridgeCredentials(hydrateAgentWorkspaces(hydrateMirrorEvents(normalizeState(JSON.parse(row.payload) as OpenPresenceState))))));
     stateCache = { updatedAt: row.updated_at ?? "", state };
     return state;
   } catch (error) {
@@ -922,7 +1031,7 @@ export function readStateSnapshotForContext(context: StateContext): OpenPresence
     const scopedInput = workspace
       ? { ...compact, ...workspace, agents: compact.agents, activeAgentId: workspace.agent?.id ?? durableRequestedAgentId, agentWorkspaces: [workspace] }
       : { ...compact, agentWorkspaces: [] };
-    const scoped = hydrateMirrorEvents(normalizeState(scopedInput as OpenPresenceState), context.includeMirrorEvents !== false);
+    const scoped = hydrateHighVolumeCollections(hydrateMirrorEvents(normalizeState(scopedInput as OpenPresenceState), context.includeMirrorEvents !== false));
     // `scopedInput` is freshly parsed from SQLite, so normalization already
     // gives callers an isolated mutable context. Re-running stateForContext
     // here used to deep-clone and normalize the same multi-megabyte workspace
@@ -1350,6 +1459,10 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
   const syncNormalized = options?.syncNormalized === true;
   const expectedRevision = typeof state.workspaceRevision === "number" ? state.workspaceRevision : undefined;
   const persistedAt = new Date().toISOString();
+  const previousHighVolumeState = stateCache?.state.activeAgentId === normalized.activeAgentId
+    && stateCache.state.agent?.id === normalized.agent?.id
+    ? stateCache.state
+    : undefined;
   let compatibilityPayload = "";
   sqlite.transaction(() => {
     let actualRevision = 0;
@@ -1366,6 +1479,11 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
     const compatibilityState = { ...normalized } as Partial<OpenPresenceState>;
     delete compatibilityState.agentWorkspaces;
     delete compatibilityState.mirrorEvents;
+    if (agentId) {
+      delete compatibilityState.resourceUsageEvents;
+      delete compatibilityState.publicationMetricSnapshots;
+      writeNewHighVolumeCollectionRows(normalized, previousHighVolumeState);
+    }
     compatibilityPayload = JSON.stringify(compatibilityState);
     sqlite.prepare("INSERT INTO app_state (id, payload, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at").run(compatibilityPayload, persistedAt);
     if (!agentId) {
