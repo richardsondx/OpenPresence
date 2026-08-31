@@ -172,8 +172,8 @@ let schedulerRestartTimer;
 let memoryWatchdog;
 let childStartedAt = 0;
 const serverRssLimitMb = Number(process.env.OPENPRESENCE_SERVER_RSS_LIMIT_MB || process.env.OPENPRESENCE_DEV_RSS_LIMIT_MB || "1536");
-const serverRssCheckMs = Math.max(5_000, Number(process.env.OPENPRESENCE_SERVER_RSS_CHECK_MS || process.env.OPENPRESENCE_DEV_RSS_CHECK_MS || "15_000"));
-const serverRssGraceMs = Math.max(0, Number(process.env.OPENPRESENCE_SERVER_RSS_GRACE_MS || process.env.OPENPRESENCE_DEV_RSS_GRACE_MS || "60_000"));
+const serverRssCheckMs = Math.max(5_000, Number(process.env.OPENPRESENCE_SERVER_RSS_CHECK_MS || process.env.OPENPRESENCE_DEV_RSS_CHECK_MS || "15000"));
+const serverRssGraceMs = Math.max(0, Number(process.env.OPENPRESENCE_SERVER_RSS_GRACE_MS || process.env.OPENPRESENCE_DEV_RSS_GRACE_MS || "60000"));
 const serverRssRequiredSamples = Math.max(1, Number(process.env.OPENPRESENCE_SERVER_RSS_REQUIRED_SAMPLES || "3"));
 let serverRssOverLimitSamples = 0;
 
