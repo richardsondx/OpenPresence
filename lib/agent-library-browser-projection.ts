@@ -1,6 +1,6 @@
 import type { OpenPresenceState } from "./types";
 
-export type AgentLibraryProjection = "knowledge" | "assets" | "people" | "feed" | "schedule";
+export type AgentLibraryProjection = "knowledge" | "assets" | "people" | "feed" | "schedule" | "watching";
 
 const historyCollections = [
   "files", "messages", "conversations", "presenceChatSessions", "operatorConversations", "operatorNudges", "agentRequests",
@@ -82,6 +82,29 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
       next.assignmentRuns = state.assignmentRuns;
       next.assetCollections = (state.assetCollections ?? []).filter((collection) => collection.agentId === state.agent?.id && collection.status === "active");
       next.executions = state.executions.filter((execution) => execution.status === "awaiting-review" || planExecutionIds.has(execution.id));
+      return next;
+    }
+    if (projection === "watching") {
+      const presenceId = state.presence?.id;
+      const watches = state.watches.filter((watch) => !presenceId || watch.presenceId === presenceId);
+      const watchIds = new Set(watches.map((watch) => watch.id));
+      const explorations = state.explorations.filter((exploration) => !presenceId || exploration.presenceId === presenceId);
+      const explorationIds = new Set(explorations.map((exploration) => exploration.id));
+      const findings = state.explorationFindings.filter((finding) => explorationIds.has(finding.explorationId));
+      const findingMirrorIds = new Set(findings.map((finding) => finding.mirrorObjectId));
+      const sessions = state.explorationSessions.filter((session) => explorationIds.has(session.explorationId));
+      const artifactMirrorIds = new Set(sessions.flatMap((session) => session.artifactIds ?? []));
+      const signalMirrorIds = new Set(state.watchSignals.filter((signal) => watchIds.has(signal.watchId)).map((signal) => signal.mirrorObjectId));
+      const recentObjects = state.mirrorObjects.filter((object) => object.presenceId === presenceId && object.visibility === "public" && object.objectType === "post").slice(0, 40);
+      const referencedMirrorIds = new Set([...findingMirrorIds, ...artifactMirrorIds, ...signalMirrorIds, ...recentObjects.map((object) => object.id)]);
+      next.watches = watches;
+      next.watchSignals = state.watchSignals.filter((signal) => watchIds.has(signal.watchId));
+      next.explorations = explorations;
+      next.explorationFindings = findings;
+      next.explorationSessions = sessions;
+      next.assignments = state.assignments.filter((assignment) => assignment.presenceId === presenceId || explorations.some((exploration) => exploration.engagement?.assignmentId === assignment.id));
+      next.bridges = state.bridges.filter((bridge) => bridge.presenceId === presenceId);
+      next.mirrorObjects = state.mirrorObjects.filter((object) => referencedMirrorIds.has(object.id));
       return next;
     }
     const presenceId = state.presence?.id;

@@ -78,4 +78,34 @@ describe("Agent library browser projections", () => {
     expect(projection.executions.map((execution) => execution.id)).toEqual(["plan-execution"]);
     expect(projection.people).toEqual([]);
   });
+
+  it("keeps Watching evidence and connector state scoped to the Presence", () => {
+    const state = createAgent({ name: "Genny", description: "An agent for useful software conversations.", audience: "AI builders", mode: "agent", handle: "@genny", accent: "#d88b57" });
+    const presenceId = state.presence!.id;
+    state.watches = [{ id: "watch-1", presenceId }] as never;
+    state.watchSignals = [{ id: "signal-1", watchId: "watch-1", mirrorObjectId: "signal-mirror" }, { id: "other-signal", watchId: "other-watch", mirrorObjectId: "other-mirror" }] as never;
+    state.explorations = [{ id: "exploration-1", presenceId, engagement: { assignmentId: "exploration-assignment" } }] as never;
+    state.explorationFindings = [{ id: "finding-1", explorationId: "exploration-1", mirrorObjectId: "finding-mirror" }] as never;
+    state.explorationSessions = [{ id: "session-1", explorationId: "exploration-1", artifactIds: ["artifact-mirror"] }] as never;
+    state.assignments = [{ id: "exploration-assignment", presenceId }, { id: "other-assignment", presenceId: "other-presence" }] as never;
+    state.bridges = [{ id: "bridge-1", presenceId, name: "OpenPresence Chrome" }, { id: "bridge-2", presenceId: "other-presence" }] as never;
+    state.mirrorObjects = [
+      { id: "signal-mirror", presenceId },
+      { id: "finding-mirror", presenceId },
+      { id: "artifact-mirror", presenceId },
+      { id: "recent-post", presenceId, visibility: "public", objectType: "post" },
+      { id: "unrelated", presenceId, visibility: "public", objectType: "post" },
+    ] as never;
+    const projection = agentLibraryBrowserProjection(state, "watching");
+    expect(projection.responseProjection).toBe("watching");
+    expect(projection.watches).toHaveLength(1);
+    expect(projection.watchSignals).toHaveLength(1);
+    expect(projection.explorations).toHaveLength(1);
+    expect(projection.explorationFindings).toHaveLength(1);
+    expect(projection.explorationSessions).toHaveLength(1);
+    expect(projection.assignments.map((assignment) => assignment.id)).toEqual(["exploration-assignment"]);
+    expect(projection.bridges.map((bridge) => bridge.id)).toEqual(["bridge-1"]);
+    expect(projection.mirrorObjects.map((object) => object.id)).toEqual(["signal-mirror", "finding-mirror", "artifact-mirror", "recent-post", "unrelated"]);
+    expect(projection.relationships).toEqual([]);
+  });
 });
