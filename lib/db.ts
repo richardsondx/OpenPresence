@@ -233,6 +233,7 @@ let highVolumeProjectionReady = false;
 let mirrorObjectsProjectionReady = false;
 let attentionEpisodesProjectionReady = false;
 let executionsProjectionReady = false;
+let operationalRunsProjectionReady = false;
 
 /** Move append-only histories out of the compatibility document once, safely and idempotently. */
 function migrateHighVolumeCollections() {
@@ -621,6 +622,57 @@ try { sqlite.exec("ALTER TABLE scheduled_wakes_idx ADD COLUMN created_at TEXT");
 // complete append-only-ish index tables on every wake.
 sqlite.exec("CREATE INDEX IF NOT EXISTS operational_runs_presence_updated_idx ON operational_runs_idx (presence_id, updated_at DESC)");
 sqlite.exec("CREATE INDEX IF NOT EXISTS operational_runs_state_updated_idx ON operational_runs_idx (state, updated_at DESC)");
+function migrateOperationalRuns() {
+  try {
+    sqlite.transaction(() => {
+      const insert = (source: "app_state" | "agent_workspaces") => sqlite.prepare(`
+        INSERT OR IGNORE INTO operational_runs_idx
+          (id, presence_id, execution_id, state, stage, lease_owner, lease_expires_at, eligible_at, next_wake_at, last_progress_at, last_heartbeat_at, payload, updated_at)
+        SELECT json_extract(value, '$.id'),
+          json_extract(value, '$.presenceId'),
+          json_extract(value, '$.executionId'),
+          COALESCE(json_extract(value, '$.state'), 'queued'),
+          COALESCE(json_extract(value, '$.stage'), 'queued'),
+          json_extract(value, '$.leaseOwner'),
+          json_extract(value, '$.leaseExpiresAt'),
+          json_extract(value, '$.eligibleAt'),
+          json_extract(value, '$.nextWakeAt'),
+          json_extract(value, '$.lastProgressAt'),
+          json_extract(value, '$.lastHeartbeatAt'),
+          value,
+          COALESCE(json_extract(value, '$.lastProgressAt'), ${source}.updated_at)
+        FROM ${source}, json_each(${source}.payload, '$.operationalRuns')
+        WHERE json_extract(value, '$.id') IS NOT NULL
+      `).run();
+      insert("app_state");
+      insert("agent_workspaces");
+
+      const appMissing = (sqlite.prepare(`
+        SELECT EXISTS(
+          SELECT 1 FROM app_state, json_each(app_state.payload, '$.operationalRuns')
+          WHERE app_state.id = 1 AND NOT EXISTS(
+            SELECT 1 FROM operational_runs_idx WHERE id = json_extract(value, '$.id')
+          )
+        ) AS missing
+      `).get() as { missing?: number } | undefined)?.missing;
+      if (!appMissing) sqlite.prepare("UPDATE app_state SET payload = json_remove(payload, '$.operationalRuns') WHERE id = 1 AND json_type(payload, '$.operationalRuns') = 'array'").run();
+
+      const workspaceMissing = (sqlite.prepare(`
+        SELECT EXISTS(
+          SELECT 1 FROM agent_workspaces, json_each(agent_workspaces.payload, '$.operationalRuns')
+          WHERE NOT EXISTS(
+            SELECT 1 FROM operational_runs_idx WHERE id = json_extract(value, '$.id')
+          )
+        ) AS missing
+      `).get() as { missing?: number } | undefined)?.missing;
+      if (!workspaceMissing) sqlite.prepare("UPDATE agent_workspaces SET payload = json_remove(payload, '$.operationalRuns') WHERE json_type(payload, '$.operationalRuns') = 'array'").run();
+    })();
+    operationalRunsProjectionReady = true;
+  } catch (error) {
+    console.warn(`OpenPresence operational-run projection migration deferred: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+if (process.env.NEXT_PHASE !== "phase-production-build") migrateOperationalRuns();
 sqlite.exec("CREATE INDEX IF NOT EXISTS scheduled_wakes_state_time_idx ON scheduled_wakes_idx (state, wake_at ASC)");
 sqlite.exec("CREATE INDEX IF NOT EXISTS scheduled_wakes_presence_created_idx ON scheduled_wakes_idx (presence_id, created_at DESC)");
 sqlite.exec("CREATE TABLE IF NOT EXISTS dependency_health_live (id TEXT PRIMARY KEY, presence_id TEXT, dependency TEXT NOT NULL, state TEXT NOT NULL, consecutive_failures INTEGER NOT NULL DEFAULT 0, circuit_until TEXT, current_incident_id TEXT, metadata TEXT, updated_at TEXT NOT NULL)");
@@ -885,6 +937,7 @@ function snapshotWorkspace(state: OpenPresenceState): AgentWorkspaceSnapshot {
   delete workspace.mirrorEvents;
   delete workspace.attentionEpisodes;
   delete workspace.executions;
+  delete workspace.operationalRuns;
   return workspace as AgentWorkspaceSnapshot;
 }
 
@@ -1781,6 +1834,7 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
       syncExecutionRows(normalized, previousHighVolumeState);
       delete compatibilityState.executions;
     }
+    if (agentId && operationalRunsProjectionReady) delete compatibilityState.operationalRuns;
     compatibilityPayload = JSON.stringify(compatibilityState);
     sqlite.prepare("INSERT INTO app_state (id, payload, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at").run(compatibilityPayload, persistedAt);
     if (!agentId) {
