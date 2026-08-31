@@ -893,15 +893,34 @@ export function readStateSnapshotForContext(context: StateContext): OpenPresence
   // Activity, health, and browser configuration requests.
   const row = sqlite.prepare("SELECT payload, updated_at FROM app_state WHERE id = 1").get() as { payload?: string; updated_at?: string } | undefined;
   if (!row?.payload) return JSON.parse(JSON.stringify(readStateSnapshot())) as OpenPresenceState;
+  const cached = stateCache;
+  const cachedAgentId = cached?.state.activeAgentId ?? cached?.state.agent?.id;
+  // Bridge events and other scoped reads often arrive immediately after a
+  // browser/health read in this same process. Reusing the revision-validated
+  // immutable snapshot avoids reparsing and normalizing the full compatibility
+  // JSON for every inbound event while still taking one structured clone for
+  // caller isolation. A different Agent or a changed SQLite revision falls
+  // through to the direct durable read below.
+  if (cached && cached.updatedAt === row.updated_at
+    && (!context.agentId || context.agentId === cachedAgentId)
+    && (!context.presenceId || cached.state.presences.some((presence) => presence.id === context.presenceId))) {
+    const scoped = structuredClone(cached.state) as OpenPresenceState;
+    if (context.presenceId) {
+      scoped.activePresenceId = context.presenceId;
+      scoped.presence = scoped.presences.find((presence) => presence.id === context.presenceId) ?? scoped.presence;
+    }
+    if (context.includeMirrorEvents === false) scoped.mirrorEvents = [];
+    return markStateNormalized(scoped);
+  }
   try {
     const compact = JSON.parse(row.payload) as OpenPresenceState;
-    const requestedAgentId = context.agentId ?? compact.activeAgentId ?? undefined;
-    const workspaceRow = requestedAgentId
-      ? sqlite.prepare("SELECT payload FROM agent_workspaces WHERE agent_id = ?").get(requestedAgentId) as { payload?: string } | undefined
+    const durableRequestedAgentId = context.agentId ?? compact.activeAgentId ?? undefined;
+    const workspaceRow = durableRequestedAgentId
+      ? sqlite.prepare("SELECT payload FROM agent_workspaces WHERE agent_id = ?").get(durableRequestedAgentId) as { payload?: string } | undefined
       : undefined;
     const workspace = workspaceRow?.payload ? JSON.parse(workspaceRow.payload) as Partial<OpenPresenceState> : undefined;
     const scopedInput = workspace
-      ? { ...compact, ...workspace, agents: compact.agents, activeAgentId: workspace.agent?.id ?? requestedAgentId, agentWorkspaces: [workspace] }
+      ? { ...compact, ...workspace, agents: compact.agents, activeAgentId: workspace.agent?.id ?? durableRequestedAgentId, agentWorkspaces: [workspace] }
       : { ...compact, agentWorkspaces: [] };
     const scoped = hydrateMirrorEvents(normalizeState(scopedInput as OpenPresenceState), context.includeMirrorEvents !== false);
     // `scopedInput` is freshly parsed from SQLite, so normalization already
