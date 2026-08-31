@@ -1,5 +1,7 @@
 import type { OpenPresenceState } from "./types";
 import { browserWorkspaceProjection } from "./state-browser-projection";
+import { collapseAudienceSnapshots, derivePublicHistory } from "./runtime";
+import { growthEvidenceIsInPresenceScope, growthPublicationIsInPresenceScope } from "./growth-scope";
 
 const compactText = (value: string | undefined, limit = 280) => {
   if (!value || value.length <= limit) return value;
@@ -26,37 +28,118 @@ export function growthBrowserProjection(state: OpenPresenceState, presenceId?: s
   // Growth totals must remain complete for the selected Presence. Baseline
   // comparisons are Activity detail, not part of this screen, and can be
   // recomputed from the durable metric history when that detail is opened.
-  projection.audienceSnapshots = scoped(state.audienceSnapshots) as never;
-  projection.publicationMetricSnapshots = scoped(state.publicationMetricSnapshots).map((snapshot) => {
-    const compact = { ...snapshot };
-    delete compact.baseline;
-    return compact;
-  }) as never;
+  const audienceSnapshots = collapseAudienceSnapshots(scoped(state.audienceSnapshots)
+    .filter((snapshot) => growthEvidenceIsInPresenceScope(state, selectedPresenceId ?? "", snapshot.observedAt)));
+  const publicationSnapshots = scoped(state.publicationMetricSnapshots)
+    .filter((snapshot) => growthPublicationIsInPresenceScope(state, selectedPresenceId ?? "", snapshot))
+    .sort((left, right) => right.observedAt.localeCompare(left.observedAt));
+  const recentAudienceSnapshots = audienceSnapshots.slice(0, 8);
+  const recentPublicationSnapshots = publicationSnapshots.slice(0, 8).map((snapshot) => ({
+    id: snapshot.id,
+    presenceId: snapshot.presenceId,
+    mirrorObjectId: snapshot.mirrorObjectId,
+    observedAt: snapshot.observedAt,
+    publicationAgeSeconds: snapshot.publicationAgeSeconds,
+    impressions: snapshot.impressions,
+    likes: snapshot.likes,
+    replies: snapshot.replies,
+    reposts: snapshot.reposts,
+    quotes: snapshot.quotes,
+    source: snapshot.source,
+    observationStatus: snapshot.observationStatus,
+  }));
+  const latestReview = scoped(state.growthReviews)
+    .sort((left, right) => right.createdAt.localeCompare(left.createdAt))[0];
+  const reviewedEvidenceIds = new Set(latestReview?.evidenceIds ?? []);
+  const publicHistory = derivePublicHistory(state, selectedPresenceId ?? undefined, { normalized: true });
+  const oneWeekAgo = Date.now() - 7 * 86_400_000;
+  const weeklyHistory = publicHistory.filter((item) => new Date(item.occurredAt).getTime() >= oneWeekAgo);
+  const scopedOutcomes = (state.outcomes ?? []).filter((outcome) => outcome.presenceId === selectedPresenceId && outcome.status === "succeeded" && outcome.environment !== "sandbox");
+  const scopedExecutions = (state.executions ?? []).filter((execution) => execution.presenceId === selectedPresenceId);
+  const followExecutionIds = new Set(scopedExecutions.filter((execution) => execution.affordance === "x.follow").map((execution) => execution.id));
+  const weeklyFollows = scopedOutcomes.filter((outcome) => Boolean(outcome.executionId && followExecutionIds.has(outcome.executionId)) && new Date(outcome.observedAt).getTime() >= oneWeekAgo).length;
+  const scopedPersonIds = new Set((state.personIdentities ?? [])
+    .filter((identity) => identity.sourcePresenceId === selectedPresenceId && growthEvidenceIsInPresenceScope(state, selectedPresenceId ?? "", identity.createdAt))
+    .map((identity) => identity.personId));
+  const scopedRecoveryIncidents = (state.recoveryIncidents ?? []).filter((incident) => !incident.presenceId || incident.presenceId === selectedPresenceId);
+  const latestAudience = audienceSnapshots[0];
+  const audienceDeltaSince = (days: number) => {
+    if (!latestAudience) return undefined;
+    const cutoff = new Date(new Date(latestAudience.observedAt).getTime() - days * 86_400_000).getTime();
+    const prior = audienceSnapshots.find((snapshot) => new Date(snapshot.observedAt).getTime() <= cutoff);
+    return prior ? latestAudience.followers - prior.followers : undefined;
+  };
+  projection.growthBrowserSummary = {
+    presenceId: selectedPresenceId ?? "",
+    audience: {
+      count: audienceSnapshots.length,
+      latest: recentAudienceSnapshots[0],
+      recent: recentAudienceSnapshots,
+      unchanged: audienceSnapshots.length > 1 && new Set(audienceSnapshots.map((snapshot) => snapshot.followers)).size === 1,
+      daily: audienceDeltaSince(1),
+      sevenDay: audienceDeltaSince(7),
+      twentyEightDay: audienceDeltaSince(28),
+    },
+    publication: {
+      count: publicationSnapshots.length,
+      totalReach: publicationSnapshots.reduce((sum, snapshot) => sum + (snapshot.impressions ?? 0), 0),
+      totalLikes: publicationSnapshots.reduce((sum, snapshot) => sum + (snapshot.likes ?? 0), 0),
+      totalReplies: publicationSnapshots.reduce((sum, snapshot) => sum + (snapshot.replies ?? 0), 0),
+      totalReposts: publicationSnapshots.reduce((sum, snapshot) => sum + (snapshot.reposts ?? 0), 0),
+      totalQuotes: publicationSnapshots.reduce((sum, snapshot) => sum + (snapshot.quotes ?? 0), 0),
+      maxImpressions: publicationSnapshots.reduce<number | undefined>((max, snapshot) => snapshot.impressions === undefined ? max : Math.max(max ?? snapshot.impressions, snapshot.impressions), undefined),
+      latest: recentPublicationSnapshots[0],
+      recent: recentPublicationSnapshots,
+    },
+    actions: {
+      total: publicHistory.filter((item) => item.environment !== "sandbox").length,
+      weekly: {
+        posts: weeklyHistory.filter((item) => item.kind === "post").length,
+        replies: weeklyHistory.filter((item) => item.kind === "reply" || item.kind === "comment").length,
+        quotes: weeklyHistory.filter((item) => item.kind === "quote").length,
+        likes: weeklyHistory.filter((item) => item.kind === "like").length,
+        follows: weeklyFollows,
+      },
+    },
+    decisionsCount: (state.socialDecisions ?? []).filter((decision) => decision.presenceId === selectedPresenceId).length,
+    verifiedOutcomesCount: scopedOutcomes.length,
+    activeRelationshipsCount: (state.relationships ?? []).filter((relationship) => relationship.state === "active" && scopedPersonIds.has(relationship.personId)).length,
+    engagedPeopleCount: (state.people ?? []).filter((person) => person.memoryState === "active" && scopedPersonIds.has(person.id)).length,
+    openIncidentCount: scopedRecoveryIncidents.filter((incident) => incident.operatorActionRequired && incident.state !== "resolved").length,
+    recoveriesHandledCount: scopedRecoveryIncidents.filter((incident) => incident.state === "resolved" && growthEvidenceIsInPresenceScope(state, selectedPresenceId ?? "", incident.resolvedAt ?? incident.lastObservedAt)).length,
+    review: latestReview ? {
+      unreviewedAudienceCount: audienceSnapshots.filter((snapshot) => !reviewedEvidenceIds.has(snapshot.id)).length,
+      unreviewedPublicationCount: publicationSnapshots.filter((snapshot) => !reviewedEvidenceIds.has(snapshot.id)).length,
+    } : undefined,
+  };
+  // Keep a recent compatibility window for older browser consumers; the
+  // summary above is authoritative for totals and evidence counts.
+  projection.audienceSnapshots = recentAudienceSnapshots as never;
+  projection.publicationMetricSnapshots = recentPublicationSnapshots as never;
 
   // Keep the small, truth-critical Mirror shape used by publication evidence
   // and derivePublicHistory. In particular, visibility and action lineage must
   // survive projection or Growth can undercount verified public activity.
-  projection.mirrorObjects = scoped(state.mirrorObjects).map((object) => ({
+  const recentPublicationMirrorIds = new Set(recentPublicationSnapshots.map((snapshot) => snapshot.mirrorObjectId));
+  projection.mirrorObjects = scoped(state.mirrorObjects)
+    .filter((object) => recentPublicationMirrorIds.has(object.id))
+    .map((object) => ({
     id: object.id,
     presenceId: object.presenceId,
     channelId: object.channelId,
     externalRef: object.externalRef,
-    parentExternalRef: object.parentExternalRef,
-    referencedExternalRefs: object.referencedExternalRefs,
     objectType: object.objectType,
     author: object.author
-      ? { displayName: object.author.displayName, handle: object.author.handle, avatarUrl: object.author.avatarUrl }
+      ? { displayName: object.author.displayName, handle: object.author.handle }
       : undefined,
-    content: object.content?.text ? { text: compactText(object.content.text) } : undefined,
+    content: recentPublicationMirrorIds.has(object.id) && object.content?.text ? { text: compactText(object.content.text) } : undefined,
     occurredAt: object.occurredAt,
     observedAt: object.observedAt,
     visibility: object.visibility,
-    shareability: object.shareability,
     originExecutionId: object.originExecutionId,
     actorPresenceId: object.actorPresenceId,
-    archived: object.archived,
     environment: object.environment,
-  })) as never;
+    })) as never;
 
   projection.assignments = scoped(state.assignments).map((assignment) => ({
     id: assignment.id,
@@ -170,6 +253,12 @@ export function growthBrowserProjection(state: OpenPresenceState, presenceId?: s
     "relationshipOpenLoops", "conversationEpisodes", "explorationSessions", "explorationFindings", "networkSearches",
     "networkIntroductions", "recoveryAttempts", "publications", "actions", "operationalRuns", "scheduledWakes",
     "watchSignals", "operatorConversations", "agentWorkspaces", "attentionEpisodes", "socialIntents", "files",
+    "socialDecisions", "outcomes", "people", "personIdentities", "relationships", "recoveryIncidents",
+    "growthEvidenceSnapshots", "assignmentPursuitWindows", "standingIntents", "discoveryPlans",
+    "assignmentRuns", "publishingPlans", "playgroundSessions", "perceptions", "capabilityChangeEvents",
+    "socialStrategyRetrievalRuns", "knowledgeSegments", "knowledgeDocuments", "knowledgeVersions",
+    "scenarioVersions", "conversations", "messages", "operatorNudges", "presenceChatSessions", "agentRequests",
+    "calendar", "watches", "relationshipPolicies", "presenceRequestPolicies", "delegationGrants",
   ] as const) {
     (projection as unknown as Record<string, unknown>)[key] = [];
   }

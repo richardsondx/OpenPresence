@@ -454,6 +454,10 @@ function GrowthEvidenceDetails({
   snapshots,
   publicationSnapshots,
   mirrorObjects,
+  audienceSnapshotCount,
+  publicationSnapshotCount,
+  maxImpressions,
+  audienceUnchanged,
   review,
   reviewIsStale,
   unreviewedAudienceCount,
@@ -463,6 +467,10 @@ function GrowthEvidenceDetails({
   snapshots: PresenceAudienceSnapshot[];
   publicationSnapshots: PublicationMetricSnapshot[];
   mirrorObjects: MirrorObject[];
+  audienceSnapshotCount?: number;
+  publicationSnapshotCount?: number;
+  maxImpressions?: number;
+  audienceUnchanged?: boolean;
   review?: GrowthReview;
   reviewIsStale: boolean;
   unreviewedAudienceCount: number;
@@ -474,8 +482,7 @@ function GrowthEvidenceDetails({
   const latest = snapshots[0];
   const latestPublication = publicationSnapshots[0];
   const followerValues = snapshots.map((item) => item.followers);
-  const followersUnchanged = followerValues.length > 1 && new Set(followerValues).size === 1;
-  const maxImpressions = publicationSnapshots.reduce<number | undefined>((max, item) => item.impressions === undefined ? max : Math.max(max ?? item.impressions, item.impressions), undefined);
+  const followersUnchanged = audienceUnchanged ?? (followerValues.length > 1 && new Set(followerValues).size === 1);
   const metricHighlights = latestPublication ? [
     latestPublication.impressions !== undefined ? latestPublication.impressions.toLocaleString() + " views" : undefined,
     latestPublication.likes !== undefined ? latestPublication.likes.toLocaleString() + " likes" : undefined,
@@ -490,11 +497,11 @@ function GrowthEvidenceDetails({
         <div>
           <span>Audience evidence</span>
           <strong>{latest ? `${latest.followers.toLocaleString()} followers` : "Not observed"}</strong>
-          <small>{followersUnchanged ? `Unchanged across ${snapshots.length.toLocaleString()} recent observations` : `${snapshots.length.toLocaleString()} verified observations`}</small>
+          <small>{followersUnchanged ? `Unchanged across ${(audienceSnapshotCount ?? snapshots.length).toLocaleString()} recent observations` : `${(audienceSnapshotCount ?? snapshots.length).toLocaleString()} verified observations`}</small>
         </div>
         <div>
           <span>Publication evidence</span>
-          <strong>{publicationSnapshots.length.toLocaleString()} observations</strong>
+          <strong>{(publicationSnapshotCount ?? publicationSnapshots.length).toLocaleString()} observations</strong>
           <small>{maxImpressions !== undefined ? `Recent reach up to ${maxImpressions.toLocaleString()} views` : metricHighlights}</small>
         </div>
       </div>
@@ -514,7 +521,7 @@ function GrowthEvidenceDetails({
           <div>
             <div className="growth-evidence-subheading">
               <strong>Audience snapshots</strong>
-              <span>{snapshots.length}</span>
+              <span>{audienceSnapshotCount ?? snapshots.length}</span>
             </div>
             {(newSnapshots.length ? newSnapshots : snapshots).slice(0, 8).map((item) => (
               <div className="growth-evidence-row" key={item.id}>
@@ -527,7 +534,7 @@ function GrowthEvidenceDetails({
           <div>
             <div className="growth-evidence-subheading">
               <strong>Publication snapshots</strong>
-              <span>{publicationSnapshots.length}</span>
+              <span>{publicationSnapshotCount ?? publicationSnapshots.length}</span>
             </div>
             {(newPublicationSnapshots.length ? newPublicationSnapshots : publicationSnapshots).slice(0, 8).map((item) => {
               const object = mirrorObjects.find((candidate) => candidate.id === item.mirrorObjectId);
@@ -624,19 +631,24 @@ export function GrowthView({ state, mutate, setView }: GrowthViewProps) {
 
   const growthBoundary = presenceGrowthBoundary(state, presence.id);
   const assignment = state.assignments.find((item) => item.presenceId === presence.id && item.successEvidence?.metric === "followers" && assignmentIsOpen(item));
-  const snapshots = collapseAudienceSnapshots((state.audienceSnapshots ?? []).filter((item) => item.presenceId === presence.id && growthEvidenceIsInPresenceScope(state, presence.id, item.observedAt)));
+  const growthSummary: NonNullable<OpenPresenceState["growthBrowserSummary"]> | undefined = state.growthBrowserSummary?.presenceId === presence.id ? state.growthBrowserSummary : undefined;
+  const snapshots = growthSummary?.audience.recent ?? collapseAudienceSnapshots((state.audienceSnapshots ?? []).filter((item) => item.presenceId === presence.id && growthEvidenceIsInPresenceScope(state, presence.id, item.observedAt)));
+  const audienceSnapshotCount = growthSummary?.audience.count ?? snapshots.length;
   const latest = snapshots[0];
   const nativeX = state.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x");
   const historicalGrowth = deriveHistoricalGrowthContext(state, presence.id);
   const currentAccountFollowers = (nativeX?.account as { followers?: number } | undefined)?.followers;
   const displayedFollowerCount = latest?.followers ?? currentAccountFollowers ?? historicalGrowth?.currentFollowers;
-  const deltas = audienceDeltas(state, presence.id);
-  const publicationSnapshots = (state.publicationMetricSnapshots ?? []).filter((item) => item.presenceId === presence.id && growthPublicationIsInPresenceScope(state, presence.id, item)).sort((left, right) => right.observedAt.localeCompare(left.observedAt));
+  const deltas = growthSummary
+    ? { current: growthSummary.audience.latest?.followers, daily: growthSummary.audience.daily, sevenDay: growthSummary.audience.sevenDay, twentyEightDay: growthSummary.audience.twentyEightDay }
+    : audienceDeltas(state, presence.id);
+  const publicationSnapshots = growthSummary?.publication.recent ?? (state.publicationMetricSnapshots ?? []).filter((item) => item.presenceId === presence.id && growthPublicationIsInPresenceScope(state, presence.id, item)).sort((left, right) => right.observedAt.localeCompare(left.observedAt));
+  const publicationSnapshotCount = growthSummary?.publication.count ?? publicationSnapshots.length;
   const latestPublication = publicationSnapshots[0];
   const reviewHistory = (state.growthReviews ?? []).filter((item) => item.presenceId === presence.id && growthEvidenceIsInPresenceScope(state, presence.id, item.createdAt)).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
   const review = reviewHistory[0];
-  const unreviewedAudienceCount = review ? snapshots.filter((item) => !(review.evidenceIds ?? []).includes(item.id)).length : 0;
-  const unreviewedPublicationCount = review ? publicationSnapshots.filter((item) => !(review.evidenceIds ?? []).includes(item.id)).length : 0;
+  const unreviewedAudienceCount = growthSummary?.review?.unreviewedAudienceCount ?? (review ? snapshots.filter((item) => !(review.evidenceIds ?? []).includes(item.id)).length : 0);
+  const unreviewedPublicationCount = growthSummary?.review?.unreviewedPublicationCount ?? (review ? publicationSnapshots.filter((item) => !(review.evidenceIds ?? []).includes(item.id)).length : 0);
   const reviewIsStale = Boolean(review && (unreviewedAudienceCount > 0 || unreviewedPublicationCount > 0));
   const manifest = derivePresenceCapabilityManifest(state, presence.id);
   const growthCapabilities = ["post", "reply", "quote", "repost", "follow", "follower_measurement", "post_performance"];
@@ -648,20 +660,20 @@ export function GrowthView({ state, mutate, setView }: GrowthViewProps) {
   const bodyHeading = manifest.bodyStatus === "degraded" ? "Degraded" : manifest.bodyStatus === "ready" ? limitations.length ? "Ready with limits" : "Ready to work" : "Unavailable";
 
   // Autonomy derivations
-  const verifiedHistory = derivePublicHistory(state, presence.id).filter((item) => item.environment !== "sandbox" && growthEvidenceIsInPresenceScope(state, presence.id, item.occurredAt));
+  const verifiedHistory = growthSummary ? [] : derivePublicHistory(state, presence.id).filter((item) => item.environment !== "sandbox" && growthEvidenceIsInPresenceScope(state, presence.id, item.occurredAt));
   const autonomousExecutions = state.executions.filter((e) => e.presenceId === presence.id && e.status === "succeeded" && e.environment !== "sandbox" && growthEvidenceIsInPresenceScope(state, presence.id, e.createdAt));
-  const totalAutonomousActions = verifiedHistory.length;
-  const decisionsCount = state.socialDecisions.filter((d) => d.presenceId === presence.id && growthEvidenceIsInPresenceScope(state, presence.id, d.createdAt)).length;
-  const verifiedOutcomesCount = state.outcomes.filter((o) => o.presenceId === presence.id && o.status === "succeeded" && growthEvidenceIsInPresenceScope(state, presence.id, o.observedAt)).length;
+  const totalAutonomousActions = growthSummary?.actions.total ?? verifiedHistory.length;
+  const decisionsCount = growthSummary?.decisionsCount ?? state.socialDecisions.filter((d) => d.presenceId === presence.id && growthEvidenceIsInPresenceScope(state, presence.id, d.createdAt)).length;
+  const verifiedOutcomesCount = growthSummary?.verifiedOutcomesCount ?? state.outcomes.filter((o) => o.presenceId === presence.id && o.status === "succeeded" && growthEvidenceIsInPresenceScope(state, presence.id, o.observedAt)).length;
   const pendingReviewCount = pendingReviewExecutionsForCapabilities(state, presence.id, growthCapabilities).length;
-  const incidentsRequiringOperator = state.recoveryIncidents?.filter((i) => (!i.presenceId || i.presenceId === presence.id) && i.operatorActionRequired && i.state !== "resolved").length ?? 0;
+  const incidentsRequiringOperator = growthSummary?.openIncidentCount ?? state.recoveryIncidents?.filter((i) => (!i.presenceId || i.presenceId === presence.id) && i.operatorActionRequired && i.state !== "resolved").length ?? 0;
   const operatorInterventionsNeeded = pendingReviewCount + incidentsRequiringOperator + (manifest.bodyStatus === "unavailable" ? 1 : 0);
-  const recoveriesHandledCount = state.recoveryIncidents?.filter((i) => (!i.presenceId || i.presenceId === presence.id) && i.state === "resolved" && growthEvidenceIsInPresenceScope(state, presence.id, i.resolvedAt ?? i.lastObservedAt)).length ?? 0;
+  const recoveriesHandledCount = growthSummary?.recoveriesHandledCount ?? state.recoveryIncidents?.filter((i) => (!i.presenceId || i.presenceId === presence.id) && i.state === "resolved" && growthEvidenceIsInPresenceScope(state, presence.id, i.resolvedAt ?? i.lastObservedAt)).length ?? 0;
 
   // 7-day activity breakdown
   const oneWeekAgo = now - 7 * 86_400_000;
   const weeklyHistory = verifiedHistory.filter((item) => new Date(item.occurredAt).getTime() >= oneWeekAgo);
-  const weeklyBreakdown = {
+  const weeklyBreakdown = growthSummary?.actions.weekly ?? {
     posts: weeklyHistory.filter((item) => item.kind === "post").length,
     replies: weeklyHistory.filter((item) => item.kind === "reply" || item.kind === "comment").length,
     quotes: weeklyHistory.filter((item) => item.kind === "quote").length,
@@ -670,14 +682,14 @@ export function GrowthView({ state, mutate, setView }: GrowthViewProps) {
   };
 
   // Metric derivations
-  const totalReach = publicationSnapshots.reduce((sum, p) => sum + (p.impressions ?? 0), 0);
-  const totalLikes = publicationSnapshots.reduce((sum, p) => sum + (p.likes ?? 0), 0);
-  const totalReplies = publicationSnapshots.reduce((sum, p) => sum + (p.replies ?? 0), 0);
-  const totalQuotes = publicationSnapshots.reduce((sum, p) => sum + (p.quotes ?? 0), 0);
+  const totalReach = growthSummary?.publication.totalReach ?? publicationSnapshots.reduce((sum, p) => sum + (p.impressions ?? 0), 0);
+  const totalLikes = growthSummary?.publication.totalLikes ?? publicationSnapshots.reduce((sum, p) => sum + (p.likes ?? 0), 0);
+  const totalReplies = growthSummary?.publication.totalReplies ?? publicationSnapshots.reduce((sum, p) => sum + (p.replies ?? 0), 0);
+  const totalQuotes = growthSummary?.publication.totalQuotes ?? publicationSnapshots.reduce((sum, p) => sum + (p.quotes ?? 0), 0);
   const totalEngagement = totalLikes + totalReplies + totalQuotes;
   const scopedPersonIds = new Set((state.personIdentities ?? []).filter((identity) => identity.sourcePresenceId === presence.id && growthEvidenceIsInPresenceScope(state, presence.id, identity.createdAt)).map((identity) => identity.personId));
-  const relationshipsCount = (state.relationships ?? []).filter((r) => r.state === "active" && scopedPersonIds.has(r.personId)).length;
-  const peopleEngagedCount = (state.people ?? []).filter((p) => p.memoryState === "active" && scopedPersonIds.has(p.id)).length;
+  const relationshipsCount = growthSummary?.activeRelationshipsCount ?? (state.relationships ?? []).filter((r) => r.state === "active" && scopedPersonIds.has(r.personId)).length;
+  const peopleEngagedCount = growthSummary?.engagedPeopleCount ?? (state.people ?? []).filter((p) => p.memoryState === "active" && scopedPersonIds.has(p.id)).length;
 
   const presencePaused = presence.status === "paused" || assignment?.status === "paused";
   const needsAttention = operatorInterventionsNeeded > 0 || assignment?.status === "blocked" || assignment?.status === "needs_operator" || presencePaused;
@@ -802,7 +814,7 @@ export function GrowthView({ state, mutate, setView }: GrowthViewProps) {
             </div>
           </section>
 
-          {historicalGrowth && snapshots.length === 0 && (
+          {historicalGrowth && audienceSnapshotCount === 0 && (
             <section className="growth-recovered-context" aria-label="Recovered Growth context">
               <div className="growth-recovered-context-copy">
                 <SectionEyebrow>Recovered context · historical</SectionEyebrow>
@@ -930,7 +942,7 @@ export function GrowthView({ state, mutate, setView }: GrowthViewProps) {
             review={review}
             assignment={assignment}
             latestPublication={latestPublication}
-            publicationSnapshotsCount={publicationSnapshots.length}
+            publicationSnapshotsCount={publicationSnapshotCount}
             weeklyRepliesCount={weeklyBreakdown.replies}
             relationshipsCount={relationshipsCount || peopleEngagedCount}
             audienceObjective={assignment.audienceObjective ?? presence.brief.audience}
@@ -962,13 +974,17 @@ export function GrowthView({ state, mutate, setView }: GrowthViewProps) {
                     <ChevronRight size={15} className="growth-disclosure-chevron" aria-hidden="true" />
                     <span>Audience &amp; Publication Evidence</span>
                   </div>
-                  <span className="growth-disclosure-meta">{snapshots.length} audience · {publicationSnapshots.length} publication records</span>
+                  <span className="growth-disclosure-meta">{audienceSnapshotCount} audience · {publicationSnapshotCount} publication records</span>
                 </summary>
                 <GrowthEvidenceDetails
                   presenceName={presence.name}
                   snapshots={snapshots}
                   publicationSnapshots={publicationSnapshots}
                   mirrorObjects={state.mirrorObjects}
+                  audienceSnapshotCount={audienceSnapshotCount}
+                  publicationSnapshotCount={publicationSnapshotCount}
+                  maxImpressions={growthSummary?.publication.maxImpressions}
+                  audienceUnchanged={growthSummary?.audience.unchanged}
                   review={review}
                   reviewIsStale={reviewIsStale}
                   unreviewedAudienceCount={unreviewedAudienceCount}

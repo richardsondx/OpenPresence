@@ -2628,7 +2628,47 @@ export interface OpenPresenceState extends AgentWorkspaceSnapshot {
   /** Activity-only compact summaries. They are derived from the full ledger and never persisted as workspace state. */
   activityAttentionUsageSnapshots?: Record<string, ActivityAttentionUsageSnapshot>;
   activityNow?: Record<string, ActivityNowProjection>;
+  /** Growth-only summary derived from durable evidence for the browser read model. */
+  growthBrowserSummary?: GrowthBrowserSummary;
   lastStimulus?: PlaygroundStimulusResult;
+}
+
+export interface GrowthBrowserSummary {
+  presenceId: string;
+  audience: {
+    count: number;
+    latest?: PresenceAudienceSnapshot;
+    recent: PresenceAudienceSnapshot[];
+    unchanged: boolean;
+    daily?: number;
+    sevenDay?: number;
+    twentyEightDay?: number;
+  };
+  publication: {
+    count: number;
+    totalReach: number;
+    totalLikes: number;
+    totalReplies: number;
+    totalReposts: number;
+    totalQuotes: number;
+    maxImpressions?: number;
+    latest?: PublicationMetricSnapshot;
+    recent: PublicationMetricSnapshot[];
+  };
+  actions: {
+    total: number;
+    weekly: { posts: number; replies: number; quotes: number; likes: number; follows: number };
+  };
+  decisionsCount: number;
+  verifiedOutcomesCount: number;
+  activeRelationshipsCount: number;
+  engagedPeopleCount: number;
+  openIncidentCount: number;
+  recoveriesHandledCount: number;
+  review?: {
+    unreviewedAudienceCount: number;
+    unreviewedPublicationCount: number;
+  };
 }
 
 export interface CreateAgentInput { name: string; description: string; audience?: string; mode: PresenceMode; handle: string; accent: string; }

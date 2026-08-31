@@ -31,6 +31,8 @@ describe("Growth browser projection", () => {
     expect(projection.socialIntents).toEqual([]);
     expect(projection.files).toEqual([]);
     expect(projection.publicationMetricSnapshots[0]?.baseline).toBeUndefined();
+    expect(projection.growthBrowserSummary?.publication.count).toBe(1);
+    expect(projection.growthBrowserSummary?.publication.totalReach).toBe(12);
     expect(projection.mirrorObjects[0]).toMatchObject({ visibility: "public", actorPresenceId: presenceId });
     expect(history).toHaveLength(1);
     expect(history[0]).toMatchObject({ id: "mirror-1", kind: "post" });
