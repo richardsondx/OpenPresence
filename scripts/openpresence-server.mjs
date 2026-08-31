@@ -227,8 +227,8 @@ function signalNextChild(signal) {
   child.kill(signal);
 }
 
-function startDevScheduler() {
-  if (mode !== "dev" || process.env.OPENPRESENCE_DISABLE_DEV_SCHEDULER === "1" || stopping) return;
+function startScheduler() {
+  if (process.env.OPENPRESENCE_DISABLE_SCHEDULER === "1" || (mode === "dev" && process.env.OPENPRESENCE_DISABLE_DEV_SCHEDULER === "1") || stopping) return;
   scheduler = spawn(process.execPath, [path.join(projectRoot, "scripts", "openpresence-scheduler-worker.mjs")], {
     cwd: projectRoot,
     env: childEnv,
@@ -241,7 +241,7 @@ function startDevScheduler() {
     scheduler = undefined;
     if (stopping) return;
     console.error(`[openpresence-server] scheduler exited (code=${code ?? "?"}, signal=${signal ?? "none"}); restarting.`);
-    schedulerRestartTimer = setTimeout(startDevScheduler, 1_000);
+    schedulerRestartTimer = setTimeout(startScheduler, 1_000);
   });
 }
 
@@ -257,7 +257,7 @@ function stopChildren(signal) {
   }
 }
 
-startDevScheduler();
+startScheduler();
 
 for (const signal of ["SIGINT", "SIGTERM"]) {
   process.on(signal, () => {
