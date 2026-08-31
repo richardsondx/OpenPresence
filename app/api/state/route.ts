@@ -62,6 +62,7 @@ import { runLiveExplorationEngagement as runSharedLiveExplorationEngagement } fr
 import { browserWorkspaceProjection } from "@/lib/state-browser-projection";
 import { growthBrowserProjection } from "@/lib/growth-browser-projection";
 import { usageBrowserProjection } from "@/lib/usage-browser-projection";
+import { agentLibraryBrowserProjection } from "@/lib/agent-library-browser-projection";
 import { compactActivityAssignment } from "@/lib/activity-projection";
 
 export const dynamic = "force-dynamic";
@@ -331,6 +332,10 @@ function stateForResponse(request: Request, state: OpenPresenceState, forceActiv
         ? growthBrowserProjection(state, state.presence?.id)
         : projection === "usage"
           ? usageBrowserProjection(state)
+        : projection === "knowledge"
+          ? agentLibraryBrowserProjection(state, "knowledge")
+        : projection === "assets"
+          ? agentLibraryBrowserProjection(state, "assets")
     : browserWorkspaceProjection(state);
 }
 
@@ -4682,6 +4687,10 @@ export async function GET(request: Request) {
             ? growthBrowserProjection(contextualState, requestedPresenceId ?? contextualState.presence?.id)
           : projection === "usage"
             ? usageBrowserProjection(contextualState)
+          : projection === "knowledge"
+            ? agentLibraryBrowserProjection(contextualState, "knowledge")
+          : projection === "assets"
+            ? agentLibraryBrowserProjection(contextualState, "assets")
           : browserWorkspaceProjection(contextualState);
       const payload = { ...browserState, runtimeIdentity: { dbPath: resolvedDbPath, dbSelectionSource, agentId: contextualState.agent?.id ?? null, presenceId: contextualState.presence?.id ?? null, handle: contextualState.presence?.handle ?? null } };
       if (!["activity", "chat"].includes(projection ?? "")) return stateBodyResponse(request, JSON.stringify(payload), { headers: responseHeaders });
