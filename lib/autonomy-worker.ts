@@ -77,7 +77,7 @@ import {
   recordCapabilityFeedback,
   recordNativeMirror,
   recordNativeMirrors,
-  recordResourceUsageEvent,
+  recordResourceUsageEventInPlace,
   recordRuntimeEvent,
   recordSocialDecision,
   isWatchPausedForOrigin,
@@ -1252,7 +1252,7 @@ export async function runAutonomousSelfDirectedDiscovery(
       try {
         const permission = requestAttentionCapacity(next, presence.id, "self_directed_discovery", "channel_read");
         if (!permission.allowed) return deferDiscovery(next, 60 * 60_000);
-        next = recordResourceUsageEvent(next, { presenceId: presence.id, invocationId, runId, originKind: "self_directed_discovery", attentionSource: "self_directed_discovery", category: "channel_read", provider: "x", usage: { requests: 1 }, attentionEpisodeId: options?.attentionEpisodeId });
+        recordResourceUsageEventInPlace(next, { presenceId: presence.id, invocationId, runId, originKind: "self_directed_discovery", attentionSource: "self_directed_discovery", category: "channel_read", provider: "x", usage: { requests: 1 }, attentionEpisodeId: options?.attentionEpisodeId });
         const posts = await searchRecentXPosts(credentials!, direction, 15);
         for (const post of posts) if (!rawPosts.has(post.id)) rawPosts.set(post.id, post);
         completedQueries += 1;
@@ -1277,7 +1277,7 @@ export async function runAutonomousSelfDirectedDiscovery(
   if (discoverySource === "bridge") {
     const permission = requestAttentionCapacity(next, presence.id, "self_directed_discovery", "channel_read");
     if (!permission.allowed) return deferDiscovery(next, 60 * 60_000);
-    next = recordResourceUsageEvent(next, { presenceId: presence.id, invocationId, runId, originKind: "self_directed_discovery", attentionSource: "self_directed_discovery", category: "channel_read", provider: "chrome-bridge", usage: { requests: 1 }, attentionEpisodeId: options?.attentionEpisodeId });
+    recordResourceUsageEventInPlace(next, { presenceId: presence.id, invocationId, runId, originKind: "self_directed_discovery", attentionSource: "self_directed_discovery", category: "channel_read", provider: "chrome-bridge", usage: { requests: 1 }, attentionEpisodeId: options?.attentionEpisodeId });
   }
   const judgedIds = new Set<string>(presence.context.publicFooting?.judgedInboundIds ?? []);
   const bridgeCandidates = discoverySource === "bridge" && bridge

@@ -261,7 +261,15 @@ const capabilityLabel: Record<string, string> = {
  * supplied to the Agent and the UI; it is never model-authored state.
  */
 export function derivePresenceCapabilityManifest(source: OpenPresenceState, presenceId?: string, context?: { target?: EntityRef }): PresenceCapabilityManifest {
-  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+  // Reads from the database and immutable runtime transitions are already
+  // normalized. Re-normalizing them by serializing the entire workspace for
+  // every candidate makes the Live discovery loop pay a multi-megabyte clone
+  // before each model judgment. Keep the defensive clone for raw/legacy
+  // callers, but let the marked transition window use the existing read-only
+  // object.
+  const state = isStateNormalized(source)
+    ? source
+    : normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
   const presence = state.presences.find((item) => item.id === (presenceId ?? state.activePresenceId)) ?? state.presence;
   if (!presence) return { presenceId: presenceId ?? "", channel: "x", generatedAt: now(), bodyStatus: "unavailable", items: [] };
   const channelIds = new Set(channelCapabilities(state, presence.channel).map((item) => item.id));
