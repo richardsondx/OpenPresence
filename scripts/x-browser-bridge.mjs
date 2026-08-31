@@ -100,21 +100,28 @@ async function observeXPage(page, url, seenIds = new Set()) {
   const objects = [];
   await page.goto(url, { waitUntil: "domcontentloaded", timeout: 45_000 });
   if (!(await signedIn(page))) throw new Error(`The X browser session is not signed in as @${expectedHandle || "the expected account"}.`);
-  await page.waitForTimeout(1_500);
   const articles = page.locator('article[data-testid="tweet"], article');
-  const count = Math.min(await articles.count(), 40);
-  for (let index = 0; index < count; index += 1) {
-    const article = articles.nth(index);
-    const hrefs = await article.locator('a[href*="/status/"]').evaluateAll((links) => links.map((link) => link.getAttribute("href"))).catch(() => []);
-    const text = (await article.innerText().catch(() => "")).trim();
-    const ownStatusHref = await article.locator("time").first().evaluate((time) => time.closest("a")?.getAttribute("href") || undefined).catch(() => undefined);
+  // X hydrates the notification feed after DOMContentLoaded. Wait only until
+  // the first article is visible, rather than sleeping for the full fallback
+  // delay on every poll. Extract the bounded visible batch in one browser
+  // evaluation to avoid several sequential Playwright round trips per tweet.
+  await articles.first().waitFor({ state: "visible", timeout: 1_500 }).catch(() => undefined);
+  const rows = await articles.evaluateAll((nodes) => nodes.slice(0, 40).map((article) => ({
+    hrefs: Array.from(article.querySelectorAll('a[href*="/status/"]')).map((link) => link.getAttribute("href")),
+    text: (article instanceof HTMLElement ? article.innerText : article.textContent ?? "").trim(),
+    ownStatusHref: article.querySelector("time")?.closest("a")?.getAttribute("href") || undefined,
+    authorHandle: article.querySelector('[data-testid="User-Name"] a')?.getAttribute("href") || undefined,
+  })));
+  for (const row of rows) {
+    const hrefs = row.hrefs;
+    const text = row.text;
+    const ownStatusHref = row.ownStatusHref;
     const id = statusIdFromHref(ownStatusHref) ?? firstStatusId(hrefs, undefined);
     const isReply = isReplyArticleText(text);
     const parentId = isReply ? firstStatusId(hrefs, id) : undefined;
     if (!id || text.length < 3 || seenIds.has(id)) continue;
     seenIds.add(id);
-    const authorHandle = await article.locator('[data-testid="User-Name"] a').first().getAttribute("href").catch(() => undefined);
-    const handle = authorHandle?.replace(/^\//, "");
+    const handle = row.authorHandle?.replace(/^\//, "");
     objects.push({
       externalRef: { type: "x.post", id },
       ...(parentId ? { parentExternalRef: { type: "x.post", id: parentId } } : {}),

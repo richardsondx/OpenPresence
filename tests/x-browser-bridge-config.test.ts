@@ -4,7 +4,7 @@ import { boundedInterval, browserBridgeIntervals } from "../scripts/x-browser-br
 describe("X Browser Bridge polling budget", () => {
   it("checks mentions more often than discovery and metrics by default", () => {
     const intervals = browserBridgeIntervals({});
-    expect(intervals.mentionObserveMs).toBe(10_000);
+    expect(intervals.mentionObserveMs).toBe(5_000);
     expect(intervals.discoveryObserveMs).toBe(30_000);
     expect(intervals.mentionObserveMs).toBeLessThan(intervals.discoveryObserveMs);
   });
