@@ -161,6 +161,9 @@ if (mode === "dev" && !/--max-old-space-size(?:=|\s)/.test(process.env.NODE_OPTI
 // supervisor. This leaves one scheduler owner per database in both modes.
 const schedulerToken = process.env.OPENPRESENCE_SCHEDULER_TOKEN || crypto.randomBytes(32).toString("base64url");
 childEnv.OPENPRESENCE_SCHEDULER_TOKEN = schedulerToken;
+const schedulerOwnedByLauncher = process.env.OPENPRESENCE_DISABLE_SCHEDULER !== "1"
+  && !(mode === "dev" && process.env.OPENPRESENCE_DISABLE_DEV_SCHEDULER === "1");
+childEnv.OPENPRESENCE_EXTERNAL_SCHEDULER_OWNER = schedulerOwnedByLauncher ? "1" : "0";
 
 const nextCliPath = path.join(projectRoot, "node_modules", "next", "dist", "bin", "next");
 const nextArgs = [nextCliPath, mode, ...(useTurbo ? ["--turbo"] : []), "-p", port];
