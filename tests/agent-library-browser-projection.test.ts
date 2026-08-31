@@ -155,4 +155,20 @@ describe("Agent library browser projections", () => {
     expect(projection.librarySources).toHaveLength(20);
     expect(projection.mirrorObjects).toEqual([]);
   });
+
+  it("keeps Presence connection settings scoped to the active Presence", () => {
+    const state = createAgent({ name: "Genny", description: "An agent for useful software conversations.", audience: "AI builders", mode: "agent", handle: "@genny", accent: "#d88b57" });
+    const presenceId = state.presence!.id;
+    state.nativeConnections = [{ id: "native-1", presenceId }, { id: "native-2", presenceId: "other-presence" }] as never;
+    state.bridges = [{ id: "bridge-1", presenceId }, { id: "bridge-2", presenceId: "other-presence" }] as never;
+    state.browserBodies = [{ id: "body-1", presenceId }, { id: "body-2", presenceId: "other-presence" }] as never;
+    state.mirrorObjects = [{ id: "current", presenceId }, { id: "other", presenceId: "other-presence" }] as never;
+    const projection = agentLibraryBrowserProjection(state, "presence");
+    expect(projection.responseProjection).toBe("presence");
+    expect(projection.nativeConnections).toHaveLength(1);
+    expect(projection.bridges).toHaveLength(1);
+    expect(projection.browserBodies).toHaveLength(1);
+    expect(projection.mirrorObjects.map((object) => object.id)).toEqual(["current"]);
+    expect(projection.relationships).toEqual([]);
+  });
 });

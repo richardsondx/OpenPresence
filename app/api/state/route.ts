@@ -350,6 +350,8 @@ function stateForResponse(request: Request, state: OpenPresenceState, forceActiv
           ? agentLibraryBrowserProjection(state, "brain")
         : projection === "teach"
           ? agentLibraryBrowserProjection(state, "teach")
+        : projection === "presence"
+          ? agentLibraryBrowserProjection(state, "presence")
     : browserWorkspaceProjection(state);
 }
 
@@ -4719,6 +4721,8 @@ export async function GET(request: Request) {
               ? agentLibraryBrowserProjection(contextualState, "brain")
             : projection === "teach"
               ? agentLibraryBrowserProjection(contextualState, "teach")
+            : projection === "presence"
+              ? agentLibraryBrowserProjection(contextualState, "presence")
           : browserWorkspaceProjection(contextualState);
       const payload = { ...browserState, runtimeIdentity: { dbPath: resolvedDbPath, dbSelectionSource, agentId: contextualState.agent?.id ?? null, presenceId: contextualState.presence?.id ?? null, handle: contextualState.presence?.handle ?? null } };
       if (!["activity", "chat"].includes(projection ?? "")) return stateBodyResponse(request, JSON.stringify(payload), { headers: responseHeaders });

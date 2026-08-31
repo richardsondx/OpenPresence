@@ -1,6 +1,6 @@
 import type { OpenPresenceState } from "./types";
 
-export type AgentLibraryProjection = "knowledge" | "assets" | "people" | "feed" | "schedule" | "watching" | "rehearsal" | "brain" | "teach";
+export type AgentLibraryProjection = "knowledge" | "assets" | "people" | "feed" | "schedule" | "watching" | "rehearsal" | "brain" | "teach" | "presence";
 
 const historyCollections = [
   "files", "messages", "conversations", "presenceChatSessions", "operatorConversations", "operatorNudges", "agentRequests",
@@ -136,6 +136,17 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
       next.librarySources = state.librarySources.slice(-20);
       next.skills = state.skills;
       next.toolBindings = state.toolBindings;
+      return next;
+    }
+    if (projection === "presence") {
+      const presenceId = state.presence?.id;
+      next.nativeConnections = state.nativeConnections.filter((connection) => !presenceId || connection.presenceId === presenceId);
+      next.bridges = state.bridges.filter((bridge) => !presenceId || bridge.presenceId === presenceId);
+      next.browserBodies = (state.browserBodies ?? []).filter((body) => !presenceId || body.presenceId === presenceId);
+      next.executions = state.executions.filter((execution) => execution.presenceId === presenceId && (execution.status === "awaiting-review" || execution.status === "succeeded" || execution.status === "failed"));
+      next.mirrorObjects = state.mirrorObjects.filter((object) => !presenceId || object.presenceId === presenceId).slice(0, 120);
+      next.presenceKnowledgeAccess = state.presenceKnowledgeAccess;
+      next.knowledgeDocuments = state.knowledgeDocuments;
       return next;
     }
     const presenceId = state.presence?.id;
