@@ -1,6 +1,6 @@
 import type { OpenPresenceState } from "./types";
 
-export type AgentLibraryProjection = "knowledge" | "assets" | "people";
+export type AgentLibraryProjection = "knowledge" | "assets" | "people" | "feed";
 
 const historyCollections = [
   "files", "messages", "conversations", "presenceChatSessions", "operatorConversations", "operatorNudges", "agentRequests",
@@ -53,6 +53,21 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
     next.perceptions = state.perceptions;
   } else {
     for (const key of ["assets", "assetCollections", "assetCollectionMemberships", "assetProcessingJobs", "knowledgeDocuments", "knowledgeVersions", "knowledgeRetrievalRuns"] as const) next[key] = [] as never;
+    if (projection === "feed") {
+      const presenceId = state.presence?.id;
+      const mirrors = presenceId ? state.mirrorObjects.filter((object) => object.presenceId === presenceId) : state.mirrorObjects;
+      const assetIds = new Set(mirrors.flatMap((object) => (object.assetRefs ?? []).map((ref) => ref.assetId)));
+      const executionIds = new Set(mirrors.map((object) => object.originExecutionId).filter((id): id is string => Boolean(id)));
+      next.mirrorObjects = mirrors;
+      next.assets = state.assets.filter((asset) => assetIds.has(asset.id));
+      next.assignments = state.assignments;
+      next.assignmentRuns = state.assignmentRuns;
+      next.events = presenceId ? state.events.filter((event) => event.presenceId === presenceId) : state.events;
+      next.executions = state.executions.filter((execution) => execution.status === "awaiting-review" || executionIds.has(execution.id) || (execution.presenceId === presenceId && execution.status === "succeeded"));
+      next.outcomes = presenceId ? state.outcomes.filter((outcome) => outcome.presenceId === presenceId) : state.outcomes;
+      next.socialIntents = presenceId ? state.socialIntents.filter((intent) => intent.presenceId === presenceId) : state.socialIntents;
+      return next;
+    }
     const presenceId = state.presence?.id;
     next.people = state.people;
     next.personIdentities = state.personIdentities;

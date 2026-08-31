@@ -338,6 +338,8 @@ function stateForResponse(request: Request, state: OpenPresenceState, forceActiv
           ? agentLibraryBrowserProjection(state, "assets")
         : projection === "people"
           ? agentLibraryBrowserProjection(state, "people")
+        : projection === "feed"
+          ? agentLibraryBrowserProjection(state, "feed")
     : browserWorkspaceProjection(state);
 }
 
@@ -4687,14 +4689,16 @@ export async function GET(request: Request) {
           ? chatProjection(contextualState)
           : projection === "growth"
             ? growthBrowserProjection(contextualState, requestedPresenceId ?? contextualState.presence?.id)
-          : projection === "usage"
-            ? usageBrowserProjection(contextualState)
-          : projection === "knowledge"
-            ? agentLibraryBrowserProjection(contextualState, "knowledge")
-          : projection === "assets"
-            ? agentLibraryBrowserProjection(contextualState, "assets")
-          : projection === "people"
-            ? agentLibraryBrowserProjection(contextualState, "people")
+            : projection === "usage"
+              ? usageBrowserProjection(contextualState)
+            : projection === "knowledge"
+              ? agentLibraryBrowserProjection(contextualState, "knowledge")
+            : projection === "assets"
+              ? agentLibraryBrowserProjection(contextualState, "assets")
+            : projection === "people"
+              ? agentLibraryBrowserProjection(contextualState, "people")
+            : projection === "feed"
+              ? agentLibraryBrowserProjection(contextualState, "feed")
           : browserWorkspaceProjection(contextualState);
       const payload = { ...browserState, runtimeIdentity: { dbPath: resolvedDbPath, dbSelectionSource, agentId: contextualState.agent?.id ?? null, presenceId: contextualState.presence?.id ?? null, handle: contextualState.presence?.handle ?? null } };
       if (!["activity", "chat"].includes(projection ?? "")) return stateBodyResponse(request, JSON.stringify(payload), { headers: responseHeaders });

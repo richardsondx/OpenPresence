@@ -40,4 +40,22 @@ describe("Agent library browser projections", () => {
     expect(projection.mirrorObjects.map((object) => object.id)).toEqual(["current"]);
     expect(projection.assets).toEqual([]);
   });
+
+  it("keeps verified Feed joins while trimming unrelated collections", () => {
+    const state = createAgent({ name: "Genny", description: "An agent for useful software conversations.", audience: "AI builders", mode: "agent", handle: "@genny", accent: "#d88b57" });
+    const presenceId = state.presence!.id;
+    state.mirrorObjects = [
+      { id: "mirror-1", presenceId, assetRefs: [{ assetId: "asset-1" }] },
+      { id: "mirror-2", presenceId: "other-presence" },
+    ] as never;
+    state.assets = [{ id: "asset-1" }, { id: "asset-2" }] as never;
+    state.assignments = [{ id: "assignment-1" }] as never;
+    state.people = [{ id: "unrelated-person" }] as never;
+    const projection = agentLibraryBrowserProjection(state, "feed");
+    expect(projection.responseProjection).toBe("feed");
+    expect(projection.mirrorObjects).toHaveLength(1);
+    expect(projection.assets).toEqual([{ id: "asset-1" }]);
+    expect(projection.assignments).toHaveLength(1);
+    expect(projection.people).toEqual([]);
+  });
 });
