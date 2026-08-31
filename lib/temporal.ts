@@ -903,6 +903,7 @@ export function runOperationalSweep(now = new Date()): SweepResult {
     reclaimedLeases,
     staleRunsDetected,
     dispatchedWakes,
+    closedNonRetryableVerifications,
     closedOrphanedWaitingRuns,
     timestamp: nowIso,
   };
