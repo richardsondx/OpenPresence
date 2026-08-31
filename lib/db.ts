@@ -222,6 +222,7 @@ for (const table of normalizedTables) {
   sqlite.exec(`CREATE TABLE IF NOT EXISTS ${table} (id TEXT PRIMARY KEY, agent_id TEXT, parent_id TEXT, payload TEXT NOT NULL, updated_at TEXT NOT NULL)`);
 }
 sqlite.exec("CREATE INDEX IF NOT EXISTS attention_episodes_agent_updated_idx ON attention_episodes (agent_id, updated_at DESC)");
+sqlite.exec("CREATE INDEX IF NOT EXISTS executions_agent_updated_idx ON executions (agent_id, updated_at DESC)");
 
 type HighVolumeCollection = "resourceUsageEvents" | "publicationMetricSnapshots";
 const highVolumeCollections: Array<{ key: HighVolumeCollection; table: string; path: string }> = [
@@ -231,6 +232,7 @@ const highVolumeCollections: Array<{ key: HighVolumeCollection; table: string; p
 let highVolumeProjectionReady = false;
 let mirrorObjectsProjectionReady = false;
 let attentionEpisodesProjectionReady = false;
+let executionsProjectionReady = false;
 
 /** Move append-only histories out of the compatibility document once, safely and idempotently. */
 function migrateHighVolumeCollections() {
@@ -357,6 +359,27 @@ function hydrateAttentionEpisodes<T extends Pick<OpenPresenceState, "agent" | "a
   return { ...state, attentionEpisodes: merged.slice(0, 300) } as T;
 }
 
+function hydrateExecutions<T extends Pick<OpenPresenceState, "agent" | "executions">>(state: T, agentId = state.agent?.id): T {
+  if (!agentId) return state;
+  const rows = sqlite.prepare(`SELECT payload FROM executions
+    WHERE agent_id = ?
+    ORDER BY CASE WHEN json_extract(payload, '$.status') IN ('awaiting-review', 'approved', 'awaiting-manual', 'awaiting-connector', 'queued', 'claimed', 'executing', 'verification-pending') THEN 0 ELSE 1 END,
+      updated_at DESC LIMIT 600`).all(agentId) as Array<{ payload?: string }>;
+  const projected = rows.flatMap((row) => {
+    if (!row.payload) return [];
+    try { return [JSON.parse(row.payload) as OpenPresenceState["executions"][number]]; } catch { return []; }
+  });
+  const current = state.executions ?? [];
+  const seen = new Set(current.map((item) => item.id));
+  const merged = [...current];
+  for (const item of projected) {
+    if (seen.has(item.id)) continue;
+    seen.add(item.id);
+    merged.push(item);
+  }
+  return { ...state, executions: merged.slice(0, 600) } as T;
+}
+
 function writeNewHighVolumeCollectionRows(state: OpenPresenceState, previous?: OpenPresenceState) {
   const agentId = state.agent?.id;
   if (!agentId) return;
@@ -407,6 +430,23 @@ function syncAttentionEpisodeRows(state: OpenPresenceState, previous?: OpenPrese
     insert.run(item.id, agentId, item.presenceId ?? null, JSON.stringify(item), item.updatedAt);
   }
   const remove = sqlite.prepare("DELETE FROM attention_episodes WHERE agent_id = ? AND id = ?");
+  for (const id of existingRows.keys()) if (!currentIds.has(id)) remove.run(agentId, id);
+}
+
+/** Keep delivery and verification records durable without serializing them into app_state. */
+function syncExecutionRows(state: OpenPresenceState, previous?: OpenPresenceState) {
+  const agentId = state.agent?.id;
+  if (!agentId) return;
+  const existingRows = new Map((sqlite.prepare("SELECT id, json_extract(payload, '$.updatedAt') AS updated_at FROM executions WHERE agent_id = ?").all(agentId) as Array<{ id: string; updated_at?: string | null }>).map((row) => [row.id, row.updated_at ?? ""]));
+  const previousById = new Map((previous?.executions ?? []).map((item) => [item.id, item]));
+  const currentIds = new Set((state.executions ?? []).map((item) => item.id));
+  const insert = sqlite.prepare("INSERT OR REPLACE INTO executions (id, agent_id, parent_id, payload, updated_at) VALUES (?, ?, ?, ?, ?)");
+  for (const item of state.executions ?? []) {
+    const prior = previousById.get(item.id);
+    if (prior?.updatedAt === item.updatedAt || (!prior && existingRows.get(item.id) === item.updatedAt)) continue;
+    insert.run(item.id, agentId, item.socialIntentId ?? null, JSON.stringify(item), item.updatedAt);
+  }
+  const remove = sqlite.prepare("DELETE FROM executions WHERE agent_id = ? AND id = ?");
   for (const id of existingRows.keys()) if (!currentIds.has(id)) remove.run(agentId, id);
 }
 
@@ -474,6 +514,71 @@ function migrateAttentionEpisodes() {
   }
 }
 
+/** Backfill executions before removing their legacy compatibility copy. */
+function migrateExecutions() {
+  try {
+    sqlite.transaction(() => {
+      sqlite.prepare("UPDATE executions SET agent_id = (SELECT agent_id FROM presences WHERE presences.id = json_extract(executions.payload, '$.presenceId')) WHERE agent_id IS NULL").run();
+      sqlite.prepare(`
+        INSERT INTO executions (id, agent_id, parent_id, payload, updated_at)
+        SELECT json_extract(value, '$.id'),
+          COALESCE(json_extract(value, '$.agentId'), json_extract(app_state.payload, '$.agent.id')),
+          json_extract(value, '$.socialIntentId'), value,
+          COALESCE(json_extract(value, '$.updatedAt'), app_state.updated_at)
+        FROM app_state, json_each(app_state.payload, '$.executions')
+        WHERE app_state.id = 1 AND json_extract(value, '$.id') IS NOT NULL
+        ON CONFLICT(id) DO UPDATE SET
+          agent_id = excluded.agent_id,
+          parent_id = excluded.parent_id,
+          payload = excluded.payload,
+          updated_at = excluded.updated_at
+        WHERE excluded.updated_at >= COALESCE(json_extract(executions.payload, '$.updatedAt'), executions.updated_at)
+      `).run();
+      sqlite.prepare(`
+        INSERT INTO executions (id, agent_id, parent_id, payload, updated_at)
+        SELECT json_extract(value, '$.id'),
+          COALESCE(json_extract(value, '$.agentId'), agent_workspaces.agent_id),
+          json_extract(value, '$.socialIntentId'), value,
+          COALESCE(json_extract(value, '$.updatedAt'), agent_workspaces.updated_at)
+        FROM agent_workspaces, json_each(agent_workspaces.payload, '$.executions')
+        WHERE json_extract(value, '$.id') IS NOT NULL
+        ON CONFLICT(id) DO UPDATE SET
+          agent_id = excluded.agent_id,
+          parent_id = excluded.parent_id,
+          payload = excluded.payload,
+          updated_at = excluded.updated_at
+        WHERE excluded.updated_at >= COALESCE(json_extract(executions.payload, '$.updatedAt'), executions.updated_at)
+      `).run();
+
+      const appMissing = (sqlite.prepare(`
+        SELECT EXISTS(
+          SELECT 1 FROM app_state, json_each(app_state.payload, '$.executions')
+          WHERE app_state.id = 1
+            AND (json_extract(value, '$.id') IS NULL OR NOT EXISTS(
+              SELECT 1 FROM executions WHERE id = json_extract(value, '$.id')
+            ))
+        ) AS missing
+      `).get() as { missing?: number } | undefined)?.missing;
+      if (!appMissing) sqlite.prepare("UPDATE app_state SET payload = json_remove(payload, '$.executions') WHERE id = 1 AND json_type(payload, '$.executions') = 'array'").run();
+
+      const workspaceMissing = (sqlite.prepare(`
+        SELECT EXISTS(
+          SELECT 1 FROM agent_workspaces, json_each(agent_workspaces.payload, '$.executions')
+          WHERE json_extract(value, '$.id') IS NULL OR NOT EXISTS(
+            SELECT 1 FROM executions WHERE id = json_extract(value, '$.id')
+          )
+        ) AS missing
+      `).get() as { missing?: number } | undefined)?.missing;
+      if (!workspaceMissing) sqlite.prepare("UPDATE agent_workspaces SET payload = json_remove(payload, '$.executions') WHERE json_type(payload, '$.executions') = 'array'").run();
+    })();
+    executionsProjectionReady = true;
+  } catch (error) {
+    // Keep the compatibility field authoritative if a legacy SQLite runtime
+    // cannot complete this optional projection migration.
+    console.warn(`OpenPresence execution projection migration deferred: ${error instanceof Error ? error.message : String(error)}`);
+  }
+}
+
 // Next collects API routes in parallel during `next build`. Keep builds
 // read-only so independent route bundles do not race this write migration;
 // the long-lived server process performs it once during runtime startup.
@@ -481,6 +586,7 @@ if (process.env.NEXT_PHASE !== "phase-production-build") {
   migrateHighVolumeCollections();
   migrateMirrorObjects();
   migrateAttentionEpisodes();
+  migrateExecutions();
 }
 // Health polls only need a small, current slice of the active workspace. Keep
 // that slice durable and revision-tagged so a fresh process does not have to
@@ -778,6 +884,7 @@ function snapshotWorkspace(state: OpenPresenceState): AgentWorkspaceSnapshot {
   delete workspace.agentWorkspaces;
   delete workspace.mirrorEvents;
   delete workspace.attentionEpisodes;
+  delete workspace.executions;
   return workspace as AgentWorkspaceSnapshot;
 }
 
@@ -793,7 +900,7 @@ function hydrateAgentWorkspaces(state: OpenPresenceState): OpenPresenceState {
     // cold read; only hydrate other Agents for the switcher.
     if (row.agent_id === state.activeAgentId) continue;
     try {
-      const workspace = hydrateAttentionEpisodes(hydrateMirrorObjects(hydrateHighVolumeCollections(JSON.parse(row.payload) as AgentWorkspaceSnapshot, row.agent_id), row.agent_id), row.agent_id);
+      const workspace = hydrateExecutions(hydrateAttentionEpisodes(hydrateMirrorObjects(hydrateHighVolumeCollections(JSON.parse(row.payload) as AgentWorkspaceSnapshot, row.agent_id), row.agent_id), row.agent_id), row.agent_id);
       stored.set(row.agent_id, { ...workspace, workspaceRevision: revisions.get(row.agent_id) ?? 0 });
     } catch { /* retain the compatibility snapshot below */ }
   }
@@ -1126,7 +1233,7 @@ export function readStateSnapshot(): OpenPresenceState {
   const cachedState = stateCache;
   if (cachedState && cachedState.updatedAt === row.updated_at) return cachedState.state;
   try {
-    const state = markStateNormalized(hydrateAttentionEpisodes(hydrateMirrorObjects(hydrateHighVolumeCollections(hydrateBridgeCredentials(hydrateAgentWorkspaces(hydrateMirrorEvents(normalizeState(JSON.parse(row.payload) as OpenPresenceState))))))));
+    const state = markStateNormalized(hydrateExecutions(hydrateAttentionEpisodes(hydrateMirrorObjects(hydrateHighVolumeCollections(hydrateBridgeCredentials(hydrateAgentWorkspaces(hydrateMirrorEvents(normalizeState(JSON.parse(row.payload) as OpenPresenceState)))))))));
     stateCache = { updatedAt: row.updated_at ?? "", state };
     return state;
   } catch (error) {
@@ -1209,7 +1316,7 @@ export function readStateSnapshotForContext(context: StateContext): OpenPresence
     const scopedInput = workspace
       ? { ...compact, ...workspace, agents: compact.agents, activeAgentId: workspace.agent?.id ?? durableRequestedAgentId, agentWorkspaces: [workspace] }
       : { ...compact, agentWorkspaces: [] };
-    const scoped = hydrateAttentionEpisodes(hydrateMirrorObjects(hydrateHighVolumeCollections(hydrateMirrorEvents(normalizeState(scopedInput as OpenPresenceState), context.includeMirrorEvents !== false))));
+    const scoped = hydrateExecutions(hydrateAttentionEpisodes(hydrateMirrorObjects(hydrateHighVolumeCollections(hydrateMirrorEvents(normalizeState(scopedInput as OpenPresenceState), context.includeMirrorEvents !== false)))), durableRequestedAgentId);
     // `scopedInput` is freshly parsed from SQLite, so normalization already
     // gives callers an isolated mutable context. Re-running stateForContext
     // here used to deep-clone and normalize the same multi-megabyte workspace
@@ -1669,6 +1776,10 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
     if (agentId && attentionEpisodesProjectionReady) {
       syncAttentionEpisodeRows(normalized, previousHighVolumeState);
       delete compatibilityState.attentionEpisodes;
+    }
+    if (agentId && executionsProjectionReady) {
+      syncExecutionRows(normalized, previousHighVolumeState);
+      delete compatibilityState.executions;
     }
     compatibilityPayload = JSON.stringify(compatibilityState);
     sqlite.prepare("INSERT INTO app_state (id, payload, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at").run(compatibilityPayload, persistedAt);
