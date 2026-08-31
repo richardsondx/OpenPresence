@@ -2062,6 +2062,7 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
   const syncNormalized = options?.syncNormalized === true;
   const expectedRevision = typeof state.workspaceRevision === "number" ? state.workspaceRevision : undefined;
   const persistedAt = new Date().toISOString();
+  let appStateUpdatedAt = persistedAt;
   const previousHighVolumeState = stateCache?.state.activeAgentId === normalized.activeAgentId
     && stateCache.state.agent?.id === normalized.agent?.id
     ? stateCache.state
@@ -2069,6 +2070,7 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
   let compatibilityPayload = "";
   sqlite.transaction(() => {
     let actualRevision = 0;
+    const previousAppState = sqlite.prepare("SELECT payload, updated_at FROM app_state WHERE id = 1").get() as { payload?: string; updated_at?: string } | undefined;
     if (agentId) {
       sqlite.prepare("INSERT OR IGNORE INTO agent_workspace_revisions (agent_id, revision, updated_at) VALUES (?, 0, ?)").run(agentId, persistedAt);
       actualRevision = ((sqlite.prepare("SELECT revision FROM agent_workspace_revisions WHERE agent_id = ?").get(agentId) as { revision?: number } | undefined)?.revision ?? 0);
@@ -2081,6 +2083,11 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
     // to render one Presence.
     const compatibilityState = { ...normalized } as Partial<OpenPresenceState>;
     delete compatibilityState.agentWorkspaces;
+    // The revision table is authoritative for conflict detection and is
+    // refreshed below. Keeping this counter in the compatibility JSON would
+    // make every otherwise-identical heartbeat look like a large payload
+    // change and force another multi-megabyte SQLite/WAL write.
+    delete compatibilityState.workspaceRevision;
     delete compatibilityState.mirrorEvents;
     if (agentId && highVolumeProjectionReady) {
       delete compatibilityState.resourceUsageEvents;
@@ -2113,7 +2120,14 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
       delete compatibilityState.events;
     }
     compatibilityPayload = JSON.stringify(compatibilityState);
-    sqlite.prepare("INSERT INTO app_state (id, payload, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at").run(compatibilityPayload, persistedAt);
+    if (previousAppState?.payload !== compatibilityPayload) {
+      sqlite.prepare("INSERT INTO app_state (id, payload, updated_at) VALUES (1, ?, ?) ON CONFLICT(id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at").run(compatibilityPayload, persistedAt);
+    } else {
+      // Preserve the cache token when only normalized operational projections
+      // changed. Readers in this process already receive `normalized`, while
+      // cold readers hydrate those projections from their indexed tables.
+      appStateUpdatedAt = previousAppState.updated_at ?? persistedAt;
+    }
     if (!agentId) {
       sqlite.prepare("DELETE FROM agent_workspaces").run();
       sqlite.prepare("DELETE FROM agent_workspace_revisions").run();
@@ -2162,7 +2176,7 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
   // writes do not alter those directory records and can reuse the object.
   const sameAgentWrite = stateCache?.state.activeAgentId === normalized.activeAgentId
     && stateCache?.state.agent?.id === normalized.agent?.id;
-  stateCache = sameAgentWrite ? { updatedAt: persistedAt, state: normalized } : undefined;
+  stateCache = sameAgentWrite ? { updatedAt: appStateUpdatedAt, state: normalized } : undefined;
   if (syncNormalized) scheduleNormalizedSync(normalized);
 }
 

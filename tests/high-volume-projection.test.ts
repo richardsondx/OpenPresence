@@ -27,4 +27,32 @@ describe("high-volume compatibility projections", () => {
     expect(reopened.publicationMetricSnapshots[0]?.id).toBe("metric-projection-test");
     expect(readUsageWorkspaces().some((workspace) => workspace.resourceUsageEvents.some((event) => event.id === "usage-projection-test"))).toBe(true);
   });
+
+  it("does not rewrite app_state for an unchanged compatibility payload", () => {
+    let state = createAgent({ name: "Genny", description: "Useful ideas", audience: "builders", mode: "agent", handle: "@genny", accent: "#D68754" });
+    writeState(state);
+    state = readStateSnapshot();
+
+    const database = new Database(resolvedDbPath);
+    const before = database.prepare("SELECT payload, updated_at FROM app_state WHERE id = 1").get() as { payload: string; updated_at: string };
+    const beforeRevision = (database.prepare("SELECT revision FROM agent_workspace_revisions WHERE agent_id = ?").get(state.agent!.id) as { revision: number }).revision;
+    database.close();
+
+    state.resourceUsageEvents = [{ id: "usage-unchanged-compatibility", agentId: state.agent!.id, presenceId: state.presence!.id, invocationId: "invocation-unchanged-compatibility", originKind: "inbound_social", category: "channel_read", provider: "x", usage: { requests: 1 }, createdAt: new Date().toISOString() }];
+    writeState(state);
+
+    const afterDatabase = new Database(resolvedDbPath);
+    const after = afterDatabase.prepare("SELECT payload, updated_at FROM app_state WHERE id = 1").get() as { payload: string; updated_at: string };
+    const afterRevision = (afterDatabase.prepare("SELECT revision FROM agent_workspace_revisions WHERE agent_id = ?").get(state.agent!.id) as { revision: number }).revision;
+    afterDatabase.close();
+
+    const beforePayload = JSON.parse(before.payload) as Record<string, unknown>;
+    const afterPayload = JSON.parse(after.payload) as Record<string, unknown>;
+    const changedKeys = [...new Set([...Object.keys(beforePayload), ...Object.keys(afterPayload)])]
+      .filter((key) => JSON.stringify(beforePayload[key]) !== JSON.stringify(afterPayload[key]));
+    expect(changedKeys).toEqual([]);
+    expect(after.updated_at).toBe(before.updated_at);
+    expect(afterRevision).toBeGreaterThan(beforeRevision);
+    expect(readStateSnapshot().resourceUsageEvents[0]?.id).toBe("usage-unchanged-compatibility");
+  });
 });
