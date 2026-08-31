@@ -1801,8 +1801,19 @@ function writeNormalized(state: OpenPresenceState) {
  */
 function writeActiveBridgeProjection(state: OpenPresenceState, timestamp: string) {
   const presenceIds = state.presences.map((presence) => presence.id);
+  const bridgeIds = state.bridges.map((bridge) => bridge.id);
   if (presenceIds.length > 0) {
-    sqlite.prepare(`DELETE FROM bridges WHERE parent_id IN (${presenceIds.map(() => "?").join(",")})`).run(...presenceIds);
+    // Bridge events are frequent. Rebuilding every bridge row on each event
+    // amplified WAL growth and made one inbound mention pay for unrelated
+    // connectors. Upsert the active projection and remove only rows that no
+    // longer belong to the active Presence set.
+    if (bridgeIds.length > 0) {
+      sqlite.prepare(`DELETE FROM bridges
+        WHERE parent_id IN (${presenceIds.map(() => "?").join(",")})
+          AND id NOT IN (${bridgeIds.map(() => "?").join(",")})`).run(...presenceIds, ...bridgeIds);
+    } else {
+      sqlite.prepare(`DELETE FROM bridges WHERE parent_id IN (${presenceIds.map(() => "?").join(",")})`).run(...presenceIds);
+    }
   }
   const insert = sqlite.prepare("INSERT OR REPLACE INTO bridges (id, agent_id, parent_id, payload, updated_at) VALUES (?, ?, ?, ?, ?)");
   for (const bridge of state.bridges) {
@@ -1811,12 +1822,27 @@ function writeActiveBridgeProjection(state: OpenPresenceState, timestamp: string
 }
 
 function writeRuntimeHealthProjection(state: OpenPresenceState, timestamp: string) {
-  sqlite.prepare("DELETE FROM runtime_health_projection").run();
-  const insert = sqlite.prepare("INSERT INTO runtime_health_projection (category, id, presence_id, payload, workspace_updated_at) VALUES (?, ?, ?, ?, ?)");
-  for (const presence of state.presences) insert.run("presence", presence.id, presence.id, JSON.stringify(presence), timestamp);
-  for (const connection of state.nativeConnections) insert.run("native_connection", connection.id, connection.presenceId ?? null, JSON.stringify(connection), timestamp);
-  for (const execution of state.executions) insert.run("execution", execution.id, execution.presenceId ?? null, JSON.stringify(execution), timestamp);
-  for (const assignment of state.assignments) insert.run("assignment", assignment.id, assignment.presenceId ?? null, JSON.stringify(assignment), timestamp);
+  const rowsByCategory = new Map<string, Array<{ id: string; presenceId?: string; payload: unknown }>>([
+    ["presence", state.presences.map((item) => ({ id: item.id, presenceId: item.id, payload: item }))],
+    ["native_connection", state.nativeConnections.map((item) => ({ id: item.id, presenceId: item.presenceId, payload: item }))],
+    ["execution", state.executions.map((item) => ({ id: item.id, presenceId: item.presenceId, payload: item }))],
+    ["assignment", state.assignments.map((item) => ({ id: item.id, presenceId: item.presenceId, payload: item }))],
+  ]);
+  // Keep the projection exact without rewriting unrelated rows. This is
+  // especially important for Bridge ingress, where the health projection is
+  // refreshed alongside every accepted event.
+  for (const [category, rows] of rowsByCategory) {
+    if (rows.length > 0) {
+      sqlite.prepare(`DELETE FROM runtime_health_projection
+        WHERE category = ? AND id NOT IN (${rows.map(() => "?").join(",")})`).run(category, ...rows.map((row) => row.id));
+    } else {
+      sqlite.prepare("DELETE FROM runtime_health_projection WHERE category = ?").run(category);
+    }
+  }
+  const insert = sqlite.prepare("INSERT OR REPLACE INTO runtime_health_projection (category, id, presence_id, payload, workspace_updated_at) VALUES (?, ?, ?, ?, ?)");
+  for (const [category, rows] of rowsByCategory) {
+    for (const row of rows) insert.run(category, row.id, row.presenceId ?? null, JSON.stringify(row.payload), timestamp);
+  }
   sqlite.prepare(`INSERT INTO runtime_health_projection_meta (id, active_agent_id, workspace_updated_at)
     VALUES (1, ?, ?)
     ON CONFLICT(id) DO UPDATE SET active_agent_id = excluded.active_agent_id, workspace_updated_at = excluded.workspace_updated_at`).run(state.agent?.id ?? null, timestamp);
