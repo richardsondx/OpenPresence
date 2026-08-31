@@ -813,7 +813,7 @@ type ChromeDeliveryReconciliation = {
 function executionExpressionText(execution: OpenPresenceState["executions"][number]) {
   const payload = execution.publication?.payload;
   const payloadText = payload && typeof payload === "object" && !Array.isArray(payload) && "text" in payload && typeof payload.text === "string" ? payload.text : undefined;
-  return execution.publication?.publicExpression?.text?.trim() || payloadText?.trim();
+  return execution.publication?.publicExpression?.text?.trim() || payloadText?.trim() || "";
 }
 
 type SocialActDraft = NonNullable<AgentSocialDecision["acts"]>[number];
