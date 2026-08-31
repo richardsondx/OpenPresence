@@ -58,4 +58,24 @@ describe("Agent library browser projections", () => {
     expect(projection.assignments).toHaveLength(1);
     expect(projection.people).toEqual([]);
   });
+
+  it("keeps Schedule assignments and plan evidence without the full ledger", () => {
+    const state = createAgent({ name: "Genny", description: "An agent for useful software conversations.", audience: "AI builders", mode: "agent", handle: "@genny", accent: "#d88b57" });
+    const presenceId = state.presence!.id;
+    state.publishingPlans = [{ id: "plan-1", presenceId, status: "active", revision: 1, updatedAt: "2026-08-30T00:00:00.000Z" }] as never;
+    state.assignments = [{ id: "assignment-1", presenceId, status: "active" }] as never;
+    state.assignmentRuns = [{ id: "run-1", assignmentId: "assignment-1" }] as never;
+    state.assetCollections = [{ id: "collection-1", agentId: state.agent!.id, status: "active" }, { id: "archived", agentId: state.agent!.id, status: "archived" }] as never;
+    state.mirrorObjects = [{ id: "plan-mirror", presenceId, originExecutionId: "plan-execution" }, { id: "unrelated", presenceId, originExecutionId: "other-execution" }] as never;
+    state.executions = [{ id: "plan-execution", presenceId, status: "succeeded", publication: { origin: { kind: "publishing_initiative", planId: "plan-1", planRevision: 1 } } }, { id: "other-execution", presenceId, status: "succeeded" }] as never;
+    const projection = agentLibraryBrowserProjection(state, "schedule");
+    expect(projection.responseProjection).toBe("schedule");
+    expect(projection.publishingPlans).toHaveLength(1);
+    expect(projection.assignments).toHaveLength(1);
+    expect(projection.assignmentRuns).toHaveLength(1);
+    expect(projection.assetCollections).toEqual([{ id: "collection-1", agentId: state.agent!.id, status: "active" }]);
+    expect(projection.mirrorObjects.map((object) => object.id)).toEqual(["plan-mirror"]);
+    expect(projection.executions.map((execution) => execution.id)).toEqual(["plan-execution"]);
+    expect(projection.people).toEqual([]);
+  });
 });

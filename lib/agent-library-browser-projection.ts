@@ -1,6 +1,6 @@
 import type { OpenPresenceState } from "./types";
 
-export type AgentLibraryProjection = "knowledge" | "assets" | "people" | "feed";
+export type AgentLibraryProjection = "knowledge" | "assets" | "people" | "feed" | "schedule";
 
 const historyCollections = [
   "files", "messages", "conversations", "presenceChatSessions", "operatorConversations", "operatorNudges", "agentRequests",
@@ -66,6 +66,22 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
       next.executions = state.executions.filter((execution) => execution.status === "awaiting-review" || executionIds.has(execution.id) || (execution.presenceId === presenceId && execution.status === "succeeded"));
       next.outcomes = presenceId ? state.outcomes.filter((outcome) => outcome.presenceId === presenceId) : state.outcomes;
       next.socialIntents = presenceId ? state.socialIntents.filter((intent) => intent.presenceId === presenceId) : state.socialIntents;
+      return next;
+    }
+    if (projection === "schedule") {
+      const presenceId = state.presence?.id;
+      const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
+      const plans = state.publishingPlans.filter((plan) => (!presenceId || plan.presenceId === presenceId) && plan.status !== "superseded");
+      const plan = plans.sort((left, right) => (right.status === "active" ? 1 : 0) - (left.status === "active" ? 1 : 0) || right.revision - left.revision || right.updatedAt.localeCompare(left.updatedAt))[0];
+      const planExecutionIds = new Set(state.executions
+        .filter((execution) => execution.presenceId === presence?.id && execution.status === "succeeded" && execution.publication?.origin?.kind === "publishing_initiative" && execution.publication.origin.planId === plan?.id && execution.publication.origin.planRevision === plan?.revision)
+        .map((execution) => execution.id));
+      next.publishingPlans = plan ? [plan] : [];
+      next.mirrorObjects = state.mirrorObjects.filter((object) => object.presenceId === presence?.id && object.originExecutionId !== undefined && planExecutionIds.has(object.originExecutionId));
+      next.assignments = state.assignments;
+      next.assignmentRuns = state.assignmentRuns;
+      next.assetCollections = (state.assetCollections ?? []).filter((collection) => collection.agentId === state.agent?.id && collection.status === "active");
+      next.executions = state.executions.filter((execution) => execution.status === "awaiting-review" || planExecutionIds.has(execution.id));
       return next;
     }
     const presenceId = state.presence?.id;
