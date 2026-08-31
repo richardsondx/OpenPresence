@@ -101,7 +101,7 @@ export function growthBrowserProjection(state: OpenPresenceState, presenceId?: s
     .map((identity) => ({ id: identity.id, personId: identity.personId, sourcePresenceId: identity.sourcePresenceId, createdAt: identity.createdAt })) as never;
   projection.relationships = (state.relationships ?? [])
     .filter((relationship) => selectedPersonIds.has(relationship.personId))
-    .map((relationship) => ({ id: relationship.id, personId: relationship.personId, presenceId: relationship.presenceId, state: relationship.state })) as never;
+    .map((relationship) => ({ id: relationship.id, personId: relationship.personId, state: relationship.state })) as never;
   projection.people = (state.people ?? [])
     .filter((person) => selectedPersonIds.has(person.id))
     .map((person) => ({ id: person.id, memoryState: person.memoryState })) as never;
