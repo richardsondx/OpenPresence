@@ -27,4 +27,17 @@ describe("Agent library browser projections", () => {
     expect(projection.mirrorObjects).toEqual([]);
     expect(Buffer.byteLength(JSON.stringify(projection))).toBeLessThan(Buffer.byteLength(JSON.stringify(state)));
   });
+
+  it("keeps People relationship evidence scoped to the active Presence", () => {
+    const state = createAgent({ name: "Genny", description: "An agent for useful software conversations.", audience: "AI builders", mode: "agent", handle: "@genny", accent: "#d88b57" });
+    const presenceId = state.presence!.id;
+    state.people = [{ id: "person-1", memoryState: "active" }] as never;
+    state.personIdentities = [{ id: "identity-1", personId: "person-1", sourcePresenceId: presenceId }] as never;
+    state.mirrorObjects = [{ id: "current", presenceId }, { id: "other", presenceId: "other-presence" }] as never;
+    const projection = agentLibraryBrowserProjection(state, "people");
+    expect(projection.people).toHaveLength(1);
+    expect(projection.personIdentities).toHaveLength(1);
+    expect(projection.mirrorObjects.map((object) => object.id)).toEqual(["current"]);
+    expect(projection.assets).toEqual([]);
+  });
 });

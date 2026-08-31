@@ -1,6 +1,6 @@
 import type { OpenPresenceState } from "./types";
 
-export type AgentLibraryProjection = "knowledge" | "assets";
+export type AgentLibraryProjection = "knowledge" | "assets" | "people";
 
 const historyCollections = [
   "files", "messages", "conversations", "presenceChatSessions", "operatorConversations", "operatorNudges", "agentRequests",
@@ -44,13 +44,33 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
     next.knowledgeDocuments = state.knowledgeDocuments;
     next.knowledgeVersions = state.knowledgeVersions;
     next.knowledgeRetrievalRuns = state.knowledgeRetrievalRuns;
-  } else {
+  } else if (projection === "assets") {
     for (const key of ["knowledgeDocuments", "knowledgeVersions", "knowledgeRetrievalRuns"] as const) next[key] = [] as never;
     next.assets = state.assets;
     next.assetCollections = state.assetCollections;
     next.assetCollectionMemberships = state.assetCollectionMemberships;
     next.assetProcessingJobs = state.assetProcessingJobs;
     next.perceptions = state.perceptions;
+  } else {
+    for (const key of ["assets", "assetCollections", "assetCollectionMemberships", "assetProcessingJobs", "knowledgeDocuments", "knowledgeVersions", "knowledgeRetrievalRuns"] as const) next[key] = [] as never;
+    const presenceId = state.presence?.id;
+    next.people = state.people;
+    next.personIdentities = state.personIdentities;
+    next.relationships = state.relationships;
+    next.relationshipFacts = state.relationshipFacts;
+    next.relationshipOpenLoops = state.relationshipOpenLoops;
+    next.peopleNotes = state.peopleNotes;
+    next.watches = state.watches;
+    next.watchSignals = state.watchSignals;
+    next.delegationGrants = state.delegationGrants;
+    next.relationshipStudies = state.relationshipStudies;
+    next.relationshipInsightSets = state.relationshipInsightSets;
+    next.autobiographicalEvents = state.autobiographicalEvents;
+    next.mirrorObjects = presenceId ? state.mirrorObjects.filter((object) => object.presenceId === presenceId) : state.mirrorObjects;
+    next.socialDecisions = presenceId ? state.socialDecisions.filter((decision) => decision.presenceId === presenceId) : state.socialDecisions;
+    next.socialIntents = presenceId ? state.socialIntents.filter((intent) => intent.presenceId === presenceId && intent.affordance === "x.follow") : state.socialIntents;
+    next.outcomes = presenceId ? state.outcomes.filter((outcome) => outcome.presenceId === presenceId) : state.outcomes;
+    next.executions = state.executions.filter((execution) => execution.status === "awaiting-review" || (execution.presenceId === presenceId && execution.affordance === "x.follow"));
   }
 
   return next;
