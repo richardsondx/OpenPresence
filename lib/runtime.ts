@@ -1232,8 +1232,7 @@ export function recordStandingIntentNoOp(source: OpenPresenceState, presenceId: 
   return state;
 }
 
-export function recordNativeObservation(source: OpenPresenceState, presenceId: string, observation: OpenPresenceState["nativeConnections"][number]["observation"]) {
-  const state = normalizeState(JSON.parse(JSON.stringify(source)) as OpenPresenceState);
+export function recordNativeObservationInPlace(state: OpenPresenceState, presenceId: string, observation: OpenPresenceState["nativeConnections"][number]["observation"]) {
   const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   state.nativeConnections = state.nativeConnections.map((connection) => {
     if (connection.presenceId !== presenceId || connection.kind !== "x") return connection;
@@ -1259,6 +1258,10 @@ export function recordNativeObservation(source: OpenPresenceState, presenceId: s
       : { ...connection, observation, updatedAt: now() };
   });
   return state;
+}
+
+export function recordNativeObservation(source: OpenPresenceState, presenceId: string, observation: OpenPresenceState["nativeConnections"][number]["observation"]) {
+  return recordNativeObservationInPlace(cloneState(source), presenceId, observation);
 }
 
 export function recordNativeMirror(source: OpenPresenceState, input: { connectionId: string; presenceId: string; own?: boolean; post: { id: string; text: string; language?: string; createdAt?: string; authorId?: string; authorUsername?: string; authorName?: string; authorAvatarUrl?: string; conversationId?: string; parentId?: string; referencedPosts?: Array<{ type: "replied_to" | "quoted" | "retweeted"; id: string }>; media?: Array<{ mediaKey: string; type: "photo" | "video" | "animated_gif"; url?: string; previewImageUrl?: string; altText?: string }> } }, options?: { normalized?: boolean; attentionEpisodeId?: string; attentionRunId?: string; attentionInvocationId?: string; explicitOperatorEvidence?: boolean; suppressRelationshipCuration?: boolean }) {

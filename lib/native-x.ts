@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readNativeXCredentials, readRecentXMentions, readRecentXPosts, readXAudienceSnapshot, readXPublicationMetrics, readXPostsByIds, searchRecentXPosts, type XRecentPost } from "./x";
 import { detectDuplicatePublicOutcomes } from "./public-action-safety";
-import { applyOperation, intervalForPresence, markNativeConnectionNeedsAttention, recordNativeMirrorsInPlace, recordNativeMirrorDeletion, recordNativeObservation, recordPublicFooting, recordResourceUsageEvent, recordResourceUsageEventInPlace, recordRuntimeEvent, recordPublicRequestsFromMirrors, recordWatchSignals, recordPublicationMetricSnapshots } from "./runtime";
+import { applyOperation, intervalForPresence, markNativeConnectionNeedsAttention, recordNativeMirrorsInPlace, recordNativeMirrorDeletion, recordNativeObservationInPlace, recordPublicFooting, recordResourceUsageEvent, recordResourceUsageEventInPlace, recordRuntimeEvent, recordPublicRequestsFromMirrors, recordWatchSignals, recordPublicationMetricSnapshots } from "./runtime";
 import { normalizeHandle } from "./x";
 import { languagesMatch } from "./language-policy";
 import type { EntityRef, MirrorObject, OpenPresenceState, Presence, PresenceQuietHours } from "./types";
@@ -174,7 +174,7 @@ function sharedWatchQueries(watches: OpenPresenceState["watches"]) {
 
 export async function reconcileNativeX(source: OpenPresenceState, presenceId: string, options?: { runId?: string; invocationId?: string; attentionEpisodeId?: string; inboundOnly?: boolean }): Promise<OpenPresenceState> {
   const previousObservation = source.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x")?.observation;
-  let next = recordNativeObservation(source, presenceId, {
+  let next = recordNativeObservationInPlace(source, presenceId, {
     ...(previousObservation ?? {}),
     status: "syncing",
     error: undefined,
@@ -190,13 +190,13 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
       ? `ACCOUNT_MISMATCH: X authenticated @${connectedHandle}, but this Presence expects @${configuredHandle}. Native observation and actions are paused until the correct credentials are connected.`
       : `ACCOUNT_UNVERIFIED: X did not expose the authenticated account for this connection. Native observation and actions are paused until @${configuredHandle} is verified.`;
     next = markNativeConnectionNeedsAttention(next, presenceId, message);
-    next = recordNativeObservation(next, presenceId, { status: "error", error: message, nextObservationAt: new Date(Date.now() + 60_000).toISOString() });
+    next = recordNativeObservationInPlace(next, presenceId, { status: "error", error: message, nextObservationAt: new Date(Date.now() + 60_000).toISOString() });
     return recordRuntimeEvent(next, presenceId, "X identity mismatch", message, "warning");
   }
   const accountId = connection?.account?.id;
   if (!connection || !credentials || !accountId) {
     const message = "The native X connection could not provide a readable account context.";
-    next = recordNativeObservation(next, presenceId, { status: "error", error: message, nextObservationAt: new Date(Date.now() + 60_000).toISOString() });
+    next = recordNativeObservationInPlace(next, presenceId, { status: "error", error: message, nextObservationAt: new Date(Date.now() + 60_000).toISOString() });
     return recordRuntimeEvent(next, presenceId, "X observation failed", message, "warning");
   }
 
@@ -335,7 +335,7 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
     const error = partial
       ? mentionsResult.reason instanceof Error ? mentionsResult.reason.message : "X did not return inbound mentions."
       : undefined;
-    next = recordNativeObservation(next, presenceId, {
+    next = recordNativeObservationInPlace(next, presenceId, {
       status: partial ? "degraded" : "up-to-date",
       lastObservedAt: observedAt,
       nextObservationAt: nextObservationAt(next.presences.find((item) => item.id === presenceId), Date.parse(observedAt), zeroDeltaStreak),
@@ -361,7 +361,7 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
     return next;
   } catch (error) {
     const message = error instanceof Error ? error.message : "X did not return a readable observation.";
-    next = recordNativeObservation(next, presenceId, {
+    next = recordNativeObservationInPlace(next, presenceId, {
       ...(connection.observation ?? {}),
       status: "error",
       error: message,
