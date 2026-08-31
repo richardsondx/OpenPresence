@@ -108,4 +108,17 @@ describe("Agent library browser projections", () => {
     expect(projection.mirrorObjects.map((object) => object.id)).toEqual(["signal-mirror", "finding-mirror", "artifact-mirror", "recent-post", "unrelated"]);
     expect(projection.relationships).toEqual([]);
   });
+
+  it("keeps only the active Presence rehearsal transcript and file context", () => {
+    const state = createAgent({ name: "Genny", description: "An agent for useful software conversations.", audience: "AI builders", mode: "agent", handle: "@genny", accent: "#d88b57" });
+    const presenceId = state.presence!.id;
+    state.presenceChatSessions = [{ id: "session-1", presenceId, messages: [] }, { id: "session-2", presenceId: "other-presence", messages: [] }] as never;
+    state.files = [{ kind: "TASTE", revision: 4 }, { kind: "BRAIN", revision: 1 }] as never;
+    state.mirrorObjects = [{ id: "unrelated" }] as never;
+    const projection = agentLibraryBrowserProjection(state, "rehearsal");
+    expect(projection.responseProjection).toBe("rehearsal");
+    expect(projection.presenceChatSessions).toHaveLength(1);
+    expect(projection.files).toHaveLength(2);
+    expect(projection.mirrorObjects).toEqual([]);
+  });
 });
