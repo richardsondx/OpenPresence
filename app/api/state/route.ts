@@ -60,6 +60,7 @@ import { authorizeAssetSelection, isLibraryAsset, searchEligibleAssets } from "@
 import { socialReplyAttributionIssue, socialReplyQualityIssue } from "@/lib/social-quality";
 import { runLiveExplorationEngagement as runSharedLiveExplorationEngagement } from "@/lib/exploration-worker";
 import { browserWorkspaceProjection } from "@/lib/state-browser-projection";
+import { growthBrowserProjection } from "@/lib/growth-browser-projection";
 import { compactActivityAssignment } from "@/lib/activity-projection";
 
 export const dynamic = "force-dynamic";
@@ -325,6 +326,8 @@ function stateForResponse(request: Request, state: OpenPresenceState, forceActiv
     ? activityProjection(state)
     : projection === "chat"
       ? chatProjection(state)
+      : projection === "growth"
+        ? growthBrowserProjection(state, state.presence?.id)
     : browserWorkspaceProjection(state);
 }
 
@@ -4672,6 +4675,8 @@ export async function GET(request: Request) {
         ? activityProjection(contextualState)
         : projection === "chat"
           ? chatProjection(contextualState)
+          : projection === "growth"
+            ? growthBrowserProjection(contextualState, requestedPresenceId ?? contextualState.presence?.id)
           : browserWorkspaceProjection(contextualState);
       const payload = { ...browserState, runtimeIdentity: { dbPath: resolvedDbPath, dbSelectionSource, agentId: contextualState.agent?.id ?? null, presenceId: contextualState.presence?.id ?? null, handle: contextualState.presence?.handle ?? null } };
       if (!["activity", "chat"].includes(projection ?? "")) return stateBodyResponse(request, JSON.stringify(payload), { headers: responseHeaders });
