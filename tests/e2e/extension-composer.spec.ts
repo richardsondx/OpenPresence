@@ -82,6 +82,35 @@ test("the Chrome observer preserves quote authorship and nested media ownership"
   ]));
 });
 
+test("the Chrome observer does not resend unchanged visible evidence", async ({ page }) => {
+  await page.route("http://openpresence.test/**", (route) => route.fulfill({ status: 200, contentType: "text/html", body: "<!doctype html><html><body></body></html>" }));
+  await page.goto("http://openpresence.test/home");
+  await page.setContent(`
+    <nav><a data-testid="AppTabBar_Profile_Link" href="/example_agent">@example_agent</a></nav>
+    <article>
+      <div data-testid="User-Name"><a href="/builder">Builder</a><a href="/builder">@builder</a></div>
+      <a href="/builder/status/2093000000000000001"><time datetime="2026-08-27T00:00:00Z">now</time></a>
+      <div data-testid="tweetText" lang="en">A stable visible post.</div>
+    </article>
+  `);
+  await page.evaluate(() => {
+    const messages: unknown[] = [];
+    const listeners: Array<(message: unknown) => void> = [];
+    Object.assign(window, { __openPresenceMessages: messages, __openPresenceListeners: listeners });
+    Object.defineProperty(window, "chrome", { configurable: true, value: { runtime: { id: "test-extension", onMessage: { addListener: (listener: (message: unknown) => void) => listeners.push(listener) }, sendMessage: (message: unknown) => { messages.push(message); return Promise.resolve({ ok: true }); } } } });
+  });
+  await page.addScriptTag({ path: "extension/execution.js" });
+  await page.addScriptTag({ path: "extension/channel-x.js" });
+  await page.evaluate(() => {
+    const listeners = (window as typeof window & { __openPresenceListeners: Array<(message: unknown) => void> }).__openPresenceListeners;
+    listeners.forEach((listener) => listener({ type: "OPENPRESENCE_SESSION_CONTEXT", expectedHandle: "@example_agent", presenceName: "Genny" }));
+  });
+  await page.waitForTimeout(6_500);
+  const observations = await page.evaluate(() => (window as typeof window & { __openPresenceMessages: Array<{ type?: string; observation?: { externalRef?: { id?: string } } }> }).__openPresenceMessages.filter((message) => message.type === "OPENPRESENCE_OBSERVATION"));
+  expect(observations).toHaveLength(1);
+  expect(observations[0]?.observation?.externalRef?.id).toBe("2093000000000000001");
+});
+
 test("the Chrome adapter does not navigate away from a dirty X composer", async ({ page }) => {
   await page.route("http://openpresence.test/**", (route) => route.fulfill({
     status: 200,

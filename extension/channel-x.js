@@ -8,6 +8,9 @@
   let presenceName = "Waiting for Presence";
   let activeExecutionId = null;
   let metricsInFlight = false;
+  const reportedObservations = new Map();
+  const maxReportedObservations = 256;
+  const observationScanIntervalMs = 2_000;
   const overlay = document.createElement("div");
   overlay.id = "openpresence-browser-overlay";
   overlay.attachShadow({ mode: "open" }).innerHTML = `<style>:host{all:initial}.wrap{position:fixed;z-index:2147483647;right:16px;bottom:16px;display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid rgba(213,146,103,.65);border-radius:999px;background:rgba(255,250,246,.96);box-shadow:0 5px 24px rgba(39,25,17,.14);color:#332a25;font:12px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.mark{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#c77d50;color:#fff;font-weight:700}.dot{width:7px;height:7px;border-radius:50%;background:#9b8d82}.text{max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.label{display:block;color:#766b63;font-size:10px;margin-top:2px}</style><div class="wrap"><span class="mark">◉</span><span class="text"><b id="name">OpenPresence</b><span class="label" id="state">Checking connection</span></span><span class="dot" id="connection-dot"></span></div>`;
@@ -549,15 +552,31 @@
     return failure({ executionId: execution.id, ok: false, code: "PUBLIC_OBJECT_NOT_VISIBLE", message: `X did not show the completed ${affordance} in the controlled tab.`, retryable: true });
   }
 
+  function reportObservation(sourceEventId, object) {
+    const fingerprint = JSON.stringify(object);
+    if (reportedObservations.get(sourceEventId) === fingerprint) return;
+    reportedObservations.delete(sourceEventId);
+    reportedObservations.set(sourceEventId, fingerprint);
+    while (reportedObservations.size > maxReportedObservations) reportedObservations.delete(reportedObservations.keys().next().value);
+    void sendMessage({ type: "OPENPRESENCE_OBSERVATION", observation: { sourceEventId, externalRef: object.externalRef, object } }).then((result) => {
+      // Keep the observation eligible for the next scan when the extension or
+      // app was temporarily unavailable. A successful send remains quiet on
+      // subsequent scans until the visible evidence actually changes.
+      if (result === false && reportedObservations.get(sourceEventId) === fingerprint) reportedObservations.delete(sourceEventId);
+    }).catch(() => {
+      if (reportedObservations.get(sourceEventId) === fingerprint) reportedObservations.delete(sourceEventId);
+    });
+  }
+
   function scan() {
     reportAccountIdentity();
     const account = verifyAccount();
     if (!account.ok) { setState("waiting"); return; }
     for (const post of visiblePosts().filter(isEnglishPost).slice(0, 12)) {
       if (post.quotedPost && isEnglishPost(post.quotedPost)) {
-        sendMessage({ type: "OPENPRESENCE_OBSERVATION", observation: { sourceEventId: `x:${post.quotedPost.id}`, externalRef: { type: "x.post", id: post.quotedPost.id }, object: { externalRef: { type: "x.post", id: post.quotedPost.id }, objectType: "post", language: post.quotedPost.language, author: { displayName: post.quotedPost.displayName, handle: post.quotedPost.handle }, content: post.quotedPost.text ? { text: post.quotedPost.text, language: post.quotedPost.language } : undefined, media: post.quotedPost.media, visibility: "public", shareability: "presence-only" } } });
+        reportObservation(`x:${post.quotedPost.id}`, { externalRef: { type: "x.post", id: post.quotedPost.id }, objectType: "post", language: post.quotedPost.language, author: { displayName: post.quotedPost.displayName, handle: post.quotedPost.handle }, content: post.quotedPost.text ? { text: post.quotedPost.text, language: post.quotedPost.language } : undefined, media: post.quotedPost.media, visibility: "public", shareability: "presence-only" });
       }
-      sendMessage({ type: "OPENPRESENCE_OBSERVATION", observation: { sourceEventId: `x:${post.id}`, externalRef: { type: "x.post", id: post.id }, object: { externalRef: { type: "x.post", id: post.id }, referencedExternalRefs: post.quotedPost ? [{ type: "x.post", id: post.quotedPost.id }] : undefined, objectType: "post", language: post.language, author: { displayName: post.displayName, handle: post.handle }, content: post.text ? { text: post.text, language: post.language } : undefined, media: post.media, visibility: "public", shareability: "presence-only" } } });
+      reportObservation(`x:${post.id}`, { externalRef: { type: "x.post", id: post.id }, referencedExternalRefs: post.quotedPost ? [{ type: "x.post", id: post.quotedPost.id }] : undefined, objectType: "post", language: post.language, author: { displayName: post.displayName, handle: post.handle }, content: post.text ? { text: post.text, language: post.language } : undefined, media: post.media, visibility: "public", shareability: "presence-only" });
     }
   }
 
@@ -629,6 +648,6 @@
   // Announce readiness so the background binds this actual X tab reliably.
   void sendMessage({ type: "OPENPRESENCE_CHANNEL_READY" });
   window.setTimeout(reportAccountIdentity, 1_000);
-  window.setInterval(scan, 6_000);
+  window.setInterval(scan, observationScanIntervalMs);
   window.setTimeout(scan, 2_000);
 })();
