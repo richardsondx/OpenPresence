@@ -1,7 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readNativeXCredentials, readRecentXMentions, readRecentXPosts, readXAudienceSnapshot, readXPublicationMetrics, readXPostsByIds, searchRecentXPosts, type XRecentPost } from "./x";
 import { detectDuplicatePublicOutcomes } from "./public-action-safety";
-import { applyOperation, intervalForPresence, markNativeConnectionNeedsAttention, recordNativeMirrors, recordNativeMirrorDeletion, recordNativeObservation, recordPublicFooting, recordResourceUsageEvent, recordResourceUsageEventInPlace, recordRuntimeEvent, recordPublicRequestsFromMirrors, recordWatchSignals, recordPublicationMetricSnapshots } from "./runtime";
+import { applyOperation, intervalForPresence, markNativeConnectionNeedsAttention, recordNativeMirrorsInPlace, recordNativeMirrorDeletion, recordNativeObservation, recordPublicFooting, recordResourceUsageEvent, recordResourceUsageEventInPlace, recordRuntimeEvent, recordPublicRequestsFromMirrors, recordWatchSignals, recordPublicationMetricSnapshots } from "./runtime";
 import { normalizeHandle } from "./x";
 import { languagesMatch } from "./language-policy";
 import type { EntityRef, MirrorObject, OpenPresenceState, Presence, PresenceQuietHours } from "./types";
@@ -112,7 +112,7 @@ export async function hydrateNativeXThreadContext(
       return posts.map((post) => xPostMirrorObject(post, presenceId, connection.id));
     },
   });
-  next = recordNativeMirrors(next, hydrated.objects.flatMap((object) => {
+  next = recordNativeMirrorsInPlace(next, hydrated.objects.flatMap((object) => {
     const sourcePost = fetchedPosts.get(object.externalRef.id);
     return sourcePost ? [{ connectionId: connection.id, presenceId, post: sourcePost }] : [];
   }), { attentionEpisodeId: options?.attentionEpisodeId, attentionRunId: options?.runId, attentionInvocationId: options?.invocationId });
@@ -257,7 +257,7 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
       }
     }
     if (hasMirrorDelta) {
-      next = recordNativeMirrors(next, [
+      next = recordNativeMirrorsInPlace(next, [
         ...posts.map((post) => ({ connectionId: connection.id, presenceId, own: true, post })),
         ...mentions.map((post) => ({ connectionId: connection.id, presenceId, post })),
         ...watchPosts.map((post) => ({ connectionId: connection.id, presenceId, post })),
