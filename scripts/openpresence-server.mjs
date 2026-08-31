@@ -249,6 +249,10 @@ function stopChildren(signal) {
   if (memoryWatchdog) clearInterval(memoryWatchdog);
   signalNextChild(signal);
   if (scheduler) scheduler.kill(signal);
+  if (!child?.pid || child.exitCode !== null) {
+    releaseServerLock();
+    process.exit(0);
+  }
 }
 
 startDevScheduler();
@@ -274,8 +278,8 @@ function startNextChild() {
   });
   child.on("exit", (code, signal) => {
     if (stopping) {
-      if (signal) process.kill(process.pid, signal);
-      process.exit(code ?? 1);
+      releaseServerLock();
+      process.exit(signal ? 0 : code ?? 0);
     }
     if (recycling) {
       recycling = false;
