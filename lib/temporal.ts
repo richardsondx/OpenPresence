@@ -5,6 +5,7 @@ import {
   getRecoveryIncident,
   listOperationalRuns,
   listScheduledWakes,
+  listRecoveryIncidents,
   mergeAttentionWake,
   readState,
   readStateViewForContext,
@@ -609,6 +610,13 @@ export function isLiveTemporalPresence(presence: Pick<Presence, "status" | "envi
 
 export function runOperationalSweep(now = new Date()): SweepResult {
   const nowIso = now.toISOString();
+  // A Presence with an unresolved operator gate must not keep generating
+  // autonomous attention work. Without this check, every scheduler sweep
+  // can create another self-directed run while the same provider/runtime
+  // incident is waiting for repair, amplifying memory and provider usage.
+  const operatorGatedIncidents = listRecoveryIncidents(undefined, "needs_operator")
+    .filter((incident) => incident.operatorActionRequired);
+  const presenceRequiresOperator = (presenceId: string) => operatorGatedIncidents.some((incident) => !incident.presenceId || incident.presenceId === presenceId);
 
   // Repair the migration gap where self-directed attention had a persisted
   // nextEligibleAt but no durable wake. Without this repair, Auto can be
@@ -667,6 +675,7 @@ export function runOperationalSweep(now = new Date()): SweepResult {
   // reader, so treating it as due here creates a no-op attention run on every
   // sweep and can starve the local runtime with repeated snapshot writes.
   for (const presence of state.presences.filter(isLiveTemporalPresence)) {
+    if (presenceRequiresOperator(presence.id)) continue;
     const nextEligibleAt = presence.selfDirectedAttention?.nextEligibleAt;
     const hasPendingAttentionWake = listScheduledWakes(presence.id).some((wake) => wake.state === "pending" && (wake.kind === "attention" || wake.kind === "self_directed_discovery"));
     const hasAttentionRun = listOperationalRuns(presence.id, ["queued", "running", "recovering", "delivery_uncertain", "reconciling"])
@@ -744,6 +753,7 @@ export function runOperationalSweep(now = new Date()): SweepResult {
       // A historical timer may become due after the operator pauses. Claim it
       // without invoking cognition; an explicit Wake creates a fresh signal.
       if (presence?.status === "paused") continue;
+      if (presence && presenceRequiresOperator(presence.id)) continue;
       const request = attentionRequestFromWake(wake);
       // Blocked and needs-operator runs are terminal records, not live work.
       // Let a later independent pulse get its own run instead of endlessly
@@ -795,6 +805,7 @@ export function runOperationalSweep(now = new Date()): SweepResult {
   // in RECOVERING forever. Dispatch only eligible queued work; the durable
   // lease remains the final duplicate-work guard.
   for (const run of listOperationalRuns(undefined, ["queued"])) {
+    if (run.kind === "attention" && presenceRequiresOperator(run.presenceId)) continue;
     if (run.eligibleAt && new Date(run.eligibleAt).getTime() > now.getTime()) continue;
     dispatchAutonomyWorker(run.id);
   }
