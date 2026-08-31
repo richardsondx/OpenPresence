@@ -1,17 +1,18 @@
 import fs from "node:fs";
 import process from "node:process";
 import { chromium } from "@playwright/test";
+import { browserBridgeIntervals } from "./x-browser-bridge-config.mjs";
 
 const baseUrl = (process.env.OPENPRESENCE_BASE_URL || "http://localhost:3015").replace(/\/$/, "");
 const bridgeKey = process.env.OPENPRESENCE_BRIDGE_KEY;
 const executorId = process.env.BRIDGE_EXECUTOR_ID || "x-browser-bridge";
 const discoveryUrl = process.env.X_BROWSER_DISCOVERY_URL || "https://x.com/home";
 const expectedHandle = (process.env.X_EXPECTED_HANDLE || "").replace(/^@/, "").toLowerCase();
-const configuredPollMs = Number(process.env.BRIDGE_POLL_MS || 1_000);
 // Delivery is a latency-sensitive queue, but it must still have a floor so a
-// misconfigured bridge cannot busy-loop against the local API.
-const pollMs = Number.isFinite(configuredPollMs) ? Math.max(250, configuredPollMs) : 1_000;
-const observeMs = Number(process.env.X_BROWSER_OBSERVE_MS || 30_000);
+// misconfigured bridge cannot busy-loop against the local API. Mentions have
+// their own cadence because discovery and metrics are slower, lower-priority
+// work that must not delay the response canary.
+const { pollMs, mentionObserveMs, discoveryObserveMs } = browserBridgeIntervals();
 const profileDir = process.env.X_BROWSER_PROFILE_DIR;
 const cdpUrl = process.env.X_BROWSER_CDP_URL;
 
@@ -374,13 +375,14 @@ async function main() {
   const browser = cdpUrl ? await chromium.connectOverCDP(cdpUrl) : undefined;
   const context = browser?.contexts()[0] ?? await chromium.launchPersistentContext(profileDir, { headless: false });
   const page = context.pages()[0] ?? await context.newPage();
-  let lastObservation = 0;
+  let lastMentionObservation = 0;
+  let lastDiscoveryObservation = 0;
   let lastHeartbeat = 0;
   console.log(`X Browser Bridge ${executorId} connected. OpenPresence: ${baseUrl}`);
   while (true) {
     const now = Date.now();
     if (now - lastHeartbeat >= 45_000) { await heartbeat(); lastHeartbeat = now; }
-    if (now - lastObservation >= observeMs) {
+    if (now - lastMentionObservation >= mentionObserveMs) {
       let seenIds = new Set();
       try {
         // Mentions are the latency-sensitive inbound path. Claim any action
@@ -391,16 +393,19 @@ async function main() {
         if (mentions.count) console.log(`Observed ${mentions.count} X mention(s).`);
       }
       catch (error) { console.warn(error instanceof Error ? error.message : String(error)); }
-      lastObservation = Date.now();
+      lastMentionObservation = Date.now();
       try { await processClaimedExecutions(page); }
       catch (error) { console.warn("Execution claim unavailable:", error instanceof Error ? error.message : String(error)); }
+    }
+    if (now - lastDiscoveryObservation >= discoveryObserveMs) {
       try {
-        const discovery = await observeXPage(page, discoveryUrl, seenIds);
+        const discovery = await observeXPage(page, discoveryUrl, new Set());
         if (discovery.count) console.log(`Observed ${discovery.count} X discovery post(s).`);
       }
       catch (error) { console.warn(error instanceof Error ? error.message : String(error)); }
       try { await reportXMetrics(page); console.log("Reported X audience and publication metrics."); }
       catch (error) { console.warn("X metrics unavailable:", error instanceof Error ? error.message : String(error)); }
+      lastDiscoveryObservation = Date.now();
     }
     try { await processClaimedExecutions(page); }
     catch (error) { console.warn("Execution claim unavailable:", error instanceof Error ? error.message : String(error)); }
