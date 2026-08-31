@@ -1,6 +1,6 @@
 import type { OpenPresenceState } from "./types";
 
-export type AgentLibraryProjection = "knowledge" | "assets" | "people" | "feed" | "schedule" | "watching" | "rehearsal" | "brain" | "teach" | "presence";
+export type AgentLibraryProjection = "knowledge" | "assets" | "people" | "feed" | "schedule" | "watching" | "rehearsal" | "brain" | "teach" | "presence" | "playground";
 
 const historyCollections = [
   "files", "messages", "conversations", "presenceChatSessions", "operatorConversations", "operatorNudges", "agentRequests",
@@ -147,6 +147,72 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
       next.mirrorObjects = state.mirrorObjects.filter((object) => !presenceId || object.presenceId === presenceId).slice(0, 120);
       next.presenceKnowledgeAccess = state.presenceKnowledgeAccess;
       next.knowledgeDocuments = state.knowledgeDocuments;
+      return next;
+    }
+    if (projection === "playground") {
+      const presenceId = state.presence?.id;
+      const sessions = state.playgroundSessions.filter((session) => !presenceId || session.presenceId === presenceId);
+      const sessionIds = new Set(sessions.map((session) => session.id));
+      const activeSession = sessions.find((session) => session.status === "active");
+      const relevantAssignments = state.assignments.filter((assignment) =>
+        (assignment.environment === "sandbox" && assignment.sessionId !== undefined && sessionIds.has(assignment.sessionId) && !["completed", "completed_with_adaptation", "cancelled"].includes(assignment.status))
+        || (assignment.environment === "sandbox" && assignment.status === "draft" && assignment.presenceId === presenceId)
+        || (assignment.environment === "live" && assignment.status === "draft" && assignment.presenceId === presenceId),
+      );
+      const assignmentIds = new Set(relevantAssignments.map((assignment) => assignment.id));
+      const assignmentRuns = (state.assignmentRuns ?? []).filter((run) => assignmentIds.has(run.assignmentId));
+      const research = (state.assetResearchSessions ?? []).filter((item) => item.assignmentId !== undefined && assignmentIds.has(item.assignmentId));
+      const rehearsalAttempts = activeSession
+        ? state.originalPostRehearsals.filter((attempt) => attempt.sessionId === activeSession.id).slice(0, 5)
+        : [];
+      const publicationIds = new Set(rehearsalAttempts.map((attempt) => attempt.publicationId).filter((id): id is string => Boolean(id)));
+      const scenarioIds = new Set(state.scenarios
+        .filter((scenario) => scenario.ownerScope !== "presence" || scenario.presenceId === presenceId)
+        .map((scenario) => scenario.id));
+      const scenarioRuns = state.scenarioRuns.filter((run) => !presenceId || run.presenceId === presenceId);
+      const scenarioRunIds = new Set(scenarioRuns.map((run) => run.id));
+      const scenarioSessionIds = new Set(scenarioRuns.map((run) => run.playgroundSessionId).filter((id): id is string => Boolean(id)));
+      for (const id of scenarioSessionIds) sessionIds.add(id);
+      const mirrorObjects = state.mirrorObjects.filter((object) => sessionIds.has(object.sessionId ?? ""));
+      const mirrorAssetIds = new Set(mirrorObjects.flatMap((object) => (object.assetRefs ?? []).map((ref) => ref.assetId)));
+      const researchAssetIds = new Set(research.flatMap((item) => item.candidates.map((candidate) => candidate.assetId).filter((id): id is string => Boolean(id))));
+      const assetIds = new Set([...mirrorAssetIds, ...researchAssetIds]);
+      const curationOpportunities = (state.editorialOpportunities ?? []).filter((item) => item.presenceId === presenceId);
+      const curationReferences = (state.editorialReferences ?? []).filter((item) => item.presenceId === presenceId);
+      const sourceAssetIds = new Set(curationOpportunities.map((item) => item.sourceAssetId).filter((id): id is string => Boolean(id)));
+      const perceptionIds = new Set(curationOpportunities.map((item) => item.perceptionId).filter((id): id is string => Boolean(id)));
+      const verificationIds = new Set(curationOpportunities.map((item) => item.verificationId).filter((id): id is string => Boolean(id)));
+      const rightsIds = new Set(curationOpportunities.map((item) => item.rightsAssessmentId).filter((id): id is string => Boolean(id)));
+      const decisionIds = new Set(curationOpportunities.map((item) => item.decisionId).filter((id): id is string => Boolean(id)));
+      const packageIds = new Set(curationOpportunities.map((item) => item.publicationPackageId).filter((id): id is string => Boolean(id)));
+      next.playgroundSessions = sessions;
+      next.sandboxActors = state.sandboxActors.filter((actor) => sessionIds.has(actor.sessionId));
+      next.mirrorObjects = mirrorObjects;
+      next.events = state.events.filter((event) => event.sessionId !== undefined && sessionIds.has(event.sessionId));
+      next.executions = state.executions.filter((execution) => (activeSession && execution.sessionId === activeSession.id && execution.status === "awaiting-review") || execution.status === "awaiting-review" && execution.presenceId === presenceId);
+      next.assignments = relevantAssignments;
+      next.assignmentRuns = assignmentRuns;
+      next.assetResearchSessions = research;
+      next.originalPostRehearsals = rehearsalAttempts;
+      next.publications = state.publications.filter((publication) => publicationIds.has(publication.id));
+      next.assets = state.assets.filter((asset) => assetIds.has(asset.id));
+      next.perceptions = state.perceptions.filter((perception) => assetIds.has(perception.assetId));
+      next.capabilityTrials = state.capabilityTrials.filter((trial) => trial.presenceId === presenceId);
+      next.scenarios = state.scenarios.filter((scenario) => scenarioIds.has(scenario.id));
+      next.scenarioVersions = state.scenarioVersions.filter((version) => scenarioIds.has(version.scenarioId));
+      next.scenarioRuns = scenarioRuns;
+      next.scenarioEvaluations = state.scenarioEvaluations.filter((evaluation) => scenarioRunIds.has(evaluation.runId));
+      next.scenarioRunProvenance = state.scenarioRunProvenance.filter((provenance) => scenarioRuns.some((run) => run.provenanceId === provenance.id));
+      next.files = state.files.filter((file) => file.kind === "TASTE");
+      next.editorialOpportunities = curationOpportunities;
+      next.editorialReferences = curationReferences;
+      next.editorialFeedbackEvents = (state.editorialFeedbackEvents ?? []).filter((item) => item.presenceId === presenceId);
+      next.sourceAssets = (state.sourceAssets ?? []).filter((item) => sourceAssetIds.has(item.id));
+      next.mediaPerceptions = (state.mediaPerceptions ?? []).filter((item) => perceptionIds.has(item.id));
+      next.verificationRecords = (state.verificationRecords ?? []).filter((item) => verificationIds.has(item.id));
+      next.rightsAssessments = (state.rightsAssessments ?? []).filter((item) => rightsIds.has(item.id));
+      next.editorialDecisions = (state.editorialDecisions ?? []).filter((item) => decisionIds.has(item.id));
+      next.publicationPackages = (state.publicationPackages ?? []).filter((item) => packageIds.has(item.id));
       return next;
     }
     const presenceId = state.presence?.id;

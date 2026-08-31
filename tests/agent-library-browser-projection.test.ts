@@ -171,4 +171,42 @@ describe("Agent library browser projections", () => {
     expect(projection.mirrorObjects.map((object) => object.id)).toEqual(["current"]);
     expect(projection.relationships).toEqual([]);
   });
+
+  it("keeps Playground data scoped to Sandbox sessions and active editorial work", () => {
+    const state = createAgent({ name: "Genny", description: "An agent for useful software conversations.", audience: "AI builders", mode: "agent", handle: "@genny", accent: "#d88b57" });
+    const presenceId = state.presence!.id;
+    state.playgroundSessions = [
+      { id: "sandbox-current", presenceId, status: "active" },
+      { id: "sandbox-other", presenceId: "other-presence", status: "active" },
+    ] as never;
+    state.sandboxActors = [{ id: "actor-current", sessionId: "sandbox-current" }, { id: "actor-other", sessionId: "sandbox-other" }] as never;
+    state.mirrorObjects = [{ id: "mirror-current", sessionId: "sandbox-current", assetRefs: [{ assetId: "asset-current" }] }, { id: "mirror-other", sessionId: "sandbox-other" }] as never;
+    state.events = [{ id: "event-current", sessionId: "sandbox-current" }, { id: "event-other", sessionId: "sandbox-other" }] as never;
+    state.assignments = [{ id: "assignment-current", presenceId, sessionId: "sandbox-current", environment: "sandbox", status: "active" }, { id: "assignment-other", presenceId: "other-presence", sessionId: "sandbox-other", environment: "sandbox", status: "active" }] as never;
+    state.assignmentRuns = [{ id: "run-current", assignmentId: "assignment-current" }, { id: "run-other", assignmentId: "assignment-other" }] as never;
+    state.assets = [{ id: "asset-current" }, { id: "asset-other" }] as never;
+    state.perceptions = [{ id: "perception-current", assetId: "asset-current" }, { id: "perception-other", assetId: "asset-other" }] as never;
+    state.editorialOpportunities = [{ id: "opportunity-current", presenceId }] as never;
+    state.editorialReferences = [{ id: "reference-current", presenceId }, { id: "reference-other", presenceId: "other-presence" }] as never;
+    state.editorialFeedbackEvents = [{ id: "feedback-current", presenceId }, { id: "feedback-other", presenceId: "other-presence" }] as never;
+    state.socialDecisions = [{ id: "unrelated-decision" }] as never;
+    state.files = [{ kind: "TASTE" }, { kind: "BRAIN" }] as never;
+
+    const projection = agentLibraryBrowserProjection(state, "playground");
+
+    expect(projection.responseProjection).toBe("playground");
+    expect(projection.playgroundSessions.map((item) => item.id)).toEqual(["sandbox-current"]);
+    expect(projection.sandboxActors.map((item) => item.id)).toEqual(["actor-current"]);
+    expect(projection.mirrorObjects.map((item) => item.id)).toEqual(["mirror-current"]);
+    expect(projection.events.map((item) => item.id)).toEqual(["event-current"]);
+    expect(projection.assignments.map((item) => item.id)).toEqual(["assignment-current"]);
+    expect((projection.assignmentRuns ?? []).map((item) => item.id)).toEqual(["run-current"]);
+    expect(projection.assets).toEqual([{ id: "asset-current" }]);
+    expect(projection.perceptions).toEqual([{ id: "perception-current", assetId: "asset-current" }]);
+    expect(projection.editorialReferences).toHaveLength(1);
+    expect(projection.editorialFeedbackEvents).toHaveLength(1);
+    expect(projection.files).toEqual([{ kind: "TASTE" }]);
+    expect(projection.socialDecisions).toEqual([]);
+    expect(Buffer.byteLength(JSON.stringify(projection))).toBeLessThan(Buffer.byteLength(JSON.stringify(state)));
+  });
 });
