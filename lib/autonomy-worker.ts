@@ -552,6 +552,11 @@ export async function executeAutonomyRun(runId: string): Promise<OpenPresenceSta
   if (priorAttemptCount > 0) run.retryReason = run.retryReason ?? `Retry after ${run.stage.replaceAll("_", " ")}.`;
   const executionPresenceId = run.presenceId;
   const runStartState = readStateSnapshotForContext({ presenceId: executionPresenceId });
+  // Keep the initialized snapshot available to the priority inbound path.
+  // The episode write below already contains the authenticated Bridge Mirror;
+  // immediately reading the same multi-megabyte workspace again only adds
+  // parse/clone latency before the mention can reach cognition.
+  let initializedState = runStartState;
   let attentionEpisodeId: string | undefined;
   try {
     if (run.kind === "operator_chat") {
@@ -567,6 +572,7 @@ export async function executeAutonomyRun(runId: string): Promise<OpenPresenceSta
       });
       attentionEpisodeId = episodeCreated.episode.id;
       const nudgeStarted = run.attention?.triggers.includes("operator_nudge") ? startQueuedNudge(episodeCreated.state, executionPresenceId, episodeCreated.episode) : { state: episodeCreated.state, nudge: undefined };
+      initializedState = nudgeStarted.state;
       run.attentionEpisodeId = attentionEpisodeId;
       upsertOperationalRun(run);
       // Persist the episode before provider/model work starts so Activity can show
@@ -614,7 +620,11 @@ export async function executeAutonomyRun(runId: string): Promise<OpenPresenceSta
     } else if (run.kind === "attention" && (run.attention?.scope === "observe_inbound" || autonomyRunHasPriority(run))) {
       const attentionOptions = { runId, invocationId, attentionEpisodeId, suppressAmbientInbound: run.attention?.triggers.includes("operator_nudge"), inboundOnly: true };
       resultState = run.attention?.source === "bridge"
-        ? await runBridgeInboundAttentionPass(run.presenceId, attentionOptions)
+        ? await runBridgeInboundAttentionPass(run.presenceId, attentionOptions, {
+          readState: () => initializedState,
+          pulse: runAutonomousPulse,
+          scheduleWatchJudgment: (presenceId, requestedAt) => requestAttention(presenceId, "watch_judgment", requestedAt, "judge_watches"),
+        })
         : await runObservedAttentionPass(run.presenceId, attentionOptions);
     } else {
       resultState = await runAutonomousAttention(run.presenceId, { runId, invocationId, attentionEpisodeId, forceEligibility: run.attention?.triggers.includes("operator_check") || run.attention?.triggers.includes("operator_nudge"), suppressAmbientInbound: run.attention?.triggers.includes("operator_nudge") });
