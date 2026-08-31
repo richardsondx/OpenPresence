@@ -12268,16 +12268,21 @@ function publicHistoryChannelTag(item: PublicHistoryItem, definitions: ChannelDe
 function PublicHistoryView({
   state,
   setView,
+  initialSurface,
   mutate,
 }: {
   state: OpenPresenceState;
+  initialSurface?: "timeline" | "calendar";
   setView: (view: View) => void;
   mutate: Mutate;
 }) {
   const presenceId = state.activePresenceId ?? state.presence?.id ?? "";
   const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   const mirrorHealth = mirrorHealthFor(state, presence);
-  const [surface, setSurface] = useState<"timeline" | "calendar">(() => typeof window !== "undefined" && new URLSearchParams(window.location.search).get("surface") === "calendar" ? "calendar" : "timeline");
+  const [surface, setSurface] = useState<"timeline" | "calendar">(() => {
+    if (initialSurface) return initialSurface;
+    return typeof window !== "undefined" && new URLSearchParams(window.location.search).get("surface") === "calendar" ? "calendar" : "timeline";
+  });
   const [range, setRange] = useState<"week" | "month" | "day">("week");
   const [filter, setFilter] = useState<PublicHistoryFilter>(() => {
     const requested = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("filter") : null;
