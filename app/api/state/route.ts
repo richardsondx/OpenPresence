@@ -193,14 +193,14 @@ function activityProjection(state: OpenPresenceState): OpenPresenceState {
     return compactActivityAssignment(assignment, activeAssignment(assignment));
   };
   projection.assignments = scopedRecent(state.assignments, 24, activeAssignment).map(compactAssignment) as never;
-  projection.assignmentRuns = scopedRecent(state.assignmentRuns, 60) as never;
-  projection.actions = scopedRecent(state.actions, 60) as never;
+  projection.assignmentRuns = scopedRecent(state.assignmentRuns, 24) as never;
+  projection.actions = scopedRecent(state.actions, 24) as never;
   const compactActivityEvent = (event: OpenPresenceState["events"][number]) => event.detail.length <= 360
     ? event
     : { ...event, detail: `${event.detail.slice(0, 359)}…` };
   projection.events = scopedRecent(state.events, 120).map(compactActivityEvent) as never;
   const executionIsInFlight = (execution: OpenPresenceState["executions"][number]) => ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"].includes(execution.status);
-  projection.executions = scopedRecent(state.executions, 60, executionIsInFlight).map((execution) => {
+  projection.executions = scopedRecent(state.executions, 24, executionIsInFlight).map((execution) => {
     const compact = { ...execution };
     // Execution permits are server authorization material, not browser read
     // model data. Older terminal publication payloads are likewise not
@@ -231,19 +231,20 @@ function activityProjection(state: OpenPresenceState): OpenPresenceState {
     steps: episode.steps?.slice(-8) ?? [],
   })) as never;
   projection.resourceUsageEvents = [];
-  projection.operationalRuns = scopedRecent(state.operationalRuns, 60, activeRun).map((run) => {
+  projection.operationalRuns = scopedRecent(state.operationalRuns, 24, activeRun).map((run) => {
     if (activeRun(run)) return run;
     const compact = { ...run };
     delete compact.attention;
     delete compact.result;
     return compact;
   }) as never;
-  projection.scheduledWakes = scopedRecent(state.scheduledWakes, 50) as never;
-  projection.publicRequests = scopedRecent(state.publicRequests, 30) as never;
-  projection.publicationMetricSnapshots = scopedRecent(state.publicationMetricSnapshots, 50) as never;
+  projection.scheduledWakes = scopedRecent(state.scheduledWakes, 32) as never;
+  projection.publicRequests = scopedRecent(state.publicRequests, 16) as never;
+  projection.publicationMetricSnapshots = scopedRecent(state.publicationMetricSnapshots, 24) as never;
   projection.playgroundSessions = scopedRecent((state.playgroundSessions ?? []).filter((session) => session.status !== "completed"), 12) as never;
-  projection.explorationFindings = scopedRecent(state.explorationFindings, 50) as never;
-  projection.explorationSessions = scopedRecent(state.explorationSessions, 30) as never;
+  projection.explorationFindings = scopedRecent(state.explorationFindings, 24) as never;
+  projection.explorationSessions = scopedRecent(state.explorationSessions, 12) as never;
+  projection.operatorNudges = scopedRecent(state.operatorNudges, 12, (nudge) => nudge.status === "working") as never;
   projection.operatorConversations = [];
   projection.standingIntents = (state.standingIntents ?? []).slice(0, 40) as never;
   projection.calendar = (state.calendar ?? []).filter((slot) => !presenceId || slot.presence === presenceId) as never;
