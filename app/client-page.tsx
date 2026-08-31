@@ -12287,7 +12287,8 @@ function PublicHistoryView({
   const [refreshing, setRefreshing] = useState(false);
   const [historyPage, setHistoryPage] = useState(1);
   const [anchor, setAnchor] = useState(() => new Date());
-  const allHistory = derivePublicHistory(state, presence?.id).filter((item) => publicHistoryMatchesPresence(item, presence));
+  const feedHistory = (state as OpenPresenceState & { feedBrowserHistory?: PublicHistoryItem[] }).feedBrowserHistory;
+  const allHistory = (feedHistory ?? derivePublicHistory(state, presence?.id)).filter((item) => publicHistoryMatchesPresence(item, presence));
   const requestedHistoryId = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("historyId") : null;
   const resetHistoryPosition = () => {
     setHistoryPage(1);

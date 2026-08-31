@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { agentLibraryBrowserProjection } from "../lib/agent-library-browser-projection";
 import { createAgent } from "../lib/runtime";
+import type { OpenPresenceState } from "../lib/types";
 
 describe("Agent library browser projections", () => {
   it("keeps Knowledge records and removes unrelated operational history", () => {
@@ -54,12 +55,27 @@ describe("Agent library browser projections", () => {
     expect(Buffer.byteLength(JSON.stringify(body))).toBeLessThan(800_000);
   });
 
+  it("keeps the canonical Feed response compact while preserving derived history", async () => {
+    const response = await (await import("../app/api/state/route")).GET(
+      new Request("http://localhost/api/state?projection=feed&agentId=agent_example_2&presenceId=presence_example_19"),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.responseProjection).toBe("feed");
+    expect(body.feedBrowserHistory).toBeDefined();
+    expect(body.socialIntents).toEqual([]);
+    expect(body.outcomes).toEqual([]);
+    expect(Buffer.byteLength(JSON.stringify(body))).toBeLessThan(2_000_000);
+  });
+
   it("keeps verified Feed joins while trimming unrelated collections", () => {
     const state = createAgent({ name: "Genny", description: "An agent for useful software conversations.", audience: "AI builders", mode: "agent", handle: "@genny", accent: "#d88b57" });
     const presenceId = state.presence!.id;
+    const observedAt = new Date().toISOString();
     state.mirrorObjects = [
-      { id: "mirror-1", presenceId, assetRefs: [{ assetId: "asset-1" }] },
-      { id: "mirror-2", presenceId: "other-presence" },
+      { id: "mirror-1", bridgeId: "test", presenceId, channelId: "x", externalRef: { type: "x.post", id: "post-1" }, objectType: "post", actorPresenceId: presenceId, assignmentId: "assignment-1", author: { displayName: "Genny" }, content: { text: "Verified feed item" }, visibility: "public", shareability: "presence-only", observedAt, occurredAt: observedAt, environment: state.presence!.environment, assetRefs: [{ assetId: "asset-1" }] },
+      { id: "mirror-2", bridgeId: "test", presenceId: "other-presence", channelId: "x", externalRef: { type: "x.post", id: "post-2" }, objectType: "post", visibility: "public", shareability: "presence-only", observedAt },
     ] as never;
     state.assets = [{ id: "asset-1" }, { id: "asset-2" }] as never;
     state.assignments = [{ id: "assignment-1" }] as never;
@@ -67,7 +83,9 @@ describe("Agent library browser projections", () => {
     const projection = agentLibraryBrowserProjection(state, "feed");
     expect(projection.responseProjection).toBe("feed");
     expect(projection.mirrorObjects).toHaveLength(1);
-    expect(projection.assets).toEqual([{ id: "asset-1" }]);
+    expect(projection.assets).toHaveLength(1);
+    expect(projection.assets[0]).toMatchObject({ id: "asset-1" });
+    expect((projection as OpenPresenceState & { feedBrowserHistory?: unknown[] }).feedBrowserHistory).toHaveLength(1);
     expect(projection.assignments).toHaveLength(1);
     expect(projection.people).toEqual([]);
   });

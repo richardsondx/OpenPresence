@@ -1,4 +1,5 @@
 import type { OpenPresenceState } from "./types";
+import { derivePublicHistory } from "./runtime";
 
 export type AgentLibraryProjection = "knowledge" | "assets" | "people" | "feed" | "schedule" | "watching" | "rehearsal" | "brain" | "teach" | "presence" | "playground";
 
@@ -55,17 +56,80 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
     for (const key of ["assets", "assetCollections", "assetCollectionMemberships", "assetProcessingJobs", "knowledgeDocuments", "knowledgeVersions", "knowledgeRetrievalRuns"] as const) next[key] = [] as never;
     if (projection === "feed") {
       const presenceId = state.presence?.id;
-      const mirrors = presenceId ? state.mirrorObjects.filter((object) => object.presenceId === presenceId) : state.mirrorObjects;
+      const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
+      const history = derivePublicHistory(state, presenceId, { normalized: true })
+        .filter((item) => !presence || item.channel === presence.channel)
+        .filter((item) => !presence || (presence.environment === "sandbox" ? item.environment === "sandbox" : item.environment !== "sandbox"))
+        .map((item) => ({
+          ...item,
+          // Feed cards and the inspector do not need unbounded provider text;
+          // keep a generous display window while preventing one malformed
+          // observation from dominating the whole browser response.
+          text: item.text?.slice(0, 4_000),
+          authorAvatarUrl: undefined,
+        }));
+      const historyExternalRefs = new Set(history.flatMap((item) => [item.externalRef, item.parentExternalRef].filter((ref): ref is NonNullable<typeof ref> => Boolean(ref)).map((ref) => `${ref.type}:${ref.id}`)));
+      const historyObjectIds = new Set(history.map((item) => item.id));
+      const mirrors = (presenceId ? state.mirrorObjects.filter((object) => object.presenceId === presenceId) : state.mirrorObjects)
+        .filter((object) => historyObjectIds.has(object.id) || (object.externalRef && historyExternalRefs.has(`${object.externalRef.type}:${object.externalRef.id}`)))
+        .map((object) => ({
+          id: object.id,
+          bridgeId: object.bridgeId,
+          presenceId: object.presenceId,
+          channelId: object.channelId,
+          externalRef: object.externalRef,
+          parentExternalRef: object.parentExternalRef,
+          objectType: object.objectType,
+          author: object.author ? { displayName: object.author.displayName, handle: object.author.handle } : undefined,
+          content: object.content?.text ? { text: object.content.text.slice(0, 4_000) } : undefined,
+          assetRefs: object.assetRefs,
+          assignmentId: object.assignmentId,
+          occurredAt: object.occurredAt,
+          observedAt: object.observedAt,
+          visibility: object.visibility,
+          shareability: object.shareability,
+          originExecutionId: object.originExecutionId,
+          actorPresenceId: object.actorPresenceId,
+          archived: object.archived,
+          environment: object.environment,
+        }));
       const assetIds = new Set(mirrors.flatMap((object) => (object.assetRefs ?? []).map((ref) => ref.assetId)));
-      const executionIds = new Set(mirrors.map((object) => object.originExecutionId).filter((id): id is string => Boolean(id)));
-      next.mirrorObjects = mirrors;
-      next.assets = state.assets.filter((asset) => assetIds.has(asset.id));
-      next.assignments = state.assignments;
-      next.assignmentRuns = state.assignmentRuns;
-      next.events = presenceId ? state.events.filter((event) => event.presenceId === presenceId) : state.events;
-      next.executions = state.executions.filter((execution) => execution.status === "awaiting-review" || executionIds.has(execution.id) || (execution.presenceId === presenceId && execution.status === "succeeded"));
-      next.outcomes = presenceId ? state.outcomes.filter((outcome) => outcome.presenceId === presenceId) : state.outcomes;
-      next.socialIntents = presenceId ? state.socialIntents.filter((intent) => intent.presenceId === presenceId) : state.socialIntents;
+      const compactAssets = state.assets.filter((asset) => assetIds.has(asset.id)).map((asset) => asset.provenance ? ({
+          id: asset.id,
+          agentId: asset.agentId,
+          presenceId: asset.presenceId,
+          type: asset.type,
+          storage: asset.storage,
+          dataUrl: asset.dataUrl,
+          status: asset.status,
+          provenance: {
+            origin: asset.provenance.origin,
+            sourceUrl: asset.provenance.sourceUrl,
+            sourcePageUrl: asset.provenance.sourcePageUrl,
+            publisher: asset.provenance.publisher,
+            importedAt: asset.provenance.importedAt,
+            sourceIdentityStatus: asset.provenance.sourceIdentityStatus,
+          },
+          rights: asset.rights ? { status: asset.rights.status } : undefined,
+          description: asset.description,
+          mimeType: asset.mimeType,
+        }) : asset);
+      const assignmentIds = new Set(mirrors.map((object) => object.assignmentId).filter((id): id is string => Boolean(id)));
+      (next as OpenPresenceState & { feedBrowserHistory?: typeof history }).feedBrowserHistory = history;
+      next.mirrorObjects = mirrors as never;
+      next.assets = compactAssets as never;
+      next.assignments = state.assignments.filter((assignment) => assignmentIds.has(assignment.id)).map((assignment) => ({
+        id: assignment.id,
+        status: assignment.status,
+        progress: assignment.progress,
+        activation: assignment.activation,
+        successEvidence: assignment.successEvidence,
+      })) as never;
+      next.assignmentRuns = (state.assignmentRuns ?? []).filter((run) => assignmentIds.has(run.assignmentId));
+      next.events = [];
+      next.executions = [];
+      next.outcomes = [];
+      next.socialIntents = [];
       return next;
     }
     if (projection === "schedule") {
