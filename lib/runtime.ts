@@ -3258,8 +3258,8 @@ export function resetPlaygroundSession(source: OpenPresenceState, sessionId: str
  * but an opener addresses an account and must be supported by observed
  * participant context. This is an execution boundary, not a text rewrite.
  */
-function expressionMentionGroundingReason(state: OpenPresenceState, presence: Presence, target: EntityRef | undefined, text: string, sessionId?: string) {
-  if (!target || !text.trim()) return undefined;
+function expressionMentionGroundingReason(state: OpenPresenceState, presence: Presence, target: EntityRef | undefined, text: string | undefined, sessionId?: string) {
+  if (!target || !text?.trim()) return undefined;
   const scope = state.mirrorObjects.filter((item) => item.presenceId === presence.id && item.channelId === presence.channel && (!sessionId || item.sessionId === sessionId));
   const byRef = new Map(scope.map((item) => [`${item.externalRef.type}:${item.externalRef.id}`, item]));
   const context = new Map<string, MirrorObject>();
@@ -3282,8 +3282,8 @@ function expressionMentionGroundingReason(state: OpenPresenceState, presence: Pr
   return unsupportedLeadingMention(text, supportedHandles);
 }
 
-function expressionSourceEchoReason(state: OpenPresenceState, presence: Presence, target: EntityRef | undefined, text: string, sessionId?: string) {
-  if (!target || !text.trim()) return undefined;
+function expressionSourceEchoReason(state: OpenPresenceState, presence: Presence, target: EntityRef | undefined, text: string | undefined, sessionId?: string) {
+  if (!target || !text?.trim()) return undefined;
   const scope = state.mirrorObjects.filter((item) => item.presenceId === presence.id && item.channelId === presence.channel && (!sessionId || item.sessionId === sessionId));
   const byRef = new Map(scope.map((item) => [`${item.externalRef.type}:${item.externalRef.id}`, item]));
   const observedTexts: string[] = [];
@@ -3303,11 +3303,15 @@ function expressionSourceEchoReason(state: OpenPresenceState, presence: Presence
   return observedSourceEchoReason(text, observedTexts);
 }
 
-export function formSandboxIntent(source: OpenPresenceState, input: { sessionId: string; affordance: string; format?: string; text: string; target?: EntityRef; perceptionTarget?: EntityRef; rehearsalAttemptId?: string; assignmentId?: string; conversationEpisodeId?: string; invocationId?: string; assets?: SandboxAssetInput[]; expressionMode?: import("./types").ExpressionMode; groundingStatus?: import("./types").GroundingStatus; assetReuse?: { usageType: import("./types").AssetUsageType; reason: string }; networkMetadata?: { referencedPeople?: import("./types").SocialIntentPersonReference[]; networkReason?: string }; operatorDirectiveId?: string; origin?: SocialOrigin; source?: "agent" | "operator"; attentionTestId?: string }) {
+export function formSandboxIntent(source: OpenPresenceState, input: { sessionId: string; affordance: string; format?: string; text?: string; target?: EntityRef; perceptionTarget?: EntityRef; rehearsalAttemptId?: string; assignmentId?: string; conversationEpisodeId?: string; invocationId?: string; assets?: SandboxAssetInput[]; expressionMode?: import("./types").ExpressionMode; groundingStatus?: import("./types").GroundingStatus; assetReuse?: { usageType: import("./types").AssetUsageType; reason: string }; networkMetadata?: { referencedPeople?: import("./types").SocialIntentPersonReference[]; networkReason?: string }; operatorDirectiveId?: string; origin?: SocialOrigin; source?: "agent" | "operator"; attentionTestId?: string }) {
   const state = cloneState(source);
   const session = sandboxSessionFor(state, input.sessionId);
   const presence = state.presences.find((item) => item.id === session.presenceId) ?? state.presence;
   if (!presence) throw new Error("Sandbox delivery requires a Sandbox Presence.");
+  // Like, repost, and follow intents do not need authored text. Treat a
+  // missing legacy field as deliberate silence instead of crashing while
+  // validating the optional public expression.
+  const expressionText = input.text ?? "";
   const perceptionTarget = input.target ?? input.perceptionTarget;
   const targetObject = perceptionTarget ? state.mirrorObjects.find((item) => item.sessionId === session.id && item.externalRef.type === perceptionTarget.type && item.externalRef.id === perceptionTarget.id) : undefined;
   const conversationEpisodeId = input.conversationEpisodeId ?? (targetObject ? ensureConversationEpisode(state, targetObject, presence?.id ?? session.presenceId)?.id : undefined);
@@ -3331,28 +3335,28 @@ export function formSandboxIntent(source: OpenPresenceState, input: { sessionId:
   });
   const expression = epistemicState(input.expressionMode ?? "factual", input.groundingStatus);
   const origin = input.origin ?? (input.assignmentId ? { kind: "assignment" as const, refId: input.assignmentId } : input.operatorDirectiveId ? { kind: "operator" as const, refId: input.operatorDirectiveId } : input.affordance === "reply" ? { kind: "inbound_social" as const, refId: input.target?.id } : { kind: "other" as const });
-  const formattedText = formatOneSentencePerLine(input.text);
+  const formattedText = formatOneSentencePerLine(expressionText);
   const publication: Publication = { id: id("publication"), format: input.format ?? `${session.channelId}.${input.affordance}`, payload: { text: formattedText }, assetIds: publicationAssets.map((asset) => asset.id), links: publicationAssets.filter((asset) => asset.type === "link" && asset.provenance.sourceUrl).map((asset) => ({ url: asset.provenance.sourceUrl!, label: asset.description })), assetReuse: input.assetReuse, origin, ...expression, createdAt: timestamp, environment: "sandbox", sessionId: session.id, rehearsalAttemptId: input.rehearsalAttemptId, assignmentId: input.assignmentId, invocationId: input.invocationId } as Publication & { invocationId?: string };
   const intent: SocialIntent = { id: id("intent"), agentId: state.agent?.id ?? "", presenceId: presence.id, affordance: input.affordance, target: input.target, publicationId: publication.id, priority: 50, validity: { staleAfterMs: 60 * 60 * 1000 }, state: executionMode === "off" ? "withdrawn" : "active", formedAt: timestamp, updatedAt: timestamp, origin, environment: "sandbox", sessionId: session.id, rehearsalAttemptId: input.rehearsalAttemptId, assignmentId: input.assignmentId, conversationEpisodeId, invocationId: input.invocationId, referencedPeople: input.networkMetadata?.referencedPeople, networkReason: input.networkMetadata?.networkReason, source: input.source ?? (input.operatorDirectiveId ? "operator" : "agent"), operatorDirectiveId: input.operatorDirectiveId, attentionTestId: input.attentionTestId } as SocialIntent & { invocationId?: string };
   if (executionMode === "off") {
     state.publications.unshift(publication);
     state.socialIntents.unshift(intent);
-    state.actions.unshift({ id: id("act"), intent: "no_op", target: input.target?.id, summary: input.text.trim() || `Selected ${input.affordance}`, status: "skipped", reason: `${input.affordance} is off in the Presence execution envelope.`, createdAt: timestamp, socialIntentId: intent.id, sessionId: session.id });
+    state.actions.unshift({ id: id("act"), intent: "no_op", target: input.target?.id, summary: expressionText.trim() || `Selected ${input.affordance}`, status: "skipped", reason: `${input.affordance} is off in the Presence execution envelope.`, createdAt: timestamp, socialIntentId: intent.id, sessionId: session.id });
     state.events.unshift({ ...event("decision", "Affordance is off", `${presence.name} considered ${input.affordance}, but the operator's execution envelope leaves it off. No execution was created.`, "quiet", { presenceId: presence.id, intentId: intent.id, sourceObjectId: targetObject?.id }), sessionId: session.id });
     return state;
   }
-  const leakageReason = identityLeakageReason(state, presence, input.text);
-  const runtimeLeakageReasonValue = runtimeContextLeakageReason(input.text);
-  const publicExpressionLeakageReasonValue = publicExpressionLeakageReason(input.text);
+  const leakageReason = identityLeakageReason(state, presence, expressionText);
+  const runtimeLeakageReasonValue = runtimeContextLeakageReason(expressionText);
+  const publicExpressionLeakageReasonValue = publicExpressionLeakageReason(expressionText);
   const mentionGroundingReason = input.source !== "operator" && !input.operatorDirectiveId
-    ? expressionMentionGroundingReason(state, presence, input.target, input.text, session.id)
+    ? expressionMentionGroundingReason(state, presence, input.target, expressionText, session.id)
     : undefined;
   const sourceEchoReason = input.source !== "operator" && !input.operatorDirectiveId
-    ? expressionSourceEchoReason(state, presence, input.target, input.text, session.id)
+    ? expressionSourceEchoReason(state, presence, input.target, expressionText, session.id)
     : undefined;
   const assignment = input.assignmentId ? state.assignments.find((item) => item.id === input.assignmentId) : undefined;
-  const assignmentLeakageReason = assignment ? assignmentPublicExpressionLeakageReason(assignment, input.text) : undefined;
-  const languageResult = validateLanguage(input.text, effectiveLanguagePolicy(state.agent, presence));
+  const assignmentLeakageReason = assignment ? assignmentPublicExpressionLeakageReason(assignment, expressionText) : undefined;
+  const languageResult = validateLanguage(expressionText, effectiveLanguagePolicy(state.agent, presence));
   const languageReason = languageResult.valid ? undefined : "The final expression violates an explicit Never use language rule.";
   const duplicateReason = duplicateAssets.length && !input.assetReuse ? "This exact asset was already used in this Sandbox Presence and needs an explicit reuse reason." : undefined;
   const reviewReason = languageReason ?? duplicateReason ?? publicExpressionLeakageReasonValue ?? assignmentLeakageReason ?? mentionGroundingReason ?? sourceEchoReason ?? leakageReason ?? runtimeLeakageReasonValue ?? (mediaReviewRequired ? "Attached media remains uncertain and this Presence requires review before acting." : undefined);
