@@ -174,6 +174,8 @@ let childStartedAt = 0;
 const serverRssLimitMb = Number(process.env.OPENPRESENCE_SERVER_RSS_LIMIT_MB || process.env.OPENPRESENCE_DEV_RSS_LIMIT_MB || "1536");
 const serverRssCheckMs = Math.max(5_000, Number(process.env.OPENPRESENCE_SERVER_RSS_CHECK_MS || process.env.OPENPRESENCE_DEV_RSS_CHECK_MS || "15_000"));
 const serverRssGraceMs = Math.max(0, Number(process.env.OPENPRESENCE_SERVER_RSS_GRACE_MS || process.env.OPENPRESENCE_DEV_RSS_GRACE_MS || "60_000"));
+const serverRssRequiredSamples = Math.max(1, Number(process.env.OPENPRESENCE_SERVER_RSS_REQUIRED_SAMPLES || "3"));
+let serverRssOverLimitSamples = 0;
 
 function childRssMb() {
   if (!child?.pid || process.platform === "win32") return undefined;
@@ -264,6 +266,7 @@ for (const signal of ["SIGINT", "SIGTERM"]) {
 }
 
 function startNextChild() {
+  serverRssOverLimitSamples = 0;
   child = spawn(process.execPath, nextArgs, {
     cwd: projectRoot,
     env: childEnv,
@@ -301,6 +304,11 @@ if (Number.isFinite(serverRssLimitMb) && serverRssLimitMb > 0 && process.platfor
   memoryWatchdog = setInterval(() => {
     if (Date.now() - childStartedAt < serverRssGraceMs) return;
     const rssMb = childRssMb();
-    if (rssMb !== undefined && rssMb >= serverRssLimitMb) recycleNextChild(rssMb);
+    if (rssMb === undefined || rssMb < serverRssLimitMb) {
+      serverRssOverLimitSamples = 0;
+      return;
+    }
+    serverRssOverLimitSamples += 1;
+    if (serverRssOverLimitSamples >= serverRssRequiredSamples) recycleNextChild(rssMb);
   }, serverRssCheckMs);
 }
