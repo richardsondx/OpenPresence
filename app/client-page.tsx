@@ -829,7 +829,7 @@ export default function Home() {
   const attentionConflictRevision = useRef<number | null>(null);
   const playgroundStartInFlight = useRef<string | null>(null);
   const playgroundClockSyncInFlight = useRef<string | null>(null);
-  const refreshStateInFlight = useRef<{ projection: "activity" | "chat" | "growth" | "knowledge" | "assets" | "people" | "feed" | "schedule" | "watching" | "rehearsal" | "brain" | "usage" | "full"; request: Promise<OpenPresenceState> } | null>(null);
+  const refreshStateInFlight = useRef<{ projection: "activity" | "chat" | "growth" | "knowledge" | "assets" | "people" | "feed" | "schedule" | "watching" | "rehearsal" | "brain" | "teach" | "usage" | "full"; request: Promise<OpenPresenceState> } | null>(null);
   const refreshStateRef = useRef<(() => Promise<OpenPresenceState>) | null>(null);
   const rememberStateResponse = useCallback((response: Response) => {
     const etag = response.headers.get("etag");
@@ -850,7 +850,7 @@ export default function Home() {
     query.set("read", Date.now().toString());
     if (typeof window !== "undefined") {
       const initialView = viewForLocation(window.location);
-      if (initialView === "live" || initialView === "chat" || initialView === "growth" || initialView === "knowledge" || initialView === "assets" || initialView === "people" || initialView === "feed" || initialView === "schedule" || initialView === "watching" || initialView === "rehearsal" || initialView === "brain" || initialView === "usage") query.set("projection", initialView === "live" ? "activity" : initialView === "chat" ? "chat" : initialView === "growth" ? "growth" : initialView === "knowledge" ? "knowledge" : initialView === "assets" ? "assets" : initialView === "people" ? "people" : initialView === "feed" ? "feed" : initialView === "schedule" ? "schedule" : initialView === "watching" ? "watching" : initialView === "rehearsal" ? "rehearsal" : initialView === "brain" ? "brain" : "usage");
+      if (initialView === "live" || initialView === "chat" || initialView === "growth" || initialView === "knowledge" || initialView === "assets" || initialView === "people" || initialView === "feed" || initialView === "schedule" || initialView === "watching" || initialView === "rehearsal" || initialView === "brain" || initialView === "teach" || initialView === "usage") query.set("projection", initialView === "live" ? "activity" : initialView === "chat" ? "chat" : initialView === "growth" ? "growth" : initialView === "knowledge" ? "knowledge" : initialView === "assets" ? "assets" : initialView === "people" ? "people" : initialView === "feed" ? "feed" : initialView === "schedule" ? "schedule" : initialView === "watching" ? "watching" : initialView === "rehearsal" ? "rehearsal" : initialView === "brain" ? "brain" : initialView === "teach" ? "teach" : "usage");
     }
     fetchState<OpenPresenceState>(`/api/state?${query.toString()}`)
       .then((payload) => {
@@ -883,7 +883,7 @@ export default function Home() {
     // avoids reparsing and downloading the multi-megabyte compatibility state
     // on every Settings/Growth/People/etc. navigation; compact Activity and
     // Chat views still intentionally refresh when entering or leaving them.
-    if ((state.responseProjection === "full" && !["live", "chat", "growth", "knowledge", "assets", "people", "feed", "schedule", "watching", "rehearsal", "usage"].includes(view)) || (state.responseProjection === "growth" && view === "growth") || (state.responseProjection === "knowledge" && view === "knowledge") || (state.responseProjection === "assets" && view === "assets") || (state.responseProjection === "people" && view === "people") || (state.responseProjection === "feed" && view === "feed") || (state.responseProjection === "schedule" && view === "schedule") || (state.responseProjection === "watching" && view === "watching") || (state.responseProjection === "rehearsal" && view === "rehearsal") || (state.responseProjection === "usage" && view === "usage")) return;
+    if ((state.responseProjection === "full" && !["live", "chat", "growth", "knowledge", "assets", "people", "feed", "schedule", "watching", "rehearsal", "brain", "teach", "usage"].includes(view)) || (state.responseProjection === "growth" && view === "growth") || (state.responseProjection === "knowledge" && view === "knowledge") || (state.responseProjection === "assets" && view === "assets") || (state.responseProjection === "people" && view === "people") || (state.responseProjection === "feed" && view === "feed") || (state.responseProjection === "schedule" && view === "schedule") || (state.responseProjection === "watching" && view === "watching") || (state.responseProjection === "rehearsal" && view === "rehearsal") || (state.responseProjection === "brain" && view === "brain") || (state.responseProjection === "teach" && view === "teach") || (state.responseProjection === "usage" && view === "usage")) return;
     // Activity uses a small projection; hydrate the full workspace when an
     // information-heavy view is opened instead of making the first Activity
     // paint wait for unrelated Agent history.
@@ -930,7 +930,7 @@ export default function Home() {
             ...(context?.activeAgentId ? { "x-openpresence-agent-id": context.activeAgentId } : {}),
             ...(context?.activePresenceId ? { "x-openpresence-presence-id": context.activePresenceId } : {}),
             ...(context?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(context.workspaceRevision) } : {}),
-            ...(view === "live" ? { "x-openpresence-projection": "activity" } : view === "chat" ? { "x-openpresence-projection": "chat" } : view === "growth" ? { "x-openpresence-projection": "growth" } : view === "knowledge" ? { "x-openpresence-projection": "knowledge" } : view === "assets" ? { "x-openpresence-projection": "assets" } : view === "people" ? { "x-openpresence-projection": "people" } : view === "feed" ? { "x-openpresence-projection": "feed" } : view === "schedule" ? { "x-openpresence-projection": "schedule" } : view === "watching" ? { "x-openpresence-projection": "watching" } : view === "rehearsal" ? { "x-openpresence-projection": "rehearsal" } : view === "usage" ? { "x-openpresence-projection": "usage" } : {}),
+            ...(view === "live" ? { "x-openpresence-projection": "activity" } : view === "chat" ? { "x-openpresence-projection": "chat" } : view === "growth" ? { "x-openpresence-projection": "growth" } : view === "knowledge" ? { "x-openpresence-projection": "knowledge" } : view === "assets" ? { "x-openpresence-projection": "assets" } : view === "people" ? { "x-openpresence-projection": "people" } : view === "feed" ? { "x-openpresence-projection": "feed" } : view === "schedule" ? { "x-openpresence-projection": "schedule" } : view === "watching" ? { "x-openpresence-projection": "watching" } : view === "rehearsal" ? { "x-openpresence-projection": "rehearsal" } : view === "brain" ? { "x-openpresence-projection": "brain" } : view === "teach" ? { "x-openpresence-projection": "teach" } : view === "usage" ? { "x-openpresence-projection": "usage" } : {}),
           },
           body: JSON.stringify(operation),
         }, runtimeTimeoutForOperation(operationType));
@@ -999,8 +999,9 @@ export default function Home() {
     const useWatchingProjection = currentView === "watching";
     const useRehearsalProjection = currentView === "rehearsal";
     const useBrainProjection = currentView === "brain";
+    const useTeachProjection = currentView === "teach";
     const useUsageProjection = currentView === "usage";
-    const requestedProjection = useActivityProjection ? "activity" : useChatProjection ? "chat" : useGrowthProjection ? "growth" : useKnowledgeProjection ? "knowledge" : useAssetsProjection ? "assets" : usePeopleProjection ? "people" : useFeedProjection ? "feed" : useScheduleProjection ? "schedule" : useWatchingProjection ? "watching" : useRehearsalProjection ? "rehearsal" : useBrainProjection ? "brain" : useUsageProjection ? "usage" : "full";
+    const requestedProjection = useActivityProjection ? "activity" : useChatProjection ? "chat" : useGrowthProjection ? "growth" : useKnowledgeProjection ? "knowledge" : useAssetsProjection ? "assets" : usePeopleProjection ? "people" : useFeedProjection ? "feed" : useScheduleProjection ? "schedule" : useWatchingProjection ? "watching" : useRehearsalProjection ? "rehearsal" : useBrainProjection ? "brain" : useTeachProjection ? "teach" : useUsageProjection ? "usage" : "full";
     // A navigation away from Activity must not reuse its smaller in-flight
     // response. That response deliberately omits view-specific collections
     // such as Growth history and is not a complete OpenPresenceState.
@@ -1010,7 +1011,7 @@ export default function Home() {
       const requestedAgentId = query.get("agentId");
       const requestedPresenceId = query.get("presenceId");
       query.set("read", Date.now().toString());
-      if (useActivityProjection || useChatProjection || useGrowthProjection || useKnowledgeProjection || useAssetsProjection || usePeopleProjection || useFeedProjection || useScheduleProjection || useWatchingProjection || useRehearsalProjection || useBrainProjection || useUsageProjection) query.set("projection", requestedProjection);
+      if (useActivityProjection || useChatProjection || useGrowthProjection || useKnowledgeProjection || useAssetsProjection || usePeopleProjection || useFeedProjection || useScheduleProjection || useWatchingProjection || useRehearsalProjection || useBrainProjection || useTeachProjection || useUsageProjection) query.set("projection", requestedProjection);
       const payload = await fetchState<OpenPresenceState>(`/api/state?${query.toString()}`);
       if (!payload) {
         if (!state) throw new Error("The workspace state is not available.");

@@ -1,6 +1,6 @@
 import type { OpenPresenceState } from "./types";
 
-export type AgentLibraryProjection = "knowledge" | "assets" | "people" | "feed" | "schedule" | "watching" | "rehearsal" | "brain";
+export type AgentLibraryProjection = "knowledge" | "assets" | "people" | "feed" | "schedule" | "watching" | "rehearsal" | "brain" | "teach";
 
 const historyCollections = [
   "files", "messages", "conversations", "presenceChatSessions", "operatorConversations", "operatorNudges", "agentRequests",
@@ -124,6 +124,18 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
       next.presenceKnowledgeAccess = state.presenceKnowledgeAccess;
       next.knowledgeDocuments = state.knowledgeDocuments;
       next.mindFileKnowledgeBindings = state.mindFileKnowledgeBindings;
+      return next;
+    }
+    if (projection === "teach") {
+      next.conversations = state.conversations.map((conversation) => ({
+        ...conversation,
+        messages: conversation.messages.slice(-100),
+      }));
+      next.modelProfiles = state.modelProfiles;
+      next.changeSets = state.changeSets.slice(-20);
+      next.librarySources = state.librarySources.slice(-20);
+      next.skills = state.skills;
+      next.toolBindings = state.toolBindings;
       return next;
     }
     const presenceId = state.presence?.id;

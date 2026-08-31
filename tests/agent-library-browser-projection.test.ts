@@ -140,4 +140,19 @@ describe("Agent library browser projections", () => {
     expect(projection.mirrorObjects).toEqual([]);
     expect(projection.events).toEqual([]);
   });
+
+  it("keeps Teach conversation context while bounding transcript history", () => {
+    const state = createAgent({ name: "Genny", description: "An agent for useful software conversations.", audience: "AI builders", mode: "agent", handle: "@genny", accent: "#d88b57" });
+    state.conversations = [{ id: "conversation-1", messages: Array.from({ length: 150 }, (_, index) => ({ id: `message-${index}`, content: `message ${index}` })) }] as never;
+    state.modelProfiles = [{ id: "model-1", agentId: state.agent!.id }] as never;
+    state.changeSets = Array.from({ length: 30 }, (_, index) => ({ id: `change-${index}` })) as never;
+    state.librarySources = Array.from({ length: 30 }, (_, index) => ({ id: `source-${index}` })) as never;
+    state.mirrorObjects = [{ id: "unrelated" }] as never;
+    const projection = agentLibraryBrowserProjection(state, "teach");
+    expect(projection.responseProjection).toBe("teach");
+    expect(projection.conversations[0].messages).toHaveLength(100);
+    expect(projection.changeSets).toHaveLength(20);
+    expect(projection.librarySources).toHaveLength(20);
+    expect(projection.mirrorObjects).toEqual([]);
+  });
 });
