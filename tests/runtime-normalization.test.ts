@@ -88,4 +88,27 @@ describe("runtime normalization boundary", () => {
       writeState(initialState());
     }
   });
+
+  it("rehydrates operator events from the indexed projection after cache invalidation", () => {
+    const created = createAgent({ name: "Jenny", description: "A test Agent.", mode: "agent", handle: "@jenny_event", accent: "#D68754" });
+    created.events = [{
+      id: "event-normalization-test",
+      type: "system",
+      title: "Indexed event",
+      detail: "This event remains available after the compatibility field is projected out.",
+      time: new Date().toISOString(),
+      tone: "positive",
+      presenceId: created.presence!.id,
+    }];
+    try {
+      writeState(created);
+      deleteBridgeIdentity("bridge-not-present");
+      const rehydrated = readStateSnapshot();
+      expect(rehydrated.events).toEqual(expect.arrayContaining([
+        expect.objectContaining({ id: "event-normalization-test", title: "Indexed event" }),
+      ]));
+    } finally {
+      writeState(initialState());
+    }
+  });
 });
