@@ -27,6 +27,9 @@ describe("Growth browser projection", () => {
     expect(projection.responseProjection).toBe("growth");
     expect(projection.assets).toEqual([]);
     expect(projection.resourceUsageEvents).toEqual([]);
+    expect(projection.attentionEpisodes).toEqual([]);
+    expect(projection.socialIntents).toEqual([]);
+    expect(projection.files).toEqual([]);
     expect(projection.publicationMetricSnapshots[0]?.baseline).toBeUndefined();
     expect(projection.mirrorObjects[0]).toMatchObject({ visibility: "public", actorPresenceId: presenceId });
     expect(history).toHaveLength(1);
@@ -39,6 +42,8 @@ describe("Growth browser projection", () => {
 
     expect(response.status).toBe(200);
     expect(body.responseProjection).toBe("growth");
-    expect(Buffer.byteLength(JSON.stringify(body))).toBeLessThan(7_000_000);
+    expect(body.attentionEpisodes).toEqual([]);
+    expect(body.socialIntents).toEqual([]);
+    expect(Buffer.byteLength(JSON.stringify(body))).toBeLessThan(1_300_000);
   });
 });

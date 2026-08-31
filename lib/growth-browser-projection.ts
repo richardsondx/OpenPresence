@@ -91,6 +91,51 @@ export function growthBrowserProjection(state: OpenPresenceState, presenceId?: s
   })) as never;
   projection.growthEvidenceSnapshots = scoped(state.growthEvidenceSnapshots) as never;
 
+  // Growth derives a small set of verified counts in the browser. Preserve
+  // only the fields those derivations can actually read instead of shipping
+  // complete execution, decision, outcome, and compatibility-history records
+  // inherited from the generic browser projection.
+  projection.executions = scoped(state.executions)
+    .map((execution) => ({
+      id: execution.id,
+      socialIntentId: execution.socialIntentId,
+      presenceId: execution.presenceId,
+      affordance: execution.affordance,
+      status: execution.status,
+      target: execution.target,
+      externalRef: execution.externalRef,
+      publication: execution.publication
+        ? { id: execution.publication.id, origin: execution.publication.origin }
+        : undefined,
+      environment: execution.environment,
+      createdAt: execution.createdAt,
+    })) as never;
+  projection.socialDecisions = scoped(state.socialDecisions)
+    .map((decision) => ({ id: decision.id, presenceId: decision.presenceId, createdAt: decision.createdAt })) as never;
+  projection.outcomes = scoped(state.outcomes)
+    .map((outcome) => ({
+      id: outcome.id,
+      executionId: outcome.executionId,
+      presenceId: outcome.presenceId,
+      status: outcome.status,
+      metrics: outcome.metrics,
+      environment: outcome.environment,
+      observedAt: outcome.observedAt,
+    })) as never;
+  projection.changeSets = scoped(state.changeSets)
+    .map((changeSet) => ({
+      id: changeSet.id,
+      presenceId: changeSet.presenceId,
+      createdAt: changeSet.createdAt,
+      operations: changeSet.operations
+        .filter((operation) => operation.path === "agentFiles.GROWTH" && typeof operation.after === "string")
+        .map((operation) => ({ path: operation.path, after: operation.after })),
+    })) as never;
+  projection.events = (state.events ?? [])
+    .filter((event) => !selectedPresenceId || event.presenceId === selectedPresenceId)
+    .map((event) => ({ id: event.id, presenceId: event.presenceId, title: event.title, time: event.time })) as never;
+  projection.presences = state.presences.filter((item) => !selectedPresenceId || item.id === selectedPresenceId) as never;
+
   const selectedPersonIds = new Set(
     (state.personIdentities ?? [])
       .filter((identity) => identity.sourcePresenceId === selectedPresenceId)
@@ -124,7 +169,7 @@ export function growthBrowserProjection(state: OpenPresenceState, presenceId?: s
     "assetMetadataEdits", "assetProcessingJobs", "resourceUsageEvents", "sandboxActors", "relationshipFacts",
     "relationshipOpenLoops", "conversationEpisodes", "explorationSessions", "explorationFindings", "networkSearches",
     "networkIntroductions", "recoveryAttempts", "publications", "actions", "operationalRuns", "scheduledWakes",
-    "watchSignals", "operatorConversations", "agentWorkspaces",
+    "watchSignals", "operatorConversations", "agentWorkspaces", "attentionEpisodes", "socialIntents", "files",
   ] as const) {
     (projection as unknown as Record<string, unknown>)[key] = [];
   }
