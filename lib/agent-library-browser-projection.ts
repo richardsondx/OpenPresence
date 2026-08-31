@@ -215,24 +215,149 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
       next.publicationPackages = (state.publicationPackages ?? []).filter((item) => packageIds.has(item.id));
       return next;
     }
+    for (const key of [
+      "presences", "capabilityChangeEvents", "socialStrategyRetrievalRuns", "assignmentPursuitWindows",
+      "nativeConnections", "bridges",
+    ] as const) next[key] = [] as never;
+    next.proposals = [];
+    next.executions = [];
     const presenceId = state.presence?.id;
-    next.people = state.people;
-    next.personIdentities = state.personIdentities;
-    next.relationships = state.relationships;
-    next.relationshipFacts = state.relationshipFacts;
-    next.relationshipOpenLoops = state.relationshipOpenLoops;
-    next.peopleNotes = state.peopleNotes;
-    next.watches = state.watches;
-    next.watchSignals = state.watchSignals;
-    next.delegationGrants = state.delegationGrants;
-    next.relationshipStudies = state.relationshipStudies;
-    next.relationshipInsightSets = state.relationshipInsightSets;
-    next.autobiographicalEvents = state.autobiographicalEvents;
-    next.mirrorObjects = presenceId ? state.mirrorObjects.filter((object) => object.presenceId === presenceId) : state.mirrorObjects;
-    next.socialDecisions = presenceId ? state.socialDecisions.filter((decision) => decision.presenceId === presenceId) : state.socialDecisions;
-    next.socialIntents = presenceId ? state.socialIntents.filter((intent) => intent.presenceId === presenceId && intent.affordance === "x.follow") : state.socialIntents;
-    next.outcomes = presenceId ? state.outcomes.filter((outcome) => outcome.presenceId === presenceId) : state.outcomes;
-    next.executions = state.executions.filter((execution) => execution.status === "awaiting-review" || (execution.presenceId === presenceId && execution.affordance === "x.follow"));
+    const identities = state.personIdentities.filter((identity) =>
+      !presenceId || identity.sourcePresenceId === presenceId,
+    );
+    const personIds = new Set(identities.map((identity) => identity.personId));
+    const relationshipIds = new Set(state.relationships.filter((relationship) => personIds.has(relationship.personId)).map((relationship) => relationship.id));
+    const watchIds = new Set(state.watches.filter((watch) => !presenceId || watch.presenceId === presenceId).map((watch) => watch.id));
+
+    // People needs the complete relationship card set, but only a narrow
+    // identity/relationship shape. Keeping provider evidence and old
+    // provenance envelopes out of this read avoids megabytes of parse and GC
+    // work before the operator can search or open one person.
+    next.people = state.people.filter((person) => personIds.has(person.id));
+    next.personIdentities = identities.map((identity) => ({
+      id: identity.id,
+      personId: identity.personId,
+      channel: identity.channel,
+      externalActorId: identity.externalActorId,
+      handle: identity.handle,
+      displayName: identity.displayName,
+      avatarUrl: identity.avatarUrl,
+      sourcePresenceId: identity.sourcePresenceId,
+      sourceEnvironment: identity.sourceEnvironment,
+      verificationMethod: identity.verificationMethod,
+      hydrationState: identity.hydrationState,
+      lastHydratedAt: identity.lastHydratedAt,
+      contactability: identity.contactability,
+      createdAt: identity.createdAt,
+    })) as never;
+    next.relationships = state.relationships.filter((relationship) => relationshipIds.has(relationship.id)).map((relationship) => ({
+      id: relationship.id,
+      personId: relationship.personId,
+      following: relationship.following,
+      lastMeaningfulInteractionAt: relationship.lastMeaningfulInteractionAt,
+      state: relationship.state,
+      createdAt: relationship.createdAt,
+      updatedAt: relationship.updatedAt,
+    })) as never;
+    next.relationshipFacts = state.relationshipFacts.filter((fact) => relationshipIds.has(fact.relationshipId)).map((fact) => ({
+      id: fact.id,
+      relationshipId: fact.relationshipId,
+      statement: fact.statement,
+      epistemicKind: fact.epistemicKind,
+      confidence: fact.confidence,
+      provenanceRefs: fact.provenanceRefs.map((ref) => ({ kind: ref.kind })),
+      validTo: fact.validTo,
+      supersedesFactId: fact.supersedesFactId,
+      createdAt: fact.createdAt,
+    })) as never;
+    next.relationshipOpenLoops = state.relationshipOpenLoops.filter((loop) => relationshipIds.has(loop.relationshipId)).map((loop) => ({
+      id: loop.id,
+      relationshipId: loop.relationshipId,
+      description: loop.description,
+      status: loop.status,
+      createdAt: loop.createdAt,
+      resolvedAt: loop.resolvedAt,
+    })) as never;
+    next.peopleNotes = (state.peopleNotes ?? []).filter((note) => !presenceId || note.presenceId === presenceId);
+    next.watches = state.watches.filter((watch) => watchIds.has(watch.id));
+    next.watchSignals = state.watchSignals.filter((signal) => watchIds.has(signal.watchId));
+    next.delegationGrants = state.delegationGrants.filter((grant) => !presenceId || grant.presenceId === presenceId);
+    const studies = (state.relationshipStudies ?? []).filter((study) => !presenceId || study.presenceId === presenceId);
+    next.relationshipStudies = studies;
+    const studyIds = new Set(studies.map((study) => study.id));
+    next.relationshipInsightSets = (state.relationshipInsightSets ?? []).filter((set) => studyIds.has(set.studyId) || studies.some((study) => study.insightSetId === set.id));
+    next.autobiographicalEvents = state.autobiographicalEvents.filter((event) =>
+      (!presenceId || event.presenceId === presenceId) && (!event.counterpartyPersonId || personIds.has(event.counterpartyPersonId)),
+    );
+    const mirrors = presenceId ? state.mirrorObjects.filter((object) => object.presenceId === presenceId) : state.mirrorObjects;
+    const identityActorIds = new Set(identities.map((identity) => identity.externalActorId).filter(Boolean));
+    const studyEvidenceMirrorIds = new Set(studies.flatMap((study) => study.evidenceRefs.filter((ref) => ref.kind === "mirror_object").map((ref) => ref.id)));
+    const followDecisionMirrorIds = new Set((presenceId ? state.socialDecisions.filter((decision) => decision.presenceId === presenceId) : state.socialDecisions).flatMap((decision) => decision.focalMirrorObjectIds ?? []));
+    const relevantMirrors = mirrors
+      .filter((object) => studyEvidenceMirrorIds.has(object.id)
+        || followDecisionMirrorIds.has(object.id)
+        || identityActorIds.has(object.author?.externalRef?.id ?? "")
+        // Preserve sparse/legacy evidence records so a partially hydrated
+        // identity does not make an otherwise valid relationship disappear.
+        || !object.author?.externalRef?.id)
+      .sort((left, right) => (right.occurredAt ?? right.observedAt).localeCompare(left.occurredAt ?? left.observedAt));
+    const retainedByActor = new Map<string, number>();
+    const personMirrors = relevantMirrors.filter((object) => {
+      if (studyEvidenceMirrorIds.has(object.id) || followDecisionMirrorIds.has(object.id)) return true;
+      const actorId = object.author?.externalRef?.id;
+      const bucket = actorId ?? "__unattributed__";
+      const retained = retainedByActor.get(bucket) ?? 0;
+      if (retained >= 8) return false;
+      retainedByActor.set(bucket, retained + 1);
+      return true;
+    });
+    next.mirrorObjects = personMirrors.map((object) => ({
+      id: object.id,
+      presenceId: object.presenceId,
+      channelId: object.channelId,
+      externalRef: object.externalRef,
+      parentExternalRef: object.parentExternalRef,
+      objectType: object.objectType,
+      language: object.language,
+      author: object.author
+        ? { externalRef: object.author.externalRef, displayName: object.author.displayName, handle: object.author.handle, avatarUrl: object.author.avatarUrl }
+        : undefined,
+      content: object.content?.text ? { text: object.content.text, language: object.content.language } : undefined,
+      assetRefs: object.assetRefs?.map((ref) => ({ assetId: ref.assetId, kind: ref.kind })),
+      occurredAt: object.occurredAt,
+      observedAt: object.observedAt,
+      visibility: object.visibility,
+      archived: object.archived,
+      environment: object.environment,
+    })) as never;
+    next.socialDecisions = (presenceId ? state.socialDecisions.filter((decision) => decision.presenceId === presenceId) : state.socialDecisions).map((decision) => ({
+      id: decision.id,
+      presenceId: decision.presenceId,
+      focalMirrorObjectIds: decision.focalMirrorObjectIds,
+      acts: (decision.acts ?? []).filter((act) => act.decision === "follow").map((act) => ({ decision: act.decision, rationale: act.rationale })),
+      summary: decision.summary,
+    })) as never;
+    next.socialIntents = (presenceId ? state.socialIntents.filter((intent) => intent.presenceId === presenceId && intent.affordance === "x.follow") : state.socialIntents).map((intent) => ({
+      id: intent.id,
+      affordance: intent.affordance,
+      target: intent.target,
+    })) as never;
+    next.outcomes = (presenceId ? state.outcomes.filter((outcome) => outcome.presenceId === presenceId) : state.outcomes).map((outcome) => ({
+      id: outcome.id,
+      socialIntentId: outcome.socialIntentId,
+      executionId: outcome.executionId,
+      presenceId: outcome.presenceId,
+      status: outcome.status,
+    })) as never;
+    next.executions = state.executions
+      .filter((execution) => execution.status === "awaiting-review" || (execution.presenceId === presenceId && execution.affordance === "x.follow"))
+      .map((execution) => ({
+        id: execution.id,
+        presenceId: execution.presenceId,
+        affordance: execution.affordance,
+        status: execution.status,
+        target: execution.target,
+      })) as never;
   }
 
   return next;

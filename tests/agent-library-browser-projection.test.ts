@@ -41,6 +41,19 @@ describe("Agent library browser projections", () => {
     expect(projection.assets).toEqual([]);
   });
 
+  it("keeps the canonical People response under the browser payload budget", async () => {
+    const response = await (await import("../app/api/state/route")).GET(
+      new Request("http://localhost/api/state?projection=people&agentId=agent_example_2&presenceId=presence_example_19"),
+    );
+    const body = await response.json();
+
+    expect(response.status).toBe(200);
+    expect(body.responseProjection).toBe("people");
+    expect(body.people).toBeDefined();
+    expect(body.personIdentities).toBeDefined();
+    expect(Buffer.byteLength(JSON.stringify(body))).toBeLessThan(800_000);
+  });
+
   it("keeps verified Feed joins while trimming unrelated collections", () => {
     const state = createAgent({ name: "Genny", description: "An agent for useful software conversations.", audience: "AI builders", mode: "agent", handle: "@genny", accent: "#d88b57" });
     const presenceId = state.presence!.id;
