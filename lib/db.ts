@@ -226,6 +226,14 @@ try {
 sqlite.exec("CREATE TABLE IF NOT EXISTS operational_runs_idx (id TEXT PRIMARY KEY, presence_id TEXT, execution_id TEXT, state TEXT NOT NULL, stage TEXT NOT NULL, lease_owner TEXT, lease_expires_at TEXT, eligible_at TEXT, next_wake_at TEXT, last_progress_at TEXT, last_heartbeat_at TEXT, payload TEXT NOT NULL, updated_at TEXT NOT NULL)");
 sqlite.exec("CREATE TABLE IF NOT EXISTS scheduled_wakes_idx (id TEXT PRIMARY KEY, presence_id TEXT, wake_at TEXT NOT NULL, kind TEXT NOT NULL, target_id TEXT, state TEXT NOT NULL, payload TEXT, updated_at TEXT NOT NULL)");
 try { sqlite.exec("ALTER TABLE scheduled_wakes_idx ADD COLUMN created_at TEXT"); } catch { /* Existing databases already have the column. */ }
+// Attention coordination and temporal sweeps repeatedly filter these durable
+// projections by presence/state and then read the newest or due records. Keep
+// those reads bounded as history grows instead of scanning and sorting the
+// complete append-only-ish index tables on every wake.
+sqlite.exec("CREATE INDEX IF NOT EXISTS operational_runs_presence_updated_idx ON operational_runs_idx (presence_id, updated_at DESC)");
+sqlite.exec("CREATE INDEX IF NOT EXISTS operational_runs_state_updated_idx ON operational_runs_idx (state, updated_at DESC)");
+sqlite.exec("CREATE INDEX IF NOT EXISTS scheduled_wakes_state_time_idx ON scheduled_wakes_idx (state, wake_at ASC)");
+sqlite.exec("CREATE INDEX IF NOT EXISTS scheduled_wakes_presence_created_idx ON scheduled_wakes_idx (presence_id, created_at DESC)");
 sqlite.exec("CREATE TABLE IF NOT EXISTS dependency_health_live (id TEXT PRIMARY KEY, presence_id TEXT, dependency TEXT NOT NULL, state TEXT NOT NULL, consecutive_failures INTEGER NOT NULL DEFAULT 0, circuit_until TEXT, current_incident_id TEXT, metadata TEXT, updated_at TEXT NOT NULL)");
 sqlite.exec("CREATE TABLE IF NOT EXISTS recovery_incidents_live (id TEXT PRIMARY KEY, root_cause_key TEXT NOT NULL, dependency_id TEXT NOT NULL, presence_id TEXT, state TEXT NOT NULL, recovery_attempts INTEGER NOT NULL DEFAULT 0, next_attempt_at TEXT, safe_summary TEXT, payload TEXT NOT NULL, updated_at TEXT NOT NULL)");
 sqlite.exec("CREATE TABLE IF NOT EXISTS recovery_attempts_log (id TEXT PRIMARY KEY, incident_id TEXT NOT NULL, attempt_number INTEGER NOT NULL, step TEXT NOT NULL, outcome TEXT NOT NULL, error TEXT, timestamp TEXT NOT NULL)");
