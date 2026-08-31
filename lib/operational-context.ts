@@ -229,7 +229,11 @@ export function readOperationalHealth(presenceId?: string, now = new Date()): Op
   normalizeLegacyRuntimeIncidents(presenceId);
   const dependencyHealth = listDependencyHealth(presenceId);
   const incidents = listRecoveryIncidents(presenceId).filter((incident) => incident.state !== "resolved");
-  let activeRuns = listOperationalRuns(presenceId, ["queued", "running", "waiting", "recovering", "delivery_uncertain", "reconciling", "blocked", "needs_operator"]);
+  // `blocked` and `needs_operator` are terminal operator boundaries, not live
+  // work. Keep them available through incidents and the full state history,
+  // but do not project them as active runs or make the health surface look
+  // stuck after a run has stopped.
+  let activeRuns = listOperationalRuns(presenceId, ["queued", "running", "waiting", "recovering", "delivery_uncertain", "reconciling"]);
   let creditsExhaustedState = false;
   let assignmentNeedsOperator = false;
   let assignmentNeedsOperatorSummary: string | undefined;

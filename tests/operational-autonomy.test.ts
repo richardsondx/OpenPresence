@@ -298,6 +298,30 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
     expect(health.activeRuns.find((run) => run.id === "run_resolved_incident")).toBeUndefined();
   });
 
+  it("does not project terminal blocked runs as active health work", () => {
+    const uniquePresence = `presence_blocked_health_${Date.now()}`;
+    const now = new Date().toISOString();
+    upsertOperationalRun({
+      id: "run_blocked_health",
+      runId: "run_blocked_health",
+      presenceId: uniquePresence,
+      kind: "attention",
+      state: "blocked",
+      stage: "blocked_capability",
+      createdAt: now,
+      eligibleAt: now,
+      lastProgressAt: now,
+      attemptCount: 1,
+      recoveryCount: 0,
+      blockedReason: "The selected capability is unavailable.",
+    });
+
+    const health = readOperationalHealth(uniquePresence);
+
+    expect(health.activeRuns).toEqual([]);
+    expect(health.status).toBe("healthy");
+  });
+
   it("Invariant: an existing recovery incident escalates immediately when credits become operator-blocked", () => {
     const uniquePresence = `presence_credit_escalation_${Date.now()}`;
     const first = recordOperationalFailure({ dependency: "runtime", presenceId: uniquePresence, runId: "run_credit_1", error: "X has no API credits remaining. Add credits or choose an API plan to continue." });
