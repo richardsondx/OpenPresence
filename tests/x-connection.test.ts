@@ -426,6 +426,19 @@ describe("native X connection", () => {
     expect(readOperationalHealth(presenceId).incidents.find((item) => item.id === incident.id)).toBeUndefined();
   });
 
+  it("rechecks a recovered local runtime incident without hiding active work", async () => {
+    const presenceId = readState().presence!.id;
+    const { incident } = recordOperationalFailure({ dependency: "runtime", presenceId, error: new WorkspaceConflictError("agent-test", 4, 5) });
+    const response = await statePost(new Request("http://localhost/api/state", {
+      method: "POST",
+      body: JSON.stringify({ type: "recheckRuntime", presenceId, incidentId: incident.id }),
+      headers: { "content-type": "application/json" },
+    }));
+    expect(response.status).toBe(200);
+    expect(readOperationalHealth(presenceId).incidents.find((item) => item.id === incident.id)).toBeUndefined();
+    expect(readState().events[0]?.title).toBe("Runtime rechecked");
+  });
+
   it("disconnects the Presence and removes its protected secret", async () => {
     const presenceId = readState().presence!.id;
     const save = await POST(new Request("http://localhost/api/x/manage", { method: "POST", body: JSON.stringify({ action: "save", presenceId, credentials: { apiKey: "test_api", apiSecret: "test_secret", bearerToken: "test_bearer" } }), headers: { "content-type": "application/json" } }));

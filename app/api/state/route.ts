@@ -4483,6 +4483,7 @@ const operation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("runPulse"), presenceId: z.string().min(1).optional(), scheduled: z.boolean().optional() }),
   z.object({ type: z.literal("replanPublishing"), presenceId: z.string().min(1).optional() }),
   z.object({ type: z.literal("syncNativeX"), presenceId: z.string().min(1).optional(), manual: z.boolean().optional(), incidentId: z.string().min(1).optional() }),
+  z.object({ type: z.literal("recheckRuntime"), presenceId: z.string().min(1).optional(), incidentId: z.string().min(1) }),
   z.object({ type: z.literal("recheckModelProvider"), presenceId: z.string().min(1).optional(), incidentId: z.string().min(1).optional() }),
   z.object({ type: z.literal("removeLegacyCalendarEntries") }),
   z.object({ type: z.literal("importXPost"), presenceId: z.string().min(1), url: z.string().url().max(2000), languageHint: z.literal("en").optional() }),
@@ -5604,6 +5605,26 @@ export async function POST(request: Request) {
       if (incident) resolveOperationalIncident(incident.id);
       writeState(current);
       return stateResponse(request, current);
+    }
+    if (parsed.type === "recheckRuntime") {
+      const presenceId = parsed.presenceId ?? current.presence?.id;
+      const incident = getRecoveryIncident(parsed.incidentId);
+      if (!incident || incident.state === "resolved") return stateResponse(request, current);
+      if (!presenceId) throw new Error("A Presence is required to recheck the local runtime.");
+      if (!incident.rootCauseKey.startsWith("runtime.")) throw new Error("That incident is not a local runtime incident.");
+      if (incident.presenceId && incident.presenceId !== presenceId) throw new Error("That health incident belongs to a different Presence.");
+      const activeAffectedRun = listOperationalRuns(presenceId, ["queued", "running", "waiting", "recovering", "delivery_uncertain", "reconciling"])
+        .some((run) => incident.affectedRunIds.includes(run.id));
+      if (activeAffectedRun) throw new Error("The runtime still has affected work in progress. It was not marked healthy.");
+      // Force the same scoped read used by health before resolving the stale
+      // incident. A successful read proves the recovered local persistence
+      // path is available, while the active-run guard prevents hiding work
+      // that still needs recovery or delivery verification.
+      readStateViewForContext({ presenceId }, { skipAssignmentPreflights: true });
+      resolveOperationalIncident(incident.id);
+      const next = recordRuntimeEvent(current, presenceId, "Runtime rechecked", "The recovered local runtime read cleanly and no affected work remains active.", "positive");
+      writeState(next);
+      return stateResponse(request, next);
     }
     if (parsed.type === "syncNativeX") {
       const presenceId = parsed.presenceId ?? current.presence?.id;

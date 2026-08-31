@@ -10855,11 +10855,14 @@ function FailedAttemptsReview({
       state.presences.some((item) => item.id === presenceId && item.channel === "x") &&
       xCreditsExhausted(nativeConnection)
     );
+    const shouldCheckRuntime = incident.rootCauseKey.startsWith("runtime.") && !shouldCheckNativeX;
     setCheckingIncidentId(incident.id);
     try {
       await mutate(
         shouldCheckNativeX
           ? { type: "syncNativeX", presenceId, manual: true, incidentId: incident.id }
+          : shouldCheckRuntime
+            ? { type: "recheckRuntime", presenceId, incidentId: incident.id }
           : { type: "recheckModelProvider", presenceId, incidentId: incident.id },
       );
       onRefreshHealth?.();
@@ -10923,7 +10926,7 @@ function FailedAttemptsReview({
                   Review Settings
                 </button>
               )}
-              {needsYou && incident.rootCauseKey.endsWith(".credits_exhausted") && (
+              {needsYou && (incident.rootCauseKey.endsWith(".credits_exhausted") || incident.rootCauseKey === "runtime.transient_error") && (
                 <button type="button" className="action-button secondary" style={{ fontSize: "11px", padding: "5px 10px", marginTop: "4px", marginLeft: "6px" }} onClick={() => void recheckIncident(incident)} disabled={checkingIncidentId !== null} aria-busy={checkingIncidentId === incident.id}>
                   {checkingIncidentId === incident.id ? "Checking…" : "Check again"}
                 </button>
