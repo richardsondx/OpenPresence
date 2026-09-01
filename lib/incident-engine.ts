@@ -169,6 +169,16 @@ export function classifyFailureRootCause(
     };
   }
 
+  if (dependency === "runtime" && /OPENPRESENCE_SECRET_KEY|secure credential storage|storing channel credentials/i.test(msg)) {
+    return {
+      rootCauseKey: "runtime.transient_error",
+      safeSummary: "Secure local credential storage was unavailable to the previous server process. Restart OpenPresence through its normal launcher; no Bridge is required.",
+      retryable: true,
+      requiresOperator: false,
+      requiresAuth: false,
+    };
+  }
+
   // Generic fallback
   return {
     rootCauseKey: `${dependency}.transient_error`,

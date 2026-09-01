@@ -185,6 +185,48 @@ describe("Operational Continuity & Responsibility Invariant Test Suite", () => {
     expect(continuity.reason).toContain("verification-pending");
   });
 
+  it("keeps an adaptive burst recoverable when its run uses the zero-attempt sentinel", () => {
+    const state = seedTestState();
+    const now = Date.now();
+    const assignment = compileAssignmentInstruction(state, "Help this post reach relevant builders.", state.presence!.id, "live");
+    assignment.status = "working";
+    state.assignments.unshift(assignment);
+    state.assignmentPursuitWindows = [{
+      id: "active-adaptive-pursuit",
+      assignmentId: assignment.id,
+      agentId: state.agent!.id,
+      presenceId: state.presence!.id,
+      startsAt: new Date(now - 300_000).toISOString(),
+      deadlineAt: new Date(now + 3_600_000).toISOString(),
+      maxVerifiedActions: 40,
+      status: "active",
+    }];
+    const run: AssignmentRun = {
+      id: "stalled-adaptive-run",
+      assignmentId: assignment.id,
+      agentId: state.agent!.id,
+      presenceId: state.presence!.id,
+      sessionId: `live:${state.presence!.id}`,
+      pursuitWindowId: "active-adaptive-pursuit",
+      status: "selecting",
+      currentStage: "candidate_review",
+      leaseOwner: "worker-gone",
+      leaseExpiresAt: new Date(now - 1_000).toISOString(),
+      heartbeatAt: new Date(now - 300_000).toISOString(),
+      lastProgressAt: new Date(now - 300_000).toISOString(),
+      attempts: 8,
+      maxAttempts: 0,
+      rejectedCandidates: 0,
+      createdAt: new Date(now - 300_000).toISOString(),
+      updatedAt: new Date(now - 300_000).toISOString(),
+    };
+    state.assignmentRuns = [run];
+
+    const recovered = recoverStaleAssignmentRuns(state, now);
+    expect(recovered.spawnedRunIds).toHaveLength(1);
+    expect(recovered.state.assignmentRuns?.[0]).toMatchObject({ status: "queued", recoveryOf: run.id, attempts: 9 });
+  });
+
   it("Case 5: Recovery Budget Exhausted vs. Needs You", () => {
     const state = seedTestState();
     const assignment = compileAssignmentInstruction(

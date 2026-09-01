@@ -1,11 +1,104 @@
 import { describe, expect, it } from "vitest";
-import { addSandboxEvent, applyOperation, assignmentIsOpen, assignmentIsSatisfied, cleanSandboxDraft, cleanUserFacingAssignmentInstruction, compileAssignmentInstruction, compilePresenceContext, compileWatch, completeNativeExecution, createAgent, deliverSandboxExecution, defaultPublishingInitiative, defaultSelfDirectedAttentionPolicy, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingProgress, deriveSelfDirectedDiscoveryPlan, failNativeExecution, formChatPostIntent, formSandboxIntent, formXReplyIntent, formXActionIntent, identityLeakageReason, inferExplicitDurableContext, inferPresenceIdentityChange, initialState, isActivityDecisionEvent, isExplicitGhostModeRequest, isExplicitXPostRequest, isMentionRestrictedError, isTeachProposalConfirmation, markInboundJudged, markNativeConnectionNeedsAttention, normalizePresenceBoundaryValues, normalizeState, publicHistoryMatchesPresence, publicSelfGuidance, recordAttentionTestDecision, recordNativeMirror, recordNativeObservation, recordPublicFooting, recordPublicRequestsFromMirrors, recordResourceUsageEvent, recordSocialDecision, recordStandingIntentNoOp, recordVerifiedChromeReply, recordVerifiedXReply, recordWatchSignals, relationshipPolicyFromWatchPurpose, rerouteExecutionToBridge, startAttentionTest, startPlaygroundSession, stateForContext, xQuoteTargetHasAvailableRoute } from "../lib/runtime";
+import { addSandboxEvent, applyOperation, assignmentIsOpen, assignmentIsSatisfied, cleanSandboxDraft, cleanUserFacingAssignmentInstruction, compileAssignmentInstruction, compilePresenceContext, compileWatch, completeNativeExecution, createAgent, deliverSandboxExecution, defaultPublishingInitiative, defaultSelfDirectedAttentionPolicy, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingProgress, deriveSelfDirectedDiscoveryPlan, failNativeExecution, formAssignmentPostIntent, formChatPostIntent, formSandboxIntent, formXDeleteIntent, formXReplyIntent, formXActionIntent, identityLeakageReason, inferExplicitDurableContext, inferPresenceIdentityChange, initialState, isActivityDecisionEvent, isExplicitGhostModeRequest, isExplicitXPostRequest, isMentionRestrictedError, isTeachProposalConfirmation, markInboundJudged, markNativeConnectionNeedsAttention, normalizePresenceBoundaryValues, normalizeState, publicHistoryMatchesPresence, publicSelfGuidance, recordAttentionTestDecision, recordNativeMirror, recordNativeObservation, recordPublicFooting, recordPublicRequestsFromMirrors, recordResourceUsageEvent, recordSocialDecision, recordStandingIntentNoOp, recordVerifiedChromeReply, recordVerifiedXReply, recordWatchSignals, relationshipPolicyFromWatchPurpose, rerouteExecutionToBridge, startAttentionTest, startPlaygroundSession, stateForContext, xQuoteTargetHasAvailableRoute } from "../lib/runtime";
 import { expireQueuedDeliveryWindows } from "../lib/temporal";
 import { acknowledgeExecution, claimExecutions, createBridgeWithKey, heartbeatBridge, ingestEvents, removeBridge, reportBridgeIdentity, revokeBridge } from "../lib/bridge";
 import { readBridgeById, readBridgeCredentialMetadata, readState, readStateVersion, writeState } from "../lib/db";
 import { nextObservationAt } from "../lib/native-x";
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
+
+describe("Presence-owned X deletion", () => {
+  const ownPost = (state: ReturnType<typeof createAgent>, id = "own-post-1", parentId?: string) => recordNativeMirror(state, {
+    connectionId: "native-delete-test",
+    presenceId: state.presence!.id,
+    own: true,
+    post: { id, text: parentId ? "@source A correction reply." : "A duplicate post.", authorId: "presence-account", authorUsername: "jenny_ai", authorName: "Jenny", parentId },
+  });
+
+  it("adds the capability and defaults new and migrated X Presences to Review", () => {
+    const fresh = createAgent(input);
+    expect(fresh.presence?.capabilities.some((capability) => capability.id === "delete")).toBe(true);
+    expect(fresh.presence?.execution.delete).toBe("review");
+
+    const legacy = createAgent(input);
+    legacy.presence!.capabilities = legacy.presence!.capabilities.filter((capability) => capability.id !== "delete");
+    delete legacy.presence!.execution.delete;
+    const migrated = normalizeState(legacy);
+    expect(migrated.presence?.capabilities.some((capability) => capability.id === "delete")).toBe(true);
+    expect(migrated.presence?.execution.delete).toBe("review");
+  });
+
+  it("forms a reviewable deletion only for the Presence's own live post or reply", () => {
+    let state = ownPost(createAgent(input));
+    const presenceId = state.presence!.id;
+    state = formXDeleteIntent(state, { presenceId, target: { type: "x.post", id: "own-post-1" }, source: "agent" });
+    expect(state.executions[0]).toMatchObject({ affordance: "x.delete", mode: "review", status: "awaiting-review", target: { type: "x.post", id: "own-post-1" } });
+    expect(state.actions[0]).toMatchObject({ intent: "delete", status: "review", summary: "Delete post" });
+    expect(state.events[0]?.detail).toContain("own X post");
+
+    const replyState = formXDeleteIntent(ownPost(createAgent(input), "own-reply-1", "source-post-1"), { target: { type: "x.post", id: "own-reply-1" } });
+    expect(replyState.executions[0]?.reviewReason).toContain("this reply");
+
+    const thirdPartyBase = createAgent(input);
+    const thirdParty = recordNativeMirror(thirdPartyBase, {
+      connectionId: "native-delete-test",
+      presenceId: thirdPartyBase.presence!.id,
+      post: { id: "other-post-1", text: "Someone else's post.", authorId: "other-account", authorUsername: "someone_else", authorName: "Someone Else" },
+    });
+    expect(formXDeleteIntent(thirdParty, { target: { type: "x.post", id: "other-post-1" } }).executions).toHaveLength(0);
+  });
+
+  it.each([
+    ["off", "skipped", 0],
+    ["manual", "awaiting-manual", 1],
+    ["review", "awaiting-review", 1],
+    ["auto", "awaiting-connector", 1],
+  ] as const)("honors the %s delete execution mode", (mode, expectedStatus, executionCount) => {
+    let state = ownPost(createAgent(input));
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { delete: mode } } });
+    state = formXDeleteIntent(state, { target: { type: "x.post", id: "own-post-1" } });
+    expect(state.executions).toHaveLength(executionCount);
+    if (executionCount) expect(state.executions[0]?.status).toBe(expectedStatus);
+    else expect(state.actions[0]).toMatchObject({ intent: "delete", status: "skipped" });
+  });
+
+  it("routes Auto deletion through Native X and archives the mirror only after completion", () => {
+    let state = ownPost(createAgent(input));
+    const presence = state.presence!;
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { delete: "auto" } } });
+    state.nativeConnections.push({ id: "native-delete", agentId: state.agent!.id, presenceId: presence.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { username: presence.handle }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } as never);
+    state = formXDeleteIntent(state, { target: { type: "x.post", id: "own-post-1" } });
+    const execution = state.executions[0]!;
+    expect(execution).toMatchObject({ connector: "native", mode: "auto", status: "queued" });
+
+    const completed = completeNativeExecution(state, execution.id, { type: "x.post", id: "own-post-1" });
+    expect(completed.executions[0]).toMatchObject({ status: "succeeded", externalRef: { type: "x.post", id: "own-post-1" } });
+    expect(completed.mirrorObjects.find((object) => object.externalRef.id === "own-post-1")).toMatchObject({ archived: true });
+    expect(completed.mirrorEvents[0]).toMatchObject({ event: "deleted", externalRef: { type: "x.post", id: "own-post-1" } });
+    expect(completed.outcomes[0]).toMatchObject({ status: "succeeded" });
+  });
+
+  it("keeps Manual deletion scoped to the selected target and preserves history", () => {
+    let state = ownPost(createAgent(input));
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { delete: "manual" } } });
+    state = formXDeleteIntent(state, { target: { type: "x.post", id: "own-post-1" } });
+    const execution = state.executions[0]!;
+    const rejected = applyOperation(state, { type: "markManualExecution", id: execution.id, externalRef: { type: "x.post", id: "another-post" } });
+    expect(rejected.executions[0]?.status).toBe("awaiting-manual");
+    const completed = applyOperation(state, { type: "markManualExecution", id: execution.id, externalRef: { type: "x.post", id: "own-post-1" } });
+    expect(completed.executions[0]?.status).toBe("succeeded");
+    expect(completed.actions[0]).toMatchObject({ status: "executed", outcomeId: expect.any(String) });
+    expect(completed.mirrorObjects.find((object) => object.externalRef.id === "own-post-1")).toMatchObject({ archived: true });
+  });
+
+  it("does not form a second deletion for the same target", () => {
+    let state = ownPost(createAgent(input));
+    state = formXDeleteIntent(state, { target: { type: "x.post", id: "own-post-1" } });
+    state = formXDeleteIntent(state, { target: { type: "x.post", id: "own-post-1" } });
+    expect(state.executions).toHaveLength(1);
+    expect(state.socialIntents).toHaveLength(1);
+  });
+});
 
 describe("Presence Brief boundary normalization", () => {
   it("keeps exclusions while omitting pasted positive guidance from Keep out", () => {
@@ -811,6 +904,27 @@ describe("OpenPresence runtime boundaries", () => {
     expect(stopped.socialIntents.find((item) => item.id === execution.socialIntentId)?.state).toBe("withdrawn");
   });
 
+  it("keeps Assignment actions scoped to their Presence after an active Presence switch", () => {
+    const state = createAgent(input);
+    const activePresence = { ...state.presence!, id: "presence-active", name: "Active Presence", handle: "@active_presence", status: "live" as const, environment: "live" as const, connectionMode: "native" as const };
+    const assignmentPresence = { ...state.presence!, id: "presence-assignment", name: "Assignment Presence", handle: "@assignment_presence", status: "live" as const, environment: "live" as const, connectionMode: "native" as const, execution: { ...state.presence!.execution, like: "auto" as const, reply: "auto" as const } };
+    state.presences = [activePresence, assignmentPresence];
+    state.presence = activePresence;
+    state.activePresenceId = activePresence.id;
+    const assignmentId = "assignment-presence-scope";
+    state.assignments = [{ id: assignmentId, agentId: state.agent!.id, presenceId: assignmentPresence.id, environment: "live", status: "active", instruction: "Help the source reach people who genuinely care.", title: "Assignment Presence distribution", deliverable: { type: "meaningful_engagement" }, progress: { required: 1, verified: 0 }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() } as never];
+    state.mirrorObjects = [{ id: "assignment-target", bridgeId: "native:assignment", presenceId: assignmentPresence.id, channelId: "x", externalRef: { type: "x.post", id: "assignment-target" }, objectType: "post", language: "en", content: { text: "A concrete public conversation for the Assignment." }, author: { displayName: "Target Author", handle: "target_author", externalRef: { type: "x.user", id: "target-author" } }, observedAt: new Date().toISOString(), visibility: "public", shareability: "presence-only", environment: "live", source: "native", trust: "untrusted_world_content" } as never];
+
+    const next = formXActionIntent(state, { affordance: "x.like", target: { type: "x.post", id: "assignment-target" }, assignmentId, source: "agent" });
+    expect(next.executions[0]).toMatchObject({ assignmentId, presenceId: assignmentPresence.id, target: { id: "assignment-target" } });
+    expect(next.socialIntents[0]?.presenceId).toBe(assignmentPresence.id);
+
+    const publicationState = formAssignmentPostIntent(next, "A concrete Assignment publication.", assignmentId);
+    expect(publicationState.executions[0]).toMatchObject({ assignmentId, presenceId: assignmentPresence.id, affordance: "x.post" });
+    expect(publicationState.socialIntents[0]?.presenceId).toBe(assignmentPresence.id);
+    expect(publicationState.publications[0]?.publicExpression?.presenceId).toBe(assignmentPresence.id);
+  });
+
   it("cancelling a migrated reply Assignment also stops its legacy directive delivery", () => {
     let state = createAgent(input);
     const presenceId = state.presence!.id;
@@ -932,7 +1046,7 @@ describe("OpenPresence runtime boundaries", () => {
     expect(state.executions[0]).toMatchObject({ status: "blocked", failure: { code: "SOURCE_EXPRESSION_ECHO" } });
   });
 
-  it("does not form a live action when a target's quoted object is missing from the Social Mirror", () => {
+  it("requires context for written actions but permits a direct like on the observed target", () => {
     const state = applyOperation(createAgent(input), { type: "setPresence", patch: { execution: { reply: "auto", like: "auto" } } });
     const presenceId = state.presence!.id;
     const target = { type: "x.post" as const, id: "outer-quote" };
@@ -942,9 +1056,12 @@ describe("OpenPresence runtime boundaries", () => {
     expect(afterReply.executions).toHaveLength(state.executions.length);
     expect(afterReply.events[0]).toMatchObject({ title: "Public action held for complete context", tone: "warning" });
 
+    const afterQuote = formXActionIntent(state, { affordance: "x.quote", target, text: "A grounded addition." });
+    expect(afterQuote.executions).toHaveLength(state.executions.length);
+
     const afterLike = formXActionIntent(state, { affordance: "x.like", target });
-    expect(afterLike.executions).toHaveLength(state.executions.length);
-    expect(afterLike.events[0]).toMatchObject({ title: "Public action held for complete context", tone: "warning" });
+    expect(afterLike.executions).toHaveLength(state.executions.length + 1);
+    expect(afterLike.executions[0]).toMatchObject({ affordance: "x.like", target });
   });
 
   it("keeps public footing in Presence context and anchors replies to the observed post", () => {
@@ -1581,6 +1698,21 @@ describe("OpenPresence runtime boundaries", () => {
       { id: "legacy-reply", bridgeId: "bridge:reply", presenceId, channelId: "x", externalRef: { type: "x.post", id: "reply-1" }, parentExternalRef: { type: "x.post", id: "parent-1" }, objectType: "post", actorPresenceId: presenceId, author: { displayName: "Jenny", handle: state.presence!.handle }, content: { text: "A contextual answer." }, occurredAt: timestamp, observedAt: timestamp, visibility: "public", shareability: "presence-only" },
     );
     expect(derivePublicHistory(state, presenceId)).toEqual(expect.arrayContaining([expect.objectContaining({ externalRef: { type: "x.post", id: "reply-1" }, kind: "reply", parentExternalRef: { type: "x.post", id: "parent-1" } })]));
+  });
+
+  it("repairs a verified reply mirror that was observed before delivery lineage", () => {
+    const state = createAgent(input);
+    const presenceId = state.presence!.id;
+    const timestamp = new Date().toISOString();
+    const executionId = "verified-reply-lineage";
+    state.executions.unshift({ id: executionId, socialIntentId: "intent-verified-reply", presenceId, affordance: "x.reply", mode: "auto", status: "succeeded", attempts: 1, connector: "bridge", target: { type: "x.post", id: "parent-verified" }, externalRef: { type: "x.reply", id: "reply-verified" }, idempotencyKey: executionId, createdAt: timestamp, updatedAt: timestamp, executedAt: timestamp, environment: "live", source: "agent" });
+    state.outcomes.unshift({ id: "outcome-verified-reply", socialIntentId: "intent-verified-reply", executionId, presenceId, status: "succeeded", observedAt: timestamp, metrics: {} });
+    state.mirrorObjects.unshift({ id: "observed-before-lineage", bridgeId: "native:x", presenceId, channelId: "x", externalRef: { type: "x.post", id: "reply-verified" }, objectType: "post", author: { displayName: "Jenny", handle: state.presence!.handle }, content: { text: "A contextual answer." }, occurredAt: timestamp, observedAt: timestamp, visibility: "public", shareability: "presence-only", environment: "live" });
+
+    const repaired = normalizeState(state);
+    const mirror = repaired.mirrorObjects.find((item) => item.externalRef.id === "reply-verified");
+    expect(mirror).toMatchObject({ objectType: "reply", parentExternalRef: { type: "x.post", id: "parent-verified" }, originExecutionId: executionId });
+    expect(derivePublicHistory(repaired, presenceId)).toEqual(expect.arrayContaining([expect.objectContaining({ kind: "reply", externalRef: { type: "x.post", id: "reply-verified" }, parentExternalRef: { type: "x.post", id: "parent-verified" } })]));
   });
 
   it("migrates the legacy X browser Bridge declaration to the shipped adapter capabilities", () => {

@@ -172,6 +172,7 @@ export async function runLiveExplorationEngagement(source: OpenPresenceState, ex
       presenceId: presence.id,
       attentionEpisodeId: options.attentionEpisodeId,
       autobiographicalEventIds: decision.autobiographicalEventIds,
+      socialStrategy: decision.socialStrategy,
     };
     if (!acts.length) {
       const findingRecord = next.explorationFindings.find((item) => item.explorationId === exploration.id && item.mirrorObjectId === currentMirror.id);

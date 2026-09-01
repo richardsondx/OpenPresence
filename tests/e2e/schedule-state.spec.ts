@@ -11,7 +11,7 @@ test("Schedule combines Agent-owned and operator Assignments with persistent con
   await page.getByRole("button", { name: "Schedule", exact: true }).click();
 
   await page.getByRole("button", { name: "Create plan", exact: true }).click();
-  await expect(page.getByRole("button", { name: "◇ Jenny's plan", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "◇ Jenny's publishing rhythm", exact: true })).toBeVisible();
   const schedule = page.getByRole("region", { name: "Schedule list" });
   await expect(page.getByRole("region", { name: "Agent publishing plan" })).toHaveCount(0);
   await expect(schedule.getByText("Jenny · Agent-owned", { exact: true }).first()).toBeVisible();

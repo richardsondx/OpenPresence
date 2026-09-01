@@ -127,3 +127,45 @@ export function browserWorkspaceProjection(state: OpenPresenceState): OpenPresen
 
   return projection;
 }
+
+/**
+ * Growth is an evidence surface, so its selected Presence needs the complete
+ * audience and publication history. Keep unrelated workspace collections
+ * bounded, but never let the generic browser cap turn an accumulated metric
+ * into a misleading partial total.
+ */
+export function growthWorkspaceProjection(state: OpenPresenceState, presenceId?: string): OpenPresenceState {
+  const projection = browserWorkspaceProjection(state);
+  const selectedPresenceId = presenceId ?? state.presence?.id ?? state.activePresenceId;
+  const scoped = <T extends { presenceId?: string }>(items: T[] | undefined) =>
+    (items ?? []).filter((item) => !selectedPresenceId || item.presenceId === selectedPresenceId);
+
+  projection.responseProjection = "growth";
+  projection.audienceSnapshots = scoped(state.audienceSnapshots) as never;
+  projection.publicationMetricSnapshots = scoped(state.publicationMetricSnapshots) as never;
+  // Publication scope validation uses the owning MirrorObject's occurredAt.
+  // Retain every selected-Presence object so older metric evidence remains
+  // attributable after the generic 600-object browser bound is applied.
+  projection.mirrorObjects = scoped(state.mirrorObjects).map((object) => ({
+    id: object.id,
+    presenceId: object.presenceId,
+    channelId: object.channelId,
+    externalRef: object.externalRef,
+    objectType: object.objectType,
+    author: object.author,
+    content: object.content?.text ? { text: object.content.text } : undefined,
+    observedAt: object.observedAt,
+    occurredAt: object.occurredAt,
+    environment: object.environment,
+  })) as never;
+  projection.growthReviews = scoped(state.growthReviews) as never;
+  projection.growthEvidenceSnapshots = scoped(state.growthEvidenceSnapshots) as never;
+  projection.socialStrategyRetrievalRuns = scoped(state.socialStrategyRetrievalRuns) as never;
+  projection.growthEvidenceRecords = scoped(state.growthEvidenceRecords) as never;
+  projection.growthHypotheses = (state.growthHypotheses ?? []).filter((hypothesis) =>
+    hypothesis.scope === "agent"
+      || (hypothesis.scope === "channel" && hypothesis.channelId === state.presences.find((item) => item.id === selectedPresenceId)?.channel)
+      || (hypothesis.scope === "presence" && hypothesis.originatingPresenceId === selectedPresenceId),
+  ) as never;
+  return projection;
+}

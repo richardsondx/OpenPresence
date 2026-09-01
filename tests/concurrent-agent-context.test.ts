@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { readStateForAgent, WorkspaceConflictError, writeState } from "../lib/db";
+import Database from "better-sqlite3";
+import { readStateForAgent, readStateSnapshotForContext, reconcileActiveWorkspaceCopy, resolvedDbPath, WorkspaceConflictError, writeState } from "../lib/db";
 import { applyOperation, assertRuntimeScope, createAgent, createRuntimeScope, initialState, resetPlaygroundSession, startPlaygroundSession } from "../lib/runtime";
 import { POST as statePost } from "../app/api/state/route";
 
@@ -43,6 +44,43 @@ describe("independent Agent browser contexts", () => {
     expect(() => writeState(applyOperation(staleTab, { type: "sendMessage", content: "The stale tab must not erase the first write." }))).toThrow(WorkspaceConflictError);
     expect(readStateForAgent(agentId).messages.some((message) => message.content === "The first tab owns this write.")).toBe(true);
     expect(readStateForAgent(agentId).messages.some((message) => message.content === "The stale tab must not erase the first write.")).toBe(false);
+
+    writeState(initialState());
+  });
+
+  it("reads the active Agent from app_state after a worker write", () => {
+    const created = createAgent(input);
+    const agentId = created.agent!.id;
+    writeState(created, { persistActiveWorkspace: true });
+
+    const updated = applyOperation(readStateForAgent(agentId), { type: "setPresence", patch: { pacing: "gentle" } });
+    writeState(updated);
+
+    expect(readStateSnapshotForContext({ agentId }).presence?.pacing).toBe("gentle");
+    writeState(initialState());
+  });
+
+  it("recovers durable records hidden in a richer active workspace copy", () => {
+    const created = createAgent(input);
+    const agentId = created.agent!.id;
+    writeState(created, { persistActiveWorkspace: true });
+
+    const database = new Database(resolvedDbPath);
+    const appRow = database.prepare("SELECT payload FROM app_state WHERE id = 1").get() as { payload: string };
+    const workspaceRow = database.prepare("SELECT payload FROM agent_workspaces WHERE agent_id = ?").get(agentId) as { payload: string };
+    const appState = JSON.parse(appRow.payload) as ReturnType<typeof initialState>;
+    const workspaceState = JSON.parse(workspaceRow.payload) as ReturnType<typeof initialState>;
+    const preservedEvent = { id: "event-preserved-during-recovery", type: "system", title: "Preserved event", detail: "Recovered", time: new Date().toISOString(), tone: "info" } as ReturnType<typeof initialState>["events"][number];
+    appState.events = [];
+    workspaceState.events = [preservedEvent];
+    database.transaction(() => {
+      database.prepare("UPDATE app_state SET payload = ? WHERE id = 1").run(JSON.stringify(appState));
+      database.prepare("UPDATE agent_workspaces SET payload = ? WHERE agent_id = ?").run(JSON.stringify(workspaceState), agentId);
+    })();
+    database.close();
+
+    expect(reconcileActiveWorkspaceCopy()).toMatchObject({ changed: true, added: 1 });
+    expect(readStateForAgent(agentId).events.some((event) => event.id === preservedEvent.id)).toBe(true);
 
     writeState(initialState());
   });

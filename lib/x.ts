@@ -4,6 +4,8 @@ import { deleteChannelSecret, readChannelSecret, saveChannelSecret } from "./db"
 import { readAssetBytes } from "./asset-store";
 import { consumeExecutionPermit, PublicationSecurityError } from "./publication-security";
 import { assertLiveWriteRuntimeAllowed, isXMockEnabled } from "./test-runtime";
+import { xPostIdFromUrl } from "./x-url";
+export { xPostIdFromUrl } from "./x-url";
 
 export interface XCredentials {
   apiKey: string;
@@ -44,17 +46,6 @@ export interface XRecentPost {
    */
   publicTargetIds?: string[];
   media?: XMediaAttachment[];
-}
-
-export function xPostIdFromUrl(value: string) {
-  try {
-    const url = new URL(value.trim());
-    if (!['x.com', 'www.x.com', 'twitter.com', 'www.twitter.com'].includes(url.hostname.toLowerCase())) return undefined;
-    const match = url.pathname.match(/^\/[^/]+\/(?:status|statuses)\/(\d+)/i) ?? url.pathname.match(/^\/i\/status\/(\d+)/i);
-    return match?.[1];
-  } catch {
-    return undefined;
-  }
 }
 
 function decodeHtml(value: string) {
@@ -339,6 +330,25 @@ export async function publishSealedXPost(credentials: XCredentials, expression: 
   });
   if (!response.data?.id) throw new Error("X accepted the request without returning a post ID.");
   return { type: "x.post", id: response.data.id };
+}
+
+/** Delete one X post and require the read API to confirm that it is gone. */
+export async function deleteXPost(credentials: XCredentials, postId: string): Promise<EntityRef> {
+  assertLiveWriteRuntimeAllowed();
+  if (!postId.trim()) throw new Error("X deletion requires a post ID.");
+  const path = `/2/tweets/${encode(postId)}`;
+  const url = `${apiBase()}${path}`;
+  const response = await requestJson<{ data?: { deleted?: boolean } }>(path, {
+    method: "DELETE",
+    headers: { Authorization: oauthHeader("DELETE", url, credentials) },
+  });
+  if (response.data?.deleted !== true) throw new Error("X accepted the deletion request without confirming that the post was deleted.");
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const remaining = await readXPostsByIds(credentials, [postId]);
+    if (!remaining.some((post) => post.id === postId)) return { type: "x.post", id: postId };
+    if (attempt < 2) await new Promise((resolve) => setTimeout(resolve, 250));
+  }
+  throw new Error("X acknowledged deletion, but the post is still readable. OpenPresence left the outcome unresolved and did not mark it deleted.");
 }
 
 async function postXAction(credentials: XCredentials, path: string, body: Record<string, string>, resultType: string, resultId: string): Promise<EntityRef> {

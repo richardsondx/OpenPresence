@@ -1,17 +1,19 @@
 "use client";
 
-import { useState, type ButtonHTMLAttributes, type ReactNode } from "react";
-import { Activity, ArrowUpRight, BarChart3, Check, ChevronRight, CircleAlert, Clock3, Eye, Heart, LoaderCircle, Plus, ShieldCheck, Sparkles, TrendingUp, Users } from "lucide-react";
+import { useEffect, useState, type ButtonHTMLAttributes, type ReactNode } from "react";
+import { Activity, ArrowUpRight, BarChart3, Check, ChevronRight, CircleAlert, Clock3, Eye, Heart, Info, LoaderCircle, Plus, ShieldCheck, Sparkles, TrendingUp, Users, X } from "lucide-react";
 import { assignmentIsOpen, audienceDeltas, capabilityProviderLabel, collapseAudienceSnapshots, derivePresenceCapabilityManifest, derivePublicHistory, externalUrlForMirrorObject, pendingReviewExecutionsForCapabilities } from "@/lib/runtime";
 import { deriveHistoricalGrowthContext } from "@/lib/growth-history";
 import { growthEvidenceIsInPresenceScope, growthPublicationIsInPresenceScope, presenceGrowthBoundary } from "@/lib/growth-scope";
 import type { Assignment, GrowthReview, MirrorObject, OpenPresenceState, PresenceAudienceSnapshot, PublicationMetricSnapshot, View } from "@/lib/types";
+import type { GrowthHypothesis } from "@/lib/types";
 
 type Mutate = (operation: unknown, requestContext?: OpenPresenceState) => Promise<OpenPresenceState | null>;
 type GrowthViewProps = {
   state: OpenPresenceState;
   mutate: Mutate;
   setView: (view: View) => void;
+  onOpenAttention?: () => void;
 };
 
 const formatHistoryTimestamp = (value: string) => {
@@ -29,6 +31,60 @@ function SectionEyebrow({ children }: { children: ReactNode }) {
 }
 function PageHeader({ eyebrow, title, titleAdornment, description, actions, className = "", actionsClassName = "" }: { eyebrow: ReactNode; title: ReactNode; titleAdornment?: ReactNode; description?: ReactNode; actions?: ReactNode; className?: string; actionsClassName?: string }) {
   return <div className={`page-heading ${className}`.trim()}><div className="page-heading-copy"><SectionEyebrow>{eyebrow}</SectionEyebrow>{titleAdornment ? <div className="page-heading-title-row"><h1>{title}</h1>{titleAdornment}</div> : <h1>{title}</h1>}{description && <p className="muted">{description}</p>}</div>{actions && <div className={`page-heading-actions ${actionsClassName}`.trim()}>{actions}</div>}</div>;
+}
+
+type GrowthMetricKey = "followers" | "reach" | "engagement" | "output" | "relationships" | "operator-load";
+
+const GROWTH_METRIC_DEFINITIONS: Record<GrowthMetricKey, { label: string; definition: string }> = {
+  followers: { label: "Followers", definition: "The latest audience size observed for this Presence, bounded to the Growth window." },
+  reach: { label: "Reach / Views", definition: "The sum of impressions recorded across this Presence's publication checks in the Growth window." },
+  engagement: { label: "Engagement", definition: "Likes, replies, and quotes recorded on this Presence's own publications in the Growth window. Views, follows, and outbound actions are not included." },
+  output: { label: "Output", definition: "Verified public actions recorded for this Presence, with the headline value showing this week's original posts when available." },
+  relationships: { label: "Relationships", definition: "Active, Presence-scoped relationships with people observed in this Growth window." },
+  "operator-load": { label: "Operator Load", definition: "Open review, recovery, or connection issues that currently need operator attention." },
+};
+
+function GrowthKpiCard({ metric, value, delta, deltaClassName = "growth-kpi-delta-neutral", sub, icon, onClick }: { metric: GrowthMetricKey; value: ReactNode; delta: ReactNode; deltaClassName?: string; sub: ReactNode; icon: ReactNode; onClick: () => void }) {
+  const definition = GROWTH_METRIC_DEFINITIONS[metric];
+  return (
+    <button type="button" className="growth-kpi-card" onClick={onClick} aria-haspopup="dialog" aria-label={`Inspect ${definition.label} metric. ${definition.definition}`}>
+      <span className="growth-kpi-card-header">
+        <span className="growth-kpi-label">
+          {definition.label}
+          <span className="growth-kpi-help" data-tooltip={definition.definition} title={definition.definition} aria-hidden="true">
+            <Info size={12} aria-hidden="true" />
+          </span>
+        </span>
+        <span className="growth-kpi-icon" aria-hidden="true">{icon}</span>
+      </span>
+      <span className="growth-kpi-value">{value}</span>
+      <span className={`growth-kpi-delta ${deltaClassName}`}>{delta}</span>
+      <span className="growth-kpi-sub">{sub}</span>
+      <span className="growth-kpi-inspect">Inspect evidence <ChevronRight size={12} aria-hidden="true" /></span>
+    </button>
+  );
+}
+
+function GrowthMetricDialog({ metric, presenceName, onClose, children }: { metric: GrowthMetricKey; presenceName: string; onClose: () => void; children: ReactNode }) {
+  const definition = GROWTH_METRIC_DEFINITIONS[metric];
+  const titleId = `growth-metric-dialog-${metric}`;
+  return (
+    <div className="modal-backdrop growth-metric-modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <section className="growth-metric-dialog" role="dialog" aria-modal="true" aria-labelledby={titleId}>
+        <div className="growth-metric-dialog-header">
+          <div>
+            <SectionEyebrow>Growth metric · {presenceName}</SectionEyebrow>
+            <h2 id={titleId}>{definition.label}</h2>
+            <p>{definition.definition}</p>
+          </div>
+          <button type="button" className="icon-button" onClick={onClose} aria-label="Close metric details"><X size={16} /></button>
+        </div>
+        <div className="growth-metric-dialog-scope"><strong>How to read this</strong><span>Evidence is limited to the selected Presence and the Growth window shown above.</span></div>
+        {children}
+        <div className="growth-metric-dialog-footer"><span>Counts come from saved Presence-scoped observations and verified outcomes.</span><Button variant="ghost" onClick={onClose}>Close</Button></div>
+      </section>
+    </div>
+  );
 }
 
 function GrowthTrendChart({
@@ -345,6 +401,60 @@ function GrowthInsights({
   );
 }
 
+function GrowthLearning({ state, presenceId }: { state: OpenPresenceState; presenceId: string }) {
+  const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
+  const hypotheses = (state.growthHypotheses ?? [])
+    .filter((hypothesis) => hypothesis.status !== "retired")
+    .filter((hypothesis) => hypothesis.scope === "agent"
+      || (hypothesis.scope === "channel" && hypothesis.channelId === presence?.channel)
+      || (hypothesis.scope === "presence" && hypothesis.originatingPresenceId === presenceId))
+    .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt));
+  const evidenceById = new Map((state.growthEvidenceRecords ?? []).map((record) => [record.id, record]));
+  const disposition = (hypothesis: GrowthHypothesis) => hypothesis.status === "supported"
+    ? { label: "KEEP", tone: "positive" }
+    : hypothesis.status === "disfavored"
+    ? { label: "STOP", tone: "danger" }
+    : { label: "TEST", tone: "neutral" };
+
+  return (
+    <section className="growth-insights-section growth-learning-section" aria-label="Structured Growth learning">
+      <div className="growth-section-heading">
+        <div>
+          <SectionEyebrow>Structured learning</SectionEyebrow>
+          <h2>Hypotheses, not hidden policy</h2>
+        </div>
+        <span className="muted">World outcomes earn confidence</span>
+      </div>
+      {hypotheses.length ? (
+        <div className="growth-learning-list">
+          {hypotheses.map((hypothesis) => {
+            const result = disposition(hypothesis);
+            const evidence = [...hypothesis.supportingEvidenceIds, ...hypothesis.contradictingEvidenceIds]
+              .map((id) => evidenceById.get(id))
+              .filter((item): item is NonNullable<typeof item> => Boolean(item));
+            return (
+              <details className="growth-learning-card" key={hypothesis.id}>
+                <summary>
+                  <span className={`growth-learning-badge growth-learning-badge-${result.tone}`}>{result.label}</span>
+                  <span className="growth-learning-statement">{hypothesis.statement}</span>
+                  <span className="growth-learning-meta">{hypothesis.confidence} confidence · {hypothesis.scope}</span>
+                </summary>
+                <div className="growth-learning-detail">
+                  <p>{hypothesis.status === "weakened" ? "Evidence weakened this interpretation; it remains testable at lower confidence." : hypothesis.status === "disfavored" ? "This interpretation is disfavored and should not guide new strategy selection." : hypothesis.status === "supported" ? "A verified world outcome supports keeping this interpretation in view." : "This is a testing hypothesis, not an instruction or identity change."}</p>
+                  <small>{evidence.length ? `${evidence.length} typed evidence record${evidence.length === 1 ? "" : "s"}` : "No typed evidence attached yet"}{hypothesis.derivedFrom.length ? ` · derived from ${hypothesis.derivedFrom.join(", ")}` : ""}</small>
+                  {evidence.length > 0 && <ul>{evidence.slice(0, 5).map((record) => <li key={record.id}><strong>{record.kind}</strong> · {record.statement}</li>)}</ul>}
+                </div>
+              </details>
+            );
+          })}
+        </div>
+      ) : (
+        <p className="growth-empty-note">No structured hypotheses yet. Growth will keep observations separate from strategy until evidence justifies a learning record.</p>
+      )}
+    </section>
+  );
+}
+
 function GrowthFocusAndNext({
   assignment,
   review,
@@ -623,10 +733,19 @@ function GrowthCapabilities({
   );
 }
 
-export function GrowthView({ state, mutate, setView }: GrowthViewProps) {
+export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthViewProps) {
   const presence = state.presence;
   const [reviewingGrowth, setReviewingGrowth] = useState(false);
+  const [selectedMetric, setSelectedMetric] = useState<GrowthMetricKey | null>(null);
   const [now] = useState(() => Date.now());
+  useEffect(() => {
+    if (!selectedMetric) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") setSelectedMetric(null);
+    };
+    document.addEventListener("keydown", handleKeyDown);
+    return () => document.removeEventListener("keydown", handleKeyDown);
+  }, [selectedMetric]);
   if (!presence) return <div className="page"><PageHeader eyebrow="Growth" title="No Presence selected" description="Select a Presence before reviewing growth evidence." /></div>;
 
   const growthBoundary = presenceGrowthBoundary(state, presence.id);
@@ -788,8 +907,8 @@ export function GrowthView({ state, mutate, setView }: GrowthViewProps) {
                   <strong>Action Required: {limitationCopy[0] ?? "Growth needs your attention"}</strong>
                   <span>Operator resolution needed for full autonomous performance.</span>
                 </div>
-                <Button variant="ghost" onClick={() => setView("presence")}>
-                  Resolve in Settings
+                <Button variant="ghost" onClick={() => onOpenAttention ? onOpenAttention() : setView("presence")}>
+                  {onOpenAttention ? "Review in Activity" : "Resolve in Settings"}
                 </Button>
               </div>
             )}
@@ -836,87 +955,58 @@ export function GrowthView({ state, mutate, setView }: GrowthViewProps) {
 
           {/* Layer 1: KPI Scoreboard */}
           <section className="growth-kpi-grid" aria-label="Key Performance Indicators">
-            <div className="growth-kpi-card">
-              <div className="growth-kpi-card-header">
-                <span className="growth-kpi-label">Followers</span>
-                <Users size={14} className="growth-kpi-icon" />
-              </div>
-              <div className="growth-kpi-value">{displayedFollowerCount !== undefined ? displayedFollowerCount.toLocaleString() : "—"}</div>
-              <div className={`growth-kpi-delta ${deltas.sevenDay && deltas.sevenDay > 0 ? "growth-kpi-delta-positive" : "growth-kpi-delta-neutral"}`}>
-                {deltas.sevenDay !== undefined ? (
-                  <>
-                    {deltas.sevenDay > 0 ? "+" : ""}{deltas.sevenDay} this week
-                  </>
-                ) : (
-                  historicalGrowth?.followerDelta !== undefined ? `${historicalGrowth.followerDelta > 0 ? "+" : ""}${historicalGrowth.followerDelta} in last recorded review` : "Collecting 7d baseline"
-                )}
-              </div>
-              <div className="growth-kpi-sub">
-                {latest ? (deltas.twentyEightDay !== undefined ? `${deltas.twentyEightDay >= 0 ? "+" : ""}${deltas.twentyEightDay} in 28d` : "Baseline mode") : currentAccountFollowers !== undefined ? "Last authenticated X profile" : historicalGrowth ? "Historical Growth review" : "Baseline mode"}
-              </div>
-            </div>
-
-            <div className="growth-kpi-card">
-              <div className="growth-kpi-card-header">
-                <span className="growth-kpi-label">Reach / Views</span>
-                <Eye size={14} className="growth-kpi-icon" />
-              </div>
-              <div className="growth-kpi-value">{totalReach ? totalReach.toLocaleString() : (latestPublication?.impressions?.toLocaleString() ?? "—")}</div>
-              <div className="growth-kpi-delta growth-kpi-delta-positive">
-                {latestPublication?.impressions ? `${latestPublication.impressions.toLocaleString()} views top post` : "Observed"}
-              </div>
-              <div className="growth-kpi-sub">{publicationSnapshots.length} publication checks</div>
-            </div>
-
-            <div className="growth-kpi-card">
-              <div className="growth-kpi-card-header">
-                <span className="growth-kpi-label">Engagement</span>
-                <Heart size={14} className="growth-kpi-icon" />
-              </div>
-              <div className="growth-kpi-value">{totalEngagement ? totalEngagement.toLocaleString() : (totalLikes ? totalLikes.toLocaleString() : "—")}</div>
-              <div className="growth-kpi-delta growth-kpi-delta-neutral">
-                {totalLikes} likes · {totalReplies} replies
-              </div>
-              <div className="growth-kpi-sub">{weeklyBreakdown.quotes} quotes · {weeklyBreakdown.follows} follows this week</div>
-            </div>
-
-            <div className="growth-kpi-card">
-              <div className="growth-kpi-card-header">
-                <span className="growth-kpi-label">Output</span>
-                <BarChart3 size={14} className="growth-kpi-icon" />
-              </div>
-              <div className="growth-kpi-value">{weeklyBreakdown.posts || totalAutonomousActions || "0"}</div>
-              <div className="growth-kpi-delta growth-kpi-delta-positive">
-                {totalAutonomousActions} total actions on X
-              </div>
-              <div className="growth-kpi-sub">{weeklyBreakdown.replies} replies this week</div>
-            </div>
-
-            <div className="growth-kpi-card">
-              <div className="growth-kpi-card-header">
-                <span className="growth-kpi-label">Relationships</span>
-                <Users size={14} className="growth-kpi-icon" />
-              </div>
-              <div className="growth-kpi-value">{relationshipsCount || peopleEngagedCount || "—"}</div>
-              <div className="growth-kpi-delta growth-kpi-delta-neutral">
-                {peopleEngagedCount} people engaged
-              </div>
-              <div className="growth-kpi-sub">Substantive connections</div>
-            </div>
-
-            <div className="growth-kpi-card">
-              <div className="growth-kpi-card-header">
-                <span className="growth-kpi-label">Operator Load</span>
-                <ShieldCheck size={14} className="growth-kpi-icon" />
-              </div>
-              <div className="growth-kpi-value" style={{ color: operatorInterventionsNeeded === 0 ? "#2f6b3e" : "#b33927" }}>
-                {operatorInterventionsNeeded === 0 ? "0" : operatorInterventionsNeeded}
-              </div>
-              <div className={`growth-kpi-delta ${operatorInterventionsNeeded === 0 ? "growth-kpi-delta-positive" : "growth-kpi-delta-warning"}`}>
-                {operatorInterventionsNeeded === 0 ? "100% autonomous" : "Intervention needed"}
-              </div>
-              <div className="growth-kpi-sub">{recoveriesHandledCount} auto-recoveries</div>
-            </div>
+            <GrowthKpiCard
+              metric="followers"
+              onClick={() => setSelectedMetric("followers")}
+              icon={<Users size={14} />}
+              value={displayedFollowerCount !== undefined ? displayedFollowerCount.toLocaleString() : "—"}
+              deltaClassName={deltas.sevenDay !== undefined && deltas.sevenDay > 0 ? "growth-kpi-delta-positive" : "growth-kpi-delta-neutral"}
+              delta={deltas.sevenDay !== undefined ? `${deltas.sevenDay > 0 ? "+" : ""}${deltas.sevenDay} this week` : historicalGrowth?.followerDelta !== undefined ? `${historicalGrowth.followerDelta > 0 ? "+" : ""}${historicalGrowth.followerDelta} in last recorded review` : "Collecting 7d baseline"}
+              sub={latest ? (deltas.twentyEightDay !== undefined ? `${deltas.twentyEightDay >= 0 ? "+" : ""}${deltas.twentyEightDay} in 28d` : "Baseline mode") : currentAccountFollowers !== undefined ? "Last authenticated X profile" : historicalGrowth ? "Historical Growth review" : "Baseline mode"}
+            />
+            <GrowthKpiCard
+              metric="reach"
+              onClick={() => setSelectedMetric("reach")}
+              icon={<Eye size={14} />}
+              value={totalReach ? totalReach.toLocaleString() : (latestPublication?.impressions?.toLocaleString() ?? "—")}
+              deltaClassName="growth-kpi-delta-positive"
+              delta={latestPublication?.impressions ? `${latestPublication.impressions.toLocaleString()} views top post` : "Observed"}
+              sub={`${publicationSnapshotCount} publication checks`}
+            />
+            <GrowthKpiCard
+              metric="engagement"
+              onClick={() => setSelectedMetric("engagement")}
+              icon={<Heart size={14} />}
+              value={totalEngagement ? totalEngagement.toLocaleString() : (totalLikes ? totalLikes.toLocaleString() : "—")}
+              delta={`${totalLikes} likes · ${totalReplies} replies`}
+              sub={`${totalQuotes} quotes · ${weeklyBreakdown.follows} follows this week`}
+            />
+            <GrowthKpiCard
+              metric="output"
+              onClick={() => setSelectedMetric("output")}
+              icon={<BarChart3 size={14} />}
+              value={weeklyBreakdown.posts || totalAutonomousActions || "0"}
+              deltaClassName="growth-kpi-delta-positive"
+              delta={`${totalAutonomousActions} total actions on X`}
+              sub={`${weeklyBreakdown.replies} replies this week`}
+            />
+            <GrowthKpiCard
+              metric="relationships"
+              onClick={() => setSelectedMetric("relationships")}
+              icon={<Users size={14} />}
+              value={relationshipsCount || peopleEngagedCount || "—"}
+              delta={`${peopleEngagedCount} people engaged`}
+              sub="Substantive connections"
+            />
+            <GrowthKpiCard
+              metric="operator-load"
+              onClick={() => setSelectedMetric("operator-load")}
+              icon={<ShieldCheck size={14} />}
+              value={<span style={{ color: operatorInterventionsNeeded === 0 ? "#2f6b3e" : "#b33927" }}>{operatorInterventionsNeeded === 0 ? "0" : operatorInterventionsNeeded}</span>}
+              deltaClassName={operatorInterventionsNeeded === 0 ? "growth-kpi-delta-positive" : "growth-kpi-delta-warning"}
+              delta={operatorInterventionsNeeded === 0 ? "100% autonomous" : "Intervention needed"}
+              sub={`${recoveriesHandledCount} auto-recoveries`}
+            />
           </section>
 
           {/* Layer 2: Autonomy Proof Panel */}
@@ -947,6 +1037,8 @@ export function GrowthView({ state, mutate, setView }: GrowthViewProps) {
             relationshipsCount={relationshipsCount || peopleEngagedCount}
             audienceObjective={assignment.audienceObjective ?? presence.brief.audience}
           />
+
+          <GrowthLearning state={state} presenceId={presence.id} />
 
           {/* Layer 2: Current Focus & What Happens Next */}
           <GrowthFocusAndNext
@@ -1019,6 +1111,75 @@ export function GrowthView({ state, mutate, setView }: GrowthViewProps) {
             </div>
           </section>
         </>
+      )}
+      {selectedMetric && (
+        <GrowthMetricDialog metric={selectedMetric} presenceName={presence.name} onClose={() => setSelectedMetric(null)}>
+          {selectedMetric === "engagement" && (
+            <>
+              <div className="growth-metric-detail-grid">
+                <div><span>Likes on own posts</span><strong>{totalLikes.toLocaleString()}</strong><small>Recorded in publication checks</small></div>
+                <div><span>Replies on own posts</span><strong>{totalReplies.toLocaleString()}</strong><small>Recorded in publication checks</small></div>
+                <div><span>Quotes of own posts</span><strong>{totalQuotes.toLocaleString()}</strong><small>Recorded in publication checks</small></div>
+                <div><span>Total engagement</span><strong>{totalEngagement.toLocaleString()}</strong><small>Likes + replies + quotes</small></div>
+              </div>
+              <div className="growth-metric-evidence-list">
+                <div className="growth-metric-evidence-heading"><strong>Recent post checks</strong><span>{publicationSnapshotCount} total</span></div>
+                {publicationSnapshots.slice(0, 6).map((item) => {
+                  const object = state.mirrorObjects.find((candidate) => candidate.id === item.mirrorObjectId);
+                  const text = object?.content?.text?.trim() || "Publication performance observed";
+                  const externalUrl = object ? externalUrlForMirrorObject(object, object.author?.handle) : undefined;
+                  return (
+                    <div className="growth-metric-evidence-row" key={item.id}>
+                      <div><strong>{text.length > 95 ? `${text.slice(0, 92)}…` : text}</strong><small>{formatHistoryTimestamp(item.observedAt)} · {item.source} · {item.observationStatus === "observed" ? "Observed" : item.observationStatus.replaceAll("_", " ")}</small></div>
+                      <span>{[item.likes !== undefined ? `${item.likes.toLocaleString()} likes` : undefined, item.replies !== undefined ? `${item.replies.toLocaleString()} replies` : undefined, item.quotes !== undefined ? `${item.quotes.toLocaleString()} quotes` : undefined].filter(Boolean).join(" · ") || "No engagement fields returned"}{externalUrl && <a href={externalUrl} target="_blank" rel="noreferrer">View post</a>}</span>
+                    </div>
+                  );
+                })}
+                {!publicationSnapshotCount && <p className="muted">No publication-performance evidence has arrived for this Presence.</p>}
+              </div>
+            </>
+          )}
+          {selectedMetric === "reach" && (
+            <div className="growth-metric-detail-grid">
+              <div><span>Recorded views</span><strong>{totalReach.toLocaleString()}</strong><small>Sum of impressions in scope</small></div>
+              <div><span>Top post</span><strong>{latestPublication?.impressions?.toLocaleString() ?? "—"}</strong><small>Most recent publication check</small></div>
+              <div><span>Publication checks</span><strong>{publicationSnapshotCount.toLocaleString()}</strong><small>Saved metric observations</small></div>
+              <div><span>Latest observation</span><strong>{latestPublication ? formatHistoryTimestamp(latestPublication.observedAt) : "—"}</strong><small>{latestPublication?.source ?? "No source yet"}</small></div>
+            </div>
+          )}
+          {selectedMetric === "followers" && (
+            <div className="growth-metric-detail-grid">
+              <div><span>Latest observed</span><strong>{displayedFollowerCount?.toLocaleString() ?? "—"}</strong><small>{latest ? `${latest.source} · ${latest.observationStatus}` : currentAccountFollowers !== undefined ? "Authenticated X profile" : "No audience observation yet"}</small></div>
+              <div><span>Change this week</span><strong>{deltas.sevenDay !== undefined ? `${deltas.sevenDay > 0 ? "+" : ""}${deltas.sevenDay}` : "—"}</strong><small>Compared with the prior audience observation</small></div>
+              <div><span>Audience observations</span><strong>{audienceSnapshotCount.toLocaleString()}</strong><small>Presence-scoped snapshots</small></div>
+              <div><span>Growth boundary</span><strong>{growthBoundary.startAt ? formatHistoryTimestamp(growthBoundary.startAt) : "Unknown"}</strong><small>Earlier account history excluded</small></div>
+            </div>
+          )}
+          {selectedMetric === "output" && (
+            <div className="growth-metric-detail-grid">
+              <div><span>Original posts this week</span><strong>{weeklyBreakdown.posts.toLocaleString()}</strong><small>Verified public outcomes</small></div>
+              <div><span>Replies this week</span><strong>{weeklyBreakdown.replies.toLocaleString()}</strong><small>Verified public outcomes</small></div>
+              <div><span>Total verified actions</span><strong>{totalAutonomousActions.toLocaleString()}</strong><small>Presence-scoped public history</small></div>
+              <div><span>Decisions recorded</span><strong>{decisionsCount.toLocaleString()}</strong><small>Social judgments in scope</small></div>
+            </div>
+          )}
+          {selectedMetric === "relationships" && (
+            <div className="growth-metric-detail-grid">
+              <div><span>Active relationships</span><strong>{relationshipsCount.toLocaleString()}</strong><small>Presence-scoped and active</small></div>
+              <div><span>People engaged</span><strong>{peopleEngagedCount.toLocaleString()}</strong><small>People with active memory</small></div>
+              <div><span>Scoped identities</span><strong>{scopedPersonIds.size.toLocaleString()}</strong><small>Observed in this Presence</small></div>
+              <div><span>Evidence boundary</span><strong>{growthBoundary.startAt ? "Applied" : "Unknown"}</strong><small>Only Growth-window evidence is counted</small></div>
+            </div>
+          )}
+          {selectedMetric === "operator-load" && (
+            <div className="growth-metric-detail-grid">
+              <div><span>Open review items</span><strong>{pendingReviewCount.toLocaleString()}</strong><small>Capabilities awaiting operator review</small></div>
+              <div><span>Open incidents</span><strong>{incidentsRequiringOperator.toLocaleString()}</strong><small>Unresolved recovery issues</small></div>
+              <div><span>Connection state</span><strong>{manifest.bodyStatus === "unavailable" ? "Needs attention" : bodyHeading}</strong><small>Current Presence capability state</small></div>
+              <div><span>Auto-recoveries</span><strong>{recoveriesHandledCount.toLocaleString()}</strong><small>Resolved in the Growth window</small></div>
+            </div>
+          )}
+        </GrowthMetricDialog>
       )}
     </div>
   );

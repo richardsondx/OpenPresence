@@ -25,8 +25,8 @@ export function chromeBrowserBridgeCapabilities(): ConnectorCapabilities {
   return {
     inbound: true,
     reconcile: true,
-    affordances: ["post", "reply", "quote", "repost", "like", "follow"],
-    formats: ["x.post", "x.reply", "x.quote", "x.repost", "x.like", "x.follow"],
+    affordances: ["post", "reply", "quote", "repost", "like", "follow", "delete"],
+    formats: ["x.post", "x.reply", "x.quote", "x.repost", "x.like", "x.follow", "x.delete"],
     metrics: ["followers", "public_metrics"],
   };
 }
@@ -122,6 +122,7 @@ export function bridgeAdapterPrompt(input: BridgePromptInput) {
       ...(supports("quote") ? ["   For x.quote, open the target post, choose Quote, enter exactly the supplied publication text, upload only supplied media, and verify the resulting post id."] : []),
       ...(supports("like") || supports("repost") ? ["   For x.like and x.repost, open the target post, use only the declared direct control, and verify the control state before acknowledging with the target post id."] : []),
       ...(supports("follow") ? ["   For x.follow, open https://x.com/i/user/<target.id>, choose Follow, and verify the control changes to Following before acknowledging with the target user id."] : []),
+      ...(supports("delete") ? ["   For x.delete, open the target post, verify it is authored by the configured Presence account, choose Delete from its More menu, confirm the deletion, and wait until the post disappears. The OpenPresence API will verify that the target is gone before counting success."] : []),
     ] : []),
     "7. Verify the resulting channel object before POSTing to /api/bridge/v1/executions/{id}/ack with executorId, externalRef, and observedAt.",
     "8. If delivery fails, POST to /api/bridge/v1/executions/{id}/fail with a truthful message and retryable flag.",

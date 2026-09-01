@@ -1,11 +1,12 @@
 import {
   claimOperationalRunLease,
   claimDueScheduledWakes,
+  cancelScheduledWake,
   getOperationalRun,
   getRecoveryIncident,
   listOperationalRuns,
-  listScheduledWakes,
   listRecoveryIncidents,
+  listScheduledWakes,
   mergeAttentionWake,
   readState,
   readStateViewForContext,
@@ -20,7 +21,7 @@ import { attentionRequestFromWake, attentionRunAcceptsSignal, mergeAttentionRequ
 import { settleAttentionResponsibility } from "./attention-responsibility";
 import { bridgeExecutionStatus } from "./bridge-contract";
 import { assignmentPursuitHasHardResourceCapacity, assignmentPursuitUsage, recordRuntimeEvent, scheduledAssignmentIsDue } from "./runtime";
-import { assignmentRunBlocksNewWork, isAutonomousPreWriteDeliveryFailure, reconcileLiveAssignmentRuns } from "./live-assignment-run";
+import { assignmentRunBlocksNewWork, assignmentRunIsActive, isAutonomousPreWriteDeliveryFailure, reconcileLiveAssignmentRuns } from "./live-assignment-run";
 import { reconcileOrphanedAttentionEpisodes } from "./attention-episodes";
 import type {
   JsonValue,
@@ -98,13 +99,6 @@ export function repairMissingAssignmentWakes(state: OpenPresenceState, now = new
 }
 
 const assignmentDispatchesInFlight = new Set<string>();
-const assignmentPursuitResourceCategories = [
-  "maxChannelReads",
-  "maxHydrations",
-  "maxModelCalls",
-  "maxVisionCalls",
-  "maxEstimatedCostCents",
-] as const;
 
 /** Convert an exhausted live burst into an explicit durable pause. */
 export function pauseExhaustedAssignmentPursuits(state: OpenPresenceState, now = new Date()): number {
@@ -115,7 +109,6 @@ export function pauseExhaustedAssignmentPursuits(state: OpenPresenceState, now =
     const limits: Array<[keyof NonNullable<typeof pursuit.resourceBudget>, number | undefined, number]> = [
       ["maxChannelReads", pursuit.resourceBudget?.maxChannelReads, usage.channelReads],
       ["maxHydrations", pursuit.resourceBudget?.maxHydrations, usage.hydrations],
-      ["maxModelCalls", pursuit.resourceBudget?.maxModelCalls, usage.modelCalls],
       ["maxVisionCalls", pursuit.resourceBudget?.maxVisionCalls, usage.visionCalls],
       ["maxEstimatedCostCents", pursuit.resourceBudget?.maxEstimatedCostCents, usage.estimatedCostCents],
     ];
@@ -134,9 +127,13 @@ export function pauseExhaustedAssignmentPursuits(state: OpenPresenceState, now =
 }
 
 export function dueLiveAssignmentsWithoutWorkers(state: OpenPresenceState, now = new Date()) {
+  const occupiedPresenceIds = new Set((state.assignmentRuns ?? [])
+    .filter((run) => assignmentRunIsActive(run))
+    .map((run) => run.presenceId));
   return state.assignments.filter((assignment) => {
     const presence = state.presences.find((item) => item.id === assignment.presenceId);
     if (!presence || presence.status !== "live" || assignment.environment === "sandbox") return false;
+    if (occupiedPresenceIds.has(assignment.presenceId)) return false;
     const pursuit = (state.assignmentPursuitWindows ?? []).find((window) => window.assignmentId === assignment.id && window.presenceId === assignment.presenceId && window.status === "active");
     const pursuitDue = Boolean(pursuit
       && new Date(pursuit.startsAt).getTime() <= now.getTime()
@@ -163,16 +160,35 @@ export function dueLiveAssignmentsWithoutWorkers(state: OpenPresenceState, now =
     // and its bounded retry budget must not silence the explicitly requested
     // push. Keep operator-blocked/cancelled work excluded; only the normal
     // completed projection is reopened by a live pursuit.
-    const pursuitMayContinue = pursuitDue && ["accepted", "planning", "active", "working", "awaiting_execution", "completed", "completed_with_adaptation"].includes(assignment.status);
+    // A worker can exhaust its recovery attempts after the pursuit window has
+    // already been accepted. That is a recoverable runtime failure, not an
+    // operator decision to stop the explicitly requested push. Re-open only
+    // this narrow failure state; target, credential, capability, and review
+    // blocks must remain closed until an operator resolves them.
+    const recoverablePursuitBlock = pursuitDue
+      && assignment.status === "blocked"
+      && /worker stopped reporting progress|exhausted its recovery attempts/i.test(
+        `${assignment.work?.blockedReason ?? ""} ${assignment.lastOutcome?.message ?? ""}`,
+      );
+    const pursuitMayContinue = pursuitDue && (["accepted", "planning", "active", "working", "awaiting_execution", "completed", "completed_with_adaptation"].includes(assignment.status) || recoverablePursuitBlock);
     if (!pursuitMayContinue && !["accepted", "planning", "active", "working", "awaiting_execution"].includes(assignment.status)) return false;
     const work = assignment.work;
     const quietBudgetExhausted = Boolean(work?.maxAttempts && work.attempts >= work.maxAttempts && ["action_no_op", "candidate_rejected"].includes(assignment.lastOutcome?.class ?? ""));
     if (!pursuitDue && (quietBudgetExhausted || work?.maxAttempts && work.attempts >= work.maxAttempts)) return false;
-    const isDue = pursuitDue || Boolean(assignment.nextDueAt && new Date(assignment.nextDueAt).getTime() <= now.getTime()) || scheduledAssignmentIsDue(assignment, now);
+    const scheduledDue = scheduledAssignmentIsDue(assignment, now);
+    // A retry wake cannot reopen a declared calendar window after it closes.
+    // Bounded pursuits are independent and are handled by pursuitDue above;
+    // unscheduled continuous work may still use its durable backoff wake.
+    const backoffDue = Boolean(assignment.nextDueAt && new Date(assignment.nextDueAt).getTime() <= now.getTime())
+      && (!assignment.schedule || scheduledDue);
+    const isDue = pursuitDue || scheduledDue || backoffDue;
     if (!isDue) return false;
-    return !(state.assignmentRuns ?? []).some((run) => run.assignmentId === assignment.id
+    const alreadyOpen = (state.assignmentRuns ?? []).some((run) => run.assignmentId === assignment.id
       && ["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"].includes(run.status)
       && assignmentRunBlocksNewWork(state, run));
+    if (alreadyOpen) return false;
+    occupiedPresenceIds.add(assignment.presenceId);
+    return true;
   });
 }
 
@@ -273,6 +289,58 @@ export function closeStaleBridgeExecutions(source: OpenPresenceState, now = new 
       action.reason = "The browser connector did not check in before the bounded delivery window closed; no external write was attempted.";
     }
     if (execution.runId) affectedAttentionRunIds.add(execution.runId);
+    closed += 1;
+  }
+  for (const runId of affectedAttentionRunIds) {
+    const run = getOperationalRun(runId);
+    if (!run?.attentionEpisodeId || run.kind !== "attention") continue;
+    const settled = settleAttentionResponsibility(source, run, run.attentionEpisodeId);
+    source.attentionEpisodes = settled.state.attentionEpisodes;
+    upsertOperationalRun(settled.run);
+  }
+  return closed;
+}
+
+/**
+ * A non-retryable verification result is already a durable decision by the
+ * delivery boundary: the runtime must not poll it forever or present it as
+ * active work. Close it without inventing success, preserving the provider's
+ * message so the operator can inspect the external channel before trying a
+ * new action.
+ */
+export function closeNonRetryableVerificationExecutions(source: OpenPresenceState, now = new Date()): number {
+  const timestamp = now.toISOString();
+  const affectedAttentionRunIds = new Set<string>();
+  let closed = 0;
+  for (const execution of source.executions ?? []) {
+    if (execution.status !== "verification-pending" || execution.failure?.retryable !== false) continue;
+    execution.status = "verification-closed";
+    const note = execution.failure?.message ?? "The external outcome could not be verified and this action will not be retried automatically.";
+    execution.failure = {
+      ...execution.failure,
+      message: note,
+      retryable: false,
+      reviewedAt: execution.failure?.reviewedAt ?? timestamp,
+      reviewDisposition: execution.failure?.reviewDisposition ?? "closed_non_retryable",
+      reviewNote: execution.failure?.reviewNote ?? "Closed automatically because the delivery boundary marked this outcome non-retryable. Inspect the channel before attempting a new action.",
+    };
+    execution.reviewReason = "The delivery boundary marked this unresolved outcome non-retryable; no success was inferred.";
+    delete execution.lease;
+    delete execution.permit;
+    execution.updatedAt = timestamp;
+    const intent = source.socialIntents?.find((item) => item.id === execution.socialIntentId);
+    if (intent?.state === "active") {
+      intent.state = "expired";
+      intent.updatedAt = timestamp;
+    }
+    const action = source.actions?.find((item) => item.executionId === execution.id);
+    if (action) {
+      action.status = "skipped";
+      action.reason = "The unresolved delivery was closed without verification; no public action was counted.";
+    }
+    if (execution.runId) affectedAttentionRunIds.add(execution.runId);
+    cancelScheduledWake(`wake_verification_${execution.id}`);
+    recordRuntimeEvent(source, execution.presenceId, "Unverified delivery closed", "The channel marked this outcome non-retryable. OpenPresence closed the stale verifier without counting a public action as sent.", "warning", { executionId: execution.id, intentId: execution.socialIntentId });
     closed += 1;
   }
   for (const runId of affectedAttentionRunIds) {
@@ -610,6 +678,7 @@ export function isLiveTemporalPresence(presence: Pick<Presence, "status" | "envi
 
 export function runOperationalSweep(now = new Date()): SweepResult {
   const nowIso = now.toISOString();
+
   // A Presence with an unresolved operator gate must not keep generating
   // autonomous attention work. Without this check, every scheduler sweep
   // can create another self-directed run while the same provider/runtime
@@ -642,6 +711,7 @@ export function runOperationalSweep(now = new Date()): SweepResult {
     const formedAt = new Date(execution.updatedAt ?? execution.createdAt).getTime();
     return Number.isFinite(formedAt) && now.getTime() - formedAt >= 120_000;
   });
+  const hasNonRetryableVerification = (stateView.executions ?? []).some((execution) => execution.status === "verification-pending" && execution.failure?.retryable === false);
   const hasAutonomousPreWriteFailure = (stateView.assignmentRuns ?? []).some((run) => {
     const execution = (stateView.executions ?? []).find((item) => item.assignmentId === run.assignmentId && item.presenceId === run.presenceId && (item.runId === run.id || (!item.runId && item.createdAt >= (run.startedAt ?? run.createdAt))));
     return Boolean(execution && isAutonomousPreWriteDeliveryFailure(execution));
@@ -654,15 +724,16 @@ export function runOperationalSweep(now = new Date()): SweepResult {
       && ["queued", "running", "waiting", "recovering", "delivery_uncertain", "reconciling"].includes(run.state)
       && (run.attentionEpisodeId === episode.id || episode.runIds.includes(run.id)));
   });
-  const state = hasExpiredQueuedExecution || hasStaleBridgeExecution || hasAutonomousPreWriteFailure || hasOrphanedAttentionEpisode ? readState() : stateView;
+  const state = hasExpiredQueuedExecution || hasStaleBridgeExecution || hasNonRetryableVerification || hasAutonomousPreWriteFailure || hasOrphanedAttentionEpisode ? readState() : stateView;
   // A disconnected Bridge cannot perform claim-time expiry. Close stale
   // pre-dispatch intents here so the queue has a bounded lifetime and never
   // presents an undeliverable action as permanently in flight.
   const expiredQueuedExecutions = hasExpiredQueuedExecution ? expireQueuedDeliveryWindows(state, now) : 0;
   const staleBridgeExecutions = hasStaleBridgeExecution ? closeStaleBridgeExecutions(state, now) : 0;
+  const closedNonRetryableVerifications = hasNonRetryableVerification ? closeNonRetryableVerificationExecutions(state, now) : 0;
   const repairedAttentionEpisodes = hasOrphanedAttentionEpisode ? reconcileOrphanedAttentionEpisodes(state, now) : 0;
   const pausedExhaustedPursuits = pauseExhaustedAssignmentPursuits(state, now);
-  if (hasAutonomousPreWriteFailure || expiredQueuedExecutions > 0 || staleBridgeExecutions > 0 || repairedAttentionEpisodes > 0 || pausedExhaustedPursuits > 0) {
+  if (hasAutonomousPreWriteFailure || expiredQueuedExecutions > 0 || staleBridgeExecutions > 0 || closedNonRetryableVerifications > 0 || repairedAttentionEpisodes > 0 || pausedExhaustedPursuits > 0) {
     reconcileLiveAssignmentRuns(state, now.getTime());
     writeState(state, { advanceWorkspaceRevision: false });
   }

@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { applyOperation, assertAssignmentPersistenceInvariant, assignmentIsCurrentlyProcessing, assignmentProgressLabel, compileAssignmentInstruction, createAgent, normalizeState, preflightAssignment } from "../lib/runtime";
 import { evaluateExecutionReadiness } from "../lib/execution-readiness";
 import { assignmentRunBlocksNewWork, classifyLiveAssignmentRun, isAutonomousPreWriteDeliveryFailure, liveAssignmentRunStage, maxConcurrentPursuitDeliveries, reconcileLiveAssignmentRuns } from "../lib/live-assignment-run";
+import { reconcileOrphanedAssignmentStatuses } from "../lib/assignment-recovery";
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
@@ -108,9 +109,22 @@ describe("canonical Assignment domain", () => {
     };
 
     expect(assignmentIsCurrentlyProcessing(assignment, [queuedRun])).toBe(true);
-    expect(assignmentIsCurrentlyProcessing(assignment, [{ ...queuedRun, status: "delivery_pending" }])).toBe(true);
-    expect(assignmentIsCurrentlyProcessing({ ...assignment, status: "working" }, [])).toBe(true);
+    expect(assignmentIsCurrentlyProcessing(assignment, [{ ...queuedRun, status: "delivery_pending" }])).toBe(false);
+    expect(assignmentIsCurrentlyProcessing({ ...assignment, status: "working" }, [])).toBe(false);
     expect(assignmentIsCurrentlyProcessing({ ...assignment, status: "active" }, [])).toBe(false);
+  });
+
+  it("repairs a working parent that has no open AssignmentRun", () => {
+    const state = createAgent(input);
+    const nextState = applyOperation(state, { type: "createAssignment", instruction: "Keep one useful idea moving.", presenceId: state.presence!.id, environment: "live" });
+    const assignment = nextState.assignments.find((item) => item.instruction === "Keep one useful idea moving.")!;
+    expect(assignment).toBeDefined();
+    assignment.status = "working";
+    assignment.work = { ...assignment.work!, phase: "researching" };
+
+    const repaired = reconcileOrphanedAssignmentStatuses(nextState);
+    expect(repaired.repairedAssignmentIds).toEqual([assignment.id]);
+    expect(repaired.state.assignments[0]).toMatchObject({ status: "active", work: { phase: "candidate_review" } });
   });
 
   it("describes continuous Assignment progress without a zero denominator", () => {

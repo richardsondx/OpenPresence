@@ -236,7 +236,7 @@ describe("Chrome extension composer and execution helpers", () => {
   it("keeps Growth's browser capability contract executable for original posts and follows", () => {
     const channelSource = readFileSync(join(process.cwd(), "extension/channel-x.js"), "utf8");
     const backgroundSource = readFileSync(join(process.cwd(), "extension/background.js"), "utf8");
-    expect(channelSource).toContain('["post", "reply", "quote", "repost", "like", "follow"]');
+    expect(channelSource).toContain('["post", "reply", "quote", "repost", "like", "follow", "delete"]');
     expect(channelSource).toContain('https://x.com/i/user/${encodeURIComponent(targetId)}');
     expect(channelSource).toContain('window.location.href = "https://x.com/compose/post"');
     expect(channelSource).toContain('const composerUrl = window.location.pathname.includes("/compose/post")');
@@ -247,6 +247,8 @@ describe("Chrome extension composer and execution helpers", () => {
     expect(backgroundSource).toContain('const composerIsOpen = affordance === "post"');
     expect(channelSource).toContain('[role="status"]');
     expect(channelSource).toContain('DUPLICATE_PUBLICATION');
+    expect(channelSource).toContain('affordance === "delete"');
+    expect(channelSource).toContain('DELETE_NOT_VERIFIED');
     expect(channelSource).not.toContain("Extension active · browser tab");
     expect(channelSource).not.toContain("suppressScript");
     expect(channelSource).not.toContain('document.createElement("script")');

@@ -1,0 +1,4 @@
+interface:
+  display_name: "Conversation Prompt Evaluation"
+  short_description: "Test social prompts with blind repeated evals"
+  default_prompt: "Use $conversation-prompt-evaluation to test whether these conversation prompts produce natural, Agent-consistent behavior and recommend the smallest evidence-backed change."

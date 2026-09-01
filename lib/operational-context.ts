@@ -1,4 +1,4 @@
-import { databaseIntegrityVerifiedAt, getDependencyHealth, getDueScheduledWakes, getOperationalRun, getProcessHeartbeats, getRecoveryIncident, listDependencyHealth, listOperationalRuns, listRecoveryIncidents, readBridgeHealthForPresence, readChannelSecret, readRuntimeHealthProjection, upsertDependencyHealth, upsertOperationalRun, upsertRecoveryIncident } from "./db";
+import { credentialStorageAvailable, databaseIntegrityVerifiedAt, getDependencyHealth, getDueScheduledWakes, getOperationalRun, getProcessHeartbeats, getRecoveryIncident, listDependencyHealth, listOperationalRuns, listRecoveryIncidents, readBridgeHealthForPresence, readChannelSecret, readRuntimeHealthProjection, upsertDependencyHealth, upsertOperationalRun, upsertRecoveryIncident } from "./db";
 import type { Bridge, OperationalHealthSnapshot } from "./types";
 import { xCreditsExhausted } from "./x-credits";
 import { bridgeExecutionStatus, bridgeIdentityReady } from "./bridge-contract";
@@ -21,6 +21,7 @@ export interface CompiledOperationalContext {
  */
 function normalizeLegacyRuntimeIncidents(presenceId?: string) {
   const now = new Date().toISOString();
+  const runtimeState = readRuntimeHealthProjection(presenceId);
   for (const run of listOperationalRuns(presenceId, ["needs_operator"])) {
     if (!run.stage.startsWith("stale_recovery_") || !["observation", "discovery", "attention"].includes(run.kind)) continue;
     run.state = "cancelled";
@@ -127,6 +128,56 @@ function normalizeLegacyRuntimeIncidents(presenceId?: string) {
       continue;
     }
 
+    // A bare `next start` process used by an older local launch path could
+    // create this exact incident before inheriting the launcher's local
+    // encryption key. Once the canonical launcher is serving again, proving
+    // that the saved channel credential decrypts is sufficient evidence that
+    // this historical runtime incident is stale. Close its poisoned run
+    // without repeating external work; the normal scheduler can create a
+    // fresh bounded run if the responsibility is still due.
+    if (incident.rootCauseKey === "runtime.transient_error" && /OPENPRESENCE_SECRET_KEY|secure credential storage|storing channel credentials/i.test(incident.safeSummary)) {
+      const targetPresenceId = incident.presenceId ?? presenceId;
+      const connection = targetPresenceId
+        ? runtimeState.nativeConnections.find((item) => item.presenceId === targetPresenceId && item.kind === "x")
+        : undefined;
+      if (credentialStorageAvailable()) {
+        try {
+          if (connection && !readChannelSecret(connection.id)) continue;
+        } catch {
+          continue;
+        }
+        for (const runId of incident.affectedRunIds) {
+          const run = getOperationalRun(runId);
+          if (!run || run.state !== "needs_operator" || run.incidentId !== incident.id) continue;
+          run.state = "cancelled";
+          run.stage = "superseded_by_verified_runtime";
+          run.blockedReason = "The prior server process could not access secure credential storage; the canonical launcher is healthy now, so the stale run was closed without repeating external work.";
+          run.lastProgressAt = now;
+          delete run.leaseOwner;
+          delete run.leaseExpiresAt;
+          upsertOperationalRun(run);
+        }
+        incident.state = "resolved";
+        incident.resolvedAt = now;
+        incident.operatorActionRequired = false;
+        incident.requiresAuth = false;
+        delete incident.nextAttemptAt;
+        incident.updatedAt = now;
+        upsertRecoveryIncident(incident);
+        const runtimeHealth = getDependencyHealth("runtime", targetPresenceId);
+        if (runtimeHealth?.currentIncidentId === incident.id) {
+          runtimeHealth.state = "healthy";
+          runtimeHealth.consecutiveFailures = 0;
+          runtimeHealth.lastHealthyAt = now;
+          delete runtimeHealth.currentIncidentId;
+          delete runtimeHealth.circuitUntil;
+          runtimeHealth.updatedAt = now;
+          upsertDependencyHealth(runtimeHealth);
+        }
+        continue;
+      }
+    }
+
     if (incident.rootCauseKey !== "runtime.transient_error" || !incident.currentRecoveryStep?.startsWith("recover_stale_run_")) continue;
     const affectedRuns = incident.affectedRunIds.map((runId) => getOperationalRun(runId)).filter((run): run is NonNullable<typeof run> => Boolean(run));
     const legacyRuns = affectedRuns.filter((run) => run.stage.startsWith("stale_recovery_") && ["recovering", "needs_operator", "blocked"].includes(run.state));
@@ -163,7 +214,6 @@ function normalizeLegacyRuntimeIncidents(presenceId?: string) {
   // recognizable legacy watchdog shape as superseded: verify the encrypted
   // credential is readable, retire the poisoned run, resolve the historical
   // incident, and let the durable temporal scheduler make one fresh attempt.
-  const runtimeState = readRuntimeHealthProjection(presenceId);
   for (const incident of listRecoveryIncidents(presenceId)) {
     if (incident.state !== "needs_operator" || incident.rootCauseKey !== "native_x.transient_error" || !/woken_from_observation|expected duration/i.test(incident.safeSummary)) continue;
     const targetPresenceId = incident.presenceId ?? presenceId;
@@ -205,7 +255,7 @@ function normalizeLegacyRuntimeIncidents(presenceId?: string) {
       health.updatedAt = now;
       upsertDependencyHealth(health);
     }
-    requestAttention(targetPresenceId, "recovery", now, "recovery");
+      requestAttention(targetPresenceId, "recovery", now, "recovery");
   }
 
   // A resolved incident must not leave its old operator-blocked run looking
@@ -306,7 +356,7 @@ export function readOperationalHealth(presenceId?: string, now = new Date()): Op
         // It must not degrade the Presence merely because the channel has no
         // background route for an action the Agent is not authorized to send.
         if (mode === "off" || mode === "review") return false;
-        const nativeSupports = presence.channel === "x" && ["post", "reply", "like", "repost", "quote", "follow"].includes(capability);
+        const nativeSupports = presence.channel === "x" && ["post", "reply", "like", "repost", "quote", "follow", "delete"].includes(capability);
         const bridgeSupports = configuredBridges.some((bridge) => bridge.capabilities.affordances.some((item) => item === capability || item === `${presence.channel}.${capability}`));
         return !(nativeSupports && nativeReady) && !(bridgeSupports && bridgeReady);
       });

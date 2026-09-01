@@ -20,6 +20,7 @@ const verificationJobs = new Map();
 const verificationRuns = new Set();
 
 const channelHome = (presence) => presence.domain || (presence.channel === "x" ? "https://x.com/home" : "https://www.linkedin.com/feed/");
+const tabGroupTitle = (presence) => String(presence?.name || "Presence").trim() || "Presence";
 const groupColor = (accent) => {
   const value = String(accent || "").toLowerCase();
   if (value.includes("blue")) return "blue";
@@ -384,6 +385,9 @@ async function startSession(presenceId) {
     const current = sessions.get(presenceId);
     const connected = await heartbeat(current);
     if (connected) {
+      if (current.groupId) {
+        await chrome.tabGroups.update(current.groupId, { title: tabGroupTitle(current.presence), color: groupColor(current.presence.accent) }).catch(() => {});
+      }
       // A persisted Bridge may still point at an old X tab after the
       // operator has signed into the expected account in another open tab.
       // Repair the binding only after positively verifying that tab's account.
@@ -414,7 +418,7 @@ async function startSession(presenceId) {
   const tab = existing?.tab || window.tabs?.[0];
   if (!tab?.id) throw new Error("Chrome did not return a controlled tab.");
   const groupId = existing ? undefined : await chrome.tabs.group({ tabIds: [tab.id] });
-  if (groupId) await chrome.tabGroups.update(groupId, { title: `OpenPresence · ${presence.name} · ${presence.channel}`, color: groupColor(presence.accent) });
+  if (groupId) await chrome.tabGroups.update(groupId, { title: tabGroupTitle(presence), color: groupColor(presence.accent) });
   const session = { presence, bridgeId: connected.bridgeId, bridgeKey: connected.bridgeKey, executorId, windowId: tab.windowId || window.id, tabId: tab.id, groupId, tabOwned: !existing };
   sessions.set(presenceId, session);
   await persistSessions();

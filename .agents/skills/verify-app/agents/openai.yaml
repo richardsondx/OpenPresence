@@ -1,0 +1,4 @@
+interface:
+  display_name: "Verify App"
+  short_description: "Prove OpenPresence behavior in the running app"
+  default_prompt: "Use $verify-app to verify the requested behavior through the real application and capture evidence."

@@ -11,11 +11,16 @@
   const reportedObservations = new Map();
   const maxReportedObservations = 256;
   const observationScanIntervalMs = 2_000;
+  const syncTabTitle = () => {
+    const label = String(presenceName || "").trim();
+    if (label && label !== "Waiting for Presence" && document.title !== label) document.title = label;
+  };
   const overlay = document.createElement("div");
   overlay.id = "openpresence-browser-overlay";
   overlay.attachShadow({ mode: "open" }).innerHTML = `<style>:host{all:initial}.wrap{position:fixed;z-index:2147483647;right:16px;bottom:16px;display:flex;align-items:center;gap:8px;padding:8px 10px;border:1px solid rgba(213,146,103,.65);border-radius:999px;background:rgba(255,250,246,.96);box-shadow:0 5px 24px rgba(39,25,17,.14);color:#332a25;font:12px/1.2 -apple-system,BlinkMacSystemFont,"Segoe UI",sans-serif}.mark{display:grid;place-items:center;width:18px;height:18px;border-radius:50%;background:#c77d50;color:#fff;font-weight:700}.dot{width:7px;height:7px;border-radius:50%;background:#9b8d82}.text{max-width:180px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}.label{display:block;color:#766b63;font-size:10px;margin-top:2px}</style><div class="wrap"><span class="mark">◉</span><span class="text"><b id="name">OpenPresence</b><span class="label" id="state">Checking connection</span></span><span class="dot" id="connection-dot"></span></div>`;
   document.documentElement.appendChild(overlay);
   const stateLabel = () => {
+    syncTabTitle();
     const connectionLabels = {
       connected: "connected",
       identity_required: "verify account",
@@ -345,7 +350,7 @@
     reportAccountIdentity();
     if (!account?.ok) return failure(accountFailure(account));
     const affordance = String(execution.affordance || "").replace(/^x\./, "");
-    if (!["post", "reply", "quote", "repost", "like", "follow"].includes(affordance)) return failure({ executionId: execution.id, ok: false, code: "UNSUPPORTED_AFFORDANCE", message: `The Chrome Bridge does not execute ${execution.affordance || "this action"}.`, retryable: false });
+    if (!["post", "reply", "quote", "repost", "like", "follow", "delete"].includes(affordance)) return failure({ executionId: execution.id, ok: false, code: "UNSUPPORTED_AFFORDANCE", message: `The Chrome Bridge does not execute ${execution.affordance || "this action"}.`, retryable: false });
     const targetId = execution.target?.id;
     if (affordance !== "post" && !targetId) return failure({ executionId: execution.id, ok: false, code: "MISSING_TARGET", message: affordance === "follow" ? "The Bridge follow execution has no target user." : "The Bridge execution has no target post.", retryable: false });
     if (affordance === "follow") {
@@ -423,7 +428,29 @@
       const latest = verifyAccount();
       return failure(accountFailure(latest));
     }
+    if (affordance === "delete" && !target) target = await waitFor(() => visiblePosts().find((post) => post.id === targetId), 12_000);
     setState("acting");
+    if (affordance === "delete") {
+      if (!target || target.handle?.replace(/^@/, "").toLowerCase() !== expectedHandle.replace(/^@/, "").toLowerCase()) {
+        return failure({ executionId: execution.id, ok: false, code: "TARGET_NOT_OWNED", message: "The target post is not authored by the expected Presence account. OpenPresence did not open its deletion controls.", retryable: false });
+      }
+      const moreButton = await waitFor(() => target.element?.querySelector('[data-testid="caret"], button[aria-label*="More"], div[role="button"][aria-label*="More"]'), 12_000);
+      if (!moreButton) return failure({ executionId: execution.id, ok: false, code: "DELETE_CONTROL_NOT_FOUND", message: "X did not expose the More menu for this own post or reply.", retryable: true });
+      await humanDelay(300, 800);
+      await humanClick(moreButton);
+      const deleteItem = await waitFor(() => [...document.querySelectorAll('[role="menuitem"], button')].find((node) => /^delete(?: post| tweet)?$/i.test(actionLabel(node))), 5_000);
+      if (!deleteItem) return failure({ executionId: execution.id, ok: false, code: "DELETE_CONTROL_NOT_FOUND", message: "X did not expose a Delete option for this own post or reply.", retryable: true });
+      await humanDelay(200, 500);
+      await humanClick(deleteItem);
+      const confirmDelete = await waitFor(() => [...document.querySelectorAll('[role="dialog"] button, [role="dialog"] [role="button"], button')].find((node) => /^delete(?: post| tweet)?$/i.test(actionLabel(node))), 5_000);
+      if (!confirmDelete) return failure({ executionId: execution.id, ok: false, code: "DELETE_CONFIRMATION_NOT_FOUND", message: "X did not expose the deletion confirmation control. OpenPresence left the post untouched.", retryable: true });
+      await humanDelay(200, 500);
+      await humanClick(confirmDelete);
+      const disappeared = await waitFor(() => !visiblePosts().some((post) => post.id === targetId) || [...document.querySelectorAll('[role="alert"], [role="status"], [data-testid*="toast"]')].some((node) => /deleted/i.test(text(node))), 12_000);
+      if (!disappeared) return failure({ executionId: execution.id, ok: false, code: "DELETE_NOT_VERIFIED", message: "X did not show that the post was deleted. OpenPresence is waiting for API verification and will not count this yet.", retryable: true });
+      setState("observing");
+      return { executionId: execution.id, ok: true, verifyWithApi: true, externalRef: { type: "x.post", id: targetId } };
+    }
     if (affordance === "like" || affordance === "repost") {
       const button = await waitFor(() => reactionButton(target?.element, affordance), 20_000);
       if (!button) return failure({ executionId: execution.id, ok: false, code: "ACTION_CONTROL_NOT_FOUND", message: `X did not expose the ${affordance} control for the target post.`, retryable: true });
@@ -648,6 +675,10 @@
   // Announce readiness so the background binds this actual X tab reliably.
   void sendMessage({ type: "OPENPRESENCE_CHANNEL_READY" });
   window.setTimeout(reportAccountIdentity, 1_000);
+  // X's SPA rewrites document.title during navigation. Re-apply the durable
+  // Presence identity so controlled tabs remain distinguishable after every
+  // target/composer transition.
+  window.setInterval(syncTabTitle, 1_000);
   window.setInterval(scan, observationScanIntervalMs);
   window.setTimeout(scan, 2_000);
 })();

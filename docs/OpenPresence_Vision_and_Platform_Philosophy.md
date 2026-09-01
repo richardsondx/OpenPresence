@@ -366,6 +366,27 @@ Useful signals may include:
 - operator approval patterns;
 - execution reliability.
 
+### Social Strategy Intelligence
+
+Social strategy is learned capability, not Agent identity. A Channel owns its
+environment-specific fluency through a versioned Playbook; a Presence supplies
+the context in which that fluency is judged. Playbook patterns are bounded
+possibilities, never a posting quota or an instruction to engage. Retrieval may
+return zero to five relevant patterns, and the Agent may still choose silence.
+
+Growth records evidence before interpretation. `WORLD_OUTCOME`,
+`OPERATOR_REVIEW`, and `STRATEGY_OBSERVATION` remain distinct: operator
+preference is not audience performance, and effectiveness claims require a
+verified world outcome. A new or broader hypothesis is derived with lineage;
+the original interpretation remains available for review. Supported, testing,
+weakened, disfavored, and retired states describe confidence and disposition,
+not silent rewrites of identity.
+
+Legacy Channel playbook prose remains advisory compatibility context. It is not
+invented structured pattern data. Recent strategy shape may softly reduce
+retrieval scores for repeated mechanisms, but there is no mechanical cooldown:
+relevance and the Agent's judgment remain primary.
+
 Raw likes alone are not the goal.
 
 ---

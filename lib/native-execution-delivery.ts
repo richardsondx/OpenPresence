@@ -18,14 +18,16 @@ import {
   rerouteExecutionToBrowser,
   targetLanguageValidationForExecution,
   isWatchPausedForExecution,
+  browserBridgeFor,
 } from "./runtime";
-import { followXUser, likeXPost, publishSealedXPost, readNativeXCredentials, repostXPost } from "./x";
+import { deleteXPost, followXUser, likeXPost, publishSealedXPost, readNativeXCredentials, repostXPost } from "./x";
 import { isTestRuntime } from "./test-runtime";
+import { xCreditsExhausted } from "./x-credits";
 import { PublicationSecurityError, sealExecutionForDelivery } from "./publication-security";
 import { detectDuplicateVerifiedExecutionOutcomes } from "./public-action-safety";
 import type { OpenPresenceState } from "./types";
 import { readStateSnapshotForContext, reservePublicActionDelivery, updatePublicActionDelivery } from "./db";
-import { authorizeAssetSelection } from "./asset-library";
+import { authorizeAssetSelection, liveAssetReuseReason } from "./asset-library";
 
 function cancelDuplicateDelivery(state: OpenPresenceState, executionId: string, representedBy: string) {
   const execution = state.executions.find((item) => item.id === executionId);
@@ -95,6 +97,11 @@ export async function deliverNativeExecutions(source: OpenPresenceState, executi
     }
     const expectedHandle = next.presences.find((item) => item.id === execution.presenceId)?.handle ?? next.presence?.handle;
     const connection = next.nativeConnections.find((item) => item.presenceId === execution.presenceId && item.access === "read-write" && nativeConnectionCanWrite(item, expectedHandle));
+    const creditlessConnection = next.nativeConnections.find((item) => item.presenceId === execution.presenceId && item.channelId === "x" && xCreditsExhausted(item));
+    if (!connection && creditlessConnection && browserBridgeFor(next, execution.presenceId, execution.affordance)) {
+      next = rerouteExecutionToBrowser(next, execution.id, "X API credits are exhausted; the authorized Chrome Bridge is the continuity route for this public action.");
+      continue;
+    }
     // Test and mock runtimes never retrieve live write credentials. The sealed
     // publication gate still runs first so the execution is recorded as a
     // security block rather than degrading into an ordinary connector error.
@@ -107,6 +114,18 @@ export async function deliverNativeExecutions(source: OpenPresenceState, executi
     if (execution.publication) {
       try {
         authorizeAssetSelection(next, execution.publication.assetIds ?? [], { presenceId: execution.presenceId, requireReady: true });
+        const liveAssetRepeatReason = liveAssetReuseReason(next, execution.presenceId, execution.publication.assetIds ?? [], { excludePublicationId: execution.publication.id });
+        if (liveAssetRepeatReason) {
+          const current = next.executions.find((item) => item.id === execution.id);
+          if (current) {
+            current.status = "blocked";
+            current.failure = { code: "DUPLICATE_LIVE_ASSET", message: liveAssetRepeatReason, retryable: false };
+            current.reviewReason = "The native writer refused a visual that this Presence already published.";
+            current.updatedAt = new Date().toISOString();
+          }
+          next = recordRuntimeEvent(next, execution.presenceId, "Live media blocked", liveAssetRepeatReason, "warning", { executionId: execution.id, intentId: execution.socialIntentId });
+          continue;
+        }
         const sealed = sealExecutionForDelivery(execution);
         const targetLanguageResult = targetLanguageValidationForExecution(next, execution);
         if (!targetLanguageResult.valid) {
@@ -176,6 +195,12 @@ export async function deliverNativeExecutions(source: OpenPresenceState, executi
         if (execution.affordance === "x.like" && execution.target.type === "x.post") externalRef = await likeXPost(credentials, connection.account.id, execution.target.id);
         else if (execution.affordance === "x.repost" && execution.target.type === "x.post") externalRef = await repostXPost(credentials, connection.account.id, execution.target.id);
         else if (execution.affordance === "x.follow" && execution.target.type === "x.user") externalRef = await followXUser(credentials, connection.account.id, execution.target.id);
+        else if (execution.affordance === "x.delete" && execution.target.type === "x.post") {
+          const expectedHandle = (next.presences.find((presence) => presence.id === execution.presenceId)?.handle ?? "").replace(/^@/, "").toLowerCase();
+          const mirrored = next.mirrorObjects.find((item) => item.presenceId === execution.presenceId && item.channelId === "x" && item.externalRef.type === "x.post" && item.externalRef.id === execution.target?.id && !item.archived && (item.actorPresenceId === execution.presenceId || (item.author?.handle ?? "").replace(/^@/, "").toLowerCase() === expectedHandle));
+          if (!mirrored) throw new Error("OpenPresence refused to delete an X post that is not verified as this Presence's own live content.");
+          externalRef = await deleteXPost(credentials, execution.target.id);
+        }
         else throw new Error(`The native X writer does not support ${execution.affordance} with target ${execution.target.type}.`);
         updatePublicActionDelivery(execution.id, "verified", externalRef);
         next = completeNativeExecution(next, execution.id, externalRef);

@@ -25,7 +25,7 @@ test("today keeps current work visible and a Schedule decision is actionable in 
     data: {
       type: "createAssignment",
       presenceId,
-      environment: "live",
+      environment: "sandbox",
       instruction: "Resolve the operator decision without losing the responsibility.",
       schedule: { day: anotherDay, time: "13:00", executionWindow: "13:00–16:00" },
     },
@@ -34,7 +34,7 @@ test("today keeps current work visible and a Schedule decision is actionable in 
     data: {
       type: "createAssignment",
       presenceId,
-      environment: "live",
+      environment: "sandbox",
       instruction: "Research the current builder conversation.",
     },
   });
@@ -101,10 +101,11 @@ test("today keeps current work visible and a Schedule decision is actionable in 
 
   await page.reload();
   await page.getByRole("button", { name: "Operating health: Needs You", exact: true }).click();
-  const health = page.getByRole("region", { name: "Operating Health & Incident Overview" });
-  await expect(health.getByRole("button", { name: "Retry Assignment", exact: true })).toBeVisible();
-  await expect(health.getByRole("button", { name: "Close Assignment", exact: true })).toBeVisible();
-  await health.getByRole("button", { name: "Open details", exact: true }).click();
+  const queue = page.getByTestId("needs-you-queue");
+  await expect(queue).toBeVisible();
+  await expect(queue.getByRole("heading", { name: "Needs You", exact: true })).toBeVisible();
+  await expect(queue).toContainText("Resolve the operator decision");
+  await queue.getByRole("button", { name: "Open Assignment details", exact: true }).click();
 
   await expect(page.getByRole("heading", { name: "Schedule", exact: true })).toBeVisible();
   await expect(page.getByRole("complementary", { name: "Assignment details" })).toContainText("Resolve the operator decision");
@@ -115,6 +116,59 @@ test("today keeps current work visible and a Schedule decision is actionable in 
   const schedule = page.getByRole("region", { name: "Schedule list" });
   await expect(schedule.getByText("Research the current builder conversation.", { exact: true })).toBeVisible();
   await expect(schedule.getByText("Resolve the operator decision without losing the responsibility.", { exact: true })).toBeVisible();
+});
+
+test("health alert opens the Needs You queue instead of sending the operator to general settings", async ({ page, request }) => {
+  await page.goto("/");
+  await page.getByLabel("Agent name").fill("Genny");
+  await page.getByLabel("Presence handle").fill("@example_agent");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+
+  const base = await request.get("/api/state").then((response) => response.json());
+  const presenceId = base.presence.id as string;
+  await page.route("**/api/runtime/health**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        now: new Date().toISOString(),
+        status: "needs_you",
+        summary: "A public delivery decision needs you.",
+        operatorAction: { kind: "settings", label: "Review Settings" },
+        presenceId,
+        counts: { activeIncidents: 1, recoveringIncidents: 0, waitingIncidents: 0, needsOperatorIncidents: 1, orphanRecoveringRuns: 0 },
+        dependencyHealth: [],
+        incidents: [{
+          id: "incident-duplicate-public-outcome",
+          rootCauseKey: "runtime.duplicate_public_outcome",
+          state: "needs_operator",
+          safeSummary: "Multiple public actions were observed for the same target.",
+          affectedRunIds: [],
+          recoveryAttempts: 0,
+          operatorActionRequired: true,
+          requiresAuth: false,
+          lastObservedAt: new Date().toISOString(),
+        }],
+        activeRuns: [],
+        dueWakeCount: 0,
+        heartbeats: [],
+      }),
+    });
+  });
+
+  await page.goto(`/activity?agentId=${base.agent.id}&presenceId=${presenceId}&surface=timeline`);
+  await page.getByRole("button", { name: "Operating health: Needs You", exact: true }).click();
+  const queue = page.getByTestId("needs-you-queue");
+  await expect(queue).toBeVisible();
+  await expect(queue.getByRole("heading", { name: "Needs You", exact: true })).toBeVisible();
+  await expect(queue).toContainText("Multiple public actions were observed for the same target.");
+  await expect(queue.getByRole("button", { name: "I reviewed it · resume", exact: true })).toBeVisible();
+  await queue.getByRole("button", { name: "I reviewed it · resume", exact: true }).click();
+  await expect(queue.getByRole("alertdialog", { name: "Resume delivery confirmation", exact: true })).toBeVisible();
+  await expect(queue.getByRole("button", { name: "Resume normal delivery", exact: true })).toBeVisible();
+  await expect(page.getByRole("tab", { name: "Now", exact: true })).toHaveAttribute("aria-selected", "true");
+  expect(new URL(page.url()).searchParams.get("surface")).toBeNull();
+  await expect(page.getByRole("heading", { name: "Presence settings", exact: true })).toHaveCount(0);
 });
 
 test("Week keeps unscheduled open Assignments visible without inventing timing", async ({ page, request }) => {
@@ -132,11 +186,11 @@ test("Week keeps unscheduled open Assignments visible without inventing timing",
   expect(created.ok()).toBeTruthy();
 
   await page.goto(`/schedule?agentId=${base.agent.id}&presenceId=${presenceId}`);
-  await expect(page.getByRole("heading", { name: "Scheduled responsibilities", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What Genny may work on", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Week", exact: true }).click();
 
   const week = page.getByRole("region", { name: /Weekly schedule/ });
-  await expect(week.getByRole("heading", { name: "Ongoing and unscheduled responsibilities", exact: true })).toBeVisible();
+  await expect(week.getByRole("heading", { name: "Responsibilities within a few hours", exact: true })).toBeVisible();
   await expect(week.getByText(instruction, { exact: true })).toBeVisible();
   await expect(week.getByRole("heading", { name: "Nothing shown on this calendar", exact: true })).toHaveCount(0);
 });

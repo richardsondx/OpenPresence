@@ -169,6 +169,22 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
       next.assignments = state.assignments.filter((assignment) => assignment.presenceId === presenceId || explorations.some((exploration) => exploration.engagement?.assignmentId === assignment.id));
       next.bridges = state.bridges.filter((bridge) => bridge.presenceId === presenceId);
       next.mirrorObjects = state.mirrorObjects.filter((object) => referencedMirrorIds.has(object.id));
+      // Watching owns the People entry point. Keep relationship context in
+      // this projection so switching to People does not create a second
+      // top-level navigation request or render an empty compatibility shell.
+      next.people = state.people;
+      next.personIdentities = state.personIdentities.filter((identity) => !presenceId || identity.sourcePresenceId === presenceId);
+      next.peopleNotes = (state.peopleNotes ?? []).filter((note) => !presenceId || note.presenceId === presenceId);
+      next.relationships = state.relationships;
+      next.relationshipFacts = state.relationshipFacts;
+      next.relationshipOpenLoops = state.relationshipOpenLoops;
+      next.relationshipStudies = (state.relationshipStudies ?? []).filter((study) => !presenceId || study.presenceId === presenceId);
+      next.relationshipInsightSets = state.relationshipInsightSets;
+      next.delegationGrants = state.delegationGrants.filter((grant) => !presenceId || grant.presenceId === presenceId);
+      next.socialDecisions = state.socialDecisions.filter((decision) => !presenceId || decision.presenceId === presenceId);
+      next.socialIntents = state.socialIntents.filter((intent) => !presenceId || intent.presenceId === presenceId);
+      next.outcomes = state.outcomes.filter((outcome) => !presenceId || outcome.presenceId === presenceId);
+      next.executions = state.executions.filter((execution) => execution.status === "awaiting-review" || !presenceId || execution.presenceId === presenceId);
       return next;
     }
     if (projection === "rehearsal") {
@@ -250,6 +266,7 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
       const decisionIds = new Set(curationOpportunities.map((item) => item.decisionId).filter((id): id is string => Boolean(id)));
       const packageIds = new Set(curationOpportunities.map((item) => item.publicationPackageId).filter((id): id is string => Boolean(id)));
       next.playgroundSessions = sessions;
+      next.presenceChatSessions = (state.presenceChatSessions ?? []).filter((session) => !presenceId || session.presenceId === presenceId);
       next.sandboxActors = state.sandboxActors.filter((actor) => sessionIds.has(actor.sessionId));
       next.mirrorObjects = mirrorObjects;
       next.events = state.events.filter((event) => event.sessionId !== undefined && sessionIds.has(event.sessionId));

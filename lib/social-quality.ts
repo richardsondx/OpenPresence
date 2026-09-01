@@ -74,6 +74,14 @@ const CANNED_EMPATHY_PATTERNS = [
   /\bthinking\s+of\s+you\b/i,
 ];
 
+const DISRESPECTFUL_SOCIAL_PATTERNS = [
+  /\b(?:idiot|stupid|pathetic|loser|clueless|amateur(?:s)?|lazy|desperate|delusional|embarrassing|nobody\s+cares|who\s+cares|skill\s+issue|cry\s+harder)\b/i,
+  /\b(?:for\s+someone\s+who|not\s+bad\s+for|even\s+you|at\s+least\s+you|surprisingly)\b/i,
+];
+
+const GATEKEEPING_INVITATION_PATTERN = /\b(?:if|unless)\s+(?:you(?:['’]re|\s+are)|your|the)\b[^.!?]{0,100}\b(?:serious|real|legit|actually|good|strong\s+enough|worth(?:y|while)?|credible)\b/i;
+const INVITATION_PATTERN = /\b(?:share|drop|post|send|show|submit|reply|comment|link|tell\s+us|let\s+us\s+know)\b/i;
+
 const CORPORATE_PHRASE_PATTERNS = [
   /\b(?:moving|going)\s+forward\b/i,
   /\bcircle\s+back\b/i,
@@ -89,6 +97,83 @@ const CORPORATE_PHRASE_PATTERNS = [
   /\bseamless(?:ly)?\b/i,
   /\bdrive\s+impact\b/i,
 ];
+
+const PUBLICATION_TEMPLATE_PATTERNS: Array<[string, RegExp]> = [
+  ["generic-agent-opening", /^(?:a|the)\s+(?:useful|strong|good|durable|reliable|capable|dependable)\s+(?:ai\s+)?(?:agent|system|workflow|product|memory|loop)\b/i],
+  ["hard-part-opening", /^(?:the\s+)?hard\s+part\s+(?:is|of)\b/i],
+  ["quality-opening", /^(?:an?|the)\s+(?:agent|system|workflow|product)\s+(?:becomes|earns|gets|is)\s+(?:useful|dependable|reliable|trustworthy)\b/i],
+  ["agent-becomes-opening", /^(?:an?|the)\s+(?:ai\s+)?agent\s+(?:becomes|can|should|needs|earns)\b/i],
+];
+
+export interface RecentPublicationForQuality {
+  text?: string;
+  occurredAt?: string;
+  observedAt?: string;
+}
+
+function publicationTokens(value: string) {
+  return new Set(value.toLowerCase().match(/[a-z][a-z0-9']{2,}/g) ?? []);
+}
+
+function publicationTemplateKey(value: string) {
+  return PUBLICATION_TEMPLATE_PATTERNS.find(([, pattern]) => pattern.test(value))?.[0];
+}
+
+/**
+ * Catch only deterministic publication repetition. This intentionally avoids
+ * judging whether two ideas are semantically alike; Taste and the model own
+ * that broader editorial decision. The check is for exact/near copies and a
+ * repeated, recognizable opening pattern in the recent verified history.
+ */
+export function publicationRepetitionIssue(candidate: string, previous: RecentPublicationForQuality[]): string | undefined {
+  const text = candidate.trim();
+  if (!text) return undefined;
+  const candidateTokens = publicationTokens(text);
+  if (candidateTokens.size < 5) return undefined;
+  const candidateTemplate = publicationTemplateKey(text);
+  let sameTemplateCount = 0;
+  for (const item of previous.slice(0, 12)) {
+    const prior = item.text?.trim();
+    if (!prior) continue;
+    if (candidateTemplate && publicationTemplateKey(prior) === candidateTemplate) sameTemplateCount += 1;
+    const priorTokens = publicationTokens(prior);
+    if (priorTokens.size < 5) continue;
+    const overlap = [...candidateTokens].filter((token) => priorTokens.has(token)).length;
+    const union = new Set([...candidateTokens, ...priorTokens]).size;
+    const similarity = union ? overlap / union : 0;
+    const containment = Math.min(candidateTokens.size, priorTokens.size) ? overlap / Math.min(candidateTokens.size, priorTokens.size) : 0;
+    if (similarity >= 0.72 || containment >= 0.86) return "The candidate repeats a recent publication too closely in wording or substance.";
+  }
+  if (candidateTemplate && sameTemplateCount >= 2) return "The candidate repeats a recent publication template; choose a materially different angle or wait.";
+  return undefined;
+}
+
+/** Provide recent-publication evidence without prescribing a post shape. */
+export function recentPublicationContext(previous: RecentPublicationForQuality[], referenceTime: string | number = Date.now()): string {
+  const usable = previous.filter((item) => item.text?.trim());
+  const items = usable
+    .slice(0, 12)
+    .map((item) => {
+      const at = item.occurredAt ?? item.observedAt;
+      return `- ${at ? `${at}: ` : ""}${item.text!.trim()}`;
+    });
+  if (!items.length) return "RECENT PUBLICATION CONTEXT: No verified prior original publications are available for this Presence.";
+  const now = typeof referenceTime === "number" ? referenceTime : Date.parse(referenceTime);
+  const recentCount = usable.filter((item) => {
+    const at = item.occurredAt ?? item.observedAt;
+    const timestamp = at ? Date.parse(at) : NaN;
+    return Number.isFinite(timestamp) && now - timestamp >= 0 && now - timestamp <= 60 * 60_000;
+  }).length;
+  const cadence = recentCount > 0
+    ? `Observed cadence: ${recentCount} verified original publication${recentCount === 1 ? "" : "s"} in the last hour.`
+    : "Observed cadence: no verified original publication in the last hour.";
+  return [
+    "RECENT PUBLICATION CONTEXT: These are the Presence's newest verified original publications, newest first.",
+    cadence,
+    ...items,
+    "Use this as editorial memory. Do not repeat the same thesis, opening pattern, or angle without a material new detail. A new post may use a different rhythm, length, opening, or format when the idea earns it. If nothing meaningfully new is available, choose no_op for an ordinary opportunity; an explicit Assignment remains active and can be revisited later.",
+  ].join("\n");
+}
 
 const WARM_SOCIAL_SIGNALS = [
   "congrats",
@@ -155,11 +240,32 @@ export function socialReplyAttributionIssue(
   return undefined;
 }
 
+/**
+ * Keep public invitations and replies welcoming. This is intentionally a
+ * narrow safety-quality check: it catches contempt, backhanded language, and
+ * worth-tests without trying to rewrite ordinary criticism or remove a
+ * deliberate, identity-defined edge from a voice.
+ */
+export function publicExpressionQualityIssue(draft: string): string | undefined {
+  const text = draft.trim();
+  if (!text) return undefined;
+  if (DISRESPECTFUL_SOCIAL_PATTERNS.some((pattern) => pattern.test(text))) {
+    return "The draft uses diminishing or contemptuous language. Preserve the person's dignity and critique the work or evidence specifically.";
+  }
+  if (INVITATION_PATTERN.test(text) && GATEKEEPING_INVITATION_PATTERN.test(text)) {
+    return "The invitation makes participation a test of worth. Invite people with genuine interest and explain what you would enjoy seeing instead.";
+  }
+  return undefined;
+}
+
 /** Return a user-facing reason when a reply should be re-expressed or dropped. */
 export function socialReplyQualityIssue(targetText: string, draft: string): string | undefined {
   const target = targetText.trim();
   const text = draft.trim();
   if (!target || !text) return undefined;
+
+  const publicExpressionIssue = publicExpressionQualityIssue(text);
+  if (publicExpressionIssue) return publicExpressionIssue;
 
   const lowerDraft = text.toLowerCase();
   const abstractSignalCount = ABSTRACT_SOCIAL_SIGNALS.filter((signal) => lowerDraft.includes(signal)).length;

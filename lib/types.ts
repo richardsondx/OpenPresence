@@ -1,4 +1,4 @@
-export type View = "teach" | "knowledge" | "assets" | "usage" | "chat" | "rehearsal" | "watching" | "people" | "playground" | "live" | "feed" | "growth" | "calendar" | "schedule" | "brain" | "presence";
+export type View = "teach" | "knowledge" | "assets" | "usage" | "chat" | "rehearsal" | "watching" | "people" | "playground" | "live" | "feed" | "growth" | "analytics" | "calendar" | "schedule" | "brain" | "presence";
 export type BuiltInChannelId = "x" | "linkedin" | "substack";
 export type ChannelId = string;
 export type ConnectorKind = "simulated" | "native" | "bridge" | "manual";
@@ -604,6 +604,17 @@ export interface GrowthReviewDecision {
     relationshipFocus?: string[];
     hypotheses?: string[];
   };
+  hypothesisActions?: Array<{
+    action: "create" | "support" | "weaken" | "disfavor" | "retire" | "generalize";
+    hypothesisId?: string;
+    statement?: string;
+    scope?: SocialStrategyScope;
+    channelId?: ChannelId;
+    patternIds?: string[];
+    evidenceIds?: string[];
+    derivedFrom?: string[];
+    confidence?: SocialDecisionConfidence;
+  }>;
 }
 export interface GrowthFileVersion {
   version: number;
@@ -796,9 +807,111 @@ export interface ChannelDefinition {
   metrics: ChannelMetricDefinition[];
   simulation?: ChannelSimulationDefinition;
   discovery?: ChannelDiscoverySurface[];
+  /** Explicit environment-specific fluency. Legacy `playbook` prose remains advisory compatibility data. */
+  socialStrategyPlaybookRef?: string;
   playbook?: string;
   privacyDefaults: ChannelPrivacyDefaults;
   builtIn?: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export type SocialStrategyScope = "presence" | "channel" | "agent";
+export type SocialStrategyHypothesisStatus = "testing" | "supported" | "weakened" | "disfavored" | "retired";
+export type SocialStrategyEvidenceKind = "WORLD_OUTCOME" | "OPERATOR_REVIEW" | "STRATEGY_OBSERVATION";
+
+export interface SocialStrategyReferenceExample {
+  label: string;
+  source?: string;
+  note?: string;
+}
+
+export interface SocialStrategyPattern {
+  id: string;
+  playbookId: string;
+  playbookVersion: string;
+  channelId: ChannelId;
+  mechanism: string;
+  audienceRole: string;
+  supportedActs: string[];
+  supportedFormats: string[];
+  usefulConditions: string[];
+  weakConditions: string[];
+  risks: string[];
+  retrievalTags: string[];
+  referenceExamples?: SocialStrategyReferenceExample[];
+}
+
+export interface SocialStrategyPlaybook {
+  id: string;
+  version: string;
+  channelId: ChannelId;
+  patterns: SocialStrategyPattern[];
+  updatedAt: string;
+}
+
+export interface LegacyChannelStrategyGuidance {
+  id: string;
+  channelId: ChannelId;
+  text: string;
+  kind: "legacy_advisory";
+  source: "migrated";
+  createdAt: string;
+}
+
+export type SocialStrategyPatternSnapshot = SocialStrategyPattern;
+
+export interface SocialStrategyRetrievalRun {
+  id: string;
+  agentId: string;
+  presenceId: string;
+  channelId: ChannelId;
+  invocation: string;
+  objective: string;
+  playbookId?: string;
+  playbookVersion?: string;
+  consideredPatterns: SocialStrategyPatternSnapshot[];
+  relevantGrowthHypothesisIds: string[];
+  compatibleSkillIds: string[];
+  recentStrategyShape: Record<string, number>;
+  noPatternReason?: string;
+  createdAt: string;
+}
+
+export interface SocialStrategyUse {
+  retrievalRunId: string;
+  playbookId?: string;
+  playbookVersion?: string;
+  consideredPatternIds: string[];
+  selectedByAct: Array<{ act: string; patternId?: string; mechanismId?: string }>;
+}
+
+export interface GrowthEvidenceRecord {
+  id: string;
+  agentId: string;
+  presenceId: string;
+  kind: SocialStrategyEvidenceKind;
+  claimScope: SocialStrategyScope;
+  statement: string;
+  sourceRefs: EvidenceRef[];
+  verified: boolean;
+  createdAt: string;
+}
+
+export interface GrowthHypothesis {
+  id: string;
+  agentId: string;
+  originatingPresenceId: string;
+  scope: SocialStrategyScope;
+  channelId?: ChannelId;
+  statement: string;
+  status: SocialStrategyHypothesisStatus;
+  confidence: SocialDecisionConfidence;
+  patternIds: string[];
+  supportingEvidenceIds: string[];
+  contradictingEvidenceIds: string[];
+  derivedFrom: string[];
+  reviewHistory: Array<{ reviewId: string; status: SocialStrategyHypothesisStatus; at: string }>;
   createdAt: string;
   updatedAt: string;
 }
@@ -874,7 +987,7 @@ export interface MirrorObject {
 }
 
 export interface EvidenceRef {
-  kind: "mirror_object" | "conversation_event" | "connector_identity" | "community_directory" | "operator_input" | "publication" | "social_intent" | "conversation_episode" | "relationship" | "knowledge" | "growth_revision" | "presence_revision" | "assignment";
+  kind: "mirror_object" | "conversation_event" | "connector_identity" | "community_directory" | "operator_input" | "publication" | "publication_metric" | "audience_snapshot" | "social_intent" | "social_decision" | "conversation_episode" | "relationship" | "knowledge" | "growth_revision" | "presence_revision" | "assignment";
   id: string;
   sourcePresenceId?: string;
   observedAt?: string;
@@ -1311,6 +1424,7 @@ export const CHANNEL_CAPABILITIES: Record<ChannelId, ChannelCapability[]> = {
     { id: "quote", label: "Quotes", description: "Add context to another post." },
     { id: "like", label: "Likes", description: "A quiet signal of attention." },
     { id: "follow", label: "Follows", description: "Follow a relevant person in the Presence's territory." },
+    { id: "delete", label: "Delete own posts & replies", description: "Remove this Presence's own X post or reply when a correction, safety issue, or duplicate makes it necessary." },
     { id: "message", label: "Messages", description: "Start or continue a private conversation." },
   ],
   linkedin: [
@@ -1743,7 +1857,7 @@ export type SocialPlannerResult =
       evidenceRefs: EvidenceRef[];
     };
 
-export type SocialDecisionKind = "reply" | "like" | "follow" | "quote" | "repost" | "original_post" | "no_op";
+export type SocialDecisionKind = "reply" | "like" | "follow" | "quote" | "repost" | "delete" | "original_post" | "no_op";
 export type SocialDecisionConfidence = "low" | "medium" | "high";
 export interface SocialDecision {
   id: string;
@@ -1769,6 +1883,7 @@ export interface SocialDecision {
   runId?: string;
   invocationId?: string;
   relevantGrowthRevisionRef?: string;
+  socialStrategy?: SocialStrategyUse;
   autobiographicalEventIds?: string[];
   createdAt: string;
   attentionEpisodeId?: string;
@@ -1952,9 +2067,9 @@ export interface ExecutionPermit {
 export interface Publication { id: string; format: string; payload: JsonValue; assetIds: string[]; links: { url: string; label?: string }[]; publicExpression?: PublicExpression; expressionMode?: ExpressionMode; groundingStatus?: GroundingStatus; factuality?: Factuality; assetReuse?: { usageType: AssetUsageType; reason: string }; operatorOverride?: { operatorId?: string; reason: string; at: string }; origin?: SocialOrigin; autobiographicalEventIds?: string[]; createdAt: string; environment?: PresenceEnvironment; sessionId?: string; rehearsalAttemptId?: string; assignmentId?: string; invocationId?: string; }
 export interface SocialIntentPersonReference { candidateId: string; personId?: string; purpose: "recommendation" | "introduction_offer" | "introduction_request" | "contextual_reference"; }
 export interface OperatorDirective { id: string; agentId: string; presenceId: string; target: EntityRef; requiredAct: "reply" | "no_op"; optionalDirection?: string; provenance: "operator"; initialAct: "no_op"; status: "requested" | "expressed" | "failed"; migratedToAssignmentId?: string; environment?: PresenceEnvironment; sessionId?: string; createdAt: string; }
-export interface SocialIntent { id: string; agentId: string; presenceId: string; affordance: string; target?: EntityRef; publicationId?: string; priority: number; validity: { expiresAt?: string; staleAfterMs?: number }; state: "active" | "withdrawn" | "expired"; formedAt: string; updatedAt: string; standingIntentId?: string; assignmentId?: string; conversationEpisodeId?: string; origin?: SocialOrigin; environment?: PresenceEnvironment; sessionId?: string; rehearsalAttemptId?: string; invocationId?: string; runId?: string; referencedPeople?: SocialIntentPersonReference[]; networkReason?: string; source?: "agent" | "operator"; operatorDirectiveId?: string; attentionTestId?: string; capabilityTrialId?: string; attentionEpisodeId?: string; autobiographicalEventIds?: string[]; }
+export interface SocialIntent { id: string; agentId: string; presenceId: string; affordance: string; target?: EntityRef; publicationId?: string; priority: number; validity: { expiresAt?: string; staleAfterMs?: number }; state: "active" | "withdrawn" | "expired"; formedAt: string; updatedAt: string; standingIntentId?: string; assignmentId?: string; conversationEpisodeId?: string; origin?: SocialOrigin; environment?: PresenceEnvironment; sessionId?: string; rehearsalAttemptId?: string; invocationId?: string; runId?: string; referencedPeople?: SocialIntentPersonReference[]; networkReason?: string; source?: "agent" | "operator"; operatorDirectiveId?: string; attentionTestId?: string; capabilityTrialId?: string; attentionEpisodeId?: string; autobiographicalEventIds?: string[]; promotion?: PromotionActionMetadata; }
 export type FailureReviewDisposition = "closed_non_retryable" | "stale" | "operator_action_required";
-export interface Execution { id: string; socialIntentId: string; presenceId: string; affordance: string; mode: Exclude<ExecutionMode, "off">; status: ExecutionStatus; attempts: number; bridgeId?: string; connector?: ConnectorKind; idempotencyKey: string; target?: EntityRef; publication?: Publication; permit?: ExecutionPermit; lease?: { executorId: string; claimedAt: string; expiresAt: string }; deliveryHold?: { reason: "bridge_identity"; at: string }; externalRef?: EntityRef; failure?: { code?: string; message: string; retryable?: boolean; reviewedAt?: string; reviewDisposition?: FailureReviewDisposition; reviewNote?: string }; reviewReason?: string; createdAt: string; updatedAt: string; executedAt?: string; assignmentId?: string; conversationEpisodeId?: string; environment?: PresenceEnvironment; sessionId?: string; rehearsalAttemptId?: string; invocationId?: string; runId?: string; source?: "agent" | "operator"; operatorDirectiveId?: string; attentionTestId?: string; capabilityTrialId?: string; attentionEpisodeId?: string; }
+export interface Execution { id: string; socialIntentId: string; presenceId: string; affordance: string; mode: Exclude<ExecutionMode, "off">; status: ExecutionStatus; attempts: number; bridgeId?: string; connector?: ConnectorKind; idempotencyKey: string; target?: EntityRef; publication?: Publication; permit?: ExecutionPermit; lease?: { executorId: string; claimedAt: string; expiresAt: string }; deliveryHold?: { reason: "bridge_identity"; at: string }; externalRef?: EntityRef; failure?: { code?: string; message: string; retryable?: boolean; reviewedAt?: string; reviewDisposition?: FailureReviewDisposition; reviewNote?: string }; reviewReason?: string; createdAt: string; updatedAt: string; executedAt?: string; assignmentId?: string; conversationEpisodeId?: string; environment?: PresenceEnvironment; sessionId?: string; rehearsalAttemptId?: string; invocationId?: string; runId?: string; source?: "agent" | "operator"; operatorDirectiveId?: string; attentionTestId?: string; capabilityTrialId?: string; attentionEpisodeId?: string; promotion?: PromotionActionMetadata; }
 export interface Outcome { id: string; socialIntentId: string; executionId?: string; presenceId: string; status: "succeeded" | "failed" | "unknown"; observedAt: string; metrics: Record<string, number>; evidence?: EntityRef[]; environment?: PresenceEnvironment; sessionId?: string; conversationEpisodeId?: string; attentionEpisodeId?: string; }
 
 export type AgendaHorizon = "now" | "ongoing" | "upcoming" | "attention";
@@ -2240,7 +2355,14 @@ export interface AssignmentRun {
   updatedAt: string;
 }
 
-export type AssignmentPursuitAction = "reply" | "quote" | "repost" | "like" | "follow";
+export type AssignmentPursuitAction = "post" | "reply" | "quote" | "repost" | "like" | "follow";
+export type AssignmentPursuitPurpose = "adaptive_distribution" | "promotion_burst";
+export type PromotionActionRole = "direct_source" | "contextual";
+export interface PromotionActionMetadata {
+  role: PromotionActionRole;
+  sourcePostId: string;
+  sourcePostUrl?: string;
+}
 export type AssignmentPursuitWindowStatus = "active" | "paused" | "completed" | "expired" | "cancelled";
 export interface AssignmentPursuitResourceBudget {
   maxChannelReads?: number;
@@ -2256,8 +2378,13 @@ export interface AssignmentPursuitWindow {
   presenceId: string;
   startsAt: string;
   deadlineAt: string;
-  /** Capacity, never a completion quota. Taste may stop well below this. */
+  /** Legacy capacity for adaptive distribution windows. Promotion bursts use requiredVerifiedPromotionalActions. */
   maxVerifiedActions: number;
+  purpose?: AssignmentPursuitPurpose;
+  sourcePostId?: string;
+  sourcePostUrl?: string;
+  requiredVerifiedPromotionalActions?: number;
+  continuationOf?: string;
   actionCaps?: Partial<Record<AssignmentPursuitAction, number>>;
   maxActionsPerHour?: number;
   maxActionsPerPerson?: number;
@@ -2400,7 +2527,22 @@ export interface AssetResearchCandidate { id: string; candidate: AssetCandidate;
 export type AssetResearchOutcome = "discovery_empty" | "fetch_failed" | "inspection_rejected" | "editorial_rejected";
 export interface AssetResearchSession { id: string; agentId: string; presenceId: string; sessionId: string; assignmentId?: string; assignmentRunId?: string; invocationId?: string; status: "researching" | "selected" | "search_again" | "text_only" | "replanned" | "failed"; outcome?: AssetResearchOutcome; storyCandidate?: StoryCandidate; evidenceNeed?: EvidenceNeed; visualNeed?: VisualNeed; visualBrief?: VisualBrief; searchHistory: Array<{ query: string; attempt: number; resultCount: number; createdAt: string }>; candidates: AssetResearchCandidate[]; selectedCandidateId?: string; decisionHistory: Array<{ decision: AssetResearchDecision; rationale?: string; candidateId?: string; createdAt: string }>; recentVisualAssetIds?: string[]; createdAt: string; updatedAt: string; }
 export interface ClaimGrounding { id: string; publicationId: string; claim: string; claimType: "factual" | "interpretation" | "opinion" | "fictional" | "satirical"; sourceEvidenceIds: string[]; assetIds: string[]; status: GroundingStatus; uncertainty?: string; }
-export interface Skill { id: string; name?: string; /** The instruction prompt that defines this reusable behavior. */ description: string; channels: ChannelId[]; requiresTools: string[]; compatibleFormats: string[]; }
+export interface Skill {
+  id: string;
+  name?: string;
+  /** The instruction prompt that defines this reusable behavior. */
+  description: string;
+  channels: ChannelId[];
+  requiresTools: string[];
+  compatibleFormats: string[];
+  strategyContributions?: Array<{
+    id: string;
+    channelId?: ChannelId;
+    mechanism?: string;
+    retrievalTags?: string[];
+    guidance: string;
+  }>;
+}
 export interface AgentSkill { id: string; agentId: string; skillId: string; enabled: boolean; }
 export interface ContentDrop { id: string; agentId: string; origin: string; brief?: string; sourceIds: string[]; assetIds: string[]; suggestedUse?: string; suggestedWindow?: string; expiresAt?: string; status: "received" | "reviewed" | "used" | "ignored" | "expired"; createdAt: string; }
 
@@ -2604,12 +2746,12 @@ export interface ActivitySummary {
   publishingPlan?: PublishingPlan;
 }
 /** Legacy projection kept for the first UI and older local databases. */
-export interface ActionRecord { id: string; intent: "post" | "reply" | "like" | "repost" | "quote" | "follow" | "no_op"; target?: string; summary: string; status: "queued" | "review" | "executed" | "skipped" | "failed"; reason: string; createdAt: string; expiresAt?: string; socialIntentId?: string; executionId?: string; outcomeId?: string; sessionId?: string; }
+export interface ActionRecord { id: string; intent: "post" | "reply" | "like" | "repost" | "quote" | "follow" | "delete" | "no_op"; target?: string; summary: string; status: "queued" | "review" | "executed" | "skipped" | "failed"; reason: string; createdAt: string; expiresAt?: string; socialIntentId?: string; executionId?: string; outcomeId?: string; sessionId?: string; }
 
 export interface AgentWorkspaceSnapshot {
   onboarded: boolean; agent: Agent | null; presence: Presence | null; presences: Presence[]; activePresenceId: string | null;
   files: AgentFile[]; proposals: FileProposal[]; messages: ChatMessage[]; conversations: Conversation[]; activeConversationId: string | null; presenceChatSessions: PresenceChatSession[]; operatorConversations?: OperatorConversation[]; operatorNudges?: OperatorNudge[]; agentRequests: AgentRequest[]; capabilityChangeEvents: CapabilityChangeEvent[];
-  events: LiveEvent[]; socialDecisions: SocialDecision[]; autobiographicalEvents: AutobiographicalEvent[]; autobiographicalReflections: AutobiographicalReflection[]; resourceUsageEvents: ResourceUsageEvent[]; calendar: CalendarSlot[]; assignments: Assignment[]; growthReviews: GrowthReview[]; growthFileVersions: GrowthFileVersion[]; growthRevisions?: GrowthRevision[]; growthEvidenceSnapshots?: GrowthEvidenceSnapshot[]; audienceSnapshots: PresenceAudienceSnapshot[]; publicationMetricSnapshots: PublicationMetricSnapshot[]; watches: Watch[]; explorations: ExplorationBrief[]; discoveryPlans: DiscoveryPlan[]; explorationSessions: ExplorationSession[]; explorationFindings: ExplorationFinding[]; actions: ActionRecord[]; publishingPlans: PublishingPlan[]; metrics: { qualifiedFollows: number; conversations: number; opportunitiesIgnored: number; audienceHealth: number };
+  events: LiveEvent[]; socialDecisions: SocialDecision[]; socialStrategyRetrievalRuns?: SocialStrategyRetrievalRun[]; growthHypotheses?: GrowthHypothesis[]; growthEvidenceRecords?: GrowthEvidenceRecord[]; legacyChannelStrategyGuidance?: LegacyChannelStrategyGuidance[]; autobiographicalEvents: AutobiographicalEvent[]; autobiographicalReflections: AutobiographicalReflection[]; resourceUsageEvents: ResourceUsageEvent[]; calendar: CalendarSlot[]; assignments: Assignment[]; growthReviews: GrowthReview[]; growthFileVersions: GrowthFileVersion[]; growthRevisions?: GrowthRevision[]; growthEvidenceSnapshots?: GrowthEvidenceSnapshot[]; audienceSnapshots: PresenceAudienceSnapshot[]; publicationMetricSnapshots: PublicationMetricSnapshot[]; watches: Watch[]; explorations: ExplorationBrief[]; discoveryPlans: DiscoveryPlan[]; explorationSessions: ExplorationSession[]; explorationFindings: ExplorationFinding[]; actions: ActionRecord[]; publishingPlans: PublishingPlan[]; metrics: { qualifiedFollows: number; conversations: number; opportunitiesIgnored: number; audienceHealth: number };
   modelProfiles: AgentModelProfile[]; providerConnections: ProviderConnection[]; assetProviderConnections: AssetProviderConnection[]; toolBindings: AgentToolBinding[]; changeSets: ChangeSet[]; standingIntents: StandingIntent[]; operatorDirectives: OperatorDirective[]; socialIntents: SocialIntent[]; executions: Execution[]; outcomes: Outcome[]; attentionTests: AttentionTest[]; capabilityTrials: CapabilityTrial[]; publications: Publication[]; assetUsages: AssetUsage[]; sourceEvidence: SourceEvidence[]; claimGrounding: ClaimGrounding[]; preferenceEvidence: PreferenceEvidence[]; originalPostRehearsals: OriginalPostRehearsalAttempt[]; librarySources: LibrarySource[]; assets: Asset[]; perceptions: AssetPerception[]; assetResearchSessions: AssetResearchSession[]; skills: Skill[]; agentSkills: AgentSkill[]; contentDrops: ContentDrop[]; channelDefinitions: ChannelDefinition[]; nativeConnections: NativeChannelConnection[]; bridges: Bridge[]; mirrorObjects: MirrorObject[]; mirrorEvents: MirrorEvent[]; bridgeSync: BridgeSyncState[]; conversationEpisodes: ConversationEpisode[]; assignmentContributions: AssignmentContribution[]; people: Person[]; personIdentities: PersonIdentity[]; relationships: Relationship[]; relationshipFacts: RelationshipFact[]; relationshipOpenLoops: RelationshipOpenLoop[]; recommendationRecords: RecommendationRecord[]; introductionRecords: IntroductionRecord[]; watchSignals: WatchSignal[]; relationshipPolicies: RelationshipPolicy[]; presenceRequestPolicies: PresenceRequestPolicy[]; delegationGrants: DelegationGrant[]; publicRequests: PublicRequest[]; sandboxEnvironments: SandboxEnvironment[]; playgroundSessions: PlaygroundSession[]; sandboxActors: SandboxActor[]; networkSearches: SandboxNetworkSearch[]; networkIntroductions: SandboxNetworkIntroduction[]; scenarios: Scenario[]; scenarioVersions: ScenarioVersion[]; scenarioRuns: ScenarioRun[]; scenarioRunProvenance: ScenarioRunProvenance[]; scenarioEvaluations: ScenarioRunEvaluation[]; knowledgeDocuments: KnowledgeDocument[]; knowledgeVersions: KnowledgeVersion[]; knowledgeSegments: KnowledgeSegment[]; presenceKnowledgeAccess: PresenceKnowledgeAccess[]; mindFileKnowledgeBindings?: MindFileKnowledgeBinding[]; knowledgeRetrievalRuns: KnowledgeRetrievalRun[]; knowledgeCitations: KnowledgeCitation[]; knowledgeCollections?: KnowledgeCollection[]; knowledgeItems?: KnowledgeItem[]; presenceKnowledgeBindings?: PresenceKnowledgeBinding[];
   assetCollections?: AssetCollection[]; assetCollectionMemberships?: AssetCollectionMembership[]; assetMetadataEdits?: AssetMetadataEdit[]; assetProcessingJobs?: AssetProcessingJob[];
   conversationStyles?: ConversationStyleProfile[];
@@ -2715,7 +2857,7 @@ export type AssignmentOperation =
   | { type: "startAssignment"; id: string; sessionId: string }
   | { type: "workAssignment"; id: string; sessionId: string }
   | { type: "runLiveAssignment"; assignmentId: string; presenceId?: string }
-  | { type: "startAssignmentPursuit"; assignmentId: string; presenceId?: string; startsAt?: string; deadlineAt: string; maxVerifiedActions: number; actionCaps?: Partial<Record<AssignmentPursuitAction, number>>; maxActionsPerHour?: number; maxActionsPerPerson?: number; maxActionsPerConversation?: number; resourceBudget?: AssignmentPursuitResourceBudget }
+  | { type: "startAssignmentPursuit"; assignmentId: string; presenceId?: string; startsAt?: string; deadlineAt: string; maxVerifiedActions: number; purpose?: AssignmentPursuitPurpose; sourcePostId?: string; sourcePostUrl?: string; requiredVerifiedPromotionalActions?: number; actionCaps?: Partial<Record<AssignmentPursuitAction, number>>; maxActionsPerHour?: number; maxActionsPerPerson?: number; maxActionsPerConversation?: number; resourceBudget?: AssignmentPursuitResourceBudget }
   | { type: "scaleAssignmentPursuit"; id: string; maxVerifiedActions: number; maxActionsPerHour?: number; resourceBudget?: AssignmentPursuitResourceBudget }
   | { type: "pauseAssignmentPursuit"; id: string }
   | { type: "resumeAssignmentPursuit"; id: string }
@@ -2840,9 +2982,10 @@ export type ConversationStyleOperation =
 
 export type OperationalRecheckOperation =
   | { type: "recheckModelProvider"; presenceId?: string; incidentId?: string }
-  | { type: "syncNativeX"; presenceId?: string; manual?: boolean; incidentId?: string };
+  | { type: "syncNativeX"; presenceId?: string; manual?: boolean; reconcile?: boolean; incidentId?: string };
 
-export type Operation = AssignmentOperation | CapabilityTrialOperation | LanguagePolicyOperation | ScenarioOperation | PublishingPlanOperation | GrowthOperation | AgentRequestOperation | FailureReviewOperation | ExplorationOperation | OperationalOperation | AttentionControlOperation | WatchRequestOperation | RelationshipStudyOperation | PeopleNoteOperation | AssetLibraryOperation
+export type PresenceSettingsOperation = { type: "setPresence"; patch: Partial<Presence> };
+export type Operation = AssignmentOperation | CapabilityTrialOperation | LanguagePolicyOperation | ScenarioOperation | PublishingPlanOperation | GrowthOperation | AgentRequestOperation | FailureReviewOperation | ExplorationOperation | OperationalOperation | AttentionControlOperation | WatchRequestOperation | RelationshipStudyOperation | PeopleNoteOperation | AssetLibraryOperation | PresenceSettingsOperation
   | BrowserOperation
   | ObservabilityOperation
   | LegacyLanguageOperation

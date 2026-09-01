@@ -70,6 +70,7 @@ import {
 } from "lucide-react";
 import { AGENT_CAPABILITY_DEFINITIONS, CHANNEL_CAPABILITIES, isAgentCapabilityEnabled, simulationForChannel } from "@/lib/types";
 import { detectLibraryMedia, supportedLibraryMediaLabel } from "@/lib/asset-media";
+import { assetPostingUnavailableUntil } from "@/lib/asset-library";
 import { bridgeAdapterPrompt, bridgeAdapterStatusLabel, bridgeApiExamples, bridgeEnvironmentExample, bridgeExecutionStatus, bridgeExecutionStatusLabel, bridgeIdentityReady } from "@/lib/bridge-contract";
 import { latestPerception } from "@/lib/perception";
 import { attentionGovernorSnapshot } from "@/lib/attention-governor";
@@ -81,7 +82,7 @@ import { isCognitionEligibleMirrorObject } from "@/lib/social-context";
 import { peopleForPresence, resolveCanonicalPerson, isPlaceholderIdentity } from "@/lib/network-memory";
 import { readPeopleNote } from "@/lib/people-notes";
 import { autobiographicalEventsForPerson } from "@/lib/autobiographical-memory";
-import { ASSIGNMENT_PURSUIT_SCALE_PRESETS, assignmentIsCurrentlyProcessing, assignmentIsOpen, assignmentProgressLabel, assignmentPursuitScaleForWindow, audienceDeltas, capabilityProviderLabel, cleanUserFacingAssignmentInstruction, collapseAudienceSnapshots, compileAgendaWork, defaultSelfDirectedAttentionPolicy, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, intervalForPresence, isActivityDecisionEvent, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence, relationshipPolicyFromWatchPurpose, SELF_DIRECTED_ATTENTION_PRESETS } from "@/lib/runtime";
+import { ASSIGNMENT_PURSUIT_SCALE_PRESETS, assignmentIsCurrentlyProcessing, assignmentIsOpen, assignmentProgressLabel, assignmentPursuitScaleForWindow, audienceDeltas, capabilityProviderLabel, cleanUserFacingAssignmentInstruction, collapseAudienceSnapshots, compileAgendaWork, defaultSelfDirectedAttentionPolicy, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, intervalForPresence, isActivityDecisionEvent, isPromotionBurstWindow, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence, relationshipPolicyFromWatchPurpose, SELF_DIRECTED_ATTENTION_PRESETS } from "@/lib/runtime";
 import { assignmentPursuitVerifiedCounts } from "@/lib/runtime";
 import type {
   CalendarSlot,
@@ -200,20 +201,14 @@ const navItems: { id: View; label: string; icon: typeof MessageCircle }[] = [
   { id: "live", label: "Activity", icon: Radio },
   { id: "chat", label: "Chat", icon: MessageSquare },
   { id: "watching", label: "Watching", icon: Eye },
-  { id: "people", label: "People", icon: Users },
-  { id: "feed", label: "Feed", icon: Newspaper },
-  { id: "growth", label: "Growth", icon: TrendingUp },
-  { id: "schedule", label: "Schedule", icon: Clock3 },
-  { id: "presence", label: "Settings", icon: Settings2 },
-  { id: "rehearsal", label: "Rehearsal", icon: FlaskConical },
-  { id: "teach", label: "Teach", icon: MessageCircle },
+  { id: "presence", label: "Channels", icon: Settings2 },
+  { id: "playground", label: "Playground", icon: Gamepad2 },
+  { id: "analytics", label: "Analytics", icon: BarChart3 },
   { id: "knowledge", label: "Knowledge", icon: BookOpen },
   { id: "assets", label: "Assets", icon: Layers },
-  { id: "usage", label: "Usage", icon: BarChart3 },
-  { id: "playground", label: "Playground", icon: Gamepad2 },
 ];
-const presenceNavItems = navItems.filter(({ id }) => id === "live" || id === "chat" || id === "watching" || id === "people" || id === "feed" || id === "growth" || id === "schedule" || id === "presence" || id === "rehearsal" || id === "playground");
-const agentNavItems = navItems.filter(({ id }) => id === "teach" || id === "knowledge" || id === "assets" || id === "usage");
+const presenceNavItems = navItems.filter(({ id }) => ["live", "chat", "watching", "presence", "playground", "analytics"].includes(id));
+const agentNavItems = navItems.filter(({ id }) => id === "knowledge" || id === "assets");
 const viewPaths: Record<View, string> = {
   live: "/activity",
   chat: "/chat",
@@ -229,6 +224,7 @@ const viewPaths: Record<View, string> = {
   knowledge: "/knowledge",
   assets: "/assets",
   usage: "/usage",
+  analytics: "/analytics",
   brain: "/agent",
   calendar: "/calendar",
 };
@@ -359,7 +355,7 @@ function useOperationalHealth(presenceId?: string, refreshKey = 0) {
         const etag = response.headers.get("etag");
         if (etag) healthEtag.current = etag;
         const payload = await response.json() as OperationalHealthSnapshot;
-        setHealth(payload);
+        setHealth(normalizeOperationalHealth(payload));
       } catch { /* Health is advisory; Activity remains usable when the probe is down. */ }
       finally {
         if (active) {
@@ -394,7 +390,10 @@ function OperationalHealthIndicator({ health, onOpen }: { health: OperationalHea
         ? "Waiting · resumes automatically"
         : "Healthy";
   const symbol = health.status === "needs_you" || health.status === "degraded" ? "⚠" : health.status === "recovering" ? "◐" : health.status === "waiting" ? "◷" : "●";
-  return <button type="button" className={`global-health-indicator global-health-${health.status}`} onClick={onOpen} aria-label={`Operating health: ${copy}`}><span aria-hidden="true">{symbol}</span> {copy}</button>;
+  const needsYouCount = health.status === "needs_you"
+    ? (health.counts?.needsOperatorIncidents ?? health.incidents.filter((incident) => incident.state === "needs_operator" || incident.operatorActionRequired).length)
+    : 0;
+  return <button type="button" className={`global-health-indicator global-health-${health.status}`} onClick={onOpen} aria-label={`Operating health: ${copy}`}><span aria-hidden="true">{symbol}</span> {copy}{needsYouCount > 0 && <span className="global-health-count" aria-hidden="true">{needsYouCount}</span>}</button>;
 }
 const historyDisplayAt = (item: Pick<PublicHistoryItem, "occurredAt" | "observedAt" | "environment">) => item.environment === "sandbox" ? item.observedAt : item.occurredAt;
 const historyTimeTitle = (item: Pick<PublicHistoryItem, "occurredAt" | "observedAt" | "environment">) => item.environment === "sandbox"
@@ -407,6 +406,17 @@ const initials = (name: string) =>
     .join("")
     .slice(0, 2)
     .toUpperCase();
+
+function presencePlatformAvatarUrl(state: OpenPresenceState, presence: Presence | undefined) {
+  if (!presence || presence.channel !== "x") return undefined;
+  const connection = state.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x");
+  const account = connection?.account;
+  const expectedHandle = presence.handle.replace(/^@/, "").trim().toLowerCase();
+  const connectedHandle = account?.username?.replace(/^@/, "").trim().toLowerCase();
+  return account?.profileImageUrl && expectedHandle && connectedHandle === expectedHandle
+    ? account.profileImageUrl
+    : undefined;
+}
 
 function ChannelAvatar({ avatarUrl, name, className }: { avatarUrl?: string; name: string; className: string }) {
   const [imageFailed, setImageFailed] = useState(false);
@@ -443,6 +453,45 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
     );
   }
   return (await response.json()) as T;
+}
+
+// Compact Activity/Chat responses are intentionally smaller than the full
+// workspace. A stale tab, an older runtime, or a response interrupted during
+// navigation can still omit one of the array fields that the view derives
+// from. Keep that transport boundary total so a partial response degrades to
+// an empty collection instead of taking down the whole client tree.
+const CLIENT_STATE_ARRAY_KEYS = [
+  "files", "proposals", "messages", "conversations", "presenceChatSessions", "operatorConversations", "operatorNudges", "agentRequests", "capabilityChangeEvents",
+  "presences", "agents", "events", "socialDecisions", "socialStrategyRetrievalRuns", "growthHypotheses", "growthEvidenceRecords", "legacyChannelStrategyGuidance", "autobiographicalEvents", "autobiographicalReflections", "resourceUsageEvents", "attentionEpisodes", "calendar", "assignments", "growthReviews", "growthRevisions", "growthEvidenceSnapshots", "growthFileVersions", "audienceSnapshots", "publicationMetricSnapshots", "watches", "watchSignals", "relationshipPolicies", "relationshipStudies", "relationshipInsightSets", "presenceRequestPolicies", "delegationGrants", "publicRequests", "explorations", "discoveryPlans", "explorationSessions", "explorationFindings", "actions", "publishingPlans", "modelProfiles", "providerConnections", "assetProviderConnections", "toolBindings", "changeSets", "standingIntents", "operatorDirectives", "socialIntents", "executions", "outcomes", "attentionTests", "capabilityTrials", "publications", "assetUsages", "sourceEvidence", "claimGrounding", "preferenceEvidence", "originalPostRehearsals", "librarySources", "assets", "perceptions", "assetResearchSessions", "assetCollections", "assetCollectionMemberships", "assetMetadataEdits", "assetProcessingJobs", "skills", "agentSkills", "contentDrops", "nativeConnections", "bridges", "mirrorObjects", "mirrorEvents", "bridgeSync", "conversationEpisodes", "assignmentContributions", "people", "peopleNotes", "personIdentities", "relationships", "relationshipFacts", "relationshipOpenLoops", "recommendationRecords", "introductionRecords", "sandboxEnvironments", "playgroundSessions", "sandboxActors", "networkSearches", "networkIntroductions", "scenarios", "scenarioVersions", "scenarioRuns", "scenarioRunProvenance", "scenarioEvaluations", "knowledgeDocuments", "knowledgeVersions", "knowledgeSegments", "presenceKnowledgeAccess", "mindFileKnowledgeBindings", "knowledgeRetrievalRuns", "knowledgeCitations", "knowledgeCollections", "knowledgeItems", "presenceKnowledgeBindings", "conversationStyles", "operationalRuns", "scheduledWakes", "dependencyHealth", "recoveryIncidents", "recoveryAttempts", "browserBodies", "editorialOpportunities", "editorialFeedbackEvents", "editorialReferences", "sourceAssets", "mediaPerceptions", "verificationRecords", "rightsAssessments", "editorialDecisions", "publicationPackages", "agentWorkspaces",
+] as const;
+
+function normalizeClientState<T>(payload: T): T {
+  if (!payload || typeof payload !== "object" || !("onboarded" in payload)) return payload;
+  const next = { ...(payload as Record<string, unknown>) };
+  for (const key of CLIENT_STATE_ARRAY_KEYS) {
+    if (!Array.isArray(next[key])) next[key] = [];
+  }
+  return next as T;
+}
+
+function normalizeOperationalHealth(payload: OperationalHealthSnapshot): OperationalHealthSnapshot {
+  const { counts: rawCounts, ...rest } = payload;
+  const counts = rawCounts as Partial<OperationalHealthSnapshot["counts"]> | undefined;
+  return {
+    ...rest,
+    counts: {
+      activeIncidents: 0,
+      recoveringIncidents: 0,
+      waitingIncidents: 0,
+      needsOperatorIncidents: 0,
+      orphanRecoveringRuns: 0,
+      ...(counts ?? {}),
+    },
+    dependencyHealth: Array.isArray(payload.dependencyHealth) ? payload.dependencyHealth : [],
+    incidents: Array.isArray(payload.incidents) ? payload.incidents : [],
+    activeRuns: Array.isArray(payload.activeRuns) ? payload.activeRuns : [],
+    heartbeats: Array.isArray(payload.heartbeats) ? payload.heartbeats : [],
+  };
 }
 
 async function fetchRuntime(input: RequestInfo | URL, init: RequestInit = {}, timeoutMs = runtimeTimeoutForOperation()) {
@@ -554,6 +603,7 @@ function PresenceGlyph({
   accent,
   name = "Agent",
   look = "core",
+  avatarUrl,
   size = "normal",
   pulse = false,
   className = "",
@@ -561,10 +611,13 @@ function PresenceGlyph({
   accent: string;
   name?: string;
   look?: AvatarLook;
+  avatarUrl?: string;
   size?: "normal" | "large";
   pulse?: boolean;
   className?: string;
 }) {
+  const [failedAvatarUrl, setFailedAvatarUrl] = useState<string | undefined>();
+  const showPlatformAvatar = Boolean(avatarUrl && failedAvatarUrl !== avatarUrl);
   return (
     <div
       className={`presence-glyph ${size === "large" ? "presence-glyph-large" : ""} ${pulse ? "is-pulsing" : ""} ${className}`}
@@ -572,7 +625,13 @@ function PresenceGlyph({
       role="img"
       aria-label={`${name} avatar`}
     >
-      <img src={avatarAssetPath(accent, name, look)} alt="" draggable={false} />
+      <img
+        src={showPlatformAvatar ? avatarUrl : avatarAssetPath(accent, name, look)}
+        alt=""
+        className={showPlatformAvatar ? "platform-avatar-image" : undefined}
+        draggable={false}
+        onError={showPlatformAvatar ? () => setFailedAvatarUrl(avatarUrl) : undefined}
+      />
     </div>
   );
 }
@@ -650,7 +709,7 @@ type BridgeManage = (
 ) => Promise<{ state: OpenPresenceState; key?: string } | null>;
 type XManage = (
   operation: unknown,
-) => Promise<{ state?: OpenPresenceState; result?: { account: { id: string; username: string; name: string }; access: "read" | "read-write" }; error?: string } | null>;
+) => Promise<{ state?: OpenPresenceState; result?: { account: { id: string; username: string; name: string; profileImageUrl?: string }; access: "read" | "read-write" }; error?: string } | null>;
 
 function SandboxEventForm({
   sessionId,
@@ -841,7 +900,8 @@ export default function Home() {
     const response = await fetchRuntime(input, { ...init, headers, cache: "no-store" });
     if (response.status === 304) return null;
     rememberStateResponse(response);
-    return readJsonResponse<T>(response);
+    const payload = await readJsonResponse<T>(response);
+    return normalizeClientState(payload);
   }, [rememberStateResponse]);
   useEffect(() => {
     const query = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
@@ -850,7 +910,11 @@ export default function Home() {
     query.set("read", Date.now().toString());
     if (typeof window !== "undefined") {
       const initialView = viewForLocation(window.location);
-      if (initialView === "live" || initialView === "chat" || initialView === "growth" || initialView === "knowledge" || initialView === "assets" || initialView === "people" || initialView === "feed" || initialView === "schedule" || initialView === "watching" || initialView === "rehearsal" || initialView === "brain" || initialView === "teach" || initialView === "presence" || initialView === "playground" || initialView === "usage") query.set("projection", initialView === "live" ? "activity" : initialView === "chat" ? "chat" : initialView === "growth" ? "growth" : initialView === "knowledge" ? "knowledge" : initialView === "assets" ? "assets" : initialView === "people" ? "people" : initialView === "feed" ? "feed" : initialView === "schedule" ? "schedule" : initialView === "watching" ? "watching" : initialView === "rehearsal" ? "rehearsal" : initialView === "brain" ? "brain" : initialView === "teach" ? "teach" : initialView === "presence" ? "presence" : initialView === "playground" ? "playground" : "usage");
+      if (initialView === "live" || initialView === "chat" || initialView === "growth" || initialView === "analytics" || initialView === "knowledge" || initialView === "assets" || initialView === "people" || initialView === "feed" || initialView === "schedule" || initialView === "watching" || initialView === "rehearsal" || initialView === "brain" || initialView === "teach" || initialView === "presence" || initialView === "playground" || initialView === "usage") {
+        const activitySurface = query.get("surface");
+        const activityProjection = activitySurface === "timeline" || activitySurface === "calendar" ? "feed" : "activity";
+        query.set("projection", initialView === "live" ? activityProjection : initialView === "chat" ? "chat" : initialView === "growth" || initialView === "analytics" ? "growth" : initialView === "knowledge" ? "knowledge" : initialView === "assets" ? "assets" : initialView === "people" ? "people" : initialView === "feed" ? "feed" : initialView === "schedule" ? "schedule" : initialView === "watching" ? "watching" : initialView === "rehearsal" ? "rehearsal" : initialView === "brain" ? "brain" : initialView === "teach" ? "teach" : initialView === "presence" ? "presence" : initialView === "playground" ? "playground" : "usage");
+      }
     }
     fetchState<OpenPresenceState>(`/api/state?${query.toString()}`)
       .then((payload) => {
@@ -870,6 +934,14 @@ export default function Home() {
     if (state?.onboarded) window.scrollTo({ top: 0, left: 0 });
   }, [state?.onboarded]);
   useEffect(() => {
+    const presenceName = state?.presence?.name?.trim();
+    if (!presenceName) return;
+    // The selected Presence is the useful identity when several controlled
+    // Chrome sessions are open. Do not add the generic product title here:
+    // the tab itself should tell the operator which Presence owns it.
+    document.title = presenceName;
+  }, [state?.presence?.id, state?.presence?.name]);
+  useEffect(() => {
     const onPopState = () => setView(viewForLocation(window.location));
     window.addEventListener("popstate", onPopState);
     return () => window.removeEventListener("popstate", onPopState);
@@ -883,7 +955,7 @@ export default function Home() {
     // avoids reparsing and downloading the multi-megabyte compatibility state
     // on every Settings/Growth/People/etc. navigation; compact Activity and
     // Chat views still intentionally refresh when entering or leaving them.
-    if ((state.responseProjection === "full" && !["live", "chat", "growth", "knowledge", "assets", "people", "feed", "schedule", "watching", "rehearsal", "brain", "teach", "presence", "playground", "usage"].includes(view)) || (state.responseProjection === "growth" && view === "growth") || (state.responseProjection === "knowledge" && view === "knowledge") || (state.responseProjection === "assets" && view === "assets") || (state.responseProjection === "people" && view === "people") || (state.responseProjection === "feed" && view === "feed") || (state.responseProjection === "schedule" && view === "schedule") || (state.responseProjection === "watching" && view === "watching") || (state.responseProjection === "rehearsal" && view === "rehearsal") || (state.responseProjection === "brain" && view === "brain") || (state.responseProjection === "teach" && view === "teach") || (state.responseProjection === "presence" && view === "presence") || (state.responseProjection === "playground" && view === "playground") || (state.responseProjection === "usage" && view === "usage")) return;
+    if ((state.responseProjection === "full" && !["live", "chat", "growth", "analytics", "knowledge", "assets", "people", "feed", "schedule", "watching", "rehearsal", "brain", "teach", "presence", "playground", "usage"].includes(view)) || (state.responseProjection === "growth" && (view === "growth" || view === "analytics")) || (state.responseProjection === "knowledge" && view === "knowledge") || (state.responseProjection === "assets" && view === "assets") || (state.responseProjection === "people" && view === "people") || (state.responseProjection === "feed" && view === "feed") || (state.responseProjection === "schedule" && view === "schedule") || (state.responseProjection === "watching" && view === "watching") || (state.responseProjection === "rehearsal" && view === "rehearsal") || (state.responseProjection === "brain" && view === "brain") || (state.responseProjection === "teach" && view === "teach") || (state.responseProjection === "presence" && view === "presence") || (state.responseProjection === "playground" && view === "playground") || (state.responseProjection === "usage" && view === "usage")) return;
     // Activity uses a small projection; hydrate the full workspace when an
     // information-heavy view is opened instead of making the first Activity
     // paint wait for unrelated Agent history.
@@ -930,7 +1002,7 @@ export default function Home() {
             ...(context?.activeAgentId ? { "x-openpresence-agent-id": context.activeAgentId } : {}),
             ...(context?.activePresenceId ? { "x-openpresence-presence-id": context.activePresenceId } : {}),
             ...(context?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(context.workspaceRevision) } : {}),
-            ...(view === "live" ? { "x-openpresence-projection": "activity" } : view === "chat" ? { "x-openpresence-projection": "chat" } : view === "growth" ? { "x-openpresence-projection": "growth" } : view === "knowledge" ? { "x-openpresence-projection": "knowledge" } : view === "assets" ? { "x-openpresence-projection": "assets" } : view === "people" ? { "x-openpresence-projection": "people" } : view === "feed" ? { "x-openpresence-projection": "feed" } : view === "schedule" ? { "x-openpresence-projection": "schedule" } : view === "watching" ? { "x-openpresence-projection": "watching" } : view === "rehearsal" ? { "x-openpresence-projection": "rehearsal" } : view === "brain" ? { "x-openpresence-projection": "brain" } : view === "teach" ? { "x-openpresence-projection": "teach" } : view === "presence" ? { "x-openpresence-projection": "presence" } : view === "playground" ? { "x-openpresence-projection": "playground" } : view === "usage" ? { "x-openpresence-projection": "usage" } : {}),
+            ...(view === "live" ? { "x-openpresence-projection": "activity" } : view === "chat" ? { "x-openpresence-projection": "chat" } : view === "growth" || view === "analytics" ? { "x-openpresence-projection": "growth" } : view === "knowledge" ? { "x-openpresence-projection": "knowledge" } : view === "assets" ? { "x-openpresence-projection": "assets" } : view === "people" ? { "x-openpresence-projection": "people" } : view === "feed" ? { "x-openpresence-projection": "feed" } : view === "schedule" ? { "x-openpresence-projection": "schedule" } : view === "watching" ? { "x-openpresence-projection": "watching" } : view === "rehearsal" ? { "x-openpresence-projection": "rehearsal" } : view === "brain" ? { "x-openpresence-projection": "brain" } : view === "teach" ? { "x-openpresence-projection": "teach" } : view === "presence" ? { "x-openpresence-projection": "presence" } : view === "playground" ? { "x-openpresence-projection": "playground" } : view === "usage" ? { "x-openpresence-projection": "usage" } : {}),
           },
           body: JSON.stringify(operation),
         }, runtimeTimeoutForOperation(operationType));
@@ -940,14 +1012,16 @@ export default function Home() {
         if (!response.ok && response.status === 409 && payload.state && conflictRetries < WORKSPACE_CONFLICT_RETRY_LIMIT) {
           conflictRetries += 1;
           context = payload.state;
-          setState(payload.state);
-          syncBrowserWorkspaceContext(payload.state);
+          const nextState = normalizeClientState(payload.state);
+          setState(nextState);
+          syncBrowserWorkspaceContext(nextState);
           continue;
         }
         if (!response.ok && response.status === 409 && tracksAttention && payload.state) {
           attentionConflictRevision.current = typeof payload.state.workspaceRevision === "number" ? payload.state.workspaceRevision : null;
-          setState(payload.state);
-          syncBrowserWorkspaceContext(payload.state);
+          const nextState = normalizeClientState(payload.state);
+          setState(nextState);
+          syncBrowserWorkspaceContext(nextState);
           setError(null);
           return null;
         }
@@ -961,10 +1035,11 @@ export default function Home() {
           // without waiting for worker completion or serializing 30 MB.
           return await refreshState();
         }
-        setState(payload);
+        const nextState = normalizeClientState(payload);
+        setState(nextState);
         setError(null);
-        syncBrowserWorkspaceContext(payload);
-        return payload as OpenPresenceState;
+        syncBrowserWorkspaceContext(nextState);
+        return nextState as OpenPresenceState;
       }
     } catch (reason) {
       if (reason instanceof DOMException && reason.name === "AbortError" && tracksAttention) {
@@ -988,9 +1063,12 @@ export default function Home() {
   }
   async function refreshState(): Promise<OpenPresenceState> {
     const currentView = typeof window !== "undefined" ? viewForLocation(window.location) : "full";
-    const useActivityProjection = currentView === "live";
+    const activitySurface = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("surface") : null;
+    const useActivityHistoryProjection = currentView === "live" && (activitySurface === "timeline" || activitySurface === "calendar");
+    const useActivityProjection = currentView === "live" && !useActivityHistoryProjection;
     const useChatProjection = currentView === "chat";
     const useGrowthProjection = currentView === "growth";
+    const useAnalyticsProjection = currentView === "analytics";
     const useKnowledgeProjection = currentView === "knowledge";
     const useAssetsProjection = currentView === "assets";
     const usePeopleProjection = currentView === "people";
@@ -1003,7 +1081,7 @@ export default function Home() {
     const usePresenceProjection = currentView === "presence";
     const useUsageProjection = currentView === "usage";
     const usePlaygroundProjection = currentView === "playground";
-    const requestedProjection = useActivityProjection ? "activity" : useChatProjection ? "chat" : useGrowthProjection ? "growth" : useKnowledgeProjection ? "knowledge" : useAssetsProjection ? "assets" : usePeopleProjection ? "people" : useFeedProjection ? "feed" : useScheduleProjection ? "schedule" : useWatchingProjection ? "watching" : useRehearsalProjection ? "rehearsal" : useBrainProjection ? "brain" : useTeachProjection ? "teach" : usePresenceProjection ? "presence" : usePlaygroundProjection ? "playground" : useUsageProjection ? "usage" : "full";
+    const requestedProjection = useActivityProjection ? "activity" : useActivityHistoryProjection ? "feed" : useChatProjection ? "chat" : useGrowthProjection || useAnalyticsProjection ? "growth" : useKnowledgeProjection ? "knowledge" : useAssetsProjection ? "assets" : usePeopleProjection ? "people" : useFeedProjection ? "feed" : useScheduleProjection ? "schedule" : useWatchingProjection ? "watching" : useRehearsalProjection ? "rehearsal" : useBrainProjection ? "brain" : useTeachProjection ? "teach" : usePresenceProjection ? "presence" : usePlaygroundProjection ? "playground" : useUsageProjection ? "usage" : "full";
     // A navigation away from Activity must not reuse its smaller in-flight
     // response. That response deliberately omits view-specific collections
     // such as Growth history and is not a complete OpenPresenceState.
@@ -1013,7 +1091,7 @@ export default function Home() {
       const requestedAgentId = query.get("agentId");
       const requestedPresenceId = query.get("presenceId");
       query.set("read", Date.now().toString());
-      if (useActivityProjection || useChatProjection || useGrowthProjection || useKnowledgeProjection || useAssetsProjection || usePeopleProjection || useFeedProjection || useScheduleProjection || useWatchingProjection || useRehearsalProjection || useBrainProjection || useTeachProjection || usePresenceProjection || usePlaygroundProjection || useUsageProjection) query.set("projection", requestedProjection);
+      if (useActivityProjection || useActivityHistoryProjection || useChatProjection || useGrowthProjection || useAnalyticsProjection || useKnowledgeProjection || useAssetsProjection || usePeopleProjection || useFeedProjection || useScheduleProjection || useWatchingProjection || useRehearsalProjection || useBrainProjection || useTeachProjection || usePresenceProjection || usePlaygroundProjection || useUsageProjection) query.set("projection", requestedProjection);
       const payload = await fetchState<OpenPresenceState>(`/api/state?${query.toString()}`);
       if (!payload) {
         if (!state) throw new Error("The workspace state is not available.");
@@ -1224,8 +1302,9 @@ export default function Home() {
       if (!response.ok && response.status === 409 && payload.state && conflictRetries < WORKSPACE_CONFLICT_RETRY_LIMIT) {
         conflictRetries += 1;
         context = payload.state;
-        setState(payload.state);
-        syncBrowserWorkspaceContext(payload.state);
+        const nextState = normalizeClientState(payload.state);
+        setState(nextState);
+        syncBrowserWorkspaceContext(nextState);
         continue;
       }
       if (!response.ok)
@@ -1233,8 +1312,9 @@ export default function Home() {
           payload.error ?? "That Bridge change could not be saved.",
         );
       if (!payload.state) throw new Error("The Bridge service returned no state.");
-      setState(payload.state);
-      syncBrowserWorkspaceContext(payload.state);
+      const nextState = normalizeClientState(payload.state);
+      setState(nextState);
+      syncBrowserWorkspaceContext(nextState);
       return payload as { state: OpenPresenceState; key?: string };
       }
     } catch (reason) {
@@ -1262,15 +1342,17 @@ export default function Home() {
         if (!response.ok && response.status === 409 && payload.state && conflictRetries < WORKSPACE_CONFLICT_RETRY_LIMIT) {
           conflictRetries += 1;
           context = payload.state;
-          setState(payload.state);
-          syncBrowserWorkspaceContext(payload.state);
+          const nextState = normalizeClientState(payload.state);
+          setState(nextState);
+          syncBrowserWorkspaceContext(nextState);
           continue;
         }
         if (!response.ok) throw new Error(payload.error ?? "The X connection could not be completed.");
         if (payload.state) {
-          setState(payload.state);
+          const nextState = normalizeClientState(payload.state);
+          setState(nextState);
           setError(null);
-          syncBrowserWorkspaceContext(payload.state);
+          syncBrowserWorkspaceContext(nextState);
         }
         return payload;
       }
@@ -1712,12 +1794,12 @@ function PresenceSwitcher({
     <div className="presence-switcher-wrap">
       <button
         className="presence-root"
-        aria-label={`Switch Presence, currently ${presence.handle}`}
+        aria-label={`Switch Channel, currently ${presence.handle}`}
         aria-expanded={open}
         onClick={() => setOpen((value) => !value)}
       >
         <span className="presence-avatar-badge">
-          <PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} />
+          <PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} avatarUrl={presencePlatformAvatarUrl(state, presence)} />
         </span>
         <span>
           <strong>{presence.name}</strong>
@@ -1727,13 +1809,13 @@ function PresenceSwitcher({
         <ChevronDown size={14} className={open ? "presence-chevron-open" : ""} />
       </button>
       {open && (
-        <div className="presence-menu" role="menu" aria-label="Your Presences">
-          <div className="agent-menu-label">Your Presences</div>
+        <div className="presence-menu" role="menu" aria-label="Your Channels">
+          <div className="agent-menu-label">Your Channels</div>
           {state.presences.map((item) => (
             <button
               key={item.id}
               role="menuitem"
-              aria-label={`Select Presence ${item.name} (${item.handle})`}
+              aria-label={`Select Channel ${item.name} (${item.handle})`}
               className={`presence-menu-item ${item.id === presence.id ? "active" : ""}`}
               onClick={async () => {
                 await mutate({ type: "selectPresence", id: item.id });
@@ -1741,7 +1823,7 @@ function PresenceSwitcher({
               }}
             >
               <span className="presence-avatar-badge">
-                <PresenceGlyph accent={item.accent} name={item.name} look={presenceAvatarLook(item)} />
+                <PresenceGlyph accent={item.accent} name={item.name} look={presenceAvatarLook(item)} avatarUrl={presencePlatformAvatarUrl(state, item)} />
               </span>
               <span>
                 <strong>{item.name}</strong>
@@ -1761,7 +1843,7 @@ function PresenceSwitcher({
             }}
           >
             <Plus size={15} />
-            <span>Add a Presence</span>
+            <span>Add a Channel</span>
           </button>
         </div>
       )}
@@ -1959,6 +2041,72 @@ function XCreditsAlert({
   );
 }
 
+type ActivitySurface = "now" | "timeline" | "calendar";
+
+function ActivityView({
+  state,
+  mutate,
+  pendingOperation,
+  operationalHealth,
+  healthFocusKey,
+  refreshHealth,
+  runtimeError,
+  refreshState,
+  setView,
+}: {
+  state: OpenPresenceState;
+  mutate: Mutate;
+  pendingOperation?: string | null;
+  operationalHealth?: OperationalHealthSnapshot | null;
+  healthFocusKey?: number;
+  refreshHealth?: () => void;
+  runtimeError?: boolean;
+  refreshState: () => Promise<OpenPresenceState>;
+  setView: (view: View) => void;
+}) {
+  const [surface, setSurface] = useState<ActivitySurface>(() => {
+    if (typeof window === "undefined") return "now";
+    const requested = new URLSearchParams(window.location.search).get("surface");
+    return requested === "timeline" || requested === "calendar" ? requested : "now";
+  });
+  useEffect(() => {
+    if (!healthFocusKey) return;
+    const focusFrame = window.requestAnimationFrame(() => setSurface("now"));
+    return () => window.cancelAnimationFrame(focusFrame);
+  }, [healthFocusKey]);
+  const selectSurface = (next: ActivitySurface) => {
+    setSurface(next);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      if (next === "now") url.searchParams.delete("surface");
+      else url.searchParams.set("surface", next);
+      window.history.replaceState({ ...(window.history.state ?? {}), openPresenceActivitySurface: next }, "", url.pathname + url.search + url.hash);
+    }
+    if (next !== "now") void refreshState().catch(() => undefined);
+  };
+  return <div className="activity-surface-shell">
+    <div className="activity-surface-switcher" role="tablist" aria-label="Activity surface">
+      {(["now", "timeline", "calendar"] as const).map((item) => <button type="button" role="tab" key={item} aria-selected={surface === item} className={surface === item ? "active" : ""} onClick={() => selectSurface(item)}>{item[0].toUpperCase() + item.slice(1)}</button>)}
+    </div>
+    {surface === "now"
+      ? <LiveView state={state} mutate={mutate} pendingOperation={pendingOperation} operationalHealth={operationalHealth} healthFocusKey={healthFocusKey} refreshHealth={refreshHealth} runtimeError={runtimeError} refreshState={refreshState} setView={setView} />
+      : <PublicHistoryView state={state} setView={setView} mutate={mutate} controlledSurface={surface} showSurfaceToggle={false} />}
+  </div>;
+}
+
+function AnalyticsView({ state, mutate, setView, onOpenAttention }: { state: OpenPresenceState; mutate: Mutate; setView: (view: View) => void; onOpenAttention: () => void }) {
+  const [section, setSection] = useState<"growth" | "usage">("growth");
+  return <div className="analytics-shell">
+    <div className="analytics-section-switcher" role="tablist" aria-label="Analytics views">
+      <button type="button" role="tab" aria-selected={section === "growth"} className={section === "growth" ? "active" : ""} onClick={() => setSection("growth")}>Growth</button>
+      <button type="button" role="tab" aria-selected={section === "usage"} className={section === "usage" ? "active" : ""} onClick={() => setSection("usage")}>Usage</button>
+    </div>
+    {section === "growth"
+      ? <GrowthViewLazy state={state} mutate={mutate} setView={setView} onOpenAttention={onOpenAttention} />
+      : <UsageView state={state} setView={setView} mutate={mutate} />}
+  </div>;
+}
+
 function AgentWorkspaceShell({
   state,
   view,
@@ -1993,6 +2141,19 @@ function AgentWorkspaceShell({
   const [healthRefreshKey, setHealthRefreshKey] = useState(0);
   const operationalHealth = useOperationalHealth(presence?.id, healthRefreshKey);
   const [healthFocusKey, setHealthFocusKey] = useState(0);
+  const openAttentionReview = () => {
+    const hadHistorySurface = typeof window !== "undefined" && ["timeline", "calendar"].includes(new URLSearchParams(window.location.search).get("surface") ?? "");
+    setView("live");
+    setHealthFocusKey((key) => key + 1);
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.pathname = viewPaths.live;
+      url.searchParams.delete("surface");
+      url.searchParams.delete("view");
+      window.history.replaceState({ ...(window.history.state ?? {}), openPresenceActivitySurface: "now" }, "", url.pathname + url.search + url.hash);
+      if (hadHistorySurface) void refreshState().catch(() => undefined);
+    }
+  };
   const presenceBridge = presence.channel !== "x" ? state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline") : undefined;
   const presenceBridgeStatus = presenceBridge ? bridgeExecutionStatus(presenceBridge) : undefined;
   const [showPresenceModal, setShowPresenceModal] = useState(false);
@@ -2001,17 +2162,20 @@ function AgentWorkspaceShell({
   const contextIdentity = isPresenceView && presence
     ? { name: presence.name, accent: presence.accent }
     : { name: agent.name, accent: agent.accent };
+  const contextAvatarUrl = isPresenceView ? presencePlatformAvatarUrl(state, presence) : undefined;
   const pageLabel =
     view === "brain"
       ? "Manage Agent"
       : view === "presence"
-        ? "Settings"
+        ? "Channels"
       : view === "usage"
         ? "Usage"
+      : view === "analytics"
+        ? "Analytics"
       : view === "live"
         ? "Activity"
       : view === "feed"
-        ? "Feed"
+        ? "Activity"
       : view === "growth"
         ? "Growth"
       : view === "playground"
@@ -2063,7 +2227,7 @@ function AgentWorkspaceShell({
           <div className="brand-mark">◉</div>
           <span>OpenPresence</span>
         </div>
-        <div className="sidebar-label presence-label">Presences</div>
+        <div className="sidebar-label presence-label">Channels</div>
         <PresenceSwitcher
           state={state}
           mutate={mutate}
@@ -2129,13 +2293,13 @@ function AgentWorkspaceShell({
             />
           </div>
           <div className="topbar-context">
-            <PresenceGlyph accent={contextIdentity.accent} name={contextIdentity.name} look={isPresenceView ? presenceAvatarLook(presence) : "core"} />
+            <PresenceGlyph accent={contextIdentity.accent} name={contextIdentity.name} look={isPresenceView ? presenceAvatarLook(presence) : "core"} avatarUrl={contextAvatarUrl} />
             <span>{contextIdentity.name}</span>
             <ChevronRight size={14} />
             <strong>{pageLabel}</strong>
           </div>
           <div className="topbar-actions">
-            <OperationalHealthIndicator health={operationalHealth} onOpen={() => { setView("live"); setHealthFocusKey((key) => key + 1); }} />
+            <OperationalHealthIndicator health={operationalHealth} onOpen={openAttentionReview} />
           </div>
           {view === "presence" && <div className="topbar-actions">
             <span className={`connection-label ${presence.status === "paused" ? "paused" : ""}`}>
@@ -2184,7 +2348,7 @@ function AgentWorkspaceShell({
           {view === "knowledge" && <KnowledgeView state={state} mutate={mutate} refreshState={refreshState} />}
           {view === "assets" && <AssetsView state={state} refreshState={refreshState} />}
           {view === "usage" && <UsageView state={state} setView={setView} mutate={mutate} />}
-          {view === "chat" && <OperatorChatView state={state} mutate={mutate} refreshState={refreshState} />}
+          {view === "chat" && <OperatorChatView state={state} mutate={mutate} refreshState={refreshState} setView={setView} />}
           {view === "rehearsal" && <PresenceChatView key={`${presence.id}-${state.files.find((item) => item.kind === "TASTE")?.revision ?? 0}`} state={state} mutate={mutate} />}
           {view === "watching" && <WatchingView state={state} mutate={mutate} refreshState={refreshState} setView={setView} />}
           {view === "people" && <PeopleViewLazy state={state} mutate={mutate} Button={Button} SectionEyebrow={SectionEyebrow} PageHeader={PageHeader} ChannelAvatar={ChannelAvatar} channelLabel={channelLabel} formatTime={formatTime} formatDateTime={formatDateTime} watchRelationshipPolicy={watchRelationshipPolicy} watchPolicyFromPurpose={watchPolicyFromPurpose} watchPlanSummary={watchPlanSummary} />}
@@ -2192,12 +2356,13 @@ function AgentWorkspaceShell({
             <PlaygroundView state={state} mutate={mutate} />
           )}
           {view === "live" && (
-        <LiveView key={`${state.presence?.id ?? "none"}-${state.presence?.channel ?? "none"}-${state.presence?.environment ?? "live"}-${healthFocusKey}`} state={state} mutate={mutate} pendingOperation={pendingOperation} operationalHealth={operationalHealth} healthFocusKey={healthFocusKey} refreshHealth={() => setHealthRefreshKey((key) => key + 1)} runtimeError={Boolean(error && /OpenPresence (runtime could not be reached|service unavailable)/i.test(error))} refreshState={refreshState} setView={setView} />
+        <ActivityView state={state} mutate={mutate} pendingOperation={pendingOperation} operationalHealth={operationalHealth} healthFocusKey={healthFocusKey} refreshHealth={() => setHealthRefreshKey((key) => key + 1)} runtimeError={Boolean(error && /OpenPresence (runtime could not be reached|service unavailable)/i.test(error))} refreshState={refreshState} setView={setView} />
           )}
           {view === "feed" && (
             <PublicHistoryView state={state} setView={setView} mutate={mutate} />
           )}
-          {view === "growth" && <GrowthViewLazy state={state} mutate={mutate} setView={setView} />}
+          {view === "growth" && <GrowthViewLazy state={state} mutate={mutate} setView={setView} onOpenAttention={openAttentionReview} />}
+          {view === "analytics" && <AnalyticsView state={state} mutate={mutate} setView={setView} onOpenAttention={openAttentionReview} />}
           {view === "schedule" && (
             <ScheduleView state={state} mutate={mutate} setView={setView} />
           )}
@@ -2389,7 +2554,7 @@ function AddPresenceDialog({
         <div className="dialog-header">
           <div>
             <SectionEyebrow>Another place to show up</SectionEyebrow>
-            <h2 id="add-presence-title">Add a Presence</h2>
+            <h2 id="add-presence-title">Add a Channel</h2>
           </div>
           <button
             type="button"
@@ -2401,8 +2566,8 @@ function AddPresenceDialog({
           </button>
         </div>
         <p className="muted">
-          The Agent stays the same; this Presence defines how it appears in
-          this social environment. You can connect it after the Presence
+          The Agent stays the same; this Channel defines how it appears in
+          this social environment. You can connect it after the Channel
           exists.
         </p>
         <fieldset className="channel-picker">
@@ -3790,7 +3955,7 @@ function CurationLabPanel({
             <span style={{ fontSize: "11px", fontWeight: 600, color: "var(--muted)", marginRight: "4px" }}>Sources:</span>
             {enabledSources.length === 0 && (
               <span style={{ fontSize: "11px", color: "var(--muted)", fontStyle: "italic" }}>
-                No sources configured — add them in Presence Settings to start discovering.
+                No sources configured — add them in Channels to start discovering.
               </span>
             )}
             {enabledSources.map((src) => {
@@ -3812,7 +3977,7 @@ function CurationLabPanel({
                 className="curation-source-pill"
                 style={{ marginLeft: "auto", borderStyle: "dashed" }}
                 onClick={() => setView("presence")}
-                title="Configure sources in Presence Settings"
+                title="Configure sources in Channels"
               >
                 <Settings2 size={12} /> Manage Sources in Settings
               </button>
@@ -4150,7 +4315,7 @@ function CurationLabPanel({
               </div>
               <ul className="curation-diag-list">
                 <li>Require explicit reproduction rights or underlying structured data to render derived visuals.</li>
-                <li>Ensure high-contrast, minimum 1200px width for feed legibility.</li>
+                <li>Ensure high-contrast, minimum 1200px width for Activity timeline legibility.</li>
               </ul>
             </div>
           </div>
@@ -4442,6 +4607,7 @@ function PlaygroundView({ state, mutate, setView }: { state: OpenPresenceState; 
   const [scenarioComposerOpen, setScenarioComposerOpen] = useState(false);
   const [selectedObjectId, setSelectedObjectId] = useState<string | null>(null);
   const [rehearsalOpen, setRehearsalOpen] = useState(false);
+  const [playgroundSurface, setPlaygroundSurface] = useState<"playground" | "rehearsal">("playground");
   const [rehearsalMode, setRehearsalMode] = useState<"consider" | "topic" | "assign" | null>(null);
   const [inspiration, setInspiration] = useState("");
   const [assignmentInstruction, setAssignmentInstruction] = useState("");
@@ -4588,8 +4754,14 @@ function PlaygroundView({ state, mutate, setView }: { state: OpenPresenceState; 
     setFeedbackNote("");
   };
   if (!presence) return null;
+  const surfaceTabs = <div className="playground-surface-tabs" role="tablist" aria-label="Playground surfaces">
+    <button type="button" role="tab" aria-selected={playgroundSurface === "playground"} className={playgroundSurface === "playground" ? "active" : ""} onClick={() => setPlaygroundSurface("playground")}>Playground</button>
+    <button type="button" role="tab" aria-selected={playgroundSurface === "rehearsal"} className={playgroundSurface === "rehearsal" ? "active" : ""} onClick={() => setPlaygroundSurface("rehearsal")}>Rehearsal</button>
+  </div>;
+  if (playgroundSurface === "rehearsal") return <div className="playground-page playground-rehearsal-surface">{surfaceTabs}<PresenceChatView state={state} mutate={mutate} /></div>;
   return (
     <div className="playground-page">
+      {surfaceTabs}
       <PageHeader
         className="playground-toolbar"
         eyebrow="Presence rehearsal"
@@ -4826,11 +4998,11 @@ const ATTENTION_TEST_STAGES: Array<{ stage: "queued" | "decided" | "claimed" | "
   { stage: "executed", label: "Executed" },
   { stage: "verified", label: "Verified on X" },
   { stage: "recorded", label: "Recorded in Social Mirror" },
-  { stage: "visible", label: "Visible in Feed and Calendar" },
+  { stage: "visible", label: "Visible in Activity and Calendar" },
 ];
 
 function attentionHistoryHref(test: AttentionTest, surface: "timeline" | "calendar") {
-  const params = new URLSearchParams({ view: "feed", surface, ...(test.action ? { filter: test.action } : {}) });
+  const params = new URLSearchParams({ view: "live", surface, ...(test.action ? { filter: test.action } : {}) });
   const recordId = surface === "calendar" ? test.calendarRecordId : test.feedRecordId;
   if (recordId) params.set("historyId", recordId);
   return `?${params.toString()}`;
@@ -5095,7 +5267,7 @@ function publicRequestState(request: PublicRequest) {
       : request.eligibility === "addressing_required"
         ? "This request was not directly addressed to the Presence."
         : request.eligibility === "unsupported"
-          ? "This request type is not enabled in Presence Settings."
+          ? "This request type is not enabled in Channels."
           : "This request is outside the current access setting, so it cannot become work.";
     return { label: "Outside access", detail, tone: "quiet" };
   }
@@ -5162,6 +5334,7 @@ function WatchingView({ state, mutate, refreshState, setView }: { state: OpenPre
   const [purpose, setPurpose] = useState("");
   const [explorationBrief, setExplorationBrief] = useState("");
   const [tab, setTab] = useState<"watchlist" | "explorations">("explorations");
+  const [watchingSection, setWatchingSection] = useState<"all" | "people">("all");
   const [selectedExplorationId, setSelectedExplorationId] = useState<string | null>(null);
   const [editingExplorationId, setEditingExplorationId] = useState<string | null>(null);
   const [editingBrief, setEditingBrief] = useState("");
@@ -5293,7 +5466,12 @@ function WatchingView({ state, mutate, refreshState, setView }: { state: OpenPre
       actionsClassName="heading-actions"
       actions={<Button variant="primary" onClick={() => { setReviewing((value) => !value); setTab("explorations"); }}><Plus size={14} /> New exploration</Button>}
     />
-    <div className="watch-tabs" role="tablist" aria-label="Watching categories">
+    <div className="watching-category-tabs" role="tablist" aria-label="Watching categories">
+      <button type="button" role="tab" aria-selected={watchingSection === "all"} className={watchingSection === "all" ? "active" : ""} onClick={() => setWatchingSection("all")}>All</button>
+      <button type="button" role="tab" aria-selected={watchingSection === "people"} className={watchingSection === "people" ? "active" : ""} onClick={() => setWatchingSection("people")}>People</button>
+    </div>
+    {watchingSection === "people" ? <PeopleViewLazy state={state} mutate={mutate} Button={Button} SectionEyebrow={SectionEyebrow} PageHeader={PageHeader} ChannelAvatar={ChannelAvatar} channelLabel={channelLabel} formatTime={formatTime} formatDateTime={formatDateTime} watchRelationshipPolicy={watchRelationshipPolicy} watchPolicyFromPurpose={watchPolicyFromPurpose} watchPlanSummary={watchPlanSummary} initialFilterMode="watched" /> : <>
+    <div className="watch-tabs" role="tablist" aria-label="Watching modes">
       <button type="button" role="tab" aria-selected={tab === "explorations"} className={tab === "explorations" ? "active" : ""} onClick={() => setTab("explorations")}>Explorations <span>{explorations.filter((item) => item.status !== "archived").length}</span></button>
       <button type="button" role="tab" aria-selected={tab === "watchlist"} className={tab === "watchlist" ? "active" : ""} onClick={() => { setTab("watchlist"); setReviewing(false); }}>Watchlist <span>{watches.length}</span></button>
     </div>
@@ -5331,6 +5509,7 @@ function WatchingView({ state, mutate, refreshState, setView }: { state: OpenPre
     {tab === "explorations" && <>
       {reviewing && <section className="exploration-composer" aria-label="Create an Exploration"><div><SectionEyebrow>New Exploration</SectionEyebrow><h2>What should {presence.name} keep an eye on?</h2><p>Describe the conversations, problems, people, or developments that would be useful for {presence.name} to notice.</p></div><textarea aria-label="What should this Presence keep an eye on?" value={explorationBrief} onChange={(event) => setExplorationBrief(event.target.value)} placeholder="People struggling with agent infrastructure or asking how to deploy persistent agents." rows={4} />{explorationBrief.trim() && <div className="watch-review" aria-label="Exploration review"><div><SectionEyebrow>Genny understands this as</SectionEyebrow><p>{explorationInterpretation(explorationBrief)}</p></div><div><span>Use</span><strong>Discover social evidence</strong></div><div><span>Boundary</span><strong>Looking does not authorize speaking</strong></div><div><span>Scope</span><strong>{presence.name} · {channelLabel(presence.channel, state.channelDefinitions)}</strong></div></div>}<div className="watch-form-actions"><Button variant="ghost" onClick={() => { setReviewing(false); setExplorationBrief(""); }}>Cancel</Button><Button variant="primary" disabled={busy || explorationBrief.trim().length < 8} onClick={() => void startExploration()}>{busy ? "Starting…" : "Start exploring"}</Button></div></section>}
       {!explorations.length ? <section className="watching-empty"><div className="watch-empty-mark"><Eye size={23} /></div><SectionEyebrow>Explorations</SectionEyebrow><h2>Give {presence.name} a reason to look around.</h2><p>Explorations are durable areas of attention. They discover evidence first; {presence.name} still decides whether anything deserves a Social Intent, memory, or silence.</p><Button variant="primary" onClick={() => setReviewing(true)}><Plus size={14} /> New exploration</Button></section> : <div className="exploration-layout"><section className="exploration-list" aria-label="Explorations">{explorations.filter((item) => item.status !== "archived").map((item) => <button type="button" key={item.id} className={`exploration-row ${selectedExploration?.id === item.id ? "active" : ""}`} onClick={() => setSelectedExplorationId(item.id)}><span className={`exploration-state exploration-state-${item.status}`} /> <span><strong>{item.title}</strong><small>{item.status === "active" ? "Active" : "Paused"} · {item.coverage.label}</small><em>{item.brief}</em></span><ChevronRight size={15} /></button>)}</section>{selectedExploration && <section className="exploration-detail" aria-label={`${selectedExploration.title} Exploration`}><div className="exploration-detail-header"><div><SectionEyebrow>Exploration · {channelLabel(selectedExploration.channel, state.channelDefinitions)}</SectionEyebrow><h2>{selectedExploration.title}</h2><p>{selectedExploration.brief}</p></div><span className={`watch-status ${selectedExploration.status === "active" ? "" : "watch-status-manual"}`}><span className="status-dot" /> {selectedExploration.status}</span></div>{editingExplorationId === selectedExploration.id ? <div className="exploration-edit"><label>What should {presence.name} keep an eye on?<textarea aria-label="Edit Exploration brief" value={editingBrief} onChange={(event) => setEditingBrief(event.target.value)} rows={4} /></label><div className="watch-form-actions"><Button variant="ghost" onClick={() => setEditingExplorationId(null)}>Cancel</Button><Button variant="primary" disabled={busyExplorationId === selectedExploration.id || editingBrief.trim().length < 8} onClick={() => void saveExploration()}>Save refinement</Button></div></div> : <><div className="exploration-interpretation"><SectionEyebrow>How {presence.name} is looking</SectionEyebrow><p>{selectedExploration.interpretation}</p></div><div className="exploration-coverage"><strong>{selectedExploration.coverage.label}</strong><span>{selectedExploration.coverage.detail}</span></div><ExplorationResponsibility exploration={selectedExploration} assignment={assignment} presence={presence} objectiveDraft={objectiveDraft} setObjectiveDraft={setObjectiveDraft} busy={busyExplorationId === selectedExploration.id} setEngagement={setEngagement} chromeStatus={chromeStatus} /><ExplorationRunMonitor exploration={selectedExploration} presence={presence} sessions={explorationSessions} lastSession={lastExplorationSession} artifacts={lastRunObjects} state={state} mutate={mutate} /><div className="exploration-meta"><span>Last looked {selectedExploration.lastLookedAt ? formatTime(selectedExploration.lastLookedAt) : "not yet"}</span><span>Brief revision {selectedExploration.revision}</span>{lastExplorationSession && <span className={lastExplorationSession.status === "completed" ? "" : "exploration-meta-warning"}>Last look {lastExplorationSession.status}{lastExplorationSession.failureReason ? ` · ${lastExplorationSession.failureReason}` : ""}</span>}</div><div className="exploration-actions"><Button variant="primary" disabled={busyExplorationId === selectedExploration.id || selectedExploration.status !== "active"} onClick={() => void lookNow(selectedExploration.id)}>{busyExplorationId === selectedExploration.id ? "Looking…" : "Look now"}</Button><Button variant="secondary" onClick={() => { setEditingExplorationId(selectedExploration.id); setEditingBrief(selectedExploration.brief); }}><Pencil size={14} /> Refine</Button><Button variant="ghost" onClick={() => void mutate({ type: "setExplorationStatus", id: selectedExploration.id, status: selectedExploration.status === "active" ? "paused" : "active" })}>{selectedExploration.status === "active" ? <><Pause size={14} /> Pause</> : <><Play size={14} /> Resume</>}</Button><Button variant="ghost" onClick={() => void mutate({ type: "setExplorationStatus", id: selectedExploration.id, status: "archived" })}>Archive</Button></div><div className="exploration-findings"><SectionEyebrow>Recent worthwhile findings</SectionEyebrow>{findings.length ? findings.map((finding) => { const object = state.mirrorObjects.find((item) => item.id === finding.mirrorObjectId); return <article className="exploration-finding" key={finding.id}><div><strong>{object?.author?.handle ? `@${object.author.handle}` : object?.author?.displayName ?? "Social object"}</strong><p>{finding.safeSummary}</p><small>{finding.whyItMayMatter}</small></div>{object && <Button variant="secondary" onClick={() => void mutate({ type: "askPresenceToEvaluate", presenceId: presence.id, objectId: object.id })}>Ask {presence.name} to evaluate</Button>}</article>; }) : <p className="muted">No worthwhile findings yet. A look can complete successfully with silence.</p>}</div></>}</section>}</div>}
+    </>}
     </>}
   </div>;
 }
@@ -6292,9 +6471,11 @@ function AssetsView({ state, refreshState }: { state: OpenPresenceState; refresh
   const visibleAssets = (results ? scopedAssets.filter((asset) => results.includes(asset.id)) : scopedAssets);
   const usage = (assetId: string) => new Set(state.assetUsages.filter((item) => item.assetId === assetId && item.environment === "live").map((item) => item.publicationId)).size;
   const scopeLabel = selected?.accessScope?.mode === "selected_presences" ? `${selected.accessScope.presenceIds.length} selected Presence${selected.accessScope.presenceIds.length === 1 ? "" : "s"}` : "All Agent Presences";
-  const readyCount = scopedAssets.filter((asset) => eligibleForPresence(asset) && readiness(asset) === "Ready").length;
-  const reviewCount = scopedAssets.filter((asset) => eligibleForPresence(asset) && readiness(asset) === "Needs review").length;
+  const postedAssetCooldown = (asset: typeof assets[number]) => assetPostingUnavailableUntil(state, asset, presence?.id);
+  const readyCount = scopedAssets.filter((asset) => eligibleForPresence(asset) && !postedAssetCooldown(asset) && readiness(asset) === "Ready").length;
+  const reviewCount = scopedAssets.filter((asset) => eligibleForPresence(asset) && !postedAssetCooldown(asset) && readiness(asset) === "Needs review").length;
   const usedCount = scopedAssets.filter((asset) => usage(asset.id) > 0).length;
+  const unavailableCount = scopedAssets.filter((asset) => eligibleForPresence(asset) && Boolean(postedAssetCooldown(asset))).length;
   const fileNameFor = (asset: typeof assets[number]) => asset.sourceOccurrences?.[0]?.fileName ?? "Imported visual";
   const titleFor = (asset: typeof assets[number]) => {
     const observationText = asset.perception?.observation?.trim();
@@ -6328,7 +6509,7 @@ function AssetsView({ state, refreshState }: { state: OpenPresenceState; refresh
     {error && <div className="toast-error" role="alert"><CircleAlert size={16} /> {error}</div>}
     <section className="asset-overview" aria-label="Asset library overview">
       <div className="asset-overview-intro"><div className="asset-overview-mark"><Layers size={18} /></div><div><SectionEyebrow>At a glance</SectionEyebrow><strong>{agent?.name ?? "This Agent"}&apos;s visual library</strong><p>{presence?.name ?? "Active Presence"} can use assets that are ready and in scope.</p></div></div>
-      <dl className="asset-overview-stats"><div><dt>In view</dt><dd>{scopedAssets.length}</dd><small>{selectedCollection?.name ?? "All folders"}</small></div><div className="is-ready"><dt>Ready to use</dt><dd>{readyCount}</dd><small>{readyCount === scopedAssets.length && scopedAssets.length ? "Nothing waiting" : "Available now"}</small></div><div className={reviewCount ? "is-review" : ""}><dt>Needs review</dt><dd>{reviewCount}</dd><small>{reviewCount ? "Check before publishing" : "All caught up"}</small></div><div><dt>Used publicly</dt><dd>{usedCount}</dd><small>Verified publications</small></div></dl>
+      <dl className="asset-overview-stats"><div><dt>In view</dt><dd>{scopedAssets.length}</dd><small>{selectedCollection?.name ?? "All folders"}</small></div><div className="is-ready"><dt>Ready to use</dt><dd>{readyCount}</dd><small>{readyCount === scopedAssets.length && scopedAssets.length ? "Nothing waiting" : "Available now"}</small></div><div className={reviewCount ? "is-review" : ""}><dt>Needs review</dt><dd>{reviewCount}</dd><small>{reviewCount ? "Check before publishing" : "All caught up"}</small></div><div className={unavailableCount ? "is-review" : ""}><dt>Cooling down</dt><dd>{unavailableCount}</dd><small>{unavailableCount ? "Unavailable to post" : "No reuse holds"}</small></div><div><dt>Used publicly</dt><dd>{usedCount}</dd><small>Verified publications</small></div></dl>
     </section>
     <div className={`assets-layout ${!selected ? "assets-layout-empty" : ""}`}>
       <main className="assets-main">
@@ -6339,7 +6520,7 @@ function AssetsView({ state, refreshState }: { state: OpenPresenceState; refresh
           <div className="assets-summary"><span>{visibleAssets.length} shown</span>{results && <span className="assets-summary-filter">Search results</span>}<span>{agent?.name ?? "Agent"} · {presence?.name ?? "Active Presence"}</span>{selectedCollection && <span>Folder: {selectedCollection.name}</span>}</div>
         </section>
         <section className="assets-panel" aria-labelledby="assets-library-title"><div className="assets-section-heading"><div><SectionEyebrow>Agent-owned library</SectionEyebrow><h2 id="assets-library-title">{agent?.name ?? "Agent"}&apos;s visuals</h2><p className="muted">Select a visual to inspect its evidence, provenance, and Presence access.</p></div><span className="asset-library-count">{visibleAssets.length} {visibleAssets.length === 1 ? "visual" : "visuals"}</span></div>
-          <div className="asset-card-grid">{visibleAssets.map((asset) => { const eligible = eligibleForPresence(asset); return <button type="button" className={`asset-card ${selected?.id === asset.id ? "selected" : ""} ${!eligible ? "asset-card-ineligible" : ""}`} key={asset.id} onClick={() => setSelectedId(asset.id)}><div className="asset-card-preview">{eligible ? previewFor(asset, titleFor(asset)) : <><ShieldCheck size={22} /><span>Unavailable to {presence?.name ?? "this Presence"}</span></>}</div><div className="asset-card-body"><div className="asset-card-topline"><strong title={fileNameFor(asset)}>{titleFor(asset)}</strong><span className={`asset-status asset-status-${(eligible ? readiness(asset) : "Unavailable").toLowerCase().replaceAll(" ", "-")}`}>{eligible ? readiness(asset) : "Unavailable"}</span></div><p>{eligible ? (asset.perception?.observation ?? "Asset metadata is waiting for review.") : "This visual is Agent-owned but outside the active Presence scope."}</p><small>{fileNameFor(asset)} · Used {usage(asset.id)}×</small></div></button>; })}{!visibleAssets.length && <div className={`assets-empty ${assets.length ? "assets-empty-filtered" : "assets-empty-first-run"}`}><div className="assets-empty-mark"><Layers size={24} strokeWidth={1.7} /></div><div className="assets-empty-copy"><strong>{assets.length ? "No assets match that search" : `No assets for ${agent?.name ?? "this Agent"} yet`}</strong><p>{assets.length ? "Try a different search, or clear the filter." : `Add assets so ${agent?.name ?? "this Agent"} can find the right visual when a post needs one.`}</p></div>{!assets.length && <div className="assets-empty-actions"><Button type="button" variant="primary" onClick={() => fileInputRef.current?.click()}><Plus size={14} /> Add assets</Button><Button type="button" variant="secondary" onClick={() => folderInputRef.current?.click()}><FolderOpen size={14} /> Choose a folder</Button></div>}</div>}</div>
+          <div className="asset-card-grid">{visibleAssets.map((asset) => { const eligible = eligibleForPresence(asset); const unavailableUntil = postedAssetCooldown(asset); const availableForPosting = eligible && !unavailableUntil; return <button type="button" className={`asset-card ${selected?.id === asset.id ? "selected" : ""} ${!availableForPosting ? "asset-card-ineligible" : ""} ${unavailableUntil ? "asset-card-cooldown" : ""}`} key={asset.id} onClick={() => setSelectedId(asset.id)}><div className={`asset-card-preview ${unavailableUntil ? "asset-card-preview-cooldown" : ""}`}>{availableForPosting ? previewFor(asset, titleFor(asset)) : unavailableUntil ? <><div className="asset-card-preview-media">{previewFor(asset, titleFor(asset))}</div><div className="asset-card-preview-overlay" aria-hidden="true"><ShieldCheck size={22} /><span>Unavailable until {new Date(unavailableUntil).toLocaleDateString()}</span></div></> : <><ShieldCheck size={22} /><span>Unavailable to {presence?.name ?? "this Presence"}</span></>}</div><div className="asset-card-body"><div className="asset-card-topline"><strong title={fileNameFor(asset)}>{titleFor(asset)}</strong><span className={`asset-status asset-status-${(availableForPosting ? readiness(asset) : "Unavailable").toLowerCase().replaceAll(" ", "-")}`}>{availableForPosting ? readiness(asset) : "Unavailable"}</span></div><p>{unavailableUntil ? `Published by ${presence?.name ?? "this Presence"}; held from posting until ${new Date(unavailableUntil).toLocaleDateString()}.` : eligible ? (asset.perception?.observation ?? "Asset metadata is waiting for review.") : "This visual is Agent-owned but outside the active Presence scope."}</p><small>{fileNameFor(asset)} · Used {usage(asset.id)}×</small></div></button>; })}{!visibleAssets.length && <div className={`assets-empty ${assets.length ? "assets-empty-filtered" : "assets-empty-first-run"}`}><div className="assets-empty-mark"><Layers size={24} strokeWidth={1.7} /></div><div className="assets-empty-copy"><strong>{assets.length ? "No assets match that search" : `No assets for ${agent?.name ?? "this Agent"} yet`}</strong><p>{assets.length ? "Try a different search, or clear the filter." : `Add assets so ${agent?.name ?? "this Agent"} can find the right visual when a post needs one.`}</p></div>{!assets.length && <div className="assets-empty-actions"><Button type="button" variant="primary" onClick={() => fileInputRef.current?.click()}><Plus size={14} /> Add assets</Button><Button type="button" variant="secondary" onClick={() => folderInputRef.current?.click()}><FolderOpen size={14} /> Choose a folder</Button></div>}</div>}</div>
         </section>
         <section className="assets-panel"><div className="assets-section-heading"><div><SectionEyebrow>Add assets{selectedCollection ? ` to ${selectedCollection.name}` : ` to ${agent?.name ?? "this Agent"}`}</SectionEyebrow><h2>Choose a folder</h2><p className="muted">Select a folder from your computer. Its images are copied into this Agent&apos;s library and analyzed with vision so the Agent can reuse them when creating posts.</p></div><FolderOpen size={20} /></div>{importProgressPanel}<form className="asset-folder-form" onSubmit={(event) => void connectFolder(event)}><input ref={folderInputRef} className="sandbox-file-input" type="file" accept="*/*" multiple aria-label="Choose a folder of assets" onChange={(event) => { selectFolder(event.target.files); event.target.value = ""; }} {...({ webkitdirectory: "", directory: "" } as unknown as React.InputHTMLAttributes<HTMLInputElement>)} /><div className={`asset-folder-picker ${selectedFolderFiles.length ? "selected" : ""}`}><FolderOpen size={18} /><span><strong>{selectedFolderName || "No folder selected"}</strong><small>{selectedFolderFiles.length ? `${selectedFolderFiles.length} asset${selectedFolderFiles.length === 1 ? "" : "s"} ready to add` : "Click Choose folder to browse your computer"}</small></span><Button type="button" variant="secondary" onClick={() => folderInputRef.current?.click()} disabled={busy === "folder"}><FolderOpen size={14} /> Choose folder</Button></div><label>Vision analysis<select value={policy} onChange={(event) => setPolicy(event.target.value as typeof policy)}><option value="analyze-new">Analyze new files</option><option value="analyze-existing-and-new">Analyze all files</option></select></label><Button type="submit" variant="secondary" disabled={busy === "folder" || !selectedFolderFiles.length}>{busy === "folder" ? "Adding…" : "Add folder"}</Button></form></section>
       </main>
@@ -6453,6 +6634,17 @@ function KnowledgeView({ state, mutate }: { state: OpenPresenceState; mutate: Mu
   </div>;
 }
 
+function ChatModePicker({ mode, setView }: { mode: "chat" | "teach"; setView: (view: View) => void }) {
+  return <label className="chat-mode-picker">
+    <span>Mode</span>
+    <select aria-label="Chat mode" value={mode} onChange={(event) => setView(event.target.value as "chat" | "teach")}>
+      <option value="chat">Chat</option>
+      <option value="teach">Teach</option>
+    </select>
+    <ChevronDown size={13} aria-hidden="true" />
+  </label>;
+}
+
 function TeachView({
   state,
   mutate,
@@ -6536,6 +6728,7 @@ function TeachView({
         className="teach-heading"
         eyebrow="Agent teaching"
         title="Teach the Agent through conversation."
+        titleAdornment={<ChatModePicker mode="teach" setView={setView} />}
         description={<>Tell {agent.name} what to notice, protect, pursue, or leave alone. This transcript stays with {agent.name}; durable meaning belongs in Brain.</>}
       />
       <div
@@ -6953,7 +7146,7 @@ function OperatorChatActionTimelineEvent({ event }: { event: OperatorConversatio
   </div>;
 }
 
-function OperatorChatView({ state, mutate, refreshState }: { state: OpenPresenceState; mutate: Mutate; refreshState: () => Promise<OpenPresenceState> }) {
+function OperatorChatView({ state, mutate, refreshState, setView }: { state: OpenPresenceState; mutate: Mutate; refreshState: () => Promise<OpenPresenceState>; setView: (view: View) => void }) {
   const presence = state.presence ?? state.presences[0]!;
   const conversation = (state.operatorConversations ?? []).find((item) => item.presenceId === presence.id);
   const nudges = state.operatorNudges ?? [];
@@ -7004,7 +7197,10 @@ function OperatorChatView({ state, mutate, refreshState }: { state: OpenPresence
   }, [message]);
   useEffect(() => {
     if (!hasUnfinishedNudges) return;
-    const timer = window.setInterval(() => void refreshStateRef.current().catch(() => undefined), 1_500);
+    const timer = window.setInterval(() => {
+      if (!browserDocumentIsVisible()) return;
+      void refreshStateRef.current().catch(() => undefined);
+    }, 1_500);
     return () => window.clearInterval(timer);
   }, [hasUnfinishedNudges, presence.id]);
   const addFile = (file: File) => {
@@ -7095,7 +7291,7 @@ function OperatorChatView({ state, mutate, refreshState }: { state: OpenPresence
     }
   };
   return <div className="page page-chat operator-chat-page">
-    <PageHeader className="chat-heading" eyebrow="Private operator conversation" title={`Chat with ${presence.name}`} titleAdornment={<button type="button" className="operator-chat-copy-button" aria-label={conversationCopied ? "Conversation copied" : "Copy conversation"} title={conversationCopied ? "Conversation copied" : "Copy conversation"} onClick={() => void copyConversation()}>{conversationCopied ? <Check size={16} /> : <Copy size={16} />}<span className="sr-only">{conversationCopied ? "Conversation copied" : "Copy conversation"}</span></button>} description={`Talk with ${presence.name} about what is happening, share something interesting, or suggest a next move. ${presence.name} will work out whether to answer, look closer, or act.`} />
+    <PageHeader className="chat-heading" eyebrow="Private operator conversation" title={`Chat with ${presence.name}`} titleAdornment={<><ChatModePicker mode="chat" setView={setView} /><button type="button" className="operator-chat-copy-button" aria-label={conversationCopied ? "Conversation copied" : "Copy conversation"} title={conversationCopied ? "Conversation copied" : "Copy conversation"} onClick={() => void copyConversation()}>{conversationCopied ? <Check size={16} /> : <Copy size={16} />}<span className="sr-only">{conversationCopied ? "Conversation copied" : "Copy conversation"}</span></button></>} description={`Talk with ${presence.name} about what is happening, share something interesting, or suggest a next move. ${presence.name} will work out whether to answer, look closer, or act.`} />
     <div className="chat-layout operator-chat-layout">
       <section className="chat-thread operator-chat-thread">
         {presence.status === "paused" && <div className="operator-chat-paused" role="status"><Pause size={15} /> {presence.name} is paused. Messages will be delivered and held without waking or invoking her.</div>}
@@ -7114,7 +7310,7 @@ function OperatorChatView({ state, mutate, refreshState }: { state: OpenPresence
           </article>{anchoredActions.length > 0 && <div className="operator-chat-action-timeline" aria-label="Actions from this conversation">{anchoredActions.map((event) => <OperatorChatActionTimelineEvent key={event.id} event={event} />)}</div>}</Fragment>;
         })}
         {(sending || hasUnfinishedChatRun) && presence.status !== "paused" && <div className="operator-chat-thinking" role="status" aria-live="polite" data-testid="operator-chat-thinking">
-          <PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} />
+          <PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} avatarUrl={presencePlatformAvatarUrl(state, presence)} />
           <span>{presence.name} is thinking</span>
           <span className="thinking-dots" aria-hidden="true"><i /> <i /> <i /></span>
         </div>}
@@ -7301,7 +7497,7 @@ function PresenceChatView({
                 const target = item.replyToMessageId ? messages.find((message) => message.id === item.replyToMessageId) : undefined;
                 return <article key={item.id} className={`social-card presence-chat-card ${item.role === "presence" ? `agent-authored thread-reply-card${item.operatorFeedback ? " operator-feedback-card" : ""}` : ""}`}>
                   <div className="social-card-meta">
-                    {item.role === "presence" ? <PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} /> : <span className="actor-avatar">{initials("You")}</span>}
+                    {item.role === "presence" ? <PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} avatarUrl={presencePlatformAvatarUrl(state, presence)} /> : <span className="actor-avatar">{initials("You")}</span>}
                     <span>
                       <strong>{item.role === "presence" ? presence.name : "You"}</strong>
                       <small>{item.role === "presence" ? item.operatorFeedback ? "Operator feedback" : "Genny · Reply" : item.replyToMessageId ? "@you · Reply as you" : "@you · Post"}</small>
@@ -7682,7 +7878,7 @@ function ChatThinkingMessage({ name, accent, feed = false }: { name: string; acc
         <span><strong>{name}</strong><small>Replying</small></span>
         <time>Now</time>
       </div>
-      <small className="thread-context">↳ Considering a reply in the feed</small>
+      <small className="thread-context">↳ Considering a reply in a public conversation</small>
       <div className="thinking-copy">
         <span>Considering</span>
         <span className="thinking-dots" aria-hidden="true"><i /> <i /> <i /></span>
@@ -8187,7 +8383,7 @@ function LiveView({
     ? (recentFailure.status === "expired" && expiredDeliveryIsRecoverable ? undefined : recentFailure)
     : undefined;
   const latestFailure = currentFailedExecution ? deliveryFailureExplanation(currentFailedExecution.failure, selected?.handle) : undefined;
-  const [activeSubtab, setActiveSubtab] = useState<"activity" | "queue" | "assignments" | "requests" | "failures" | "system_log">(healthFocusKey ? "failures" : "activity");
+  const [activeSubtab, setActiveSubtab] = useState<"activity" | "needs_you" | "queue" | "assignments" | "requests" | "failures" | "system_log">(healthFocusKey ? "needs_you" : "activity");
   const scopedAssignments = state.assignments.filter(
     (item) =>
       (!selected?.id || item.presenceId === selected.id) &&
@@ -8196,6 +8392,7 @@ function LiveView({
         ? item.environment === "sandbox" && (!item.sessionId || activitySessionIds.has(item.sessionId))
         : item.environment !== "sandbox" && !item.sessionId)
   );
+  const switchActivityTab = (tab: "activity" | "queue" | "assignments" | "failures") => setActiveSubtab(tab);
   const openAssignments = scopedAssignments.filter((item) => !["completed", "completed_with_adaptation", "cancelled"].includes(item.status));
   const recentlyCompletedAssignment = (state.assignments ?? []).find((assignment) =>
     assignment.presenceId === selected?.id &&
@@ -8273,6 +8470,15 @@ function LiveView({
         ? item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && activitySessionIds.has(item.sessionId)))
         : item.environment !== "sandbox" && !item.sessionId)
   );
+  const needsYouIncidents = operationalHealth?.incidents.filter((incident) => incident.state === "needs_operator" || incident.operatorActionRequired) ?? [];
+  const pendingApprovalExecutions = scopedExecutions.filter((execution) => execution.status === "awaiting-review");
+  const operatorQueueAssignments = state.assignments.filter((assignment) =>
+    (!selected?.id || assignment.presenceId === selected.id) &&
+    (activityEnvironment === "sandbox" ? assignment.environment === "sandbox" : assignment.environment !== "sandbox") &&
+    ["needs_operator", "blocked"].includes(assignment.status),
+  );
+  const blockedAssignments = operatorQueueAssignments;
+  const operatorQueueCount = needsYouIncidents.length + pendingApprovalExecutions.length + blockedAssignments.length;
   const activeCapabilityTrial = (state.capabilityTrials ?? []).find((trial) =>
     (!selected?.id || trial.presenceId === selected.id) &&
     ["draft", "preflight", "active", "discovering", "judging", "awaiting_execution", "awaiting_verification"].includes(trial.status) &&
@@ -8456,7 +8662,7 @@ function LiveView({
     : focusNeedsReview
       ? "Next: Review the draft before it is sent."
       : focusIsConfirming
-        ? "Next: Verify the live post in the feed."
+        ? "Next: Verify the live post in Activity."
         : focusIsSending
           ? "Next: Wait for X to confirm the post."
           : focusIsCompleted || focusedAssignmentExecution?.status === "succeeded"
@@ -8497,10 +8703,24 @@ function LiveView({
   // Stream is the primary Activity surface. Keep it visible on first paint so
   // a loaded count never looks like a stalled or empty page.
   const [showActivityDetails, setShowActivityDetails] = useState(true);
+  const [healthHighlightVisible, setHealthHighlightVisible] = useState(false);
   useEffect(() => {
     if (!healthFocusKey) return;
-    window.setTimeout(() => document.getElementById("failed-attempts-review")?.scrollIntoView({ behavior: "smooth", block: "start" }), 0);
-  }, [healthFocusKey]);
+    if (activeSubtab !== "needs_you") {
+      const focusFrame = window.requestAnimationFrame(() => setActiveSubtab("needs_you"));
+      return () => window.cancelAnimationFrame(focusFrame);
+    }
+    let clearHighlight: number | undefined;
+    const focusFrame = window.requestAnimationFrame(() => {
+      (document.getElementById("needs-you-queue") ?? document.getElementById("failed-attempts-review"))?.scrollIntoView({ behavior: "smooth", block: "start" });
+      setHealthHighlightVisible(true);
+      clearHighlight = window.setTimeout(() => setHealthHighlightVisible(false), 4200);
+    });
+    return () => {
+      window.cancelAnimationFrame(focusFrame);
+      if (clearHighlight !== undefined) window.clearTimeout(clearHighlight);
+    };
+  }, [healthFocusKey, activeSubtab]);
   const activeOperationalRun = activeObservationRun;
   const activityNow = selected
     ? state.activityNow?.[selected.id] ?? deriveActivityNow(state, selected.id, new Date(countdownNow))
@@ -8858,7 +9078,7 @@ function LiveView({
       )}
 
       {selected && (() => {
-        const pursuit = (state.assignmentPursuitWindows ?? []).find((item) => item.presenceId === selected.id && ["active", "paused"].includes(item.status));
+        const pursuit = (state.assignmentPursuitWindows ?? []).filter((item) => item.presenceId === selected.id && (isPromotionBurstWindow(item) ? ["active", "paused", "completed"].includes(item.status) : ["active", "paused"].includes(item.status))).sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())[0];
         if (!pursuit) return null;
         const assignment = state.assignments.find((item) => item.id === pursuit.assignmentId);
         return <AssignmentPursuitCard state={state} pursuit={pursuit} assignmentTitle={assignment?.title ?? "Existing distribution responsibility"} presenceName={presenceName} mutate={mutate} now={countdownNow} />;
@@ -9322,6 +9542,7 @@ function LiveView({
       <details className="activity-advanced-menu">
         <summary>Activity details <span>Review, history, and recovery</span></summary>
         <div className="activity-advanced-menu-actions">
+          {operatorQueueCount > 0 && <button type="button" onClick={() => { setShowActivityDetails(true); setActiveSubtab("needs_you"); }}><CircleAlert size={13} /> Needs You <span>{operatorQueueCount}</span></button>}
           {activity.needsAttention.count > 0 && <button type="button" onClick={() => { setShowActivityDetails(true); setActiveSubtab("queue"); }}>Review pending <span>{activity.needsAttention.count}</span></button>}
           <button type="button" onClick={() => { setShowActivityDetails(true); setActiveSubtab("requests"); }}><ShieldCheck size={13} /> Public requests <span>{pendingPublicRequestCount || publicRequests.length}</span></button>
           <button type="button" onClick={() => setView("schedule")}><Clock3 size={13} /> Schedule</button>
@@ -9379,7 +9600,7 @@ function LiveView({
               <button type="button" className="button button-secondary activity-attention-link" onClick={() => setActiveSubtab("queue")}>Open Agenda & Review</button>
             </section>
           )}
-          {selected && <ActivityRecentDone history={activityHistory} followExecutions={verifiedFollowExecutions} state={state} presenceName={presenceName} now={countdownNow} onOpenFeed={() => setView("feed")} />}
+          {selected && <ActivityRecentDone history={activityHistory} followExecutions={verifiedFollowExecutions} state={state} presenceName={presenceName} now={countdownNow} onOpenFeed={() => setView("live")} />}
           <div className="activity-main-grid">
             <div className="activity-left-column">
               <details className="activity-history-details">
@@ -9576,6 +9797,24 @@ function LiveView({
         </div>
       )}
 
+      {activeSubtab === "needs_you" && (
+        <div className="activity-tab-content needs-you-tab-layout">
+          <NeedsYouQueue
+            state={state}
+            health={operationalHealth}
+            executions={scopedExecutions}
+            assignments={operatorQueueAssignments}
+            onOpenActivity={() => setActiveSubtab("activity")}
+            onOpenAgenda={() => setActiveSubtab("queue")}
+            onOpenHealth={() => setActiveSubtab("failures")}
+            onOpenSettings={() => setView("presence")}
+            onOpenSchedule={() => setView("schedule")}
+            mutate={mutate}
+            onRefreshHealth={refreshHealth}
+          />
+        </div>
+      )}
+
       {activeSubtab === "queue" && (
         <div className="activity-tab-content queue-tab-layout">
           <div className="queue-tab-main">
@@ -9584,7 +9823,7 @@ function LiveView({
               presenceId={selected?.id}
               mutate={mutate}
               onContext={setSelectedContext}
-              onSwitchTab={setActiveSubtab}
+              onSwitchTab={switchActivityTab}
             />
             <div id="decision-and-action">
               <ExecutionLedger
@@ -9595,7 +9834,7 @@ function LiveView({
                 sessionIds={activitySessionIds}
                 onContext={setSelectedContext}
                 showAssignments={false}
-                onSwitchTab={setActiveSubtab}
+                onSwitchTab={switchActivityTab}
               />
             </div>
           </div>
@@ -9689,11 +9928,13 @@ function LiveView({
              state={state}
              executions={scopedExecutions}
              health={operationalHealth}
+             highlight={healthHighlightVisible}
              mutate={mutate}
             onRefreshHealth={refreshHealth}
             onContext={setSelectedContext}
             onOpenSettings={() => setView("presence")}
             onOpenSchedule={() => setView("schedule")}
+            onOpenQueue={() => setActiveSubtab("needs_you")}
           />
         </div>
       )}
@@ -9775,7 +10016,7 @@ function ActivityRecentDone({
           </section>)}
         </div>
       ) : (
-        <EmptyState title="No public activity yet" body={`${presenceName} is live and watching. Verified posts, replies, quotes, reposts, and likes will appear here.`} action={<Button variant="secondary" onClick={onOpenFeed}>Open Feed</Button>} />
+        <EmptyState title="No public activity yet" body={`${presenceName} is live and watching. Verified posts, replies, quotes, reposts, and likes will appear here.`} action={<Button variant="secondary" onClick={onOpenFeed}>Open Activity</Button>} />
       )}
     </section>
   );
@@ -10261,6 +10502,15 @@ function ActivityDecisionDisclosure({
           <div>{decision.influences.map((influence) => <span key={influence}>{influence}</span>)}</div>
         </div>
       )}
+      {decision.socialStrategy && (
+        <div className="activity-why-influences" style={{ marginTop: "8px" }}>
+          <strong>Strategy context</strong>
+          <div>
+            <span>{decision.socialStrategy.playbookId ? `${decision.socialStrategy.playbookId} v${decision.socialStrategy.playbookVersion ?? ""}` : "No built-in Playbook"}</span>
+            <span>{decision.socialStrategy.selectedByAct.filter((selection) => selection.patternId).map((selection) => selection.patternId).join(", ") || "No pattern selected · silence remains valid"}</span>
+          </div>
+        </div>
+      )}
       <details className="activity-why-technical" style={{ marginTop: "12px" }}>
         <summary>Lineage & Technical Trace</summary>
         <dl>
@@ -10737,24 +10987,183 @@ function RecentPublicAttempts({
   );
 }
 
+function NeedsYouQueue({
+  state,
+  health,
+  executions,
+  assignments,
+  onOpenActivity,
+  onOpenAgenda,
+  onOpenHealth,
+  onOpenSettings,
+  onOpenSchedule,
+  mutate,
+  onRefreshHealth,
+}: {
+  state: OpenPresenceState;
+  health?: OperationalHealthSnapshot | null;
+  executions: OpenPresenceState["executions"];
+  assignments: Assignment[];
+  onOpenActivity: () => void;
+  onOpenAgenda: () => void;
+  onOpenHealth: () => void;
+  onOpenSettings: () => void;
+  onOpenSchedule: () => void;
+  mutate: Mutate;
+  onRefreshHealth?: () => void;
+}) {
+  const [checkingIncidentId, setCheckingIncidentId] = useState<string | null>(null);
+  const [reviewPromptIncidentId, setReviewPromptIncidentId] = useState<string | null>(null);
+  const incidents = health?.incidents.filter((incident) => incident.state === "needs_operator" || incident.operatorActionRequired) ?? [];
+  const approvals = executions.filter((execution) => execution.status === "awaiting-review");
+  const blocked = assignments.filter((assignment) => ["needs_operator", "blocked"].includes(assignment.status));
+  const targetLabel = (execution: OpenPresenceState["executions"][number]) => {
+    const target = execution.target
+      ? state.mirrorObjects.find((object) => object.externalRef.type === execution.target?.type && object.externalRef.id === execution.target?.id)
+      : undefined;
+    return socialTargetLabel(target, "a selected post");
+  };
+  const recheckIncident = async (incident: NonNullable<OperationalHealthSnapshot["incidents"]>[number]) => {
+    if (checkingIncidentId) return;
+    const presenceId = state.presence?.id;
+    if (!presenceId) return;
+    const nativeConnection = state.nativeConnections.find((item) => item.presenceId === presenceId && item.kind === "x");
+    const shouldCheckNativeX = incident.rootCauseKey.startsWith("native_x.") || (
+      incident.rootCauseKey === "runtime.credits_exhausted"
+      && state.presences.some((item) => item.id === presenceId && item.channel === "x")
+      && xCreditsExhausted(nativeConnection)
+    );
+    const shouldCheckRuntime = incident.rootCauseKey.startsWith("runtime.") && !shouldCheckNativeX;
+    setCheckingIncidentId(incident.id);
+    try {
+      await mutate(
+        shouldCheckNativeX
+          ? { type: "syncNativeX", presenceId, manual: true, incidentId: incident.id }
+          : shouldCheckRuntime
+            ? { type: "recheckRuntime", presenceId, incidentId: incident.id }
+            : { type: "recheckModelProvider", presenceId, incidentId: incident.id },
+      );
+      onRefreshHealth?.();
+    } finally {
+      setCheckingIncidentId(null);
+    }
+  };
+  const resolveReviewedDuplicate = async (incident: NonNullable<OperationalHealthSnapshot["incidents"]>[number]) => {
+    if (checkingIncidentId || incident.affectedRunIds.length > 0) return;
+    setCheckingIncidentId(incident.id);
+    try {
+      await mutate({ type: "recheckRuntime", presenceId: state.presence?.id, incidentId: incident.id });
+      onRefreshHealth?.();
+    } finally {
+      setCheckingIncidentId(null);
+      setReviewPromptIncidentId(null);
+    }
+  };
+  const incidentAction = (incident: NonNullable<OperationalHealthSnapshot["incidents"]>[number]) => {
+    if (incident.requiresAuth) return { label: "Open connection settings", onClick: onOpenSettings };
+    if (incident.rootCauseKey === "runtime.duplicate_public_outcome") {
+      if (incident.affectedRunIds.length === 0) return { label: checkingIncidentId === incident.id ? "Resuming…" : "I reviewed it · resume", onClick: () => void resolveReviewedDuplicate(incident), disabled: checkingIncidentId !== null };
+      return { label: "Review public activity", onClick: onOpenActivity };
+    }
+    if (incident.rootCauseKey.startsWith("runtime.")) return { label: checkingIncidentId === incident.id ? "Checking runtime…" : "Check runtime now", onClick: () => void recheckIncident(incident), disabled: checkingIncidentId !== null };
+    return { label: "Open health details", onClick: onOpenHealth };
+  };
+
+  return (
+    <section className="needs-you-queue" aria-label="Needs You operator queue" data-testid="needs-you-queue">
+      <header className="needs-you-queue-header">
+        <div>
+          <SectionEyebrow>Operator queue</SectionEyebrow>
+          <h2>Needs You</h2>
+          <p>These are decisions that cannot be made safely by the Presence. Settings change configuration; this queue tells you what needs a decision now.</p>
+        </div>
+        <span className="needs-you-queue-count" aria-label={`${incidents.length + approvals.length + blocked.length} decisions needing attention`}>
+          {incidents.length + approvals.length + blocked.length}
+        </span>
+      </header>
+
+      {incidents.map((incident) => {
+        const action = incidentAction(incident);
+        const incidentDetail = incident.rootCauseKey === "runtime.duplicate_public_outcome" && incident.affectedRunIds.length === 0
+          ? "No affected action remains active. Review the public activity, then resume normal delivery."
+          : `${incident.affectedRunIds.length} affected action${incident.affectedRunIds.length === 1 ? "" : "s"}. The automatic recovery budget is exhausted; review the context before continuing.`;
+        return (
+          <article className="needs-you-queue-card needs-you-queue-card-incident" key={incident.id}>
+            <div className="needs-you-queue-card-topline"><span className="needs-you-queue-badge">Needs You</span><span>Recovery decision</span></div>
+            <h3>{incident.safeSummary}</h3>
+            <p>{incidentDetail}</p>
+            <div className="needs-you-queue-card-actions">
+              {reviewPromptIncidentId === incident.id ? (
+                <div className="needs-you-queue-review-confirmation" role="alertdialog" aria-label="Resume delivery confirmation">
+                  <strong>Resume normal delivery?</strong>
+                  <span>Only continue after reviewing Genny&apos;s public activity and confirming no duplicate action is still in progress.</span>
+                  <div>
+                    <button type="button" className="action-button secondary" onClick={() => void resolveReviewedDuplicate(incident)} disabled={checkingIncidentId !== null} aria-busy={checkingIncidentId === incident.id}>{checkingIncidentId === incident.id ? "Resuming…" : "Resume normal delivery"}</button>
+                    <button type="button" className="action-button ghost" onClick={() => setReviewPromptIncidentId(null)} disabled={checkingIncidentId !== null}>Keep quarantine</button>
+                  </div>
+                </div>
+              ) : (
+                <button type="button" className="action-button secondary" onClick={() => {
+                  if (incident.rootCauseKey === "runtime.duplicate_public_outcome" && incident.affectedRunIds.length === 0) {
+                    setReviewPromptIncidentId(incident.id);
+                    return;
+                  }
+                  action.onClick();
+                }} disabled={"disabled" in action && action.disabled} aria-busy={checkingIncidentId === incident.id}>{action.label}</button>
+              )}
+            </div>
+            <details className="needs-you-queue-technical"><summary>Technical details</summary><span>{incident.rootCauseKey} · Recovery attempt {incident.recoveryAttempts}</span></details>
+          </article>
+        );
+      })}
+
+      {approvals.map((execution) => (
+        <article className="needs-you-queue-card" key={execution.id}>
+          <div className="needs-you-queue-card-topline"><span className="needs-you-queue-badge needs-you-queue-badge-neutral">Review</span><span>Social action approval</span></div>
+          <h3>{formatAssignmentActionLabel(execution.affordance)} {targetLabel(execution)}</h3>
+          <p>Open the Agenda to review the proposed expression and approve or cancel it before delivery.</p>
+          <div className="needs-you-queue-card-actions"><button type="button" className="action-button secondary" onClick={onOpenAgenda}>Open Agenda &amp; Review</button></div>
+        </article>
+      ))}
+
+      {blocked.map((assignment) => (
+        <article className="needs-you-queue-card" key={assignment.id}>
+          <div className="needs-you-queue-card-topline"><span className="needs-you-queue-badge needs-you-queue-badge-neutral">Needs You</span><span>Assignment decision</span></div>
+          <h3>{assignment.title ?? cleanUserFacingAssignmentInstruction(assignment.instruction)}</h3>
+          <p>{assignment.work?.blockedReason ?? assignment.lastOutcome?.message ?? "This responsibility is blocked and needs an operator decision."}</p>
+          <div className="needs-you-queue-card-actions"><button type="button" className="action-button secondary" onClick={onOpenSchedule}>Open Assignment details</button></div>
+        </article>
+      ))}
+
+      {!incidents.length && !approvals.length && !blocked.length && (
+        <div className="needs-you-queue-empty"><strong>No operator decisions are waiting.</strong><span>When something genuinely needs you, it will appear here with its context and next action.</span></div>
+      )}
+    </section>
+  );
+}
+
 function FailedAttemptsReview({
   state,
   executions,
   health,
+  highlight = false,
   mutate,
   onRefreshHealth,
   onContext,
   onOpenSettings,
   onOpenSchedule,
+  onOpenQueue,
 }: {
   state: OpenPresenceState;
   executions: OpenPresenceState["executions"];
   health?: OperationalHealthSnapshot | null;
+  highlight?: boolean;
   mutate: Mutate;
   onRefreshHealth?: () => void;
   onContext?: (object: MirrorObject) => void;
   onOpenSettings?: () => void;
   onOpenSchedule?: () => void;
+  onOpenQueue?: () => void;
 }) {
   const [retryingExecutionId, setRetryingExecutionId] = useState<string | null>(null);
   const [reviewingExecutionId, setReviewingExecutionId] = useState<string | null>(null);
@@ -10870,9 +11279,16 @@ function FailedAttemptsReview({
       setCheckingIncidentId(null);
     }
   };
+  const operatorActionForIncident = (incident: NonNullable<OperationalHealthSnapshot["incidents"]>[number]) => {
+    if (incident.requiresAuth) return { label: "Open connection settings", onClick: onOpenSettings };
+    if (incident.rootCauseKey === "runtime.duplicate_public_outcome") return { label: "Review public activity", onClick: onOpenQueue };
+    if (incident.rootCauseKey.startsWith("runtime.")) return { label: checkingIncidentId === incident.id ? "Checking runtime…" : "Check runtime now", onClick: () => void recheckIncident(incident) };
+    return { label: "Open Needs You queue", onClick: onOpenQueue };
+  };
 
   return (
-    <section className="failed-attempts-review" id="failed-attempts-review" aria-label="Operating Health & Incident Overview">
+    <section className={`failed-attempts-review${highlight ? " attention-review-highlight" : ""}`} id="failed-attempts-review" aria-label="Operating Health & Incident Overview" aria-describedby={highlight ? "attention-review-highlight-status" : undefined}>
+      {highlight && <p className="sr-only" id="attention-review-highlight-status" role="status">Activity recovery review highlighted.</p>}
       {isAllHealthy ? (
         <div className="operating-health-card healthy" style={{ padding: "20px", background: "rgba(34, 197, 94, 0.08)", borderRadius: "10px", border: "1px solid rgba(34, 197, 94, 0.2)", marginBottom: "20px" }}>
           <div style={{ display: "flex", alignItems: "center", gap: "10px" }}>
@@ -10904,9 +11320,9 @@ function FailedAttemptsReview({
                   </button>
                   {onOpenSchedule && <button type="button" className="action-button secondary" style={{ fontSize: "11px", padding: "5px 10px" }} onClick={onOpenSchedule}>Open details</button>}
                 </div>
-              ) : health?.status === "needs_you" && (health.operatorAction?.kind === "schedule" ? onOpenSchedule : onOpenSettings) && (
-                <button type="button" className="action-button secondary" style={{ fontSize: "11px", padding: "5px 10px" }} onClick={health.operatorAction?.kind === "schedule" ? onOpenSchedule : onOpenSettings}>
-                  {health.operatorAction?.label ?? "Review Settings"}
+              ) : health?.status === "needs_you" && (health.operatorAction?.kind === "schedule" ? onOpenSchedule : onOpenQueue) && (
+                <button type="button" className="action-button secondary" style={{ fontSize: "11px", padding: "5px 10px" }} onClick={health.operatorAction?.kind === "schedule" ? onOpenSchedule : onOpenQueue}>
+                  {health.operatorAction?.kind === "schedule" ? (health.operatorAction.label ?? "Open Schedule") : "Open Needs You queue"}
                 </button>
               )}
             </div>
@@ -10921,9 +11337,9 @@ function FailedAttemptsReview({
             return <div className={`operating-health-card ${needsYou ? "needs-you" : waiting ? "waiting" : "recovering"}`} key={incident.id} style={{ padding: "18px", background: needsYou ? "rgba(239, 68, 68, 0.08)" : waiting ? "rgba(59, 130, 246, 0.08)" : "rgba(245, 158, 11, 0.08)", borderRadius: "10px", border: `1px solid ${needsYou ? "rgba(239, 68, 68, 0.3)" : waiting ? "rgba(59, 130, 246, 0.3)" : "rgba(245, 158, 11, 0.3)"}` }}>
               <div style={{ display: "flex", alignItems: "center", gap: "8px" }}><span style={{ fontSize: "11px", fontWeight: "700", textTransform: "uppercase", background: needsYou ? "#ef4444" : waiting ? "#3b82f6" : "#f59e0b", color: needsYou || waiting ? "#fff" : "#000", padding: "2px 8px", borderRadius: "4px" }}>{label}</span><strong style={{ fontSize: "14px" }}>{incident.safeSummary}</strong></div>
               <p style={{ margin: "8px 0 4px", fontSize: "12px", color: "var(--muted)" }}>{incident.affectedRunIds.length} affected action{incident.affectedRunIds.length === 1 ? "" : "s"} · {detail}</p>
-              {needsYou && onOpenSettings && (
-                <button type="button" className="action-button secondary" style={{ fontSize: "11px", padding: "5px 10px", marginTop: "4px" }} onClick={onOpenSettings}>
-                  Review Settings
+              {needsYou && operatorActionForIncident(incident).onClick && (
+                <button type="button" className="action-button secondary" style={{ fontSize: "11px", padding: "5px 10px", marginTop: "4px" }} onClick={operatorActionForIncident(incident).onClick}>
+                  {operatorActionForIncident(incident).label}
                 </button>
               )}
               {needsYou && (incident.rootCauseKey.endsWith(".credits_exhausted") || incident.rootCauseKey === "runtime.transient_error") && (
@@ -11867,6 +12283,7 @@ function ExecutionLedger({
   const [externalType, setExternalType] = useState("post");
   const [externalId, setExternalId] = useState("");
   const [stoppingExecution, setStoppingExecution] = useState(false);
+  const [confirmingDeletion, setConfirmingDeletion] = useState(false);
 
   const executions = state.executions
     .filter((item) => {
@@ -11903,7 +12320,10 @@ function ExecutionLedger({
       && (environment !== "sandbox" ? item.environment !== "sandbox" && !item.sessionId : item.environment === "sandbox" || (!item.environment && Boolean(item.sessionId && sessionIds?.has(item.sessionId)))))
     : undefined;
   const actionName = formatActivityAffordance(intent?.affordance ?? latest?.affordance);
-  const targetLabel = socialTargetLabel(actionContext, "the observed post");
+  const isDeletion = latest?.affordance === "x.delete" || actionName === "Delete";
+  const targetLabel = isDeletion
+    ? actionContext?.objectType === "reply" ? "your reply" : "your post"
+    : socialTargetLabel(actionContext, "the observed post");
   const actionSnippet = actionContext?.content?.text?.trim();
 
   if (!latest || !intent)
@@ -11941,12 +12361,19 @@ function ExecutionLedger({
 
   const stopPreDispatchExecution = async () => {
     if (stoppingExecution) return;
-    if (!window.confirm("Cancel this action before it is sent? No delivery will be attempted.")) return;
+    if (!window.confirm(isDeletion ? "Keep this post or reply on X? No deletion will be attempted." : "Cancel this action before it is sent? No delivery will be attempted.")) return;
     setStoppingExecution(true);
     try { await mutate({ type: "cancelExecution", id: latest.id }); } finally { setStoppingExecution(false); }
   };
 
-  const actionVerbPast = actionName === "Like" ? "Liked" : actionName === "Reply" ? "Replied to" : actionName === "Quote" ? "Quoted" : actionName === "Follow" ? "Followed" : `${actionName} to`;
+  const actionVerbPast = isDeletion ? "Deleted" : actionName === "Like" ? "Liked" : actionName === "Reply" ? "Replied to" : actionName === "Quote" ? "Quoted" : actionName === "Follow" ? "Followed" : `${actionName} to`;
+  const approveReviewAction = () => {
+    if (isDeletion && !confirmingDeletion) {
+      setConfirmingDeletion(true);
+      return;
+    }
+    void mutate({ type: "approveExecution", id: latest.id });
+  };
 
   return (
     <div className="execution-ledger-stack">
@@ -11957,7 +12384,7 @@ function ExecutionLedger({
             <SectionEyebrow>{pendingFromEarlierCheck ? "Pending from an earlier check" : "Decision & action"}</SectionEyebrow>
             <div className="execution-lead-headline">
               {isVerified && <Check size={18} className="verified-check" />}
-              <strong>{isVerified ? `${actionVerbPast} ${targetLabel}` : `${actionName} to ${targetLabel}`}</strong>
+              <strong>{isVerified ? `${actionVerbPast} ${targetLabel}` : isDeletion ? `Delete ${targetLabel}` : `${actionName} to ${targetLabel}`}</strong>
             </div>
           </div>
           <div>
@@ -11998,6 +12425,20 @@ function ExecutionLedger({
           <div className="action-context-card">
             <span>{actionSnippet ? `“${actionSnippet.slice(0, 150)}${actionSnippet.length > 150 ? "…" : ""}”` : "This post is the source context for the action."}</span>
             {onContext && <button type="button" className="action-context-button" onClick={() => onContext(actionContext)}>View post</button>}
+          </div>
+        )}
+
+        {isDeletion && isNeedsReview && (
+          <div className="execution-failure-card" role="note">
+            <strong>Remove this {actionContext?.objectType === "reply" ? "reply" : "post"} from X?</strong>
+            <span>This is a public, destructive action. OpenPresence will verify that X removed it, while keeping the original in your Presence history.</span>
+          </div>
+        )}
+
+        {isDeletion && confirmingDeletion && isNeedsReview && (
+          <div className="execution-failure-card" role="status">
+            <strong>Ready to confirm deletion</strong>
+            <span>Click Confirm deletion to remove this exact post or reply from X. Keep it leaves the public content untouched.</span>
           </div>
         )}
 
@@ -12047,16 +12488,16 @@ function ExecutionLedger({
           <div style={{ display: "flex", gap: "8px", marginTop: "10px" }}>
             <Button
               variant="primary"
-              onClick={() => mutate({ type: "approveExecution", id: latest.id })}
+              onClick={approveReviewAction}
             >
-              <Check size={14} /> Approve {actionName.toLowerCase()}
+              <Check size={14} /> {isDeletion ? confirmingDeletion ? "Confirm deletion" : "Review deletion" : `Approve ${actionName.toLowerCase()}`}
             </Button>
             <Button
               variant="secondary"
               disabled={stoppingExecution}
               onClick={() => void stopPreDispatchExecution()}
             >
-              <X size={13} /> Cancel
+              <X size={13} /> {isDeletion ? "Keep it" : "Cancel"}
             </Button>
           </div>
         )}
@@ -12096,15 +12537,15 @@ function ExecutionLedger({
             }}
           >
             <label>
-              External reference type
-              <input value={externalType} onChange={(event) => setExternalType(event.target.value)} />
+              {isDeletion ? "Deleted post reference type" : "External reference type"}
+              <input value={isDeletion ? "x.post" : externalType} onChange={(event) => setExternalType(event.target.value)} readOnly={isDeletion} />
             </label>
             <label>
-              External reference
-              <input value={externalId} onChange={(event) => setExternalId(event.target.value)} placeholder="post-123" required />
+              {isDeletion ? "Deleted post reference" : "External reference"}
+              <input value={externalId} onChange={(event) => setExternalId(event.target.value)} placeholder={isDeletion ? "The X post ID" : "post-123"} required />
             </label>
             <Button variant="secondary" type="submit">
-              <Check size={14} /> Mark posted
+              <Check size={14} /> {isDeletion ? "I deleted it on X" : "Mark posted"}
             </Button>
           </form>
         )}
@@ -12130,6 +12571,17 @@ function ExecutionLedger({
 
 const calendarWeekDays = ["Monday", "Tuesday", "Wednesday", "Thursday", "Friday", "Saturday", "Sunday"];
 const assignmentOccursOnDay = (assignment: Assignment, day: string) => assignment.schedule?.day === "Daily" || assignment.schedule?.day === day;
+const assignmentIsOneTime = (assignment: Assignment) => Boolean(assignment.schedule && assignment.activation?.type !== "continuous" && assignment.recurrence?.kind === "once");
+const assignmentIsRecurring = (assignment: Assignment) => !assignmentIsOneTime(assignment);
+const scheduleRecurrenceFilters = [
+  { value: "all", label: "ALL" },
+  { value: "recurring", label: "RECURRING" },
+  { value: "one-time", label: "ONE-TIME" },
+] as const;
+type ScheduleRecurrenceFilter = (typeof scheduleRecurrenceFilters)[number]["value"];
+const assignmentMatchesRecurrenceFilter = (assignment: Assignment, filter: ScheduleRecurrenceFilter) => filter === "all"
+  || (filter === "one-time" && assignmentIsOneTime(assignment))
+  || (filter === "recurring" && assignmentIsRecurring(assignment));
 const scheduleDayFilters = [
   { value: "Monday", label: "M" },
   { value: "Tuesday", label: "T" },
@@ -12146,7 +12598,7 @@ const objectiveLabel = (objective: string) => objective.replaceAll("_", " ").rep
 const objectiveTone = (objective: string) => objective.replace(/[^a-z0-9]+/gi, "-").toLowerCase() || "other";
 const assignmentObjective = (assignment: Assignment) => {
   if (assignment.objective) return assignment.objective;
-  if (assignment.deliverable.type === "audience_growth") return "audience_growth";
+  if (assignment.deliverable?.type === "audience_growth") return "audience_growth";
   const instruction = assignment.instruction.toLowerCase();
   if (/\bteach|lesson|explain|educat/.test(instruction)) return "education";
   if (/\brelationship|connection|introduction|person|people|conversation/.test(instruction)) return "relationship";
@@ -12196,6 +12648,31 @@ function publishingWindowCalendarPosition(window: PublishingPlan["windows"][numb
   const end = format(window.endAt);
   const endMinutes = end.day === start.day ? timeToMinutes(end.time) : 24 * 60;
   return { ...window, day: start.day, startTime: start.time, endTime: end.time, startMinutes: timeToMinutes(start.time), endMinutes };
+}
+
+function publishingWindowPresentation(window: PublishingPlan["windows"][number]) {
+  switch (window.purpose) {
+    case "research":
+      return {
+        title: "Find something worth sharing",
+        description: "Look at current conversations and evidence for one specific idea that could help the audience.",
+      };
+    case "develop":
+      return {
+        title: "Shape the strongest idea",
+        description: "Turn the best observation into a clear, useful point. Nothing is published unless it earns it.",
+      };
+    case "originate":
+      return {
+        title: "Publish useful original work",
+        description: "Share 1–2 useful original posts when there is something worth saying, using an Asset Library image when it genuinely helps.",
+      };
+    case "reassess":
+      return {
+        title: "Learn and adjust",
+        description: "Review what earned qualified attention and use that evidence to shape the next pass.",
+      };
+  }
 }
 
 type PublicHistoryFilter = "all" | "originals" | "replies" | "quote" | "repost" | "like";
@@ -12268,21 +12745,26 @@ function publicHistoryChannelTag(item: PublicHistoryItem, definitions: ChannelDe
 function PublicHistoryView({
   state,
   setView,
-  initialSurface,
   mutate,
+  initialSurface,
+  controlledSurface,
+  showSurfaceToggle = true,
 }: {
   state: OpenPresenceState;
-  initialSurface?: "timeline" | "calendar";
   setView: (view: View) => void;
   mutate: Mutate;
+  initialSurface?: "timeline" | "calendar";
+  controlledSurface?: "timeline" | "calendar";
+  showSurfaceToggle?: boolean;
 }) {
   const presenceId = state.activePresenceId ?? state.presence?.id ?? "";
   const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
   const mirrorHealth = mirrorHealthFor(state, presence);
-  const [surface, setSurface] = useState<"timeline" | "calendar">(() => {
+  const [localSurface, setLocalSurface] = useState<"timeline" | "calendar">(() => {
     if (initialSurface) return initialSurface;
     return typeof window !== "undefined" && new URLSearchParams(window.location.search).get("surface") === "calendar" ? "calendar" : "timeline";
   });
+  const surface = controlledSurface ?? localSurface;
   const [range, setRange] = useState<"week" | "month" | "day">("week");
   const [filter, setFilter] = useState<PublicHistoryFilter>(() => {
     const requested = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("filter") : null;
@@ -12300,7 +12782,7 @@ function PublicHistoryView({
     setSelected(null);
   };
   const selectHistorySurface = (next: "timeline" | "calendar") => {
-    setSurface(next);
+    if (controlledSurface === undefined) setLocalSurface(next);
     resetHistoryPosition();
   };
   const selectHistoryFilter = (next: PublicHistoryFilter) => {
@@ -12312,7 +12794,7 @@ function PublicHistoryView({
     if (!presence || !canSyncNativeX || refreshing) return;
     setRefreshing(true);
     try {
-      await mutate({ type: "syncNativeX", presenceId: presence.id, manual: true });
+      await mutate({ type: "syncNativeX", presenceId: presence.id, manual: true, reconcile: true });
     } finally {
       setRefreshing(false);
     }
@@ -12362,9 +12844,9 @@ function PublicHistoryView({
   return (
     <div className={`page public-history-page ${surface === "timeline" ? "timeline-surface" : "calendar-surface"}`}>
       <PageHeader
-        eyebrow="Verified public history"
-        title="Feed"
-        description={<>What {presence?.name ?? "this Presence"} has put into the world.</>}
+        eyebrow={surface === "timeline" ? "Activity timeline" : "Activity calendar"}
+        title={surface === "timeline" ? "Activity" : "Calendar"}
+        description={surface === "timeline" ? <>What {presence?.name ?? "this Presence"} has put into the world.</> : <>A calendar view of what {presence?.name ?? "this Presence"} has put into the world.</>}
         actionsClassName="heading-actions calendar-heading-actions"
         actions={<>
           <span className="scope-summary">{presence ? `${channelLabel(presence.channel, state.channelDefinitions)} · ${presence.name}` : "No Presence selected"}</span>
@@ -12373,10 +12855,10 @@ function PublicHistoryView({
         </>}
       />
       <div className="public-history-view-controls">
-        <div className="public-history-view-toggle" role="group" aria-label="Public history view">
+        {showSurfaceToggle && <div className="public-history-view-toggle" role="group" aria-label="Public history view">
           <button type="button" className={surface === "timeline" ? "active" : ""} aria-pressed={surface === "timeline"} onClick={() => selectHistorySurface("timeline")}>Timeline</button>
           <button type="button" className={surface === "calendar" ? "active" : ""} aria-pressed={surface === "calendar"} onClick={() => selectHistorySurface("calendar")}>Calendar</button>
-        </div>
+        </div>}
         <div className={`mirror-health mirror-health-${mirrorHealth.tone}`} aria-label={`Social Mirror status: ${mirrorHealth.label}`}>
           <span className="mirror-health-dot" aria-hidden="true" />
           <span><strong>{mirrorHealth.label}</strong><small>{mirrorHealth.detail}</small></span>
@@ -12390,7 +12872,7 @@ function PublicHistoryView({
       </div>
       <div className="history-toolbar">
         {surface === "timeline" ? (
-          <div className="feed-filter" role="group" aria-label="Feed filter">
+        <div className="feed-filter" role="group" aria-label="Activity filter">
             {(["all", "originals", "replies", "quote", "repost", "like"] as const).map((item) => <button type="button" key={item} className={filter === item ? "active" : ""} aria-pressed={filter === item} onClick={() => selectHistoryFilter(item)}>{item === "all" ? "All" : item === "quote" ? "Quotes" : item === "repost" ? "Reposts" : item === "like" ? "Likes" : item[0].toUpperCase() + item.slice(1)}</button>)}
           </div>
         ) : (
@@ -12410,11 +12892,11 @@ function PublicHistoryView({
         )}
       </div>
       <div className={`public-history-layout ${effectiveSelected ? "has-inspector" : ""}`}>
-        <section className="public-history-surface" aria-label={surface === "timeline" ? "Feed timeline" : `${range} public history`}>
+        <section className="public-history-surface" aria-label={surface === "timeline" ? "Activity timeline" : `${range} public history`}>
           {surface === "timeline" ? (
             <>
               <FeedHistory history={paginatedHistory} state={state} presenceName={presence?.name ?? "this Presence"} onSelect={setSelected} />
-              {filteredHistory.length > PUBLIC_HISTORY_PAGE_SIZE && <nav className="public-history-pagination" aria-label="Feed pages">
+              {filteredHistory.length > PUBLIC_HISTORY_PAGE_SIZE && <nav className="public-history-pagination" aria-label="Activity pages">
                 <span className="public-history-pagination-count">
                   Showing {(visibleHistoryPage - 1) * PUBLIC_HISTORY_PAGE_SIZE + 1}–{Math.min(visibleHistoryPage * PUBLIC_HISTORY_PAGE_SIZE, filteredHistory.length)} of {filteredHistory.length}
                 </span>
@@ -12491,7 +12973,7 @@ function FeedItem({ item, state, presenceName, onSelect }: { item: PublicHistory
     const repostedPostAuthor = repostedPost?.author?.displayName ?? repostedPost?.author?.handle;
     return <article className={`feed-item-shell mirror-post ${isDeleted ? "feed-item-shell-deleted" : ""}`}>
       <button type="button" className={`feed-item feed-item-${item.kind}`} onClick={() => onSelect(item)}>
-        <span className="feed-item-header mirror-post-header"><PresenceGlyph className="presence-feed-avatar" accent={authorAccent} name={authorName} look={presence ? presenceAvatarLook(presence) : "core"} /><span className="feed-item-identity mirror-post-author"><strong>{authorName}</strong><small>{presence?.handle ?? ""} · {kindLabel}</small></span>{isDeleted && <span className="feed-item-availability feed-item-availability-deleted"><Trash2 size={11} /> Deleted on X</span>}<time dateTime={displayAt} title={historyTimeTitle(item)}>{formatRecentPostTimestamp(displayAt)}</time></span>
+        <span className="feed-item-header mirror-post-header"><PresenceGlyph className="presence-feed-avatar" accent={authorAccent} name={authorName} look={presence ? presenceAvatarLook(presence) : "core"} avatarUrl={presencePlatformAvatarUrl(state, presence)} /><span className="feed-item-identity mirror-post-author"><strong>{authorName}</strong><small>{presence?.handle ?? ""} · {kindLabel}</small></span>{isDeleted && <span className="feed-item-availability feed-item-availability-deleted"><Trash2 size={11} /> Deleted on X</span>}<time dateTime={displayAt} title={historyTimeTitle(item)}>{formatRecentPostTimestamp(displayAt)}</time></span>
         {item.kind === "reply" || item.kind === "comment" ? <span className="feed-item-context">Replying in a public conversation</span> : null}
         {originLabel ? <span className="feed-item-context">{originLabel}</span> : null}
         {item.kind === "like" ? (
@@ -12536,7 +13018,7 @@ function HistoryCard({ item, state, onSelect, compact = false }: { item: PublicH
   const isDeleted = item.availability === "deleted";
   const presence = state.presences.find((candidate) => candidate.id === item.presenceId);
   return <button type="button" className={`history-card history-card-${item.kind} ${compact ? "compact" : ""}`} onClick={() => onSelect(item)}>
-    <span className="history-card-kicker"><span className="history-card-author"><PresenceGlyph className="presence-history-avatar" accent={presence?.accent ?? "#D68754"} name={presence?.name ?? "Presence"} look={presence ? presenceAvatarLook(presence) : "core"} /><strong>{label}</strong>{isDeleted && <span className="history-card-availability"><Trash2 size={10} /> Deleted</span>}</span><time dateTime={displayAt} title={historyTimeTitle(item)}>{formatRecentPostTimestamp(displayAt)}</time></span>
+    <span className="history-card-kicker"><span className="history-card-author"><PresenceGlyph className="presence-history-avatar" accent={presence?.accent ?? "#D68754"} name={presence?.name ?? "Presence"} look={presence ? presenceAvatarLook(presence) : "core"} avatarUrl={presencePlatformAvatarUrl(state, presence)} /><strong>{label}</strong>{isDeleted && <span className="history-card-availability"><Trash2 size={10} /> Deleted</span>}</span><time dateTime={displayAt} title={historyTimeTitle(item)}>{formatRecentPostTimestamp(displayAt)}</time></span>
     {item.text ? <span className="history-card-text">{item.text}</span> : <span className="history-card-text quiet">{item.kind === "repost" ? "Passed along publicly" : item.kind === "like" ? "Liked publicly" : "Public expression"}</span>}
     <span className="history-card-footer"><span className="history-card-proof">{isDeleted ? "Deleted on X · retained in Social Mirror" : item.environment === "sandbox" ? "Verified in Sandbox Mirror · simulated only" : item.externalUrl ? "Verified on X" : "Verified in Social Mirror"}</span><span className="history-card-channel-badge" aria-label={`Channel: ${channelTag}`}><Badge size={11} aria-hidden="true" />{channelTag}</span></span>
   </button>;
@@ -12637,7 +13119,7 @@ function PublicHistoryInspector({ item, state, mutate, index, total, onNavigate,
       setPostIdCopied(false);
     }
   };
-  return <aside className="history-inspector" aria-label={`${kindLabel} details`}><div className="history-inspector-header"><div><SectionEyebrow>{kindLabel} details</SectionEyebrow><h2>{kindLabel}</h2><small title={historyTimeTitle(item)}>{formatHistoryTimestamp(displayAt)}{item.environment === "sandbox" ? " · Sandbox observed" : ""}</small></div><button type="button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button></div>{isDeleted && <div className="history-availability history-availability-deleted"><Trash2 size={14} /><span><strong>Deleted on X</strong><small>The original is retained here as verified history, but X no longer serves it.</small></span></div>}<div className="history-inspector-navigation" aria-label="Browse public posts"><span aria-live="polite"><strong>Post {position}</strong> of {total}</span><div><button type="button" aria-label="Previous post" disabled={index <= 0} onClick={() => onNavigate(-1)}><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /></button><button type="button" aria-label="Next post" disabled={index < 0 || index >= total - 1} onClick={() => onNavigate(1)}><ChevronRight size={14} /></button></div></div><div className="history-inspector-identity"><PresenceGlyph accent={presence?.accent ?? "#D68754"} name={presence?.name ?? "Presence"} look={presence ? presenceAvatarLook(presence) : "core"} /><span><strong>{presence?.name ?? "Presence"}</strong><small>{presence?.handle ?? ""}</small></span></div>{parent?.content?.text && <div className="history-parent-context"><SectionEyebrow>Context</SectionEyebrow><p>{parent.content.text}</p><small>{parent.author?.displayName ?? "Public conversation"}</small></div>}<p className="history-inspector-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : item.kind === "like" ? "Liked publicly." : "No text was returned by the channel.")}</p>{mirrorObject?.assetRefs?.length ? <MediaPerceptionDisclosure object={mirrorObject} state={state} mutate={mutate} presenceName={presence?.name ?? "this Presence"} /> : null}{itemAssets.length > 0 && <section className="history-provenance"><SectionEyebrow>Attached sources</SectionEyebrow>{itemAssets.map((asset) => <div key={asset.id}><a className="history-external-link" href={asset.provenance.sourcePageUrl ?? asset.provenance.sourceUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {asset.provenance.publisher ?? asset.description ?? "Open source"}</a><small>Origin: {asset.provenance.origin}. Source identity: {asset.provenance.sourceIdentityStatus ?? "unknown"}. Rights: {asset.rights?.status ?? "unknown"}.</small></div>)}</section>}<div className="history-proof">{isDeleted ? <Trash2 size={14} /> : <Check size={14} />}<span>{isDeleted ? "Deleted on X · retained in Social Mirror" : `Observed in Social Mirror · ${item.externalRef.type}`}</span><button type="button" className="history-copy-id" aria-label="Copy internal post ID" title="Copy internal post ID" onClick={() => void copyPostId()}><Copy size={12} /> {postIdCopied ? "Copied" : "Copy ID"}</button></div><section className="history-provenance"><SectionEyebrow>Provenance</SectionEyebrow><p>{originLabel}</p><p>{item.executionId ? "Published by OpenPresence and verified in the Social Mirror." : "Observed on the connected channel and attributed to this Presence."}</p>{item.origin?.planWindowId && <small>Plan window: {item.origin.planWindowId}</small>}{assignment && <p>Assignment output · {assignmentProgressLabel(assignment)}</p>}{mirrorObject?.environment === "sandbox" && <small>Simulated social reality · this expression has no live destination. Sandbox world time: {formatTime(item.occurredAt)}.</small>}</section><section className="history-outcome"><SectionEyebrow>Outcome</SectionEyebrow>{metrics.length ? <div className="history-outcome-grid">{metrics.map(([key, value]) => <div key={key}><strong>{value}</strong><small>{key.replaceAll("_", " ")}</small></div>)}</div> : <p>No channel outcome evidence is attached to this expression yet.</p>}</section><div className="history-inspector-actions">{item.externalUrl ? <a className="history-external-link" href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {isDeleted ? "Open original URL · deleted on X" : item.kind === "reply" || item.kind === "comment" ? "Open reply on X" : item.kind === "like" ? "Open liked post on X" : item.kind === "repost" ? "Open reposted post on X" : "Open original on X"}</a> : item.environment === "sandbox" && item.channel === "x" ? <p className="history-sandbox-note">Sandbox rehearsal only. This expression has no live destination.</p> : item.channel === "x" ? <p className="history-sandbox-note">X URL unavailable from the connected account.</p> : null}<Button variant="secondary" onClick={onActivity}><Activity size={14} /> View in Activity</Button></div></aside>;
+  return <aside className="history-inspector" aria-label={`${kindLabel} details`}><div className="history-inspector-header"><div><SectionEyebrow>{kindLabel} details</SectionEyebrow><h2>{kindLabel}</h2><small title={historyTimeTitle(item)}>{formatHistoryTimestamp(displayAt)}{item.environment === "sandbox" ? " · Sandbox observed" : ""}</small></div><button type="button" aria-label="Close inspector" onClick={onClose}><X size={16} /></button></div>{isDeleted && <div className="history-availability history-availability-deleted"><Trash2 size={14} /><span><strong>Deleted on X</strong><small>The original is retained here as verified history, but X no longer serves it.</small></span></div>}<div className="history-inspector-navigation" aria-label="Browse public posts"><span aria-live="polite"><strong>Post {position}</strong> of {total}</span><div><button type="button" aria-label="Previous post" disabled={index <= 0} onClick={() => onNavigate(-1)}><ChevronRight size={14} style={{ transform: "rotate(180deg)" }} /></button><button type="button" aria-label="Next post" disabled={index < 0 || index >= total - 1} onClick={() => onNavigate(1)}><ChevronRight size={14} /></button></div></div><div className="history-inspector-identity"><PresenceGlyph accent={presence?.accent ?? "#D68754"} name={presence?.name ?? "Presence"} look={presence ? presenceAvatarLook(presence) : "core"} avatarUrl={presencePlatformAvatarUrl(state, presence)} /><span><strong>{presence?.name ?? "Presence"}</strong><small>{presence?.handle ?? ""}</small></span></div>{parent?.content?.text && <div className="history-parent-context"><SectionEyebrow>Context</SectionEyebrow><p>{parent.content.text}</p><small>{parent.author?.displayName ?? "Public conversation"}</small></div>}<p className="history-inspector-text">{item.text || (item.kind === "repost" ? "Passed along publicly." : item.kind === "like" ? "Liked publicly." : "No text was returned by the channel.")}</p>{mirrorObject?.assetRefs?.length ? <MediaPerceptionDisclosure object={mirrorObject} state={state} mutate={mutate} presenceName={presence?.name ?? "this Presence"} /> : null}{itemAssets.length > 0 && <section className="history-provenance"><SectionEyebrow>Attached sources</SectionEyebrow>{itemAssets.map((asset) => <div key={asset.id}><a className="history-external-link" href={asset.provenance.sourcePageUrl ?? asset.provenance.sourceUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {asset.provenance.publisher ?? asset.description ?? "Open source"}</a><small>Origin: {asset.provenance.origin}. Source identity: {asset.provenance.sourceIdentityStatus ?? "unknown"}. Rights: {asset.rights?.status ?? "unknown"}.</small></div>)}</section>}<div className="history-proof">{isDeleted ? <Trash2 size={14} /> : <Check size={14} />}<span>{isDeleted ? "Deleted on X · retained in Social Mirror" : `Observed in Social Mirror · ${item.externalRef.type}`}</span><button type="button" className="history-copy-id" aria-label="Copy internal post ID" title="Copy internal post ID" onClick={() => void copyPostId()}><Copy size={12} /> {postIdCopied ? "Copied" : "Copy ID"}</button></div><section className="history-provenance"><SectionEyebrow>Provenance</SectionEyebrow><p>{originLabel}</p><p>{item.executionId ? "Published by OpenPresence and verified in the Social Mirror." : "Observed on the connected channel and attributed to this Presence."}</p>{item.origin?.planWindowId && <small>Plan window: {item.origin.planWindowId}</small>}{assignment && <p>Assignment output · {assignmentProgressLabel(assignment)}</p>}{mirrorObject?.environment === "sandbox" && <small>Simulated social reality · this expression has no live destination. Sandbox world time: {formatTime(item.occurredAt)}.</small>}</section><section className="history-outcome"><SectionEyebrow>Outcome</SectionEyebrow>{metrics.length ? <div className="history-outcome-grid">{metrics.map(([key, value]) => <div key={key}><strong>{value}</strong><small>{key.replaceAll("_", " ")}</small></div>)}</div> : <p>No channel outcome evidence is attached to this expression yet.</p>}</section><div className="history-inspector-actions">{item.externalUrl ? <a className="history-external-link" href={item.externalUrl} target="_blank" rel="noreferrer"><ArrowUpRight size={14} /> {isDeleted ? "Open original URL · deleted on X" : item.kind === "reply" || item.kind === "comment" ? "Open reply on X" : item.kind === "like" ? "Open liked post on X" : item.kind === "repost" ? "Open reposted post on X" : "Open original on X"}</a> : item.environment === "sandbox" && item.channel === "x" ? <p className="history-sandbox-note">Sandbox rehearsal only. This expression has no live destination.</p> : item.channel === "x" ? <p className="history-sandbox-note">X URL unavailable from the connected account.</p> : null}<Button variant="secondary" onClick={onActivity}><Activity size={14} /> View in Activity</Button></div></aside>;
 }
 
 function AssignmentPursuitCard({
@@ -12658,18 +13140,19 @@ function AssignmentPursuitCard({
   compact?: boolean;
 }) {
   const [scaling, setScaling] = useState(false);
+  const promotion = isPromotionBurstWindow(pursuit);
   const counts = assignmentPursuitVerifiedCounts(state, pursuit, now);
   const pendingStatuses = ["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"];
-  const pending = state.executions.filter((item) => item.assignmentId === pursuit.assignmentId && item.presenceId === pursuit.presenceId && pendingStatuses.includes(item.status)).length;
+  const pending = promotion ? (counts.pending ?? 0) : state.executions.filter((item) => item.assignmentId === pursuit.assignmentId && item.presenceId === pursuit.presenceId && pendingStatuses.includes(item.status)).length;
   const executions = state.executions
-    .filter((item) => item.assignmentId === pursuit.assignmentId && item.presenceId === pursuit.presenceId)
+    .filter((item) => item.assignmentId === pursuit.assignmentId && item.presenceId === pursuit.presenceId && (!promotion || item.promotion?.sourcePostId === pursuit.sourcePostId))
     .sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime());
   const latestExecution = executions[0];
   const latestOutcome = latestExecution ? state.outcomes.find((item) => item.executionId === latestExecution.id) : undefined;
   const target = latestExecution?.target ? state.mirrorObjects.find((item) => (item.externalRef.type === latestExecution.target?.type && item.externalRef.id === latestExecution.target?.id) || item.id === latestExecution.target?.id) : undefined;
   const targetLabel = socialTargetLabel(target, "the observed conversation");
   const latestEvents = state.events
-    .filter((item) => item.presenceId === pursuit.presenceId && item.sourceObjectId === pursuit.assignmentId && ["Promotion opportunity held", "Promotion opportunity unavailable", "Promotion actions held", "Promotion action failed", "Promotion actions queued", "Distribution candidate skipped", "Distribution candidate disappeared"].includes(item.title))
+    .filter((item) => item.presenceId === pursuit.presenceId && item.sourceObjectId === pursuit.assignmentId && ["Promotion opportunity held", "Promotion opportunity unavailable", "Promotion source unavailable", "Promotion source held", "Promotion actions held", "Promotion action failed", "Promotion actions queued", "Distribution candidate skipped", "Distribution candidate disappeared"].includes(item.title))
     .sort((left, right) => new Date(right.time).getTime() - new Date(left.time).getTime());
   const latestEvent = latestEvents[0];
   const result = latestExecution
@@ -12689,10 +13172,13 @@ function AssignmentPursuitCard({
           : latestEvent?.title ?? "No pass result recorded yet";
   const resultDetail = latestExecution?.failure?.message ?? latestEvent?.detail ?? "The next pass will look for a specific, useful opportunity.";
   const activeRun = (state.assignmentRuns ?? []).some((run) => run.pursuitWindowId === pursuit.id && ["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"].includes(run.status));
-  const nextPass = pursuit.status !== "active" ? "paused" : activeRun ? "in progress" : formatCountdown(pursuit.nextRunAt, now) ?? "queued";
+  const nextPass = pursuit.status === "completed" ? "complete" : pursuit.status !== "active" ? "paused" : activeRun ? "in progress" : formatCountdown(pursuit.nextRunAt, now) ?? "queued";
   const pausedAtResourceBudget = pursuit.status === "paused" && pursuit.pauseReason?.includes("budget reached");
   const scale = assignmentPursuitScaleForWindow(pursuit);
-  const remaining = Math.max(0, pursuit.maxVerifiedActions - counts.verified - pending);
+  const burstTarget = promotion ? (pursuit.requiredVerifiedPromotionalActions ?? 40) : pursuit.maxVerifiedActions;
+  const source = promotion && pursuit.sourcePostId ? state.mirrorObjects.find((item) => item.presenceId === pursuit.presenceId && item.externalRef.type === "x.post" && item.externalRef.id === pursuit.sourcePostId) : undefined;
+  const sourceUrl = pursuit.sourcePostUrl ?? (source ? externalUrlForMirrorObject(source) : undefined);
+  const stateLabel = pursuit.status === "completed" ? "Completed" : pursuit.status === "paused" ? (pausedAtResourceBudget ? "Recovering" : "Paused") : activeRun ? "Running" : "Recovering";
   const scalePursuit = async (value: string) => {
     if (!(value in ASSIGNMENT_PURSUIT_SCALE_PRESETS) || scaling) return;
     const preset = ASSIGNMENT_PURSUIT_SCALE_PRESETS[value as keyof typeof ASSIGNMENT_PURSUIT_SCALE_PRESETS];
@@ -12704,19 +13190,20 @@ function AssignmentPursuitCard({
       setScaling(false);
     }
   };
-  return <section className={compact ? "assignment-pursuit assignment-pursuit-compact" : "activity-glance-card activity-pursuit-card"} aria-label={`Distribution push progress for ${presenceName}`}>
-    <div className={compact ? "assignment-pursuit-header" : "activity-glance-heading"}><div><SectionEyebrow>Distribution push</SectionEyebrow><h2>{pursuit.status === "active" ? (compact ? "Higher effort window" : "Burst is active") : "Burst is paused"}</h2></div>{!compact && <Activity size={21} aria-hidden="true" />}</div>
-    {assignmentTitle && <p>{assignmentTitle}</p>}
+  return <section className={compact ? "assignment-pursuit assignment-pursuit-compact" : "activity-glance-card activity-pursuit-card"} aria-label={promotion ? `OwnTheHype promotion burst progress for ${presenceName}` : `Distribution push progress for ${presenceName}`}>
+    <div className={compact ? "assignment-pursuit-header" : "activity-glance-heading"}><div><SectionEyebrow>{promotion ? "OwnTheHype promotion" : "Distribution push"}</SectionEyebrow><h2>{promotion ? `${counts.verified} / ${burstTarget} verified` : pursuit.status === "active" ? (compact ? "Higher effort window" : "Burst is active") : "Burst is paused"}</h2></div>{!compact && <Activity size={21} aria-hidden="true" />}</div>
+    {promotion && <div className="assignment-pursuit-source"><strong>Source post</strong>{sourceUrl ? <a href={sourceUrl} target="_blank" rel="noreferrer">{source?.content?.text?.slice(0, 140) || sourceUrl}</a> : <span>{source?.content?.text?.slice(0, 140) || "Source post is being recovered."}</span>}</div>}
+    {!promotion && assignmentTitle && <p>{assignmentTitle}</p>}
     <div className={compact ? "assignment-pursuit-grid" : "activity-pursuit-grid"}>
-      <div><strong>{counts.verified} / {pursuit.maxVerifiedActions}</strong><span>verified outcomes</span></div>
-      <div><strong>{remaining}</strong><span>capacity remaining</span></div>
-      <div><strong>{pending}</strong><span>awaiting delivery or verification</span></div>
+      <div><strong>{promotion ? counts.counts.reply + counts.counts.quote + counts.counts.repost + counts.counts.post : counts.verified}</strong><span>{promotion ? "direct or contextual" : "verified outcomes"}</span></div>
+      <div><strong>{Math.max(0, burstTarget - counts.verified)}</strong><span>{promotion ? "promotional actions left" : "remaining"}</span></div>
+      <div><strong>{promotion ? `${counts.auxiliaryCounts.like + counts.auxiliaryCounts.follow}` : pending}</strong><span>{promotion ? "likes/follows · auxiliary" : "awaiting delivery or verification"}</span></div>
       <div><strong>{nextPass}</strong><span>next pass</span></div>
     </div>
     <div className="assignment-pursuit-result" data-testid="distribution-push-latest-result"><span>Latest result</span><strong>{result}</strong><small>{resultDetail.slice(0, 220)}{resultDetail.length > 220 ? "…" : ""}</small></div>
-    <div className="assignment-pursuit-scale"><label htmlFor={`pursuit-scale-${pursuit.id}`}>Scale effort<select id={`pursuit-scale-${pursuit.id}`} aria-label="Scale distribution push effort" value={scale} disabled={scaling} onChange={(event) => void scalePursuit(event.target.value)}><option value="focused">Focused · up to 15 outcomes</option><option value="balanced">Balanced · up to 40 outcomes</option><option value="expanded">Expanded · up to 90 outcomes</option>{scale === "custom" && <option value="custom">Custom · current capacity</option>}</select></label><small>Uses the same Focused, Balanced, and Expanded levels as Autonomy Today. This is capacity, not a quota.</small></div>
-    <small>{pursuit.status === "active" ? `The Agent keeps looking until ${new Date(pursuit.deadlineAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })} or capacity is reached. Weak opportunities are left alone.` : pausedAtResourceBudget ? `The burst paused because its bounded resource envelope was reached. Choose a larger effort level above to resume; ${remaining} outcome slots remain.` : "The burst is paused. Resume it when you want the Agent to continue."}</small>
-    <div className={compact ? "assignment-pursuit-actions" : "activity-pursuit-controls"}>{pursuit.status === "active" ? <Button variant="secondary" onClick={() => void mutate({ type: "pauseAssignmentPursuit", id: pursuit.id })}>Pause push</Button> : <Button variant="secondary" onClick={() => void mutate({ type: "resumeAssignmentPursuit", id: pursuit.id })}>Resume push</Button>}<Button variant="ghost" onClick={() => void mutate({ type: "cancelAssignmentPursuit", id: pursuit.id })}>Stop push</Button></div>
+    {promotion && <details className="assignment-pursuit-recent"><summary>Recent actions</summary><div>{executions.slice(0, 5).map((execution) => <span key={execution.id}>{formatActivityAffordance(execution.affordance)} · {execution.status === "succeeded" && state.outcomes.some((outcome) => outcome.executionId === execution.id && outcome.status === "succeeded") ? "verified" : execution.status}</span>)}</div></details>}
+    {promotion ? <small>{stateLabel} · Verified public promotional actions only. The burst continues through recovery windows until {burstTarget}, unless you stop it.</small> : <><div className="assignment-pursuit-scale"><label htmlFor={`pursuit-scale-${pursuit.id}`}>Scale effort<select id={`pursuit-scale-${pursuit.id}`} aria-label="Scale distribution push effort" value={scale} disabled={scaling} onChange={(event) => void scalePursuit(event.target.value)}><option value="focused">Focused · up to 15 outcomes</option><option value="balanced">Balanced · up to 40 outcomes</option><option value="expanded">Expanded · up to 90 outcomes</option>{scale === "custom" && <option value="custom">Custom · current capacity</option>}</select></label><small>Uses the same Focused, Balanced, and Expanded intensity labels as Autonomy Today, with a separate burst work envelope.</small></div><small>{pursuit.status === "active" ? `The Agent keeps looking until ${new Date(pursuit.deadlineAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" })}. Weak opportunities are left alone.` : pausedAtResourceBudget ? `The burst paused because its bounded resource envelope was reached. Choose a larger effort level above to resume; ${Math.max(0, burstTarget - counts.verified)} outcomes remain.` : "The burst is paused. Resume it when you want the Agent to continue."}</small></>}
+    <div className={compact ? "assignment-pursuit-actions" : "activity-pursuit-controls"}>{pursuit.status === "active" ? <Button variant="secondary" onClick={() => void mutate({ type: "pauseAssignmentPursuit", id: pursuit.id })}>Pause</Button> : pursuit.status !== "completed" ? <Button variant="secondary" onClick={() => void mutate({ type: "resumeAssignmentPursuit", id: pursuit.id })}>Resume</Button> : null}{pursuit.status !== "completed" && <Button variant="ghost" onClick={() => void mutate({ type: "cancelAssignmentPursuit", id: pursuit.id })}>Stop</Button>}</div>
   </section>;
 }
 
@@ -12738,11 +13225,11 @@ function ScheduleLayerToolbar({
   return (
     <section className="schedule-layer-toolbar" aria-label="Calendar layers">
       <div className="schedule-layer-intro">
-        <SectionEyebrow>Planning layers</SectionEyebrow>
-        <p>Choose which planning layers to see. They are permissions to consider work, not promises to publish.</p>
+        <SectionEyebrow>What Genny may work on</SectionEyebrow>
+        <p>The publishing rhythm is flexible thinking time, not a list of guaranteed posts. Assignments are specific outcomes you asked Genny to pursue.</p>
       </div>
       <div className="schedule-layer-controls">
-        <button type="button" className={`schedule-plan-header-toggle schedule-layer-toggle-plan ${layers.plan ? "active" : ""} ${plan ? "" : "unavailable"}`} aria-pressed={layers.plan} disabled={!plan} onClick={() => onToggle("plan")}>◇ {presenceName}&apos;s plan</button>
+        <button type="button" className={`schedule-plan-header-toggle schedule-layer-toggle-plan ${layers.plan ? "active" : ""} ${plan ? "" : "unavailable"}`} aria-pressed={layers.plan} disabled={!plan} onClick={() => onToggle("plan")}>◇ {presenceName}&apos;s publishing rhythm</button>
         {(["assignments"] as const).map((layer) => {
           const labels = { assignments: "Assignments" };
           return <label className={`schedule-layer-toggle schedule-layer-toggle-${layer} ${layers[layer] ? "selected" : ""}`} key={layer}>
@@ -12754,8 +13241,8 @@ function ScheduleLayerToolbar({
       </div>
       <div className="schedule-layer-actions">
         {plan ? <>
-        <span className="schedule-plan-status">Plan {plan.status === "active" ? "active" : plan.status}</span>
-          <Button type="button" variant="ghost" onClick={() => void mutate({ type: "replanPublishing", presenceId: plan.presenceId })}>Replan</Button>
+        <span className="schedule-plan-status">Rhythm {plan.status === "active" ? "active" : plan.status}</span>
+          <Button type="button" variant="ghost" onClick={() => void mutate({ type: "replanPublishing", presenceId: plan.presenceId })}>Refresh rhythm</Button>
         </> : <Button type="button" variant="ghost" onClick={() => void mutate({ type: "replanPublishing" })}>Create plan</Button>}
         <Button type="button" variant="ghost" onClick={onReset}>Show all layers</Button>
       </div>
@@ -12765,988 +13252,11 @@ function ScheduleLayerToolbar({
 
 function ScheduleLegend({ plan, layers }: { plan?: PublishingPlan; layers: ScheduleLayerVisibility }) {
   return <div className="week-calendar-legend schedule-list-legend" aria-label="Schedule legend">
-    {plan && layers.plan && <span><i className="legend-dot plan-legend-dot" />Publishing plan</span>}
+    {plan && layers.plan && <span><i className="legend-dot plan-legend-dot" />Publishing rhythm</span>}
     {layers.assignments && <span><i className="legend-dot assignment-legend-dot" />Assignment</span>}
   </div>;
 }
 
-function GrowthTrendChart({
-  snapshots,
-  deltas: _deltas,
-  presenceName,
-}: {
-  snapshots: PresenceAudienceSnapshot[];
-  deltas: ReturnType<typeof audienceDeltas>;
-  presenceName: string;
-}) {
-  void _deltas;
-  const [timeframe, setTimeframe] = useState<"7d" | "28d">("7d");
-  const [now] = useState(() => Date.now());
-  const days = timeframe === "7d" ? 7 : 28;
-  const cutoff = now - days * 86_400_000;
-
-  // Filter snapshots by timeframe
-  const filteredSnapshots = snapshots
-    .filter((s) => new Date(s.observedAt).getTime() >= cutoff)
-    .sort((a, b) => new Date(a.observedAt).getTime() - new Date(b.observedAt).getTime());
-
-  const displaySnapshots = filteredSnapshots.length ? filteredSnapshots : snapshots.slice(-10);
-  const followerValues = displaySnapshots.map((s) => s.followers);
-  const minVal = followerValues.length ? Math.min(...followerValues) : 0;
-  const maxVal = followerValues.length ? Math.max(...followerValues) : 0;
-  const range = maxVal - minVal;
-  const padding = range === 0 ? Math.max(2, Math.round(maxVal * 0.2)) : Math.ceil(range * 0.25);
-  const yMin = Math.max(0, minVal - padding);
-  const yMax = maxVal + padding;
-  const yRange = yMax - yMin || 1;
-
-  const width = 800;
-  const height = 160;
-  const padLeft = 40;
-  const padRight = 50;
-  const padTop = 25;
-  const padBottom = 30;
-  const chartW = width - padLeft - padRight;
-  const chartH = height - padTop - padBottom;
-
-  // Time-proportional X mapping
-  const firstTime = displaySnapshots.length ? new Date(displaySnapshots[0].observedAt).getTime() : cutoff;
-  const lastTime = displaySnapshots.length ? new Date(displaySnapshots[displaySnapshots.length - 1].observedAt).getTime() : now;
-  const timeSpan = Math.max(1000, lastTime - firstTime);
-
-  const points = displaySnapshots.map((s) => {
-    const t = new Date(s.observedAt).getTime();
-    const x = padLeft + (displaySnapshots.length === 1 ? chartW / 2 : ((t - firstTime) / timeSpan) * chartW);
-    const y = padTop + chartH - ((s.followers - yMin) / yRange) * chartH;
-    return { x, y, followers: s.followers, observedAt: s.observedAt };
-  });
-
-  // Build crisp step-or-linear path
-  const pathD = points.length > 1
-    ? points.map((p, idx) => `${idx === 0 ? "M" : "L"} ${p.x.toFixed(1)} ${p.y.toFixed(1)}`).join(" ")
-    : points.length === 1
-    ? `M ${padLeft} ${points[0].y.toFixed(1)} L ${width - padRight} ${points[0].y.toFixed(1)}`
-    : "";
-
-  const areaD = points.length > 1
-    ? `${pathD} L ${points[points.length - 1].x.toFixed(1)} ${height - padBottom} L ${points[0].x.toFixed(1)} ${height - padBottom} Z`
-    : "";
-
-  const latestPoint = points.length ? points[points.length - 1] : undefined;
-  const startPoint = points.length > 1 ? points[0] : undefined;
-
-  const startDateLabel = displaySnapshots.length
-    ? new Date(displaySnapshots[0].observedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })
-    : `${days}d ago`;
-
-  return (
-    <section className="growth-trend-card" aria-label="Growth trend chart">
-      <div className="growth-trend-header">
-        <div>
-          <SectionEyebrow>Follower Trend</SectionEyebrow>
-          <h2>Audience Growth Over Time</h2>
-        </div>
-        <div className="growth-trend-controls">
-          <button
-            type="button"
-            className={`growth-trend-toggle ${timeframe === "7d" ? "growth-trend-toggle-active" : ""}`}
-            onClick={() => setTimeframe("7d")}
-          >
-            7 Days
-          </button>
-          <button
-            type="button"
-            className={`growth-trend-toggle ${timeframe === "28d" ? "growth-trend-toggle-active" : ""}`}
-            onClick={() => setTimeframe("28d")}
-          >
-            28 Days
-          </button>
-        </div>
-      </div>
-      <div className="growth-chart-wrap">
-        {displaySnapshots.length <= 1 ? (
-          <div className="growth-chart-baseline-banner">
-            <Activity size={15} />
-            <span>Collecting baseline data for {presenceName} ({displaySnapshots[0]?.followers.toLocaleString() ?? 0} followers recorded)</span>
-          </div>
-        ) : (
-          <svg viewBox={`0 0 ${width} ${height}`} className="growth-chart-svg">
-            <defs>
-              <linearGradient id="growthAreaGradient" x1="0" y1="0" x2="0" y2="1">
-                <stop offset="0%" stopColor="#d88b57" stopOpacity="0.22" />
-                <stop offset="100%" stopColor="#d88b57" stopOpacity="0.01" />
-              </linearGradient>
-            </defs>
-
-            {/* Grid lines */}
-            <line x1={padLeft} y1={padTop} x2={width - padRight} y2={padTop} stroke="var(--line)" strokeDasharray="3 3" strokeOpacity="0.6" />
-            <line x1={padLeft} y1={padTop + chartH / 2} x2={width - padRight} y2={padTop + chartH / 2} stroke="var(--line)" strokeDasharray="3 3" strokeOpacity="0.6" />
-            <line x1={padLeft} y1={height - padBottom} x2={width - padRight} y2={height - padBottom} stroke="var(--line)" strokeOpacity="0.8" />
-
-            {/* Axis Y values */}
-            <text x={width - padRight + 8} y={padTop + 4} fill="var(--muted)" fontSize="10" fontFamily="DM Mono, monospace">
-              {yMax}
-            </text>
-            <text x={width - padRight + 8} y={height - padBottom + 3} fill="var(--muted)" fontSize="10" fontFamily="DM Mono, monospace">
-              {yMin}
-            </text>
-
-            {/* Area and Line */}
-            {areaD && <path d={areaD} fill="url(#growthAreaGradient)" />}
-            {pathD && <path d={pathD} fill="none" stroke="#d88b57" strokeWidth="2.5" strokeLinecap="round" strokeLinejoin="round" />}
-
-            {/* Start point dot & label */}
-            {startPoint && (
-              <g>
-                <circle cx={startPoint.x} cy={startPoint.y} r="4" fill="#fffdfa" stroke="#d88b57" strokeWidth="2" />
-                <text
-                  x={startPoint.x}
-                  y={startPoint.y - 8}
-                  textAnchor="start"
-                  fill="var(--ink)"
-                  fontSize="11"
-                  fontFamily="DM Mono, monospace"
-                  fontWeight="bold"
-                >
-                  {startPoint.followers.toLocaleString()}
-                </text>
-              </g>
-            )}
-
-            {/* Latest point dot with pulse ring & label */}
-            {latestPoint && (
-              <g>
-                <circle cx={latestPoint.x} cy={latestPoint.y} r="6" fill="#d88b57" fillOpacity="0.2" />
-                <circle cx={latestPoint.x} cy={latestPoint.y} r="4.5" fill="#d88b57" stroke="#fffdfa" strokeWidth="2" />
-                <text
-                  x={latestPoint.x}
-                  y={latestPoint.y - 9}
-                  textAnchor="end"
-                  fill="var(--ink)"
-                  fontSize="11"
-                  fontFamily="DM Mono, monospace"
-                  fontWeight="bold"
-                >
-                  {latestPoint.followers.toLocaleString()}
-                </text>
-              </g>
-            )}
-
-            {/* X-axis date labels */}
-            <text x={padLeft} y={height - 8} fill="var(--muted)" fontSize="10" fontFamily="DM Mono, monospace">
-              {startDateLabel}
-            </text>
-            <text x={width - padRight} y={height - 8} textAnchor="end" fill="var(--muted)" fontSize="10" fontFamily="DM Mono, monospace">
-              Today
-            </text>
-          </svg>
-        )}
-      </div>
-    </section>
-  );
-}
-
-function GrowthAutonomyProof({
-  presenceName,
-  autonomousExecutionsCount,
-  decisionsCount,
-  verifiedOutcomesCount,
-  operatorInterventionsCount,
-  recoveriesHandledCount,
-  weeklyBreakdown,
-}: {
-  presenceName: string;
-  autonomousExecutionsCount: number;
-  decisionsCount: number;
-  verifiedOutcomesCount: number;
-  operatorInterventionsCount: number;
-  recoveriesHandledCount: number;
-  weeklyBreakdown: { posts: number; replies: number; quotes: number; likes: number; follows: number };
-}) {
-  return (
-    <section className="growth-autonomy-card" aria-label="Autonomy Proof">
-      <div className="growth-autonomy-header">
-        <div>
-          <SectionEyebrow>Proof of Autonomy</SectionEyebrow>
-          <h2>Autonomous Execution &amp; Reliability</h2>
-        </div>
-        <span className="growth-hero-meta">0 Babysitting Required</span>
-      </div>
-      <div className="growth-autonomy-stats-row">
-        <div className="growth-autonomy-stat">
-          <span>Autonomous Actions</span>
-          <strong>{autonomousExecutionsCount.toLocaleString()}</strong>
-          <small>Executed on X</small>
-        </div>
-        <div className="growth-autonomy-stat">
-          <span>Decisions by {presenceName}</span>
-          <strong>{decisionsCount.toLocaleString()}</strong>
-          <small>Social judgments</small>
-        </div>
-        <div className="growth-autonomy-stat">
-          <span>Verified Outcomes</span>
-          <strong>{verifiedOutcomesCount.toLocaleString()}</strong>
-          <small>Mirrored &amp; verified</small>
-        </div>
-        <div className="growth-autonomy-stat">
-          <span>Operator Load</span>
-          <strong style={{ color: operatorInterventionsCount === 0 ? "#2f6b3e" : "#b33927" }}>
-            {operatorInterventionsCount}
-          </strong>
-          <small>{operatorInterventionsCount === 0 ? "0 interventions" : "Action required"}</small>
-        </div>
-        <div className="growth-autonomy-stat">
-          <span>Auto-Recoveries</span>
-          <strong>{recoveriesHandledCount.toLocaleString()}</strong>
-          <small>Handled automatically</small>
-        </div>
-      </div>
-      <div className="growth-autonomy-breakdown">
-        <strong>Activity this week:</strong>
-        <span className="growth-autonomy-pill">{weeklyBreakdown.posts} original posts</span>
-        <span className="growth-autonomy-pill">{weeklyBreakdown.replies} replies</span>
-        <span className="growth-autonomy-pill">{weeklyBreakdown.quotes} quotes</span>
-        <span className="growth-autonomy-pill">{weeklyBreakdown.likes} likes</span>
-        <span className="growth-autonomy-pill">{weeklyBreakdown.follows} follows</span>
-        <span className="growth-autonomy-pill" style={{ color: "#2f6b3e", fontWeight: 700 }}>
-          0 operator interventions needed
-        </span>
-      </div>
-    </section>
-  );
-}
-
-function GrowthInsights({
-  review,
-  assignment,
-  latestPublication,
-  publicationSnapshotsCount,
-  weeklyRepliesCount,
-  relationshipsCount,
-  audienceObjective,
-}: {
-  review?: GrowthReview;
-  assignment?: Assignment;
-  latestPublication?: PublicationMetricSnapshot;
-  publicationSnapshotsCount: number;
-  weeklyRepliesCount: number;
-  relationshipsCount: number;
-  audienceObjective?: string;
-}) {
-  const hasWorkingEvidence = Boolean(review?.working && review.working.length > 0);
-  const workingTitle = hasWorkingEvidence ? review!.working[0] : "No approach has proven itself yet.";
-  const workingEvidence = hasWorkingEvidence
-    ? (latestPublication?.impressions ? `${latestPublication.impressions.toLocaleString()} views on top recent post` : `${publicationSnapshotsCount} verified publication snapshots observed`)
-    : "Gathering early baseline evidence before claiming confirmed drivers.";
-
-  const testingTitle = assignment?.plan?.publishingApproach?.[0] ?? "Concrete implementation observations over broad commentary";
-  const testingEvidence = `${weeklyRepliesCount || Math.max(1, Math.round(publicationSnapshotsCount * 0.6))} discussion contributions active in target territory`;
-
-  const hasWeakSignals = Boolean(review?.weak && review.weak.length > 0);
-  const watchingTitle = hasWeakSignals ? review!.weak[0] : "Monitoring reach, conversion, and engagement velocity";
-  const watchingEvidence = `${relationshipsCount} active connections observed across target territory`;
-
-  return (
-    <section className="growth-insights-section" aria-label="Growth signals and active strategy">
-      <div className="growth-section-heading">
-        <div>
-          <SectionEyebrow>Strategic signals</SectionEyebrow>
-          <h2>Key Growth Drivers &amp; Signals</h2>
-        </div>
-      </div>
-      <div className="growth-insights-grid">
-        <article className="growth-insight-card">
-          <span className="growth-insight-eyebrow">What Appears to Be Working</span>
-          <h3 className="growth-insight-title">&ldquo;{workingTitle}&rdquo;</h3>
-          <p className="growth-insight-evidence">
-            <Check size={14} aria-hidden="true" />
-            <span>{workingEvidence}</span>
-          </p>
-        </article>
-        <article className="growth-insight-card">
-          <span className="growth-insight-eyebrow">What Genny Is Testing</span>
-          <h3 className="growth-insight-title">&ldquo;{testingTitle}&rdquo;</h3>
-          <p className="growth-insight-evidence">
-            <Sparkles size={14} aria-hidden="true" />
-            <span>{testingEvidence}</span>
-          </p>
-        </article>
-        <article className="growth-insight-card">
-          <span className="growth-insight-eyebrow">What Genny Is Watching</span>
-          <h3 className="growth-insight-title">&ldquo;{watchingTitle}&rdquo;</h3>
-          <p className="growth-insight-evidence">
-            <Clock3 size={14} aria-hidden="true" />
-            <span>{watchingEvidence}</span>
-          </p>
-        </article>
-      </div>
-    </section>
-  );
-}
-
-function GrowthFocusAndNext({
-  assignment,
-  review,
-  nextGrowthReviewAt,
-  statusLabel,
-  presencePaused,
-  reviewingGrowth,
-  reviewGrowth,
-}: {
-  assignment: Assignment;
-  review?: GrowthReview;
-  nextGrowthReviewAt?: string;
-  statusLabel: string;
-  presencePaused: boolean;
-  reviewingGrowth: boolean;
-  reviewGrowth: (kind: "weekly" | "strategic") => void;
-}) {
-  const plan = assignment.plan;
-  const publishingFocus = plan?.publishingApproach?.[0] ?? "Prefer concrete implementation lessons over broad commentary";
-  const discoveryFocus = plan?.discoveryDirections?.[0] ?? "AI agents, tools, and developer conversations";
-  const relationshipFocus = plan?.relationshipFocus?.[0] ?? "Founders, builders, and curious people exploring AI";
-  const modeFocus = presencePaused ? "Paused" : statusLabel === "Learning" ? "Learning baseline" : statusLabel === "Accelerating" ? "Scaling reach" : "Active autonomous";
-
-  const [now] = useState(() => Date.now());
-  const isReviewDue = Boolean(nextGrowthReviewAt && new Date(nextGrowthReviewAt).getTime() <= now);
-  const reviewDateDisplay = presencePaused
-    ? "Paused"
-    : reviewingGrowth
-    ? "Review in progress…"
-    : isReviewDue
-    ? `Due now (${formatHistoryTimestamp(nextGrowthReviewAt!)})`
-    : nextGrowthReviewAt
-    ? formatHistoryTimestamp(nextGrowthReviewAt)
-    : "Monitoring continuously";
-
-  const reviewStatusMessage = presencePaused
-    ? "Growth is paused with this Presence."
-    : reviewingGrowth
-    ? "Genny is currently evaluating verified growth evidence and assessing whether strategy should adapt."
-    : isReviewDue
-    ? "A scheduled strategic review is due and queued for Genny's next cognition cycle."
-    : review?.changedPlan
-    ? "Genny adapted the operating strategy during the last review."
-    : "Genny is monitoring new evidence and will adapt strategy automatically when warranted. No action needed.";
-
-  return (
-    <div className="growth-focus-section" aria-label="Current strategy and next steps">
-      <section className="growth-focus-card">
-        <div className="growth-section-heading">
-          <div>
-            <SectionEyebrow>Current strategy</SectionEyebrow>
-            <h2>What Genny is doing now</h2>
-          </div>
-          <Sparkles size={16} />
-        </div>
-        <div className="growth-focus-chips-grid">
-          <div className="growth-focus-chip">
-            <span>Publishing</span>
-            <strong>{publishingFocus}</strong>
-          </div>
-          <div className="growth-focus-chip">
-            <span>Discovery</span>
-            <strong>{discoveryFocus}</strong>
-          </div>
-          <div className="growth-focus-chip">
-            <span>Relationships</span>
-            <strong>{relationshipFocus}</strong>
-          </div>
-          <div className="growth-focus-chip">
-            <span>Mode</span>
-            <strong>{modeFocus}</strong>
-          </div>
-        </div>
-      </section>
-      <section className="growth-next-panel">
-        <div className="growth-section-heading">
-          <div>
-            <SectionEyebrow>What happens next</SectionEyebrow>
-            <h2>Review rhythm</h2>
-          </div>
-          <Clock3 size={16} />
-        </div>
-        <div className="growth-next-content">
-          <div className="growth-next-date-row">
-            <span>Next review</span>
-            <strong>{reviewDateDisplay}</strong>
-          </div>
-          <p>{reviewStatusMessage}</p>
-          <div className="growth-next-actions">
-            <span className="growth-hero-meta">Continuous baseline review</span>
-            <Button
-              variant="ghost"
-              disabled={reviewingGrowth || presencePaused}
-              onClick={() => void reviewGrowth(review?.kind === "strategic" ? "strategic" : "weekly")}
-            >
-              {reviewingGrowth ? <><LoaderCircle size={13} className="spin" /> Reviewing…</> : "Review early"}
-            </Button>
-          </div>
-        </div>
-      </section>
-    </div>
-  );
-}
-
-function GrowthEvidenceDetails({
-  presenceName,
-  snapshots,
-  publicationSnapshots,
-  mirrorObjects,
-  review,
-  reviewIsStale,
-  unreviewedAudienceCount,
-  unreviewedPublicationCount,
-}: {
-  presenceName?: string;
-  snapshots: PresenceAudienceSnapshot[];
-  publicationSnapshots: PublicationMetricSnapshot[];
-  mirrorObjects: MirrorObject[];
-  review?: GrowthReview;
-  reviewIsStale: boolean;
-  unreviewedAudienceCount: number;
-  unreviewedPublicationCount: number;
-}) {
-  const evidenceIds = new Set(review?.evidenceIds ?? []);
-  const newSnapshots = review ? snapshots.filter((item) => !evidenceIds.has(item.id)) : snapshots;
-  const newPublicationSnapshots = review ? publicationSnapshots.filter((item) => !evidenceIds.has(item.id)) : publicationSnapshots;
-  const latest = snapshots[0];
-  const latestPublication = publicationSnapshots[0];
-  const followerValues = snapshots.map((item) => item.followers);
-  const followersUnchanged = followerValues.length > 1 && new Set(followerValues).size === 1;
-  const maxImpressions = publicationSnapshots.reduce<number | undefined>((max, item) => item.impressions === undefined ? max : Math.max(max ?? item.impressions, item.impressions), undefined);
-  const metricHighlights = latestPublication ? [
-    latestPublication.impressions !== undefined ? latestPublication.impressions.toLocaleString() + " views" : undefined,
-    latestPublication.likes !== undefined ? latestPublication.likes.toLocaleString() + " likes" : undefined,
-    latestPublication.replies !== undefined ? latestPublication.replies.toLocaleString() + " replies" : undefined,
-  ].filter(Boolean).slice(0, 2).join(" · ") : "No publication metrics yet";
-  const formatSnapshotStatus = (status: PresenceAudienceSnapshot["observationStatus"] | PublicationMetricSnapshot["observationStatus"]) => status === "observed" ? "Verified" : status.replaceAll("_", " ");
-  const newerObservationCount = unreviewedAudienceCount + unreviewedPublicationCount;
-
-  return (
-    <div className="growth-disclosure-content">
-      <div className="growth-evidence-summary-grid">
-        <div>
-          <span>Audience evidence</span>
-          <strong>{latest ? `${latest.followers.toLocaleString()} followers` : "Not observed"}</strong>
-          <small>{followersUnchanged ? `Unchanged across ${snapshots.length.toLocaleString()} recent observations` : `${snapshots.length.toLocaleString()} verified observations`}</small>
-        </div>
-        <div>
-          <span>Publication evidence</span>
-          <strong>{publicationSnapshots.length.toLocaleString()} observations</strong>
-          <small>{maxImpressions !== undefined ? `Recent reach up to ${maxImpressions.toLocaleString()} views` : metricHighlights}</small>
-        </div>
-      </div>
-      <p className="growth-evidence-meaning">
-        {newerObservationCount > 0
-          ? `${newerObservationCount.toLocaleString()} newer observation${newerObservationCount === 1 ? "" : "s"} arrived since the current read. They will be interpreted automatically at the next review.`
-          : reviewIsStale
-          ? "New evidence is waiting to be interpreted."
-          : `The evidence above is included in ${presenceName ?? "this Presence"}'s current read.`}
-      </p>
-      <details className="growth-raw-evidence">
-        <summary>
-          <span>View audience and publication evidence</span>
-          <small>Raw snapshots and source records</small>
-        </summary>
-        <div className="growth-evidence-columns">
-          <div>
-            <div className="growth-evidence-subheading">
-              <strong>Audience snapshots</strong>
-              <span>{snapshots.length}</span>
-            </div>
-            {(newSnapshots.length ? newSnapshots : snapshots).slice(0, 8).map((item) => (
-              <div className="growth-evidence-row" key={item.id}>
-                <strong>{item.followers.toLocaleString()} followers</strong>
-                <span>{formatHistoryTimestamp(item.observedAt)} · {item.source} · {formatSnapshotStatus(item.observationStatus)}</span>
-              </div>
-            ))}
-            {!snapshots.length && <p className="muted">No verified audience snapshot has arrived.</p>}
-          </div>
-          <div>
-            <div className="growth-evidence-subheading">
-              <strong>Publication snapshots</strong>
-              <span>{publicationSnapshots.length}</span>
-            </div>
-            {(newPublicationSnapshots.length ? newPublicationSnapshots : publicationSnapshots).slice(0, 8).map((item) => {
-              const object = mirrorObjects.find((candidate) => candidate.id === item.mirrorObjectId);
-              const text = object?.content?.text?.trim() || "Publication performance observed";
-              const externalUrl = object ? externalUrlForMirrorObject(object, object.author?.handle) : undefined;
-              return (
-                <div className="growth-evidence-row growth-evidence-publication" key={item.id}>
-                  <div>
-                    <strong>{object?.author?.handle ? "@" + object.author.handle : object?.author?.displayName ?? "X publication"}</strong>
-                    <span>{text.length > 110 ? text.slice(0, 107) + "…" : text}</span>
-                  </div>
-                  <small>
-                    {[item.impressions !== undefined ? item.impressions.toLocaleString() + " views" : undefined, item.likes !== undefined ? item.likes.toLocaleString() + " likes" : undefined, formatSnapshotStatus(item.observationStatus)].filter(Boolean).join(" · ")}
-                    {externalUrl && <a href={externalUrl} target="_blank" rel="noreferrer">View post</a>}
-                  </small>
-                </div>
-              );
-            })}
-            {!publicationSnapshots.length && <p className="muted">No verified publication-performance snapshot has arrived.</p>}
-          </div>
-        </div>
-      </details>
-    </div>
-  );
-}
-
-function GrowthReviewHistory({ reviews }: { reviews: GrowthReview[] }) {
-  return (
-    <div className="growth-disclosure-content">
-      <div className="growth-history-content">
-        {reviews.length ? (
-          reviews.slice(0, 8).map((item) => (
-            <div className="growth-history-row" key={item.id}>
-              <div>
-                <strong>{item.kind === "strategic" ? "Strategic review" : "Weekly review"}</strong>
-                <span>{formatHistoryTimestamp(item.createdAt)} · {item.reviewSource === "model" ? "Model-backed" : "Evidence review"}</span>
-              </div>
-              <p>{item.summary}</p>
-              <small>{item.changedPlan ? "Approach changed" : "Approach unchanged"}</small>
-            </div>
-          ))
-        ) : (
-          <p className="growth-empty-note">No Growth reviews have been completed yet.</p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function GrowthCapabilities({
-  state,
-  presenceId,
-  manifest,
-  limitations,
-}: {
-  state: OpenPresenceState;
-  presenceId: string;
-  manifest: ReturnType<typeof derivePresenceCapabilityManifest>;
-  limitations: ReturnType<typeof derivePresenceCapabilityManifest>["items"];
-}) {
-  const visible = manifest.items.filter((item) => ["post", "reply", "quote", "repost", "follow", "follower_measurement", "post_performance"].includes(item.capability));
-  return (
-    <div className="growth-disclosure-content">
-      <div className="growth-capabilities-content">
-        <p className="growth-capabilities-note">
-          Only capabilities that affect this responsibility are shown here. Full connector details remain in Presence Settings.
-        </p>
-        <div className="capability-list">
-          {visible.map((item) => (
-            <div className="capability-row" key={item.capability}>
-              <div className="capability-copy">
-                <strong>{item.label}</strong>
-                <small>{capabilityProviderLabel(state, presenceId, item)}{item.limitation ? ` · ${item.limitation}` : ""}</small>
-              </div>
-              <span className={`capability-state capability-state-${item.availability}`}>
-                {item.availability.replaceAll("-", " ")}
-              </span>
-            </div>
-          ))}
-        </div>
-        {limitations.length > 0 && (
-          <p className="settings-warning">{limitations.length} capability limitation{limitations.length === 1 ? "" : "s"} currently reported.</p>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function GrowthView({ state, mutate, setView: _setView }: { state: OpenPresenceState; mutate: Mutate; setView: (view: View) => void }) {
-  void _setView;
-  const presence = state.presence;
-  const [reviewingGrowth, setReviewingGrowth] = useState(false);
-  const [now] = useState(() => Date.now());
-  if (!presence) return <div className="page"><PageHeader eyebrow="Growth" title="No Presence selected" description="Select a Presence before reviewing growth evidence." /></div>;
-
-  const growthBoundary = presenceGrowthBoundary(state, presence.id);
-  const assignment = state.assignments.find((item) => item.presenceId === presence.id && item.successEvidence?.metric === "followers" && assignmentIsOpen(item));
-  const snapshots = collapseAudienceSnapshots((state.audienceSnapshots ?? []).filter((item) => item.presenceId === presence.id && growthEvidenceIsInPresenceScope(state, presence.id, item.observedAt)));
-  const latest = snapshots[0];
-  const nativeX = state.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x");
-  const historicalGrowth = deriveHistoricalGrowthContext(state, presence.id);
-  const currentAccountFollowers = (nativeX?.account as { followers?: number } | undefined)?.followers;
-  const displayedFollowerCount = latest?.followers ?? currentAccountFollowers ?? historicalGrowth?.currentFollowers;
-  const deltas = audienceDeltas(state, presence.id);
-  const publicationSnapshots = (state.publicationMetricSnapshots ?? []).filter((item) => item.presenceId === presence.id && growthPublicationIsInPresenceScope(state, presence.id, item)).sort((left, right) => right.observedAt.localeCompare(left.observedAt));
-  const latestPublication = publicationSnapshots[0];
-  const reviewHistory = (state.growthReviews ?? []).filter((item) => item.presenceId === presence.id && growthEvidenceIsInPresenceScope(state, presence.id, item.createdAt)).sort((left, right) => right.createdAt.localeCompare(left.createdAt));
-  const review = reviewHistory[0];
-  const unreviewedAudienceCount = review ? snapshots.filter((item) => !(review.evidenceIds ?? []).includes(item.id)).length : 0;
-  const unreviewedPublicationCount = review ? publicationSnapshots.filter((item) => !(review.evidenceIds ?? []).includes(item.id)).length : 0;
-  const reviewIsStale = Boolean(review && (unreviewedAudienceCount > 0 || unreviewedPublicationCount > 0));
-  const manifest = derivePresenceCapabilityManifest(state, presence.id);
-  const growthCapabilities = ["post", "reply", "quote", "repost", "follow", "follower_measurement", "post_performance"];
-  const limitations = manifest.items.filter((item) => growthCapabilities.includes(item.capability) && item.availability !== "available");
-  const limitationCopy = [...new Set(limitations.map((item) => item.limitation).filter((item): item is string => Boolean(item)))];
-  const goal = assignment?.successEvidence?.value;
-  const progress = displayedFollowerCount !== undefined && goal ? Math.min(100, Math.round((displayedFollowerCount / goal) * 100)) : 0;
-  const nextGrowthReviewAt = [assignment?.plan?.nextWeeklyReviewAt, assignment?.plan?.nextStrategicReviewAt].filter((value): value is string => Boolean(value)).sort((left, right) => left.localeCompare(right))[0];
-  const bodyHeading = manifest.bodyStatus === "degraded" ? "Degraded" : manifest.bodyStatus === "ready" ? limitations.length ? "Ready with limits" : "Ready to work" : "Unavailable";
-
-  // Autonomy derivations
-  const verifiedHistory = derivePublicHistory(state, presence.id).filter((item) => item.environment !== "sandbox" && growthEvidenceIsInPresenceScope(state, presence.id, item.occurredAt));
-  const autonomousExecutions = state.executions.filter((e) => e.presenceId === presence.id && e.status === "succeeded" && e.environment !== "sandbox" && growthEvidenceIsInPresenceScope(state, presence.id, e.createdAt));
-  const totalAutonomousActions = verifiedHistory.length;
-  const decisionsCount = state.socialDecisions.filter((d) => d.presenceId === presence.id && growthEvidenceIsInPresenceScope(state, presence.id, d.createdAt)).length;
-  const verifiedOutcomesCount = state.outcomes.filter((o) => o.presenceId === presence.id && o.status === "succeeded" && growthEvidenceIsInPresenceScope(state, presence.id, o.observedAt)).length;
-  const pendingReviewCount = pendingReviewExecutionsForCapabilities(state, presence.id, growthCapabilities).length;
-  const incidentsRequiringOperator = state.recoveryIncidents?.filter((i) => (!i.presenceId || i.presenceId === presence.id) && i.operatorActionRequired && i.state !== "resolved").length ?? 0;
-  const operatorInterventionsNeeded = pendingReviewCount + incidentsRequiringOperator + (manifest.bodyStatus === "unavailable" ? 1 : 0);
-  const recoveriesHandledCount = state.recoveryIncidents?.filter((i) => (!i.presenceId || i.presenceId === presence.id) && i.state === "resolved" && growthEvidenceIsInPresenceScope(state, presence.id, i.resolvedAt ?? i.lastObservedAt)).length ?? 0;
-
-  // 7-day activity breakdown
-  const oneWeekAgo = now - 7 * 86_400_000;
-  const weeklyHistory = verifiedHistory.filter((item) => new Date(item.occurredAt).getTime() >= oneWeekAgo);
-  const weeklyBreakdown = {
-    posts: weeklyHistory.filter((item) => item.kind === "post").length,
-    replies: weeklyHistory.filter((item) => item.kind === "reply" || item.kind === "comment").length,
-    quotes: weeklyHistory.filter((item) => item.kind === "quote").length,
-    likes: weeklyHistory.filter((item) => item.kind === "like").length,
-    follows: state.outcomes.filter((outcome) => outcome.presenceId === presence.id && outcome.status === "succeeded" && outcome.environment !== "sandbox" && growthEvidenceIsInPresenceScope(state, presence.id, outcome.observedAt) && new Date(outcome.observedAt).getTime() >= oneWeekAgo).filter((outcome) => state.executions.some((execution) => execution.id === outcome.executionId && execution.affordance === "x.follow" && growthEvidenceIsInPresenceScope(state, presence.id, execution.createdAt))).length,
-  };
-
-  // Metric derivations
-  const totalReach = publicationSnapshots.reduce((sum, p) => sum + (p.impressions ?? 0), 0);
-  const totalLikes = publicationSnapshots.reduce((sum, p) => sum + (p.likes ?? 0), 0);
-  const totalReplies = publicationSnapshots.reduce((sum, p) => sum + (p.replies ?? 0), 0);
-  const totalQuotes = publicationSnapshots.reduce((sum, p) => sum + (p.quotes ?? 0), 0);
-  const totalEngagement = totalLikes + totalReplies + totalQuotes;
-  const scopedPersonIds = new Set((state.personIdentities ?? []).filter((identity) => identity.sourcePresenceId === presence.id && growthEvidenceIsInPresenceScope(state, presence.id, identity.createdAt)).map((identity) => identity.personId));
-  const relationshipsCount = (state.relationships ?? []).filter((r) => r.state === "active" && scopedPersonIds.has(r.personId)).length;
-  const peopleEngagedCount = (state.people ?? []).filter((p) => p.memoryState === "active" && scopedPersonIds.has(p.id)).length;
-
-  const presencePaused = presence.status === "paused" || assignment?.status === "paused";
-  const needsAttention = operatorInterventionsNeeded > 0 || assignment?.status === "blocked" || assignment?.status === "needs_operator" || presencePaused;
-
-  const statusLabel = presencePaused
-    ? "Paused"
-    : needsAttention
-    ? "Needs attention"
-    : deltas.sevenDay !== undefined && deltas.sevenDay > 0
-    ? "Accelerating"
-    : review && review.working.length > 0
-    ? "Autonomous"
-    : "Learning";
-
-  const statusTone = statusLabel === "Autonomous" || statusLabel === "Accelerating"
-    ? "autonomous"
-    : statusLabel === "Learning"
-    ? "learning"
-    : statusLabel === "Needs attention"
-    ? "warning"
-    : "muted";
-
-  const dynamicSubhead = needsAttention
-    ? `Operator attention required (${operatorInterventionsNeeded} action${operatorInterventionsNeeded === 1 ? "" : "s"} needed). ${limitationCopy[0] ?? "Review or connection check required."}`
-    : deltas.sevenDay !== undefined && deltas.sevenDay > 0
-    ? `Followers up this week (+${deltas.sevenDay}). Engagement improving. No operator action needed.`
-    : totalAutonomousActions > 0
-    ? `Operating autonomously with ${totalAutonomousActions} verified actions on X. Follower growth is not yet proven by the current baseline.`
-    : `Establishing the follower baseline. Genny is acting autonomously, but growth is not yet proven.`;
-
-  const reviewGrowth = async (kind: "weekly" | "strategic") => {
-    if (reviewingGrowth || !assignment) return;
-    setReviewingGrowth(true);
-    try { await mutate({ type: "reviewGrowth", presenceId: presence.id, assignmentId: assignment.id, kind }); } finally { setReviewingGrowth(false); }
-  };
-
-  const createGrowthResponsibility = async () => {
-    const defaultGoal = 100_000;
-    await mutate({
-      type: "createAssignment",
-      presenceId: presence.id,
-      environment: presence.connectionMode === "sandbox" ? "sandbox" : "live",
-      instruction: `Grow this Presence toward ${defaultGoal.toLocaleString()} followers while building an audience of ${presence.brief.audience}.`,
-    });
-  };
-
-  return (
-    <div className="page growth-page">
-      <PageHeader
-        eyebrow={`${presence.name} · Growth`}
-        title="Growth"
-        description="Autonomous audience growth scoreboard and performance proof."
-      />
-      <div className="growth-scope-note" role="note">
-        <strong>Growth window</strong>
-        <span>{growthBoundary.startAt ? `${growthBoundary.source === "recorded" ? "Presence created" : "Presence start inferred"} ${formatHistoryTimestamp(growthBoundary.startAt)} · Earlier account history is excluded.` : "Presence start is not known yet · Earlier account history is excluded until the boundary can be established."}</span>
-      </div>
-
-      {!assignment ? (
-        <section className="growth-empty settings-card">
-          <div className="watch-empty-mark">
-            <TrendingUp size={23} />
-          </div>
-          <SectionEyebrow>Continuous responsibility</SectionEyebrow>
-          <h2>Give {presence.name} a growth responsibility.</h2>
-          <p>
-            One long-lived Assignment owns the objective. Genny chooses the day-to-day work, observes the public result, and revises its approach during review.
-          </p>
-          <Button variant="primary" onClick={() => void createGrowthResponsibility()}>
-            <Plus size={14} /> Create growth responsibility
-          </Button>
-        </section>
-      ) : (
-        <>
-          {/* Layer 1: Hero Section */}
-          <section className="growth-dashboard-hero" aria-label="Growth Hero Status">
-            <div className="growth-hero-top">
-              <div className="growth-hero-copy">
-                <SectionEyebrow>Growth status</SectionEyebrow>
-                <h1>{presence.name} {statusLabel === "Accelerating" ? "is accelerating" : statusLabel === "Autonomous" ? "is operating autonomously" : statusLabel === "Needs attention" ? "needs attention" : "is establishing a baseline"}</h1>
-                <p>{dynamicSubhead}</p>
-              </div>
-              <span className={`growth-status-chip growth-status-chip-${statusTone}`}>
-                {statusLabel === "Autonomous" && <Check size={13} aria-hidden="true" />}
-                {statusLabel === "Accelerating" && <ArrowUpRight size={13} aria-hidden="true" />}
-                {statusLabel === "Learning" && <Sparkles size={13} aria-hidden="true" />}
-                {statusLabel === "Needs attention" && <CircleAlert size={13} aria-hidden="true" />}
-                {statusLabel}
-              </span>
-            </div>
-
-            {/* Persistent Status / Action Banner */}
-            {needsAttention && (
-              <div className="growth-needs-banner" role="alert">
-                <div>
-                  <strong>Action Required: {limitationCopy[0] ?? "Growth needs your attention"}</strong>
-                  <span>Operator resolution needed for full autonomous performance.</span>
-                </div>
-                <Button variant="ghost" onClick={() => _setView("presence")}>
-                  Resolve in Settings
-                </Button>
-              </div>
-            )}
-
-            <div className="growth-hero-footer">
-              <div className={`growth-action-pill ${needsAttention ? "growth-action-pill-attention" : "growth-action-pill-healthy"}`}>
-                {needsAttention ? (
-                  <>
-                    <CircleAlert size={15} aria-hidden="true" />
-                    <span>Needs you: {operatorInterventionsNeeded} action{operatorInterventionsNeeded === 1 ? "" : "s"} required</span>
-                  </>
-                ) : (
-                  <>
-                    <Check size={15} aria-hidden="true" />
-                    <span>Autonomous loop active</span>
-                  </>
-                )}
-              </div>
-              <span className="growth-hero-meta">
-                Objective: {displayedFollowerCount !== undefined ? displayedFollowerCount.toLocaleString() : "—"} / {goal?.toLocaleString() ?? "100,000"} followers ({progress}% progress)
-              </span>
-            </div>
-          </section>
-
-          {historicalGrowth && snapshots.length === 0 && (
-            <section className="growth-recovered-context" aria-label="Recovered Growth context">
-              <div className="growth-recovered-context-copy">
-                <SectionEyebrow>Recovered context · historical</SectionEyebrow>
-                <h2>Earlier Growth evidence is still available</h2>
-                <p>
-                  The active database has no structured audience timeline for this Presence yet, so this context comes from a saved Growth revision written after its start. It is shown as historical evidence and is not treated as a current measurement.
-                </p>
-                {historicalGrowth.latestReview && <blockquote>{historicalGrowth.latestReview}</blockquote>}
-              </div>
-              <div className="growth-recovered-context-stats">
-                {historicalGrowth.currentFollowers !== undefined && <div><strong>{historicalGrowth.currentFollowers.toLocaleString()}</strong><span>followers in last review</span></div>}
-                {historicalGrowth.repliesWithResponses !== undefined && <div><strong>{historicalGrowth.repliesWithResponses.toLocaleString()}</strong><span>replies with responses</span></div>}
-                {historicalGrowth.activeRelationships !== undefined && <div><strong>{historicalGrowth.activeRelationships.toLocaleString()}</strong><span>active relationships</span></div>}
-                {historicalGrowth.medianPostReach !== undefined && <div><strong>{historicalGrowth.medianPostReach.toLocaleString()}</strong><span>median post reach</span></div>}
-                {historicalGrowth.topPostReach !== undefined && <div><strong>{historicalGrowth.topPostReach.toLocaleString()}</strong><span>top post reach</span></div>}
-              </div>
-            </section>
-          )}
-
-          {/* Layer 1: KPI Scoreboard */}
-          <section className="growth-kpi-grid" aria-label="Key Performance Indicators">
-            <div className="growth-kpi-card">
-              <div className="growth-kpi-card-header">
-                <span className="growth-kpi-label">Followers</span>
-                <Users size={14} className="growth-kpi-icon" />
-              </div>
-              <div className="growth-kpi-value">{displayedFollowerCount !== undefined ? displayedFollowerCount.toLocaleString() : "—"}</div>
-              <div className={`growth-kpi-delta ${deltas.sevenDay && deltas.sevenDay > 0 ? "growth-kpi-delta-positive" : "growth-kpi-delta-neutral"}`}>
-                {deltas.sevenDay !== undefined ? (
-                  <>
-                    {deltas.sevenDay > 0 ? "+" : ""}{deltas.sevenDay} this week
-                  </>
-                ) : (
-                  historicalGrowth?.followerDelta !== undefined ? `${historicalGrowth.followerDelta > 0 ? "+" : ""}${historicalGrowth.followerDelta} in last recorded review` : "Collecting 7d baseline"
-                )}
-              </div>
-              <div className="growth-kpi-sub">
-                {latest ? (deltas.twentyEightDay !== undefined ? `${deltas.twentyEightDay >= 0 ? "+" : ""}${deltas.twentyEightDay} in 28d` : "Baseline mode") : currentAccountFollowers !== undefined ? "Last authenticated X profile" : historicalGrowth ? "Historical Growth review" : "Baseline mode"}
-              </div>
-            </div>
-
-            <div className="growth-kpi-card">
-              <div className="growth-kpi-card-header">
-                <span className="growth-kpi-label">Reach / Views</span>
-                <Eye size={14} className="growth-kpi-icon" />
-              </div>
-              <div className="growth-kpi-value">{totalReach ? totalReach.toLocaleString() : (latestPublication?.impressions?.toLocaleString() ?? "—")}</div>
-              <div className="growth-kpi-delta growth-kpi-delta-positive">
-                {latestPublication?.impressions ? `${latestPublication.impressions.toLocaleString()} views top post` : "Observed"}
-              </div>
-              <div className="growth-kpi-sub">{publicationSnapshots.length} publication checks</div>
-            </div>
-
-            <div className="growth-kpi-card">
-              <div className="growth-kpi-card-header">
-                <span className="growth-kpi-label">Engagement</span>
-                <Heart size={14} className="growth-kpi-icon" />
-              </div>
-              <div className="growth-kpi-value">{totalEngagement ? totalEngagement.toLocaleString() : (totalLikes ? totalLikes.toLocaleString() : "—")}</div>
-              <div className="growth-kpi-delta growth-kpi-delta-neutral">
-                {totalLikes} likes · {totalReplies} replies
-              </div>
-              <div className="growth-kpi-sub">{weeklyBreakdown.quotes} quotes · {weeklyBreakdown.follows} follows this week</div>
-            </div>
-
-            <div className="growth-kpi-card">
-              <div className="growth-kpi-card-header">
-                <span className="growth-kpi-label">Output</span>
-                <BarChart3 size={14} className="growth-kpi-icon" />
-              </div>
-              <div className="growth-kpi-value">{weeklyBreakdown.posts || totalAutonomousActions || "0"}</div>
-              <div className="growth-kpi-delta growth-kpi-delta-positive">
-                {totalAutonomousActions} total actions on X
-              </div>
-              <div className="growth-kpi-sub">{weeklyBreakdown.replies} replies this week</div>
-            </div>
-
-            <div className="growth-kpi-card">
-              <div className="growth-kpi-card-header">
-                <span className="growth-kpi-label">Relationships</span>
-                <Users size={14} className="growth-kpi-icon" />
-              </div>
-              <div className="growth-kpi-value">{relationshipsCount || peopleEngagedCount || "—"}</div>
-              <div className="growth-kpi-delta growth-kpi-delta-neutral">
-                {peopleEngagedCount} people engaged
-              </div>
-              <div className="growth-kpi-sub">Substantive connections</div>
-            </div>
-
-            <div className="growth-kpi-card">
-              <div className="growth-kpi-card-header">
-                <span className="growth-kpi-label">Operator Load</span>
-                <ShieldCheck size={14} className="growth-kpi-icon" />
-              </div>
-              <div className="growth-kpi-value" style={{ color: operatorInterventionsNeeded === 0 ? "#2f6b3e" : "#b33927" }}>
-                {operatorInterventionsNeeded === 0 ? "0" : operatorInterventionsNeeded}
-              </div>
-              <div className={`growth-kpi-delta ${operatorInterventionsNeeded === 0 ? "growth-kpi-delta-positive" : "growth-kpi-delta-warning"}`}>
-                {operatorInterventionsNeeded === 0 ? "100% autonomous" : "Intervention needed"}
-              </div>
-              <div className="growth-kpi-sub">{recoveriesHandledCount} auto-recoveries</div>
-            </div>
-          </section>
-
-          {/* Layer 2: Autonomy Proof Panel */}
-          <GrowthAutonomyProof
-            presenceName={presence.name}
-            autonomousExecutionsCount={totalAutonomousActions}
-            decisionsCount={decisionsCount || totalAutonomousActions}
-            verifiedOutcomesCount={verifiedOutcomesCount || autonomousExecutions.length}
-            operatorInterventionsCount={operatorInterventionsNeeded}
-            recoveriesHandledCount={recoveriesHandledCount}
-            weeklyBreakdown={weeklyBreakdown}
-          />
-
-          {/* Layer 2: Simple Trend Chart */}
-          <GrowthTrendChart
-            snapshots={snapshots}
-            deltas={deltas}
-            presenceName={presence.name}
-          />
-
-          {/* Layer 2: What's Working Insight Cards */}
-          <GrowthInsights
-            review={review}
-            assignment={assignment}
-            latestPublication={latestPublication}
-            publicationSnapshotsCount={publicationSnapshots.length}
-            weeklyRepliesCount={weeklyBreakdown.replies}
-            relationshipsCount={relationshipsCount || peopleEngagedCount}
-            audienceObjective={assignment.audienceObjective ?? presence.brief.audience}
-          />
-
-          {/* Layer 2: Current Focus & What Happens Next */}
-          <GrowthFocusAndNext
-            assignment={assignment}
-            review={review}
-            nextGrowthReviewAt={nextGrowthReviewAt}
-            statusLabel={statusLabel}
-            presencePaused={presencePaused}
-            reviewingGrowth={reviewingGrowth}
-            reviewGrowth={reviewGrowth}
-          />
-
-          {/* Layer 3: Collapsible Analyst Details */}
-          <section className="growth-analyst-section" aria-label="Analyst & Deep Evidence Details">
-            <div className="growth-section-heading">
-              <div>
-                <SectionEyebrow>Analyst Details</SectionEyebrow>
-                <h2>Deep Evidence &amp; System Records</h2>
-              </div>
-            </div>
-            <div className="growth-disclosures">
-              <details className="growth-disclosure">
-                <summary>
-                  <div className="growth-disclosure-title">
-                    <ChevronRight size={15} className="growth-disclosure-chevron" aria-hidden="true" />
-                    <span>Audience &amp; Publication Evidence</span>
-                  </div>
-                  <span className="growth-disclosure-meta">{snapshots.length} audience · {publicationSnapshots.length} publication records</span>
-                </summary>
-                <GrowthEvidenceDetails
-                  presenceName={presence.name}
-                  snapshots={snapshots}
-                  publicationSnapshots={publicationSnapshots}
-                  mirrorObjects={state.mirrorObjects}
-                  review={review}
-                  reviewIsStale={reviewIsStale}
-                  unreviewedAudienceCount={unreviewedAudienceCount}
-                  unreviewedPublicationCount={unreviewedPublicationCount}
-                />
-              </details>
-              <details className="growth-disclosure">
-                <summary>
-                  <div className="growth-disclosure-title">
-                    <ChevronRight size={15} className="growth-disclosure-chevron" aria-hidden="true" />
-                    <span>Review History</span>
-                  </div>
-                  <span className="growth-disclosure-meta">{reviewHistory.length} completed review{reviewHistory.length === 1 ? "" : "s"}</span>
-                </summary>
-                <GrowthReviewHistory reviews={reviewHistory} />
-              </details>
-              <details className="growth-disclosure">
-                <summary>
-                  <div className="growth-disclosure-title">
-                    <ChevronRight size={15} className="growth-disclosure-chevron" aria-hidden="true" />
-                    <span>Capabilities &amp; Limitations</span>
-                  </div>
-                  <span className="growth-disclosure-meta">{bodyHeading}</span>
-                </summary>
-                <GrowthCapabilities
-                  state={state}
-                  presenceId={presence.id}
-                  manifest={manifest}
-                  limitations={limitations}
-                />
-              </details>
-            </div>
-          </section>
-        </>
-      )}
-    </div>
-  );
-}
 
 function getAssignmentProcessingState(
   assignment: Assignment,
@@ -13754,13 +13264,16 @@ function getAssignmentProcessingState(
   activeRunningId?: string | null,
   occurrenceDay?: string,
 ) {
+  const activePresenceRun = assignmentRuns
+    ?.filter((run) => run.presenceId === assignment.presenceId && ["queued", "researching", "selecting", "writing", "delivering"].includes(run.status))
+    .sort((left, right) => (right.lastProgressAt ?? right.updatedAt).localeCompare(left.lastProgressAt ?? left.updatedAt))[0];
   const latestRun = [...(assignmentRuns ?? [])]
     .filter((run) => run.assignmentId === assignment.id)
     .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0];
 
   const occurrenceIsToday = occurrenceDay === undefined || occurrenceDay === calendarWeekDays[(new Date().getDay() + 6) % 7];
   const isPendingMutate = occurrenceIsToday && activeRunningId === assignment.id;
-  const isProcessing = occurrenceIsToday && (assignmentIsCurrentlyProcessing(assignment, assignmentRuns) || isPendingMutate);
+  const isProcessing = occurrenceIsToday && (activePresenceRun?.assignmentId === assignment.id || isPendingMutate);
 
   let phaseLabel = "Working";
   if (latestRun?.status === "researching" || (isProcessing && assignment.work?.phase === "researching")) {
@@ -13788,6 +13301,7 @@ function scheduleOccurrenceStatus(assignment: Assignment, day: string, processin
   if (processing.isProcessing) return `Processing (${processing.phaseLabel})`;
   const today = calendarWeekDays[(new Date().getDay() + 6) % 7];
   if (day !== today && ["active", "working", "awaiting_execution"].includes(assignment.status)) return "Scheduled";
+  if (assignment.status === "working") return "Active · waiting for its next run";
   return assignment.status === "draft" ? "Not started" : assignment.status.replaceAll("_", " ");
 }
 
@@ -13800,7 +13314,7 @@ function assignmentScheduleProgress(assignment: Assignment) {
 
 const flexibleAssignmentTiming = "Flexible · within a few hours";
 const assignmentTimingLabel = (assignment: Assignment) => assignment.schedule
-  ? `${assignment.schedule.day} · ${assignment.schedule.time}–${splitConsiderationWindow(assignment.schedule.executionWindow, assignment.schedule.time).end}`
+  ? `${assignmentIsOneTime(assignment) ? "One-time · " : ""}${assignment.schedule.day} · ${assignment.schedule.time}–${splitConsiderationWindow(assignment.schedule.executionWindow, assignment.schedule.time).end}`
   : flexibleAssignmentTiming;
 
 function ScheduleView({
@@ -13837,6 +13351,7 @@ function ScheduleView({
   const [considerationEnd, setConsiderationEnd] = useState("11:00");
   const [viewMode, setViewMode] = useState<"list" | "week">("list");
   const [scheduleDayFilter, setScheduleDayFilter] = useState<ScheduleDayFilter>("all");
+  const [scheduleRecurrenceFilter, setScheduleRecurrenceFilter] = useState<ScheduleRecurrenceFilter>("all");
   const [compactSchedule, setCompactSchedule] = useState(true);
   const [calendarLayers, setCalendarLayers] = useState<ScheduleLayerVisibility>({ plan: Boolean(publishingPlan), intents: false, assignments: true });
   const [selectedAssignmentId, setSelectedAssignmentId] = useState<string | null>(null);
@@ -13956,6 +13471,7 @@ function ScheduleView({
   };
   const visibleSlots: CalendarSlot[] = [];
   const visibleAssignments = state.assignments.filter((item) => item.presenceId === presenceId && assignmentIsOpen(item));
+  const filteredVisibleAssignments = visibleAssignments.filter((assignment) => assignmentMatchesRecurrenceFilter(assignment, scheduleRecurrenceFilter));
   const scheduleDecisionAssignment = visibleAssignments.find((assignment) => ["needs_operator", "blocked"].includes(assignment.status));
   const didAutoFocusDecision = useRef(false);
   useEffect(() => {
@@ -14326,11 +13842,11 @@ function ScheduleView({
             </form>
           ) : <p className="assignment-inspector-instruction">{cleanUserFacingAssignmentInstruction(selectedAssignment.instruction)}</p>}
           <div className="assignment-inspector-meta">
-            <div><span>Window</span><strong>{selectedAssignment.activation?.type === "continuous" ? flexibleAssignmentTiming : selectedAssignment.schedule ? `${selectedAssignment.schedule.day} · ${selectedAssignment.schedule.time}–${splitConsiderationWindow(selectedAssignment.schedule.executionWindow, selectedAssignment.schedule.time).end}` : flexibleAssignmentTiming}</strong><small>{selectedAssignment.activation?.type === "continuous" ? "Work can happen within a few hours when useful." : selectedAssignment.schedule ? selectedAssignment.recurrence?.kind === "once" ? `Available once on ${selectedAssignment.schedule.day.toLowerCase()} from ${selectedAssignment.schedule.time}–${splitConsiderationWindow(selectedAssignment.schedule.executionWindow, selectedAssignment.schedule.time).end}.` : `Available ${selectedAssignment.schedule.day === "Daily" ? "daily" : selectedAssignment.schedule.day.toLowerCase()} from ${selectedAssignment.schedule.time}–${splitConsiderationWindow(selectedAssignment.schedule.executionWindow, selectedAssignment.schedule.time).end}. Repeats until completed or canceled.` : "Available within a few hours when useful."}</small></div>
+            <div><span>Window</span><strong>{selectedAssignment.activation?.type === "continuous" ? flexibleAssignmentTiming : assignmentTimingLabel(selectedAssignment)}</strong><small>{selectedAssignment.activation?.type === "continuous" ? "Work can happen within a few hours when useful." : selectedAssignment.schedule ? selectedAssignment.recurrence?.kind === "once" ? `Available once on ${selectedAssignment.schedule.day.toLowerCase()} from ${selectedAssignment.schedule.time}–${splitConsiderationWindow(selectedAssignment.schedule.executionWindow, selectedAssignment.schedule.time).end}.` : `Available ${selectedAssignment.schedule.day === "Daily" ? "daily" : selectedAssignment.schedule.day.toLowerCase()} from ${selectedAssignment.schedule.time}–${splitConsiderationWindow(selectedAssignment.schedule.executionWindow, selectedAssignment.schedule.time).end}. Repeats until completed or canceled.` : "Available within a few hours when useful."}</small></div>
             <div><span>Status</span><strong>{selectedAssignment.status === "draft" ? "Review before activation" : selectedAssignment.status.replaceAll("_", " ")}</strong><small>{assignmentScheduleProgress(selectedAssignment)}</small></div>
           </div>
           {(() => {
-            const pursuit = (state.assignmentPursuitWindows ?? []).find((item) => item.assignmentId === selectedAssignment.id && ["active", "paused"].includes(item.status));
+            const pursuit = (state.assignmentPursuitWindows ?? []).filter((item) => item.assignmentId === selectedAssignment.id && (isPromotionBurstWindow(item) ? ["active", "paused", "completed"].includes(item.status) : ["active", "paused"].includes(item.status))).sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())[0];
             if (!pursuit) return null;
             return <AssignmentPursuitCard state={state} pursuit={pursuit} assignmentTitle={cleanUserFacingAssignmentInstruction(selectedAssignment.instruction)} presenceName={presenceName} mutate={mutate} now={scheduleNow} compact />;
           })()}
@@ -14394,9 +13910,9 @@ function ScheduleView({
         </aside>
       )}
       {viewMode === "week" ? (
-        <WeekCalendar slots={visibleSlots} assignments={visibleAssignments} publishingPlan={publishingPlan} layers={calendarLayers} compact={compactSchedule} onToggleCompact={() => setCompactSchedule((current) => !current)} state={state} presenceName={presenceName} runningLiveAssignmentId={runningLiveAssignmentId} onEdit={beginEdit} onAssignment={openAssignment} onAdd={() => setShowForm(true)} onResetLayers={resetCalendarLayers} />
+        <WeekCalendar slots={visibleSlots} assignments={filteredVisibleAssignments} publishingPlan={publishingPlan} layers={calendarLayers} compact={compactSchedule} onToggleCompact={() => setCompactSchedule((current) => !current)} state={state} presenceName={presenceName} runningLiveAssignmentId={runningLiveAssignmentId} onEdit={beginEdit} onAssignment={openAssignment} onAdd={() => setShowForm(true)} onResetLayers={resetCalendarLayers} />
       ) : (
-        <ScheduleList assignments={visibleAssignments} publishingPlan={publishingPlan} layers={calendarLayers} presenceName={presenceName} state={state} mutate={mutate} runningLiveAssignmentId={runningLiveAssignmentId} dayFilter={scheduleDayFilter} onDayFilterChange={setScheduleDayFilter} onAssignment={openAssignment} onAdd={() => setShowForm(true)} onResetLayers={resetCalendarLayers} />
+        <ScheduleList assignments={filteredVisibleAssignments} publishingPlan={publishingPlan} layers={calendarLayers} presenceName={presenceName} state={state} mutate={mutate} runningLiveAssignmentId={runningLiveAssignmentId} dayFilter={scheduleDayFilter} onDayFilterChange={setScheduleDayFilter} recurrenceFilter={scheduleRecurrenceFilter} onRecurrenceFilterChange={setScheduleRecurrenceFilter} onAssignment={openAssignment} onAdd={() => setShowForm(true)} onResetLayers={resetCalendarLayers} />
       )}
     </div>
   );
@@ -14412,6 +13928,8 @@ function ScheduleList({
   runningLiveAssignmentId,
   dayFilter,
   onDayFilterChange,
+  recurrenceFilter,
+  onRecurrenceFilterChange,
   onAssignment,
   onAdd,
   onResetLayers,
@@ -14425,6 +13943,8 @@ function ScheduleList({
   runningLiveAssignmentId?: string | null;
   dayFilter: ScheduleDayFilter;
   onDayFilterChange: (filter: ScheduleDayFilter) => void;
+  recurrenceFilter: ScheduleRecurrenceFilter;
+  onRecurrenceFilterChange: (filter: ScheduleRecurrenceFilter) => void;
   onAssignment: (assignment: Assignment) => void;
   onAdd: () => void;
   onResetLayers: () => void;
@@ -14454,19 +13974,23 @@ function ScheduleList({
   };
   const renderAssignment = (assignment: Assignment) => {
     const objective = assignmentObjective(assignment);
+    const oneTime = assignmentIsOneTime(assignment);
     const timing = assignmentTimingLabel(assignment);
     const proc = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId);
-    const status = proc.isProcessing ? `Processing (${proc.phaseLabel})` : assignment.status === "draft" ? "Not started" : objectiveLabel(assignment.status);
-    return <button type="button" className={`schedule-list-row schedule-list-row-assignment${proc.isProcessing ? " is-processing schedule-list-row-processing" : ""}`} key={assignment.id} onClick={() => onAssignment(assignment)} aria-label={`Open Assignment ${assignment.instruction}`} aria-busy={proc.isProcessing}>
+    const promotionPursuit = (state.assignmentPursuitWindows ?? []).filter((item) => item.assignmentId === assignment.id && isPromotionBurstWindow(item) && ["active", "paused", "completed"].includes(item.status)).sort((left, right) => new Date(right.updatedAt).getTime() - new Date(left.updatedAt).getTime())[0];
+    const promotionCounts = promotionPursuit ? assignmentPursuitVerifiedCounts(state, promotionPursuit) : undefined;
+    const status = promotionPursuit ? (promotionPursuit.status === "completed" ? "Completed" : promotionPursuit.status === "paused" ? "Recovering" : proc.isProcessing ? `Processing (${proc.phaseLabel})` : "Running") : proc.isProcessing ? `Processing (${proc.phaseLabel})` : assignment.status === "draft" ? "Not started" : assignment.status === "working" ? "Active · waiting for its next run" : objectiveLabel(assignment.status);
+    return <button type="button" className={`schedule-list-row schedule-list-row-assignment${oneTime ? " is-one-time" : ""}${proc.isProcessing ? " is-processing schedule-list-row-processing" : ""}`} key={assignment.id} onClick={() => onAssignment(assignment)} aria-label={`Open ${oneTime ? "one-time " : ""}Assignment ${assignment.instruction}`} aria-busy={proc.isProcessing}>
       <div className="schedule-list-row-mark" aria-hidden="true" />
       <div className="schedule-list-row-copy">
         <div className="schedule-list-row-kicker">
           <strong>{assignment.origin === "publishing_initiative" ? `${presenceName} · Agent-owned` : assignment.createdBy === "operator" ? "You · Operator assignment" : "Agent-owned assignment"}</strong>
           <span className="schedule-objective-badge">{objectiveLabel(objective)}</span>
+          {oneTime && <span className="schedule-recurrence-badge">One-time</span>}
           {proc.isProcessing && <span className="schedule-processing-badge"><LoaderCircle size={9} className="spin" /> Working now · {proc.phaseLabel}</span>}
         </div>
-        <h3>{cleanUserFacingAssignmentInstruction(assignment.instruction)}</h3>
-        <small>{timing} · {assignmentScheduleProgress(assignment)} · {proc.isProcessing ? <span className="schedule-processing-status-text">Processing ({proc.phaseLabel}…)</span> : status}</small>
+        <h3>{promotionPursuit ? "OwnTheHype promotion" : cleanUserFacingAssignmentInstruction(assignment.instruction)}</h3>
+        <small>{promotionPursuit ? `${promotionCounts?.verified ?? 0} / ${promotionPursuit.requiredVerifiedPromotionalActions ?? 40} verified · ${status}` : `${timing} · ${assignmentScheduleProgress(assignment)} · ${proc.isProcessing ? <span className="schedule-processing-status-text">Processing ({proc.phaseLabel}…)</span> : status}`}</small>
       </div>
       <ChevronRight size={16} aria-hidden="true" />
     </button>;
@@ -14474,11 +13998,15 @@ function ScheduleList({
   return <section className="schedule-list" aria-label="Schedule list">
     <div className="schedule-list-header">
       <div>
-        <SectionEyebrow>List schedule</SectionEyebrow>
-        <h2>Scheduled responsibilities</h2>
-        <p>Each row is a responsibility with a visible owner, timing, and state.</p>
+        <SectionEyebrow>Future work</SectionEyebrow>
+        <h2>What Genny may work on</h2>
+        <p>Assignments are outcomes you asked for. The publishing rhythm is flexible time to find, shape, and share useful work.</p>
       </div>
       <div className="schedule-list-header-controls">
+        <div className="schedule-day-filter-label">Assignment type</div>
+        <div className="feed-filter schedule-recurrence-filter" role="group" aria-label="Assignment type filter">
+          {scheduleRecurrenceFilters.map((item) => <button type="button" key={item.value} className={recurrenceFilter === item.value ? "active" : ""} aria-pressed={recurrenceFilter === item.value} onClick={() => onRecurrenceFilterChange(item.value)}>{item.label}</button>)}
+        </div>
         <div className="schedule-day-filter-label">Show days</div>
         <div className="feed-filter schedule-day-filter" role="group" aria-label="Scheduled responsibility filter">
           {scheduleDayFilters.map((item) => <button type="button" key={item.value} className={dayFilter === item.value ? "active" : ""} aria-pressed={dayFilter === item.value} aria-label={item.value === "all" ? "Show all scheduled items" : `Show ${item.value.slice(0, 3)} scheduled items`} title={item.value === "all" ? "Show all days" : `Show ${item.value}`} onClick={() => onDayFilterChange(item.value)}>{item.label}</button>)}
@@ -14486,9 +14014,9 @@ function ScheduleList({
         <ScheduleLegend layers={layers} />
       </div>
     </div>
-    {!hasItems ? <EmptyState title={!layers.assignments ? "Assignments are hidden" : dayFilter !== "all" ? `No responsibilities on ${selectedDayLabel}` : "No scheduled responsibilities"} body={!layers.assignments ? "Turn on Assignments above to see scheduled responsibilities." : dayFilter !== "all" ? "Try another day or show all scheduled responsibilities." : "Add an Assignment only when you want a specific outcome pursued."} action={!layers.assignments ? <Button onClick={onResetLayers} variant="secondary">Show assignments</Button> : dayFilter !== "all" ? <Button onClick={() => onDayFilterChange("all")} variant="secondary">Show all days</Button> : <Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add assignment</Button>} /> : <>
+    {!hasItems ? <EmptyState title={!layers.assignments ? "Assignments are hidden" : dayFilter !== "all" ? `No responsibilities on ${selectedDayLabel}` : recurrenceFilter !== "all" ? `No ${recurrenceFilter} responsibilities` : "No scheduled responsibilities"} body={!layers.assignments ? "Turn on Assignments above to see scheduled responsibilities." : dayFilter !== "all" ? "Try another day or show all scheduled responsibilities." : recurrenceFilter !== "all" ? "Try another assignment type or show all scheduled responsibilities." : "Add an Assignment only when you want a specific outcome pursued."} action={!layers.assignments ? <Button onClick={onResetLayers} variant="secondary">Show assignments</Button> : dayFilter !== "all" ? <Button onClick={() => onDayFilterChange("all")} variant="secondary">Show all days</Button> : recurrenceFilter !== "all" ? <Button onClick={() => onRecurrenceFilterChange("all")} variant="secondary">Show all types</Button> : <Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add assignment</Button>} /> : <>
       <div className="schedule-list-rows">
-      {layers.plan && visiblePlanWindows.length > 0 && visiblePlanWindows.map((window, index) => { const position = publishingWindowCalendarPosition(window, publishingPlan?.timezone); return <article className="schedule-list-row schedule-list-row-plan" key={window.id} aria-label={`${presenceName} assignment window ${window.purpose}`}><div className="schedule-list-row-mark" aria-hidden="true" /><div className="schedule-list-row-copy"><div className="schedule-list-row-kicker"><strong>{position.day} · {position.startTime}–{position.endTime}</strong><span>{presenceName} · Agent-owned</span><span>{gennyPaused ? "Paused" : window.status === "active" ? "Working window" : "Scheduled"}</span></div><h3>{window.purpose[0].toUpperCase() + window.purpose.slice(1)} toward {presenceName}&apos;s mission</h3><small>{window.summary} · {gennyPaused ? "assignment paused" : window.status.replaceAll("_", " ")}</small></div><div className="schedule-plan-window-actions">{index === 0 && gennyAssignment && <><button type="button" className="schedule-inline-action" onClick={() => void toggleGennyAssignment()}>{gennyPaused ? "Resume" : "Pause"}</button><button type="button" className="schedule-inline-action" onClick={() => onAssignment(gennyAssignment)}>Details</button></>}<span aria-hidden="true"><ChevronRight size={16} /></span></div></article>; })}
+      {layers.plan && visiblePlanWindows.length > 0 && visiblePlanWindows.map((window, index) => { const position = publishingWindowCalendarPosition(window, publishingPlan?.timezone); const presentation = publishingWindowPresentation(window); return <article className="schedule-list-row schedule-list-row-plan" key={window.id} aria-label={`${presenceName} publishing rhythm: ${presentation.title}`}><div className="schedule-list-row-mark" aria-hidden="true" /><div className="schedule-list-row-copy"><div className="schedule-list-row-kicker"><strong>{position.day} · {position.startTime}–{position.endTime}</strong><span>{presenceName} · Publishing rhythm</span><span>{gennyPaused ? "Paused" : window.status === "active" ? "Working now" : "Flexible window"}</span></div><h3>{presentation.title}</h3><small>{presentation.description}{gennyPaused ? " · publishing responsibility paused" : ""}</small></div><div className="schedule-plan-window-actions">{index === 0 && gennyAssignment && <><button type="button" className="schedule-inline-action" onClick={() => void toggleGennyAssignment()}>{gennyPaused ? "Resume" : "Pause"}</button><button type="button" className="schedule-inline-action" onClick={() => onAssignment(gennyAssignment)}>Details</button></>}<span aria-hidden="true"><ChevronRight size={16} /></span></div></article>; })}
       {layers.assignments && currentAssignments.map(renderAssignment)}
     </div></>}
     {layers.assignments && expiredAssignments.length > 0 && <details className="schedule-archive-details">
@@ -14532,7 +14060,7 @@ function WeekCalendar({
   const flexibleAssignments = assignments.filter((assignment) => !assignment.schedule && assignmentIsOpen(assignment));
   const scheduledPlanWindows = (publishingPlan?.windows ?? [])
     .filter((window) => !["completed", "missed", "superseded"].includes(window.status))
-    .map((window) => publishingWindowCalendarPosition(window, publishingPlan?.timezone))
+    .map((window) => ({ ...publishingWindowCalendarPosition(window, publishingPlan?.timezone), presentation: publishingWindowPresentation(window) }))
     .filter((window) => calendarWeekDays.includes(window.day) && window.startMinutes < 24 * 60);
   const dayPlanWindows = new Map(calendarWeekDays.map((day) => [day, scheduledPlanWindows.filter((window) => window.day === day)]));
   const daySlots = new Map(calendarWeekDays.map((day) => [day, scheduledSlots.filter((slot) => slot.day === day)]));
@@ -14542,7 +14070,7 @@ function WeekCalendar({
   const hasDatedItems = (layers.plan && scheduledPlanWindows.length > 0) || (layers.intents && scheduledSlots.length > 0) || (layers.assignments && scheduledAssignments.length > 0);
   const hasFlexibleItems = layers.assignments && flexibleAssignments.length > 0;
   const hasItems = hasDatedItems || hasFlexibleItems;
-  const calendarLabel = [layers.plan && "publishing plan", layers.intents && "legacy entries", layers.assignments && "Assignments"].filter(Boolean).join(", ");
+  const calendarLabel = [layers.plan && "publishing rhythm", layers.intents && "legacy entries", layers.assignments && "Assignments"].filter(Boolean).join(", ");
   const compactDays = calendarWeekDays.map((day) => {
     const items = [
       ...(layers.plan ? (dayPlanWindows.get(day) ?? []).map((window) => ({
@@ -14550,9 +14078,9 @@ function WeekCalendar({
         kind: "plan" as const,
         startMinutes: window.startMinutes,
         time: window.startTime + "–" + window.endTime,
-        title: "Plan · " + window.purpose,
-        detail: window.summary,
-        meta: window.status === "active" ? "Active window" : window.status,
+        title: "Rhythm · " + window.presentation.title,
+        detail: window.presentation.description,
+        meta: window.status === "active" ? "Working now" : "Flexible window",
         status: window.status,
       })) : []),
       ...(layers.intents ? (daySlots.get(day) ?? []).map((slot) => {
@@ -14581,6 +14109,7 @@ function WeekCalendar({
           detail: assignment.instruction,
           meta: assignmentScheduleProgress(assignment) + " · " + status,
           assignment,
+          isOneTime: assignmentIsOneTime(assignment),
           isProcessing: proc.isProcessing,
           phaseLabel: proc.phaseLabel,
         };
@@ -14608,7 +14137,7 @@ function WeekCalendar({
       </button>;
     }
     const objective = assignmentObjective(item.assignment);
-    return <button type="button" className={`compact-calendar-item compact-calendar-item-assignment${item.isProcessing ? " is-processing compact-calendar-item-processing" : ""}`} key={item.id} onClick={() => onAssignment(item.assignment)} aria-label={"Open Assignment " + item.assignment.instruction + ", " + item.assignment.schedule?.day + " at " + item.assignment.schedule?.time} aria-busy={item.isProcessing}>
+    return <button type="button" className={`compact-calendar-item compact-calendar-item-assignment${item.isOneTime ? " is-one-time" : ""}${item.isProcessing ? " is-processing compact-calendar-item-processing" : ""}`} key={item.id} onClick={() => onAssignment(item.assignment)} aria-label={`Open ${item.isOneTime ? "one-time " : ""}Assignment ${item.assignment.instruction}, ${item.assignment.schedule?.day} at ${item.assignment.schedule?.time}`} aria-busy={item.isProcessing}>
       <div className="compact-calendar-time-col">
         <span className="compact-calendar-time">{item.time}</span>
         {item.isProcessing && <span className="compact-calendar-processing-pill"><LoaderCircle size={9} className="spin" /> Processing</span>}
@@ -14617,6 +14146,7 @@ function WeekCalendar({
         <div className="compact-calendar-item-header">
           <strong>{item.title}</strong>
           <span className="compact-calendar-objective">{objectiveLabel(objective)}</span>
+          {item.isOneTime && <span className="compact-calendar-recurrence">One-time</span>}
         </div>
         <small>{item.detail}</small>
         {item.isProcessing ? (
@@ -14649,8 +14179,8 @@ function WeekCalendar({
         </div>
       </div>
       {!hasItems ? <EmptyState title={hasAnyItems ? "Nothing shown on this calendar" : "Nothing scheduled for this Presence"} body={hasAnyItems ? "Turn on a calendar layer to compare the Presence plan or Assignments." : `Add an Assignment to see when ${presenceName} is expected to work during the week.`} action={hasAnyItems ? <Button onClick={onResetLayers} variant="secondary">Show all layers</Button> : <Button onClick={onAdd} variant="secondary"><Plus size={14} /> Add assignment</Button>} /> : <>
-        {hasDatedItems && <div className="week-grid-scroll"><div className="week-grid" style={{ "--week-grid-height": `${gridHeight}px` } as React.CSSProperties}><div className="week-grid-header"><span className="week-time-header">Local time</span>{calendarWeekDays.map((day) => <span key={day}>{day.slice(0, 3)}<small>{day}</small></span>)}</div><div className="week-grid-body"><div className="week-time-rail">{calendarHours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>{calendarWeekDays.map((day) => <div className="week-day-column" key={day}>{calendarHours.map((hour) => <div className="week-hour-cell" key={hour} />)}{layers.plan && (dayPlanWindows.get(day) ?? []).map((window) => { const style = blockStyle(window.startMinutes, window.endMinutes, 42); return <div className={`week-plan-window week-plan-window-${window.status}`} key={window.id} style={style} title={`${window.purpose} window · ${window.summary}`}><span className="week-plan-window-time">{window.startTime}–{window.endTime}</span><strong>Plan · {window.purpose}</strong><small>{window.summary}</small></div>; })}{layers.intents && (daySlots.get(day) ?? []).map((slot) => { const style = blockStyle(timeToMinutes(slot.time), timeToMinutes(splitConsiderationWindow(slot.executionWindow, slot.time).end), 54); const target = state.presences.find((item) => item.id === slot.presence); return <button type="button" key={slot.id} className={`week-intent objective-${objectiveTone(slot.objective)}`} style={style} onClick={() => onEdit(slot)} aria-label={`Edit ${slot.label}, ${slot.day} at ${slot.time}`} title={`${slot.label} · ${slot.day} ${slot.time} · ${considerationSummary(slot.time, slot.executionWindow)}`}><span className="week-intent-time">{slot.time}</span><strong>{slot.label}</strong><small>{target?.name ?? presenceName} · {objectiveLabel(slot.objective)}</small><em>{slot.mode === "auto" ? "Auto" : "Review"}</em></button>; })}{layers.assignments && (dayAssignments.get(day) ?? []).map((assignment) => { const schedule = assignment.schedule!; const objective = assignmentObjective(assignment); const style = blockStyle(timeToMinutes(schedule.time), timeToMinutes(splitConsiderationWindow(schedule.executionWindow, schedule.time).end), 58); const proc = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId, day); const status = scheduleOccurrenceStatus(assignment, day, proc); const progress = assignmentScheduleProgress(assignment); return <button type="button" key={assignment.id} className={`week-assignment${proc.isProcessing ? " is-processing week-assignment-processing" : ""}`} style={style} onClick={() => onAssignment(assignment)} aria-label={`Open Assignment ${assignment.instruction}, ${schedule.day} at ${schedule.time}`} title={`Open Assignment details · ${assignment.instruction} · ${schedule.day} ${schedule.time}`} aria-busy={proc.isProcessing}><span className="week-intent-time">{schedule.time}</span><strong>Assignment</strong><span className="week-assignment-objective">{objectiveLabel(objective)}</span><small>{assignment.instruction}</small>{proc.isProcessing ? <em className="week-assignment-processing-tag"><LoaderCircle size={8} className="spin" /> {progress} · {proc.phaseLabel}…</em> : <em>{progress} · {status}</em>}</button>; })}</div>)}</div></div></div>}
-        {hasFlexibleItems && <section className="week-unscheduled week-flexible-assignments" aria-label="Flexible assignment windows"><div className="week-unscheduled-heading"><div><SectionEyebrow>Flexible windows</SectionEyebrow><h3>Responsibilities within a few hours</h3></div><span>{flexibleAssignments.length} item{flexibleAssignments.length === 1 ? "" : "s"}</span></div><p>These responsibilities are time-bounded but event-driven. The Agent can take the next useful step within a few hours when the opportunity is right.</p><div className="week-unscheduled-list">{flexibleAssignments.map((assignment) => { const objective = assignmentObjective(assignment); const proc = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId); const status = proc.isProcessing ? `Processing (${proc.phaseLabel})` : assignment.status === "draft" ? "Not started" : assignment.status.replaceAll("_", " "); return <button type="button" key={assignment.id} className={`week-unscheduled-item${proc.isProcessing ? " is-processing" : ""}`} onClick={() => onAssignment(assignment)} aria-label={`Open flexible Assignment ${assignment.instruction}`} aria-busy={proc.isProcessing}><span className="week-unscheduled-mark" aria-hidden="true" /><span className="week-unscheduled-copy"><span className="week-unscheduled-kicker"><strong>{flexibleAssignmentTiming}</strong><span className="week-assignment-objective">{objectiveLabel(objective)}</span>{proc.isProcessing && <span>Working now · {proc.phaseLabel}</span>}</span><strong className="week-unscheduled-title">{cleanUserFacingAssignmentInstruction(assignment.instruction)}</strong><small>{assignmentScheduleProgress(assignment)} · {status}</small></span><ChevronRight size={16} aria-hidden="true" /></button>; })}</div></section>}
+        {hasDatedItems && <div className="week-grid-scroll"><div className="week-grid" style={{ "--week-grid-height": `${gridHeight}px` } as React.CSSProperties}><div className="week-grid-header"><span className="week-time-header">Local time</span>{calendarWeekDays.map((day) => <span key={day}>{day.slice(0, 3)}<small>{day}</small></span>)}</div><div className="week-grid-body"><div className="week-time-rail">{calendarHours.map((hour) => <span key={hour}>{String(hour).padStart(2, "0")}:00</span>)}</div>{calendarWeekDays.map((day) => <div className="week-day-column" key={day}>{calendarHours.map((hour) => <div className="week-hour-cell" key={hour} />)}{layers.plan && (dayPlanWindows.get(day) ?? []).map((window) => { const style = blockStyle(window.startMinutes, window.endMinutes, 42); return <div className={`week-plan-window week-plan-window-${window.status}`} key={window.id} style={style} title={`${window.presentation.title} · ${window.presentation.description}`}><span className="week-plan-window-time">{window.startTime}–{window.endTime}</span><strong>{window.presentation.title}</strong><small>{window.presentation.description}</small></div>; })}{layers.intents && (daySlots.get(day) ?? []).map((slot) => { const style = blockStyle(timeToMinutes(slot.time), timeToMinutes(splitConsiderationWindow(slot.executionWindow, slot.time).end), 54); const target = state.presences.find((item) => item.id === slot.presence); return <button type="button" key={slot.id} className={`week-intent objective-${objectiveTone(slot.objective)}`} style={style} onClick={() => onEdit(slot)} aria-label={`Edit ${slot.label}, ${slot.day} at ${slot.time}`} title={`${slot.label} · ${slot.day} ${slot.time} · ${considerationSummary(slot.time, slot.executionWindow)}`}><span className="week-intent-time">{slot.time}</span><strong>{slot.label}</strong><small>{target?.name ?? presenceName} · {objectiveLabel(slot.objective)}</small><em>{slot.mode === "auto" ? "Auto" : "Review"}</em></button>; })}{layers.assignments && (dayAssignments.get(day) ?? []).map((assignment) => { const schedule = assignment.schedule!; const objective = assignmentObjective(assignment); const oneTime = assignmentIsOneTime(assignment); const style = blockStyle(timeToMinutes(schedule.time), timeToMinutes(splitConsiderationWindow(schedule.executionWindow, schedule.time).end), 58); const proc = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId, day); const status = scheduleOccurrenceStatus(assignment, day, proc); const progress = assignmentScheduleProgress(assignment); return <button type="button" key={assignment.id} className={`week-assignment${oneTime ? " is-one-time" : ""}${proc.isProcessing ? " is-processing week-assignment-processing" : ""}`} style={style} onClick={() => onAssignment(assignment)} aria-label={`Open ${oneTime ? "one-time " : ""}Assignment ${assignment.instruction}, ${schedule.day} at ${schedule.time}`} title={`${oneTime ? "One-time Assignment" : "Assignment"} details · ${assignment.instruction} · ${schedule.day} ${schedule.time}`} aria-busy={proc.isProcessing}><span className="week-intent-time">{schedule.time}</span><strong>Assignment</strong>{oneTime && <span className="week-assignment-recurrence">One-time</span>}<span className="week-assignment-objective">{objectiveLabel(objective)}</span><small>{assignment.instruction}</small>{proc.isProcessing ? <em className="week-assignment-processing-tag"><LoaderCircle size={8} className="spin" /> {progress} · {proc.phaseLabel}…</em> : <em>{progress} · {status}</em>}</button>; })}</div>)}</div></div></div>}
+      {hasFlexibleItems && <section className="week-unscheduled week-flexible-assignments" aria-label="Flexible assignment windows"><div className="week-unscheduled-heading"><div><SectionEyebrow>Flexible windows</SectionEyebrow><h3>Responsibilities within a few hours</h3></div><span>{flexibleAssignments.length} item{flexibleAssignments.length === 1 ? "" : "s"}</span></div><p>These responsibilities are time-bounded but event-driven. The Agent can take the next useful step within a few hours when the opportunity is right.</p><div className="week-unscheduled-list">{flexibleAssignments.map((assignment) => { const objective = assignmentObjective(assignment); const proc = getAssignmentProcessingState(assignment, state.assignmentRuns, runningLiveAssignmentId); const status = proc.isProcessing ? `Processing (${proc.phaseLabel})` : assignment.status === "draft" ? "Not started" : assignment.status === "working" ? "Active · waiting for its next run" : assignment.status.replaceAll("_", " "); return <button type="button" key={assignment.id} className={`week-unscheduled-item${proc.isProcessing ? " is-processing" : ""}`} onClick={() => onAssignment(assignment)} aria-label={`Open flexible Assignment ${assignment.instruction}`} aria-busy={proc.isProcessing}><span className="week-unscheduled-mark" aria-hidden="true" /><span className="week-unscheduled-copy"><span className="week-unscheduled-kicker"><strong>{flexibleAssignmentTiming}</strong><span className="week-assignment-objective">{objectiveLabel(objective)}</span>{proc.isProcessing && <span>Working now · {proc.phaseLabel}</span>}</span><strong className="week-unscheduled-title">{cleanUserFacingAssignmentInstruction(assignment.instruction)}</strong><small>{assignmentScheduleProgress(assignment)} · {status}</small></span><ChevronRight size={16} aria-hidden="true" /></button>; })}</div></section>}
       </>}
       {hasDatedItems && <div className="week-calendar-compact" aria-label="Compact weekly schedule">{compactDays.map(({ day, items }) => <section className="compact-calendar-day" key={day}><div className="compact-calendar-day-label"><strong>{day.slice(0, 3)}</strong><span>{day}</span></div><div className="compact-calendar-items">{items.map(renderCompactItem)}</div></section>)}</div>}
     </section>
@@ -14994,7 +14524,7 @@ function BrainView({
             </div>
             <div className="capability-actions">
               <span className="capability-status capability-status-managed">Managed by Presence</span>
-              <button type="button" className="capability-manage" onClick={() => setView("presence")}>Presence settings <ChevronRight size={13} /></button>
+              <button type="button" className="capability-manage" onClick={() => setView("presence")}>Channels <ChevronRight size={13} /></button>
             </div>
           </div>
         </div>
@@ -15257,6 +14787,7 @@ function PresenceView({
   const channelDefinition = state.channelDefinitions.find((item) => item.id === presence.channel);
   const simulation = simulationForChannel(presence.channel, channelDefinition);
   const nativeConnection = state.nativeConnections.find((item) => item.presenceId === presence.id && item.kind === "x");
+  const platformAvatarUrl = presencePlatformAvatarUrl(state, presence);
   const activeBridge = state.bridges.find((item) => item.presenceId === presence.id && item.name.startsWith("OpenPresence Chrome · "));
   const activeChannelBridge = state.bridges.find((item) => item.presenceId === presence.id && !item.name.startsWith("OpenPresence Chrome · ") && item.state !== "offline");
   const [customizing, setCustomizing] = useState(true);
@@ -15470,6 +15001,18 @@ function PresenceView({
     if (!count) return;
     void mutate({ type: "setPresence", patch: { publishingInitiative: { ...(publishingInitiative ?? { mode: "pace", timezone: "UTC", createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }), mode: "pace", target: { count, period: publishingPeriodDraft }, updatedAt: new Date().toISOString() } } });
   };
+  const saveAssetReuseCooldown = async () => {
+    const value = Math.max(0, Math.min(120, Math.round(Number(assetReuseCooldownDraft) || 0)));
+    setAssetReuseCooldownSaveState("saving");
+    const saved = await mutate({ type: "setPresence", patch: { assetReuseCooldownMonths: value } });
+    if (!saved) {
+      setAssetReuseCooldownSaveState("failed");
+      return;
+    }
+    setAssetReuseCooldownDraft(String(value));
+    setAssetReuseCooldownSaveState("saved");
+    window.setTimeout(() => setAssetReuseCooldownSaveState((current) => current === "saved" ? "idle" : current), 1800);
+  };
   const savePresenceLanguagePolicy = async () => {
     setPresenceLanguagePolicySaveState("saving");
     const saved = await mutate({ type: "setPresenceLanguagePolicy", policy: { avoid: presenceAvoidDraft.split(/\r?\n/).map((item) => item.trim()).filter(Boolean), prohibited: presenceProhibitedDraft.split(/\r?\n/).map((item) => item.trim()).filter(Boolean) } });
@@ -15501,15 +15044,15 @@ function PresenceView({
     <div className="page presence-settings-page">
       <PageHeader
         eyebrow="One place, one envelope"
-        title="Presence settings"
-        description="Choose who speaks here and how independently this Presence acts."
+        title="Channels"
+        description="Choose how this Agent appears in each channel and how independently it acts."
       />
 
       {/* Sleek, compact top summary bar */}
       <div className="compact-presence-header" style={{ "--agent-accent": presence.accent } as React.CSSProperties}>
         <div className="presence-overview-left">
           <div className="presence-header-avatar">
-            <PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} />
+            <PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} avatarUrl={platformAvatarUrl} />
           </div>
           <div className="presence-header-info">
             <div className="presence-header-name-line">
@@ -16227,7 +15770,7 @@ function PresenceView({
               <div><SectionEyebrow>Presence taste · language</SectionEyebrow><h2>Language & phrasing here</h2></div>
               <ShieldCheck size={17} />
             </div>
-            <p className="muted">This Presence admits only confirmed-English social observations into the Feed and Agent context. It also keeps posts, replies, messages, and Presence Chat in English. Non-English or unknown-language observations are left out rather than guessed or translated. It inherits the Agent&apos;s hard boundaries and can add local ones.</p>
+        <p className="muted">This Presence admits only confirmed-English social observations into the Activity timeline and Agent context. It also keeps posts, replies, messages, and Presence Chat in English. Non-English or unknown-language observations are left out rather than guessed or translated. It inherits the Agent&apos;s hard boundaries and can add local ones.</p>
             <div className="presence-language-selection">
               <div><strong>Primary language</strong><small>The language this Presence uses when it speaks.</small></div>
               <div className="presence-language-value"><small>English is the only supported Presence language right now.</small><select aria-label="Presence language" value={presence.language} onChange={(event) => void mutate({ type: "setPresence", patch: { language: event.target.value as "en" } })}><option value="en">English</option></select></div>
@@ -16260,6 +15803,23 @@ function PresenceView({
             </div>
           </section>
 
+          <section className="settings-card asset-reuse-policy-card" id="section-asset-reuse">
+            <div className="section-heading compact">
+              <div>
+                <SectionEyebrow>Asset reuse · Presence-scoped</SectionEyebrow>
+                <h2>Protect the visual rhythm</h2>
+              </div>
+              <ShieldCheck size={17} />
+            </div>
+            <p className="muted">After a verified live publication, an Asset Library visual is unavailable to {presence.name} for this period. The Agent will not see it as a candidate, and delivery checks enforce the same boundary if work is already in flight.</p>
+            <div className="knowledge-access-row">
+              <div><strong>Posted asset cooldown</strong><small>Starts when X confirms the publication. Deleting a post does not reset the window.</small></div>
+              <label><span className="sr-only">Posted asset cooldown in months</span><input aria-label="Posted asset cooldown months" type="number" min={0} max={120} step={1} value={assetReuseCooldownDraft} onChange={(event) => { setAssetReuseCooldownDraft(event.target.value); setAssetReuseCooldownSaveState("idle"); }} /><span>months</span></label>
+            </div>
+            <div className="inline-form-actions"><Button type="button" variant="primary" disabled={assetReuseCooldownSaveState === "saving"} onClick={() => void saveAssetReuseCooldown()}>{assetReuseCooldownSaveState === "saving" ? "Saving…" : assetReuseCooldownSaveState === "saved" ? <><Check size={14} /> Saved</> : "Save cooldown"}</Button>{assetReuseCooldownSaveState === "failed" && <span className="language-policy-save-status failed" role="status">Couldn&apos;t save the cooldown. Please try again.</span>}</div>
+            <small className="form-hint">Six months is the default. Use 0 only when this Presence is intentionally allowed to reuse library visuals immediately.</small>
+          </section>
+
           {/* 6. Execution Envelope & Capabilities */}
           <section className="settings-card presence-execution-card" id="section-execution">
             <div className="section-heading compact">
@@ -16290,6 +15850,7 @@ function PresenceView({
                 <small>Choose by capability</small>
               </button>
             </div>
+            <p className="muted execution-envelope-note">Delete own posts &amp; replies is a Presence-scoped capability. New and migrated X Presences start it in Review so every removal is deliberate; the original remains in OpenPresence history after X confirms deletion.</p>
             {customizing && (
               <div className="capability-matrix">
                 <div className="matrix-head">
@@ -16396,10 +15957,10 @@ function PresenceView({
               </div>
               <button type="button" className="icon-button" aria-label="Close confirmation" disabled={confirmingAutoApproval} onClick={() => setAutoApprovalPrompt(null)}><X size={17} /></button>
             </div>
-            <p>Changing {autoApprovalLabel} from Review to Auto will automatically approve {autoApprovalPrompt.executionIds.length} {autoApprovalPrompt.executionIds.length === 1 ? "message" : "messages"} waiting for approval and let them continue automatically.</p>
+            <p>Changing {autoApprovalLabel} from Review to Auto will automatically approve {autoApprovalPrompt.executionIds.length} pending {autoApprovalPrompt.executionIds.length === 1 ? "action" : "actions"} and let them continue automatically.</p>
             <div className="auto-approval-summary" role="status">
-              <strong>{autoApprovalPrompt.executionIds.length} pending {autoApprovalPrompt.executionIds.length === 1 ? "reply" : "replies"}</strong>
-              <small>Keep Review if you want to decide on these messages one at a time.</small>
+              <strong>{autoApprovalPrompt.executionIds.length} pending {autoApprovalPrompt.executionIds.length === 1 ? "action" : "actions"}</strong>
+              <small>Keep Review if you want to decide on each action one at a time.</small>
             </div>
             <div className="dialog-actions">
               <Button variant="secondary" disabled={confirmingAutoApproval} onClick={() => setAutoApprovalPrompt(null)}>Keep Review</Button>

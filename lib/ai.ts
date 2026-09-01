@@ -9,6 +9,7 @@ import { compileConversationStylePrompt, resolveConversationStyle } from "./conv
 import { isCognitionEligibleMirrorObject } from "./social-context";
 import { recordOperationalFailure, recordOperationalSuccess } from "./incident-engine";
 import { retrievePublicSafeAutobiographicalContext } from "./autobiographical-memory";
+import { compileSocialStrategyContext, strategyUseFromDecision } from "./social-strategy";
 import type { AssetSemanticKind, Assignment, Conversation, ConversationDisposition, EvidenceNeed, FileKind, GrowthReviewDecision, GrowthReviewKind, KnowledgeContextPacket, KnowledgeEvidence, ModelProvider, OpenPresenceState, OperatorConversationMessage, PlaygroundStimulusResult, PlaygroundStimulusTarget, Presence, PresenceBrief, PresenceChatMessage, PublishingPlanDraft, ResourceUsageEvent, SocialAssetKind, StoryCandidate, VisualBrief, VisualNeed } from "./types";
 
 const REQUEST_TIMEOUT_MS = 60_000;
@@ -41,6 +42,7 @@ function selectedConversation(state: OpenPresenceState, conversationId?: string)
 
 const conversationalVoiceGuidance = "CONVERSATIONAL VOICE: Apply the voice, stance, tone, and pacing defined in TASTE.md and the active Style Guidance. Speak as one person to another rather than answering like a generic assistant or teacher. React to the actual moment before offering a thought. Do not restate the post, narrate your reasoning, explain the system, teach a lesson, manufacture a takeaway, or force a tidy conclusion.";
 const personToPersonLanguageGuidance = "PERSON-TO-PERSON LANGUAGE: Write as one person speaking to another in the same room. TASTE.md and the active Style Guidance remain authoritative for the Agent's voice and surface texture. Use clear, ordinary language as the default. Complete sentences are the default, but a short reaction, thanks, agreement, joke, or question can stand alone when it fits the moment. Say the point directly. Use one main idea, then stop. Let warmth come from noticing something specific, not from a stock reassurance. Avoid repeated contrasts, canned empathy, slang, workplace jargon, bureaucratic phrasing, vague abstractions, and language that sounds like a presentation or support script unless the Agent's meaning files intentionally call for that texture.";
+const socialDignityGuidance = "POSITIVE SOCIAL DEFAULT: Be constructive and respectful by default. When inviting people to share a project, experience, work, or opinion, lead with genuine interest and make participation feel welcome and optional: say what you would enjoy seeing or why it could help. Never use a test of worth, a backhanded compliment, contempt, shame, ridicule, or a dismissive comparison to motivate participation. Critique ideas or evidence specifically, never a person's intelligence, effort, status, or worth. A limitation can be named plainly, then paired with a concrete possibility or next step.";
 const aiSlopAvoidanceGuidance = [
   "AI-SLOP AVOIDANCE: Make substantive writing easy to follow on one read while preserving the active voice's rhythm, vocabulary, humor, and level of formality. This is a shared quality floor against generic AI prose, not a replacement for BRAIN.md, TASTE.md, or the active Style Guidance. A short reaction, thanks, agreement, joke, or simple question can be the complete response when it fits the moment. A deliberate meaning-file or style choice takes precedence when it conflicts with a generic default.",
   "REALISTIC OPTIMISM DEFAULT: Use this stance only when BRAIN.md does not specify another one. Be candid about a constraint while respecting the person and the work. When a limitation matters, name it plainly and add a concrete possibility or next move. Keep the tone constructive and calm. Avoid gotchas, dunking, verdicts, and negative parallel frames such as \"isn't X, it's Y\" or \"not just X, but Y\". If BRAIN.md calls for pessimism, skepticism, severity, urgency, or another stance, preserve that stance rather than forcing optimism into the Agent's reasoning or expression.",
@@ -60,7 +62,7 @@ const conversationalReplyFormatGuidance = "REPLY FORMAT: Follow the reply format
 const connectorAgnosticGuidance = "CONNECTOR OWNERSHIP: The runtime owns account identity, channel inspection, and transport selection. Use the strongest authorized capability available, with Native X preferred when it supports the act and a verified browser body only as an explicit fallback. Do not ask the operator to choose Chrome, name a signed-in account, or manage connector mechanics when the Presence and runtime can determine that themselves. Keep connector details out of the social response.";
 const plainPunctuationGuidance = "PUNCTUATION: Use plain punctuation only. Do not use em dashes or en dashes; use commas or periods instead.";
 const meaningFilePrecedenceGuidance = "MEANING-FILE PRECEDENCE: BRAIN.md defines how the Agent thinks and may set a different stance; SOUL.md defines identity; TASTE.md and the active Style Guidance define expression. Apply shared AI-SLOP defaults only where they fit those sources. Preserve the Agent's own voice and stance.";
-const sharedVoiceGuidance = [conversationalVoiceGuidance, personToPersonLanguageGuidance, aiSlopAvoidanceGuidance].join("\n");
+const sharedVoiceGuidance = [conversationalVoiceGuidance, personToPersonLanguageGuidance, socialDignityGuidance, aiSlopAvoidanceGuidance].join("\n");
 const rehearsalStyleExecutionContract = [
   "STYLEPRINT EXECUTION CONTRACT: TASTE.md and the active Style Guidance control how this social turn is expressed, including its voice, stance, tone, pacing, and formatting. The following are turn-level defaults and yield to those sources.",
   "Before drafting, silently choose the social move and one compatible choreography: compact reaction, agreement plus sharpening, playful twist, narrow question, brief personal association, practical addition, challenge plus distinction, or minimal acknowledgment. Choose the choreography that fits the Agent and the moment.",
@@ -702,6 +704,31 @@ function boundedReviewList(value: unknown) {
   return Array.isArray(value) ? value.filter((item): item is string => typeof item === "string" && item.trim().length > 0).map((item) => item.trim().slice(0, 500)).slice(0, 8) : [];
 }
 
+function boundedHypothesisActions(value: unknown): NonNullable<GrowthReviewDecision["hypothesisActions"]> {
+  if (!Array.isArray(value)) return [];
+  const actions = new Set(["create", "support", "weaken", "disfavor", "retire", "generalize"]);
+  const scopes = new Set(["presence", "channel", "agent"]);
+  return value.flatMap((item) => {
+    if (!item || typeof item !== "object") return [];
+    const candidate = item as Record<string, unknown>;
+    if (typeof candidate.action !== "string" || !actions.has(candidate.action)) return [];
+    const stringList = (field: string, limit = 12) => Array.isArray(candidate[field]) ? candidate[field].filter((entry): entry is string => typeof entry === "string" && entry.trim().length > 0).map((entry) => entry.trim().slice(0, 500)).slice(0, limit) : undefined;
+    const confidence = candidate.confidence === "high" || candidate.confidence === "medium" || candidate.confidence === "low" ? candidate.confidence : undefined;
+    const scope = typeof candidate.scope === "string" && scopes.has(candidate.scope) ? candidate.scope as NonNullable<GrowthReviewDecision["hypothesisActions"]>[number]["scope"] : undefined;
+    return [{
+      action: candidate.action as NonNullable<GrowthReviewDecision["hypothesisActions"]>[number]["action"],
+      ...(typeof candidate.hypothesisId === "string" ? { hypothesisId: candidate.hypothesisId.slice(0, 200) } : {}),
+      ...(typeof candidate.statement === "string" ? { statement: candidate.statement.trim().slice(0, 1000) } : {}),
+      ...(scope ? { scope } : {}),
+      ...(typeof candidate.channelId === "string" ? { channelId: candidate.channelId as import("./types").ChannelId } : {}),
+      ...(stringList("patternIds") ? { patternIds: stringList("patternIds") } : {}),
+      ...(stringList("evidenceIds") ? { evidenceIds: stringList("evidenceIds") } : {}),
+      ...(stringList("derivedFrom", 8) ? { derivedFrom: stringList("derivedFrom", 8) } : {}),
+      ...(confidence ? { confidence } : {}),
+    }];
+  });
+}
+
 export function parseGrowthReviewDecision(raw: string): GrowthReviewDecision | undefined {
   const normalized = raw.trim().replace(/^```json\s*/i, "").replace(/\s*```$/, "");
   const start = normalized.indexOf("{");
@@ -720,12 +747,13 @@ export function parseGrowthReviewDecision(raw: string): GrowthReviewDecision | u
     ...(boundedReviewList(rawPlan.hypotheses).length ? { hypotheses: boundedReviewList(rawPlan.hypotheses) } : {}),
   } : undefined;
   const strategyChanged = typeof parsed.strategyChanged === "boolean" ? parsed.strategyChanged : Boolean(plan && Object.keys(plan).length > 0);
-  return { summary: parsed.summary.trim().slice(0, 2000), working: boundedReviewList(parsed.working), uncertain: boundedReviewList(parsed.uncertain), weak: boundedReviewList(parsed.weak), strategyChanged, ...(typeof parsed.rationale === "string" && parsed.rationale.trim() ? { rationale: parsed.rationale.trim().slice(0, 1000) } : {}), ...(plan && Object.keys(plan).length ? { plan } : {}) };
+  const hypothesisActions = boundedHypothesisActions(parsed.hypothesisActions);
+  return { summary: parsed.summary.trim().slice(0, 2000), working: boundedReviewList(parsed.working), uncertain: boundedReviewList(parsed.uncertain), weak: boundedReviewList(parsed.weak), strategyChanged, ...(typeof parsed.rationale === "string" && parsed.rationale.trim() ? { rationale: parsed.rationale.trim().slice(0, 1000) } : {}), ...(plan && Object.keys(plan).length ? { plan } : {}), ...(hypothesisActions.length ? { hypothesisActions } : {}) };
 }
 
 export async function generateGrowthReview(state: OpenPresenceState, assignment: Assignment, kind: GrowthReviewKind, evidence: Record<string, unknown>): Promise<GrowthReviewDecision> {
   if (isAiMockEnabled()) return { summary: `${kind === "strategic" ? "Strategic" : kind === "event_driven" ? "Reconsideration" : "Weekly"} model review: keep the current learning loop explicit while evidence accumulates.`, working: [], uncertain: ["The mock runtime does not invent performance evidence."], weak: [], strategyChanged: false, rationale: "Test model fixture." };
-  const system = "You are the Growth Review role for an autonomous social Presence. Return JSON only with summary, working[], uncertain[], weak[], strategyChanged (boolean), rationale, and optional plan {summary,dailyTargets,publishingApproach,discoveryDirections,relationshipFocus,hypotheses}. Baseline uncertainty should moderate conviction, not suspend learning. Activity is not progress: distinguish actions taken from evidence of mission advance, without assuming naive causal attribution. You may revise the operating approach and hypotheses (setting strategyChanged: true), but never modify identity files (SOUL.md, MISSION.md, BRAIN.md, TASTE.md, or Presence identity). If the evidence does not justify a strategy revision, set strategyChanged: false. Do not invent metrics or claim follower growth without observed evidence.";
+  const system = "You are the Growth Review role for an autonomous social Presence. Return JSON only with summary, working[], uncertain[], weak[], strategyChanged (boolean), rationale, optional plan {summary,dailyTargets,publishingApproach,discoveryDirections,relationshipFocus,hypotheses}, and optional hypothesisActions[] where each action is create|support|weaken|disfavor|retire|generalize with hypothesisId, statement, scope, channelId, patternIds, evidenceIds, derivedFrom, and confidence as appropriate. Growth evidence is typed: WORLD_OUTCOME is required for an effectiveness claim; OPERATOR_REVIEW captures operator preference but is not audience performance; STRATEGY_OBSERVATION records what was tried. Create/generalize remains testing, and originals are never deleted or silently promoted. Baseline uncertainty should moderate conviction, not suspend learning. Activity is not progress: distinguish actions taken from evidence of mission advance, without assuming naive causal attribution. You may revise the operating approach and hypotheses, but never modify identity files (SOUL.md, MISSION.md, BRAIN.md, TASTE.md, or Presence identity). Do not invent metrics or claim follower growth without observed evidence.";
   const content = JSON.stringify({ reviewKind: kind, responsibility: assignment.instruction, currentPlan: assignment.plan, evidence }, null, 2);
   const raw = await generateIndependentModelText(state, system, content);
   const decision = parseGrowthReviewDecision(raw);
@@ -800,7 +828,7 @@ export interface AgentSocialDecision {
   action: string;
   text: string;
   rationale?: string;
-  acts?: Array<{ action: string; text: string; rationale?: string; targetIndex?: number }>;
+  acts?: Array<{ action: string; text: string; rationale?: string; targetIndex?: number; strategyId?: string; mechanismId?: string }>;
   conversationDisposition?: ConversationDisposition;
   operatorReaction?: string;
   referencedPeople?: Array<{ candidateId: string; personId?: string; purpose: "recommendation" | "introduction_offer" | "introduction_request" | "contextual_reference" }>;
@@ -816,6 +844,7 @@ export interface AgentSocialDecision {
     droppedIllegalActions?: string[];
   };
   autobiographicalEventIds?: string[];
+  socialStrategy?: { retrievalRun: ReturnType<typeof compileSocialStrategyContext>["retrievalRun"]; use?: ReturnType<typeof strategyUseFromDecision> };
 }
 
 export interface AgentSocialJudgment {
@@ -1026,7 +1055,9 @@ export function parseAgentSocialDecision(raw: string, allowedActions: string[]):
         droppedIllegalActions.push(action);
         return undefined;
       }
-      return { action, text: cleanDecisionText(item.text ?? item.draft ?? item.content ?? (action === "reply" ? item.reply : undefined)), rationale: cleanDecisionText(item.rationale ?? item.reason) || undefined, targetIndex: typeof item.targetIndex === "number" && Number.isInteger(item.targetIndex) ? item.targetIndex : undefined };
+      const strategyId = typeof item.strategyId === "string" ? item.strategyId.trim() : typeof item.strategy_id === "string" ? item.strategy_id.trim() : undefined;
+      const mechanismId = typeof item.mechanismId === "string" ? item.mechanismId.trim() : typeof item.mechanism_id === "string" ? item.mechanism_id.trim() : undefined;
+      return { action, text: cleanDecisionText(item.text ?? item.draft ?? item.content ?? (action === "reply" ? item.reply : undefined)), rationale: cleanDecisionText(item.rationale ?? item.reason) || undefined, targetIndex: typeof item.targetIndex === "number" && Number.isInteger(item.targetIndex) ? item.targetIndex : undefined, strategyId, mechanismId };
     }).filter((item): item is NonNullable<typeof item> => Boolean(item)).slice(0, 6);
     const normalization = (recoveredLegacyNoOp || droppedIllegalActions.length > 0)
       ? { ...(recoveredLegacyNoOp ? { recoveredLegacyNoOp: true } : {}), ...(droppedIllegalActions.length > 0 ? { droppedIllegalActions } : {}) }
@@ -1452,6 +1483,8 @@ export type SocialGenerationOptions = {
   /** Bound public cognition output so a mention cannot become runaway model work. */
   maxOutputTokens?: number;
   peopleNote?: { presenceId: string; personId: string; markdown: string; revision: number; updatedAt: string };
+  /** Shared strategy context compiled for this social cognition invocation. */
+  strategyContext?: ReturnType<typeof compileSocialStrategyContext>;
 };
 
 const SOCIAL_DECISION_MAX_OUTPUT_TOKENS = 320;
@@ -1460,6 +1493,12 @@ const SOCIAL_EDIT_MAX_OUTPUT_TOKENS = 240;
 export async function generateAgentSocialDecision(state: OpenPresenceState, instruction: string, allowedActions: string[], options?: SocialGenerationOptions): Promise<AgentSocialDecision> {
   const actions = [...new Set(allowedActions.filter((action) => action && action.toLowerCase() !== "no_op"))];
   const presence = options?.presence ?? state.presence ?? undefined;
+  const strategyContext = options?.strategyContext ?? (presence ? compileSocialStrategyContext(state, presence, {
+    invocation: options?.attentionSource ?? options?.usageOrigin ?? "social_decision",
+    objective: instruction,
+    availableActions: actions,
+    assignmentContext: options?.assignmentMode ? "This social judgment belongs to an Assignment responsibility." : undefined,
+  }) : undefined);
   const autobiography = presence
     ? retrievePublicSafeAutobiographicalContext(state, presence, [instruction, options?.socialEvidence, options?.socialThreadContext].filter(Boolean).join("\n"))
     : undefined;
@@ -1470,14 +1509,16 @@ export async function generateAgentSocialDecision(state: OpenPresenceState, inst
       autobiographicalEventIds: autobiography?.eventIds,
       ...(options?.operatorConversation ? { operatorReaction: mock.action === "no_op" ? "This one does not need a public response, but the underlying point is useful context." : "Thank you for sharing this. There is something here worth engaging with." } : {}),
       acts: mock.acts ?? (mock.action === "no_op" ? [] : [{ action: mock.action, text: mock.text, rationale: mock.rationale }]),
+      ...(strategyContext ? { socialStrategy: { retrievalRun: strategyContext.retrievalRun, use: strategyUseFromDecision(strategyContext.retrievalRun, mock.acts ?? (mock.action === "no_op" ? [] : [{ action: mock.action, text: mock.text, rationale: mock.rationale }])) } } : {}),
     };
   }
   const operatorReactionInstruction = options?.operatorConversation
     ? `\n- Operator reaction: also return operatorReaction as one brief, natural private response about what you think of the post itself. Speak to the operator like a person. Do not narrate your decision, selected action, evidence process, or internal rationale; never say “I chose to,” “I decided to,” or “no public act is warranted.” This private reaction is separate from any public reply text.\n\nInclude "operatorReaction":"one natural sentence" in the top-level JSON.`
     : "";
     const plannerInstruction = `${instruction}\n\nEvaluate the social candidate and choose zero or more compatible acts from: ${actions.join(", ")}.\n- Repost: choose repost when the post is valuable as-is and should be shared directly with your audience.\n- Quote: choose quote only when a short, concrete response makes this specific source post more useful to this audience. Anchor the words to the source's claim, tension, or moment; never write a generic essay, product pitch, discovery brief, or abstract lesson. Keep the quote under 240 characters (the channel limit is 280).\n- Reply: choose reply when a direct conversational response to the author adds value; keep it specific and under 240 characters.\n- Like: choose like for quiet appreciation without needing to speak.\n- Follow: choose follow for continued awareness of this author.\n- Silence: return an empty acts array ([]) when sufficient context is present and no outward action earned its place.${operatorReactionInstruction}\n\n${personToPersonLanguageGuidance} Language quality: follow BRAIN.md for the Agent's reasoning stance and TASTE.md plus active Style Guidance for voice and surface choices. When BRAIN.md does not specify a stance, use the realistic-optimist default in AI-SLOP AVOIDANCE. Name the concrete detail first. Be honest about limits when that fits the selected stance. Avoid teacher voice, canned empathy, slang, workplace jargon, bureaucratic phrasing, stock formulas, repeated contrasts, negative parallelism (\"isn't X, it's Y\" and \"not just X, but Y\"), vague frames such as \"the interesting/useful bit\" or \"the real test\", and phrases about doing heroic or heavy lifting.\n\nReturn JSON only in this shape:\n{"acts":[{"action":"like|reply|repost|quote|follow","text":"reply or quote text when needed, otherwise empty","rationale":"concise reason for this act"}],"conversationDisposition":"continue|react_only|close_with_reply|close_silently|defer","rationale":"concise summary of the decision"}.`;
-    const raw = await generateAgentReply(state, options?.socialInput ?? plannerInstruction, undefined, { social: true, presence, socialHistory: options?.socialHistory, socialGuidance: options?.socialInput ? plannerInstruction : options?.socialGuidance, socialEvidence: options?.socialEvidence, socialThreadContext: options?.socialThreadContext, autobiographicalContext: options?.autobiographicalContext ?? autobiography?.text, knowledgeContext: options?.knowledgeContext, disableKnowledge: options?.disableKnowledge, assignmentMode: options?.assignmentMode, briefOverride: options?.briefOverride, usageOrigin: options?.usageOrigin, attentionSource: options?.attentionSource, operational: options?.operational, runId: options?.runId, presenceId: options?.presenceId ?? options?.presence?.id, invocationId: options?.invocationId, originId: options?.originId, operatorConversation: options?.operatorConversation, maxOutputTokens: options?.maxOutputTokens ?? SOCIAL_DECISION_MAX_OUTPUT_TOKENS, peopleNote: options?.peopleNote });
-  return { ...parseAgentSocialDecision(raw, actions), autobiographicalEventIds: autobiography?.eventIds };
+    const raw = await generateAgentReply(state, options?.socialInput ?? plannerInstruction, undefined, { social: true, presence, socialHistory: options?.socialHistory, socialGuidance: [options?.socialInput ? plannerInstruction : options?.socialGuidance, strategyContext?.prompt].filter(Boolean).join("\n\n"), socialEvidence: options?.socialEvidence, socialThreadContext: options?.socialThreadContext, autobiographicalContext: options?.autobiographicalContext ?? autobiography?.text, knowledgeContext: options?.knowledgeContext, disableKnowledge: options?.disableKnowledge, assignmentMode: options?.assignmentMode, briefOverride: options?.briefOverride, usageOrigin: options?.usageOrigin, attentionSource: options?.attentionSource, operational: options?.operational, runId: options?.runId, presenceId: options?.presenceId ?? options?.presence?.id, invocationId: options?.invocationId, originId: options?.originId, operatorConversation: options?.operatorConversation, maxOutputTokens: options?.maxOutputTokens ?? SOCIAL_DECISION_MAX_OUTPUT_TOKENS, peopleNote: options?.peopleNote });
+  const parsed = parseAgentSocialDecision(raw, actions);
+  return { ...parsed, autobiographicalEventIds: autobiography?.eventIds, ...(strategyContext ? { socialStrategy: { retrievalRun: strategyContext.retrievalRun, use: strategyUseFromDecision(strategyContext.retrievalRun, parsed.acts) } } : {}) };
 }
 
 function planHour(date: Date, hour: number) {
@@ -1501,9 +1542,9 @@ function fallbackPublishingPlan(state: OpenPresenceState): PublishingPlanDraft {
     horizonEnd: new Date(now.getFullYear(), now.getMonth(), now.getDate() + (presence?.publishingInitiative.target?.period === "week" ? 7 : 1)).toISOString(),
     expectedOriginals: { min, max },
     windows: [
-      { startAt: researchStart.toISOString(), endAt: new Date(researchStart.getTime() + 90 * 60_000).toISOString(), purpose: "research", summary: "Look for a concrete, worthwhile story before deciding what deserves expression.", desiredContribution: { min: 0, max: Math.max(1, Math.ceil(max / 2)) } },
-      { startAt: originateStart.toISOString(), endAt: new Date(originateStart.getTime() + 90 * 60_000).toISOString(), purpose: "originate", summary: "Develop or publish the strongest original opportunity that survives the Agent's Taste.", desiredContribution: { min, max } },
-      { startAt: reassessStart.toISOString(), endAt: new Date(reassessStart.getTime() + 60 * 60_000).toISOString(), purpose: "reassess", summary: "Reassess after conversations and current evidence develop; silence remains valid if nothing earns the audience's attention.", desiredContribution: { min: 0, max } },
+      { startAt: researchStart.toISOString(), endAt: new Date(researchStart.getTime() + 90 * 60_000).toISOString(), purpose: "research", summary: "Look at current conversations and evidence for one specific idea that could help the audience.", desiredContribution: { min: 0, max: Math.max(1, Math.ceil(max / 2)) } },
+      { startAt: originateStart.toISOString(), endAt: new Date(originateStart.getTime() + 90 * 60_000).toISOString(), purpose: "originate", summary: "Share 1–2 useful original posts when there is something worth saying, using an Asset Library image when it genuinely helps.", desiredContribution: { min, max } },
+      { startAt: reassessStart.toISOString(), endAt: new Date(reassessStart.getTime() + 60 * 60_000).toISOString(), purpose: "reassess", summary: "Review what earned qualified attention and use that evidence to shape the next pass.", desiredContribution: { min: 0, max } },
     ],
     currentWork: [{ status: "exploring", summary: "Exploring one possible story grounded in the Presence Mission and current social context." }],
     nextReassessmentAt: reassessStart.toISOString(),
@@ -1529,7 +1570,7 @@ export async function generatePublishingPlan(state: OpenPresenceState): Promise<
     recentVerifiedPublications: recent,
     currentTime: new Date().toISOString(),
   }, null, 2);
-  const raw = await generateAgentReply(state, `Create a bounded working plan for your ongoing publishing responsibility. Treat it as an assignment you intend to carry through, not a list of optional ideas. Anchor every window in the Presence brief and the Agent's Mission and Taste. Use durable social-growth practice: a consistent cadence of research, original useful expression, relationship-aware distribution, and evidence-led reassessment that compounds a qualified audience without flattening identity. This is future work context, not a scheduler and not a list of prewritten posts. Use windows for research, development, origination, or reassessment; each window should name a concrete mission-serving contribution or decision. Reject weak candidates and keep pursuing the responsibility rather than filling the calendar with generic posts. Return JSON only: {"horizonStart":"ISO","horizonEnd":"ISO","expectedOriginals":{"min":0,"max":0},"windows":[{"startAt":"ISO","endAt":"ISO","purpose":"originate|research|develop|reassess","desiredContribution":{"min":0,"max":0},"summary":"brief mission-linked assignment step"}],"currentWork":[{"status":"exploring|researching|developing|candidate_ready|blocked|waiting","summary":"brief visible work item"}],"nextReassessmentAt":"ISO","rationaleSummary":"brief explanation of how this plan serves the Presence goal and qualified growth","evidenceSummary":["observable evidence"],"constraints":["constraint"],"replanSignals":["signal"]}. Keep the plan to at most four windows and six work items. Do not include hidden reasoning, exact post text, or implementation details. Context:\n${context}`, undefined, { social: true });
+  const raw = await generateAgentReply(state, `Create a bounded working plan for your ongoing publishing responsibility. Treat it as an adaptive rhythm, not a list of guaranteed posts or separate assignments. Anchor every window in the Presence brief and the Agent's Mission and Taste. Use durable social-growth practice: find a specific useful idea, shape it clearly, publish only when it earns expression, and learn from qualified conversation without flattening identity. This is future work context, not a scheduler and not a list of prewritten posts. Use windows for research, development, origination, or reassessment; each window must describe one plain-language action the operator can understand at a glance. Use titles implied by these actions, not internal strategy jargon or phrases such as “toward the mission.” The plan should leave room for silence and should not force activity. Return JSON only: {"horizonStart":"ISO","horizonEnd":"ISO","expectedOriginals":{"min":0,"max":0},"windows":[{"startAt":"ISO","endAt":"ISO","purpose":"originate|research|develop|reassess","desiredContribution":{"min":0,"max":0},"summary":"one short plain-language action, starting with a verb"}],"currentWork":[{"status":"exploring|researching|developing|candidate_ready|blocked|waiting","summary":"brief visible work item"}],"nextReassessmentAt":"ISO","rationaleSummary":"brief explanation of how this plan serves the Presence goal and qualified growth","evidenceSummary":["observable evidence"],"constraints":["constraint"],"replanSignals":["signal"]}. Keep the plan to at most four windows and six work items. Do not include hidden reasoning, exact post text, or implementation details. Context:\n${context}`, undefined, { social: true });
   const start = raw.indexOf("{");
   const end = raw.lastIndexOf("}");
   if (start < 0 || end <= start) throw new AiRuntimeError("The Publishing Planner did not return a valid plan.");

@@ -152,6 +152,73 @@ describe("Sandbox assignment runtime", () => {
     expect(decision.mock.calls.length).toBe(firstCalls);
   });
 
+  it("does not count an unrelated conversation as promotion when the linked source is available", async () => {
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    const decision = vi.spyOn(ai, "generateAgentSocialDecision").mockResolvedValue({
+      action: "reply",
+      text: "A useful conversation about attention markets.",
+      rationale: "The candidate is relevant.",
+      acts: [{ action: "reply", targetIndex: 1, text: "A useful conversation about attention markets.", rationale: "The candidate is relevant." }],
+    });
+    let state = createAgent({ name: "Source First Agent", description: "A careful distributor", mode: "agent", handle: "@source_first", accent: "#D68754" });
+    const presence = { ...state.presence!, environment: "live" as const, connectionMode: "native" as const, execution: { ...state.presence!.execution, reply: "auto" as const, like: "auto" as const, repost: "auto" as const } };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    state.nativeConnections = [{ id: "source-first-connection", presenceId: presence.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "source-first-account", username: "source_first", name: "Source First Agent" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    saveChannelSecret("source-first-connection", { apiKey: "api", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" });
+    const now = new Date().toISOString();
+    state.mirrorObjects = [
+      { id: "source-first-source", bridgeId: "native:source-first-connection", presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: "2093472969037099455" }, objectType: "post", language: "en", content: { text: "OwnTheHype turns attention into a market for ideas worth seeing.", language: "en" }, author: { externalRef: { type: "x.user", id: "source-author" }, displayName: "Source Author", handle: "source_author" }, observedAt: now, occurredAt: now, visibility: "public", shareability: "presence-only", environment: "live", source: "native", trust: "untrusted_world_content" },
+      { id: "source-first-candidate", bridgeId: "native:source-first-connection", presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: "unrelated-candidate" }, objectType: "post", language: "en", content: { text: "A relevant builder conversation about attention markets.", language: "en" }, author: { externalRef: { type: "x.user", id: "candidate-author" }, displayName: "Candidate Author", handle: "candidate_author" }, observedAt: now, occurredAt: now, visibility: "public", shareability: "presence-only", environment: "live", source: "native", trust: "untrusted_world_content" },
+    ];
+    state = applyOperation(state, { type: "createAssignment", presenceId: presence.id, environment: "live", instruction: "Help https://x.com/source_author/status/2093472969037099455 reach people who genuinely care. Inspect relevant conversations and choose useful authorized actions." });
+    const assignment = state.assignments[0]!;
+    state = applyOperation(state, { type: "startAssignmentPursuit", assignmentId: assignment.id, presenceId: presence.id, deadlineAt: new Date(Date.now() + 3_600_000).toISOString(), maxVerifiedActions: 10, resourceBudget: { maxChannelReads: 10, maxModelCalls: 10 } });
+    writeState(state);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } })));
+
+    await POST(new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "runLiveAssignment", assignmentId: assignment.id, presenceId: presence.id }) }));
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline && !readState().events.some((event) => event.title === "Promotion source held")) await new Promise((resolve) => setTimeout(resolve, 20));
+    const result = readState();
+    expect(decision).toHaveBeenCalledTimes(2);
+    expect(result.events.some((event) => event.title === "Promotion source held")).toBe(true);
+    expect(result.executions.filter((execution) => execution.assignmentId === assignment.id)).toHaveLength(0);
+    expect(result.assignments.find((item) => item.id === assignment.id)?.status).toBe("active");
+  });
+
+  it("keeps a linked source eligible for a distinct direct action after its Like is verified", async () => {
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    vi.spyOn(ai, "generateAgentSocialDecision").mockResolvedValue({
+      action: "repost",
+      text: "",
+      rationale: "The linked source is the exact object this distribution push is meant to amplify.",
+      acts: [{ action: "repost", targetIndex: 0, text: "", rationale: "The linked source is the exact object this distribution push is meant to amplify." }],
+    });
+    let state = createAgent({ name: "Distinct Source Action Agent", description: "A careful distributor", mode: "agent", handle: "@distinct_source_action", accent: "#D68754" });
+    const presence = { ...state.presence!, environment: "live" as const, connectionMode: "native" as const, execution: { ...state.presence!.execution, like: "auto" as const, repost: "auto" as const } };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    state.nativeConnections = [{ id: "distinct-source-connection", presenceId: presence.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "distinct-source-account", username: "distinct_source_action", name: "Distinct Source Action Agent" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
+    saveChannelSecret("distinct-source-connection", { apiKey: "api", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" });
+    const now = new Date().toISOString();
+    state.mirrorObjects = [{ id: "distinct-source-mirror", bridgeId: "native:distinct-source-connection", presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: "2093472969037099455" }, objectType: "post", language: "en", content: { text: "OwnTheHype turns attention into a market for ideas worth seeing.", language: "en" }, author: { externalRef: { type: "x.user", id: "source-author" }, displayName: "Source Author", handle: "source_author" }, observedAt: now, occurredAt: now, visibility: "public", shareability: "presence-only", environment: "live", source: "native", trust: "untrusted_world_content" }];
+    state = applyOperation(state, { type: "createAssignment", presenceId: presence.id, environment: "live", instruction: "Help https://x.com/source_author/status/2093472969037099455 reach people who genuinely care. Inspect relevant conversations and choose useful authorized actions." });
+    const assignment = state.assignments[0]!;
+    state.executions.unshift({ id: "verified-source-like", socialIntentId: "verified-source-like-intent", assignmentId: assignment.id, presenceId: presence.id, affordance: "x.like", mode: "auto", status: "succeeded", attempts: 1, connector: "native", target: { type: "x.post", id: "2093472969037099455" }, externalRef: { type: "x.like", id: "verified-source-like" }, idempotencyKey: "verified-source-like", createdAt: now, updatedAt: now, executedAt: now, environment: "live", source: "agent" } as never);
+    state = applyOperation(state, { type: "startAssignmentPursuit", assignmentId: assignment.id, presenceId: presence.id, deadlineAt: new Date(Date.now() + 3_600_000).toISOString(), maxVerifiedActions: 10, resourceBudget: { maxChannelReads: 10, maxModelCalls: 10 } });
+    writeState(state);
+    vi.stubGlobal("fetch", vi.fn(async () => new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } })));
+
+    await POST(new Request("http://localhost/api/state", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ type: "runLiveAssignment", assignmentId: assignment.id, presenceId: presence.id }) }));
+    const deadline = Date.now() + 5_000;
+    while (Date.now() < deadline && !readState().events.some((event) => event.title === "Promotion actions queued" || event.title === "Promotion action failed")) await new Promise((resolve) => setTimeout(resolve, 20));
+    const result = readState();
+    const repost = result.executions.find((execution) => execution.assignmentId === assignment.id && execution.affordance === "x.repost");
+    expect(repost).toMatchObject({ target: { type: "x.post", id: "2093472969037099455" } });
+    expect(result.events.some((event) => event.title === "Promotion source held")).toBe(false);
+  });
+
   it("keeps Sandbox checks available while the Presence is paused", async () => {
     process.env.OPENPRESENCE_AI_MOCK = "1";
     let state = createAgent({ name: "Paused Sandbox Agent", description: "A careful operator", mode: "agent", handle: "@paused_sandbox", accent: "#D68754" });

@@ -4,7 +4,7 @@ import { activityRefreshIntervalMs } from "../lib/activity-polling";
 import { createOperatorNudge, directWatchQuery, isBurstStatusQuestion, operatorBurstStatusReply, operatorNudgeReceipt, operatorRequestsWatch, recordOperatorConversationMessage, recordNudgeAssignmentHandoff, releasePausedNudges, settleNudgeForEpisode, settleNudgeFromAssignment, startQueuedNudge } from "../lib/operator-chat";
 import { operatorConversationActionEvents } from "../lib/operator-chat-projection";
 import { createAgent, formXActionIntent } from "../lib/runtime";
-import { dueLiveAssignmentsWithoutWorkers, pauseExhaustedAssignmentPursuits, repairMissingAssignmentWakes, repairMissingOperatorNudgeWakes, repairPendingBridgeVerificationWakes } from "../lib/temporal";
+import { closeNonRetryableVerificationExecutions, dueLiveAssignmentsWithoutWorkers, pauseExhaustedAssignmentPursuits, repairMissingAssignmentWakes, repairMissingOperatorNudgeWakes, repairPendingBridgeVerificationWakes } from "../lib/temporal";
 import { listScheduledWakes, upsertOperationalRun } from "../lib/db";
 import type { OperationalRun } from "../lib/types";
 
@@ -24,6 +24,29 @@ describe("truthful Activity right-now projection", () => {
     const projection = deriveActivityNow(state, presence.id);
     expect(projection.state).toBe("resting");
     expect(projection.title).toBe("Resting between attention passes");
+  });
+
+  it("only exposes one due live Assignment per Presence to the scheduler", () => {
+    const state = fixture();
+    const presence = { ...state.presence!, environment: "live" as const, status: "live" as const };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    const now = new Date();
+    const base = {
+      agentId: state.agent!.id,
+      presenceId: presence.id,
+      environment: "live" as const,
+      status: "active" as const,
+      deliverable: { type: "original_publication" as const },
+      progress: { required: 1, verified: 0 },
+      work: { phase: "candidate_review" as const, attempts: 0, maxAttempts: 4, storiesResearched: 0 },
+      schedule: { day: now.toLocaleDateString("en-US", { weekday: "long" }), time: "00:00", executionWindow: "00:00–23:59" },
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    };
+    state.assignments = [{ ...base, id: "due:first" }, { ...base, id: "due:second" }] as never;
+
+    expect(dueLiveAssignmentsWithoutWorkers(state, now).map((assignment) => assignment.id)).toEqual(["due:first"]);
   });
 
   it("shows a running checkpoint and marks an overdue heartbeat stuck", () => {
@@ -80,12 +103,58 @@ describe("truthful Activity right-now projection", () => {
     expect(listScheduledWakes(presence.id).some((wake) => wake.id === `wake_verification_${executionId}` && wake.kind === "verification")).toBe(true);
   });
 
+  it("closes non-retryable verification outcomes instead of leaving them in-flight", () => {
+    const state = fixture();
+    const presence = state.presence!;
+    state.executions.unshift({
+      id: "stale-verification",
+      presenceId: presence.id,
+      affordance: "x.reply",
+      mode: "auto",
+      connector: "bridge",
+      status: "verification-pending",
+      failure: { code: "X_API_CREDITS_EXHAUSTED", message: "X verification is paused.", retryable: false },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } as never);
+    const execution = state.executions[0]!;
+    expect(closeNonRetryableVerificationExecutions(state)).toBe(1);
+    expect(state.executions.find((item) => item.id === execution.id)?.status).toBe("verification-closed");
+    expect(state.executions.find((item) => item.id === execution.id)?.externalRef).toBeUndefined();
+  });
+
   it("detects overdue Assignment work without misrouting it through generic Attention", () => {
     const state = fixture();
     const presence = state.presence!;
     state.assignments.unshift({ id: `overdue_${Date.now()}_${Math.random()}`, presenceId: presence.id, status: "active", nextDueAt: "2020-01-01T00:00:00.000Z" } as never);
     expect(repairMissingAssignmentWakes(state)).toBe(1);
     expect(listScheduledWakes(presence.id).some((wake) => ((wake.payload as { triggers?: string[] })?.triggers ?? []).includes("assignment_due"))).toBe(false);
+  });
+
+  it("does not reopen a scheduled promotion after its execution window closes", () => {
+    const state = fixture();
+    const presence = { ...state.presence!, environment: "live" as const, status: "live" as const };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    const now = new Date(2026, 7, 30, 19, 0, 0);
+    state.assignments.unshift({
+      id: "closed-scheduled-promotion",
+      agentId: state.agent!.id,
+      presenceId: presence.id,
+      environment: "live",
+      status: "active",
+      deliverable: { type: "meaningful_engagement" },
+      schedule: { day: "Sunday", time: "08:00", executionWindow: "08:00–18:00" },
+      nextDueAt: new Date(now.getTime() - 60_000).toISOString(),
+      progress: { required: 0, verified: 1 },
+      work: { phase: "candidate_review", attempts: 42, maxAttempts: 0, storiesResearched: 40 },
+      lastOutcome: { class: "action_no_op", message: "No earned source action in the last pass.", at: new Date(now.getTime() - 60_000).toISOString() },
+      createdAt: now.toISOString(),
+      updatedAt: now.toISOString(),
+    } as never);
+    state.assignmentPursuitWindows = [{ id: "expired-promotion-window", assignmentId: "closed-scheduled-promotion", agentId: state.agent!.id, presenceId: presence.id, startsAt: new Date(now.getTime() - 2 * 60 * 60_000).toISOString(), deadlineAt: new Date(now.getTime() - 60 * 60_000).toISOString(), maxVerifiedActions: 40, status: "expired", createdAt: now.toISOString(), updatedAt: now.toISOString() }];
+
+    expect(dueLiveAssignmentsWithoutWorkers(state, now)).toEqual([]);
   });
 
   it("keeps an active burst moving after the parent Assignment is completed", () => {
@@ -124,6 +193,18 @@ describe("truthful Activity right-now projection", () => {
     expect(dueLiveAssignmentsWithoutWorkers(state, new Date("2026-08-29T01:00:00.000Z")).map((item) => item.id)).toEqual(["completed_distribution_assignment"]);
   });
 
+  it("retries a burst after the worker exhausts recovery without reopening other blocks", () => {
+    const state = fixture();
+    const presence = { ...state.presence!, environment: "live" as const, status: "live" as const };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    const now = new Date("2026-08-29T01:00:00.000Z");
+    state.assignments.unshift({ id: "recoverable_burst_assignment", agentId: state.agent!.id, presenceId: presence.id, environment: "live", status: "blocked", deliverable: { type: "meaningful_engagement" }, progress: { required: 1, verified: 0 }, work: { phase: "blocked", attempts: 4, maxAttempts: 4, storiesResearched: 1, blockedReason: "The Assignment worker stopped reporting progress and exhausted its recovery attempts." }, lastOutcome: { class: "incomplete", message: "The Assignment worker stopped reporting progress and exhausted its recovery attempts.", at: now.toISOString() }, createdAt: now.toISOString(), updatedAt: now.toISOString() } as never);
+    state.assignmentPursuitWindows = [{ id: "recoverable_burst", assignmentId: "recoverable_burst_assignment", agentId: state.agent!.id, presenceId: presence.id, startsAt: "2026-08-29T00:00:00.000Z", deadlineAt: "2026-08-29T02:00:00.000Z", maxVerifiedActions: 10, status: "active", nextRunAt: "2026-08-29T01:00:00.000Z", createdAt: now.toISOString(), updatedAt: now.toISOString() }];
+
+    expect(dueLiveAssignmentsWithoutWorkers(state, now).map((item) => item.id)).toEqual(["recoverable_burst_assignment"]);
+  });
+
   it("keeps a burst visible above stale confirmation work between scan passes", () => {
     const state = fixture();
     const presence = { ...state.presence!, environment: "live" as const, status: "live" as const };
@@ -141,7 +222,7 @@ describe("truthful Activity right-now projection", () => {
     expect(projection.title).not.toBe("Waiting for X verification");
   });
 
-  it("pauses a burst durably when a resource envelope is exhausted", () => {
+  it("keeps a burst active when only its model-call budget is exhausted", () => {
     const state = fixture();
     const presence = { ...state.presence!, environment: "live" as const, status: "live" as const };
     state.presence = presence;
@@ -151,8 +232,22 @@ describe("truthful Activity right-now projection", () => {
     state.assignmentPursuitWindows = [{ id: "budgeted_burst", assignmentId: "budgeted_burst_assignment", agentId: state.agent!.id, presenceId: presence.id, startsAt: "2026-08-29T00:00:00.000Z", deadlineAt: "2026-08-29T02:00:00.000Z", maxVerifiedActions: 10, resourceBudget: { maxModelCalls: 1 }, status: "active", nextRunAt: now.toISOString(), createdAt: now.toISOString(), updatedAt: now.toISOString() }];
     state.resourceUsageEvents = [{ id: "model_budget", agentId: state.agent!.id, presenceId: presence.id, invocationId: "run", originKind: "assignment", originId: "budgeted_burst_assignment", attentionSource: "assignment", category: "model", usage: { requests: 1 }, createdAt: now.toISOString() }];
 
+    expect(pauseExhaustedAssignmentPursuits(state, now)).toBe(0);
+    expect(state.assignmentPursuitWindows[0]).toMatchObject({ status: "active", nextRunAt: now.toISOString() });
+  });
+
+  it("still pauses a burst when a hard delivery resource is exhausted", () => {
+    const state = fixture();
+    const presence = { ...state.presence!, environment: "live" as const, status: "live" as const };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    const now = new Date("2026-08-29T01:00:00.000Z");
+    state.assignments.unshift({ id: "hard_budget_assignment", agentId: state.agent!.id, presenceId: presence.id, environment: "live", status: "active", instruction: "Find a worthwhile conversation to engage with.", deliverable: { type: "meaningful_engagement" }, progress: { required: 1, verified: 0 }, createdAt: now.toISOString(), updatedAt: now.toISOString() } as never);
+    state.assignmentPursuitWindows = [{ id: "hard_budget_burst", assignmentId: "hard_budget_assignment", agentId: state.agent!.id, presenceId: presence.id, startsAt: "2026-08-29T00:00:00.000Z", deadlineAt: "2026-08-29T02:00:00.000Z", maxVerifiedActions: 10, resourceBudget: { maxChannelReads: 1 }, status: "active", nextRunAt: now.toISOString(), createdAt: now.toISOString(), updatedAt: now.toISOString() }];
+    state.resourceUsageEvents = [{ id: "read_budget", agentId: state.agent!.id, presenceId: presence.id, invocationId: "run", originKind: "assignment", originId: "hard_budget_assignment", attentionSource: "assignment", category: "channel_read", provider: "x", usage: { requests: 1 }, createdAt: now.toISOString() }];
+
     expect(pauseExhaustedAssignmentPursuits(state, now)).toBe(1);
-    expect(state.assignmentPursuitWindows[0]).toMatchObject({ status: "paused", nextRunAt: undefined, pauseReason: "maxModelCalls budget reached (1 / 1)." });
+    expect(state.assignmentPursuitWindows[0]).toMatchObject({ status: "paused", nextRunAt: undefined, pauseReason: "maxChannelReads budget reached (1 / 1)." });
   });
 
   it("does not redispatch an exhausted burst before its pause is persisted", () => {
@@ -166,6 +261,41 @@ describe("truthful Activity right-now projection", () => {
     state.resourceUsageEvents = [{ id: "model_budget", agentId: state.agent!.id, presenceId: presence.id, invocationId: "run", originKind: "assignment", originId: "due_exhausted_burst", attentionSource: "assignment", category: "model", usage: { requests: 1 }, createdAt: now.toISOString() }];
 
     expect(dueLiveAssignmentsWithoutWorkers(state, now)).toEqual([]);
+  });
+
+  it("does not run the parent Assignment behind a capacity-paused burst", () => {
+    const state = fixture();
+    const presence = { ...state.presence!, environment: "live" as const, status: "live" as const };
+    state.presence = presence;
+    state.presences = state.presences.map((item) => item.id === presence.id ? presence : item);
+    const now = new Date("2026-08-29T01:00:00.000Z");
+    state.assignments.unshift({ id: "paused_burst_assignment", agentId: state.agent!.id, presenceId: presence.id, environment: "live", status: "active", nextDueAt: "2026-08-29T00:59:00.000Z", deliverable: { type: "meaningful_engagement" }, progress: { required: 1, verified: 0 }, createdAt: now.toISOString(), updatedAt: now.toISOString() } as never);
+    state.assignmentPursuitWindows = [{ id: "paused_burst", assignmentId: "paused_burst_assignment", agentId: state.agent!.id, presenceId: presence.id, startsAt: "2026-08-29T00:00:00.000Z", deadlineAt: "2026-08-29T02:00:00.000Z", maxVerifiedActions: 10, resourceBudget: { maxModelCalls: 1 }, status: "paused", pauseReason: "maxModelCalls budget reached (1 / 1).", createdAt: now.toISOString(), updatedAt: now.toISOString() }];
+    expect(dueLiveAssignmentsWithoutWorkers(state, now)).toEqual([]);
+  });
+
+  it("does not present an expired capacity pause as current Activity work", () => {
+    const state = fixture();
+    const presence = state.presence!;
+    const now = new Date("2026-08-30T12:00:00.000Z");
+    state.assignmentPursuitWindows = [{
+      id: "expired_paused_burst",
+      assignmentId: "expired_paused_assignment",
+      agentId: state.agent!.id,
+      presenceId: presence.id,
+      startsAt: "2026-08-28T00:00:00.000Z",
+      deadlineAt: "2026-08-29T04:00:00.000Z",
+      maxVerifiedActions: 40,
+      resourceBudget: { maxModelCalls: 40 },
+      status: "paused",
+      pauseReason: "maxModelCalls budget reached (40 / 40).",
+      createdAt: "2026-08-28T00:00:00.000Z",
+      updatedAt: "2026-08-29T03:00:00.000Z",
+    }];
+
+    const projection = deriveActivityNow(state, presence.id, now);
+    expect(projection.state).toBe("resting");
+    expect(projection.title).toBe("Resting between attention passes");
   });
 
   it("does not present a due scheduler row as the next future wake", () => {

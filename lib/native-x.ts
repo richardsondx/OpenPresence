@@ -297,7 +297,10 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
     const currentPostIds = new Set(posts.map((post) => post.id));
     const missingOwnPostIds = [...previousOwnPostIds].filter((postId) => !currentPostIds.has(postId));
     let deletedOwnPostIds: string[] = [];
-    if (missingOwnPostIds.length && !options?.inboundOnly && (hasMirrorDelta || publicationMetricsDue)) {
+    // A missing post is itself the signal we need to verify. Do not gate this
+    // targeted lookup on unrelated mirror deltas or metric timing: a deletion
+    // can be the only change since the last observation.
+    if (missingOwnPostIds.length && !options?.inboundOnly) {
       try {
         const stillVisible: XRecentPost[] = [];
         for (let offset = 0; offset < missingOwnPostIds.length; offset += 100) {

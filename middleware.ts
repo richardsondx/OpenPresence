@@ -11,8 +11,10 @@ const routeViews: Record<string, string> = {
   "/schedule": "schedule",
   "/settings": "presence",
   "/playground": "playground",
+  "/rehearsal": "rehearsal",
   "/teach": "teach",
   "/knowledge": "knowledge",
+  "/assets": "assets",
   "/usage": "usage",
   "/agent": "brain",
   "/calendar": "calendar",
@@ -28,5 +30,5 @@ export function middleware(request: NextRequest) {
 }
 
 export const config = {
-  matcher: ["/activity", "/chat", "/watching", "/people", "/feed", "/growth", "/schedule", "/settings", "/playground", "/teach", "/knowledge", "/usage", "/agent", "/calendar"],
+  matcher: ["/activity", "/chat", "/watching", "/people", "/feed", "/growth", "/schedule", "/settings", "/rehearsal", "/playground", "/teach", "/knowledge", "/assets", "/usage", "/agent", "/calendar"],
 };

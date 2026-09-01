@@ -2,8 +2,26 @@ import type { Assignment, AssignmentOutcomeClass, AssignmentRun, AssignmentRunSt
 
 const pendingDeliveryStatuses = new Set(["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"]);
 const retryableDeliveryStatuses = new Set(["failed", "blocked", "expired"]);
-const activePursuitSkippableFailureCodes = new Set(["TARGET_LANGUAGE_MISMATCH", "TARGET_DISAPPEARED", "X_API_CREDITS_EXHAUSTED"]);
+const activePursuitSkippableFailureCodes = new Set(["TARGET_LANGUAGE_MISMATCH", "TARGET_DISAPPEARED", "X_API_CREDITS_EXHAUSTED", "DUPLICATE_LIVE_ASSET"]);
 const autonomousPreWriteClosureCodes = new Set(["BRIDGE_NOT_CHECKED_IN"]);
+/** A run in these states owns the Presence's current cognition/execution lane. */
+export const activeAssignmentRunStatuses = new Set<AssignmentRunStatus>(["queued", "researching", "selecting", "writing", "delivering"]);
+
+export function assignmentRunIsActive(run: Pick<AssignmentRun, "status">) {
+  return activeAssignmentRunStatuses.has(run.status);
+}
+
+/**
+ * Schedule and Activity need one canonical current Assignment even if an old
+ * snapshot contains more than one non-terminal run. New writes are guarded in
+ * the queue; this latest-progress projection also keeps the browser truthful
+ * while legacy/concurrent records are being settled.
+ */
+export function latestActiveAssignmentRunForPresence(state: OpenPresenceState, presenceId: string) {
+  return [...(state.assignmentRuns ?? [])]
+    .filter((run) => run.presenceId === presenceId && assignmentRunIsActive(run))
+    .sort((left, right) => (right.lastProgressAt ?? right.updatedAt).localeCompare(left.lastProgressAt ?? left.updatedAt))[0];
+}
 /** Keep a small amount of verified-delivery work moving while X confirms prior acts. */
 export const maxConcurrentPursuitDeliveries = 3;
 

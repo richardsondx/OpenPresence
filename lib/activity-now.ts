@@ -38,7 +38,6 @@ function pursuitResourceUsage(state: OpenPresenceState, pursuit: NonNullable<Ope
 function pursuitCapacityReason(state: OpenPresenceState, pursuit: NonNullable<OpenPresenceState["assignmentPursuitWindows"]>[number], now: Date) {
   const usage = pursuitResourceUsage(state, pursuit, now);
   const limits: Array<[string, number | undefined, number]> = [
-    ["model calls", pursuit.resourceBudget?.maxModelCalls, usage.modelCalls],
     ["channel reads", pursuit.resourceBudget?.maxChannelReads, usage.channelReads],
     ["hydrations", pursuit.resourceBudget?.maxHydrations, usage.hydrations],
     ["vision calls", pursuit.resourceBudget?.maxVisionCalls, usage.visionCalls],
@@ -126,6 +125,7 @@ export function deriveActivityNow(state: OpenPresenceState, presenceId: string, 
     && new Date(pursuit.deadlineAt).getTime() > now.getTime());
   const pausedPursuit = latest((state.assignmentPursuitWindows ?? []).filter((pursuit) => pursuit.presenceId === presenceId
     && pursuit.status === "paused"
+    && new Date(pursuit.deadlineAt).getTime() > now.getTime()
     && new Date(pursuit.updatedAt ?? pursuit.createdAt).getTime() <= now.getTime()), (pursuit) => pursuit.updatedAt ?? pursuit.createdAt);
   const pursuitRun = activePursuit
     ? latest((state.assignmentRuns ?? []).filter((run) => run.pursuitWindowId === activePursuit.id && ["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"].includes(run.status)), (run) => run.lastProgressAt ?? run.updatedAt)

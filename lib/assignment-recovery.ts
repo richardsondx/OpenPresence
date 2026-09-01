@@ -2,6 +2,39 @@ import type { AssignmentRun, OpenPresenceState } from "./types";
 import { defaultOperationalStagePolicies } from "./responsibility-continuity";
 
 export const assignmentWorkerStaleAfterMs = 15 * 60 * 1000;
+const openAssignmentRunStatuses = new Set(["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"]);
+
+/**
+ * Repair legacy parent statuses that outlived their durable worker. A parent
+ * Assignment status is a lifecycle projection; it cannot claim current work
+ * when no open AssignmentRun exists. Delivery-pending runs are preserved as a
+ * waiting state, while orphaned working/awaiting-execution parents return to
+ * the normal active queue.
+ */
+export function reconcileOrphanedAssignmentStatuses(source: OpenPresenceState): { state: OpenPresenceState; repairedAssignmentIds: string[] } {
+  const openRuns = source.assignmentRuns ?? [];
+  const candidates = source.assignments.filter((assignment) =>
+    ["working", "awaiting_execution"].includes(assignment.status)
+    && !openRuns.some((run) => run.assignmentId === assignment.id && openAssignmentRunStatuses.has(run.status)),
+  );
+  if (!candidates.length) return { state: source, repairedAssignmentIds: [] };
+
+  const next = JSON.parse(JSON.stringify(source)) as OpenPresenceState;
+  const timestamp = new Date().toISOString();
+  const repairedAssignmentIds: string[] = [];
+  for (const assignment of next.assignments) {
+    if (!candidates.some((candidate) => candidate.id === assignment.id)) continue;
+    assignment.status = "active";
+    assignment.work = {
+      ...(assignment.work ?? { phase: "candidate_review", attempts: 0, maxAttempts: 4, storiesResearched: 0 }),
+      phase: "candidate_review",
+      blockedReason: undefined,
+    };
+    assignment.updatedAt = timestamp;
+    repairedAssignmentIds.push(assignment.id);
+  }
+  return { state: next, repairedAssignmentIds };
+}
 
 export function stageTimeoutForRun(run: AssignmentRun): number {
   const stage = run.currentStage ?? "candidate_review";
@@ -53,7 +86,19 @@ export function recoverStaleAssignmentRuns(
 
     const timestamp = new Date(nowMs).toISOString();
     const assignment = next.assignments.find((item) => item.id === run.assignmentId);
-    const canRetry = run.attempts + 1 < run.maxAttempts;
+    const pursuit = (source.assignmentPursuitWindows ?? []).find((window) =>
+      window.id === run.pursuitWindowId
+      && window.assignmentId === run.assignmentId
+      && window.presenceId === run.presenceId,
+    );
+    const activePursuit = Boolean(pursuit
+      && pursuit.status === "active"
+      && new Date(pursuit.deadlineAt).getTime() > nowMs);
+    // Adaptive live work uses maxAttempts=0 because its real bound is the
+    // active pursuit window and resource envelope. Treat zero as unbounded
+    // only for that explicit window; ordinary assignments still retain their
+    // finite recovery budget.
+    const canRetry = activePursuit || (run.maxAttempts === 0 || run.attempts + 1 < run.maxAttempts);
 
     if (canRetry && assignment && !["completed", "cancelled"].includes(assignment.status)) {
       // 1. Mark current run as superseded_stale (preserving attempt lineage)

@@ -33,7 +33,7 @@ test("scales an active distribution push in Activity and persists the new capaci
       presenceId,
       deadlineAt,
       maxVerifiedActions: 40,
-      resourceBudget: { maxChannelReads: 60, maxHydrations: 36, maxModelCalls: 40, maxVisionCalls: 15 },
+      resourceBudget: { maxChannelReads: 200, maxHydrations: 80, maxModelCalls: 160, maxVisionCalls: 30 },
     },
   });
   expect(started.ok()).toBeTruthy();
@@ -51,11 +51,33 @@ test("scales an active distribution push in Activity and persists the new capaci
   const persisted = await request.get("/api/state");
   const persistedState = await persisted.json();
   const pursuit = persistedState.assignmentPursuitWindows.find((item: { assignmentId: string }) => item.assignmentId === assignmentId);
-  expect(pursuit).toMatchObject({ maxVerifiedActions: 90, resourceBudget: { maxChannelReads: 150, maxModelCalls: 90 } });
+  expect(pursuit).toMatchObject({ maxVerifiedActions: 90, resourceBudget: { maxChannelReads: 500, maxModelCalls: 360 } });
   expect(persistedState.assignmentRuns.some((run: { pursuitWindowId?: string }) => run.pursuitWindowId === pursuit.id)).toBeTruthy();
 
   await page.reload();
   const reloadedCard = page.getByRole("region", { name: /Distribution push progress/ });
   await expect(reloadedCard.getByLabel("Scale distribution push effort")).toHaveValue("expanded");
   await expect(reloadedCard.getByTestId("distribution-push-latest-result")).toBeVisible();
+});
+
+test("renders an OwnTheHype burst as 40 verified promotional actions", async ({ page, request }) => {
+  await page.goto("/");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  const state = await (await request.get("/api/state")).json();
+  const presenceId = state.presence.id as string;
+  const sourceUrl = "https://x.com/example_builder/status/2093472969037099455";
+  const created = await request.post("/api/state", { data: { type: "createAssignment", presenceId, environment: "live", instruction: `Promote OwnTheHype from ${sourceUrl} in relevant X conversations.` } });
+  expect(created.ok()).toBeTruthy();
+  const createdState = await created.json();
+  const assignmentId = createdState.assignments.find((item: { environment?: string }) => item.environment === "live").id as string;
+  expect((await request.post("/api/state", { data: { type: "activateAssignment", id: assignmentId } })).ok()).toBeTruthy();
+  const started = await request.post("/api/state", { data: { type: "startAssignmentPursuit", assignmentId, presenceId, deadlineAt: new Date(Date.now() + 30 * 60_000).toISOString(), maxVerifiedActions: 40, purpose: "promotion_burst", sourcePostId: "2093472969037099455", sourcePostUrl: sourceUrl, requiredVerifiedPromotionalActions: 40, actionCaps: { post: 40, reply: 20, quote: 10, repost: 15, like: 60, follow: 10 } } });
+  expect(started.ok()).toBeTruthy();
+  await page.goto(`/activity?agentId=${state.agent.id}&presenceId=${presenceId}`);
+  const card = page.getByRole("region", { name: /OwnTheHype promotion burst progress/ });
+  await expect(card).toBeVisible();
+  await expect(card.getByText("0 / 40 verified", { exact: true })).toBeVisible();
+  await expect(card.getByText("likes/follows · auxiliary", { exact: true })).toBeVisible();
+  await expect(card.getByText(sourceUrl, { exact: true })).toBeVisible();
+  await expect(card.getByText(/Verified public promotional actions only/)).toBeVisible();
 });

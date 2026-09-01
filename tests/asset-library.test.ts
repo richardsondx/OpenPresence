@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { appendAssetOccurrence, assetHistory, assetIsEligibleForPresence, assetSourceErrorMessage, assetUsageSummary, authorizeAssetSelection, deriveAssetReadiness, ingestLibraryImages, readEligibleAsset, searchEligibleAssets } from "../lib/asset-library";
+import { appendAssetOccurrence, assetHistory, assetIsEligibleForPresence, assetPostingUnavailableUntil, assetSourceErrorMessage, assetUsageSummary, authorizeAssetSelection, deriveAssetReadiness, ingestLibraryImages, liveAssetReuseReason, readEligibleAsset, searchEligibleAssets } from "../lib/asset-library";
 import { applyOperation, createAgent, normalizeState } from "../lib/runtime";
 import type { Asset } from "../lib/types";
 
@@ -82,6 +82,36 @@ describe("Agent-scoped Asset Library", () => {
       { id: "live-duplicate", assetId: "jenny-asset", agentId: state.agent!.id, presenceId: state.presence!.id, publicationId: "pub-live", channelId: "x", environment: "live", usageType: "new", publishedAt: "2026-08-28T00:00:01.000Z" },
     ];
     expect(assetUsageSummary(state.assetUsages, "jenny-asset")).toEqual({ liveUseCount: 1, sandboxTestCount: 1 });
+  });
+
+  it("blocks the same live visual by exact or perceptual identity, including in-flight work", () => {
+    const state = stateWithAssets();
+    const prior = image(state.agent!.id, "prior-asset");
+    prior.storage = { ...prior.storage!, exactHash: "prior-exact", perceptualHash: "0000000011111111" };
+    const candidate = image(state.agent!.id, "candidate-asset");
+    candidate.storage = { ...candidate.storage!, exactHash: "different-encoding", perceptualHash: "0000000011111110" };
+    state.assets = [candidate, prior];
+    state.assetUsages = [{ id: "live-usage", assetId: prior.id, agentId: state.agent!.id, presenceId: state.presence!.id, publicationId: "pub-live", channelId: "x", environment: "live", usageType: "new", publishedAt: "2026-08-28T00:00:00.000Z" }];
+    expect(liveAssetReuseReason(state, state.presence!.id, [candidate.id])).toContain("already published");
+
+    state.assetUsages = [];
+    state.executions = [{ id: "in-flight", socialIntentId: "intent", presenceId: state.presence!.id, affordance: "x.post", mode: "auto", status: "queued", attempts: 0, idempotencyKey: "key", environment: "live", publication: { id: "pub-in-flight", format: "x.media-post", payload: { text: "Queued" }, assetIds: [prior.id], links: [], createdAt: "2026-08-28T00:00:00.000Z", environment: "live" }, createdAt: "2026-08-28T00:00:00.000Z", updatedAt: "2026-08-28T00:00:00.000Z" } as never];
+    expect(liveAssetReuseReason(state, state.presence!.id, [candidate.id])).toContain("already published");
+  });
+
+  it("removes a posted library asset from Agent candidates for the Presence cooldown", () => {
+    const state = stateWithAssets();
+    const presenceId = state.presence!.id;
+    state.assetUsages = [{ id: "live-usage", assetId: "jenny-asset", agentId: state.agent!.id, presenceId, publicationId: "pub-live", channelId: "x", environment: "live", usageType: "new", publishedAt: "2026-08-28T00:00:00.000Z" }];
+
+    expect(state.presence!.assetReuseCooldownMonths).toBe(6);
+    expect(assetPostingUnavailableUntil(state, "jenny-asset", presenceId, "2026-09-01T00:00:00.000Z")).toBe("2027-02-28T00:00:00.000Z");
+    expect(searchEligibleAssets(state, "", { presenceId })).toEqual([]);
+    expect(readEligibleAsset(state, "jenny-asset", presenceId)).toBeUndefined();
+    expect(() => authorizeAssetSelection(state, ["jenny-asset"], { presenceId })).toThrow(/unavailable for posting/);
+
+    const immediateReuse = { ...state, presence: { ...state.presence!, assetReuseCooldownMonths: 0 }, presences: state.presences.map((presence) => ({ ...presence, assetReuseCooldownMonths: 0 })) };
+    expect(searchEligibleAssets(immediateReuse, "", { presenceId })).toHaveLength(1);
   });
 
   it("normalizes newly added library collections and processing jobs", () => {

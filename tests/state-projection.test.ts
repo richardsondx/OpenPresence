@@ -3,9 +3,9 @@ import { gunzipSync } from "node:zlib";
 import { GET as healthGet } from "../app/runtime/health/route";
 import { GET as stateGet } from "../app/api/state/route";
 import { readStateReadToken, readStateVersion } from "../lib/db";
-import { initialState } from "../lib/runtime";
+import { createAgent, initialState } from "../lib/runtime";
 import { expireElapsedPursuitWindows } from "../lib/state-projection";
-import { browserWorkspaceProjection } from "../lib/state-browser-projection";
+import { browserWorkspaceProjection, growthWorkspaceProjection } from "../lib/state-browser-projection";
 
 describe("state read projections", () => {
   it("does not clone the workspace when no pursuit window has expired", () => {
@@ -116,6 +116,31 @@ describe("state read projections", () => {
     expect(projection.actions.some((action) => action.executionId === "execution-299")).toBe(true);
   });
 
+  it("keeps complete selected-Presence Growth evidence outside the generic browser cap", () => {
+    const state = createAgent({ name: "Genny", description: "An agent for useful software conversations.", audience: "AI builders", mode: "agent", handle: "@genny", accent: "#d88b57" });
+    const presenceId = state.presence!.id;
+    state.audienceSnapshots = Array.from({ length: 301 }, (_, index) => ({
+      id: `audience-${index}`, presenceId, channel: "x", followers: index, source: "native",
+      observationStatus: "observed", observedAt: new Date(index).toISOString(),
+    }));
+    state.publicationMetricSnapshots = Array.from({ length: 501 }, (_, index) => ({
+      id: `publication-metric-${index}`, presenceId, mirrorObjectId: `mirror-${index}`,
+      observedAt: new Date(index).toISOString(), publicationAgeSeconds: 3600,
+      impressions: index, source: "native", observationStatus: "observed",
+    }));
+    state.mirrorObjects = Array.from({ length: 501 }, (_, index) => ({
+      id: `mirror-${index}`, presenceId, externalRef: { type: "x.post", id: `post-${index}` },
+      observedAt: new Date(index).toISOString(), occurredAt: new Date(index).toISOString(),
+    })) as never;
+
+    const projection = growthWorkspaceProjection(state, presenceId);
+
+    expect(projection.responseProjection).toBe("growth");
+    expect(projection.audienceSnapshots).toHaveLength(301);
+    expect(projection.publicationMetricSnapshots).toHaveLength(501);
+    expect(projection.mirrorObjects).toHaveLength(501);
+  });
+
   it("clones only when an active or paused pursuit window has expired", () => {
     const state = initialState();
     state.assignmentPursuitWindows = [{
@@ -142,6 +167,7 @@ describe("state read projections", () => {
     expect(body.agentWorkspaces).toBeUndefined();
     expect(body.mirrorEvents).toBeUndefined();
     expect(body.operatorConversations).toBeInstanceOf(Array);
+    expect(body.proposals).toBeInstanceOf(Array);
     expect(JSON.stringify(body).length).toBeLessThan(600_000);
   });
 

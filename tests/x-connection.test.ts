@@ -1,7 +1,7 @@
 import crypto from "node:crypto";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { readChannelSecret, readProviderSecret, readState, shouldRecordNativeOperationalFailure, writeState } from "../lib/db";
-import { findVerifiedXQuote, findVerifiedXReply, matchesXQuote, matchesXReply, mergeXCredentials, normalizeXText, readRecentXMentions, readRecentXPosts, readXPostsByIds } from "../lib/x";
+import { deleteXPost, findVerifiedXQuote, findVerifiedXReply, matchesXQuote, matchesXReply, mergeXCredentials, normalizeXText, readRecentXMentions, readRecentXPosts, readXPostsByIds } from "../lib/x";
 import { applyOperation, createAgent, derivePublicHistory, recordNativeMirror, recordPublicFooting, settleCapabilityTrialNoOpportunity } from "../lib/runtime";
 import { hydrateNativeXThreadContext } from "../lib/native-x";
 import { xCreditsExhausted } from "../lib/x-credits";
@@ -255,6 +255,40 @@ describe("native X connection", () => {
     vi.unstubAllGlobals();
   });
 
+  it("checks missing own posts even when deletion is the only mirror change", async () => {
+    const presenceId = readState().presence!.id;
+    const save = await POST(new Request("http://localhost/api/x/manage", {
+      method: "POST",
+      body: JSON.stringify({ action: "save", presenceId, credentials: { apiKey: "test_api", apiSecret: "test_secret", accessToken: "test_access", accessTokenSecret: "test_access_secret" } }),
+      headers: { "content-type": "application/json" },
+    }));
+    const connectionId = (await save.json()).state.nativeConnections[0].id;
+    let seeded = readState();
+    seeded = recordNativeMirror(seeded, { connectionId, presenceId, own: true, post: { id: "deleted-post", text: "This was deleted on X.", createdAt: "2026-08-15T11:00:00.000Z", authorId: "mock-x-user", authorUsername: "jenny_ai", authorName: "Jenny" } });
+    seeded = recordNativeMirror(seeded, { connectionId, presenceId, own: true, post: { id: "still-live", text: "This is still public.", createdAt: "2026-08-16T11:00:00.000Z", authorId: "mock-x-user", authorUsername: "jenny_ai", authorName: "Jenny" } });
+    const liveMirror = seeded.mirrorObjects.find((item) => item.externalRef.type === "x.post" && item.externalRef.id === "still-live");
+    expect(liveMirror).toBeDefined();
+    seeded = applyOperation(seeded, { type: "recordPublicationMetricSnapshot", presenceId, mirrorObjectId: liveMirror!.id, publicationAgeSeconds: 3600, metrics: { impressions: 1 } });
+    seeded = recordPublicFooting(seeded, presenceId, { postsPublished: 2, recentPostIds: ["still-live", "deleted-post"], recentInboundIds: [], observedAt: new Date().toISOString() });
+    writeState(seeded);
+
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [{ id: "still-live", text: "This is still public.", created_at: "2026-08-16T11:00:00.000Z", author_id: "mock-x-user" }] }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: [] }), { status: 200, headers: { "content-type": "application/json" } }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "syncNativeX", presenceId }), headers: { "content-type": "application/json" } }));
+      const body = await response.json();
+      expect(response.status).toBe(200);
+      expect(body.mirrorObjects.find((item: { externalRef: { id: string } }) => item.externalRef.id === "deleted-post").archived).toBe(true);
+      expect(fetchMock.mock.calls.some(([url]) => String(url).includes("/2/tweets?ids=deleted-post"))).toBe(true);
+    } finally {
+      vi.unstubAllGlobals();
+    }
+  });
+
   it("stores provider secrets in the encrypted vault instead of app state", async () => {
     const response = await statePost(new Request("http://localhost/api/state", { method: "POST", body: JSON.stringify({ type: "configureProvider", provider: "openai", label: "OpenAI workspace", secret: "provider-secret-test", hasSecret: true }), headers: { "content-type": "application/json" } }));
     const body = await response.json();
@@ -343,6 +377,28 @@ describe("native X connection", () => {
     expect(mention?.media?.[0]).toMatchObject({ type: "photo", url: "https://pbs.twimg.com/media/example.jpg", altText: "A useful chart" });
     expect(parent?.text).toBe("The earlier public claim");
     vi.unstubAllGlobals();
+  });
+
+  it("requires the X API to confirm an own post disappeared after deletion", async () => {
+    const priorTestMode = process.env.OPENPRESENCE_TEST_MODE;
+    const priorXMock = process.env.OPENPRESENCE_X_API_MOCK;
+    process.env.OPENPRESENCE_TEST_MODE = "0";
+    process.env.OPENPRESENCE_X_API_MOCK = "0";
+    const fetchMock = vi.fn()
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: { deleted: true } }), { status: 200 }))
+      .mockResolvedValueOnce(new Response(JSON.stringify({ data: undefined }), { status: 200 }));
+    vi.stubGlobal("fetch", fetchMock);
+    try {
+      await expect(deleteXPost({ apiKey: "api", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" }, "post-to-delete")).resolves.toEqual({ type: "x.post", id: "post-to-delete" });
+      expect(fetchMock.mock.calls[0]?.[1]).toMatchObject({ method: "DELETE" });
+      expect(String(fetchMock.mock.calls[1]?.[0])).toContain("/2/tweets?ids=post-to-delete");
+    } finally {
+      if (priorTestMode === undefined) delete process.env.OPENPRESENCE_TEST_MODE;
+      else process.env.OPENPRESENCE_TEST_MODE = priorTestMode;
+      if (priorXMock === undefined) delete process.env.OPENPRESENCE_X_API_MOCK;
+      else process.env.OPENPRESENCE_X_API_MOCK = priorXMock;
+      vi.unstubAllGlobals();
+    }
   });
 
   it("persists X thread identity and media as normalized Mirror evidence", () => {

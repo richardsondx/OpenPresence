@@ -16,6 +16,9 @@ import type {
 } from "./types";
 import { detectLibraryMedia, isSupportedLibraryMedia } from "./asset-media";
 
+export const DEFAULT_ASSET_REUSE_COOLDOWN_MONTHS = 6;
+const MAX_ASSET_REUSE_COOLDOWN_MONTHS = 120;
+
 function timestamp() { return new Date().toISOString(); }
 function recordId(prefix: string) {
   const uuid = typeof globalThis.crypto?.randomUUID === "function"
@@ -151,12 +154,43 @@ export function isLibraryAsset(asset: Asset) {
   return Boolean(asset.sourceId || asset.sourceOccurrences?.length || asset.provenance.origin === "operator_upload");
 }
 
+export function normalizeAssetReuseCooldownMonths(value: unknown) {
+  if (typeof value !== "number" || !Number.isFinite(value)) return DEFAULT_ASSET_REUSE_COOLDOWN_MONTHS;
+  return Math.max(0, Math.min(MAX_ASSET_REUSE_COOLDOWN_MONTHS, Math.round(value)));
+}
+
+function cooldownEndsAt(publishedAt: string, months: number) {
+  const end = new Date(publishedAt);
+  if (Number.isNaN(end.getTime())) return undefined;
+  end.setUTCMonth(end.getUTCMonth() + months);
+  return end.toISOString();
+}
+
+/** Return the end of the active no-reuse window for a library asset. */
+export function assetPostingUnavailableUntil(state: OpenPresenceState, assetOrId: Asset | string, presenceId?: string, at = timestamp(), options?: { excludePublicationId?: string }) {
+  const asset = typeof assetOrId === "string" ? state.assets.find((item) => item.id === assetOrId) : assetOrId;
+  const presence = state.presences.find((item) => item.id === (presenceId ?? state.presence?.id)) ?? state.presence;
+  if (!asset || !presence || !isLibraryAsset(asset)) return undefined;
+  const cooldownMonths = normalizeAssetReuseCooldownMonths(presence.assetReuseCooldownMonths);
+  if (cooldownMonths === 0) return undefined;
+  const latest = state.assetUsages
+    .filter((usage) => usage.assetId === asset.id && usage.presenceId === presence.id && usage.environment === "live" && usage.publicationId !== options?.excludePublicationId)
+    .map((usage) => usage.publishedAt)
+    .filter((publishedAt) => !Number.isNaN(new Date(publishedAt).getTime()))
+    .sort((left, right) => right.localeCompare(left))[0];
+  if (!latest) return undefined;
+  const unavailableUntil = cooldownEndsAt(latest, cooldownMonths);
+  return unavailableUntil && unavailableUntil > at ? unavailableUntil : undefined;
+}
+
 export function assetSelectionFailure(state: OpenPresenceState, assetId: string, options?: { presenceId?: string; collectionId?: string; requireReady?: boolean }) {
   const asset = state.assets.find((item) => item.id === assetId);
   if (!asset) return "The selected Asset is no longer available.";
   if (!state.agent?.id || asset.agentId !== state.agent.id) return "That Asset belongs to another Agent and cannot be used here.";
   if (!assetIsEligibleForPresence(state, asset, options?.presenceId ?? state.presence?.id)) return "That Asset is not eligible for this Presence.";
   if (asset.archivedAt) return "That Asset is archived.";
+  const unavailableUntil = assetPostingUnavailableUntil(state, asset, options?.presenceId ?? state.presence?.id);
+  if (unavailableUntil) return `That Asset was already published by this Presence and is unavailable for posting until ${new Date(unavailableUntil).toLocaleDateString()}.`;
   if (asset.rights?.status === "restricted") return "That Asset has restricted rights and cannot be published.";
   if ((options?.collectionId || options?.collectionId === "") && !collectionContainsAsset(state, options.collectionId, asset.id)) return "That Asset is not in the requested Collection.";
   const readiness = deriveAssetReadiness(state, asset);
@@ -169,6 +203,51 @@ export function authorizeAssetSelection(state: OpenPresenceState, assetIds: stri
   const failures = assetIds.map((assetId) => assetSelectionFailure(state, assetId, options)).filter((failure): failure is string => Boolean(failure));
   if (failures.length) throw new Error(failures[0]);
   return [...new Set(assetIds)];
+}
+
+const LIVE_VISUAL_REPEAT_DISTANCE = 6;
+
+function visualHashDistance(left: string, right: string) {
+  if (left.length !== right.length) return Number.POSITIVE_INFINITY;
+  let distance = 0;
+  for (let index = 0; index < left.length; index += 1) if (left[index] !== right[index]) distance += 1;
+  return distance;
+}
+
+function assetsRepresentSameVisual(left: Asset, right: Asset) {
+  const leftExact = left.storage?.exactHash ?? left.checksum;
+  const rightExact = right.storage?.exactHash ?? right.checksum;
+  if (leftExact && rightExact && leftExact === rightExact) return true;
+  const leftSource = left.provenance.sourceUrl?.trim();
+  const rightSource = right.provenance.sourceUrl?.trim();
+  if (leftSource && rightSource && leftSource === rightSource) return true;
+  const leftPerceptual = left.storage?.perceptualHash;
+  const rightPerceptual = right.storage?.perceptualHash;
+  return Boolean(leftPerceptual && rightPerceptual && visualHashDistance(leftPerceptual, rightPerceptual) <= LIVE_VISUAL_REPEAT_DISTANCE);
+}
+
+/**
+ * Live Presence media is a public identity signal. Do not publish the same
+ * visual again merely because a new asset record or X media URL was created.
+ * Include in-flight executions as well as verified usages so concurrent
+ * workers cannot publish the same image twice before usage is recorded.
+ */
+export function liveAssetReuseReason(state: OpenPresenceState, presenceId: string, assetIds: string[], options?: { excludePublicationId?: string }) {
+  if (!assetIds.length) return undefined;
+  const candidateAssets = assetIds.map((assetId) => state.assets.find((asset) => asset.id === assetId)).filter((asset): asset is Asset => Boolean(asset));
+  if (!candidateAssets.length) return undefined;
+  const priorUsageAssetIds = new Set(state.assetUsages
+    .filter((usage) => usage.presenceId === presenceId && usage.environment === "live" && usage.publicationId !== options?.excludePublicationId)
+    .map((usage) => usage.assetId));
+  const inFlightAssetIds = new Set<string>();
+  for (const execution of state.executions) {
+    if (execution.presenceId !== presenceId || execution.environment !== "live" || execution.publication?.id === options?.excludePublicationId) continue;
+    if (["failed", "blocked", "cancelled", "expired", "verification-closed"].includes(execution.status)) continue;
+    for (const assetId of execution.publication?.assetIds ?? []) inFlightAssetIds.add(assetId);
+  }
+  const priorAssets = [...priorUsageAssetIds, ...inFlightAssetIds].map((assetId) => state.assets.find((asset) => asset.id === assetId)).filter((asset): asset is Asset => Boolean(asset));
+  const repeated = candidateAssets.find((candidate) => assetPostingUnavailableUntil(state, candidate, presenceId, timestamp(), options) || priorAssets.some((prior) => prior.id !== candidate.id && assetsRepresentSameVisual(candidate, prior) && (inFlightAssetIds.has(prior.id) || !isLibraryAsset(candidate) || !isLibraryAsset(prior) || assetPostingUnavailableUntil(state, prior, presenceId, timestamp(), options))));
+  return repeated ? "This visual was already published by this Presence and cannot be used again in a live publication." : undefined;
 }
 
 export function collectionContainsAsset(state: OpenPresenceState, collectionId: string, assetId: string) {
@@ -195,6 +274,7 @@ export interface AssetSearchResult {
 export function readEligibleAsset(state: OpenPresenceState, assetId: string, presenceId?: string) {
   const asset = state.assets.find((item) => item.id === assetId);
   if (!asset || !isLibraryAsset(asset) || asset.archivedAt || !assetIsEligibleForPresence(state, asset, presenceId ?? state.presence?.id)) return undefined;
+  if (assetPostingUnavailableUntil(state, asset, presenceId ?? state.presence?.id)) return undefined;
   const effective = effectiveAssetObservation(state, asset);
   return {
     assetId: asset.id,
@@ -237,7 +317,7 @@ export function searchEligibleAssets(state: OpenPresenceState, query: string, op
   const normalizedQuery = query.trim().toLowerCase();
   const presenceId = options?.presenceId ?? state.presence?.id;
   return state.assets
-    .filter((asset) => !asset.archivedAt && isLibraryAsset(asset) && asset.agentId === state.agent?.id && assetIsEligibleForPresence(state, asset, presenceId))
+    .filter((asset) => !asset.archivedAt && isLibraryAsset(asset) && asset.agentId === state.agent?.id && assetIsEligibleForPresence(state, asset, presenceId) && !assetPostingUnavailableUntil(state, asset, presenceId))
     .filter((asset) => !options?.collectionId || collectionContainsAsset(state, options.collectionId, asset.id))
     .map((asset) => {
       const effective = effectiveAssetObservation(state, asset);

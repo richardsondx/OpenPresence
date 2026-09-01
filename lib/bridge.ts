@@ -1,5 +1,5 @@
 import { z } from "zod";
-import { activeAssignmentPursuitWindow, applyOperation, assignmentIsSatisfied, blockExecutionForLanguage, blockExecutionForTargetLanguage, cancelExecutionForBlockedTarget, clearPersonBlockFromExecution, curateRelationshipFromMirror, ensureCapabilityRequests, existingPublicActionExecution, isPersonBlockingError, isWatchPausedForExecution, languageValidationForExecution, recordPersonBlockedFromExecution, recordVerifiedCapabilityTrial, recordVerifiedFollow, settleCapabilityTrialVerificationFailure, targetIsBlockedByPerson, targetLanguageValidationForExecution } from "./runtime";
+import { activeAssignmentPursuitWindow, applyOperation, assignmentIsSatisfied, blockExecutionForLanguage, blockExecutionForTargetLanguage, cancelExecutionForBlockedTarget, clearPersonBlockFromExecution, curateRelationshipFromMirror, ensureCapabilityRequests, existingPublicActionExecution, isPersonBlockingError, isWatchPausedForExecution, languageValidationForExecution, recordNativeMirrorDeletion, recordPersonBlockedFromExecution, recordVerifiedCapabilityTrial, recordVerifiedFollow, settleCapabilityTrialVerificationFailure, settlePromotionBurstProgress, targetIsBlockedByPerson, targetLanguageValidationForExecution } from "./runtime";
 import { appendMirrorEvents, authenticateBridgeKey, cancelScheduledWake, deleteBridgeCredential, deleteBridgeIdentity, issueBridgeKey, readBridgeById, readBridgeCredentialMetadata, readBridgeIdentity, readBridgeIdentityForExecutor, readPublicActionDeliverySlot, readStateForBridge, releasePublicActionDelivery, reservePublicActionDelivery, revokeBridgeKey, updatePublicActionDelivery, upsertScheduledWake, writeBridgeHeartbeat, writeBridgeIdentity, writeState } from "./db";
 import { readMirrorEventSourceIds } from "./db";
 import type { Asset, Bridge, Execution, LiveEvent, MirrorObject, OpenPresenceState, Outcome } from "./types";
@@ -17,7 +17,7 @@ import { settleAttentionForExecution } from "./attention-responsibility";
 import { requestAttention } from "./attention-coordinator";
 import { recordOperationalSuccess } from "./incident-engine";
 import { detectDuplicatePublicOutcomes, detectDuplicateVerifiedExecutionOutcomes } from "./public-action-safety";
-import { authorizeAssetSelection } from "./asset-library";
+import { authorizeAssetSelection, liveAssetReuseReason } from "./asset-library";
 
 const entityRef = z.object({ type: z.string().min(1).max(80), id: z.string().min(1).max(240) });
 const author = z.object({ externalRef: entityRef.optional(), displayName: z.string().min(1).max(160), handle: z.string().max(160).optional(), avatarUrl: z.string().url().max(2_000).optional() }).optional();
@@ -527,6 +527,15 @@ export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput
     if (execution.environment === "live" && execution.publication?.publicExpression) {
       try {
         authorizeAssetSelection(state, execution.publication.assetIds ?? [], { presenceId: execution.presenceId, requireReady: true });
+        const liveAssetRepeatReason = liveAssetReuseReason(state, execution.presenceId, execution.publication.assetIds ?? [], { excludePublicationId: execution.publication.id });
+        if (liveAssetRepeatReason) {
+          execution.status = "blocked";
+          execution.failure = { code: "DUPLICATE_LIVE_ASSET", message: liveAssetRepeatReason, retryable: false };
+          execution.reviewReason = "The Bridge refused a visual that this Presence already published.";
+          execution.updatedAt = timestamp();
+          state.events.unshift(bridgeEvent(state, "Live media blocked", liveAssetRepeatReason, "warning", execution.id));
+          continue;
+        }
         // Claim polling is intentionally idempotent. A browser service-worker
         // restart or a second claim request can observe an execution after
         // the first claimant has sealed it but before the DOM action returns;
@@ -605,7 +614,8 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
   const identityFresh = accountIdentity?.status === "verified"
     && Date.now() - new Date(accountIdentity.observedAt).getTime() <= BRIDGE_IDENTITY_MAX_AGE_MS;
   const apiVerifiedReply = options.apiVerified === true && input.externalRef.type === "x.reply" && ["reply", "x.reply"].includes(execution.affordance);
-  if (execution.environment === "live" && !identityFresh && !apiVerifiedReply) {
+  const apiVerifiedDelete = options.apiVerified === true && input.externalRef.type === "x.post" && execution.affordance === "x.delete";
+  if (execution.environment === "live" && !identityFresh && !apiVerifiedReply && !apiVerifiedDelete) {
     execution.status = "failed";
     execution.failure = { code: "ACCOUNT_MISMATCH", message: "The Bridge account was not verified against the Presence before delivery.", retryable: false };
     execution.lease = undefined;
@@ -618,6 +628,20 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
   if (execution.environment === "live" && execution.publication?.publicExpression) {
     try {
       authorizeAssetSelection(state, execution.publication.assetIds ?? [], { presenceId: execution.presenceId, requireReady: true });
+      const liveAssetRepeatReason = liveAssetReuseReason(state, execution.presenceId, execution.publication.assetIds ?? [], { excludePublicationId: execution.publication.id });
+      if (liveAssetRepeatReason) {
+        execution.status = "blocked";
+        execution.failure = { code: "DUPLICATE_LIVE_ASSET", message: liveAssetRepeatReason, retryable: false };
+        execution.reviewReason = "The Bridge refused a visual that this Presence already published.";
+        execution.lease = undefined;
+        execution.updatedAt = timestamp();
+        releasePublicActionDelivery(execution.id);
+        state = settleAttentionForExecution(state, execution);
+        state.events.unshift(bridgeEvent(state, "Live media blocked", liveAssetRepeatReason, "warning", execution.id));
+        touchBridge(state, bridge);
+        writeState(state);
+        return { state, execution };
+      }
     } catch (error) {
       execution.status = "blocked";
       execution.failure = { code: "ASSET_AUTHORIZATION_FAILED", message: error instanceof Error ? error.message : "The selected Asset cannot be used by this Presence.", retryable: false };
@@ -665,17 +689,20 @@ export function acknowledgeExecution(bridge: Bridge, executionId: string, input:
   }
   execution.status = "succeeded"; execution.externalRef = input.externalRef; execution.executedAt = input.observedAt ?? timestamp(); execution.updatedAt = timestamp(); execution.lease = undefined;
   updatePublicActionDelivery(execution.id, "verified", input.externalRef);
-  const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, attentionEpisodeId: execution.attentionEpisodeId, status: "succeeded", observedAt: timestamp(), metrics: {}, evidence: [input.externalRef] }; state.outcomes.unshift(outcome); recordVerifiedCapabilityTrial(state, execution, outcome);
+  const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, attentionEpisodeId: execution.attentionEpisodeId, status: "succeeded", observedAt: timestamp(), metrics: {}, evidence: [input.externalRef] }; state.outcomes.unshift(outcome); state = settlePromotionBurstProgress(state, execution.assignmentId ?? "", execution.presenceId); recordVerifiedCapabilityTrial(state, execution, outcome);
   recordVerifiedBridgeAttention(state, bridge, execution, input.externalRef);
   recordVerifiedLiveAssetUsage(state, bridge, execution);
   const action = state.actions.find((item) => item.executionId === execution.id);
   if (action) { action.status = "executed"; action.outcomeId = outcome.id; }
+  if (execution.affordance === "x.delete" && execution.target?.type === "x.post") {
+    state = recordNativeMirrorDeletion(state, { connectionId: bridge.id, presenceId: execution.presenceId, postId: execution.target.id });
+  }
   if (execution.affordance === "x.follow" && execution.target?.type === "x.user") state = recordVerifiedFollow(state, execution.presenceId, execution.target);
   state = clearPersonBlockFromExecution(state, execution.id);
   state.events.unshift(bridgeEvent(
     state,
-    apiVerifiedReply ? "Chrome reply verified on X" : "Bridge execution completed",
-    apiVerifiedReply ? "The X API confirmed the exact public reply from the expected account." : "The external executor acknowledged the action.",
+    apiVerifiedReply ? "Chrome reply verified on X" : apiVerifiedDelete ? "Chrome deletion verified on X" : "Bridge execution completed",
+    apiVerifiedReply ? "The X API confirmed the exact public reply from the expected account." : apiVerifiedDelete ? "The X API confirmed that this Presence's own post is no longer available." : "The external executor acknowledged the action.",
     "positive",
     execution.id,
   )); touchBridge(state, bridge); state = settleAttentionForExecution(state, execution); state = detectDuplicateVerifiedExecutionOutcomes(state, execution.id); writeState(state); return { state, execution };
@@ -705,6 +732,7 @@ export function recordVerifiedBridgeReaction(source: OpenPresenceState, executio
   updatePublicActionDelivery(execution.id, "verified", externalRef);
   const outcome: Outcome = { id: localId("outcome"), socialIntentId: execution.socialIntentId, executionId: execution.id, presenceId: execution.presenceId, attentionEpisodeId: execution.attentionEpisodeId, status: "succeeded", observedAt: verifiedAt, metrics: {}, evidence: [externalRef], environment: execution.environment, sessionId: execution.sessionId, conversationEpisodeId: execution.conversationEpisodeId };
   state.outcomes.unshift(outcome);
+  state = settlePromotionBurstProgress(state, execution.assignmentId ?? "", execution.presenceId);
   const mirror = state.mirrorObjects.find((item) => item.externalRef.type === externalRef.type && item.externalRef.id === externalRef.id && item.presenceId === execution.presenceId);
   if (mirror) {
     mirror.objectType = execution.affordance === "x.quote" || execution.affordance === "quote" ? "quote" : "repost";
@@ -816,7 +844,7 @@ export async function verifyChromeExecution(bridge: Bridge, executionId: string,
     || (execution.status === "failed" && ["RESULT_NOT_VERIFIED", "X_API_VERIFICATION_PENDING"].includes(execution.failure?.code ?? ""));
   if (!canVerify) throw new Error("Execution is not waiting for X verification");
   const action = execution.affordance.replace(/^x\./, "");
-  if (action !== "reply" && action !== "quote") throw new Error("Only X replies and quotes submitted through Chrome can be API-verified");
+  if (action !== "reply" && action !== "quote" && action !== "delete") throw new Error("Only X replies, quotes, and deletions submitted through Chrome can be API-verified");
   if (execution.target?.type !== "x.post" || !execution.target.id) throw new Error(`The Chrome ${action} has no target X post`);
 
   const presence = state.presences.find((item) => item.id === execution.presenceId) ?? state.presence;
@@ -829,6 +857,39 @@ export async function verifyChromeExecution(bridge: Bridge, executionId: string,
     && ["connected", "needs-attention"].includes(item.status)
   );
   const credentials = connection ? readNativeXCredentials(connection.id) : undefined;
+  if (action === "delete") {
+    const targetMirror = state.mirrorObjects.find((item) => item.presenceId === execution.presenceId
+      && item.channelId === "x"
+      && item.environment !== "sandbox"
+      && !item.archived
+      && ["post", "reply"].includes(item.objectType)
+      && item.externalRef.type === "x.post"
+      && item.externalRef.id === execution.target?.id
+      && (item.actorPresenceId === execution.presenceId || (item.author?.handle ?? "").replace(/^@/, "").toLowerCase() === (presence?.handle ?? "").replace(/^@/, "").toLowerCase()));
+    if (!credentials || !targetMirror) return leaveExecutionVerificationPending(bridge, state, execution, !targetMirror
+      ? "Chrome reported an X deletion, but OpenPresence cannot prove that the target was this Presence's own live post or reply. No deletion is counted."
+      : "Chrome reported an X deletion, but the connected X API is not ready to verify that the post is gone.", input);
+    let remaining;
+    try {
+      remaining = await readXPostsByIds(credentials, [execution.target.id]);
+    } catch (error) {
+      return leaveExecutionVerificationPending(bridge, state, execution, `Chrome reported a deletion, but X verification is temporarily unavailable: ${error instanceof Error ? error.message : "X did not return a verification response."}`, input);
+    }
+    if (remaining.some((post) => post.id === execution.target?.id)) {
+      return leaveExecutionVerificationPending(bridge, state, execution, "Chrome reported a deletion, but X still returns the post. OpenPresence is not counting it as deleted.", input);
+    }
+    state = readStateForBridge(bridge.id);
+    const latest = state.executions.find((item) => item.id === executionId && item.bridgeId === bridge.id);
+    if (!latest) throw new Error("Execution not found");
+    if (latest.status === "verification-pending" || latest.status === "failed") {
+      latest.status = "claimed";
+      latest.lease = { executorId: input.executorId, claimedAt: timestamp(), expiresAt: new Date(Date.now() + 30_000).toISOString() };
+      latest.updatedAt = timestamp();
+      writeState(state);
+    }
+    const result = acknowledgeExecution(bridge, executionId, { executorId: input.executorId, externalRef: { type: "x.post", id: execution.target.id }, observedAt: input.observedAt ?? timestamp() }, { apiVerified: true });
+    return { ...result, verified: true, nextAttemptAt: undefined };
+  }
   const payload = execution.publication?.payload;
   const payloadText = payload && typeof payload === "object" && !Array.isArray(payload) && typeof payload.text === "string" ? payload.text : undefined;
   const text = typeof execution.publication?.publicExpression?.text === "string" ? execution.publication.publicExpression.text : payloadText;

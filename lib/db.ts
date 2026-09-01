@@ -215,7 +215,7 @@ sqlite.exec("CREATE TABLE IF NOT EXISTS bridge_executor_identity (bridge_id TEXT
 sqlite.exec("INSERT OR IGNORE INTO bridge_executor_identity (bridge_id, executor_id, username, status, message, observed_at, updated_at) SELECT bridge_id, executor_id, username, status, message, observed_at, updated_at FROM bridge_identity");
 sqlite.exec("INSERT INTO agent_workspace_revisions (agent_id, revision, updated_at) SELECT agent_id, 0, updated_at FROM agent_workspaces WHERE agent_id NOT IN (SELECT agent_id FROM agent_workspace_revisions)");
 const normalizedTables = [
-  "agents", "agent_files", "provider_connections", "asset_provider_connections", "agent_model_profiles", "agent_tool_bindings", "presences", "execution_envelopes", "conversations", "presence_chat_sessions", "messages", "change_sets", "standing_intents", "publishing_plans", "social_intents", "executions", "outcomes", "publications", "asset_usages", "source_evidence", "claim_grounding", "library_sources", "assets", "asset_collections", "asset_collection_memberships", "asset_metadata_edits", "asset_processing_jobs", "assignment_runs", "skills", "agent_skills", "content_drops", "channel_definitions", "events", "native_channel_connections", "bridges", "mirror_objects", "mirror_events", "bridge_sync", "conversation_episodes", "assignment_contributions", "people", "person_identities", "relationships", "relationship_facts", "relationship_open_loops", "recommendation_records", "introduction_records", "scenarios", "scenario_versions", "scenario_runs", "scenario_run_provenance", "scenario_evaluations", "attention_episodes",
+  "agents", "agent_files", "provider_connections", "asset_provider_connections", "agent_model_profiles", "agent_tool_bindings", "presences", "execution_envelopes", "conversations", "presence_chat_sessions", "messages", "change_sets", "standing_intents", "publishing_plans", "social_intents", "executions", "outcomes", "publications", "asset_usages", "source_evidence", "claim_grounding", "library_sources", "assets", "asset_collections", "asset_collection_memberships", "asset_metadata_edits", "asset_processing_jobs", "skills", "agent_skills", "content_drops", "channel_definitions", "events", "social_strategy_retrieval_runs", "growth_hypotheses", "growth_evidence_records", "legacy_channel_strategy_guidance", "native_channel_connections", "bridges", "mirror_objects", "mirror_events", "bridge_sync", "conversation_episodes", "assignment_contributions", "people", "person_identities", "relationships", "relationship_facts", "relationship_open_loops", "recommendation_records", "introduction_records", "scenarios", "scenario_versions", "scenario_runs", "scenario_run_provenance", "scenario_evaluations", "attention_episodes",
   "operational_runs", "scheduled_wakes", "dependency_health", "recovery_incidents", "recovery_attempts", "browser_bodies", "people_notes", "resource_usage_events", "publication_metric_snapshots",
 ];
 for (const table of normalizedTables) {
@@ -1769,8 +1769,8 @@ export function readRuntimeAuditProjection(presenceId?: string) {
       try { return [JSON.parse(row.value) as T]; } catch { return []; }
     });
   };
-  const filterPresence = <T extends { presenceId?: string }>(items: T[]) => items.filter((item) => !presenceId || item.presenceId === presenceId);
-  const readNormalizedOrCompatibility = <T extends { presenceId?: string }>(table: string, jsonPath: string, whereSql?: string, whereArgs: string[] = []) => {
+  const filterPresence = <T extends { presenceId?: string; originatingPresenceId?: string }>(items: T[]) => items.filter((item) => !presenceId || item.presenceId === presenceId || item.originatingPresenceId === presenceId);
+  const readNormalizedOrCompatibility = <T extends { presenceId?: string; originatingPresenceId?: string }>(table: string, jsonPath: string, whereSql?: string, whereArgs: string[] = []) => {
     // The compatibility snapshot is authoritative. Normalized tables may be
     // briefly behind because their rebuild is debounced; an audit view must
     // never make a durable execution or outcome disappear during that gap.
@@ -1792,6 +1792,9 @@ export function readRuntimeAuditProjection(presenceId?: string) {
     outcomes: readNormalizedOrCompatibility<OpenPresenceState["outcomes"][number]>("outcomes", "$.outcomes"),
     resourceUsageEvents: filterPresence(parseJsonEach<OpenPresenceState["resourceUsageEvents"][number]>("$.resourceUsageEvents")),
     attentionEpisodes: readNormalizedOrCompatibility<NonNullable<OpenPresenceState["attentionEpisodes"]>[number]>("attention_episodes", "$.attentionEpisodes"),
+    socialStrategyRetrievalRuns: readNormalizedOrCompatibility<NonNullable<OpenPresenceState["socialStrategyRetrievalRuns"]>[number]>("social_strategy_retrieval_runs", "$.socialStrategyRetrievalRuns"),
+    growthHypotheses: readNormalizedOrCompatibility<NonNullable<OpenPresenceState["growthHypotheses"]>[number]>("growth_hypotheses", "$.growthHypotheses"),
+    growthEvidenceRecords: readNormalizedOrCompatibility<NonNullable<OpenPresenceState["growthEvidenceRecords"]>[number]>("growth_evidence_records", "$.growthEvidenceRecords"),
     modelProfiles: parseRows<OpenPresenceState["modelProfiles"][number]>(sqlite.prepare("SELECT payload FROM agent_model_profiles").all() as Array<{ payload?: string }>),
   };
 }
@@ -1884,6 +1887,10 @@ function entityRows(state: OpenPresenceState): Record<string, { id: string; agen
     agent_skills: state.agentSkills.map((item) => ({ id: item.id, agentId: item.agentId, payload: item })),
     content_drops: state.contentDrops.map((item) => ({ id: item.id, agentId: item.agentId, payload: item })),
     channel_definitions: state.channelDefinitions.map((item) => ({ id: item.id, payload: item })),
+    social_strategy_retrieval_runs: (state.socialStrategyRetrievalRuns ?? []).map((item) => ({ id: item.id, agentId: item.agentId, parentId: item.presenceId, payload: item })),
+    growth_hypotheses: (state.growthHypotheses ?? []).map((item) => ({ id: item.id, agentId: item.agentId, parentId: item.originatingPresenceId, payload: item })),
+    growth_evidence_records: (state.growthEvidenceRecords ?? []).map((item) => ({ id: item.id, agentId: item.agentId, parentId: item.presenceId, payload: item })),
+    legacy_channel_strategy_guidance: (state.legacyChannelStrategyGuidance ?? []).map((item) => ({ id: item.id, parentId: item.channelId, payload: item })),
     native_channel_connections: state.nativeConnections.map((item) => ({ id: item.id, parentId: item.presenceId, payload: item })),
     bridges: state.bridges.map((item) => ({ id: item.id, parentId: item.presenceId, payload: item })),
     mirror_objects: state.mirrorObjects.map((item) => ({ id: item.id, agentId, parentId: item.presenceId, payload: item })),
@@ -1953,6 +1960,88 @@ function writeNormalized(state: OpenPresenceState) {
     }
   });
   transaction();
+}
+
+/** Rebuild the query projection from the canonical compatibility snapshot. */
+export function rebuildNormalizedProjection() {
+  writeNormalized(readStateSnapshot());
+}
+
+function recoveryItemKey(item: unknown) {
+  if (item && typeof item === "object" && typeof (item as { id?: unknown }).id === "string") return `id:${(item as { id: string }).id}`;
+  return `json:${JSON.stringify(item)}`;
+}
+
+/**
+ * Reconcile the active Agent's legacy directory copy once at process start.
+ *
+ * The compatibility app_state row is the hot-path authority, while
+ * agent_workspaces is also the only durable copy available to older recovery
+ * tooling. A failed recovery could therefore leave a richer active workspace
+ * hidden behind a partial app_state row. Preserve the current app_state value
+ * for duplicate IDs, add any directory-only durable records, and write the
+ * reconciled snapshot back to both locations before serving the UI.
+ */
+export function reconcileActiveWorkspaceCopy() {
+  const appRow = sqlite.prepare("SELECT payload FROM app_state WHERE id = 1").get() as { payload?: string } | undefined;
+  if (!appRow?.payload) return { changed: false, added: 0 };
+  let current: OpenPresenceState;
+  try {
+    current = JSON.parse(appRow.payload) as OpenPresenceState;
+  } catch (error) {
+    console.warn(`OpenPresence skipped active workspace reconciliation because app_state is unreadable: ${error instanceof Error ? error.message : String(error)}`);
+    return { changed: false, added: 0 };
+  }
+  const agentId = current.activeAgentId ?? current.agent?.id;
+  if (!agentId) return { changed: false, added: 0 };
+  const workspaceRow = sqlite.prepare("SELECT payload FROM agent_workspaces WHERE agent_id = ?").get(agentId) as { payload?: string } | undefined;
+  if (!workspaceRow?.payload) return { changed: false, added: 0 };
+  let preserved: Partial<OpenPresenceState>;
+  try {
+    preserved = JSON.parse(workspaceRow.payload) as Partial<OpenPresenceState>;
+  } catch (error) {
+    console.warn(`OpenPresence skipped active workspace reconciliation because the preserved Agent copy is unreadable: ${error instanceof Error ? error.message : String(error)}`);
+    return { changed: false, added: 0 };
+  }
+  if (preserved.agent?.id && preserved.agent.id !== agentId) return { changed: false, added: 0 };
+
+  const merged = { ...current } as OpenPresenceState;
+  let added = 0;
+  for (const [key, value] of Object.entries(preserved)) {
+    if (!Array.isArray(value)) continue;
+    // The operator event stream is intentionally bounded by normalizeState;
+    // its older history remains in the preserved workspace copy and must not
+    // cause a full compatibility rewrite on every route-module load.
+    const existing = Array.isArray(current[key as keyof OpenPresenceState])
+      ? current[key as keyof OpenPresenceState] as unknown[]
+      : [];
+    if ((key === "events" && existing.length >= 2_000) || key === "actions" || key === "mirrorEvents") continue;
+    const seen = new Set(existing.map(recoveryItemKey));
+    const additions = value.filter((item) => {
+      const itemKey = recoveryItemKey(item);
+      if (seen.has(itemKey)) return false;
+      seen.add(itemKey);
+      return true;
+    });
+    if (additions.length > 0) {
+      added += additions.length;
+      (merged as unknown as Record<string, unknown>)[key] = [...existing, ...additions];
+    }
+  }
+  if (added === 0) return { changed: false, added: 0 };
+
+  const workspaceSnapshot = { ...merged } as Partial<OpenPresenceState>;
+  delete workspaceSnapshot.agents;
+  delete workspaceSnapshot.activeAgentId;
+  delete workspaceSnapshot.agentWorkspaces;
+  delete workspaceSnapshot.mirrorEvents;
+  const persistedAt = new Date().toISOString();
+  sqlite.transaction(() => {
+    sqlite.prepare("UPDATE app_state SET payload = ?, updated_at = ? WHERE id = 1").run(JSON.stringify(merged), persistedAt);
+    sqlite.prepare("UPDATE agent_workspaces SET payload = ?, updated_at = ? WHERE agent_id = ?").run(JSON.stringify(workspaceSnapshot), persistedAt, agentId);
+  })();
+  console.warn(`OpenPresence reconciled ${added} durable records from the active Agent workspace copy before serving requests.`);
+  return { changed: true, added };
 }
 
 /**
@@ -2077,6 +2166,21 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
       if (expectedRevision !== undefined && expectedRevision !== actualRevision && !options?.force) throw new WorkspaceConflictError(agentId, expectedRevision, actualRevision);
       normalized.workspaceRevision = advanceWorkspaceRevision ? actualRevision + 1 : actualRevision;
     }
+    // An Agent switch replaces the active compatibility projection. Checkpoint
+    // the outgoing active Agent first so its newest state is still available
+    // when another tab later selects it. Ordinary same-Agent writes do not pay
+    // this second serialization cost.
+    if (agentId) {
+      if (previousAppState?.payload) {
+        const previous = JSON.parse(previousAppState.payload) as OpenPresenceState;
+        const previousAgentId = previous.activeAgentId ?? previous.agent?.id;
+        if (previousAgentId && previousAgentId !== agentId && previous.agent?.id === previousAgentId) {
+          const previousRevision = ((sqlite.prepare("SELECT revision FROM agent_workspace_revisions WHERE agent_id = ?").get(previousAgentId) as { revision?: number } | undefined)?.revision ?? previous.workspaceRevision ?? 0);
+          const previousWorkspace = snapshotWorkspace({ ...previous, workspaceRevision: previousRevision });
+          sqlite.prepare("INSERT INTO agent_workspaces (agent_id, payload, updated_at) VALUES (?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at").run(previousAgentId, JSON.stringify(previousWorkspace), persistedAt);
+        }
+      }
+    }
     // `agent_workspaces` is the durable directory for non-active Agents. Do
     // not duplicate all of those snapshots inside the compatibility row:
     // Activity and health reads would otherwise parse tens of megabytes just
@@ -2142,10 +2246,21 @@ export function writeState(state: OpenPresenceState, options?: { advanceWorkspac
         sqlite.prepare("INSERT INTO agent_workspaces (agent_id, payload, updated_at) VALUES (?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET payload = excluded.payload, updated_at = excluded.updated_at").run(agentId, JSON.stringify(snapshot), persistedAt);
       }
       sqlite.prepare("INSERT INTO agent_workspace_revisions (agent_id, revision, updated_at) VALUES (?, ?, ?) ON CONFLICT(agent_id) DO UPDATE SET revision = excluded.revision, updated_at = excluded.updated_at").run(agentId, normalized.workspaceRevision, persistedAt);
-      if (options?.persistAgentWorkspaces) {
+      // A state produced by Agent selection carries the inactive workspace
+      // snapshots needed to keep multi-Agent tabs independent. Persist those
+      // snapshots whenever they are present; the explicit option remains for
+      // maintenance callers that need to force directory synchronization even
+      // when the current state has no inactive rows.
+      if (options?.persistAgentWorkspaces || normalized.agentWorkspaces.length > 0) {
         for (const workspace of normalized.agentWorkspaces) {
           const workspaceAgentId = workspace.agent?.id;
           if (!workspaceAgentId || workspaceAgentId === agentId) continue;
+          const incomingRevision = typeof workspace.workspaceRevision === "number" ? workspace.workspaceRevision : 0;
+          const actualWorkspaceRevision = ((sqlite.prepare("SELECT revision FROM agent_workspace_revisions WHERE agent_id = ?").get(workspaceAgentId) as { revision?: number } | undefined)?.revision ?? 0);
+          // A stale active tab can still carry an older inactive workspace
+          // snapshot. Never let that directory copy erase a newer write that
+          // already advanced the inactive Agent's revision.
+          if (incomingRevision < actualWorkspaceRevision) continue;
           const workspaceSnapshot = JSON.parse(JSON.stringify(workspace)) as Record<string, unknown>;
           delete workspaceSnapshot.agents;
           delete workspaceSnapshot.activeAgentId;
@@ -2219,7 +2334,7 @@ function masterKey() {
     if (key.length === 32) return key;
     throw new Error("OPENPRESENCE_SECRET_KEY must be a 32-byte base64 or 64-character hex value.");
   }
-  if (process.env.NODE_ENV === "production") throw new Error("Set OPENPRESENCE_SECRET_KEY before storing channel credentials.");
+  if (process.env.NODE_ENV === "production") throw new Error("Secure local credential storage is unavailable. Start OpenPresence through its normal server launcher before storing channel credentials.");
   const fallbackPath = path.join(dataDir, ".secret-key");
   try {
     const existing = fs.readFileSync(fallbackPath);
@@ -2228,6 +2343,14 @@ function masterKey() {
   const generated = crypto.randomBytes(32);
   fs.writeFileSync(fallbackPath, generated, { mode: 0o600 });
   return generated;
+}
+export function credentialStorageAvailable() {
+  try {
+    masterKey();
+    return true;
+  } catch {
+    return false;
+  }
 }
 function encryptSecret(value: object) {
   const iv = crypto.randomBytes(12);

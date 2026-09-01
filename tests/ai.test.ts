@@ -59,10 +59,19 @@ describe("Agent social decision parsing", () => {
       expect(system).toContain("A short reaction, thanks, agreement, joke, or simple question can be the complete response");
       expect(system).toContain("Do not force the same opening, sentence shape, length, or rhythm onto every voice");
       expect(system).toContain("REALISTIC OPTIMISM DEFAULT: Use this stance only when BRAIN.md does not specify another one.");
+      expect(system).toContain("POSITIVE SOCIAL DEFAULT");
+      expect(system).toContain("Never use a test of worth");
       expect(system).toContain("A deliberate meaning-file or style choice takes precedence");
       expect(system).toContain("Vary the choreography across turns");
       expect(system).toContain("SURFACE STYLE: Follow TASTE.md and the active Style Guidance");
     }
+  });
+
+  it("seeds new Agents with encouraging, dignity-preserving social defaults", () => {
+    const state = createAgent({ name: "Genny", description: "Make useful founder observations.", mode: "agent", handle: "@genny_positive", accent: "#D68754" });
+    expect(state.files.find((file) => file.kind === "BRAIN")?.content).toContain("make the invitation warm, specific, and optional");
+    expect(state.files.find((file) => file.kind === "SOUL")?.content).toContain("feel more capable and encouraged");
+    expect(state.files.find((file) => file.kind === "TASTE")?.content).toContain("Participation is welcome");
   });
 
   it("keeps the realistic-optimist stance subordinate to Brain and Taste", () => {

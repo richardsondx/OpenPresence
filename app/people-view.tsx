@@ -28,6 +28,7 @@ type PeopleViewProps = {
   watchRelationshipPolicy: (watch: Watch, state: OpenPresenceState) => RelationshipPolicy | undefined;
   watchPolicyFromPurpose: (purpose?: string) => RelationshipPolicy | undefined;
   watchPlanSummary: (watch: Watch, presence: Presence, policy?: RelationshipPolicy) => RelationshipPlan;
+  initialFilterMode?: "all" | "following" | "watched" | "boundaries";
 };
 
 const PERSON_FACT_PAGE_SIZE = 8;
@@ -38,10 +39,10 @@ const REQUEST_TYPE_OPTIONS = [
   { id: "introduction", label: "Introductions" },
 ] as const;
 
-export function PeopleView({ state, mutate, Button, SectionEyebrow, PageHeader, ChannelAvatar, channelLabel, formatTime, formatDateTime, watchRelationshipPolicy, watchPolicyFromPurpose, watchPlanSummary }: PeopleViewProps) {
+export function PeopleView({ state, mutate, Button, SectionEyebrow, PageHeader, ChannelAvatar, channelLabel, formatTime, formatDateTime, watchRelationshipPolicy, watchPolicyFromPurpose, watchPlanSummary, initialFilterMode }: PeopleViewProps) {
   const presence = state.presence ?? state.presences[0];
   const [query, setQuery] = useState("");
-  const [filterMode, setFilterMode] = useState<"all" | "following" | "watched" | "boundaries">("all");
+  const [filterMode, setFilterMode] = useState<"all" | "following" | "watched" | "boundaries">(initialFilterMode ?? "all");
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [remembering, setRemembering] = useState(false);
   const [rememberName, setRememberName] = useState("");

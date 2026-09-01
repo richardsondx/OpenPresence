@@ -41,16 +41,32 @@ function mergeAutonomyState(base: OpenPresenceState, candidate: OpenPresenceStat
   return merged;
 }
 
-async function writeStateWithRetry(base: OpenPresenceState, state: OpenPresenceState, maxRetries = 2): Promise<void> {
+async function writeStateWithRetry(base: OpenPresenceState, state: OpenPresenceState, maxRetries = 12, forceFinalMergedWrite = false): Promise<void> {
   for (let attempt = 0; attempt <= maxRetries; attempt++) {
     try {
       writeState(state);
       return;
     } catch (error) {
       if (error instanceof WorkspaceConflictError && attempt < maxRetries) {
+        // Several live Presence workers can finish a provider call at once.
+        // A zero-delay retry merely joins the same writer collision and was
+        // leaving attention runs in failed_initialization/recovering forever.
+        // Yield briefly, then merge the worker's changed records onto the
+        // newest durable snapshot before trying again.
+        await new Promise((resolve) => setTimeout(resolve, Math.min(1_000, 50 * (attempt + 1))));
         const latest = readStateSnapshotForContext({ presenceId: state.presence?.id ?? base.presence?.id });
         state = mergeAutonomyState(base, state, latest);
         continue;
+      }
+      if (error instanceof WorkspaceConflictError && forceFinalMergedWrite) {
+        // Initialization only adds the new episode/run linkage. After the
+        // bounded merge retries, make that tiny, already-merged receipt
+        // durable atomically instead of leaving the Presence in recovery
+        // forever because a busy Bridge keeps winning the revision race.
+        const latest = readStateSnapshotForContext({ presenceId: state.presence?.id ?? base.presence?.id });
+        const merged = mergeAutonomyState(base, state, latest);
+        writeState(merged, { force: true });
+        return;
       }
       throw error;
     }
@@ -577,7 +593,7 @@ export async function executeAutonomyRun(runId: string): Promise<OpenPresenceSta
       upsertOperationalRun(run);
       // Persist the episode before provider/model work starts so Activity can show
       // a truthful live look instead of waiting for the whole run to finish.
-      await writeStateWithRetry(runStartState, nudgeStarted.state);
+      await writeStateWithRetry(runStartState, nudgeStarted.state, 12, true);
     } else {
       run.stage = "verifying";
       upsertOperationalRun(run);
@@ -963,6 +979,7 @@ export async function runAutonomousPulse(
           presenceId,
           attentionEpisodeId: options?.attentionEpisodeId,
           autobiographicalEventIds: decision.autobiographicalEventIds,
+          socialStrategy: decision.socialStrategy,
         };
         const recordedDecision = bundleRecorded ? undefined : decisionInput;
         if (act.action === "reply") next = formXReplyIntent(next, act.text.trim(), focalPostId, undefined, undefined, [], recordedDecision);
@@ -1063,7 +1080,7 @@ async function judgeAutonomousWatchSignals(
       (decision.acts ?? [{ action: decision.action, text: decision.text, rationale: decision.rationale }]).map((act) => ({ action: act.action, text: act.text ?? "", rationale: act.rationale })),
       decision.conversationDisposition,
     ).filter((act) => allowedActions.includes(act.action) && act.action !== "no_op" && (act.action !== "reply" || Boolean(act.text?.trim())));
-    const autobiographicalDecisionInput = { ...decisionInput, autobiographicalEventIds: decision.autobiographicalEventIds };
+    const autobiographicalDecisionInput = { ...decisionInput, autobiographicalEventIds: decision.autobiographicalEventIds, socialStrategy: decision.socialStrategy };
     if (isWatchPausedForOrigin(next, decisionInput.origin)) break;
     const decisionDisposition = decision.conversationDisposition ?? (acts.length ? conversationDispositionForAction(acts[0]!.action) : "close_silently");
     if (!acts.length) {
@@ -1401,6 +1418,7 @@ export async function runAutonomousSelfDirectedDiscovery(
       presenceId: presence.id,
       attentionEpisodeId: options?.attentionEpisodeId,
       autobiographicalEventIds: decision.autobiographicalEventIds,
+      socialStrategy: decision.socialStrategy,
     };
 
     if (!acts.length) {
@@ -1669,6 +1687,7 @@ export async function judgeOperatorNudgeTargets(
       attentionEpisodeId: options?.attentionEpisodeId,
       operatorReaction: decision.operatorReaction,
       autobiographicalEventIds: decision.autobiographicalEventIds,
+      socialStrategy: decision.socialStrategy,
     };
     if (!acts.length) {
       next = markInboundJudged(next, presenceId, mirror.externalRef.id);
