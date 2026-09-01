@@ -381,7 +381,7 @@ function GrowthInsights({
           </p>
         </article>
         <article className="growth-insight-card">
-          <span className="growth-insight-eyebrow">What Genny Is Testing</span>
+          <span className="growth-insight-eyebrow">What the Agent Is Testing</span>
           <h3 className="growth-insight-title">&ldquo;{testingTitle}&rdquo;</h3>
           <p className="growth-insight-evidence">
             <Sparkles size={14} aria-hidden="true" />
@@ -389,7 +389,7 @@ function GrowthInsights({
           </p>
         </article>
         <article className="growth-insight-card">
-          <span className="growth-insight-eyebrow">What Genny Is Watching</span>
+          <span className="growth-insight-eyebrow">What the Agent Is Watching</span>
           <h3 className="growth-insight-title">&ldquo;{watchingTitle}&rdquo;</h3>
           <p className="growth-insight-evidence">
             <Clock3 size={14} aria-hidden="true" />
@@ -493,12 +493,12 @@ function GrowthFocusAndNext({
   const reviewStatusMessage = presencePaused
     ? "Growth is paused with this Presence."
     : reviewingGrowth
-    ? "Genny is currently evaluating verified growth evidence and assessing whether strategy should adapt."
+    ? "The Agent is currently evaluating verified growth evidence and assessing whether strategy should adapt."
     : isReviewDue
-    ? "A scheduled strategic review is due and queued for Genny's next cognition cycle."
+    ? "A scheduled strategic review is due and queued for the Agent's next cognition cycle."
     : review?.changedPlan
-    ? "Genny adapted the operating strategy during the last review."
-    : "Genny is monitoring new evidence and will adapt strategy automatically when warranted. No action needed.";
+    ? "The Agent adapted the operating strategy during the last review."
+    : "The Agent is monitoring new evidence and will adapt strategy automatically when warranted. No action needed.";
 
   return (
     <div className="growth-focus-section" aria-label="Current strategy and next steps">
@@ -506,7 +506,7 @@ function GrowthFocusAndNext({
         <div className="growth-section-heading">
           <div>
             <SectionEyebrow>Current strategy</SectionEyebrow>
-            <h2>What Genny is doing now</h2>
+            <h2>What the Agent is doing now</h2>
           </div>
           <Sparkles size={16} />
         </div>
@@ -735,7 +735,11 @@ function GrowthCapabilities({
 
 export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthViewProps) {
   const presence = state.presence;
+  const agentName = state.agent?.name ?? "the Agent";
   const [reviewingGrowth, setReviewingGrowth] = useState(false);
+  const [growthSetupOpen, setGrowthSetupOpen] = useState(false);
+  const [growthGoalDraft, setGrowthGoalDraft] = useState("");
+  const [creatingGrowth, setCreatingGrowth] = useState(false);
   const [selectedMetric, setSelectedMetric] = useState<GrowthMetricKey | null>(null);
   const [now] = useState(() => Date.now());
   useEffect(() => {
@@ -747,6 +751,7 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
     return () => document.removeEventListener("keydown", handleKeyDown);
   }, [selectedMetric]);
   if (!presence) return <div className="page"><PageHeader eyebrow="Growth" title="No Presence selected" description="Select a Presence before reviewing growth evidence." /></div>;
+  const parsedGrowthGoal = Math.floor(Number(growthGoalDraft.replaceAll(",", "").trim()));
 
   const growthBoundary = presenceGrowthBoundary(state, presence.id);
   const assignment = state.assignments.find((item) => item.presenceId === presence.id && item.successEvidence?.metric === "followers" && assignmentIsOpen(item));
@@ -837,7 +842,7 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
     ? `Followers up this week (+${deltas.sevenDay}). Engagement improving. No operator action needed.`
     : totalAutonomousActions > 0
     ? `Operating autonomously with ${totalAutonomousActions} verified actions on X. Follower growth is not yet proven by the current baseline.`
-    : `Establishing the follower baseline. Genny is acting autonomously, but growth is not yet proven.`;
+    : `Establishing the follower baseline. ${agentName} is acting autonomously, but growth is not yet proven.`;
 
   const reviewGrowth = async (kind: "weekly" | "strategic") => {
     if (reviewingGrowth || !assignment) return;
@@ -846,13 +851,20 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
   };
 
   const createGrowthResponsibility = async () => {
-    const defaultGoal = 100_000;
-    await mutate({
-      type: "createAssignment",
-      presenceId: presence.id,
-      environment: presence.connectionMode === "sandbox" ? "sandbox" : "live",
-      instruction: `Grow this Presence toward ${defaultGoal.toLocaleString()} followers while building an audience of ${presence.brief.audience}.`,
-    });
+    if (!Number.isFinite(parsedGrowthGoal) || parsedGrowthGoal < 1 || creatingGrowth) return;
+    setCreatingGrowth(true);
+    try {
+      await mutate({
+        type: "createAssignment",
+        presenceId: presence.id,
+        environment: presence.connectionMode === "sandbox" ? "sandbox" : "live",
+        instruction: `Grow this Presence toward ${parsedGrowthGoal.toLocaleString()} followers while building an audience of ${presence.brief.audience}.`,
+      });
+      setGrowthSetupOpen(false);
+      setGrowthGoalDraft("");
+    } finally {
+      setCreatingGrowth(false);
+    }
   };
 
   return (
@@ -875,11 +887,40 @@ export function GrowthView({ state, mutate, setView, onOpenAttention }: GrowthVi
           <SectionEyebrow>Continuous responsibility</SectionEyebrow>
           <h2>Give {presence.name} a growth responsibility.</h2>
           <p>
-            One long-lived Assignment owns the objective. Genny chooses the day-to-day work, observes the public result, and revises its approach during review.
+            One long-lived Assignment owns the objective. {agentName} chooses the day-to-day work, observes the public result, and revises its approach during review.
           </p>
-          <Button variant="primary" onClick={() => void createGrowthResponsibility()}>
-            <Plus size={14} /> Create growth responsibility
-          </Button>
+          {!growthSetupOpen ? (
+            <Button variant="primary" onClick={() => setGrowthSetupOpen(true)}>
+              <Plus size={14} /> Set a growth goal
+            </Button>
+          ) : (
+            <div className="growth-responsibility-setup" aria-label="Set growth goal">
+              <label htmlFor="growth-goal">Follower goal</label>
+              <input
+                id="growth-goal"
+                aria-describedby="growth-goal-help"
+                inputMode="numeric"
+                min="1"
+                pattern="[0-9,]*"
+                placeholder="Enter a target audience size"
+                value={growthGoalDraft}
+                onChange={(event) => setGrowthGoalDraft(event.target.value)}
+              />
+              <p id="growth-goal-help">This becomes the success measure for the long-lived responsibility. {agentName} still decides the day-to-day work.</p>
+              {parsedGrowthGoal >= 1 && (
+                <div className="growth-responsibility-contract" role="status">
+                  <strong>Growth contract</strong>
+                  <span>Work toward {parsedGrowthGoal.toLocaleString()} followers for {presence.name}, then review the evidence before adapting the plan.</span>
+                </div>
+              )}
+              <div className="growth-responsibility-actions">
+                <Button variant="ghost" onClick={() => { setGrowthSetupOpen(false); setGrowthGoalDraft(""); }} disabled={creatingGrowth}>Cancel</Button>
+                <Button variant="primary" onClick={() => void createGrowthResponsibility()} disabled={creatingGrowth || parsedGrowthGoal < 1}>
+                  {creatingGrowth ? <><LoaderCircle size={14} className="spin" /> Creating…</> : <><Check size={14} /> Confirm and create</>}
+                </Button>
+              </div>
+            </div>
+          )}
         </section>
       ) : (
         <>

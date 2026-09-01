@@ -1155,6 +1155,7 @@ export default function Home() {
       const url = new URL(window.location.href);
       url.pathname = viewPaths[nextView];
       url.searchParams.delete("view");
+      if (nextView !== "live") url.searchParams.delete("focus");
       window.history.pushState({ ...(window.history.state ?? {}), openPresenceView: nextView }, "", `${url.pathname}${url.search}${url.hash}`);
     }
     const presence = state?.presence;
@@ -2131,6 +2132,16 @@ function ReviewView({
     (environment === "sandbox" ? assignment.environment === "sandbox" : assignment.environment !== "sandbox") &&
     ["needs_operator", "blocked"].includes(assignment.status),
   );
+  const openApprovalQueue = () => {
+    setView("live");
+    if (typeof window !== "undefined") {
+      const url = new URL(window.location.href);
+      url.pathname = viewPaths.live;
+      url.searchParams.delete("surface");
+      url.searchParams.set("focus", "queue");
+      window.history.replaceState({ ...(window.history.state ?? {}), openPresenceActivityFocus: "queue" }, "", url.pathname + url.search + url.hash);
+    }
+  };
 
   return (
     <div className="review-page">
@@ -2140,7 +2151,7 @@ function ReviewView({
         executions={executions}
         assignments={assignments}
         onOpenActivity={() => setView("live")}
-        onOpenAgenda={() => setView("live")}
+        onOpenAgenda={openApprovalQueue}
         onOpenHealth={() => setView("live")}
         onOpenSettings={() => setView("presence")}
         onOpenSchedule={() => setView("schedule")}
@@ -8461,7 +8472,14 @@ function LiveView({
     ? (recentFailure.status === "expired" && expiredDeliveryIsRecoverable ? undefined : recentFailure)
     : undefined;
   const latestFailure = currentFailedExecution ? deliveryFailureExplanation(currentFailedExecution.failure, selected?.handle) : undefined;
-  const [activeSubtab, setActiveSubtab] = useState<"activity" | "needs_you" | "queue" | "assignments" | "requests" | "failures" | "system_log">(healthFocusKey ? "needs_you" : "activity");
+  const initialActivityTab = (() => {
+    if (typeof window !== "undefined") {
+      const requestedFocus = new URLSearchParams(window.location.search).get("focus");
+      if (requestedFocus === "queue" || requestedFocus === "needs_you" || requestedFocus === "failures") return requestedFocus;
+    }
+    return healthFocusKey ? "needs_you" : "activity";
+  })();
+  const [activeSubtab, setActiveSubtab] = useState<"activity" | "needs_you" | "queue" | "assignments" | "requests" | "failures" | "system_log">(initialActivityTab);
   const scopedAssignments = state.assignments.filter(
     (item) =>
       (!selected?.id || item.presenceId === selected.id) &&

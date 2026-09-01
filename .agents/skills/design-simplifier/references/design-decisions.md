@@ -26,6 +26,22 @@ Record accepted design decisions here so repeated reviews do not reopen settled 
 - **Reasoning:** The distinction preserves trust, authority, and useful learning.
 - **Reopen when:** Sandbox/live boundaries or the product’s authority model are deliberately redesigned and remain explicit to users.
 
+## 2026-09-01 — Review handoffs land on the actionable queue
+
+- **Decision:** A Review approval handoff opens Activity directly on the Agenda/queue context that contains the decision controls.
+- **Context/problem:** The Review card said “Open Agenda & Review” but previously landed on general Activity, forcing the operator to hunt for the approval.
+- **Alternatives rejected:** Leave the operator on the general Activity stream; duplicate approval controls in the Review summary card.
+- **Reasoning:** Review remains a focused queue while the handoff preserves one source of truth for approval actions and removes a trust-critical navigation detour.
+- **Reopen when:** The approval controls move to a different canonical surface or runtime evidence shows the focused queue is still insufficient.
+
+## 2026-09-01 — Growth objectives are operator-owned contracts
+
+- **Decision:** Growth must collect and display an explicit follower target before creating its long-lived Assignment; the Agent owns the method, not the operator’s unstated goal.
+- **Context/problem:** The first-run CTA silently persisted a universal 100,000-follower objective.
+- **Alternatives rejected:** Keep a hard-coded benchmark; create the Assignment first and ask for the target later; replace the durable Assignment with a dashboard-only goal.
+- **Reasoning:** The operator sees the inferred success measure and confirms it before persistence, while the Agent retains autonomy over day-to-day strategy.
+- **Reopen when:** Growth supports a documented objective model beyond follower targets and the preflight contract can represent it without hiding operator intent.
+
 ## Review discipline
 
 Do not reopen a decision because a new component, trend, or visual style is available. Reopen only for changed goals, changed user evidence, changed surrounding architecture, or demonstrated friction against the decision.

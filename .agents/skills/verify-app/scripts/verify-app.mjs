@@ -19,6 +19,7 @@ const sourceHash = crypto.createHash("sha256").update(repoRoot).digest("hex").sl
 const routes = {
   activity: "/activity",
   live: "/activity",
+  review: "/review",
   chat: "/chat",
   teach: "/teach",
   rehearsal: "/rehearsal",

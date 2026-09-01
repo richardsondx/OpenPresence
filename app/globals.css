@@ -3824,6 +3824,13 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .activity-autonomy-strip span { color: var(--muted); font-size: 10px; }
 .growth-empty { text-align: center; padding: 48px 24px; }
 .growth-empty p { max-width: 650px; margin: 8px auto 18px; color: var(--muted); line-height: 1.6; }
+.growth-responsibility-setup { display: grid; gap: 10px; max-width: 520px; margin: 22px auto 0; text-align: left; }
+.growth-responsibility-setup > label { color: var(--ink); font-size: 11px; font-weight: 600; }
+.growth-responsibility-setup > input { width: 100%; padding: 10px 12px; border: 1px solid var(--line); border-radius: 6px; background: #fffdfa; color: var(--ink); font: 13px inherit; }
+.growth-responsibility-setup > p { margin: 0; font-size: 11px; line-height: 1.45; }
+.growth-responsibility-contract { display: grid; gap: 4px; padding: 11px 12px; border: 1px solid #ead6c5; border-left: 3px solid #d88b57; border-radius: 6px; background: #fffaf5; color: var(--muted); font-size: 11px; line-height: 1.45; }
+.growth-responsibility-contract strong { color: var(--ink); font-size: 10px; letter-spacing: .06em; text-transform: uppercase; }
+.growth-responsibility-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 2px; }
 
 /* Dashboard Hero */
 .growth-dashboard-hero {
