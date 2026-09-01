@@ -2100,6 +2100,58 @@ function ActivityView({
   </div>;
 }
 
+function ReviewView({
+  state,
+  operationalHealth,
+  mutate,
+  setView,
+  refreshHealth,
+}: {
+  state: OpenPresenceState;
+  operationalHealth?: OperationalHealthSnapshot | null;
+  mutate: Mutate;
+  setView: (view: View) => void;
+  refreshHealth: () => void;
+}) {
+  const selected = state.presence;
+  const environment: PresenceEnvironment = selected?.environment ?? "live";
+  const sessionIds = new Set(
+    state.playgroundSessions
+      .filter((session) => session.presenceId === selected?.id && session.channelId === selected?.channel && session.status !== "completed")
+      .map((session) => session.id),
+  );
+  const executions = state.executions.filter((execution) =>
+    (!selected?.id || execution.presenceId === selected.id) &&
+    (environment === "sandbox"
+      ? execution.environment === "sandbox" || (!execution.environment && Boolean(execution.sessionId && sessionIds.has(execution.sessionId)))
+      : execution.environment !== "sandbox" && !execution.sessionId),
+  );
+  const assignments = state.assignments.filter((assignment) =>
+    (!selected?.id || assignment.presenceId === selected.id) &&
+    (environment === "sandbox" ? assignment.environment === "sandbox" : assignment.environment !== "sandbox") &&
+    ["needs_operator", "blocked"].includes(assignment.status),
+  );
+
+  return (
+    <div className="review-page">
+      <NeedsYouQueue
+        state={state}
+        health={operationalHealth}
+        executions={executions}
+        assignments={assignments}
+        onOpenActivity={() => setView("live")}
+        onOpenAgenda={() => setView("live")}
+        onOpenHealth={() => setView("live")}
+        onOpenSettings={() => setView("presence")}
+        onOpenSchedule={() => setView("schedule")}
+        mutate={mutate}
+        onRefreshHealth={refreshHealth}
+        standalone
+      />
+    </div>
+  );
+}
+
 function AnalyticsView({ state, mutate, setView, onOpenAttention }: { state: OpenPresenceState; mutate: Mutate; setView: (view: View) => void; onOpenAttention: () => void }) {
   const [section, setSection] = useState<"growth" | "usage">("growth");
   return <div className="analytics-shell">
@@ -2363,8 +2415,11 @@ function AgentWorkspaceShell({
           {view === "playground" && (
             <PlaygroundView state={state} mutate={mutate} />
           )}
-          {(view === "live" || view === "review") && (
-        <ActivityView state={state} mutate={mutate} pendingOperation={pendingOperation} operationalHealth={operationalHealth} healthFocusKey={view === "review" ? Math.max(1, healthFocusKey) : healthFocusKey} refreshHealth={() => setHealthRefreshKey((key) => key + 1)} runtimeError={Boolean(error && /OpenPresence (runtime could not be reached|service unavailable)/i.test(error))} refreshState={refreshState} setView={setView} />
+          {view === "live" && (
+            <ActivityView state={state} mutate={mutate} pendingOperation={pendingOperation} operationalHealth={operationalHealth} healthFocusKey={healthFocusKey} refreshHealth={() => setHealthRefreshKey((key) => key + 1)} runtimeError={Boolean(error && /OpenPresence (runtime could not be reached|service unavailable)/i.test(error))} refreshState={refreshState} setView={setView} />
+          )}
+          {view === "review" && (
+            <ReviewView state={state} mutate={mutate} operationalHealth={operationalHealth} refreshHealth={() => setHealthRefreshKey((key) => key + 1)} setView={setView} />
           )}
           {view === "feed" && (
             <PublicHistoryView state={state} setView={setView} mutate={mutate} />
@@ -8000,7 +8055,7 @@ function LiveView({
   const [activityFocus, setActivityFocus] = useState<"selected" | "preparing" | null>(null);
   const [activityPage, setActivityPage] = useState(1);
   const [countdownNow, setCountdownNow] = useState<number>(() => Date.now());
-  const presenceCopy = (text: string) => text.replaceAll("Jenny", presenceName).replaceAll(state.agent?.name ?? "Jenny", presenceName);
+  const presenceCopy = (text?: string) => (text ?? "No details recorded.").replaceAll("Jenny", presenceName).replaceAll(state.agent?.name ?? "Jenny", presenceName);
   const activityEnvironment: PresenceEnvironment = selected?.environment ?? "live";
   const scopedAttentionEpisodes = (state.attentionEpisodes ?? [])
     .filter((episode) => episode.presenceId === selected?.id && episode.environment === activityEnvironment)
@@ -10358,8 +10413,8 @@ function EmptyState({
   );
 }
 
-function ActivityEventDetail({ text }: { text: string }) {
-  const parts = text.split(/(Playground)/gi);
+function ActivityEventDetail({ text }: { text?: string }) {
+  const parts = (text ?? "No details recorded.").split(/(Playground)/gi);
   return (
     <p>
       {parts.map((part, index) => /playground/i.test(part) ? <span className="activity-tag" key={`${part}-${index}`}>{part}</span> : part)}
@@ -11036,6 +11091,7 @@ function NeedsYouQueue({
   onOpenSchedule,
   mutate,
   onRefreshHealth,
+  standalone = false,
 }: {
   state: OpenPresenceState;
   health?: OperationalHealthSnapshot | null;
@@ -11048,6 +11104,7 @@ function NeedsYouQueue({
   onOpenSchedule: () => void;
   mutate: Mutate;
   onRefreshHealth?: () => void;
+  standalone?: boolean;
 }) {
   const [checkingIncidentId, setCheckingIncidentId] = useState<string | null>(null);
   const [reviewPromptIncidentId, setReviewPromptIncidentId] = useState<string | null>(null);
@@ -11110,13 +11167,18 @@ function NeedsYouQueue({
     <section className="needs-you-queue" aria-label="Needs You operator queue" data-testid="needs-you-queue">
       <header className="needs-you-queue-header">
         <div>
-          <SectionEyebrow>Operator queue</SectionEyebrow>
-          <h2>Needs You</h2>
-          <p>These are decisions that cannot be made safely by the Presence. Settings change configuration; this queue tells you what needs a decision now.</p>
+          <SectionEyebrow>{standalone ? "Review" : "Operator queue"}</SectionEyebrow>
+          {standalone ? <h1>Needs You</h1> : <h2>Needs You</h2>}
+          <p>{standalone
+            ? "Review decisions that need your judgment. The Presence pauses before sending anything it cannot safely decide on its own."
+            : "These are decisions that cannot be made safely by the Presence. Settings change configuration; this queue tells you what needs a decision now."}</p>
         </div>
-        <span className="needs-you-queue-count" aria-label={`${incidents.length + approvals.length + blocked.length} decisions needing attention`}>
-          {incidents.length + approvals.length + blocked.length}
-        </span>
+        <div className="needs-you-queue-header-actions">
+          {standalone && <Button variant="secondary" onClick={onOpenActivity}><ChevronLeft size={14} /> Back to Activity</Button>}
+          <span className="needs-you-queue-count" aria-label={`${incidents.length + approvals.length + blocked.length} decisions needing attention`}>
+            {incidents.length + approvals.length + blocked.length}
+          </span>
+        </div>
       </header>
 
       {incidents.map((incident) => {

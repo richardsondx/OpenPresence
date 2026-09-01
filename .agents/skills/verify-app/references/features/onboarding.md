@@ -19,7 +19,7 @@ verify-app reset-session
 verify-app open /
 verify-app type --label "Agent name" --text "Jenny"
 verify-app click --role button --name "Create Agent + Presence"
-verify-app wait-for --text "Jenny, right now."
+verify-app wait-for --text "Jenny at a glance"
 verify-app snapshot
 verify-app state --projection activity
 ```
@@ -35,3 +35,4 @@ Convincing proof is the created workspace heading plus a persisted state project
 - `reset-session` is test-only and must target the harness-owned database.
 - A pre-seeded canonical workspace is not a fresh onboarding proof.
 - Mobile uses a compact switcher; desktop uses the sidebar/footer switcher.
+- The first-run Activity card routes to Sandbox so the operator can rehearse before connecting a live channel.

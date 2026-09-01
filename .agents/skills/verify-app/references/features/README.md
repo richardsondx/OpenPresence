@@ -18,6 +18,7 @@ Every claim needs the user trigger, stable end state, side effect, and evidence.
 
 - [Onboarding and workspace identity](onboarding.md)
 - [Activity and verified outcomes](activity.md)
+- [Review and operator queue](review.md)
 - [Chat and Teach](chat-teach.md)
 - [Watching and People](watching-people.md)
 - [Channels and Manage Agent](channels-agent.md)
@@ -30,13 +31,14 @@ Every claim needs the user trigger, stable end state, side effect, and evidence.
 
 1. Onboarding and workspace identity.
 2. Activity and route/persistence truth.
-3. Chat/Teach and the Chat → Activity handoff.
-4. Channels and Manage Agent scope/persistence.
-5. Watching/People and attention entry points.
-6. Playground/Rehearsal sandbox isolation.
-7. Schedule/Assignments and responsibility state.
-8. Knowledge/Assets/Growth/Analytics/Usage/Feed reporting surfaces.
-9. Cross-surface journeys and responsive entry points.
+3. Review and operator decisions.
+4. Chat/Teach and the Chat → Activity handoff.
+5. Channels and Manage Agent scope/persistence.
+6. Watching/People and attention entry points.
+7. Playground/Rehearsal sandbox isolation.
+8. Schedule/Assignments and responsibility state.
+9. Knowledge/Assets/Growth/Analytics/Usage/Feed reporting surfaces.
+10. Cross-surface journeys and responsive entry points.
 
 ## Important journeys
 

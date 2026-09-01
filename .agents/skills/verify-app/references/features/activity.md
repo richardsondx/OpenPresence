@@ -8,6 +8,7 @@ Activity is the operational social surface: current attention, decisions, review
 - Trigger `Look now`/`Look again next` when the Presence is eligible.
 - Inspect observed context, decision details, execution status, and recovery.
 - Switch between Activity now, timeline, and Calendar history.
+- Open `Review` when a decision needs operator judgment; Activity remains the live operational stream.
 
 ## How to get to it (user POV)
 

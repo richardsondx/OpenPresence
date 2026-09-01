@@ -1430,7 +1430,9 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .activity-return-row .button { gap: 6px; }
 .needs-you-queue { display: grid; gap: 12px; max-width: 920px; }
 .needs-you-queue-header { display: flex; align-items: flex-start; justify-content: space-between; gap: 18px; padding: 18px; border: 1px solid #efc9bd; border-left: 3px solid #ef4444; border-radius: 9px; background: #fff9f7; }
+.needs-you-queue-header-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; justify-content: flex-end; }
 .needs-you-queue-header h2 { margin: 5px 0 6px; color: var(--ink); font-size: 24px; letter-spacing: -.05em; }
+.needs-you-queue-header h1 { margin: 5px 0 6px; color: var(--ink); font-size: clamp(30px, 3vw, 40px); line-height: .98; letter-spacing: -.075em; }
 .needs-you-queue-header p { max-width: 700px; margin: 0; color: #7d6254; font-size: 11px; line-height: 1.5; }
 .needs-you-queue-count { display: inline-grid; min-width: 34px; height: 34px; padding: 0 9px; place-items: center; border-radius: 999px; background: #ef4444; color: #fff; font: 700 15px "DM Mono", monospace; }
 .needs-you-queue-card { display: grid; gap: 7px; padding: 15px 16px; border: 1px solid var(--line); border-left: 3px solid #cbb7a7; border-radius: 8px; background: #fff; }

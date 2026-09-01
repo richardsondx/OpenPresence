@@ -19,6 +19,8 @@ test("navigation survives a partial Activity state response", async ({ page }) =
   await page.getByRole("button", { name: "Review", exact: true }).click({ force: true });
   await expect(page).toHaveURL(/\/review(?:\?|$)/);
   await expect(page.getByRole("heading", { name: "Needs You", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Today at a glance", exact: true })).toHaveCount(0);
+  await expect(page.getByText("Practice before you connect", { exact: false })).toHaveCount(0);
 
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));

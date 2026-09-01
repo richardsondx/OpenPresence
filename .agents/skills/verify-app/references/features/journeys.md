@@ -6,6 +6,10 @@ These journeys sequence the individual feature maps to test boundaries that a si
 
 Follow [Onboarding](onboarding.md), create an Agent/Presence through `/`, open Activity, reload, and assert the same named identity and persisted IDs. This catches stale client state and wrong-workspace reads.
 
+## Activity → Review decision handoff
+
+From [Activity](activity.md), open `Review` when the operator queue has work or when the health indicator requires attention. Prove that Review opens the focused [operator queue](review.md), that Activity-only dashboard content is absent, and that `Back to Activity` returns to the live stream.
+
 ## Chat → responsibility → Activity
 
 Follow [Chat and Teach](chat-teach.md) for an explicit publication direction, then open [Schedule](schedule-assignments.md) or Activity. Prove the visible receipt, Assignment/attention state, and persisted separation between Social Intent, Execution, and Outcome.
