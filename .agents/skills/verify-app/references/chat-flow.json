@@ -1,0 +1,13 @@
+[
+  {"command":"open","destination":"/"},
+  {"command":"type","label":"Agent name","text":"Jenny"},
+  {"command":"click","role":"button","name":"Create Agent + Presence"},
+  {"command":"open","destination":"activity"},
+  {"command":"wait-for","text":"Jenny at a glance"},
+  {"command":"open","destination":"chat"},
+  {"command":"type","label":"Message Jenny","text":"What do you think about our growth right now?"},
+  {"command":"click","label":"Send"},
+  {"command":"wait-for","text":"I am treating growth as a direction"},
+  {"command":"assert","text":"What do you think about our growth right now?"},
+  {"command":"screenshot","path":"/tmp/openpresence-verify-chat-flow.png"}
+]

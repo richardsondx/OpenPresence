@@ -59,12 +59,13 @@ Browser inspection and control:
   route                          Print the current URL and route
   snapshot [--selector <css>]    Capture DOM, labels, route, and visible text
   screenshot [--path <file>]     Capture a PNG evidence artifact
-  click --role <role> --name <n> Semantic click (also: aria-click, semantic-click)
+  click --role <role> --name <n> Semantic click (also: aria-click, semantic-click; use --index for intentional disambiguation)
   type --label <label> --text <t> Fill a labelled control (also placeholder/testid/css)
   press --key <key>               Press a keyboard key on a located control
   select --label <label> --value <v> Select a native option
   submit --role button --name <n> Submit through the visible UI
   upload --label <label> --path <file> Upload through a visible file input
+  run <flow.json>                  Run open/type/click/wait/assert steps in one browser context
   wait-for --text <t>             Wait for an observable condition
   wait-settle                      Wait for the app's current page to settle
   assert --text <t>               Assert a visible product state
@@ -226,6 +227,7 @@ async function readPid(runtime) {
 }
 
 async function start(runtime) {
+  if (runtime.attached) throw new Error("start cannot use an externally supplied URL. Omit --url or use a harness-owned local URL.");
   await ensureRuntime(runtime);
   const existing = await readPid(runtime);
   if (existing && processAlive(existing.pid)) {
@@ -323,12 +325,14 @@ function destination(value) {
 }
 
 function getLocator(page, options, defaultRole = "button") {
-  if (options.selector || options.css) return page.locator(options.selector ?? options.css);
-  if (options.testid) return page.getByTestId(String(options.testid));
-  if (options.label) return page.getByLabel(String(options.label), { exact: options.exact === true });
-  if (options.placeholder) return page.getByPlaceholder(String(options.placeholder), { exact: options.exact === true });
-  if (options.role || options.name) return page.getByRole(String(options.role ?? defaultRole), { name: String(options.name ?? ""), exact: options.exact === true });
-  if (options.text) return page.getByText(String(options.text), { exact: options.exact === true });
+  let locator;
+  if (options.selector || options.css) locator = page.locator(options.selector ?? options.css);
+  else if (options.testid) locator = page.getByTestId(String(options.testid));
+  else if (options.label) locator = page.getByLabel(String(options.label), { exact: options.exact === true });
+  else if (options.placeholder) locator = page.getByPlaceholder(String(options.placeholder), { exact: options.exact === true });
+  else if (options.role || options.name) locator = page.getByRole(String(options.role ?? defaultRole), { name: String(options.name ?? ""), exact: options.exact === true });
+  else if (options.text) locator = page.getByText(String(options.text), { exact: options.exact === true });
+  if (locator) return options.index === undefined ? locator : locator.nth(Number(options.index));
   throw new Error("Locate the control with --role/--name, --label, --placeholder, --testid, --text, or --selector.");
 }
 
@@ -356,10 +360,12 @@ async function withPage(runtime, options, operation) {
     }
     const result = await operation(page);
     await saveRoute(runtime, page.url());
-    await collectEvents(runtime, events);
     return result;
   } finally {
-    await context.close();
+    // Preserve diagnostics even when the operation itself throws. A failed
+    // assertion is often the moment when console/network evidence matters.
+    await collectEvents(runtime, events);
+    await context.close().catch(() => undefined);
   }
 }
 
@@ -404,7 +410,7 @@ async function browserAction(runtime, options, command) {
     const locatorOptions = command === "type" ? { ...options, text: undefined } : options;
     const locator = getLocator(page, locatorOptions, command === "submit" ? "button" : "button");
     const expectedMutation = command === "submit" || (command === "click" || command === "aria-click" || command === "semantic-click")
-      && /create|save|send|queue|add|submit|confirm|review|run|pause|resume|remove|delete|connect|enable|disable|start|reset|approve|rehearse/i.test(String(options.name ?? options.label ?? options.text ?? ""));
+      && /create agent|save|send|queue|confirm|approve|remove|delete|connect|enable|disable|start|reset|rehearse|inject|review responsibility/i.test(String(options.name ?? options.label ?? options.text ?? ""));
     const mutationResponse = expectedMutation
       ? page.waitForResponse((response) => response.url().includes("/api/state") && response.request().method() === "POST", { timeout: numberOption(options, "timeout", 30_000) }).catch(() => undefined)
       : undefined;
@@ -418,6 +424,70 @@ async function browserAction(runtime, options, command) {
     if (mutationResponse) await mutationResponse;
     await waitForSettle(page, options);
     return { ok: true, command, url: page.url(), locator: { selector: options.selector ?? options.css, role: options.role, name: options.name, label: options.label, text: options.text }, visibleText: (await page.locator("body").innerText()).slice(0, 8_000) };
+  });
+}
+
+async function browserRun(runtime, options, flowFile) {
+  if (!flowFile) throw new Error("run requires a JSON flow file.");
+  const absoluteFlow = path.resolve(flowFile);
+  const flow = await readJson(absoluteFlow, undefined);
+  if (!Array.isArray(flow)) throw new Error(`Flow must be a JSON array: ${absoluteFlow}`);
+  return withPage(runtime, { ...options, navigate: false }, async (page) => {
+    const results = [];
+    for (const [index, step] of flow.entries()) {
+      if (!step || typeof step !== "object" || typeof step.command !== "string") throw new Error(`Flow step ${index + 1} must contain a command.`);
+      const stepOptions = { ...options, ...step };
+      const command = step.command;
+      if (command === "open") {
+        const route = destination(step.destination ?? step.route);
+        await page.goto(route.startsWith("http") ? route : `${runtime.url}${route}`, { waitUntil: "domcontentloaded", timeout: numberOption(stepOptions, "timeout", 30_000) });
+        await waitForSettle(page, stepOptions);
+        results.push({ step: index + 1, command, route: await saveRoute(runtime, page.url()) });
+      } else if (["click", "aria-click", "semantic-click", "type", "press", "select", "submit", "upload"].includes(command)) {
+        const locatorOptions = command === "type" ? { ...stepOptions, text: undefined } : stepOptions;
+        const locator = getLocator(page, locatorOptions, "button");
+        const expectedMutation = command === "submit" || ["click", "aria-click", "semantic-click"].includes(command)
+          && /create agent|save|send|queue|confirm|approve|remove|delete|connect|enable|disable|start|reset|rehearse|inject|review responsibility/i.test(String(step.name ?? step.label ?? step.text ?? ""));
+        const mutationResponse = expectedMutation
+          ? page.waitForResponse((response) => response.url().includes("/api/state") && response.request().method() === "POST", { timeout: numberOption(stepOptions, "timeout", 30_000) }).catch(() => undefined)
+          : undefined;
+        if (["click", "aria-click", "semantic-click", "submit"].includes(command)) await locator.click();
+        else if (command === "type") await locator.fill(String(step.text ?? step.value ?? step.content ?? ""));
+        else if (command === "press") await locator.press(String(step.key ?? step.value ?? "Enter"));
+        else if (command === "select") await locator.selectOption(String(step.value));
+        else if (command === "upload") await locator.setInputFiles(path.resolve(String(step.path)));
+        if (mutationResponse) await mutationResponse;
+        await waitForSettle(page, stepOptions);
+        results.push({ step: index + 1, command, url: page.url() });
+      } else if (command === "wait-for") {
+        const timeout = numberOption(stepOptions, "timeout", 30_000);
+        if (step.url) await page.waitForURL((url) => url.toString().includes(String(step.url)), { timeout });
+        else if (step.text) await page.getByText(String(step.text), { exact: step.exact === true }).waitFor({ state: step.hidden ? "hidden" : "visible", timeout });
+        else await getLocator(page, stepOptions).waitFor({ state: step.hidden ? "hidden" : "visible", timeout });
+        results.push({ step: index + 1, command, url: page.url() });
+      } else if (command === "assert") {
+        if (step.url && !page.url().includes(String(step.url))) throw new Error(`Flow step ${index + 1}: URL does not contain '${step.url}'.`);
+        const body = await page.locator("body").innerText();
+        if (step.text && !body.includes(String(step.text))) throw new Error(`Flow step ${index + 1}: page does not contain '${step.text}'.`);
+        if (step["not-text"] && body.includes(String(step["not-text"]))) throw new Error(`Flow step ${index + 1}: page contains '${step["not-text"]}'.`);
+        if (step.selector || step.css || step.label || step.placeholder || step.testid || step.role || step.name) {
+          const locator = getLocator(page, stepOptions);
+          const count = await locator.count();
+          const expectedCount = step.count === undefined ? 1 : Number(step.count);
+          if (count !== expectedCount) throw new Error(`Flow step ${index + 1}: expected ${expectedCount} locator match(es), found ${count}.`);
+          if (step.visible !== false && count > 0 && !(await locator.first().isVisible())) throw new Error(`Flow step ${index + 1}: locator is not visible.`);
+        }
+        results.push({ step: index + 1, command, url: page.url() });
+      } else if (command === "screenshot") {
+        const requested = step.path ? path.resolve(String(step.path)) : path.join(runtime.evidenceDir, `flow-${index + 1}.png`);
+        await fsp.mkdir(path.dirname(requested), { recursive: true });
+        await page.screenshot({ path: requested, fullPage: step["full-page"] === true });
+        results.push({ step: index + 1, command, path: requested, url: page.url() });
+      } else {
+        throw new Error(`Flow step ${index + 1} has unsupported command '${command}'.`);
+      }
+    }
+    return { ok: true, command: "run", flow: absoluteFlow, steps: results, url: page.url() };
   });
 }
 
@@ -526,7 +596,7 @@ async function maintenance(runtime) {
   const featureRoot = path.join(scriptDir, "../references/features");
   const readme = path.join(featureRoot, "README.md");
   const content = await fsp.readFile(readme, "utf8");
-  const links = [...content.matchAll(/\]\(([^)]+\.md)\)/g)].map((match) => match[1]).filter((value) => !value.startsWith("http"));
+  const links = [...new Set([...content.matchAll(/\]\(([^)]+\.md)\)/g)].map((match) => match[1]).filter((value) => !value.startsWith("http")))];
   const missing = links.filter((link) => !fs.existsSync(path.join(featureRoot, link)));
   const scriptExecutable = (await fsp.stat(path.join(scriptDir, "verify-app.mjs"))).mode & 0o111;
   const result = { ok: missing.length === 0 && Boolean(scriptExecutable), command: "maintenance", featureMap: { readme, linkedFiles: links, missing }, harness: { scriptExecutable: Boolean(scriptExecutable), runtimeDir: runtime.runtimeDir } };
@@ -536,6 +606,8 @@ async function maintenance(runtime) {
 
 async function cleanup(runtime, options) {
   const exists = fs.existsSync(runtime.runtimeDir);
+  const forbidden = new Set([path.parse(runtime.runtimeDir).root, repoRoot, os.homedir(), os.tmpdir()]);
+  if (forbidden.has(runtime.runtimeDir)) throw new Error(`Refusing to remove a broad directory: ${runtime.runtimeDir}`);
   const result = { ok: true, command: "cleanup", dryRun: options["dry-run"] === true || options.confirm !== true, runtimeDir: runtime.runtimeDir, exists };
   if (result.dryRun || !exists) return result;
   await stop(runtime);
@@ -566,6 +638,7 @@ async function main() {
   else if (command === "route") result = { ok: true, command: "route", route: await currentRoute(runtime), url: runtime.url };
   else if (command === "snapshot") result = await browserSnapshot(runtime, options);
   else if (command === "screenshot") result = await screenshot(runtime, options);
+  else if (command === "run") result = await browserRun(runtime, options, positionals[1] ?? options.flow);
   else if (["click", "aria-click", "semantic-click", "type", "press", "select", "submit", "upload"].includes(command)) result = await browserAction(runtime, options, command);
   else if (command === "wait-for") result = await browserWait(runtime, options);
   else if (command === "wait-settle") result = await withPage(runtime, options, async (page) => { await waitForSettle(page, options); return { ok: true, command, url: page.url() }; });

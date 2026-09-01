@@ -23,6 +23,8 @@ verify-app type --label 'What should Jenny accomplish?' --text 'Teach one useful
 verify-app select --label Day --value Tuesday
 verify-app type --role textbox --name Time --text 08:00
 verify-app click --role button --name 'Review responsibility'
+verify-app wait-for --text 'Assignment details'
+verify-app click --role button --name Week
 verify-app wait-for --role region --name 'Weekly schedule'
 verify-app state --projection schedule
 ```

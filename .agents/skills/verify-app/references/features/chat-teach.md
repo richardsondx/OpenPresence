@@ -20,7 +20,7 @@ Choose `Chat` or open `/chat`. The composer is `Message <Presence>…`; submit w
 verify-app open chat
 verify-app type --label "Message Jenny" --text "What do you think about our growth right now?"
 verify-app click --role button --name Send
-verify-app wait-for --text "I’m treating growth as a direction"
+verify-app wait-for --text "I am treating growth as a direction"
 verify-app assert --text "What do you think about our growth right now?"
 verify-app state --projection chat
 ```

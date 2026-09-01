@@ -7,7 +7,10 @@ coverage
 test-results
 playwright-report
 tmp/
+var/
 *.tsbuildinfo
+*.sqlite
+*.sqlite-*
 .env
 .env.*
 !.env.example

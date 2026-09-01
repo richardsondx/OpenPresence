@@ -1,0 +1,4 @@
+interface:
+  display_name: "Design Simplifier"
+  short_description: "Simplify product journeys and reduce cognitive load"
+  default_prompt: "Use $design-simplifier to find the smallest evidence-backed change that makes this product journey simpler."
