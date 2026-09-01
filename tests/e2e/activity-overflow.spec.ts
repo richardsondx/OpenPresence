@@ -8,7 +8,8 @@ test("Activity stays within the viewport at responsive widths", async ({ page, r
   await page.getByLabel("Agent name").fill("Jenny");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
   await expect(page.getByRole("heading", { name: "Jenny at a glance" })).toBeVisible();
-  await page.getByRole("button", { name: "Activity", exact: true }).click();
+  const activityButton = page.getByRole("button", { name: "Activity", exact: true });
+  if (!((await activityButton.getAttribute("class")) ?? "").includes("active")) await activityButton.click();
   await expect(page.locator(".activity-page")).toBeVisible();
 
   const widths = [1512, 1280, 1100, 1024, 960, 900, 840, 768, 720, 680, 600, 480];

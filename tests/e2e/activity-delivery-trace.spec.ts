@@ -134,7 +134,7 @@ test("Activity keeps durable Assignments visible before any delivery exists", as
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny at a glance" })).toBeVisible();
 
   await page.route("**/api/state**", async (route) => {
     if (route.request().method() !== "GET") return route.continue();
@@ -210,7 +210,7 @@ test("Activity distinguishes an older pending action from the latest check", asy
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny at a glance" })).toBeVisible();
 
   await page.route("**/api/state**", async (route) => {
     if (route.request().method() !== "GET") return route.continue();
@@ -241,7 +241,7 @@ test("Activity explains a legacy failed Pulse from its adjacent delivery event",
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny at a glance" })).toBeVisible();
 
   await page.route("**/api/state**", async (route) => {
     if (route.request().method() !== "GET") return route.continue();
@@ -281,7 +281,7 @@ test("Activity shows every public attempt triggered by the latest Pulse", async 
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny at a glance" })).toBeVisible();
 
   await page.route("**/api/state**", async (route) => {
     if (route.request().method() !== "GET") return route.continue();
@@ -322,7 +322,7 @@ test("Activity paginates long failure history", async ({ page }) => {
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny at a glance" })).toBeVisible();
 
   await page.route("**/api/state**", async (route) => {
     if (route.request().method() !== "GET") return route.continue();
@@ -367,7 +367,7 @@ test("Activity pipeline cards reveal the exact selected and preparing actions", 
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny at a glance" })).toBeVisible();
 
   await page.route("**/api/state**", async (route) => {
     if (route.request().method() !== "GET") return route.continue();
@@ -430,7 +430,7 @@ test("Activity shows the actual publication metrics behind a performance event",
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny at a glance" })).toBeVisible();
 
   await page.route("**/api/state**", async (route) => {
     if (route.request().method() !== "GET") return route.continue();

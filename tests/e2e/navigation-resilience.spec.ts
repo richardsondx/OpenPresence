@@ -10,6 +10,15 @@ test("navigation survives a partial Activity state response", async ({ page }) =
   await page.getByLabel("Agent name").fill("Jenny");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
   await expect(page.getByRole("heading", { name: "Jenny at a glance", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Practice before you connect.", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Practice in Sandbox", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Playground", exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Practice one safe moment.", exact: true })).toBeVisible();
+  await expect(page.getByRole("region", { name: "Practice one safe moment." }).getByRole("button", { name: "Check now", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Activity", exact: true }).click({ force: true });
+  await page.getByRole("button", { name: "Review", exact: true }).click({ force: true });
+  await expect(page).toHaveURL(/\/review(?:\?|$)/);
+  await expect(page.getByRole("heading", { name: "Needs You", exact: true })).toBeVisible();
 
   const pageErrors: string[] = [];
   page.on("pageerror", (error) => pageErrors.push(error.message));
@@ -30,7 +39,7 @@ test("navigation survives a partial Activity state response", async ({ page }) =
   await expect(page.getByRole("heading", { name: "Jenny at a glance", exact: true })).toBeVisible();
   await expect.poll(() => responseWasDegraded).toBe(true);
 
-  for (const [path, heading] of [["/settings", "Presence settings"], ["/growth", "Growth"], ["/people", "People"], ["/activity", "Jenny at a glance"]] as const) {
+  for (const [path, heading] of [["/settings", "How this Presence acts"], ["/growth", "Growth"], ["/people", "People"], ["/activity", "Jenny at a glance"]] as const) {
     await page.goto(path);
     await expect(page.getByRole("heading", { name: heading, exact: true })).toBeVisible();
     await expect(page.getByText("Application error: a client-side exception has occurred", { exact: false })).toHaveCount(0);

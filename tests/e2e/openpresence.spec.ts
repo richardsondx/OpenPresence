@@ -121,7 +121,7 @@ async function expectChatViewportLayout(page: import("@playwright/test").Page) {
 
 test("operator can create an agent and first Presence from blank state", async ({ page }) => {
   await createAgent(page, "Atlas");
-  if (test.info().project.name === "mobile") await expect(page.getByRole("heading", { name: "Atlas, right now." })).toBeVisible();
+  if (test.info().project.name === "mobile") await expect(page.getByRole("heading", { name: "Atlas at a glance" })).toBeVisible();
   else await expect(page.getByRole("button", { name: "Switch agent, currently Atlas" })).toBeVisible();
 });
 
@@ -522,16 +522,16 @@ test("Agent switcher creates and switches isolated workspaces", async ({ page })
   await page.getByLabel("Agent handle").fill("@atlas");
   await page.getByRole("dialog", { name: "Create Agent" }).getByRole("button", { name: "Create Agent" }).click();
   await expect(page.getByRole("button", { name: "Switch agent, currently Atlas" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Atlas, right now." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Atlas at a glance" })).toBeVisible();
   await page.reload();
   await expect(page.getByRole("button", { name: "Switch agent, currently Atlas" })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Atlas, right now." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Atlas at a glance" })).toBeVisible();
   await clickAgentSwitcher("Atlas");
   await page.getByRole("menu", { name: "Your Agents" }).getByRole("menuitem", { name: /Jenny/ }).click();
-  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny at a glance" })).toBeVisible();
   await clickAgentSwitcher("Jenny");
   await page.getByRole("menu", { name: "Your Agents" }).getByRole("menuitem", { name: /Atlas/ }).click();
-  await expect(page.getByRole("heading", { name: "Atlas, right now." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Atlas at a glance" })).toBeVisible();
   await navigate(page, "Brain");
   await expect(page.getByRole("button", { name: "Use GPT 5.6 Luna medium" })).toHaveClass(/selected/);
   await expect(page.getByText("How I think")).toBeVisible();
@@ -1001,11 +1001,11 @@ test("Presence settings are generated from channel capabilities and pause truthf
   await expect(page.getByText("Connection health", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Healthy and within rhythm.", { exact: true })).toHaveCount(0);
   await expect(page.getByText("Within your configured pacing.", { exact: true })).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Posts auto", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Posts review", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Replies review", exact: true })).toBeVisible();
   await page.getByRole("button", { name: "Pause Presence" }).click();
   await navigate(page, "Activity");
-  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny at a glance" })).toBeVisible();
   await expect(page.getByRole("button", { name: "Wake up Jenny", exact: true })).toBeVisible();
   await expect(page.getByRole("button", { name: "Resume Presence", exact: true })).toHaveCount(0);
   await expect(page.getByRole("button", { name: "Run one pulse", exact: true })).toHaveCount(0);
@@ -1016,7 +1016,7 @@ test("Presence settings are generated from channel capabilities and pause truthf
   });
   await page.getByRole("button", { name: "Wake up Jenny", exact: true }).first().click();
   await expect(page.getByRole("button", { name: "Waking Jenny…", exact: true })).toBeVisible();
-  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny at a glance" })).toBeVisible();
   await expect(page.locator(".event-title").filter({ hasText: "Jenny woke up" })).toBeVisible();
   await expect(page.locator(".event-title").filter({ hasText: "Pulse completed" })).toBeVisible();
   await navigate(page, "Settings");

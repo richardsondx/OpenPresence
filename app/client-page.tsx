@@ -199,6 +199,7 @@ const fileOrder: FileKind[] = [
 ];
 const navItems: { id: View; label: string; icon: typeof MessageCircle }[] = [
   { id: "live", label: "Activity", icon: Radio },
+  { id: "review", label: "Review", icon: CircleAlert },
   { id: "chat", label: "Chat", icon: MessageSquare },
   { id: "watching", label: "Watching", icon: Eye },
   { id: "presence", label: "Channels", icon: Settings2 },
@@ -207,10 +208,11 @@ const navItems: { id: View; label: string; icon: typeof MessageCircle }[] = [
   { id: "knowledge", label: "Knowledge", icon: BookOpen },
   { id: "assets", label: "Assets", icon: Layers },
 ];
-const presenceNavItems = navItems.filter(({ id }) => ["live", "chat", "watching", "presence", "playground", "analytics"].includes(id));
+const presenceNavItems = navItems.filter(({ id }) => ["live", "review", "chat", "watching", "presence", "playground", "analytics"].includes(id));
 const agentNavItems = navItems.filter(({ id }) => id === "knowledge" || id === "assets");
 const viewPaths: Record<View, string> = {
   live: "/activity",
+  review: "/review",
   chat: "/chat",
   rehearsal: "/rehearsal",
   watching: "/watching",
@@ -910,10 +912,10 @@ export default function Home() {
     query.set("read", Date.now().toString());
     if (typeof window !== "undefined") {
       const initialView = viewForLocation(window.location);
-      if (initialView === "live" || initialView === "chat" || initialView === "growth" || initialView === "analytics" || initialView === "knowledge" || initialView === "assets" || initialView === "people" || initialView === "feed" || initialView === "schedule" || initialView === "watching" || initialView === "rehearsal" || initialView === "brain" || initialView === "teach" || initialView === "presence" || initialView === "playground" || initialView === "usage") {
+      if (initialView === "live" || initialView === "review" || initialView === "chat" || initialView === "growth" || initialView === "analytics" || initialView === "knowledge" || initialView === "assets" || initialView === "people" || initialView === "feed" || initialView === "schedule" || initialView === "watching" || initialView === "rehearsal" || initialView === "brain" || initialView === "teach" || initialView === "presence" || initialView === "playground" || initialView === "usage") {
         const activitySurface = query.get("surface");
         const activityProjection = activitySurface === "timeline" || activitySurface === "calendar" ? "feed" : "activity";
-        query.set("projection", initialView === "live" ? activityProjection : initialView === "chat" ? "chat" : initialView === "growth" || initialView === "analytics" ? "growth" : initialView === "knowledge" ? "knowledge" : initialView === "assets" ? "assets" : initialView === "people" ? "people" : initialView === "feed" ? "feed" : initialView === "schedule" ? "schedule" : initialView === "watching" ? "watching" : initialView === "rehearsal" ? "rehearsal" : initialView === "brain" ? "brain" : initialView === "teach" ? "teach" : initialView === "presence" ? "presence" : initialView === "playground" ? "playground" : "usage");
+        query.set("projection", initialView === "live" || initialView === "review" ? activityProjection : initialView === "chat" ? "chat" : initialView === "growth" || initialView === "analytics" ? "growth" : initialView === "knowledge" ? "knowledge" : initialView === "assets" ? "assets" : initialView === "people" ? "people" : initialView === "feed" ? "feed" : initialView === "schedule" ? "schedule" : initialView === "watching" ? "watching" : initialView === "rehearsal" ? "rehearsal" : initialView === "brain" ? "brain" : initialView === "teach" ? "teach" : initialView === "presence" ? "presence" : initialView === "playground" ? "playground" : "usage");
       }
     }
     fetchState<OpenPresenceState>(`/api/state?${query.toString()}`)
@@ -955,7 +957,7 @@ export default function Home() {
     // avoids reparsing and downloading the multi-megabyte compatibility state
     // on every Settings/Growth/People/etc. navigation; compact Activity and
     // Chat views still intentionally refresh when entering or leaving them.
-    if ((state.responseProjection === "full" && !["live", "chat", "growth", "analytics", "knowledge", "assets", "people", "feed", "schedule", "watching", "rehearsal", "brain", "teach", "presence", "playground", "usage"].includes(view)) || (state.responseProjection === "growth" && (view === "growth" || view === "analytics")) || (state.responseProjection === "knowledge" && view === "knowledge") || (state.responseProjection === "assets" && view === "assets") || (state.responseProjection === "people" && view === "people") || (state.responseProjection === "feed" && view === "feed") || (state.responseProjection === "schedule" && view === "schedule") || (state.responseProjection === "watching" && view === "watching") || (state.responseProjection === "rehearsal" && view === "rehearsal") || (state.responseProjection === "brain" && view === "brain") || (state.responseProjection === "teach" && view === "teach") || (state.responseProjection === "presence" && view === "presence") || (state.responseProjection === "playground" && view === "playground") || (state.responseProjection === "usage" && view === "usage")) return;
+    if ((state.responseProjection === "full" && !["live", "review", "chat", "growth", "analytics", "knowledge", "assets", "people", "feed", "schedule", "watching", "rehearsal", "brain", "teach", "presence", "playground", "usage"].includes(view)) || (state.responseProjection === "growth" && (view === "growth" || view === "analytics")) || (state.responseProjection === "knowledge" && view === "knowledge") || (state.responseProjection === "assets" && view === "assets") || (state.responseProjection === "people" && view === "people") || (state.responseProjection === "feed" && view === "feed") || (state.responseProjection === "schedule" && view === "schedule") || (state.responseProjection === "watching" && view === "watching") || (state.responseProjection === "rehearsal" && view === "rehearsal") || (state.responseProjection === "brain" && view === "brain") || (state.responseProjection === "teach" && view === "teach") || (state.responseProjection === "presence" && view === "presence") || (state.responseProjection === "playground" && view === "playground") || (state.responseProjection === "usage" && view === "usage")) return;
     // Activity uses a small projection; hydrate the full workspace when an
     // information-heavy view is opened instead of making the first Activity
     // paint wait for unrelated Agent history.
@@ -1002,7 +1004,7 @@ export default function Home() {
             ...(context?.activeAgentId ? { "x-openpresence-agent-id": context.activeAgentId } : {}),
             ...(context?.activePresenceId ? { "x-openpresence-presence-id": context.activePresenceId } : {}),
             ...(context?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(context.workspaceRevision) } : {}),
-            ...(view === "live" ? { "x-openpresence-projection": "activity" } : view === "chat" ? { "x-openpresence-projection": "chat" } : view === "growth" || view === "analytics" ? { "x-openpresence-projection": "growth" } : view === "knowledge" ? { "x-openpresence-projection": "knowledge" } : view === "assets" ? { "x-openpresence-projection": "assets" } : view === "people" ? { "x-openpresence-projection": "people" } : view === "feed" ? { "x-openpresence-projection": "feed" } : view === "schedule" ? { "x-openpresence-projection": "schedule" } : view === "watching" ? { "x-openpresence-projection": "watching" } : view === "rehearsal" ? { "x-openpresence-projection": "rehearsal" } : view === "brain" ? { "x-openpresence-projection": "brain" } : view === "teach" ? { "x-openpresence-projection": "teach" } : view === "presence" ? { "x-openpresence-projection": "presence" } : view === "playground" ? { "x-openpresence-projection": "playground" } : view === "usage" ? { "x-openpresence-projection": "usage" } : {}),
+            ...(view === "live" || view === "review" ? { "x-openpresence-projection": "activity" } : view === "chat" ? { "x-openpresence-projection": "chat" } : view === "growth" || view === "analytics" ? { "x-openpresence-projection": "growth" } : view === "knowledge" ? { "x-openpresence-projection": "knowledge" } : view === "assets" ? { "x-openpresence-projection": "assets" } : view === "people" ? { "x-openpresence-projection": "people" } : view === "feed" ? { "x-openpresence-projection": "feed" } : view === "schedule" ? { "x-openpresence-projection": "schedule" } : view === "watching" ? { "x-openpresence-projection": "watching" } : view === "rehearsal" ? { "x-openpresence-projection": "rehearsal" } : view === "brain" ? { "x-openpresence-projection": "brain" } : view === "teach" ? { "x-openpresence-projection": "teach" } : view === "presence" ? { "x-openpresence-projection": "presence" } : view === "playground" ? { "x-openpresence-projection": "playground" } : view === "usage" ? { "x-openpresence-projection": "usage" } : {}),
           },
           body: JSON.stringify(operation),
         }, runtimeTimeoutForOperation(operationType));
@@ -1064,8 +1066,8 @@ export default function Home() {
   async function refreshState(): Promise<OpenPresenceState> {
     const currentView = typeof window !== "undefined" ? viewForLocation(window.location) : "full";
     const activitySurface = typeof window !== "undefined" ? new URLSearchParams(window.location.search).get("surface") : null;
-    const useActivityHistoryProjection = currentView === "live" && (activitySurface === "timeline" || activitySurface === "calendar");
-    const useActivityProjection = currentView === "live" && !useActivityHistoryProjection;
+    const useActivityHistoryProjection = (currentView === "live" || currentView === "review") && (activitySurface === "timeline" || activitySurface === "calendar");
+    const useActivityProjection = (currentView === "live" || currentView === "review") && !useActivityHistoryProjection;
     const useChatProjection = currentView === "chat";
     const useGrowthProjection = currentView === "growth";
     const useAnalyticsProjection = currentView === "analytics";
@@ -1104,7 +1106,7 @@ export default function Home() {
       // An Activity request may finish after the operator has already opened
       // another route. Do not let that late compact response replace the
       // complete workspace requested by the new view.
-      if (useActivityProjection && typeof window !== "undefined" && viewForLocation(window.location) !== "live") {
+      if (useActivityProjection && typeof window !== "undefined" && !["live", "review"].includes(viewForLocation(window.location))) {
         if (!state) throw new Error("The workspace state is not available.");
         return state;
       }
@@ -1130,7 +1132,7 @@ export default function Home() {
   // projection-scoped: the durable worker owns attention; the browser only
   // observes it.
   useEffect(() => {
-    if (view !== "live" || !state?.onboarded || state.presence?.status !== "live") return;
+    if ((view !== "live" && view !== "review") || !state?.onboarded || state.presence?.status !== "live") return;
     const timer = window.setInterval(() => {
       if (!browserDocumentIsVisible()) return;
       void refreshState().catch(() => undefined);
@@ -1381,7 +1383,7 @@ export default function Home() {
   // Activity is intentionally backed by a compact read model. When the
   // operator opens another surface, wait for its full workspace response
   // instead of briefly rendering that surface against missing collections.
-  if (view !== "live" && state.responseProjection === "activity")
+  if (view !== "live" && view !== "review" && state.responseProjection === "activity")
     return (
       <main className="loading-screen">
         <PresenceGlyph accent={state.presence?.accent ?? state.agent?.accent ?? "#D68754"} pulse size="large" />
@@ -1391,7 +1393,7 @@ export default function Home() {
   if (!state.onboarded)
     return (
       <Onboarding
-        onCreate={(input) => mutate({ type: "createAgent", input })}
+        onCreate={(input) => mutate({ type: "createAgent", input }).then(() => undefined)}
         error={error}
       />
     );
@@ -1422,7 +1424,7 @@ function Onboarding({
     mode: PresenceMode;
     handle: string;
     accent: string;
-  }) => void;
+  }) => void | Promise<void>;
   error: string | null;
 }) {
   const [name, setName] = useState("Jenny");
@@ -1433,11 +1435,15 @@ function Onboarding({
   const [handle, setHandle] = useState("@jenny_ai");
   const [accent, setAccent] = useState("#D68754");
   const [submitting, setSubmitting] = useState(false);
-  const submit = (event: React.FormEvent) => {
+  const submit = async (event: React.FormEvent) => {
     event.preventDefault();
     if (!name.trim() || !description.trim()) return;
     setSubmitting(true);
-    onCreate({ name, description, mode, handle, accent });
+    try {
+      await onCreate({ name, description, mode, handle, accent });
+    } finally {
+      setSubmitting(false);
+    }
   };
   return (
     <main className="onboarding-shell">
@@ -1538,8 +1544,8 @@ function Onboarding({
             )}
           </Button>
           <p className="fine-print">
-            No account, API key, or external channel is required for this local
-            demo.
+            Your first Presence opens in Sandbox. Nothing is published until
+            you connect a channel and approve a live action.
           </p>
         </form>
       </div>
@@ -2143,11 +2149,11 @@ function AgentWorkspaceShell({
   const [healthFocusKey, setHealthFocusKey] = useState(0);
   const openAttentionReview = () => {
     const hadHistorySurface = typeof window !== "undefined" && ["timeline", "calendar"].includes(new URLSearchParams(window.location.search).get("surface") ?? "");
-    setView("live");
+    setView("review");
     setHealthFocusKey((key) => key + 1);
     if (typeof window !== "undefined") {
       const url = new URL(window.location.href);
-      url.pathname = viewPaths.live;
+      url.pathname = viewPaths.review;
       url.searchParams.delete("surface");
       url.searchParams.delete("view");
       window.history.replaceState({ ...(window.history.state ?? {}), openPresenceActivitySurface: "now" }, "", url.pathname + url.search + url.hash);
@@ -2174,6 +2180,8 @@ function AgentWorkspaceShell({
         ? "Analytics"
       : view === "live"
         ? "Activity"
+      : view === "review"
+        ? "Review"
       : view === "feed"
         ? "Activity"
       : view === "growth"
@@ -2355,8 +2363,8 @@ function AgentWorkspaceShell({
           {view === "playground" && (
             <PlaygroundView state={state} mutate={mutate} />
           )}
-          {view === "live" && (
-        <ActivityView state={state} mutate={mutate} pendingOperation={pendingOperation} operationalHealth={operationalHealth} healthFocusKey={healthFocusKey} refreshHealth={() => setHealthRefreshKey((key) => key + 1)} runtimeError={Boolean(error && /OpenPresence (runtime could not be reached|service unavailable)/i.test(error))} refreshState={refreshState} setView={setView} />
+          {(view === "live" || view === "review") && (
+        <ActivityView state={state} mutate={mutate} pendingOperation={pendingOperation} operationalHealth={operationalHealth} healthFocusKey={view === "review" ? Math.max(1, healthFocusKey) : healthFocusKey} refreshHealth={() => setHealthRefreshKey((key) => key + 1)} runtimeError={Boolean(error && /OpenPresence (runtime could not be reached|service unavailable)/i.test(error))} refreshState={refreshState} setView={setView} />
           )}
           {view === "feed" && (
             <PublicHistoryView state={state} setView={setView} mutate={mutate} />
@@ -4636,6 +4644,8 @@ function PlaygroundView({ state, mutate, setView }: { state: OpenPresenceState; 
   const latestAssignment = [...sessionAssignments]
     .filter((item) => item.status !== "cancelled")
     .sort((left, right) => new Date(right.updatedAt ?? right.createdAt).getTime() - new Date(left.updatedAt ?? left.createdAt).getTime())[0];
+  const meaningfulSessionEvents = sessionEvents.filter((item) => item.title !== "Playground session started");
+  const playgroundIsFresh = Boolean(session && !objects.length && !meaningfulSessionEvents.length && !rehearsalAttempts.length && !sessionAssignments.length);
   let displayedAssignment = assignmentPanelDismissed ? undefined : assignmentDraft ?? latestAssignment;
   const displayedAssignmentId = displayedAssignment?.id;
   const assignmentRun = displayedAssignmentId ? [...(state.assignmentRuns ?? [])].filter((run) => run.assignmentId === displayedAssignmentId).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] : undefined;
@@ -4783,6 +4793,19 @@ function PlaygroundView({ state, mutate, setView }: { state: OpenPresenceState; 
           </div>
         </div>
       </div>
+      {!curationMode && !trialMode && !scenarioMode && playgroundIsFresh && (
+        <section className="playground-first-run" aria-labelledby="playground-first-run-title">
+          <div>
+            <SectionEyebrow>Start here</SectionEyebrow>
+            <h2 id="playground-first-run-title">Practice one safe moment.</h2>
+            <p>Sandbox gives {presence.name} a private world to notice, decide, and express in. Nothing here reaches a live channel.</p>
+          </div>
+          <div className="playground-first-run-actions">
+            <Button variant="primary" disabled={busy} onClick={() => void wakeOrCheck()}><Sparkles size={14} /> Check now</Button>
+            <Button variant="ghost" disabled={busy} onClick={() => { setRehearsalMode("consider"); setRehearsalOpen(true); }}>Rehearse a post</Button>
+          </div>
+        </section>
+      )}
       {curationMode ? <CurationLabPanel state={state} mutate={mutate} presence={presence} setView={setView} /> : trialMode ? <CapabilityTrialPanel state={state} mutate={mutate} presence={presence} /> : scenarioMode ? <ScenarioLibrary state={state} mutate={mutate} presence={presence} creating={scenarioComposerOpen} onCreatingChange={setScenarioComposerOpen} /> : !session ? <div className="playground-loading" role="status">Opening a fresh simulated account…</div> : <>
       {rehearsalOpen && <section className="original-rehearsal-panel" aria-label="Posting rehearsal controls">
         <div className="rehearsal-panel-header"><div className="eyebrow">Rehearsal controls</div><Button variant="ghost" type="button" onClick={() => setRehearsalOpen(false)}><X size={14} /> Close</Button></div>
@@ -9042,6 +9065,20 @@ function LiveView({
           )}
         </>}
         />
+
+      {selected && !activityEvents.length && !activityHistory.length && !scopedExecutions.length && (
+        <section className="activity-first-run" aria-labelledby="activity-first-run-title">
+          <div>
+            <SectionEyebrow>Start safely</SectionEyebrow>
+            <h2 id="activity-first-run-title">Practice before you connect.</h2>
+            <p>Your first Presence is ready in Sandbox. See how it notices, decides, and expresses itself before any live channel is involved.</p>
+          </div>
+          <div className="activity-first-run-actions">
+            <Button variant="primary" onClick={() => setView("playground")}><FlaskConical size={14} /> Practice in Sandbox</Button>
+            <Button variant="ghost" onClick={() => setView("brain")}><PlugZap size={14} /> Set up a model</Button>
+          </div>
+        </section>
+      )}
 
       {selected && (
         <section className="activity-today-dashboard" aria-label="Today at a glance" data-testid="activity-today-dashboard">

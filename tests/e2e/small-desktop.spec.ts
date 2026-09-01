@@ -11,12 +11,15 @@ async function createAgent(page: import("@playwright/test").Page) {
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny at a glance" })).toBeVisible();
 }
 
 async function inspectCompactPage(page: import("@playwright/test").Page, view: "Chat" | "Activity" | "Watching" | "Feed" | "Schedule" | "Playground" | "Teach" | "Brain" | "Presence settings") {
   if (view === "Presence settings") {
-    await page.locator(".sidebar").getByRole("button", { name: "Settings", exact: true }).click();
+    await page.locator(".sidebar").getByRole("button", { name: "Channels", exact: true }).click();
+  } else if (view === "Feed" || view === "Schedule" || view === "Teach") {
+    const paths = { Feed: "/feed", Schedule: "/schedule", Teach: "/teach" } as const;
+    await page.goto(paths[view]);
   } else {
     const label = view === "Brain" ? "Manage Agent" : view;
     await page.locator(".sidebar").getByRole("button", { name: view === "Brain" ? /^Manage Agent/ : label, exact: view !== "Brain" }).click();
@@ -38,11 +41,11 @@ test("small desktop keeps each page task above the fold", async ({ page }) => {
   await createAgent(page);
   for (const view of ["Chat", "Activity", "Watching", "Feed", "Schedule", "Playground", "Teach", "Brain", "Presence settings"] as const) await inspectCompactPage(page, view);
 
-  await page.getByRole("button", { name: "Schedule", exact: true }).click();
+  await page.goto("/schedule");
   await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();
   await expect(page.getByRole("button", { name: "Review responsibility" })).toBeVisible();
 
-  await page.getByRole("button", { name: "Settings", exact: true }).click();
+  await page.locator(".sidebar").getByRole("button", { name: "Channels", exact: true }).click();
   const settingsScroll = await page.evaluate(() => ({
     documentScrolls: document.documentElement.scrollHeight > document.documentElement.clientHeight,
     workspaceOverflow: getComputedStyle(document.querySelector(".workspace")!).overflow,
@@ -50,7 +53,7 @@ test("small desktop keeps each page task above the fold", async ({ page }) => {
   expect(settingsScroll.documentScrolls).toBe(true);
   expect(settingsScroll.workspaceOverflow).toBe("visible");
 
-  await page.getByRole("button", { name: "Teach", exact: true }).click();
+  await page.goto("/teach");
   const contextSidebar = page.getByRole("complementary", { name: "Context & Changes sidebar" });
   await expect(contextSidebar).toBeVisible();
   await page.getByRole("button", { name: "Hide context sidebar" }).click();

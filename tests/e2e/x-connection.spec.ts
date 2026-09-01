@@ -9,7 +9,7 @@ async function createAgent(page: import("@playwright/test").Page) {
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await expect(page.getByRole("heading", { name: "Jenny, right now." })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Jenny at a glance" })).toBeVisible();
 }
 
 test("Activity keeps the Chrome connection notice out of the pulse controls", async ({ page, request }) => {

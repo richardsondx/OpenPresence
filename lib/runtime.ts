@@ -2355,7 +2355,7 @@ function defaultPresenceRequestPolicy(presenceId: string, updatedAt = now()): im
 }
 function makeEnvelope(presenceId: string, capabilities: { id: string }[], execution: Record<string, import("./types").ExecutionMode>): ExecutionEnvelope { return { presenceId, affordances: Object.fromEntries(capabilities.map((item) => [item.id, { mode: execution[item.id] ?? "off" }])), pacingProfile: "recommended", accountProtection: "guidance" }; }
 function defaultExecutionModeForCapability(capability: string): import("./types").ExecutionMode {
-  return capability === "post" ? "auto" : capability === "reply" || capability === "comment" || capability === "delete" ? "review" : "off";
+  return capability === "post" || capability === "reply" || capability === "comment" || capability === "delete" ? "review" : "off";
 }
 function makePresence(input: CreatePresenceInput, displayName = input.name?.trim() || input.handle, definition?: ChannelDefinition, brief = defaultPresenceBrief()): Presence {
   const presenceId = id("presence");

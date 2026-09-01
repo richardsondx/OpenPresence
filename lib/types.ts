@@ -1,4 +1,4 @@
-export type View = "teach" | "knowledge" | "assets" | "usage" | "chat" | "rehearsal" | "watching" | "people" | "playground" | "live" | "feed" | "growth" | "analytics" | "calendar" | "schedule" | "brain" | "presence";
+export type View = "teach" | "knowledge" | "assets" | "usage" | "chat" | "rehearsal" | "watching" | "people" | "playground" | "live" | "review" | "feed" | "growth" | "analytics" | "calendar" | "schedule" | "brain" | "presence";
 export type BuiltInChannelId = "x" | "linkedin" | "substack";
 export type ChannelId = string;
 export type ConnectorKind = "simulated" | "native" | "bridge" | "manual";

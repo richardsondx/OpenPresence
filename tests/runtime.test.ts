@@ -7,6 +7,19 @@ import { nextObservationAt } from "../lib/native-x";
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
+describe("Fresh Presence authority", () => {
+  it("starts public posting in Review and keeps existing explicit choices", () => {
+    const fresh = createAgent(input);
+    expect(fresh.presence?.execution.post).toBe("review");
+
+    const existingChoice = applyOperation(fresh, { type: "setPresence", patch: { execution: { post: "auto" } } });
+    expect(existingChoice.presence?.execution.post).toBe("auto");
+
+    const missingExecution = { ...fresh, presence: { ...fresh.presence!, execution: {} } };
+    expect(normalizeState(missingExecution).presence?.execution.post).toBe("review");
+  });
+});
+
 describe("Presence-owned X deletion", () => {
   const ownPost = (state: ReturnType<typeof createAgent>, id = "own-post-1", parentId?: string) => recordNativeMirror(state, {
     connectionId: "native-delete-test",
@@ -834,6 +847,7 @@ describe("OpenPresence runtime boundaries", () => {
 
   it("counts only verified Sandbox Mirror publications toward an Assignment", () => {
     let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto" } } });
     const session = startPlaygroundSession(state, state.presence!.id);
     state = applyOperation(session, { type: "createAssignment", instruction: "Produce 2 original Sandbox posts about useful agent ideas.", presenceId: state.presence!.id, sessionId: session.playgroundSessions[0]!.id, environment: "sandbox" });
     const assignment = state.assignments[0]!;
@@ -995,6 +1009,7 @@ describe("OpenPresence runtime boundaries", () => {
 
   it("turns an explicit Chat publication request into a native X execution", () => {
     let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto" } } });
     state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "jenny_ai", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
     expect(isExplicitXPostRequest("Introduce this Presence on X and invite conversation.")).toBe(true);
     state = formChatPostIntent(state, "I am Jenny, learning to become a useful presence for thoughtful builders. What are you learning right now?");
@@ -1264,6 +1279,7 @@ describe("OpenPresence runtime boundaries", () => {
 
   it("requeues the same failed execution when the operator retries it", () => {
     let state = createAgent(input);
+    state = applyOperation(state, { type: "setPresence", patch: { execution: { post: "auto" } } });
     state.nativeConnections = [{ id: "native-x", presenceId: state.presence!.id, channelId: "x", kind: "x", status: "connected", access: "read-write", account: { id: "account-1", username: "jenny_ai", name: "Genny" }, createdAt: new Date().toISOString(), updatedAt: new Date().toISOString() }];
     state = formChatPostIntent(state, "A useful first point of view.");
     const execution = state.executions[0]!;
@@ -1421,7 +1437,7 @@ describe("OpenPresence runtime boundaries", () => {
     expect(summary.current.label).toBe("Waiting for the next meaningful event");
     expect(summary.nextAttention.label).toBe("On demand");
     expect(summary.nextAttention.detail).toContain("No automatic scan");
-    expect(summary.rhythm.publishing).toBe("Auto");
+    expect(summary.rhythm.publishing).toBe("Review");
     expect(summary.rhythm.replies).toBe("Review");
     expect(summary.lastPulseAt).toBeUndefined();
 
@@ -1451,7 +1467,7 @@ describe("OpenPresence runtime boundaries", () => {
     let state = createAgent(input);
     state = applyOperation(state, { type: "setPresence", patch: { pacing: "custom", attentionIntervalMinutes: 30, quietHours: { enabled: true, start: "22:00", end: "07:00" } } });
     expect(state.presence).toMatchObject({ pacing: "custom", attentionIntervalMinutes: 30, quietHours: { enabled: true, start: "22:00", end: "07:00" } });
-    expect(state.presence?.execution.post).toBe("auto");
+    expect(state.presence?.execution.post).toBe("review");
     expect(deriveActivitySummary(state).rhythm.quietHours).toBe("22:00–07:00");
   });
 
