@@ -526,6 +526,7 @@ fieldset { border: none; padding: 0; margin: 0 0 26px; }
 .chat-layout.context-collapsed { max-width: none; grid-template-columns: minmax(0, 1fr); }
 .chat-layout.operator-chat-layout { max-width: none; grid-template-columns: minmax(0, 1fr); gap: 0; }
 .chat-layout.rehearsal-chat-layout { max-width: none; grid-template-columns: minmax(0, 1fr); gap: 0; }
+.chat-layout.rehearsal-chat-layout .chat-thread { justify-content: flex-start; }
 .chat-layout .chat-thread { max-width: none; }
 .context-toggle { position: fixed; z-index: 20; top: 20px; right: 20px; width: 38px; height: 38px; display: grid; place-items: center; border: 1px solid var(--line); border-radius: 7px; background: var(--paper); color: var(--muted); }
 .context-toggle:hover { color: var(--ink); border-color: #c8c0b5; background: white; }
@@ -6428,6 +6429,47 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .chat-mode-picker svg { pointer-events: none; }
 .playground-surface-tabs { margin-top: -4px; }
 .playground-rehearsal-surface > .page-chat { margin-top: 8px; }
+@media (min-width: 681px) {
+  /* The embedded Rehearsal tab lives inside the normal Playground workspace,
+     so it cannot inherit the top-level Chat viewport contract. Keep its
+     transcript scrollable and its composer anchored to the bottom of the
+     available workspace just like /chat and /rehearsal. */
+  .playground-rehearsal-surface {
+    height: calc(100vh - 122px);
+    min-height: 0;
+    overflow: hidden;
+    display: flex;
+    flex-direction: column;
+  }
+  .playground-rehearsal-surface > .page-chat {
+    flex: 1 1 auto;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+  }
+  .playground-rehearsal-surface > .page-chat .chat-heading,
+  .playground-rehearsal-surface > .page-chat .chat-composer,
+  .playground-rehearsal-surface > .page-chat .composer-hint {
+    flex: 0 0 auto;
+  }
+  .playground-rehearsal-surface > .page-chat .chat-layout {
+    flex: 1 1 auto;
+    min-height: 0;
+  }
+  .playground-rehearsal-surface > .page-chat .chat-thread {
+    height: 100%;
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    justify-content: flex-start;
+  }
+  .playground-rehearsal-surface > .page-chat .chat-history {
+    flex: 1 1 auto;
+    min-height: 0;
+    max-height: none;
+    overflow-y: auto;
+  }
+}
 @media (max-width: 680px) { .activity-surface-switcher, .analytics-section-switcher, .watching-category-tabs, .playground-surface-tabs { width: 100%; margin-top: -4px; } .activity-surface-switcher button, .analytics-section-switcher button, .watching-category-tabs button, .playground-surface-tabs button { flex: 1; } .chat-mode-picker { align-self: flex-start; } }
 @media (max-width: 680px) { .playground-first-run { align-items: stretch; flex-direction: column; gap: 12px; padding: 14px; }.playground-first-run-actions { width: 100%; }.playground-first-run-actions .button { flex: 1; justify-content: center; } }
 @media (max-width: 680px) { .activity-first-run { align-items: stretch; flex-direction: column; gap: 12px; padding: 14px; }.activity-first-run-actions { width: 100%; }.activity-first-run-actions .button { flex: 1; justify-content: center; } }

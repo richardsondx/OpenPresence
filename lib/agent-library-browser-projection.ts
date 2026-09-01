@@ -44,7 +44,14 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
     for (const key of ["assets", "assetCollections", "assetCollectionMemberships", "assetProcessingJobs"] as const) next[key] = [] as never;
     next.knowledgeDocuments = state.knowledgeDocuments;
     next.knowledgeVersions = state.knowledgeVersions;
+    next.knowledgeSegments = state.knowledgeSegments;
+    next.knowledgeCollections = state.knowledgeCollections;
+    next.knowledgeItems = state.knowledgeItems;
+    next.presenceKnowledgeAccess = state.presenceKnowledgeAccess;
+    next.mindFileKnowledgeBindings = state.mindFileKnowledgeBindings;
     next.knowledgeRetrievalRuns = state.knowledgeRetrievalRuns;
+    next.knowledgeCitations = state.knowledgeCitations;
+    next.presenceKnowledgeBindings = state.presenceKnowledgeBindings;
   } else if (projection === "assets") {
     for (const key of ["knowledgeDocuments", "knowledgeVersions", "knowledgeRetrievalRuns"] as const) next[key] = [] as never;
     next.assets = state.assets;
