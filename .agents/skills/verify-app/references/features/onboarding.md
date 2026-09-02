@@ -10,7 +10,7 @@ The first-run surface creates an Agent and its initial Presence, then opens the 
 
 ## How to get to it (user POV)
 
-Open `/` in a fresh or reset workspace. Enter a name in `Agent name` and choose `Create Agent + Presence`. The active workspace can later be changed through the Agent switcher (`Switch agent, currently …`) and Presence switcher.
+Open `/` in a fresh or reset workspace. Enter a name in `Agent name` and choose `Create Agent + Presence`. The active workspace can later be changed by selecting an Agent in the persistent left rail; the connected channel remains inline Agent context.
 
 ## Driving it with verify-app
 

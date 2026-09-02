@@ -62,7 +62,7 @@ The current shell exposes the Agent portfolio and the active connected channel t
 
 The primary desktop shell is Agent-first: a memorable Agent portfolio rail, Chat, Agent Lab, Knowledge, Assets, and one Agent settings home. The Agents header owns `New agent`; the Chat context card in the sidebar owns `New conversation`, while the main chat header stays focused on the permanent Main thread and Presence context. A single topbar context-sidebar toggle opens or collapses the inspector; once open, Attention, Calendar, Analytics, and Agent settings are selected from controls inside that inspector. The topbar has no global `Needs You` notice; actionable runtime boundaries appear in Chat as in-context notices and remain available in the focused Review queue. The active channel is shown as context on the selected Agent, not as a second top-level switcher. Presence-scoped routes remain available for operational detail, but `Activity`, `Review`, `Watching`, and legacy `Playground` are not presented as equal primary products. `Schedule` remains the temporal detail route; `Teach`, `People`, `Growth`, `Feed`, and `Usage` remain reachable by direct route or contextual links.
 
-Every loaded view repeats an Agent switcher, active-channel context, operational health indicator, and the same navigation. The repeated shell is part of every journey and should be considered when evaluating cognitive load.
+The persistent left rail owns Agent selection and shows each Agent's active channel inline. The main topbar owns only workspace context controls; it does not duplicate Agent selection or repeat active-channel context. The repeated shell is part of every journey and should be considered when evaluating cognitive load.
 
 ## Agent-first verification contract
 

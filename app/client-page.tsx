@@ -1576,176 +1576,6 @@ function Onboarding({
   );
 }
 
-function AgentSwitcher({
-  state,
-  mutate,
-}: {
-  state: OpenPresenceState;
-  mutate: Mutate;
-}) {
-  const [open, setOpen] = useState(false);
-  const [createSeed, setCreateSeed] = useState<Partial<CreateAgentInput> | null>(null);
-  const [avatarEditorAgentId, setAvatarEditorAgentId] = useState<string | null>(null);
-  const [menuPosition, setMenuPosition] = useState<React.CSSProperties | null>(null);
-  const switcherRef = useRef<HTMLButtonElement>(null);
-  const agent = state.agent!;
-  const agents = state.agents?.length ? state.agents : [agent];
-  useEffect(() => {
-    if (!open) return;
-    const updatePosition = () => {
-      const anchor = switcherRef.current?.getBoundingClientRect();
-      if (!anchor) return;
-      const menuWidth = Math.min(250, window.innerWidth - 24);
-      const estimatedHeight = Math.min(520, 88 + agents.length * 52);
-      const below = window.innerHeight - anchor.bottom;
-      const top = below >= estimatedHeight + 8
-        ? anchor.bottom + 8
-        : undefined;
-      setMenuPosition({
-        position: "fixed",
-        left: Math.min(
-          Math.max(12, anchor.left),
-          Math.max(12, window.innerWidth - menuWidth - 12),
-        ),
-        ...(top === undefined
-          ? { bottom: Math.max(12, window.innerHeight - anchor.top + 8) }
-          : { top }),
-        width: menuWidth,
-      });
-    };
-    updatePosition();
-    window.addEventListener("resize", updatePosition);
-    window.addEventListener("scroll", updatePosition, true);
-    return () => {
-      window.removeEventListener("resize", updatePosition);
-      window.removeEventListener("scroll", updatePosition, true);
-    };
-  }, [agents.length, open]);
-  const avatarEditorAgent = agents.find((item) => item.id === avatarEditorAgentId);
-  return (
-    <div className="agent-switcher-wrap">
-      <button
-        ref={switcherRef}
-        className="agent-root agent-switcher"
-        aria-label={`Switch agent, currently ${agent.name}`}
-        aria-expanded={open}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <PresenceGlyph accent={agent.accent} name={agent.name} />
-        <span>
-          <strong>{agent.name}</strong>
-        </span>
-        <ChevronRight size={14} className={open ? "agent-chevron-open" : ""} />
-      </button>
-      {open && menuPosition && typeof document !== "undefined" && createPortal(
-        <div
-          className="agent-menu agent-menu-portal"
-          role="menu"
-          aria-label="Your Agents"
-          style={menuPosition}
-        >
-          <div className="agent-menu-label">Your Agents</div>
-          {agents.map((item) => (
-            <div className="agent-menu-agent" key={item.id}>
-              <div className="agent-menu-agent-row">
-                <button
-                  type="button"
-                  className="agent-menu-color-button"
-                  aria-label={`Edit ${item.name} avatar`}
-                  title="Edit Agent avatar"
-                  onClick={() => {
-                    setOpen(false);
-                    setAvatarEditorAgentId(item.id);
-                  }}
-                >
-                  <PresenceGlyph accent={item.accent} name={item.name} />
-                </button>
-                <button
-                  type="button"
-                  role="menuitem"
-                  className={`agent-menu-item ${item.id === state.activeAgentId ? "active" : ""}`}
-                  onClick={async () => {
-                    const next = await mutate({ type: "selectAgent", id: item.id });
-                    if (next) syncBrowserWorkspaceContext(next);
-                    setOpen(false);
-                  }}
-                >
-                  <span>
-                    <strong>{item.name}</strong>
-                    {item.id === agent.id && <small>Current</small>}
-                  </span>
-                </button>
-              </div>
-            </div>
-          ))}
-          {agents.length === 1 && (
-            <p className="agent-menu-empty">No other Agents yet.</p>
-          )}
-          <div className="agent-menu-divider" />
-          <button
-            type="button"
-            className="agent-menu-action"
-            onClick={() => {
-              setOpen(false);
-              setCreateSeed({});
-            }}
-          >
-            <Plus size={14} /> Create Agent
-          </button>
-          <button
-            type="button"
-            className="agent-menu-action"
-            onClick={() => {
-              setOpen(false);
-              const presence = state.presence ?? state.presences[0];
-              setCreateSeed({
-                name: `${agent.name} copy`,
-                description: agent.description,
-                audience: agent.audience,
-                handle: `@${agent.name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_copy`,
-                accent: agent.accent,
-                mode: presence?.mode ?? "agent",
-              });
-            }}
-          >
-            <Copy size={14} /> Duplicate Agent
-          </button>
-        </div>,
-        document.body,
-      )}
-      {createSeed &&
-        typeof document !== "undefined" &&
-        createPortal(
-          <CreateAgentDialog
-            initialInput={Object.keys(createSeed).length > 0 ? createSeed : undefined}
-            onClose={() => setCreateSeed(null)}
-            onCreate={async (input) => {
-              const next = await mutate({
-                type: "createAdditionalAgent",
-                input,
-              });
-              if (next) setCreateSeed(null);
-            }}
-          />,
-          document.body,
-        )}
-      {avatarEditorAgent &&
-        typeof document !== "undefined" &&
-        createPortal(
-          <AgentAvatarEditorDialog
-            agent={avatarEditorAgent}
-            onClose={() => setAvatarEditorAgentId(null)}
-            onSave={async (accent) => {
-              const next = await mutate({ type: "setAgentAccent", agentId: avatarEditorAgent.id, accent });
-              if (next) setAvatarEditorAgentId(null);
-            }}
-          />,
-          document.body,
-        )}
-    </div>
-  );
-}
-
 function AgentPortfolio({
   state,
   mutate,
@@ -2518,7 +2348,6 @@ function AgentWorkspaceShell({
       </aside>
       <section className={`${view === "chat" || view === "teach" || view === "rehearsal" ? "workspace workspace-chat" : "workspace"} ${view === "knowledge" ? "workspace-knowledge" : ""} ${inspector ? "has-inspector" : ""}`}>
         <header className="topbar">
-          <div className="topbar-agent-context"><AgentSwitcher state={state} mutate={mutate} /><span className="topbar-channel-context"><span>Active channel</span><strong>{channelLabel(presence.channel, state.channelDefinitions)} · {presence.handle}</strong></span></div>
           <div className="topbar-actions context-controls" aria-label="Workspace controls">
             <button type="button" className="context-control context-sidebar-toggle" aria-label={inspector ? "Collapse context sidebar" : "Open context sidebar"} aria-pressed={Boolean(inspector)} title={inspector ? "Collapse context sidebar" : "Open context sidebar"} onClick={() => setInspector((current) => current ? null : "attention")}>{inspector ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}</button>
           </div>
@@ -14723,6 +14552,7 @@ function BrainView({
   const [deleteAgentOpen, setDeleteAgentOpen] = useState(false);
   const [deleteAgentName, setDeleteAgentName] = useState("");
   const [deletingAgent, setDeletingAgent] = useState(false);
+  const [duplicateAgentOpen, setDuplicateAgentOpen] = useState(false);
   const ollamaConnection = providerConnections.find((item) => item.provider === "ollama" && item.status !== "needs-configuration");
   const tavilyConnection = assetProviderConnections.find((item) => item.provider === "tavily");
   const ollamaConnectionId = ollamaConnection?.id;
@@ -14789,7 +14619,7 @@ function BrainView({
         eyebrow="Managed Agent"
         title="Manage Agent"
         description={<>{agent.name}&apos;s Brain, runtime, skills, and provider access. These settings shape every Presence.</>}
-        actions={pending.length > 0 ? <span className="review-badge"><CircleAlert size={14} /> {pending.length} to review</span> : undefined}
+        actions={<><Button type="button" variant="secondary" onClick={() => setDuplicateAgentOpen(true)}><Copy size={14} /> Duplicate Agent</Button>{pending.length > 0 && <span className="review-badge"><CircleAlert size={14} /> {pending.length} to review</span>}</>}
       />
       <section className="settings-card agent-identity-card">
         <div>
@@ -15145,6 +14975,21 @@ function BrainView({
           </form>
         )}
       </section>
+      {duplicateAgentOpen && <CreateAgentDialog
+        initialInput={{
+          name: `${agent.name} copy`,
+          description: agent.description,
+          audience: agent.audience,
+          handle: `@${agent.name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_copy`,
+          accent: agent.accent,
+          mode: activePresence?.mode ?? "agent",
+        }}
+        onClose={() => setDuplicateAgentOpen(false)}
+        onCreate={async (input) => {
+          const next = await mutate({ type: "createAdditionalAgent", input });
+          if (next) setDuplicateAgentOpen(false);
+        }}
+      />}
     </div>
   );
 }

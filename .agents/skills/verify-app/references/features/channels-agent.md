@@ -12,7 +12,7 @@ Agent settings is one home for the selected Agent’s durable mind plus the conn
 
 ## How to get to it (user POV)
 
-Choose `Agent settings` or open `/agent` (or the legacy `/settings` alias). The page has `Identity & Brain` and `Presence & Autonomy` sections. The topbar Agent dropdown switches the durable mind; the active channel is shown beside it as context. Contextual links from Watching, Chat, Usage, and Activity open the same unified settings home.
+Choose `Agent settings` or open `/agent` (or the legacy `/settings` alias). The page has `Identity & Brain` and `Presence & Autonomy` sections. Select the durable mind from the left Agent rail; the main topbar does not duplicate that selector or show a second active-channel block. Duplicate Agent is available in Identity & Brain. Contextual links from Watching, Chat, Usage, and Activity open the same unified settings home.
 
 ## Driving it with verify-app
 

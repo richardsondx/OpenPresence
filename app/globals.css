@@ -6994,6 +6994,7 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .sidebar-conversation-card strong { overflow: hidden; color: var(--agent-rail-strong); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
 .sidebar-conversation-card small, .sidebar-conversation-card span { color: var(--agent-rail-muted); font: 8px var(--font-mono, monospace); }
 .sidebar-conversation-card p { margin: 3px 0 0; color: var(--agent-rail-muted); font-size: 9px; line-height: 1.35; }
+.topbar .context-controls { margin-left: auto; }
 @media (max-width: 680px) {
   .sidebar { display: block; overflow: visible; }
   .sidebar-body { overflow: visible; }
