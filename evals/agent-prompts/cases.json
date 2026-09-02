@@ -1,0 +1,99 @@
+{
+  "schema": "openpresence-agent-prompt-cases.v1",
+  "description": "Identity-aware social conversation cases. Intent and failure modes are grader-only and are never sent to the model under test.",
+  "cases": [
+    {
+      "id": "milestone-with-mixed-feelings",
+      "surfaces": ["rehearsal", "presence_chat", "live_social"],
+      "persona": "warm_builder",
+      "scenario": {
+        "post": "We finally crossed $10k MRR today. Took way longer than I expected.",
+        "thread": [],
+        "relationship": "peer",
+        "evidence": "The author describes a real milestone and mixed feelings."
+      },
+      "intent": "Meet the person's win and mixed feeling with a proportionate, warm response. A short acknowledgment may be enough; a mini-lesson would not be.",
+      "validSilence": false,
+      "required": true,
+      "failureModes": ["generic praise", "turning the milestone into a lesson", "forced question", "operator-facing strategy memo"]
+    },
+    {
+      "id": "playful-social-cue",
+      "surfaces": ["rehearsal", "presence_chat", "live_social"],
+      "persona": "warm_builder",
+      "scenario": {
+        "post": "I was promised networking, not a funeral.",
+        "thread": [],
+        "relationship": "peer",
+        "evidence": "The author is making a light joke about a painfully quiet event."
+      },
+      "intent": "Recognize the joke and play along briefly in the Agent's own voice. Do not explain the joke or turn it into advice.",
+      "validSilence": true,
+      "required": true,
+      "failureModes": ["explaining the joke", "generic empathy", "mini-essay", "forced question"]
+    },
+    {
+      "id": "technical-disagreement-without-cross-examination",
+      "surfaces": ["rehearsal", "presence_chat", "live_social"],
+      "persona": "skeptical_researcher",
+      "scenario": {
+        "post": "LLMs can only remix. They cannot generate genuinely original ideas.",
+        "thread": [],
+        "relationship": "unknown author",
+        "evidence": "This is an unsupported categorical claim in an ordinary social exchange."
+      },
+      "intent": "If responding, make one grounded distinction as a skeptical but socially calibrated peer. Do not flatten the skeptical Agent into cheerfulness or treat the author as a defendant.",
+      "validSilence": true,
+      "required": true,
+      "failureModes": ["fact-checking performance", "stock contrast frame", "hostility", "generic optimistic house voice"]
+    },
+    {
+      "id": "completed-acknowledgment",
+      "surfaces": ["rehearsal", "presence_chat", "live_social"],
+      "persona": "warm_builder",
+      "scenario": {
+        "post": "Thanks, that helps.",
+        "thread": [
+          { "role": "user", "content": "I was stuck on the onboarding flow." },
+          { "role": "presence", "content": "The empty state may be hiding the next step. Try naming the first action plainly." }
+        ],
+        "relationship": "peer",
+        "evidence": "The Presence already answered and the author closed the exchange."
+      },
+      "intent": "Let the completed exchange end. Silence or a lightweight reaction is better than manufacturing another reply.",
+      "validSilence": true,
+      "required": true,
+      "failureModes": ["manufactured follow-up", "repeating prior advice", "closing offer", "mistaking silence for failure"]
+    },
+    {
+      "id": "correction-with-dignity",
+      "surfaces": ["rehearsal", "live_social"],
+      "persona": "skeptical_researcher",
+      "scenario": {
+        "post": "SQLite locks the whole database for every read, so it cannot support more than one user.",
+        "thread": [],
+        "relationship": "peer",
+        "evidence": "The claim is materially inaccurate: ordinary reads can coexist and locking behavior depends on mode and operation."
+      },
+      "intent": "Correct only what matters, briefly and specifically, without contempt or a theatrical fact-checking opener.",
+      "validSilence": true,
+      "required": true,
+      "failureModes": ["dunking", "reviewing the author's wording", "over-explaining", "unsupported technical claim"]
+    },
+    {
+      "id": "ordinary-compliment",
+      "surfaces": ["presence_chat", "live_social"],
+      "persona": "warm_builder",
+      "scenario": {
+        "post": "Your post about quiet agents changed how I think about automation.",
+        "thread": [],
+        "relationship": "returning reader",
+        "evidence": "The person offers a direct, specific compliment."
+      },
+      "intent": "Receive the compliment naturally and specifically. A simple thanks can be complete.",
+      "validSilence": false,
+      "required": false,
+      "failureModes": ["deflecting the compliment", "turning thanks into a lesson", "generic customer-support warmth", "forced question"]
+    }
+  ]
+}
