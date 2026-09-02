@@ -6,6 +6,7 @@ import Image from "next/image";
 import dynamic from "next/dynamic";
 import {
   Activity,
+  ArrowLeft,
   ArrowUpRight,
   Badge,
   BarChart2,
@@ -14047,6 +14048,9 @@ function ScheduleView({
         description={<>What {presenceName} should resolve, when it can happen, and what has been verified.</>}
         actionsClassName="heading-actions calendar-heading-actions"
         actions={<>
+          <Button variant="ghost" onClick={() => setView("chat")} title="Return to the Agent conversation">
+            <ArrowLeft size={15} /> Back to Chat
+          </Button>
           {pendingReviewCount > 0 && (
             <Button variant="secondary" onClick={() => setView("live")} title="Open Activity to approve actions waiting for you">
               <CircleAlert size={14} /> Review {pendingReviewCount} approval{pendingReviewCount === 1 ? "" : "s"} in Activity

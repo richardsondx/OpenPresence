@@ -10,10 +10,11 @@ Schedule manages durable operator responsibility and timing; the Agent chooses t
 - Run or cancel a responsibility in the supported Sandbox path.
 - Inspect due, working, blocked, deferred, failed, and completed states.
 - Scan prominent responsibility times, see verified recurring work as `Done today`, and expand long flexible-responsibility lists only when needed.
+- Return to the originating Agent conversation with the persistent `Back to Chat` action.
 
 ## How to get to it (user POV)
 
-Choose `Schedule` or open `/schedule`; `/calendar` remains a legacy alias that resolves to the same Schedule view. The current route offers `List`/`Week`, `Create with a prompt`, `Add assignment`, publishing rhythm/plan controls, layer visibility, recurrence/day filters, and Assignment details. Use `Add assignment`, fill `What should <Presence> accomplish?`, choose `Day`, `Time`, and `Objective`, then choose `Review responsibility`. A dated Assignment repeats weekly by default; include `once` or `one-time` only for a single event.
+Choose `Schedule` or open `/schedule`; `/calendar` remains a legacy alias that resolves to the same Schedule view. When Schedule is opened from the Chat context sidebar, use the visible `Back to Chat` action in the Schedule header to return to the Agent conversation. The current route offers `List`/`Week`, `Create with a prompt`, `Add assignment`, publishing rhythm/plan controls, layer visibility, recurrence/day filters, and Assignment details. Use `Add assignment`, fill `What should <Presence> accomplish?`, choose `Day`, `Time`, and `Objective`, then choose `Review responsibility`. A dated Assignment repeats weekly by default; include `once` or `one-time` only for a single event.
 
 ## Driving it with verify-app
 

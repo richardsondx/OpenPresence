@@ -60,6 +60,12 @@ test("Context sidebar owns its view controls and the workspace theme toggles", a
   await expect(page.getByRole("button", { name: "Show Calendar" })).toBeVisible();
   await page.getByRole("button", { name: "Show Calendar" }).click();
   await expect(page.getByRole("complementary", { name: /Calendar inspector/ })).toBeVisible();
+  await page.getByRole("button", { name: "Open full calendar", exact: true }).click();
+  await expect(page.getByRole("heading", { name: "Schedule", exact: true })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Back to Chat", exact: true })).toBeVisible();
+  await page.getByRole("button", { name: "Back to Chat", exact: true }).click();
+  await expect(page).toHaveURL(/\/chat\?/);
+  await expect(page.getByRole("textbox", { name: /Message/ })).toBeVisible();
 
   const shell = page.locator("main.app-shell");
   await page.getByRole("button", { name: "Switch to dark mode" }).click();
