@@ -10,10 +10,12 @@ import {
   Badge,
   BarChart2,
   BarChart3,
+  Bell,
   BookOpen,
   Bot,
   Brain,
   BriefcaseBusiness,
+  CalendarDays,
   Check,
   CheckCircle2,
   Code2,
@@ -44,6 +46,8 @@ import {
   MessageCircle,
   MessageSquare,
   Newspaper,
+  PanelLeft,
+  PanelLeftClose,
   PanelRightClose,
   PanelRightOpen,
   Pause,
@@ -198,22 +202,6 @@ const fileOrder: FileKind[] = [
   "MEMORY",
   "GROWTH",
   "PULSE",
-];
-const navItems: { id: View; label: string; icon: typeof MessageCircle }[] = [
-  { id: "live", label: "Activity", icon: Radio },
-  { id: "review", label: "Review", icon: CircleAlert },
-  { id: "chat", label: "Chat", icon: MessageSquare },
-  { id: "watching", label: "Watching", icon: Eye },
-  { id: "presence", label: "Presence", icon: Settings2 },
-  { id: "playground", label: "Playground", icon: Gamepad2 },
-  { id: "analytics", label: "Analytics", icon: BarChart3 },
-  { id: "knowledge", label: "Knowledge", icon: BookOpen },
-  { id: "assets", label: "Assets", icon: Layers },
-];
-const presenceNavItems = navItems.filter(({ id }) => ["live", "review", "chat", "watching", "presence", "playground", "analytics"].includes(id));
-const agentNavItems = [
-  { id: "work" as View, label: "Work", icon: BriefcaseBusiness },
-  ...navItems.filter(({ id }) => id === "knowledge" || id === "assets"),
 ];
 const viewPaths: Record<View, string> = {
   live: "/activity",
@@ -915,6 +903,7 @@ export default function Home() {
     const query = new URLSearchParams(typeof window === "undefined" ? "" : window.location.search);
     const requestedAgentId = query.get("agentId");
     const requestedPresenceId = query.get("presenceId");
+    const pendingCreateHandoff = typeof window !== "undefined" && window.sessionStorage.getItem("openpresence.create.pending") === "1";
     query.set("read", Date.now().toString());
     if (typeof window !== "undefined") {
       const initialView = viewForLocation(window.location);
@@ -924,7 +913,25 @@ export default function Home() {
         query.set("projection", initialView === "live" || initialView === "review" ? activityProjection : initialView === "chat" ? "chat" : initialView === "growth" || initialView === "analytics" ? "growth" : initialView === "knowledge" ? "knowledge" : initialView === "assets" ? "assets" : initialView === "people" ? "people" : initialView === "feed" ? "feed" : initialView === "schedule" ? "schedule" : initialView === "work" ? "work" : initialView === "watching" ? "watching" : initialView === "rehearsal" ? "rehearsal" : initialView === "brain" ? "brain" : initialView === "teach" ? "teach" : initialView === "presence" ? "presence" : initialView === "playground" ? "playground" : "usage");
       }
     }
-    fetchState<OpenPresenceState>(`/api/state?${query.toString()}`)
+    const loadInitialState = async () => {
+      let payload = await fetchState<OpenPresenceState>(`/api/state?${query.toString()}`);
+      // A browser harness (or a fast human click followed by a deep link) can
+      // navigate away while createAgent is still committing. Keep the handoff
+      // alive across that navigation and retry only the one meaningful boundary
+      // instead of rendering onboarding over a creation that is still landing.
+      if (pendingCreateHandoff && payload && !payload.onboarded) {
+        for (let attempt = 0; attempt < 8 && payload && !payload.onboarded; attempt += 1) {
+          await new Promise((resolve) => window.setTimeout(resolve, 125));
+          const retryQuery = new URLSearchParams(query);
+          retryQuery.set("read", Date.now().toString());
+          const retryPayload = await fetchState<OpenPresenceState>(`/api/state?${retryQuery.toString()}`);
+          if (retryPayload) payload = retryPayload;
+        }
+      }
+      if (payload?.onboarded && typeof window !== "undefined") window.sessionStorage.removeItem("openpresence.create.pending");
+      return payload;
+    };
+    loadInitialState()
       .then((payload) => {
         if (!payload) return;
         if (!browserRequestContextIsCurrent(requestedAgentId, requestedPresenceId)) return;
@@ -1012,6 +1019,7 @@ export default function Home() {
             ...(context?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(context.workspaceRevision) } : {}),
             ...(view === "live" || view === "review" ? { "x-openpresence-projection": "activity" } : view === "chat" ? { "x-openpresence-projection": "chat" } : view === "growth" || view === "analytics" ? { "x-openpresence-projection": "growth" } : view === "knowledge" ? { "x-openpresence-projection": "knowledge" } : view === "assets" ? { "x-openpresence-projection": "assets" } : view === "people" ? { "x-openpresence-projection": "people" } : view === "feed" ? { "x-openpresence-projection": "feed" } : view === "schedule" ? { "x-openpresence-projection": "schedule" } : view === "work" ? { "x-openpresence-projection": "work" } : view === "watching" ? { "x-openpresence-projection": "watching" } : view === "rehearsal" ? { "x-openpresence-projection": "rehearsal" } : view === "brain" ? { "x-openpresence-projection": "brain" } : view === "teach" ? { "x-openpresence-projection": "teach" } : view === "presence" ? { "x-openpresence-projection": "presence" } : view === "playground" ? { "x-openpresence-projection": "playground" } : view === "usage" ? { "x-openpresence-projection": "usage" } : {}),
           },
+          keepalive: operationType === "createAgent",
           body: JSON.stringify(operation),
         }, runtimeTimeoutForOperation(operationType));
         rememberStateResponse(response);
@@ -1400,7 +1408,14 @@ export default function Home() {
   if (!state.onboarded)
     return (
       <Onboarding
-        onCreate={(input) => mutate({ type: "createAgent", input }).then(() => { openView("chat"); })}
+        onCreate={async (input) => {
+          if (typeof window !== "undefined") window.sessionStorage.setItem("openpresence.create.pending", "1");
+          const created = await mutate({ type: "createAgent", input });
+          if (created?.onboarded) {
+            if (typeof window !== "undefined") window.sessionStorage.removeItem("openpresence.create.pending");
+            openView("chat");
+          }
+        }}
         error={error}
       />
     );
@@ -1706,6 +1721,113 @@ function AgentSwitcher({
           document.body,
         )}
     </div>
+  );
+}
+
+function AgentPortfolio({
+  state,
+  mutate,
+  setView,
+  onNewChat,
+  collapsed = false,
+}: {
+  state: OpenPresenceState;
+  mutate: Mutate;
+  setView: (view: View) => void;
+  onNewChat: () => Promise<void>;
+  collapsed?: boolean;
+}) {
+  const agents = state.agents?.length ? state.agents : state.agent ? [state.agent] : [];
+  const workspaceFor = (agentId: string) => state.agentWorkspaces?.find((workspace) => workspace.agent?.id === agentId);
+  const presenceFor = (agentId: string) => agentId === state.activeAgentId ? state.presence : workspaceFor(agentId)?.presence;
+  const selectAgent = async (agentId: string) => {
+    if (agentId !== state.activeAgentId) await mutate({ type: "selectAgent", id: agentId });
+    setView("chat");
+  };
+  return (
+    <div className={`agent-portfolio ${collapsed ? "is-collapsed" : ""}`} aria-label="Agents">
+      {!collapsed && <><div className="portfolio-section-heading"><span className="sidebar-label">Agents</span><button type="button" className="portfolio-add" onClick={() => setView("brain")} aria-label="Create a new Agent" title="Create a new Agent"><Plus size={15} /></button></div><span className="portfolio-workspace-label">Agent workspace</span></>}
+      <div className="portfolio-agent-list">
+        {agents.map((item) => {
+          const itemPresence = presenceFor(item.id);
+          const selected = item.id === state.activeAgentId;
+          return (
+            <button
+              type="button"
+              key={item.id}
+              className={`portfolio-agent-row ${selected ? "is-selected" : ""}`}
+              onClick={() => void selectAgent(item.id)}
+              aria-current={selected ? "page" : undefined}
+              title={collapsed ? `${item.name}${itemPresence ? ` · ${channelLabel(itemPresence.channel, state.channelDefinitions)} ${itemPresence.handle}` : ""}` : undefined}
+            >
+              <span className="portfolio-agent-avatar"><PresenceGlyph accent={item.accent} name={item.name} avatarUrl={itemPresence ? presencePlatformAvatarUrl(state, itemPresence) : undefined} look={itemPresence ? presenceAvatarLook(itemPresence) : "core"} /></span>
+              <span className="portfolio-agent-copy">
+                <strong>{item.name}</strong>
+                <small>{itemPresence ? `${channelLabel(itemPresence.channel, state.channelDefinitions)} · ${itemPresence.handle}` : "Agent workspace"}</small>
+              </span>
+              <span className={`portfolio-agent-status ${itemPresence?.status === "paused" ? "is-paused" : ""}`} aria-label={itemPresence?.status === "paused" ? "Paused" : "Connected"} />
+            </button>
+          );
+        })}
+      </div>
+      {!collapsed && <><button type="button" className="portfolio-new-chat" onClick={() => void onNewChat()}><Plus size={15} /> New chat</button><button type="button" className="portfolio-new-agent" onClick={() => setView("brain")}><Plus size={15} /> New Agent</button></>}
+    </div>
+  );
+}
+
+type InspectorPanel = "attention" | "calendar" | "analytics" | "settings";
+
+function ContextInspector({
+  panel,
+  state,
+  presence,
+  attentionCount,
+  onClose,
+  onNavigate,
+  onAddPresence,
+}: {
+  panel: InspectorPanel;
+  state: OpenPresenceState;
+  presence: NonNullable<OpenPresenceState["presence"]>;
+  attentionCount: number;
+  onClose: () => void;
+  onNavigate: (view: View) => void;
+  onAddPresence: () => void;
+}) {
+  const agent = state.agent!;
+  const upcoming = state.calendar.filter((slot) => slot.enabled).slice(0, 5);
+  const openAssignments = state.assignments.filter((assignment) => assignment.presenceId === presence.id && assignmentIsOpen(assignment)).slice(0, 4);
+  const pendingApprovals = state.executions.filter((execution) => execution.presenceId === presence.id && execution.status === "awaiting-review").length;
+  const usageEvents = state.resourceUsageEvents.filter((event) => event.agentId === agent.id).length;
+  const title = panel === "attention" ? "Attention" : panel === "calendar" ? "Calendar" : panel === "analytics" ? "Analytics" : "Agent settings";
+  return (
+    <aside className="workspace-context-inspector" aria-label={`${title} inspector`}>
+      <div className="inspector-heading">
+        <div><span className="eyebrow">{panel === "settings" ? "Current Agent" : "Agent context"}</span><h2>{title}</h2></div>
+        <button type="button" className="inspector-close" aria-label="Close inspector" onClick={onClose}><X size={17} /></button>
+      </div>
+      {panel === "attention" && <>
+        <section className="inspector-section inspector-attention-summary"><span className="inspector-kicker">Needs you</span><strong>{attentionCount ? `${attentionCount} item${attentionCount === 1 ? "" : "s"}` : "Nothing waiting"}</strong><p>{attentionCount ? "Blocking items stay in the conversation so you can act with full context." : `${agent.name} is clear to keep moving.`}</p></section>
+        <section className="inspector-section"><div className="inspector-section-title"><span>Waiting</span><small>{pendingApprovals}</small></div>{pendingApprovals > 0 ? <button type="button" className="inspector-list-row" onClick={() => onNavigate("review")}><span className="inspector-status-dot is-warn" /><span><strong>Public action needs review</strong><small>Open the inline card in Chat</small></span><ChevronRight size={14} /></button> : <p className="inspector-empty">No public actions are waiting for approval.</p>}{state.proposals.filter((proposal) => proposal.status === "pending").slice(0, 2).map((proposal) => <button type="button" className="inspector-list-row" key={proposal.id} onClick={() => onNavigate("brain")}><span className="inspector-status-dot is-warn" /><span><strong>Agent change to review</strong><small>{proposal.reason}</small></span><ChevronRight size={14} /></button>)}</section>
+        <section className="inspector-section"><div className="inspector-section-title"><span>Working</span></div>{openAssignments.length ? openAssignments.map((assignment) => <div className="inspector-list-row is-static" key={assignment.id}><span className="inspector-status-dot is-live" /><span><strong>{assignment.title}</strong><small>{assignment.work?.phase?.replaceAll("_", " ") ?? "In progress"}</small></span></div>) : <p className="inspector-empty">No active responsibility.</p>}</section>
+        <section className="inspector-section"><div className="inspector-section-title"><span>Recent</span></div><p className="inspector-receipt"><CheckCircle2 size={15} /> Verified outcomes appear in Chat as receipts.</p></section>
+      </>}
+      {panel === "calendar" && <>
+        <section className="inspector-section inspector-calendar-date"><span className="inspector-kicker">Today</span><strong>{new Intl.DateTimeFormat("en", { weekday: "long", month: "short", day: "numeric" }).format(new Date())}</strong></section>
+        <section className="inspector-section">{upcoming.length ? upcoming.map((slot) => <div className="inspector-list-row is-static" key={slot.id}><span className="inspector-time">{slot.time}</span><span><strong>{slot.instruction}</strong><small>{slot.day} · {slot.executionWindow}</small></span></div>) : <p className="inspector-empty">No scheduled work yet.</p>}</section>
+        <section className="inspector-section"><div className="inspector-section-title"><span>Recurring</span></div>{state.assignments.filter((assignment) => assignment.presenceId === presence.id && assignment.recurrence).slice(0, 3).map((assignment) => <div className="inspector-list-row is-static" key={assignment.id}><span className="inspector-status-dot is-live" /><span><strong>{assignment.title}</strong><small>{assignment.recurrence?.label ?? "Recurring responsibility"}</small></span></div>)}<button type="button" className="inspector-link-button" onClick={() => onNavigate("schedule")}>Open full calendar <ArrowUpRight size={14} /></button></section>
+      </>}
+      {panel === "analytics" && <>
+        <section className="inspector-section"><div className="inspector-section-title"><span>Performance</span><small>Last 7 days</small></div><div className="inspector-metric-grid"><div><strong>{state.metrics.conversations}</strong><span>Conversations</span></div><div><strong>{state.metrics.qualifiedFollows}</strong><span>Qualified follows</span></div><div><strong>{state.metrics.audienceHealth}</strong><span>Audience health</span></div></div></section>
+        <section className="inspector-section"><div className="inspector-section-title"><span>Usage</span><small>This workspace</small></div><div className="inspector-usage-row"><span>Runtime events</span><strong>{usageEvents}</strong></div><div className="inspector-usage-row"><span>Agent actions</span><strong>{state.actions.length}</strong></div><div className="inspector-usage-row"><span>Assets available</span><strong>{state.assets.length}</strong></div></section>
+        <button type="button" className="inspector-link-button" onClick={() => onNavigate("analytics")}>Open analytics <ArrowUpRight size={14} /></button>
+      </>}
+      {panel === "settings" && <>
+        <section className="inspector-agent-card"><PresenceGlyph accent={agent.accent} name={agent.name} size="large" /><div><h3>{agent.name}</h3><p>{presence.handle} · {channelLabel(presence.channel, state.channelDefinitions)}</p><span className="inspector-health"><span className="portfolio-agent-status" /> Connected</span></div></section>
+        <section className="inspector-section"><div className="inspector-section-title"><span>Brain</span></div><div className="inspector-setting-row"><strong>{state.files.find((file) => file.kind === "BRAIN")?.title ?? "Brain"}</strong><small>{state.agentWorkspaces.length > 1 ? "Shared across linked Agents" : "Agent-owned intelligence"}</small></div><div className="inspector-setting-row"><strong>Social account</strong><small>{channelLabel(presence.channel, state.channelDefinitions)} · {presence.handle}</small></div></section>
+        <button type="button" className="inspector-link-button" onClick={() => onNavigate("brain")}>Open Agent settings <ArrowUpRight size={14} /></button><button type="button" className="inspector-secondary-button" onClick={onAddPresence}><Plus size={14} /> Add another channel</button>
+      </>}
+    </aside>
   );
 }
 
@@ -2239,6 +2361,19 @@ function AgentWorkspaceShell({
   const [healthRefreshKey, setHealthRefreshKey] = useState(0);
   const operationalHealth = useOperationalHealth(presence?.id, healthRefreshKey);
   const [healthFocusKey, setHealthFocusKey] = useState(0);
+  const [inspector, setInspector] = useState<InspectorPanel | null>(null);
+  const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const createChat = async () => {
+    const next = await mutate({ type: "createOperatorThread", presenceId: presence.id, title: "New conversation" });
+    const created = next?.operatorThreads?.find((thread) => thread.title === "New conversation") ?? next?.operatorThreads?.[0];
+    if (!created || typeof window === "undefined") return;
+    const url = new URL(window.location.href);
+    url.pathname = viewPaths.chat;
+    url.searchParams.set("threadId", created.id);
+    window.history.pushState({ ...(window.history.state ?? {}), openPresenceView: "chat" }, "", url.pathname + url.search + url.hash);
+    setView("chat");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  };
   const openAttentionReview = () => {
     const hadHistorySurface = typeof window !== "undefined" && ["timeline", "calendar"].includes(new URLSearchParams(window.location.search).get("surface") ?? "");
     setView("review");
@@ -2252,35 +2387,7 @@ function AgentWorkspaceShell({
       if (hadHistorySurface) void refreshState().catch(() => undefined);
     }
   };
-  const presenceBridge = presence.channel !== "x" ? state.bridges.find((item) => item.presenceId === presence.id && item.state !== "offline") : undefined;
-  const presenceBridgeStatus = presenceBridge ? bridgeExecutionStatus(presenceBridge) : undefined;
   const [showPresenceModal, setShowPresenceModal] = useState(false);
-  const [rehearsalCopied, setRehearsalCopied] = useState(false);
-  const isPresenceView = presenceNavItems.some(({ id }) => id === view) || view === "calendar";
-  const contextIdentity = isPresenceView && presence
-    ? { name: presence.name, accent: presence.accent }
-    : { name: agent.name, accent: agent.accent };
-  const contextAvatarUrl = isPresenceView ? presencePlatformAvatarUrl(state, presence) : undefined;
-  const pageLabel =
-    view === "brain"
-      ? "Manage Agent"
-      : view === "presence"
-        ? "Presence"
-      : view === "usage"
-        ? "Usage"
-      : view === "analytics"
-        ? "Analytics"
-      : view === "live"
-        ? "Activity"
-      : view === "review"
-        ? "Review"
-      : view === "feed"
-        ? "Activity"
-      : view === "growth"
-        ? "Growth"
-      : view === "playground"
-        ? "Playground"
-      : view[0].toUpperCase() + view.slice(1);
   const pendingExecutionCount = state.executions.filter(
     (item) =>
       item.presenceId === presence.id && item.status === "awaiting-review",
@@ -2288,158 +2395,32 @@ function AgentWorkspaceShell({
   const pendingAgentChangeCount = state.proposals.filter(
     (item) => item.status === "pending",
   ).length;
-  const rehearsalSession = (state.presenceChatSessions ?? []).find((item) => item.presenceId === presence.id);
-  const rehearsalHasTranscript = Boolean(rehearsalSession?.messages.some((item) => item.role === "user" || item.role === "presence" && !item.operatorFeedback));
-  const copyRehearsal = async () => {
-    const transcript = (rehearsalSession?.messages ?? [])
-      .filter((item) => item.role === "user" || item.role === "presence" && !item.operatorFeedback)
-      .map((item) => `${item.role === "presence" ? presence.name : "You"} · ${formatTime(item.timestamp)}\n${item.role === "presence" ? publicExpressionText(item.content) : item.content}`)
-      .join("\n\n");
-    if (!transcript) return;
-    const fallbackCopy = () => {
-      const fallback = document.createElement("textarea");
-      fallback.value = transcript;
-      fallback.setAttribute("readonly", "");
-      fallback.style.position = "fixed";
-      fallback.style.opacity = "0";
-      document.body.appendChild(fallback);
-      fallback.select();
-      const copied = document.execCommand("copy");
-      fallback.remove();
-      if (!copied) throw new Error("Clipboard copy was not available.");
-    };
-    try {
-      if (navigator.clipboard?.writeText) {
-        try { await navigator.clipboard.writeText(transcript); } catch { fallbackCopy(); }
-      } else {
-        fallbackCopy();
-      }
-      setRehearsalCopied(true);
-      window.setTimeout(() => setRehearsalCopied(false), 1800);
-    } catch {
-      setRehearsalCopied(false);
-    }
-  };
+  const attentionCount = pendingExecutionCount + pendingAgentChangeCount + state.agentRequests.filter((item) => item.status === "open" && item.importance !== "informational").length;
   return (
-    <main className="app-shell">
+    <main className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
-        <div className="brand-lockup sidebar-brand">
-          <div className="brand-mark">◉</div>
-          <span>OpenPresence</span>
-        </div>
-        <div className="sidebar-agent-workspace">
-          <div className="sidebar-label">Agent workspace</div>
-          <AgentSwitcher state={state} mutate={mutate} />
-          <button type="button" className="new-chat-sidebar" onClick={() => void (async () => {
-            const next = await mutate({ type: "createOperatorThread", presenceId: presence.id });
-            const thread = next?.operatorThreads?.[0];
-            if (!thread) return;
-            const url = new URL(window.location.href);
-            url.pathname = viewPaths.chat;
-            url.searchParams.set("threadId", thread.id);
-            window.history.pushState({ ...(window.history.state ?? {}), openPresenceView: "chat" }, "", url.pathname + url.search + url.hash);
-            setView("chat");
-            window.dispatchEvent(new PopStateEvent("popstate"));
-          })()}><Plus size={15} /> New chat</button>
-          <OperatorThreadSidebar state={state} setView={setView} />
-          <div className="sidebar-context-switcher">
-            <span className="sidebar-label">Presence context</span>
-            <PresenceSwitcher state={state} mutate={mutate} onAddPresence={() => setShowPresenceModal(true)} />
-          </div>
-        </div>
-        <nav className="main-nav" aria-label="Primary navigation">
-          {presenceNavItems.filter(({ id }) => !["chat", "presence"].includes(id)).map(({ id, label, icon: Icon }) => (
-            <button key={id} onClick={() => setView(id)} className={view === id ? "active" : ""}>
-              <Icon size={17} /><span>{label}</span>
-              {id === "live" && pendingExecutionCount > 0 && <span className="nav-count">{pendingExecutionCount}</span>}
-            </button>
-          ))}
-        </nav>
-        <div className="sidebar-divider" />
-        <div className="sidebar-label">Agent</div>
-        {agentNavItems.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => setView(id)}
-            className={`secondary-nav ${view === id ? "active" : ""}`}
-          >
-            <Icon size={17} />
-            <span>{label}</span>
-          </button>
-        ))}
-        <button
-          className={`secondary-nav ${view === "brain" ? "active" : ""}`}
-          onClick={() => setView("brain")}
-        >
-          <Brain size={17} />
-          <span>Manage Agent</span>
-          {pendingAgentChangeCount > 0 && (
-            <span className="nav-count">{pendingAgentChangeCount}</span>
-          )}
-        </button>
-        <div className="sidebar-footer"><div className="sidebar-footer-actions"><span className="sidebar-footer-caption">Persistent Agent workspace</span></div></div>
+        <div className="sidebar-brand-row"><div className="brand-lockup sidebar-brand"><div className="brand-mark">◉</div><span>OpenPresence</span></div><button type="button" className="sidebar-collapse-button" aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeft size={17} /> : <PanelLeftClose size={17} />}</button></div>
+        <AgentPortfolio state={state} mutate={mutate} setView={setView} onNewChat={createChat} collapsed={sidebarCollapsed} />
+        {!sidebarCollapsed && <>
+          <div className="sidebar-section-rule" />
+          <section className="sidebar-projects" aria-label="Projects"><div className="portfolio-section-heading"><span className="sidebar-label">Projects</span><span className="sidebar-section-count">{state.assignments.filter((item) => item.environment === "live").length}</span></div>{state.assignments.filter((item) => item.environment === "live").slice(0, 3).map((assignment) => <button type="button" className="sidebar-project-row" key={assignment.id} onClick={() => setView("chat")}><span className="project-avatar-stack"><PresenceGlyph accent={agent.accent} name={agent.name} /></span><span><strong>{assignment.title}</strong><small>Bounded work · {agent.name}</small></span></button>)}{state.assignments.filter((item) => item.environment === "live").length === 0 && <p className="sidebar-empty-copy">Projects appear when you give an Agent a bounded goal.</p>}</section>
+          <div className="sidebar-section-rule" />
+          <section className="sidebar-resources" aria-label="Resources"><span className="sidebar-label">Resources</span><button type="button" className={`resource-nav-row ${view === "rehearsal" ? "active" : ""}`} onClick={() => setView("rehearsal")}><FlaskConical size={17} /><span>Agent Lab</span></button><button type="button" className={`resource-nav-row ${view === "knowledge" ? "active" : ""}`} onClick={() => setView("knowledge")}><BookOpen size={17} /><span>Knowledge</span></button><button type="button" className={`resource-nav-row ${view === "assets" ? "active" : ""}`} onClick={() => setView("assets")}><Layers size={17} /><span>Assets</span></button><button type="button" className={`resource-nav-row ${view === "brain" ? "active" : ""}`} onClick={() => setView("brain")}><Brain size={17} /><span>Agent settings</span>{pendingAgentChangeCount > 0 && <span className="nav-count">{pendingAgentChangeCount}</span>}</button></section>
+        </>}
+        <div className="sidebar-footer"><div className="operator-avatar">AR</div>{!sidebarCollapsed && <div><strong>Aaron</strong><small>Operator</small></div>}<span className="sidebar-footer-status" /></div>
       </aside>
-      <section className={`${view === "chat" || view === "teach" || view === "rehearsal" ? "workspace workspace-chat" : "workspace"} ${view === "knowledge" ? "workspace-knowledge" : ""}`}>
+      <section className={`${view === "chat" || view === "teach" || view === "rehearsal" ? "workspace workspace-chat" : "workspace"} ${view === "knowledge" ? "workspace-knowledge" : ""} ${inspector ? "has-inspector" : ""}`}>
         <header className="topbar">
-          <div className="mobile-brand">
-            <div className="brand-mark">◉</div>
-            <span>OpenPresence</span>
+          <div className="topbar-agent-identity"><PresenceGlyph accent={agent.accent} name={agent.name} /><span><strong>{agent.name}</strong><small>{channelLabel(presence.channel, state.channelDefinitions)} · {presence.handle}</small></span></div>
+          <div className="topbar-actions context-controls" aria-label="Agent context controls">
+            <button type="button" className={`context-control ${inspector === "attention" ? "active" : ""}`} aria-label={`Open Attention${attentionCount ? `, ${attentionCount} waiting` : ""}`} aria-pressed={inspector === "attention"} title="Attention" onClick={() => setInspector((current) => current === "attention" ? null : "attention")}><Bell size={17} />{attentionCount > 0 && <span className="context-control-count">{attentionCount}</span>}</button>
+            <button type="button" className={`context-control ${inspector === "calendar" ? "active" : ""}`} aria-label="Open Calendar" aria-pressed={inspector === "calendar"} title="Calendar" onClick={() => setInspector((current) => current === "calendar" ? null : "calendar")}><CalendarDays size={17} /></button>
+            <button type="button" className={`context-control ${inspector === "analytics" ? "active" : ""}`} aria-label="Open Analytics" aria-pressed={inspector === "analytics"} title="Analytics" onClick={() => setInspector((current) => current === "analytics" ? null : "analytics")}><BarChart3 size={17} /></button>
+            <button type="button" className={`context-control ${inspector === "settings" ? "active" : ""}`} aria-label="Open Agent settings" aria-pressed={inspector === "settings"} title="Agent settings" onClick={() => setInspector((current) => current === "settings" ? null : "settings")}><Settings2 size={17} /></button>
+            <OperationalHealthIndicator health={operationalHealth} onOpen={() => setInspector("attention")} />
           </div>
-          <div className="mobile-agent-switcher">
-            <AgentSwitcher state={state} mutate={mutate} />
-          </div>
-          <div className="mobile-presence-switcher">
-            <PresenceSwitcher
-              state={state}
-              mutate={mutate}
-              onAddPresence={() => setShowPresenceModal(true)}
-            />
-          </div>
-          <div className="topbar-context">
-            <PresenceGlyph accent={contextIdentity.accent} name={contextIdentity.name} look={isPresenceView ? presenceAvatarLook(presence) : "core"} avatarUrl={contextAvatarUrl} />
-            <span>{contextIdentity.name}</span>
-            <ChevronRight size={14} />
-            <strong>{pageLabel}</strong>
-          </div>
-          <div className="topbar-actions">
-            <OperationalHealthIndicator health={operationalHealth} onOpen={openAttentionReview} />
-          </div>
-          {view === "presence" && <div className="topbar-actions">
-            <span className={`connection-label ${presence.status === "paused" ? "paused" : ""}`}>
-              <span className="status-dot" />{" "}
-              {presence.status === "paused"
-                ? "Asleep"
-                : state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "needs-attention") || presenceBridgeStatus === "stale"
-                  ? "Needs attention"
-                  : presence.connectionMode === "sandbox"
-                    ? "Sandbox"
-                    : presenceBridgeStatus === "waiting"
-                      ? "Waiting for adapter"
-                      : (state.nativeConnections.some((item) => item.presenceId === presence.id && item.status === "connected") || presenceBridgeStatus === "connected")
-                        ? "Connected"
-                        : "Not connected"}
-            </span>
-          </div>}
-          {view === "rehearsal" && <div className="topbar-actions">
-            <button
-              type="button"
-              className="rehearsal-copy-button"
-              aria-label={rehearsalCopied ? "Rehearsal copied" : "Copy rehearsal"}
-              title={rehearsalCopied ? "Rehearsal copied" : "Copy rehearsal"}
-              onClick={() => void copyRehearsal()}
-              disabled={!rehearsalHasTranscript}
-            >
-              {rehearsalCopied ? <Check size={16} /> : <Copy size={16} />}
-              <span className="sr-only">{rehearsalCopied ? "Rehearsal copied" : "Copy rehearsal"}</span>
-            </button>
-            <Button
-              variant="secondary"
-              onClick={() => void mutate({ type: "newPresenceChatSession", presenceId: presence.id })}
-            >
-              <Plus size={14} /> New rehearsal
-            </Button>
-          </div>}
         </header>
+        {inspector && <ContextInspector panel={inspector} state={state} presence={presence} attentionCount={attentionCount} onClose={() => setInspector(null)} onNavigate={(nextView) => { setInspector(null); setView(nextView); }} onAddPresence={() => setShowPresenceModal(true)} />}
         {error && (
           <div className="toast-error" role="alert">
             <CircleAlert size={16} /> {error}
@@ -2452,7 +2433,7 @@ function AgentWorkspaceShell({
           {view === "assets" && <AssetsView state={state} refreshState={refreshState} />}
           {view === "usage" && <UsageView state={state} setView={setView} mutate={mutate} />}
           {view === "chat" && <OperatorChatView state={state} mutate={mutate} refreshState={refreshState} setView={setView} />}
-          {view === "rehearsal" && <PresenceChatView key={`${presence.id}-${state.files.find((item) => item.kind === "TASTE")?.revision ?? 0}`} state={state} mutate={mutate} />}
+          {view === "rehearsal" && <AgentLabView state={state} mutate={mutate} setView={setView} />}
           {view === "watching" && <WatchingView state={state} mutate={mutate} refreshState={refreshState} setView={setView} />}
           {view === "people" && <PeopleViewLazy state={state} mutate={mutate} Button={Button} SectionEyebrow={SectionEyebrow} PageHeader={PageHeader} ChannelAvatar={ChannelAvatar} channelLabel={channelLabel} formatTime={formatTime} formatDateTime={formatDateTime} watchRelationshipPolicy={watchRelationshipPolicy} watchPolicyFromPurpose={watchPolicyFromPurpose} watchPlanSummary={watchPlanSummary} />}
           {view === "playground" && (
@@ -2496,38 +2477,6 @@ function AgentWorkspaceShell({
           )}
         </div>
       </section>
-      <nav className="mobile-nav" aria-label="Mobile navigation">
-        {presenceNavItems.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => setView(id)}
-            className={view === id ? "active" : ""}
-          >
-            <Icon size={18} />
-            <span>{label}</span>
-          </button>
-        ))}
-        {agentNavItems.map(({ id, label, icon: Icon }) => (
-          <button
-            key={id}
-            onClick={() => setView(id)}
-            className={view === id ? "active" : ""}
-          >
-            <Icon size={18} />
-            <span>{label}</span>
-          </button>
-        ))}
-        <button
-          onClick={() => setView("brain")}
-          className={view === "brain" ? "active" : ""}
-        >
-          <Brain size={18} />
-          <span>Manage Agent</span>
-          {pendingAgentChangeCount > 0 && (
-            <span className="nav-count">{pendingAgentChangeCount}</span>
-          )}
-        </button>
-      </nav>
       {showPresenceModal && (
         <AddPresenceDialog
           agentName={agent.name}
@@ -3560,6 +3509,24 @@ const scenarioCriterionLabels: Record<string, string> = {
 
 function scenarioCriterionLabel(criterionId: string, version?: OpenPresenceState["scenarioVersions"][number]) {
   return scenarioCriterionLabels[criterionId] ?? version?.evaluationSpec.structuralCriteria.find((criterion) => criterion.id === criterionId)?.label ?? version?.evaluationSpec.socialCriteria.find((criterion) => criterion.id === criterionId)?.label ?? criterionId.replaceAll("-", " ").replace(/\b\w/g, (letter) => letter.toUpperCase());
+}
+
+function AgentLabView({ state, mutate, setView }: { state: OpenPresenceState; mutate: Mutate; setView: (view: View) => void }) {
+  const [surface, setSurface] = useState<"rehearse" | "scenarios">("rehearse");
+  const [creating, setCreating] = useState(false);
+  const agent = state.agent!;
+  const presence = state.presence ?? state.presences[0]!;
+  return (
+    <div className="agent-lab-page" aria-label="Agent Lab">
+      <header className="agent-lab-header">
+        <div className="agent-lab-heading"><div className="agent-lab-breadcrumb"><FlaskConical size={15} /> Agent Lab <ChevronRight size={14} /> <strong>{agent.name}</strong></div><h1>Test {agent.name} before it goes public.</h1><p>Rehearse social situations safely. Nothing here publishes or changes live learning.</p></div>
+        <div className="agent-lab-header-actions"><span className="sandbox-badge"><ShieldCheck size={13} /> Sandbox</span><button type="button" className="lab-close-button" onClick={() => setView("chat")}>Back to Chat</button></div>
+      </header>
+      <div className="agent-lab-toolbar"><div className="agent-lab-tabs" role="tablist" aria-label="Agent Lab surfaces"><button type="button" role="tab" aria-selected={surface === "rehearse"} className={surface === "rehearse" ? "active" : ""} onClick={() => setSurface("rehearse")}>Rehearse</button><button type="button" role="tab" aria-selected={surface === "scenarios"} className={surface === "scenarios" ? "active" : ""} onClick={() => setSurface("scenarios")}>Scenarios</button></div><div className="agent-lab-testing"><PresenceGlyph accent={agent.accent} name={agent.name} /><span>Testing <strong>{agent.name}</strong></span><span className="agent-lab-account">{channelLabel(presence.channel, state.channelDefinitions)} · {presence.handle}</span></div></div>
+      <div className="agent-lab-boundary"><ShieldCheck size={15} /><span><strong>Safe sandbox</strong> Simulated actions stay private. Verified public outcomes only exist on the connected social network.</span></div>
+      {surface === "rehearse" ? <PresenceChatView state={state} mutate={mutate} /> : <ScenarioLibrary state={state} mutate={mutate} presence={presence} creating={creating} onCreatingChange={setCreating} />}
+    </div>
+  );
 }
 
 function ScenarioLibrary({ state, mutate, presence, creating, onCreatingChange }: { state: OpenPresenceState; mutate: Mutate; presence: NonNullable<OpenPresenceState["presence"]>; creating: boolean; onCreatingChange: (open: boolean) => void }) {
@@ -7497,7 +7464,7 @@ function OperatorChatView({ state, mutate, refreshState, setView }: { state: Ope
   };
   return <div className="page page-chat operator-chat-page">
     <PageHeader className="chat-heading" eyebrow={operatorThread.title === "Main" ? "Main" : "Conversation"} title={operatorThread.title} titleAdornment={<><span className="chat-presence-context"><PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} avatarUrl={presencePlatformAvatarUrl(state, presence)} />{state.agent?.name} · {presence.name} <span>{presence.handle}</span></span>{operatorThread.title !== "Main" && <><button type="button" className="operator-chat-copy-button" aria-label="Rename conversation" title="Rename conversation" onClick={() => void renameThread()}><Pencil size={14} /></button><button type="button" className="operator-chat-copy-button" aria-label="Archive conversation" title="Archive conversation" onClick={() => void archiveThread()}><X size={14} /></button></>}<button type="button" className="operator-chat-copy-button" aria-label={conversationCopied ? "Conversation copied" : "Copy conversation"} title={conversationCopied ? "Conversation copied" : "Copy conversation"} onClick={() => void copyConversation()}>{conversationCopied ? <Check size={16} /> : <Copy size={16} />}<span className="sr-only">{conversationCopied ? "Conversation copied" : "Copy conversation"}</span></button></>} description={operatorThread.title === "Main" ? `Talk with ${presence.name} about what is happening, ask a question, or give direction. Meaningful work will return here without turning Main into an activity feed.` : `A durable conversation with ${presence.name}. Accepted work continues if you leave this chat.`} />
-    {threadContext && <details className="operator-thread-context"><summary><span><strong>{operatorThread.title}</strong><small>{threadContext.scopeLabel} · {threadContext.messageCount} message{threadContext.messageCount === 1 ? "" : "s"}</small></span><span>{threadContext.assignmentCount ? `${threadContext.assignmentCount} responsibility` : "No active responsibility"}</span></summary><div><span>Conversation context is scoped to {presence.name}; Activity remains the historical work log.</span>{threadContext.assignments.length > 0 && <ul>{threadContext.assignments.slice(0, 3).map((assignment) => <li key={assignment.id}>{assignment.title} · {assignment.completion}</li>)}</ul>}</div></details>}
+    {threadContext && <details className="operator-thread-context"><summary><span><strong>{operatorThread.title}</strong><small>Agent chat · <span>Presence context</span> · {threadContext.messageCount} message{threadContext.messageCount === 1 ? "" : "s"}</small></span><span>{threadContext.assignmentCount ? `${threadContext.assignmentCount} responsibility` : "No active responsibility"}</span></summary><div><span>Conversation context is scoped to {state.agent?.name ?? presence.name}; work and outcomes return here as the Agent&apos;s narrative.</span>{threadContext.assignments.length > 0 && <ul>{threadContext.assignments.slice(0, 3).map((assignment) => <li key={assignment.id}>{assignment.title} · {assignment.completion}</li>)}</ul>}</div></details>}
     <div className="chat-layout operator-chat-layout">
       <section className="chat-thread operator-chat-thread">
         {presence.status === "paused" && <div className="operator-chat-paused" role="status"><Pause size={15} /> {presence.name} is paused. Messages will be delivered and held without waking or invoking her.</div>}
@@ -7527,7 +7494,7 @@ function OperatorChatView({ state, mutate, refreshState, setView }: { state: Ope
         <div className="operator-chat-composer-meta"><ChatModePicker mode="chat" setView={setView} /><span>{presence.name} · {presence.handle}</span>{sessionAssignments.some((assignment) => assignmentIsOpen(assignment)) ? <span>Steering current work</span> : <span>Public actions require review</span>}</div>
         <form className="chat-composer operator-chat-composer" onSubmit={send}>
           <label className="attach-button" aria-label="Attach context"><Plus size={16} /><input type="file" hidden multiple onChange={(event) => Array.from(event.target.files ?? []).forEach(addFile)} /></label>
-          <textarea ref={composerRef} aria-label={`Message ${presence.name}`} value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder={sending ? `Sending to ${presence.name}…` : sessionAssignments.some((assignment) => assignmentIsOpen(assignment)) ? "Steer current work or ask Jenny…" : `Message ${presence.name}…`} rows={1} disabled={sending} />
+          <textarea ref={composerRef} aria-label={`Message ${presence.name}`} value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder={sending ? `Sending to ${presence.name}…` : sessionAssignments.some((assignment) => assignmentIsOpen(assignment)) ? `Steer current work or ask ${presence.name}…` : `Message ${presence.name}…`} rows={1} disabled={sending} />
           <button className="send-button" aria-label={presence.status === "paused" ? "Queue message" : "Send"} type="submit" disabled={!message.trim() || sending}>{sending ? <LoaderCircle size={17} className="spin" /> : <Send size={17} />}</button>
         </form>
         <div className="composer-hint">Enter to send <span>·</span> Shift + Enter for a new line{presence.status === "paused" ? <><span>·</span> Queued until Wake</> : null}</div>

@@ -480,7 +480,12 @@ async function runAutonomousVerification(run: OperationalRun): Promise<OpenPrese
 async function runOperatorChat(run: OperationalRun): Promise<OpenPresenceState> {
   const base = readStateSnapshotForContext({ presenceId: run.presenceId });
   const messageId = typeof run.metadata?.operatorMessageId === "string" ? run.metadata.operatorMessageId : undefined;
-  const conversation = base.operatorConversations?.find((item) => item.presenceId === run.presenceId);
+  // Operator message ids are globally unique across conversations. Resolve
+  // the exact thread from the durable message id before falling back to the
+  // presence, otherwise a second thread can make a valid send look missing.
+  const conversation = base.operatorConversations?.find((item) =>
+    Boolean(messageId && item.messages.some((candidate) => candidate.id === messageId)),
+  ) ?? base.operatorConversations?.find((item) => item.presenceId === run.presenceId);
   const messageIndex = messageId ? conversation?.messages.findIndex((item) => item.id === messageId) ?? -1 : -1;
   const operatorMessage = messageIndex >= 0 ? conversation?.messages[messageIndex] : undefined;
   const presence = base.presences.find((item) => item.id === run.presenceId) ?? base.presence;

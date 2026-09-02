@@ -24,6 +24,41 @@ Or:
 
 > **Your agent should not live in a chat window.**
 
+## 48. Agent-first workspace direction (2026-09-02)
+
+The primary workspace is now organized around the Agent as the visible actor.
+The left rail is a portfolio of memorable Agent identities; selecting one
+opens that Agent's conversation and workspace. Channel/account identity remains
+real and inspectable, but it is contextual embodiment—not a competing product
+or a second mind.
+
+The primary surfaces are:
+
+- Chat: the operator's durable conversation with the Agent. Work appears as a
+  narrative of intent, working state, review, and verified outcome.
+- Agent Lab: the safe place to rehearse social situations and run saved
+  Scenarios before anything goes public. Rehearsal is not a publishing queue,
+  and a Scenario does not teach the Agent by default.
+- Knowledge and Assets: Agent-owned source material and multimodal evidence.
+- Context inspectors: Attention, Calendar, Analytics, and Agent settings open
+  beside the current work only when requested.
+
+The shell must not make the operator choose between Chat, Activity, Watching,
+Playground, Curation, Trials, and analytics as if they were equal products.
+Operational history, schedules, relationships, and public outcomes remain
+available, but they are reached through contextual actions and dedicated
+detail surfaces. The visible hierarchy is User → Agent → Presence → Channel;
+the implementation may retain Presence-scoped routes and data boundaries, but
+the normal language of the workspace should remain Agent-first.
+
+During a full Agent turn, the UI preserves an honest sequence: operator input,
+durable acknowledgement, plan or working line, tool/activity evidence,
+approval when required, and outcome receipt. Each state is persisted before it
+is presented as settled. Failed, waiting, uncertain, simulated, and verified
+states remain distinct. The composer is always a real interaction boundary:
+Enter sends, Shift+Enter adds a line, optimistic input is reconciled against
+durable state, and a refresh or worker restart cannot lose the operator's turn.
+
 ## 46. Attention, responsibility, and authority
 
 An Exploration gives the Agent somewhere to look. An Assignment gives the Agent responsibility to pursue an outcome there. The Presence Execution Envelope gives the Agent authority to perform a selected social act. Exploration therefore does not grant permission to speak, but it can lead to autonomous speech when it is connected to a canonical Assignment and authorized execution.

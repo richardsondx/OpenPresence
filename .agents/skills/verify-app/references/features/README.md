@@ -1,6 +1,6 @@
 # OpenPresence feature map
 
-> Reviewed 2026-09-01 against the current source and a fresh harness-owned runtime. This map records the current product surface, not the proposed simplified design.
+> Reviewed 2026-09-02 against the current source and a fresh harness-owned runtime. This map records the current product surface and the Agent-first workspace direction.
 
 This map records how a real operator reaches behavior in the local OpenPresence product and what counts as proof. It is intentionally behavior-level; source code and internal handlers are not substitutes for exercising the UI.
 
@@ -41,7 +41,7 @@ The current shell does expose both switchers, but the Presence switcher is label
 | `/review` | Review / Needs You | Selected Presence | Focused operator queue; must not be described as delivery until outcome is verified |
 | `/chat` | Chat | Agent conversation, Presence context where applicable | Private operator conversation and receipts |
 | `/teach` | Teach | Agent-wide durable judgment | Conversation, proposals/change sets, scope and persistence |
-| `/rehearsal` | Presence Rehearsal | Selected Presence, Sandbox | Private social practice; never live delivery or durable identity mutation by default |
+| `/rehearsal` | Agent Lab | Selected Agent with Presence context, Sandbox | Rehearse social situations or run saved Scenarios; never live delivery or durable identity mutation by default |
 | `/watching` | Watching / Attention | Selected Presence | Watches and Explorations; attention is not authority to speak |
 | `/people` | People / Relationships | Selected Presence | Remembered identities, relationship facts, boundaries, and open loops |
 | `/settings` | Presence care (currently `Channels`) | Selected Presence | Identity, purpose, attention, autonomy, knowledge access, connection, and deletion |
@@ -60,9 +60,16 @@ The current shell does expose both switchers, but the Presence switcher is label
 
 ## Current navigation shell
 
-Desktop and mobile expose selected-Presence items: `Activity`, `Review`, `Chat`, `Watching`, `Presence`, `Playground`, and `Analytics`. Agent items are `Work`, `Knowledge`, `Assets`, and `Manage Agent`. `Schedule` remains the temporal detail route; `Teach`, `People`, `Growth`, `Feed`, `Usage`, and `Rehearsal` remain reachable by direct route or contextual links.
+The primary desktop shell is Agent-first: a memorable Agent portfolio rail, Chat, Agent Lab, Knowledge, Assets, and Agent settings. Attention, Calendar, Analytics, and health open as contextual inspectors. Presence-scoped routes remain available for operational detail, but `Activity`, `Review`, `Watching`, and legacy `Playground` are not presented as equal primary products. `Schedule` remains the temporal detail route; `Teach`, `People`, `Growth`, `Feed`, and `Usage` remain reachable by direct route or contextual links.
 
 Every loaded view repeats an Agent switcher, Presence switcher, operational health indicator, and the same navigation. The repeated shell is part of every journey and should be considered when evaluating cognitive load.
+
+## Agent-first verification contract
+
+- Selecting an Agent from the left rail changes the active Agent and opens Chat; the selection persists after refresh.
+- Chat sends must create a durable operator message before generation, show a working/thinking state while the worker runs, and render the Agent response in the selected thread.
+- Agent Lab must clearly identify Sandbox, keep Rehearse and Scenarios together, and never describe simulated output as a live social outcome.
+- Opening Attention, Calendar, Analytics, or Agent settings must preserve the current surface and close cleanly without changing the underlying Agent or Presence.
 
 ## Feature areas
 

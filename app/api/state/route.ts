@@ -5466,7 +5466,11 @@ export async function POST(request: Request) {
         // unavailable, or the process restarts while it is being generated.
         next = recordOperatorConversationMessage(next, { presenceId: parsed.presenceId, threadId: parsed.threadId, content: parsed.content, clientRequestId: parsed.clientRequestId });
         writeState(next);
-        const operatorMessage = next.operatorConversations?.find((item) => item.presenceId === parsed.presenceId)?.messages.at(-1);
+        const operatorConversation = next.operatorConversations?.find((item) =>
+          item.presenceId === parsed.presenceId
+          && (!parsed.threadId || item.threadId === parsed.threadId || item.id === parsed.threadId || (!item.threadId && `thread:${item.id}` === parsed.threadId)),
+        );
+        const operatorMessage = operatorConversation?.messages.slice().reverse().find((item) => item.role === "operator");
         if (!operatorMessage) throw new Error("The operator message could not be persisted.");
         const queued = queueAutonomyRun(parsed.presenceId, "operator_chat", {
           stage: "operator_chat.queued",
