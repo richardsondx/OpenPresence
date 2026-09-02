@@ -59,6 +59,34 @@ describe("truthful Activity right-now projection", () => {
     expect(projection.detail).toContain("No meaningful progress");
   });
 
+  it("shows a queued recovery as durable waiting work instead of active or stuck cognition", () => {
+    const state = fixture();
+    const presence = state.presence!;
+    const old = new Date(Date.now() - 10 * 60_000).toISOString();
+    state.operationalRuns = [{ id: "queued-recovery", runId: "queued-recovery", presenceId: presence.id, kind: "attention", state: "queued", stage: "recovery_retry_attention", createdAt: old, startedAt: old, lastProgressAt: old, eligibleAt: old, attemptCount: 1, recoveryCount: 0 } as OperationalRun];
+
+    const projection = deriveActivityNow(state, presence.id);
+
+    expect(projection.state).toBe("recovering");
+    expect(projection.title).toBe("Attention pass queued to resume");
+    expect(projection.detail).toContain("No cognition worker is running");
+    expect(projection.staleForMs).toBeUndefined();
+  });
+
+  it("shows a queued recovery as waiting for review when a Presence-wide operator gate exists", () => {
+    const state = fixture();
+    const presence = state.presence!;
+    const timestamp = new Date().toISOString();
+    state.operationalRuns = [{ id: "queued-provider-recovery", runId: "queued-provider-recovery", presenceId: presence.id, kind: "attention", state: "queued", stage: "recovery_retry_attention", createdAt: timestamp, lastProgressAt: timestamp, eligibleAt: timestamp, attemptCount: 1, recoveryCount: 0 } as OperationalRun];
+    state.recoveryIncidents = [{ id: "provider-review", rootCauseKey: "model_provider.credentials_missing", dependencyId: "provider", presenceId: presence.id, state: "needs_operator", openedAt: timestamp, lastObservedAt: timestamp, affectedRunIds: [], recoveryAttempts: 0, safeSummary: "The selected AI provider is not configured.", operatorActionRequired: true, updatedAt: timestamp }];
+
+    const projection = deriveActivityNow(state, presence.id);
+
+    expect(projection.state).toBe("paused");
+    expect(projection.title).toBe("Attention pass waiting for your review");
+    expect(projection.detail).toContain("No cognition worker is running");
+  });
+
   it("shows Assignment stages while a worker is active and does not call delivery waiting work", () => {
     const state = fixture();
     const presence = state.presence!;

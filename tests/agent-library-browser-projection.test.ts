@@ -124,6 +124,33 @@ describe("Agent library browser projections", () => {
     expect(projection.people).toEqual([]);
   });
 
+  it("keeps Work as an Agent-wide responsibility index while retaining thread provenance", () => {
+    const state = createAgent({ name: "Genny", description: "An agent for useful software conversations.", audience: "AI builders", mode: "agent", handle: "@genny", accent: "#d88b57" });
+    const presenceId = state.presence!.id;
+    const agentId = state.agent!.id;
+    state.assignments = [{ id: "assignment-1", agentId, presenceId, status: "active", instruction: "Keep one useful responsibility moving." }] as never;
+    state.operatorThreads = [{
+      id: "thread-1",
+      agentId,
+      title: "Main thread",
+      scope: { kind: "presence", presenceId },
+      originThreadId: null,
+      communicationThreadId: "operator-1",
+      status: "active",
+      messageIds: [],
+      assignmentIds: ["assignment-1"],
+      createdAt: "2026-09-01T00:00:00.000Z",
+      updatedAt: "2026-09-01T00:00:00.000Z",
+    }];
+    state.mirrorObjects = [{ id: "unrelated" }] as never;
+
+    const projection = agentLibraryBrowserProjection(state, "work");
+    expect(projection.responseProjection).toBe("work");
+    expect(projection.assignments).toEqual(state.assignments);
+    expect(projection.operatorThreads).toEqual(state.operatorThreads);
+    expect(projection.mirrorObjects).toEqual([]);
+  });
+
   it("keeps Watching evidence and connector state scoped to the Presence", () => {
     const state = createAgent({ name: "Genny", description: "An agent for useful software conversations.", audience: "AI builders", mode: "agent", handle: "@genny", accent: "#d88b57" });
     const presenceId = state.presence!.id;

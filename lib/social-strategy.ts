@@ -150,6 +150,76 @@ function recentStrategyShape(state: OpenPresenceState, presenceId: string, limit
   return shape;
 }
 
+export interface StrategyPerformanceSummary {
+  action: string;
+  samples: number;
+  averageImpressions?: number;
+  averageEngagementRate?: number;
+  averageEngagementSignal: number;
+  mirrorObjectIds: string[];
+}
+
+function performanceActionForMirror(state: OpenPresenceState, mirror: OpenPresenceState["mirrorObjects"][number]) {
+  const execution = mirror.originExecutionId
+    ? state.executions.find((item) => item.id === mirror.originExecutionId)
+    : undefined;
+  const affordance = execution?.affordance?.replace(/^x\./, "");
+  if (affordance && ["post", "reply", "quote", "repost", "like", "follow"].includes(affordance)) return affordance;
+  return ["post", "reply", "quote", "repost", "like", "follow"].includes(mirror.objectType) ? mirror.objectType : undefined;
+}
+
+function engagementSignal(snapshot: OpenPresenceState["publicationMetricSnapshots"][number]) {
+  return (snapshot.likes ?? 0)
+    + (snapshot.replies ?? 0) * 3
+    + (snapshot.reposts ?? 0) * 4
+    + (snapshot.quotes ?? 0) * 5;
+}
+
+/**
+ * Summarize only verified live publication metrics by the social act that
+ * produced each Mirror object. This is descriptive evidence for the planner,
+ * not a deterministic action selector or a causal growth claim.
+ */
+export function summarizeStrategyPerformance(state: OpenPresenceState, presenceId: string): StrategyPerformanceSummary[] {
+  const latestByMirror = new Map<string, OpenPresenceState["publicationMetricSnapshots"][number]>();
+  for (const snapshot of state.publicationMetricSnapshots ?? []) {
+    const mirror = state.mirrorObjects.find((item) => item.id === snapshot.mirrorObjectId);
+    if (!mirror || mirror.presenceId !== presenceId || mirror.environment === "sandbox" || snapshot.observationStatus === "unavailable") continue;
+    const prior = latestByMirror.get(snapshot.mirrorObjectId);
+    if (!prior || snapshot.observedAt > prior.observedAt) latestByMirror.set(snapshot.mirrorObjectId, snapshot);
+  }
+  const byAction = new Map<string, StrategyPerformanceSummary & { impressions: number[]; rates: number[] }>();
+  for (const snapshot of latestByMirror.values()) {
+    const mirror = state.mirrorObjects.find((item) => item.id === snapshot.mirrorObjectId);
+    const action = mirror ? performanceActionForMirror(state, mirror) : undefined;
+    if (!action) continue;
+    const summary = byAction.get(action) ?? { action, samples: 0, impressions: [], rates: [], averageEngagementSignal: 0, mirrorObjectIds: [] };
+    summary.samples += 1;
+    summary.averageEngagementSignal += engagementSignal(snapshot);
+    summary.mirrorObjectIds.push(snapshot.mirrorObjectId);
+    if (typeof snapshot.impressions === "number" && snapshot.impressions > 0) {
+      summary.impressions.push(snapshot.impressions);
+      summary.rates.push(engagementSignal(snapshot) / snapshot.impressions * 100);
+    }
+    byAction.set(action, summary);
+  }
+  return [...byAction.values()]
+    .map(({ impressions, rates, ...summary }) => ({
+      ...summary,
+      ...(impressions.length ? { averageImpressions: Math.round(impressions.reduce((sum, value) => sum + value, 0) / impressions.length) } : {}),
+      ...(rates.length ? { averageEngagementRate: Number((rates.reduce((sum, value) => sum + value, 0) / rates.length).toFixed(2)) } : {}),
+      averageEngagementSignal: Number((summary.averageEngagementSignal / Math.max(1, summary.samples)).toFixed(2)),
+    }))
+    .sort((left, right) => right.averageEngagementSignal - left.averageEngagementSignal || right.samples - left.samples);
+}
+
+function strategyPerformanceContext(state: OpenPresenceState, presenceId: string) {
+  const summaries = summarizeStrategyPerformance(state, presenceId);
+  if (!summaries.length) return "No verified live publication-performance comparison is available yet. Do not infer that one act grows the audience better than another.";
+  const lines = summaries.map((summary) => `- ${summary.action}: ${summary.samples} verified publication${summary.samples === 1 ? "" : "s"}${summary.averageEngagementRate !== undefined ? `, ${summary.averageEngagementRate}% average weighted engagement signal per impression` : ""}${summary.averageImpressions !== undefined ? `, ${summary.averageImpressions.toLocaleString()} average impressions` : ""}.`);
+  return `Verified live publication performance by act (descriptive evidence, not causal proof):\n${lines.join("\n")}\nUse this evidence to test the active Growth mission. Prefer a stronger observed act only when the current source also earns it; do not force quote, repost, or any other action from a small sample, and do not claim causality.`;
+}
+
 const knownPatternIds = new Set(patterns.map((pattern) => pattern.id));
 const confidenceRank: Record<SocialDecisionConfidence, number> = { low: 0, medium: 1, high: 2 };
 
@@ -334,11 +404,12 @@ export function compileSocialStrategyContext(state: OpenPresenceState, presence:
     ? candidates.map((pattern) => `- ${pattern.id} · ${pattern.mechanism} · audience role: ${pattern.audienceRole}\n  useful when: ${pattern.usefulConditions.join("; ")}\n  weak when: ${pattern.weakConditions.join("; ")}\n  risks: ${pattern.risks.join("; ")}`).join("\n")
     : `- ${noPatternReason}`;
   const growthText = hypotheses.length ? hypotheses.map((hypothesis) => `- ${hypothesis.id} · ${hypothesis.scope} · ${hypothesis.status} · ${hypothesis.statement}`).join("\n") : "- No applicable structured Growth hypothesis.";
+  const performanceText = strategyPerformanceContext(state, presence.id);
   const skillText = skills.length ? skills.flatMap((skill) => (skill.strategyContributions ?? []).map((contribution) => `- ${skill.id}/${contribution.id}: ${contribution.guidance}`)).join("\n") : "- No specialized strategy Skill applies.";
   const recentText = Object.entries(recent).filter(([, count]) => count > 0).map(([mechanism, count]) => `${mechanism} ${count} of last ${Math.max(1, Object.values(recent).reduce((sum, value) => sum + value, 0))}`).join(", ") || "no selected strategy shape recorded";
   return {
     retrievalRun,
-    prompt: `SOCIAL STRATEGY INTELLIGENCE (possibilities, never instructions)\nChannel: ${presence.channel}\nPlaybook: ${selectedPlaybook ? `${selectedPlaybook.id} v${selectedPlaybook.version}` : "no built-in Playbook"}\nRecent strategy shape: ${recentText}\n${legacy ? `Legacy Channel guidance (advisory only): ${legacy.text}\n` : ""}\nConsider up to five candidates, select none when appropriate, and never copy example wording.\n${patternText}\n\nRelevant Growth hypotheses (evidence, not policy):\n${growthText}\n\nCompatible strategy Skills (extensions, not replacements):\n${skillText}\n\nIf you select an act, declare strategyId from the supplied pattern IDs and mechanismId from the selected pattern's mechanism. Invalid or invented IDs will be discarded.`,
+    prompt: `SOCIAL STRATEGY INTELLIGENCE (possibilities, never instructions)\nChannel: ${presence.channel}\nPlaybook: ${selectedPlaybook ? `${selectedPlaybook.id} v${selectedPlaybook.version}` : "no built-in Playbook"}\nRecent strategy shape: ${recentText}\n${legacy ? `Legacy Channel guidance: ${legacy.text}\n` : ""}\nConsider up to five candidates, select none when appropriate, and never copy example wording.\n${patternText}\n\nRelevant Growth hypotheses (evidence, not policy):\n${growthText}\n\n${performanceText}\n\nCompatible strategy Skills (extensions, not replacements):\n${skillText}\n\nIf you select an act, declare strategyId from the supplied pattern IDs and mechanismId from the selected pattern's mechanism. Invalid or invented IDs will be discarded.`,
   };
 }
 

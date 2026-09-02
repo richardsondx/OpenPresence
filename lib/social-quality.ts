@@ -35,6 +35,10 @@ const TEACHER_FRAMING_SIGNALS = [
   "here's why",
 ];
 
+const MIXED_FEELING_MILESTONE_TARGET = /\b(?:finally|milestone|crossed|hit|reached|made it to|shipped|launched|released|proud)\b/i;
+const MIXED_FEELING_CAVEAT_TARGET = /\b(?:took|taking|longer|delay(?:ed)?|exhaust(?:ed|ing)|tired|frustrat(?:ed|ing)|hard|doubt|burn(?:ed|t out))\b/i;
+const MIXED_FEELING_REFRAME_DRAFT = /\b(?:the\s+slow\s+part|the\s+hard\s+part|taught\s+you|teaches\s+you|learn(?:ed|ing)?|the\s+lesson|makes?\s+it\s+(?:stick|sturdy|hold\s+up)|earned\s+it\s+the\s+hard\s+way|built\s+(?:it\s+)?on\s+(?:something\s+)?that\s+actually\s+(?:holds?|lasts?|works?)|made\s+you\s+stronger|worth\s+it|you['’]?re\s+allowed\s+to|it(?:['’]?s|\s+is)\s+(?:okay|ok|valid|fair)\s+(?:that|to))\b/i;
+
 // These are common “thought-leadership” scaffolds. They sound decisive, but
 // often replace the author's actual moment with a generic thesis.
 const THESIS_FRAME_SIGNALS = [
@@ -58,6 +62,33 @@ const FORMULAIC_CONTRAST_PATTERNS = [
   /\botherwise\s+(?:you['’]ve|you have|we['’]ve|we have|they['’]ve|they have)\b/i,
   /\bdoing\s+(?:astonishingly\s+)?(?:heavy|heroic)\s+lifting\b/i,
 ];
+
+// A common AI-social move is to quote a small fragment of the source and then
+// review it from the outside. This is different from a phrase-specific answer
+// and from a real quote-post: the draft is commenting on the message instead
+// of participating in the exchange.
+const SOURCE_COMMENTARY_OPENING_PATTERNS = [
+  /^(?:@[a-z0-9_]{1,30}\s+)?(?:i\s+(?:like|love|appreciate|notice|admire)\s+)?(?:the\s+)?[“\"‘'][^”\"’'\n]{1,100}[”\"’']/i,
+  /^(?:@[a-z0-9_]{1,30}\s+)?before\s+(?:treating|assuming|calling|taking)\s+[“\"‘']/i,
+  /^(?:@[a-z0-9_]{1,30}\s+)?[“\"‘'][^”\"’'\n]{1,100}[”\"’']\s+(?:is|was|does|did|deserves|needs)\b/i,
+  /^(?:@[a-z0-9_]{1,30}\s+)?(?:a\s+)?(?:recurring|classic|common|familiar)\s+(?:pattern|move|line|phrase)\b[^.!?\n]{0,120}[“\"‘']/i,
+  /^@[a-z0-9_]{1,30}\s+[“\"‘'][^”\"’'\n]{1,60}[”\"’']\s+is\s+(?:doing|working)\b/i,
+  /^(?:the\s+)?other\s+half\s+(?:is|being)\b/i,
+  /^(?:the\s+)?(?:interesting|real|hard)\s+(?:question|shift|part|test)\b/i,
+  /^(?:this|that)\s+(?:claim|framing|premise)\b[^.!?\n]{0,80}\b(?:gets?\s+repeated|is\s+too|overstates?|flattens?|conflates?)\b/i,
+  /^(?:i['’]?d|i\s+would)\s+push\s+back\b/i,
+];
+const PLAYFUL_TARGET_PATTERN = /\b(?:lol|lmao|haha|funeral)\b/i;
+const EMOJI_PATTERN = /\p{Extended_Pictographic}/u;
+
+/** Preserve a light joke's tone when the model omitted the requested cue. */
+export function ensurePlayfulToneEmoji(targetText: string, draft: string): string {
+  const target = targetText.trim();
+  const text = draft.trim();
+  if (!text || !PLAYFUL_TARGET_PATTERN.test(target) || EMOJI_PATTERN.test(text)) return text;
+  const emoji = /\bfuneral\b/i.test(target) ? "😭" : /\b(?:lol|lmao)\b/i.test(target) ? "😂" : "😄";
+  return `${text} ${emoji}`;
+}
 
 const GENERIC_AI_OPENING_PATTERNS = [
   /^(?:the|this)\s+(?:demo|launch|update|project|product|post|thing)\s+(?:is|shows|means)\s+(?:an?|the)\s+(?:interesting|useful|important|real|meaningful|powerful|compelling|thoughtful|promising|strong|exciting|transformative|effective|valuable)\b/i,
@@ -272,14 +303,29 @@ export function socialReplyQualityIssue(targetText: string, draft: string): stri
   const teacherFramingCount = TEACHER_FRAMING_SIGNALS.filter((signal) => lowerDraft.includes(signal)).length;
   const thesisFrameCount = THESIS_FRAME_SIGNALS.filter((signal) => lowerDraft.includes(signal)).length;
   const formulaicContrast = FORMULAIC_CONTRAST_PATTERNS.find((pattern) => pattern.test(text));
+  const sourceCommentaryOpening = SOURCE_COMMENTARY_OPENING_PATTERNS.find((pattern) => pattern.test(text));
   const genericAiOpening = GENERIC_AI_OPENING_PATTERNS.find((pattern) => pattern.test(text));
   const cannedEmpathy = CANNED_EMPATHY_PATTERNS.find((pattern) => pattern.test(text));
   const corporatePhrase = CORPORATE_PHRASE_PATTERNS.find((pattern) => pattern.test(text));
+  const mixedFeelingMoment = MIXED_FEELING_MILESTONE_TARGET.test(target) && MIXED_FEELING_CAVEAT_TARGET.test(target);
+  const mixedFeelingReframe = MIXED_FEELING_REFRAME_DRAFT.test(text);
   const hasTargetAnchor = targetAnchors(target).some((anchor) => lowerDraft.includes(anchor.toLowerCase()));
   const isAnnouncement = /\b(?:launch(?:ed)?|live|excited|proud|announce|announcement|built|shipping|released|capable)\b/i.test(target)
     || /let(?:'|’)s see what you(?:'|’)re capable/i.test(target);
   const isWarm = WARM_SOCIAL_SIGNALS.some((signal) => lowerDraft.includes(signal));
+  const playfulTarget = PLAYFUL_TARGET_PATTERN.test(target);
+  const phraseSpecificQuestion = /\b(?:what|why|which|how)\s+(?:does|did|do|is|was|were|means?|mean)\b[^.!?]{0,80}[“\"‘']/i.test(target)
+    || /\b(?:by|with)\s+[“\"‘'][^”\"’']+[”\"’']\s+(?:do you|did you|are you|were you)\b/i.test(target);
 
+  if (sourceCommentaryOpening && !phraseSpecificQuestion) {
+    return "The draft opens by reviewing or quoting the source instead of joining the exchange. Start with your own reaction or contribution; use exact wording only when the question requires it.";
+  }
+  if (mixedFeelingMoment && mixedFeelingReframe && !/\b(?:what|how|why)\s+(?:did|do|can|would)\s+you\s+learn\b/i.test(target)) {
+    return "The author shared a win with a real caveat. Acknowledge both plainly, but do not turn the delay or difficulty into a lesson, virtue, or tidy reframe.";
+  }
+  if (playfulTarget && !EMOJI_PATTERN.test(text)) {
+    return "The target is playful, but the draft leaves the tone ambiguous. Keep the joke brief and add one familiar emoji, unless the subject is sensitive.";
+  }
   if (formulaicContrast) {
     return "The draft uses a stock contrast or vague thought-leadership frame. State the concrete point directly, with a human reaction or a constructive next step.";
   }

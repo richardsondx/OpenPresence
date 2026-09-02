@@ -1,4 +1,5 @@
 import { recordOperationalFailure } from "./incident-engine";
+import { duplicatePublicOutcomeEvidence } from "./duplicate-public-outcome";
 import { publicActionDeliveryScope, reservePublicActionDelivery, updatePublicActionDelivery } from "./db";
 import { isTestRuntime } from "./test-runtime";
 import type { Execution, OpenPresenceState } from "./types";
@@ -14,19 +15,8 @@ const cancellableStatuses = new Set<Execution["status"]>([
  */
 export function detectDuplicatePublicOutcomes(source: OpenPresenceState, presenceId: string): OpenPresenceState {
   const state = source;
-  const byTarget = new Map<string, typeof state.mirrorObjects>();
-  for (const object of state.mirrorObjects) {
-    if (object.presenceId !== presenceId || object.environment === "sandbox" || object.archived) continue;
-    if (object.actorPresenceId !== presenceId || object.objectType !== "reply" || !object.parentExternalRef) continue;
-    const key = `${object.parentExternalRef.type}:${object.parentExternalRef.id}`;
-    const group = byTarget.get(key) ?? [];
-    if (!group.some((candidate) => candidate.externalRef.type === object.externalRef.type && candidate.externalRef.id === object.externalRef.id)) group.push(object);
-    byTarget.set(key, group);
-  }
-
-  for (const [targetKey, objects] of byTarget) {
-    if (objects.length < 2) continue;
-    const target = objects[0]!.parentExternalRef!;
+  for (const { targetRef: target, replies: objects } of duplicatePublicOutcomeEvidence(state, presenceId)) {
+    const targetKey = `${target.type}:${target.id}`;
     const matchingExecutions = state.executions.filter((execution) => execution.presenceId === presenceId
       && execution.environment !== "sandbox"
       && ["reply", "x.reply"].includes(execution.affordance)

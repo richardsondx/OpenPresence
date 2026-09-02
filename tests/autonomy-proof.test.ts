@@ -164,6 +164,8 @@ describe("Empirical Autonomy Evidence Harness", () => {
     expect(repostOutcome.status).toBe("succeeded");
     expect(deliveredFollow.status).toBe("succeeded");
     expect(results.relationshipMemory.followingVerified).toBe(true);
+    expect(results.relationshipMemory.personIdentityRecorded).toBe(true);
+    expect(state.relationships.find((relationship) => relationship.personId === personIdentity?.personId)?.following).toBe(true);
 
     // CRITICAL INVARIANT: Standalone post + Quote + Follow MUST NOT create a ConversationEpisode or Conversation Agenda work
     expect(state.conversationEpisodes.length).toBe(0);

@@ -2,6 +2,7 @@ import { describe, expect, it, vi } from "vitest";
 import { writeState } from "../lib/db";
 import { POST as statePost } from "../app/api/state/route";
 import { addSandboxEvent, advanceSandboxTime, applyOperation, beginOriginalPostRehearsal, completeOriginalPostRehearsal, confirmAutoMode, createAgent, deliverSandboxExecution, expireSandboxIntents, formSandboxIntent, recordPreferenceEvidence, resetPlaygroundSession, startPlaygroundSession, syncPlaygroundTime } from "../lib/runtime";
+import type { OpenPresenceState } from "../lib/types";
 
 const input = { name: "Jenny", description: "Explain useful AI agent ideas.", mode: "agent" as const, handle: "@jenny_ai", accent: "#D68754" };
 
@@ -207,7 +208,7 @@ describe("Sandbox and Playground boundaries", () => {
   });
 
   it("delivers only simulated executions and leaves a visible simulated object", () => {
-    let state = startPlaygroundSession(createAgent(input));
+    let state = startPlaygroundSession(applyOperation(createAgent(input), { type: "setPresence", patch: { execution: { post: "auto" } } }));
     const session = state.playgroundSessions[0]!;
     state = formSandboxIntent(state, { sessionId: session.id, affordance: "post", text: "A useful first thought about building agents." });
     const execution = state.executions[0]!;
@@ -246,7 +247,7 @@ describe("Sandbox and Playground boundaries", () => {
   });
 
   it("delivers a Sandbox execution idempotently and carries publication assets into the Mirror", () => {
-    let state = startPlaygroundSession(createAgent(input));
+    let state = startPlaygroundSession(applyOperation(createAgent(input), { type: "setPresence", patch: { execution: { post: "auto" } } }));
     const session = state.playgroundSessions[0]!;
     state = formSandboxIntent(state, {
       sessionId: session.id,
@@ -268,8 +269,85 @@ describe("Sandbox and Playground boundaries", () => {
     expect(state.publications[0]?.assetIds).toHaveLength(2);
   });
 
+  it("reuses an eligible Asset-library item by exact id and records Sandbox usage", () => {
+    let state = applyOperation(createAgent(input), { type: "setPresence", patch: { execution: { post: "auto" } } });
+    state = startPlaygroundSession(state);
+    const session = state.playgroundSessions[0]!;
+    const libraryAsset = {
+      id: "library-visual-1",
+      agentId: state.agent!.id,
+      sourceId: "asset-source-1",
+      type: "image" as const,
+      semanticKind: "diagram" as const,
+      dataUrl: "data:image/svg+xml,%3Csvg%3E%3C/svg%3E",
+      status: "ready" as const,
+      perception: { observation: "A diagram of an agent decision loop.", likelyMeaning: "Shows observation, judgment, action, and outcome.", uncertainty: [] },
+      rights: { status: "unknown" as const },
+      provenance: { origin: "operator_upload", importedAt: new Date().toISOString() },
+      visibility: "private-community" as const,
+      shareability: "agent-wide" as const,
+      environment: "sandbox" as const,
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    } satisfies OpenPresenceState["assets"][number];
+    state.assets.unshift(libraryAsset);
+
+    state = formSandboxIntent(state, {
+      sessionId: session.id,
+      affordance: "post",
+      text: "A durable agent earns trust by showing the path from observation to outcome.",
+      assets: [{ name: "Decision loop", kind: "image", existingAssetId: libraryAsset.id }],
+    });
+    const execution = state.executions[0]!;
+    state = deliverSandboxExecution(state, execution.id);
+
+    expect(state.executions[0]?.status).toBe("succeeded");
+    expect(state.publications[0]?.assetIds).toEqual([libraryAsset.id]);
+    expect(state.mirrorObjects[0]?.assetRefs?.[0]?.assetId).toBe(libraryAsset.id);
+    expect(state.assetUsages[0]).toMatchObject({ assetId: libraryAsset.id, environment: "sandbox", publicationId: state.publications[0]?.id });
+  });
+
+  it("lets autonomous Sandbox cognition select the listed library item instead of inventing media", async () => {
+    vi.stubEnv("OPENPRESENCE_TEST_MODE", "1");
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
+    let state = applyOperation(createAgent(input), { type: "setPresence", patch: { execution: { post: "auto" } } });
+    state = startPlaygroundSession(state);
+    const session = state.playgroundSessions[0]!;
+    const assetId = "library-autonomous-1";
+    state.assets.unshift({
+      id: assetId,
+      agentId: state.agent!.id,
+      sourceId: "asset-source-autonomous",
+      type: "image",
+      semanticKind: "diagram",
+      dataUrl: "data:image/svg+xml,%3Csvg%3E%3C/svg%3E",
+      status: "ready",
+      perception: { observation: "A diagram showing the agent feedback loop.", likelyMeaning: "The loop connects judgment to verified outcomes.", uncertainty: [] },
+      rights: { status: "unknown" },
+      provenance: { origin: "operator_upload", importedAt: new Date().toISOString() },
+      visibility: "private-community",
+      shareability: "agent-wide",
+      environment: "sandbox",
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    });
+    writeState(state);
+
+    const response = await statePost(new Request("http://localhost/api/state", {
+      method: "POST",
+      body: JSON.stringify({ type: "runSandboxPulse", sessionId: session.id }),
+      headers: { "content-type": "application/json" },
+    }));
+    const next = await response.json();
+    expect(response.status).toBe(200);
+    expect(next.executions[0]).toMatchObject({ status: "succeeded", environment: "sandbox" });
+    expect(next.publications[0]?.assetIds).toEqual([assetId]);
+    expect(next.assetUsages[0]).toMatchObject({ assetId, environment: "sandbox" });
+    expect(next.mirrorObjects.find((item: { originExecutionId?: string }) => item.originExecutionId === next.executions[0].id)?.assetRefs?.[0]?.assetId).toBe(assetId);
+  });
+
   it("does not silently republish an exact asset as a new original", () => {
-    let state = startPlaygroundSession(createAgent(input));
+    let state = startPlaygroundSession(applyOperation(createAgent(input), { type: "setPresence", patch: { execution: { post: "auto" } } }));
     const session = state.playgroundSessions[0]!;
     const asset = { name: "same visual", kind: "gif" as const, mimeType: "image/gif", dataUrl: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" };
     state = formSandboxIntent(state, { sessionId: session.id, affordance: "post", text: "First publication.", assets: [asset] });
@@ -281,7 +359,7 @@ describe("Sandbox and Playground boundaries", () => {
   });
 
   it("allows reuse when the planner records why it is intentional", () => {
-    let state = startPlaygroundSession(createAgent(input));
+    let state = startPlaygroundSession(applyOperation(createAgent(input), { type: "setPresence", patch: { execution: { post: "auto" } } }));
     const session = state.playgroundSessions[0]!;
     const asset = { name: "same visual", kind: "gif" as const, mimeType: "image/gif", dataUrl: "data:image/gif;base64,R0lGODlhAQABAIAAAAAAAP///ywAAAAAAQABAAACAUwAOw==" };
     state = formSandboxIntent(state, { sessionId: session.id, affordance: "post", text: "First publication.", assets: [asset] });
@@ -406,7 +484,7 @@ describe("Sandbox and Playground boundaries", () => {
   });
 
   it("does not let simulated delivery become Presence-level public footing", () => {
-    let state = createAgent(input);
+    let state = applyOperation(createAgent(input), { type: "setPresence", patch: { execution: { post: "auto" } } });
     state = startPlaygroundSession(state);
     const first = state.playgroundSessions[0]!;
     state = formSandboxIntent(state, { sessionId: first.id, affordance: "post", text: "A simulated point of view." });
@@ -477,7 +555,7 @@ describe("Sandbox and Playground boundaries", () => {
 
   it("records original-post rehearsal provenance and preference evidence without mutating identity", () => {
     const originalTaste = createAgent(input).files.find((file) => file.kind === "TASTE")?.content;
-    let state = startPlaygroundSession(createAgent(input));
+    let state = startPlaygroundSession(applyOperation(createAgent(input), { type: "setPresence", patch: { execution: { post: "auto" } } }));
     const session = state.playgroundSessions[0]!;
     state = beginOriginalPostRehearsal(state, { sessionId: session.id, inspiration: "A concrete note about durable memory." });
     const attempt = state.originalPostRehearsals[0]!;

@@ -334,29 +334,11 @@ export function recordOperationalSuccess(
   const nowIso = new Date().toISOString();
   let health = getDependencyHealth(dependency, presenceId);
 
-  if (!health) {
-    health = {
-      id: `dh_${dependency}_${presenceId ?? "global"}`,
-      presenceId,
-      dependency,
-      state: "healthy",
-      consecutiveFailures: 0,
-      lastHealthyAt: nowIso,
-      updatedAt: nowIso,
-    };
-  } else {
-    health.state = "healthy";
-    health.consecutiveFailures = 0;
-    health.lastHealthyAt = nowIso;
-    delete health.circuitUntil;
-    delete health.currentIncidentId;
-    health.updatedAt = nowIso;
-  }
-
-  upsertDependencyHealth(health);
-
-  // Resolve all open/recovering incidents for this dependency & presence
-  const openIncidents = listRecoveryIncidents(presenceId).filter(
+  // Some incidents describe a world/safety invariant rather than dependency
+  // liveness. A later successful runtime call cannot prove that the operator
+  // reviewed duplicate public outcomes, so those incidents only close through
+  // the explicit resolveOperationalIncident boundary.
+  const matchingIncidents = listRecoveryIncidents(presenceId).filter(
     (item) => item.state !== "resolved" && (
       item.dependencyId === health?.id ||
       item.dependencyId?.includes(dependency) ||
@@ -365,6 +347,35 @@ export function recordOperationalSuccess(
       (dependency === "user_attached_bridge" && item.rootCauseKey.startsWith("bridge."))
     )
   );
+  const explicitResolutionIncidents = matchingIncidents.filter((item) => item.rootCauseKey === "runtime.duplicate_public_outcome");
+  const openIncidents = matchingIncidents.filter((item) => !explicitResolutionIncidents.includes(item));
+
+  if (!health) {
+    health = {
+      id: `dh_${dependency}_${presenceId ?? "global"}`,
+      presenceId,
+      dependency,
+      state: explicitResolutionIncidents.length ? "requires_operator" : "healthy",
+      consecutiveFailures: 0,
+      lastHealthyAt: explicitResolutionIncidents.length ? undefined : nowIso,
+      currentIncidentId: explicitResolutionIncidents[0]?.id,
+      updatedAt: nowIso,
+    };
+  } else {
+    if (explicitResolutionIncidents.length) {
+      health.state = "requires_operator";
+      health.currentIncidentId = explicitResolutionIncidents[0]!.id;
+    } else {
+      health.state = "healthy";
+      health.consecutiveFailures = 0;
+      health.lastHealthyAt = nowIso;
+      delete health.circuitUntil;
+      delete health.currentIncidentId;
+    }
+    health.updatedAt = nowIso;
+  }
+
+  upsertDependencyHealth(health);
 
   const resolvedIncidents: RecoveryIncident[] = [];
   for (const candidate of openIncidents) {

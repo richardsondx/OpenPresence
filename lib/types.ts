@@ -1,4 +1,4 @@
-export type View = "teach" | "knowledge" | "assets" | "usage" | "chat" | "rehearsal" | "watching" | "people" | "playground" | "live" | "review" | "feed" | "growth" | "analytics" | "calendar" | "schedule" | "brain" | "presence";
+export type View = "teach" | "knowledge" | "assets" | "usage" | "chat" | "rehearsal" | "watching" | "people" | "playground" | "live" | "review" | "feed" | "growth" | "analytics" | "calendar" | "schedule" | "work" | "brain" | "presence";
 export type BuiltInChannelId = "x" | "linkedin" | "substack";
 export type ChannelId = string;
 export type ConnectorKind = "simulated" | "native" | "bridge" | "manual";
@@ -1942,7 +1942,36 @@ export interface Presence { id: string; createdAt?: string; channel: ChannelId; 
 export interface Presence { updatedAt?: string; assetReuseCooldownMonths?: number; }
 
 export interface ChatMessage { id: string; role: "agent" | "operator"; content: string; timestamp: string; change?: string; }
-export interface Conversation { id: string; title: string; createdAt: string; updatedAt: string; messages: ChatMessage[]; }
+export interface Conversation {
+  id: string;
+  title: string;
+  createdAt: string;
+  updatedAt: string;
+  messages: ChatMessage[];
+  /** Additive thread identity for Agent-first communication. */
+  threadId?: string;
+  originThreadId?: string | null;
+  communicationThreadId?: string | null;
+}
+export type OperatorThreadScope =
+  | { kind: "agent" }
+  | { kind: "presence"; presenceId: string }
+  | { kind: "multi_presence"; presenceIds: string[] };
+export interface OperatorThread {
+  id: string;
+  agentId: string;
+  title: string;
+  scope: OperatorThreadScope;
+  /** Where the request originated, when known. Unknown provenance stays null. */
+  originThreadId: string | null;
+  /** The canonical communication thread used for operator-visible messages. */
+  communicationThreadId: string;
+  status: "active" | "archived";
+  messageIds: string[];
+  assignmentIds: string[];
+  createdAt: string;
+  updatedAt: string;
+}
 export interface PresenceChatAttachment {
   id: string;
   name: string;
@@ -2750,7 +2779,7 @@ export interface ActionRecord { id: string; intent: "post" | "reply" | "like" | 
 
 export interface AgentWorkspaceSnapshot {
   onboarded: boolean; agent: Agent | null; presence: Presence | null; presences: Presence[]; activePresenceId: string | null;
-  files: AgentFile[]; proposals: FileProposal[]; messages: ChatMessage[]; conversations: Conversation[]; activeConversationId: string | null; presenceChatSessions: PresenceChatSession[]; operatorConversations?: OperatorConversation[]; operatorNudges?: OperatorNudge[]; agentRequests: AgentRequest[]; capabilityChangeEvents: CapabilityChangeEvent[];
+  files: AgentFile[]; proposals: FileProposal[]; messages: ChatMessage[]; conversations: Conversation[]; activeConversationId: string | null; presenceChatSessions: PresenceChatSession[]; operatorThreads?: OperatorThread[]; operatorConversations?: OperatorConversation[]; operatorNudges?: OperatorNudge[]; agentRequests: AgentRequest[]; capabilityChangeEvents: CapabilityChangeEvent[];
   events: LiveEvent[]; socialDecisions: SocialDecision[]; socialStrategyRetrievalRuns?: SocialStrategyRetrievalRun[]; growthHypotheses?: GrowthHypothesis[]; growthEvidenceRecords?: GrowthEvidenceRecord[]; legacyChannelStrategyGuidance?: LegacyChannelStrategyGuidance[]; autobiographicalEvents: AutobiographicalEvent[]; autobiographicalReflections: AutobiographicalReflection[]; resourceUsageEvents: ResourceUsageEvent[]; calendar: CalendarSlot[]; assignments: Assignment[]; growthReviews: GrowthReview[]; growthFileVersions: GrowthFileVersion[]; growthRevisions?: GrowthRevision[]; growthEvidenceSnapshots?: GrowthEvidenceSnapshot[]; audienceSnapshots: PresenceAudienceSnapshot[]; publicationMetricSnapshots: PublicationMetricSnapshot[]; watches: Watch[]; explorations: ExplorationBrief[]; discoveryPlans: DiscoveryPlan[]; explorationSessions: ExplorationSession[]; explorationFindings: ExplorationFinding[]; actions: ActionRecord[]; publishingPlans: PublishingPlan[]; metrics: { qualifiedFollows: number; conversations: number; opportunitiesIgnored: number; audienceHealth: number };
   modelProfiles: AgentModelProfile[]; providerConnections: ProviderConnection[]; assetProviderConnections: AssetProviderConnection[]; toolBindings: AgentToolBinding[]; changeSets: ChangeSet[]; standingIntents: StandingIntent[]; operatorDirectives: OperatorDirective[]; socialIntents: SocialIntent[]; executions: Execution[]; outcomes: Outcome[]; attentionTests: AttentionTest[]; capabilityTrials: CapabilityTrial[]; publications: Publication[]; assetUsages: AssetUsage[]; sourceEvidence: SourceEvidence[]; claimGrounding: ClaimGrounding[]; preferenceEvidence: PreferenceEvidence[]; originalPostRehearsals: OriginalPostRehearsalAttempt[]; librarySources: LibrarySource[]; assets: Asset[]; perceptions: AssetPerception[]; assetResearchSessions: AssetResearchSession[]; skills: Skill[]; agentSkills: AgentSkill[]; contentDrops: ContentDrop[]; channelDefinitions: ChannelDefinition[]; nativeConnections: NativeChannelConnection[]; bridges: Bridge[]; mirrorObjects: MirrorObject[]; mirrorEvents: MirrorEvent[]; bridgeSync: BridgeSyncState[]; conversationEpisodes: ConversationEpisode[]; assignmentContributions: AssignmentContribution[]; people: Person[]; personIdentities: PersonIdentity[]; relationships: Relationship[]; relationshipFacts: RelationshipFact[]; relationshipOpenLoops: RelationshipOpenLoop[]; recommendationRecords: RecommendationRecord[]; introductionRecords: IntroductionRecord[]; watchSignals: WatchSignal[]; relationshipPolicies: RelationshipPolicy[]; presenceRequestPolicies: PresenceRequestPolicy[]; delegationGrants: DelegationGrant[]; publicRequests: PublicRequest[]; sandboxEnvironments: SandboxEnvironment[]; playgroundSessions: PlaygroundSession[]; sandboxActors: SandboxActor[]; networkSearches: SandboxNetworkSearch[]; networkIntroductions: SandboxNetworkIntroduction[]; scenarios: Scenario[]; scenarioVersions: ScenarioVersion[]; scenarioRuns: ScenarioRun[]; scenarioRunProvenance: ScenarioRunProvenance[]; scenarioEvaluations: ScenarioRunEvaluation[]; knowledgeDocuments: KnowledgeDocument[]; knowledgeVersions: KnowledgeVersion[]; knowledgeSegments: KnowledgeSegment[]; presenceKnowledgeAccess: PresenceKnowledgeAccess[]; mindFileKnowledgeBindings?: MindFileKnowledgeBinding[]; knowledgeRetrievalRuns: KnowledgeRetrievalRun[]; knowledgeCitations: KnowledgeCitation[]; knowledgeCollections?: KnowledgeCollection[]; knowledgeItems?: KnowledgeItem[]; presenceKnowledgeBindings?: PresenceKnowledgeBinding[];
   assetCollections?: AssetCollection[]; assetCollectionMemberships?: AssetCollectionMembership[]; assetMetadataEdits?: AssetMetadataEdit[]; assetProcessingJobs?: AssetProcessingJob[];
@@ -2766,7 +2795,7 @@ export interface AgentWorkspaceSnapshot {
 export interface OpenPresenceState extends AgentWorkspaceSnapshot {
   agents: Agent[]; activeAgentId: string | null; agentWorkspaces: AgentWorkspaceSnapshot[]; assignmentRuns?: AssignmentRun[];
   /** Identifies whether an API response contains the complete workspace or the compact Activity read model. Never persisted. */
-  responseProjection?: "activity" | "chat" | "growth" | "knowledge" | "assets" | "people" | "feed" | "schedule" | "watching" | "rehearsal" | "brain" | "teach" | "presence" | "playground" | "usage" | "full";
+  responseProjection?: "activity" | "chat" | "growth" | "knowledge" | "assets" | "people" | "feed" | "schedule" | "work" | "watching" | "rehearsal" | "brain" | "teach" | "presence" | "playground" | "usage" | "full";
   /** Activity-only compact summaries. They are derived from the full ledger and never persisted as workspace state. */
   activityAttentionUsageSnapshots?: Record<string, ActivityAttentionUsageSnapshot>;
   activityNow?: Record<string, ActivityNowProjection>;

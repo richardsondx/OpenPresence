@@ -129,7 +129,7 @@ import { reassessPublishingPlan } from "./publishing-plan-reassessment";
 import { cognitionSafeAssetSummary, hasUsablePerception } from "./perception";
 import { inspectSandboxObject } from "./perception-runtime";
 import { applyConversationDisposition, conversationDispositionForAction, conversationEpisodeForObject, shouldEvaluateConversationObject } from "./conversation-episodes";
-import { socialReplyQualityIssue } from "./social-quality";
+import { ensurePlayfulToneEmoji, socialReplyQualityIssue } from "./social-quality";
 import { formatReplyText } from "./public-expression";
 import { runLiveExplorationWorker } from "./exploration-worker";
 import type {
@@ -934,6 +934,11 @@ export async function runAutonomousPulse(
     const qualityRejected: string[] = [];
     for (const act of candidateActs) {
       if (!["reply", "quote"].includes(act.action)) continue;
+      const toneCorrected = ensurePlayfulToneEmoji(replyPrompt, act.text);
+      if (toneCorrected !== act.text && !socialReplyQualityIssue(replyPrompt, toneCorrected)) {
+        act.text = toneCorrected;
+        continue;
+      }
       const issue = socialReplyQualityIssue(replyPrompt, act.text);
       if (!issue) continue;
       let repaired = "";

@@ -81,6 +81,23 @@ async function throwIfBlockedByTarget(page) {
   throw error;
 }
 
+async function throwIfOwnReplyAlreadyExists(page, targetId) {
+  if (!expectedHandle) return;
+  const existing = await page.locator('article').evaluateAll((nodes, input) => nodes.map((article) => {
+    const hrefs = Array.from(article.querySelectorAll('a[href*="/status/"]')).map((link) => link.getAttribute('href') || '');
+    const ownStatusHref = article.querySelector('time')?.closest('a')?.getAttribute('href') || '';
+    const authorHref = article.querySelector('[data-testid="User-Name"] a')?.getAttribute('href') || '';
+    const ownStatusId = ownStatusHref.match(/\/status\/(\d+)/)?.[1];
+    const author = authorHref.replace(/^\//, '').split('/')[0].toLowerCase();
+    return { ownStatusId, author, hrefs };
+  }).some((row) => row.ownStatusId && row.ownStatusId !== input.targetId && row.author === input.expectedHandle && row.hrefs.some((href) => href.includes(`/status/${input.targetId}`))), { targetId, expectedHandle });
+  if (!existing) return;
+  const error = new Error('The target thread already contains a reply from the expected account; no second public reply was attempted.');
+  error.code = 'DUPLICATE_PUBLIC_OUTCOME';
+  error.retryable = false;
+  throw error;
+}
+
 async function signedIn(page) {
   if (await page.getByText(/log in|sign up/i).first().isVisible().catch(() => false)) return false;
   if (!expectedHandle) return true;
@@ -208,6 +225,7 @@ async function fillReply(page, targetId, text, assets = []) {
   if (!(await signedIn(page))) throw new Error(`The X browser session is not signed in as @${expectedHandle || "the expected account"}.`);
   await page.waitForTimeout(1_000);
   const targetArticle = page.locator('article').filter({ has: page.locator(`a[href*="/status/${targetId}"]`) }).first();
+  await throwIfOwnReplyAlreadyExists(page, targetId);
   const opened = await clickFirstVisible([
     targetArticle.getByTestId("reply"),
     targetArticle.getByRole("button", { name: /reply/i }).first(),

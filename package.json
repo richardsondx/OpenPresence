@@ -10,6 +10,8 @@
     "bridge:x": "node scripts/x-browser-bridge.mjs",
     "test:repost-live": "node scripts/run-repost-attention-test.mjs",
     "test:capability-live": "node scripts/run-repost-attention-test.mjs",
+    "eval:prompts": "node scripts/run-conversation-eval.mjs",
+    "eval:prompts:report": "node scripts/summarize-conversation-eval.mjs",
     "db:compact": "node scripts/compact-openpresence-db.mjs",
     "lint": "eslint .",
     "typecheck": "tsc --noEmit",

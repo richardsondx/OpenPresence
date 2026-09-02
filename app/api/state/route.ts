@@ -44,6 +44,7 @@ import { bridgeExecutionStatus } from "@/lib/bridge-contract";
 import { routeExecutionIntent } from "@/lib/execution-router";
 import { recordVerifiedBridgeReaction } from "@/lib/bridge";
 import { reassessPublishingPlan } from "@/lib/publishing-plan-reassessment";
+import { duplicatePublicOutcomeEvidence } from "@/lib/duplicate-public-outcome";
 import { nextSelfDirectedAttentionAt, selectBridgeDiscoveryCandidates, selectGrowthDiscoverySource } from "@/lib/growth-scheduler";
 import { reconcileOrphanedAssignmentStatuses, recoverStaleAssignmentRuns } from "@/lib/assignment-recovery";
 import { expireElapsedPursuitWindows } from "@/lib/state-projection";
@@ -57,7 +58,7 @@ import { cognitionSafeDMInstructionsForObject, cognitionSafePeopleNoteProjection
 import { analyzeSchedulePrompt, isAdaptiveDistributionPrompt, modelScheduleDrafts } from "@/lib/schedule-prompt";
 import { readRuntimeScopeCookie, setRuntimeScopeCookie } from "@/lib/runtime-scope";
 import { authorizeAssetSelection, isLibraryAsset, liveAssetReuseReason, searchEligibleAssets } from "@/lib/asset-library";
-import { publicExpressionQualityIssue, publicationRepetitionIssue, recentPublicationContext, socialReplyAttributionIssue, socialReplyQualityIssue } from "@/lib/social-quality";
+import { ensurePlayfulToneEmoji, publicExpressionQualityIssue, publicationRepetitionIssue, recentPublicationContext, socialReplyAttributionIssue, socialReplyQualityIssue } from "@/lib/social-quality";
 import { runLiveExplorationEngagement as runSharedLiveExplorationEngagement } from "@/lib/exploration-worker";
 import { browserWorkspaceProjection } from "@/lib/state-browser-projection";
 import { growthBrowserProjection } from "@/lib/growth-browser-projection";
@@ -122,7 +123,7 @@ const activityProjectionKeys = new Set<keyof OpenPresenceState>([
   "mirrorObjects", "nativeConnections", "bridges", "playgroundSessions", "originalPostRehearsals", "assetResearchSessions", "channelDefinitions", "operationalRuns", "scheduledWakes", "standingIntents",
   "growthRevisions", "growthFileVersions",
   "publishingPlans",
-  "operatorConversations", "operatorNudges",
+  "operatorThreads", "operatorConversations", "operatorNudges",
   "operatorDirectives", "explorations", "watches", "capabilityTrials", "explorationFindings", "explorationSessions", "calendar",
   "publicRequests", "publicationMetricSnapshots",
   // People is a first-class operator surface. Keep its relationship inputs in
@@ -139,7 +140,7 @@ const activityProjectionKeys = new Set<keyof OpenPresenceState>([
 const chatProjectionKeys = new Set<keyof OpenPresenceState>([
   "agent", "agents", "activeAgentId", "activePresenceId", "presence", "presences", "onboarded", "workspaceRevision", "proposals",
   "assignments", "actions", "executions", "outcomes", "socialIntents", "socialDecisions", "mirrorObjects", "nativeConnections", "bridges", "channelDefinitions",
-  "operationalRuns", "attentionEpisodes", "operatorConversations", "operatorNudges",
+  "operationalRuns", "attentionEpisodes", "operatorThreads", "operatorConversations", "operatorNudges",
 ]);
 
 function activityProjection(state: OpenPresenceState): OpenPresenceState {
@@ -274,7 +275,10 @@ function activityProjection(state: OpenPresenceState): OpenPresenceState {
 
   const targetMirrorIds = new Set((projection.assignments ?? []).map((assignment) => assignment.target?.mirrorObjectId).filter((id): id is string => Boolean(id)));
   const scopedMirrors = state.mirrorObjects.filter((object) => !presenceId || object.presenceId === presenceId);
-  const targetObjects = scopedMirrors.filter((object) => targetMirrorIds.has(object.id));
+  const duplicateEvidence = duplicatePublicOutcomeEvidence(state, presenceId);
+  const recoveryMirrorIds = new Set(duplicateEvidence.flatMap((evidence) => [evidence.target?.id, ...evidence.replies.map((reply) => reply.id)]).filter((id): id is string => Boolean(id)));
+  const retainedMirrorIds = new Set([...targetMirrorIds, ...recoveryMirrorIds]);
+  const targetObjects = scopedMirrors.filter((object) => retainedMirrorIds.has(object.id));
   // Activity derives "recently done" from verified public Mirror history. The
   // raw mirror array is dominated by incoming observations, so a simple first
   // 120 slice can omit every public act Genny performed and produce the false
@@ -286,7 +290,7 @@ function activityProjection(state: OpenPresenceState): OpenPresenceState {
       : [],
   );
   const recentObjects = scopedMirrors.filter((object, index) =>
-    !targetMirrorIds.has(object.id) && (index < 120 || publicHistoryMirrorIds.has(object.id)),
+    !retainedMirrorIds.has(object.id) && (index < 120 || publicHistoryMirrorIds.has(object.id)),
   );
   const compactMirror = (object: OpenPresenceState["mirrorObjects"][number]) => {
     // Activity needs identity, relationship, and public text evidence. These
@@ -371,8 +375,8 @@ function stateForResponse(request: Request, state: OpenPresenceState, forceActiv
           ? agentLibraryBrowserProjection(state, "people")
         : projection === "feed"
           ? agentLibraryBrowserProjection(state, "feed")
-        : projection === "schedule"
-          ? agentLibraryBrowserProjection(state, "schedule")
+        : projection === "schedule" || projection === "work"
+          ? agentLibraryBrowserProjection(state, projection)
         : projection === "watching"
           ? agentLibraryBrowserProjection(state, "watching")
         : projection === "rehearsal"
@@ -779,6 +783,22 @@ function scopedLiveAssetLibraryContext(source: OpenPresenceState, presenceId: st
   return `Eligible Agent Asset Library images (durable perception already available; choose by assetId only):\n${JSON.stringify(inventory, null, 2)}\n\nAsset rule: return at most one fitting image as {"kind":"image","assetId":"<exact id from the inventory>","name":"<name>"}. Never return sourceUrl, a guessed ID, or an image from public research. The server will authorize the selected asset again before publication.`;
 }
 
+function scopedSandboxAssetLibraryContext(source: OpenPresenceState, presenceId: string) {
+  const assets = searchEligibleAssets(source, "", { presenceId, limit: 24 })
+    .filter((asset) => ["image", "chart"].includes(asset.type) && asset.readiness === "ready");
+  if (!assets.length) return "Eligible Agent Asset Library images for this Sandbox Presence: none. Do not invent an assetId or attach a library asset that is not listed.";
+  const inventory = assets.map((asset) => ({
+    assetId: asset.assetId,
+    name: asset.name,
+    type: asset.type,
+    observation: asset.observation,
+    likelyMeaning: asset.likelyMeaning,
+    visibleText: asset.visibleText,
+    semanticKind: asset.semanticKind,
+  }));
+  return `Eligible Agent Asset Library images for this Sandbox Presence (choose by exact assetId only):\n${JSON.stringify(inventory, null, 2)}\n\nAsset rule: select at most one fitting image when it materially strengthens the current contribution. Never guess an assetId, attach an unlisted library item, or use media merely to decorate a post. The runtime will authorize the selected asset again before delivery.`;
+}
+
 async function materializeLiveDecisionAssets(source: OpenPresenceState, presenceId: string, decision: AgentSocialDecision, options?: { collectionId?: string; libraryOnly?: boolean }) {
   let next = source;
   const presence = next.presences.find((item) => item.id === presenceId) ?? next.presence;
@@ -885,6 +905,8 @@ type SocialActDraft = NonNullable<AgentSocialDecision["acts"]>[number];
 
 async function qualityCheckedSocialAct(state: OpenPresenceState, presence: NonNullable<OpenPresenceState["presence"]>, target: MirrorObject, act: SocialActDraft): Promise<SocialActDraft | undefined> {
   if ((act.action !== "reply" && act.action !== "quote") || !act.text?.trim()) return act;
+  const toneCorrected = ensurePlayfulToneEmoji(target.content?.text ?? "", act.text);
+  if (toneCorrected !== act.text && !socialReplyQualityIssue(target.content?.text ?? "", toneCorrected)) return { ...act, text: toneCorrected };
   const issue = socialReplyQualityIssue(target.content?.text ?? "", act.text);
   if (!issue) return act;
   try {
@@ -3128,6 +3150,9 @@ const sandboxFixtureSvg = (label: string, accent: string) =>
 
 const sandboxDecisionAssets = (decision: AgentSocialDecision): SandboxAssetInput[] => (decision.assets ?? []).map((asset) => {
   const name = asset.name ?? `Sandbox ${asset.kind} rehearsal asset`;
+  // Preserve exact Asset-library identity through Rehearsal so this path
+  // exercises the same provenance and authorization boundary as live posts.
+  if (asset.assetId) return { name, kind: asset.kind, existingAssetId: asset.assetId };
   if (asset.sourceUrl) return { name, kind: asset.kind, sourceUrl: asset.sourceUrl, sourcePageUrl: asset.sourcePageUrl, publisher: asset.publisher };
   if (!isAiMockEnabled()) return { name, kind: asset.kind };
   if (asset.kind === "image") return { name, kind: asset.kind, mimeType: "image/svg+xml", dataUrl: sandboxFixtureSvg("Image note", "#d68754") };
@@ -3762,6 +3787,7 @@ async function runSandboxAgentCycle(source: OpenPresenceState, sessionId: string
   if (!session || !presence) throw new Error("Sandbox session is unavailable.");
   const publishingProgress = derivePublishingProgress(source, presence.id, session.virtualNow);
   const publishingGuidance = publishingInitiativeGuidance(publishingProgress);
+  const sandboxAssetLibraryContext = scopedSandboxAssetLibraryContext(source, presence.id);
   // Playground sessions are Presence-scoped. Keep the persisted Agent selection
   // untouched, but give every social cognition call the session's identity.
   let cognitionSource = sandboxCognitionSource(source, presence);
@@ -3928,6 +3954,7 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
   prompt += `\n\n${networkMemoryContext}`;
   prompt += `\n\n${publicationHistoryContext}`;
   prompt += `\n\nPublishing initiative context:\n${publishingGuidance}\nThis context describes an ongoing responsibility, not a command to force a weak post. A no_op may reject the current candidate, but it does not complete the standing responsibility.`;
+  prompt += `\n\n${sandboxAssetLibraryContext}`;
   prompt += structuredEvidenceGuidance;
   prompt += "\n\nLanguage and phrasing policy:\n" + presenceLanguageGuidance(presence.language) + "\n" + languagePolicyGuidance(effectiveLanguagePolicy(cognitionSource.agent, presence));
   let decision: AgentSocialDecision;
@@ -4268,6 +4295,27 @@ ${publicSelfGuidance(presence)} Do not mention simulation, prompts, connectors, 
   const blockedByMedia = next.events[0]?.title === "Media needs inspection";
   if (!blockedByMedia && inbound) next = markSandboxObjectJudged(next, sessionId, inbound.externalRef.id);
   const createdExecution = execution && !planRecorded.executions.some((item) => item.id === execution.id) ? execution : undefined;
+  const socialDecisionKind = decision.action === "post"
+    ? "original_post"
+    : ["reply", "like", "follow", "quote", "repost"].includes(decision.action)
+      ? decision.action
+      : undefined;
+  if (socialDecisionKind) {
+    next = recordSocialDecision(next, {
+      decision: socialDecisionKind as "reply" | "like" | "follow" | "quote" | "repost" | "original_post",
+      acts: (decision.acts ?? []).filter((act) => ["reply", "like", "follow", "quote", "repost"].includes(act.action)).map((act) => ({ decision: act.action as "reply" | "like" | "follow" | "quote" | "repost", text: act.text, rationale: act.rationale })),
+      focalMirrorObjectIds: inbound ? [inbound.id] : [],
+      origin: assignment ? { kind: "assignment", refId: assignment.id } : publishingContext ? { kind: "publishing_initiative", planId: publishingContext.planId, planRevision: publishingContext.planRevision, planWindowId: publishingContext.windowId } : rehearsal ? { kind: "other" } : { kind: "self_directed_discovery", refId: sessionId },
+      summary: decision.rationale,
+      influences: ["Mission", "Taste", "Current social context", "Growth evidence"],
+      confidence: "medium",
+      relevantGrowthRevisionRef: presence.activeGrowthRevisionRef,
+      socialStrategy: decision.socialStrategy,
+      presenceId: presence.id,
+    } as Parameters<typeof recordSocialDecision>[1]);
+    const recordedDecision = next.socialDecisions[0];
+    if (recordedDecision && createdExecution) recordedDecision.socialIntentId = createdExecution.socialIntentId;
+  }
   if (conversationEpisode && createdExecution && ["close_with_reply", "react_only"].includes(conversationDisposition)) {
     const episode = next.conversationEpisodes.find((item) => item.id === conversationEpisode.id);
     if (episode) episode.closingSocialIntentId = createdExecution.socialIntentId;
@@ -5050,8 +5098,8 @@ export async function GET(request: Request) {
               ? agentLibraryBrowserProjection(contextualState, "people")
             : projection === "feed"
               ? agentLibraryBrowserProjection(contextualState, "feed")
-            : projection === "schedule"
-              ? agentLibraryBrowserProjection(contextualState, "schedule")
+            : projection === "schedule" || projection === "work"
+              ? agentLibraryBrowserProjection(contextualState, projection)
             : projection === "watching"
               ? agentLibraryBrowserProjection(contextualState, "watching")
             : projection === "rehearsal"

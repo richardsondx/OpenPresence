@@ -9,10 +9,15 @@ Playground is isolated social rehearsal inside the real Sandbox cognition → in
 - Inspect media perception separately from Taste/planning.
 - Rehearse an original publication and record preference evidence.
 - Inspect a decision trace without teaching hidden expected answers.
+- Switch between Playground-level `Free play`, `Curation`, `Trials`, and `Scenarios` modes; the top-level Presence tabs also expose `Playground` and `Rehearsal`.
 
 ## How to get to it (user POV)
 
-Choose `Playground` or open `/playground`. Use `Check now`, the event controls, object selection, and `Inspect media`. Choose the Playground `Rehearsal` tab or open `/rehearsal` for Presence conversation practice.
+Choose `Playground` or open `/playground`. Use `Check now`, the event controls, object selection, and `Inspect media`. Choose the Playground `Rehearsal` tab or open `/rehearsal` for Presence conversation practice. The first Playground state currently presents Free play, Curation, Trials, and Scenarios together, with a control-room form for adding simulated events.
+
+For the direct Presence Rehearsal thread, choose `Rehearsal` from the selected Presence navigation or open `/rehearsal` with the Agent/Presence query context. The transcript is `[data-testid="rehearsal-transcript"]`; the always-available composer is `[data-testid="rehearsal-composer"]`.
+
+The Rehearsal viewport follows Chat geometry: the transcript is the scroll owner, the composer remains at the bottom of the usable workspace on desktop and mobile, and an empty thread offers a clear first action without creating document-level overflow. Sandbox cognition also exposes only eligible Asset-library candidates by exact ID and records verified follow memory in the scoped People model.
 
 ## Driving it with verify-app
 
@@ -32,7 +37,7 @@ Use the CLI only to seed a Sandbox scenario; the browser inspection after seedin
 
 ## Proof
 
-Evidence must show the simulated event reached the visible Playground and that the persisted session contains the corresponding observation/decision/execution/outcome chain. Rehearsal feedback must remain preference evidence and must not silently mutate identity.
+Evidence must show the simulated event reached the visible Playground and that the persisted session contains the corresponding observation/decision/execution/outcome chain. Rehearsal feedback must remain preference evidence and must not silently mutate identity. When testing autonomous publication, verify exact Asset-library identity and usage records; when testing relationships, verify PersonIdentity and Relationship after the follow outcome.
 
 ## Gotchas
 
@@ -40,3 +45,4 @@ Evidence must show the simulated event reached the visible Playground and that t
 - Scenario versions freeze before Runs; runs are Presence-scoped and isolated.
 - A media filename or link preview is not visual evidence; use Inspect media where media matters.
 - Reset clears only the selected Sandbox session, not Agent meaning.
+- A direct bare `/rehearsal` may need the selected `agentId` and `presenceId` query context; verify in-app navigation or a context-bearing refresh.

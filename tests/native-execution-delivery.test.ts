@@ -118,4 +118,44 @@ describe("Autonomous native execution delivery", () => {
     expect(statuses).toContain("succeeded");
     expect(statuses).toContain("cancelled");
   });
+
+  it("quarantines a queued reply when Mirror evidence already shows an authored reply", async () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("OPENPRESENCE_TEST_MODE", "0");
+    const targetId = `native-observed-reply-${Date.now()}-${Math.random()}`;
+    let state = createAgent({ name: "Observed Reply", description: "Test", audience: "Testers", mode: "agent", handle: "@observed_reply", accent: "#777777" });
+    const presence = { ...state.presence!, environment: "live" as const, connectionMode: "native" as const, execution: { ...state.presence!.execution, reply: "auto" as const } };
+    const connection: NativeChannelConnection = {
+      id: `native-observed-${Date.now()}`,
+      presenceId: presence.id,
+      channelId: "x",
+      kind: "x",
+      status: "connected",
+      access: "read-write",
+      account: { id: "observed-account", username: "observed_reply", name: "Observed Reply" },
+      createdAt: new Date().toISOString(),
+      updatedAt: new Date().toISOString(),
+    };
+    state.presence = presence;
+    state.presences = [presence];
+    state.nativeConnections = [connection];
+    const observedAt = new Date().toISOString();
+    state.mirrorObjects = [
+      { id: "observed-target", bridgeId: connection.id, presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: targetId }, objectType: "post", language: "en", content: { text: "A target that already has a reply", language: "en" }, observedAt, visibility: "public", shareability: "presence-only", archived: false, environment: "live" },
+    ] as never;
+    state = formXReplyIntent(state, "A duplicate should be quarantined.", targetId);
+    state.mirrorObjects.unshift({ id: "observed-reply", bridgeId: connection.id, presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: `${targetId}-reply` }, parentExternalRef: { type: "x.post", id: targetId }, objectType: "reply", actorPresenceId: presence.id, author: { displayName: presence.name, handle: presence.handle }, content: { text: "The reply already in the world", language: "en" }, observedAt, visibility: "public", shareability: "presence-only", archived: false, environment: "live" } as never);
+    // Simulate a stale queued execution that was formed before the Mirror was
+    // reconciled. The connector must still refuse the write.
+    const stale = { ...state.executions[0], id: "stale-observed-reply", status: "queued" as const, connector: "native" as const, mode: "auto" as const, target: { type: "x.post" as const, id: targetId }, publication: state.publications[0] };
+    state.executions = [stale as never];
+    vi.spyOn(x, "readNativeXCredentials").mockReturnValue({ apiKey: "key", apiSecret: "secret", accessToken: "token", accessTokenSecret: "token-secret" });
+    const publish = vi.spyOn(x, "publishSealedXPost").mockResolvedValue({ type: "x.reply", id: "should-not-exist" });
+
+    const delivered = await deliverNativeExecutions(state, new Set([stale.id]));
+
+    expect(delivered.executions[0]?.status).toBe("cancelled");
+    expect(delivered.executions[0]?.failure?.code).toBe("DUPLICATE_PUBLIC_OUTCOME");
+    expect(publish).not.toHaveBeenCalled();
+  });
 });

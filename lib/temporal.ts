@@ -29,6 +29,7 @@ import type {
   OpenPresenceState,
   OperationalRun,
   Presence,
+  RecoveryIncident,
   ScheduledWake,
   ScheduledWakeKind,
 } from "./types";
@@ -676,6 +677,21 @@ export function isLiveTemporalPresence(presence: Pick<Presence, "status" | "envi
   return presence.status === "live" && presence.environment !== "sandbox";
 }
 
+/**
+ * Whether an operator incident must stop new cognition for the Presence.
+ *
+ * Duplicate public outcomes are target-scoped delivery incidents. The
+ * delivery reservation quarantines the affected target, so stopping every
+ * unrelated Attention pass here both exceeds that safety boundary and can
+ * strand already-queued recovery work indefinitely.
+ */
+export function incidentBlocksAutonomousAttention(
+  incident: Pick<RecoveryIncident, "state" | "operatorActionRequired" | "rootCauseKey">,
+) {
+  if (incident.state !== "needs_operator" || !incident.operatorActionRequired) return false;
+  return incident.rootCauseKey !== "runtime.duplicate_public_outcome";
+}
+
 export function runOperationalSweep(now = new Date()): SweepResult {
   const nowIso = now.toISOString();
 
@@ -684,7 +700,7 @@ export function runOperationalSweep(now = new Date()): SweepResult {
   // can create another self-directed run while the same provider/runtime
   // incident is waiting for repair, amplifying memory and provider usage.
   const operatorGatedIncidents = listRecoveryIncidents(undefined, "needs_operator")
-    .filter((incident) => incident.operatorActionRequired);
+    .filter(incidentBlocksAutonomousAttention);
   const presenceRequiresOperator = (presenceId: string) => operatorGatedIncidents.some((incident) => !incident.presenceId || incident.presenceId === presenceId);
 
   // Repair the migration gap where self-directed attention had a persisted

@@ -505,6 +505,35 @@ describe("Bridge browser retry lifecycle", () => {
     expect(sameTarget.filter((execution) => execution.status === "cancelled" && execution.failure?.code === "DUPLICATE_EXECUTION")).toHaveLength(1);
   });
 
+  it("quarantines a queued Bridge reply when the Mirror already shows the Presence reply", () => {
+    vi.stubEnv("NODE_ENV", "production");
+    vi.stubEnv("OPENPRESENCE_TEST_MODE", "0");
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "0");
+
+    const targetId = `bridge-observed-reply-${Date.now()}-${Math.random()}`;
+    let state = createAgent({ name: "Genny", description: "A test Presence", mode: "agent", handle: "@example_agent", accent: "#D68754" });
+    state.presence!.environment = "live";
+    state.presence!.connectionMode = "bridge";
+    state.presences = state.presences.map((presence) => presence.id === state.presence!.id ? { ...presence, environment: "live", connectionMode: "bridge" } : presence);
+    const bridgeResult = createBridgeWithKey(state, { type: "createBridge", input: { presenceId: state.presence!.id, name: "OpenPresence Chrome", kind: "bridge", capabilities: { inbound: true, reconcile: true, affordances: ["reply"], formats: ["x.reply"], metrics: [] } } });
+    state = applyOperation(bridgeResult.state, { type: "setPresence", patch: { execution: { reply: "auto" } } });
+    state = formXReplyIntent(state, "A stale reply must stop before the browser writes.", targetId);
+    writeState(state);
+
+    let bridge = readState().bridges.find((item) => item.id === bridgeResult.bridge?.id)!;
+    reportBridgeIdentity(bridge, { executorId: "chrome-test", username: "example_agent" });
+    bridge = readState().bridges.find((item) => item.id === bridge.id)!;
+    ingestEvents(bridge, { events: [
+      { sourceEventId: "observed-target", event: "created", object: { externalRef: { type: "x.post", id: targetId }, objectType: "post", language: "en", author: { displayName: "Target", handle: "target" }, content: { text: "Target conversation" }, visibility: "public", shareability: "presence-only" } },
+      { sourceEventId: "observed-own-reply", event: "created", object: { externalRef: { type: "x.post", id: `${targetId}-reply` }, parentExternalRef: { type: "x.post", id: targetId }, objectType: "reply", language: "en", author: { displayName: "Genny", handle: "example_agent" }, content: { text: "A prior reply already exists." }, visibility: "public", shareability: "presence-only" } },
+    ] });
+
+    const claimed = claimExecutions(readState().bridges.find((item) => item.id === bridge.id)!, { executorId: "chrome-test", limit: 1 });
+
+    expect(claimed.executions).toHaveLength(0);
+    expect(readState().executions.find((execution) => execution.target?.id === targetId)).toMatchObject({ status: "cancelled", failure: { code: "DUPLICATE_PUBLIC_OUTCOME" } });
+  });
+
   it("closes an unverified browser submission without counting delivery", () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("OPENPRESENCE_TEST_MODE", "0");

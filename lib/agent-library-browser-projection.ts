@@ -1,10 +1,10 @@
 import type { OpenPresenceState } from "./types";
 import { derivePublicHistory } from "./runtime";
 
-export type AgentLibraryProjection = "knowledge" | "assets" | "people" | "feed" | "schedule" | "watching" | "rehearsal" | "brain" | "teach" | "presence" | "playground";
+export type AgentLibraryProjection = "knowledge" | "assets" | "people" | "feed" | "schedule" | "work" | "watching" | "rehearsal" | "brain" | "teach" | "presence" | "playground";
 
 const historyCollections = [
-  "files", "messages", "conversations", "presenceChatSessions", "operatorConversations", "operatorNudges", "agentRequests",
+  "files", "messages", "conversations", "presenceChatSessions", "operatorThreads", "operatorConversations", "operatorNudges", "agentRequests",
   "events", "socialDecisions", "autobiographicalEvents", "autobiographicalReflections", "resourceUsageEvents", "attentionEpisodes",
   "calendar", "assignments", "assignmentRuns", "growthReviews", "growthRevisions", "growthEvidenceSnapshots", "growthFileVersions",
   "audienceSnapshots", "publicationMetricSnapshots", "watches", "watchSignals", "relationshipPolicies", "relationshipStudies",
@@ -139,7 +139,7 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
       next.socialIntents = [];
       return next;
     }
-    if (projection === "schedule") {
+    if (projection === "schedule" || projection === "work") {
       const presenceId = state.presence?.id;
       const presence = state.presences.find((item) => item.id === presenceId) ?? state.presence;
       const plans = state.publishingPlans.filter((plan) => (!presenceId || plan.presenceId === presenceId) && plan.status !== "superseded");
@@ -151,6 +151,8 @@ export function agentLibraryBrowserProjection(state: OpenPresenceState, projecti
       next.mirrorObjects = state.mirrorObjects.filter((object) => object.presenceId === presence?.id && object.originExecutionId !== undefined && planExecutionIds.has(object.originExecutionId));
       next.assignments = state.assignments;
       next.assignmentRuns = state.assignmentRuns;
+      next.operatorThreads = state.operatorThreads;
+      next.operatorConversations = state.operatorConversations;
       next.assetCollections = (state.assetCollections ?? []).filter((collection) => collection.agentId === state.agent?.id && collection.status === "active");
       next.executions = state.executions.filter((execution) => execution.status === "awaiting-review" || planExecutionIds.has(execution.id));
       return next;

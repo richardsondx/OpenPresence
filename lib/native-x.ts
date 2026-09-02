@@ -1,6 +1,7 @@
 import { randomUUID } from "node:crypto";
 import { readNativeXCredentials, readRecentXMentions, readRecentXPosts, readXAudienceSnapshot, readXPublicationMetrics, readXPostsByIds, searchRecentXPosts, type XRecentPost } from "./x";
 import { detectDuplicatePublicOutcomes } from "./public-action-safety";
+import { duplicatePublicOutcomeEvidence } from "./duplicate-public-outcome";
 import { applyOperation, intervalForPresence, markNativeConnectionNeedsAttention, recordNativeMirrorsInPlace, recordNativeMirrorDeletion, recordNativeObservationInPlace, recordPublicFooting, recordResourceUsageEvent, recordResourceUsageEventInPlace, recordRuntimeEvent, recordPublicRequestsFromMirrors, recordWatchSignals, recordPublicationMetricSnapshots } from "./runtime";
 import { normalizeHandle } from "./x";
 import { languagesMatch } from "./language-policy";
@@ -205,9 +206,16 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
       .filter((item) => item.presenceId === presenceId && item.channelId === "x" && item.environment !== "sandbox" && item.externalRef.type === "x.post" && item.actorPresenceId === presenceId && !item.archived)
       .slice(0, 100)
       .map((item) => item.externalRef.id);
+    // Duplicate-outcome evidence is safety-critical even when it is older
+    // than the normal recent-public-history window. Include those reply IDs
+    // in the targeted deletion check so an operator deleting the extras on X
+    // can clear the local quarantine on the same reconciliation pass.
+    const duplicateOutcomePostIds = duplicatePublicOutcomeEvidence(next, presenceId)
+      .flatMap((evidence) => evidence.replies.map((reply) => reply.externalRef.id));
     const previousOwnPostIds = new Set([
       ...(targetPresence?.context.publicFooting?.recentPostIds ?? []),
       ...knownOwnMirrorPostIds,
+      ...duplicateOutcomePostIds,
     ]);
     const previousInboundIds = targetPresence?.context.publicFooting?.recentInboundIds ?? [];
     const inboundSinceId = newestXId(previousInboundIds);
@@ -314,6 +322,7 @@ export async function reconcileNativeX(source: OpenPresenceState, presenceId: st
         next = recordRuntimeEvent(next, presenceId, "Deleted-post check unavailable", error instanceof Error ? error.message : "X did not confirm whether missing posts were deleted.", "warning");
       }
     }
+    if (deletedOwnPostIds.length) next = detectDuplicatePublicOutcomes(next, presenceId);
     // Do not hydrate every mention during the observation critical path.
     // X can return up to 100 mentions, and each ancestry request has its own
     // bounded connector timeout. Hydrating them serially turned one healthy

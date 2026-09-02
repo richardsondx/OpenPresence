@@ -9,10 +9,11 @@ Chat is the continuous operator conversation; Teach is the explicit conversation
 - Queue paused work without waking a paused Presence.
 - Teach a preference or memory proposal for review.
 - Open a Presence rehearsal from Chat when the user wants to rehearse.
+- Use the Chat mode control to switch between `Chat` and `Teach`; `/teach` is the direct Agent-teaching route.
 
 ## How to get to it (user POV)
 
-Choose `Chat` or open `/chat`. The composer is `Message <Presence>…`; submit with `Send`, or `Queue message` when paused. Choose `Teach` through the Chat mode control or open `/teach`; its composer is `Message your Presence`.
+Choose `Chat` or open `/chat`. The composer is `Message <Presence>…`; submit with `Send`, or `Queue message` when paused. Choose `Teach` through the Chat mode control or open `/teach`; its composer is `Message your Presence`. `/rehearsal` is a separate Presence-scoped private social thread with its own transcript and composer.
 
 ## Driving it with verify-app
 

@@ -17,6 +17,7 @@ import { settleAttentionForExecution } from "./attention-responsibility";
 import { requestAttention } from "./attention-coordinator";
 import { recordOperationalSuccess } from "./incident-engine";
 import { detectDuplicatePublicOutcomes, detectDuplicateVerifiedExecutionOutcomes } from "./public-action-safety";
+import { hasObservedOwnReplyForTarget } from "./duplicate-public-outcome";
 import { authorizeAssetSelection, liveAssetReuseReason } from "./asset-library";
 
 const entityRef = z.object({ type: z.string().min(1).max(80), id: z.string().min(1).max(240) });
@@ -507,6 +508,14 @@ export function claimExecutions(bridge: Bridge, input: z.infer<typeof claimInput
       expiredQueuedWork = true;
       continue;
     }
+    if (execution.affordance === "x.reply" && hasObservedOwnReplyForTarget(state, execution)) {
+      execution.status = "cancelled";
+      execution.failure = { code: "DUPLICATE_PUBLIC_OUTCOME", message: "The Social Mirror already contains an authored reply for this target; the browser did not receive a second write request.", retryable: false };
+      execution.reviewReason = "An authored reply is already visible for this target in the Social Mirror.";
+      execution.updatedAt = timestamp();
+      expiredQueuedWork = true;
+      continue;
+    }
     const duplicateOf = existingPublicActionExecution(state, execution);
     if (duplicateOf) {
       execution.status = "cancelled";
@@ -769,6 +778,22 @@ export function recordVerifiedBridgeReaction(source: OpenPresenceState, executio
 
 export function failExecution(bridge: Bridge, executionId: string, input: z.infer<typeof failInput>) {
   let state = readStateForBridge(bridge.id); const execution = leasedExecution(state, bridge, executionId, input.executorId);
+  if (input.code === "DUPLICATE_PUBLIC_OUTCOME") {
+    execution.failure = { code: input.code, message: input.message, retryable: false };
+    execution.reviewReason = "The target thread already contains an authored reply; delivery is quarantined.";
+    execution.lease = undefined;
+    execution.status = "cancelled";
+    execution.updatedAt = timestamp();
+    // Keep the durable slot instead of releasing it: the browser observed a
+    // prior public outcome, so a later retry would be unsafe even without its
+    // external id. The slot remains the quarantine barrier for this target.
+    updatePublicActionDelivery(execution.id, "uncertain");
+    state.events.unshift(bridgeEvent(state, "Duplicate public outcome blocked", "The browser found an authored reply already present in the target thread. No second public reply was sent.", "warning", execution.id));
+    touchBridge(state, bridge);
+    state = settleAttentionForExecution(state, execution);
+    writeState(state);
+    return { state, execution };
+  }
   const identityBlocked = execution.environment === "live" && ["ACCOUNT_MISMATCH", "ACCOUNT_NOT_READY"].includes(input.code ?? "");
   const blockedByPerson = isPersonBlockingError(input.message, input.code);
   execution.failure = { code: blockedByPerson ? "TARGET_BLOCKED_PRESENCE" : input.code, message: input.message, retryable: blockedByPerson ? false : identityBlocked ? true : input.retryable }; execution.lease = undefined;

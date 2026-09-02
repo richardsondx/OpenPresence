@@ -1,7 +1,8 @@
 import { describe, expect, it } from "vitest";
 import { reservePublicActionDelivery } from "../lib/db";
+import { duplicatePublicOutcomeEvidence } from "../lib/duplicate-public-outcome";
 import { detectDuplicatePublicOutcomes, detectDuplicateVerifiedExecutionOutcomes } from "../lib/public-action-safety";
-import { createAgent, formChatPostIntent, formXActionIntent, formXReplyIntent } from "../lib/runtime";
+import { cloneState, createAgent, formChatPostIntent, formXActionIntent, formXReplyIntent } from "../lib/runtime";
 
 function fixture() {
   const state = createAgent({ name: "Idempotency Agent", description: "Test", audience: "Testers", mode: "agent", handle: "@idempotency_agent", accent: "#777777" });
@@ -14,6 +15,38 @@ function fixture() {
 }
 
 describe("public action idempotency", () => {
+  it("does not form another reply when the Social Mirror already proves one was authored", () => {
+    let state = fixture();
+    const presence = { ...state.presence!, status: "live" as const, environment: "live" as const, execution: { ...state.presence!.execution, reply: "auto" as const } };
+    state.presence = presence;
+    state.presences = [presence];
+    const observedAt = new Date().toISOString();
+    state.mirrorObjects = [
+      { id: "target-post", bridgeId: "native:test", presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: "already-replied-to" }, objectType: "post", author: { displayName: "Builder", handle: "builder" }, content: { text: "A post worth answering" }, observedAt, visibility: "public", shareability: "presence-only", environment: "live", archived: false },
+      { id: "observed-own-reply", bridgeId: "native:test", presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: "already-replied" }, parentExternalRef: { type: "x.post", id: "already-replied-to" }, objectType: "reply", actorPresenceId: presence.id, author: { displayName: presence.name, handle: presence.handle }, content: { text: "The reply that already exists." }, observedAt, visibility: "public", shareability: "presence-only", environment: "live", archived: false },
+    ] as never;
+
+    state = formXReplyIntent(state, "A second reply must never be formed.", "already-replied-to");
+
+    expect(state.socialIntents).toHaveLength(0);
+    expect(state.executions).toHaveLength(0);
+  });
+
+  it("collapses repeated observations of one external reply before recovery evaluates outcomes", () => {
+    const state = fixture();
+    const presence = state.presence!;
+    const observedAt = new Date().toISOString();
+    state.mirrorObjects = [
+      { id: "newest-observation", bridgeId: "native:test", presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: "same-reply" }, parentExternalRef: { type: "x.post", id: "same-target" }, objectType: "reply", actorPresenceId: presence.id, author: { displayName: presence.name, handle: presence.handle }, content: { text: "The same reply" }, observedAt, visibility: "public", shareability: "presence-only", environment: "live", archived: false },
+      { id: "older-observation", bridgeId: "native:test", presenceId: presence.id, channelId: "x", externalRef: { type: "x.post", id: "same-reply" }, parentExternalRef: { type: "x.post", id: "same-target" }, objectType: "reply", actorPresenceId: presence.id, author: { displayName: presence.name, handle: presence.handle }, content: { text: "The same reply" }, observedAt: new Date(Date.parse(observedAt) - 60_000).toISOString(), visibility: "public", shareability: "presence-only", environment: "live", archived: false },
+    ] as never;
+
+    const normalized = cloneState(state);
+
+    expect(normalized.mirrorObjects.filter((object) => object.externalRef.id === "same-reply")).toHaveLength(1);
+    expect(duplicatePublicOutcomeEvidence(normalized, presence.id)).toEqual([]);
+  });
+
   it("does not create two executions for a retried reply", () => {
     let state = fixture();
     state = formXReplyIntent(state, "A useful reply that should be sent once.", "post-retry");
@@ -64,11 +97,16 @@ describe("public action idempotency", () => {
     const presenceId = state.presence!.id;
     const observedAt = new Date().toISOString();
     state.mirrorObjects.unshift(
+      { id: "observed-target", bridgeId: "native:test", presenceId, channelId: "x", externalRef: { type: "x.post", id: targetId }, objectType: "post", author: { displayName: "Builder", handle: "builder" }, content: { text: "What should reliable social agents do after an uncertain write?" }, observedAt, visibility: "public", shareability: "presence-only", environment: "live", archived: false } as never,
       { id: "observed-duplicate-1", bridgeId: "native:test", presenceId, channelId: "x", externalRef: { type: "x.post", id: "reply-1" }, parentExternalRef: { type: "x.post", id: targetId }, objectType: "reply", actorPresenceId: presenceId, author: { displayName: "Agent" }, content: { text: "First public reply." }, observedAt, visibility: "public", shareability: "presence-only", environment: "live", archived: false } as never,
       { id: "observed-duplicate-2", bridgeId: "native:test", presenceId, channelId: "x", externalRef: { type: "x.post", id: "reply-2" }, parentExternalRef: { type: "x.post", id: targetId }, objectType: "reply", actorPresenceId: presenceId, author: { displayName: "Agent" }, content: { text: "Second public reply." }, observedAt, visibility: "public", shareability: "presence-only", environment: "live", archived: false } as never,
     );
 
     state = detectDuplicatePublicOutcomes(state, presenceId);
+    expect(duplicatePublicOutcomeEvidence(state, presenceId)).toMatchObject([{
+      target: { id: "observed-target", author: { displayName: "Builder", handle: "builder" } },
+      replies: [{ id: "observed-duplicate-1" }, { id: "observed-duplicate-2" }],
+    }]);
     expect(state.executions.find((execution) => execution.target?.id === targetId)?.status).toBe("cancelled");
     expect(state.events[0]).toMatchObject({ title: "Duplicate public replies detected", tone: "warning" });
   });

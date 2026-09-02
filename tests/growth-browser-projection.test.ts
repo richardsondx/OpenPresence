@@ -48,4 +48,31 @@ describe("Growth browser projection", () => {
     expect(body.socialIntents).toEqual([]);
     expect(Buffer.byteLength(JSON.stringify(body))).toBeLessThan(1_300_000);
   });
+
+  it("keeps enough of the 28-day audience history for the chart controls", () => {
+    const state = createAgent({ name: "Genny", description: "An agent for useful software conversations.", audience: "AI builders", mode: "agent", handle: "@genny", accent: "#d88b57" });
+    const presenceId = state.presence!.id;
+    const now = Date.now();
+    const presence = { ...state.presence!, createdAt: new Date(now - 40 * 86_400_000).toISOString() };
+    state.presence = presence;
+    state.presences = [presence];
+    state.audienceSnapshots = Array.from({ length: 40 }, (_, index) => ({
+      id: `audience-${index}`,
+      presenceId,
+      channel: "x" as const,
+      followers: 10_000 + index,
+      source: "native" as const,
+      observationStatus: "observed" as const,
+      observedAt: new Date(now - index * 86_400_000).toISOString(),
+    }));
+
+    const projection = growthBrowserProjection(state, presenceId);
+    const chartHistory = projection.growthBrowserSummary?.audience.recent ?? [];
+
+    expect(projection.growthBrowserSummary?.audience.count).toBe(40);
+    expect(chartHistory.length).toBeGreaterThan(8);
+    expect(chartHistory.length).toBeLessThanOrEqual(32);
+    expect(chartHistory[0]?.followers).toBe(10_000);
+    expect(chartHistory.at(-1)?.followers).toBeGreaterThan(10_000);
+  });
 });

@@ -20,7 +20,7 @@ import { languagesMatch } from "./language-policy";
 import { bridgeExecutionStatus } from "./bridge-contract";
 import { readNativeXCredentials, searchRecentXPosts } from "./x";
 import { deliverNativeExecutions } from "./native-execution-delivery";
-import { socialReplyQualityIssue } from "./social-quality";
+import { ensurePlayfulToneEmoji, socialReplyQualityIssue } from "./social-quality";
 import type { Assignment, MirrorObject, OpenPresenceState, Presence } from "./types";
 
 type Exploration = OpenPresenceState["explorations"][number];
@@ -94,6 +94,8 @@ function actionAvailable(state: OpenPresenceState, presence: Presence, mirror: M
 async function groundExpression(state: OpenPresenceState, presence: Presence, mirror: MirrorObject, draft: string, action: "reply" | "quote", options: ExplorationWorkerOptions) {
   const text = draft.trim();
   if (!text) return "";
+  const toneCorrected = ensurePlayfulToneEmoji(mirror.content?.text ?? "", text);
+  if (toneCorrected !== text && !socialReplyQualityIssue(mirror.content?.text ?? "", toneCorrected)) return toneCorrected;
   const qualityIssue = socialReplyQualityIssue(mirror.content?.text ?? "", text);
   if (!qualityIssue && text.length < 240) return text;
   try {

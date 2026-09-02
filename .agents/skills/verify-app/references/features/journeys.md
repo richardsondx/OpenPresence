@@ -22,6 +22,10 @@ Follow [Playground](playground-rehearsal.md) to seed a simulated event, inspect 
 
 Follow [Channels and Manage Agent](channels-agent.md), change a Presence setting, open Chat/Watching/Activity, return to Settings, and inspect persistence. Separately open Manage Agent and confirm Agent meaning/model scope remains stable.
 
+## Portfolio Agent → Presence → Channel switching
+
+Create or use at least two Agents, each with a distinct X Presence. Switch Agent, verify the Agent name and Agent-scoped Knowledge/Assets/meaning remain stable, then switch Presence and verify the selected social identity, Channel/environment, Activity, Review, and settings all follow the selected Presence. The current shell calls the Presence switcher `Channels`; record this label and accessibility state as evidence rather than assuming it represents the intended hierarchy.
+
 ## Responsive and partial-state resilience
 
-Repeat materially affected journeys at a mobile viewport when layout or navigation changed. If a projection is intentionally partial, navigate through Activity, Settings, People, and Growth and assert no client exception or fabricated status. Use the existing Playwright mobile project for broad regression.
+Repeat materially affected journeys at a mobile viewport when layout or navigation changed. If a projection is intentionally partial, navigate through Activity, Settings, People, and Growth and assert no client exception or fabricated status. Use the existing Playwright mobile project for broad regression. Include the Agent/Presence portfolio switchers because the current desktop footer and mobile topbar expose them in different locations.

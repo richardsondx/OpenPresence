@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { applyOperation, assertAssignmentPersistenceInvariant, assignmentIsCurrentlyProcessing, assignmentProgressLabel, compileAssignmentInstruction, createAgent, normalizeState, preflightAssignment } from "../lib/runtime";
+import { applyOperation, assertAssignmentPersistenceInvariant, assignmentIsCurrentlyProcessing, assignmentIsSatisfied, assignmentProgressLabel, compileAssignmentInstruction, createAgent, normalizeState, preflightAssignment } from "../lib/runtime";
 import { evaluateExecutionReadiness } from "../lib/execution-readiness";
 import { assignmentRunBlocksNewWork, classifyLiveAssignmentRun, isAutonomousPreWriteDeliveryFailure, liveAssignmentRunStage, maxConcurrentPursuitDeliveries, reconcileLiveAssignmentRuns } from "../lib/live-assignment-run";
 import { reconcileOrphanedAssignmentStatuses } from "../lib/assignment-recovery";
@@ -57,6 +57,24 @@ describe("canonical Assignment domain", () => {
 
     expect(recurring.recurrence).toMatchObject({ kind: "weekly", label: "Every week" });
     expect(oneTime.recurrence).toMatchObject({ kind: "once", label: "Once" });
+  });
+
+  it("repairs legacy dated Assignments that used once as an unset recurrence", () => {
+    const state = createAgent(input);
+    const schedule = { day: "Tuesday", time: "08:00", executionWindow: "08:00–11:00" };
+    const assignment = compileAssignmentInstruction(state, "Publish one useful lesson about persistent agents.", state.presence!.id, "sandbox", undefined, schedule);
+    const normalized = normalizeState({ ...state, assignments: [{ ...assignment, recurrence: { kind: "once", label: "Once" }, activation: { type: "scheduled", recurrence: { kind: "once", label: "Once" } } }] });
+
+    expect(normalized.assignments[0]?.recurrence).toMatchObject({ kind: "weekly", label: "Every week" });
+    expect(normalized.assignments[0]?.activation).toMatchObject({ type: "scheduled", recurrence: { kind: "weekly" } });
+  });
+
+  it("keeps a recurring Assignment active after one verified outcome", () => {
+    const state = createAgent(input);
+    const assignment = compileAssignmentInstruction(state, "Publish one useful lesson about persistent agents.", state.presence!.id, "sandbox", undefined, { day: "Tuesday", time: "08:00", executionWindow: "08:00–11:00" });
+    const recurring = { ...assignment, progress: { required: 1, verified: 1 } };
+
+    expect(assignmentIsSatisfied(recurring)).toBe(false);
   });
 
   it("persists the Schedule objective for List and Week projections", () => {

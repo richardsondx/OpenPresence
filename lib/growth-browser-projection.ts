@@ -8,6 +8,14 @@ const compactText = (value: string | undefined, limit = 280) => {
   return `${value.slice(0, limit - 1)}…`;
 };
 
+const GROWTH_CHART_WINDOW_DAYS = 28;
+const GROWTH_CHART_POINT_LIMIT = 32;
+
+function boundedHistory<T>(items: T[], limit: number) {
+  if (items.length <= limit) return items;
+  return Array.from({ length: limit }, (_, index) => items[Math.round((index * (items.length - 1)) / (limit - 1))]);
+}
+
 /**
  * Build the Growth read model without sending unrelated workspace history to
  * the browser. Growth needs complete selected-Presence evidence, but it does
@@ -33,7 +41,13 @@ export function growthBrowserProjection(state: OpenPresenceState, presenceId?: s
   const publicationSnapshots = scoped(state.publicationMetricSnapshots)
     .filter((snapshot) => growthPublicationIsInPresenceScope(state, selectedPresenceId ?? "", snapshot))
     .sort((left, right) => right.observedAt.localeCompare(left.observedAt));
-  const recentAudienceSnapshots = audienceSnapshots.slice(0, 8);
+  // The Growth chart has a 28-day control. Keep a bounded, representative
+  // history for that window instead of the eight-row evidence preview; the
+  // latter made the 7-day and 28-day controls render the same data once a
+  // Presence had more than eight observations.
+  const chartWindowStart = Date.now() - GROWTH_CHART_WINDOW_DAYS * 86_400_000;
+  const chartAudienceSnapshots = audienceSnapshots.filter((snapshot) => new Date(snapshot.observedAt).getTime() >= chartWindowStart);
+  const recentAudienceSnapshots = boundedHistory(chartAudienceSnapshots, GROWTH_CHART_POINT_LIMIT);
   const recentPublicationSnapshots = publicationSnapshots.slice(0, 8).map((snapshot) => ({
     id: snapshot.id,
     presenceId: snapshot.presenceId,

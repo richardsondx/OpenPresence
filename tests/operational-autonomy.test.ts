@@ -31,6 +31,7 @@ import {
   closeStaleBridgeExecutions,
   evaluateOperationalRunProgress,
   reconcileOrphanedWaitingRuns,
+  incidentBlocksAutonomousAttention,
   isLiveTemporalPresence,
   runOperationalSweep,
   scheduleRetryWake,
@@ -57,6 +58,37 @@ describe("Operational Autonomy & Temporal Runtime (Tier A / B / C Proofs)", () =
     expect(isLiveTemporalPresence({ status: "live", environment: "live" })).toBe(true);
     expect(isLiveTemporalPresence({ status: "live", environment: "sandbox" })).toBe(false);
     expect(isLiveTemporalPresence({ status: "paused", environment: "live" })).toBe(false);
+  });
+
+  it("keeps duplicate-outcome review target-scoped instead of freezing unrelated Attention", () => {
+    const incident = {
+      state: "needs_operator" as const,
+      operatorActionRequired: true,
+      rootCauseKey: "runtime.duplicate_public_outcome",
+    };
+    expect(incidentBlocksAutonomousAttention(incident)).toBe(false);
+    expect(incidentBlocksAutonomousAttention({ ...incident, rootCauseKey: "model_provider.credentials_missing" })).toBe(true);
+  });
+
+  it("does not erase duplicate-outcome review when unrelated runtime work succeeds", () => {
+    const uniquePresence = `presence_duplicate_review_${Date.now()}_${Math.random()}`;
+    const { incident } = recordOperationalFailure({
+      dependency: "runtime",
+      presenceId: uniquePresence,
+      error: "Duplicate public outcome: multiple verified public replies (2) for x.post:target.",
+    });
+
+    const result = recordOperationalSuccess("runtime", uniquePresence);
+
+    expect(result.resolvedIncidents).toEqual([]);
+    expect(listRecoveryIncidents(uniquePresence).find((item) => item.id === incident.id)).toMatchObject({
+      state: "needs_operator",
+      operatorActionRequired: true,
+    });
+    expect(getDependencyHealth("runtime", uniquePresence)).toMatchObject({
+      state: "requires_operator",
+      currentIncidentId: incident.id,
+    });
   });
 
   it("fences a second worker invocation even when it targets the same run in the same process", () => {

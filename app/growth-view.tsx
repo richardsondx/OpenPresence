@@ -107,7 +107,9 @@ function GrowthTrendChart({
     .filter((s) => new Date(s.observedAt).getTime() >= cutoff)
     .sort((a, b) => new Date(a.observedAt).getTime() - new Date(b.observedAt).getTime());
 
-  const displaySnapshots = filteredSnapshots.length ? filteredSnapshots : snapshots.slice(-10);
+  // Do not fall back to older observations. That makes a sparse or stale
+  // window look populated and causes both controls to appear identical.
+  const displaySnapshots = filteredSnapshots;
   const followerValues = displaySnapshots.map((s) => s.followers);
   const minVal = followerValues.length ? Math.min(...followerValues) : 0;
   const maxVal = followerValues.length ? Math.max(...followerValues) : 0;
@@ -126,14 +128,14 @@ function GrowthTrendChart({
   const chartW = width - padLeft - padRight;
   const chartH = height - padTop - padBottom;
 
-  // Time-proportional X mapping
-  const firstTime = displaySnapshots.length ? new Date(displaySnapshots[0].observedAt).getTime() : cutoff;
-  const lastTime = displaySnapshots.length ? new Date(displaySnapshots[displaySnapshots.length - 1].observedAt).getTime() : now;
-  const timeSpan = Math.max(1000, lastTime - firstTime);
+  // Keep the axis tied to the selected window, not just the first and last
+  // observations. Sparse evidence should remain visibly sparse in a 28-day
+  // view instead of stretching across the entire chart.
+  const timeSpan = Math.max(1000, now - cutoff);
 
   const points = displaySnapshots.map((s) => {
     const t = new Date(s.observedAt).getTime();
-    const x = padLeft + (displaySnapshots.length === 1 ? chartW / 2 : ((t - firstTime) / timeSpan) * chartW);
+    const x = padLeft + ((t - cutoff) / timeSpan) * chartW;
     const y = padTop + chartH - ((s.followers - yMin) / yRange) * chartH;
     return { x, y, followers: s.followers, observedAt: s.observedAt };
   });
@@ -152,9 +154,7 @@ function GrowthTrendChart({
   const latestPoint = points.length ? points[points.length - 1] : undefined;
   const startPoint = points.length > 1 ? points[0] : undefined;
 
-  const startDateLabel = displaySnapshots.length
-    ? new Date(displaySnapshots[0].observedAt).toLocaleDateString("en-US", { month: "short", day: "numeric" })
-    : `${days}d ago`;
+  const startDateLabel = new Date(cutoff).toLocaleDateString("en-US", { month: "short", day: "numeric" });
 
   return (
     <section className="growth-trend-card" aria-label="Growth trend chart">
@@ -167,6 +167,7 @@ function GrowthTrendChart({
           <button
             type="button"
             className={`growth-trend-toggle ${timeframe === "7d" ? "growth-trend-toggle-active" : ""}`}
+            aria-pressed={timeframe === "7d"}
             onClick={() => setTimeframe("7d")}
           >
             7 Days
@@ -174,6 +175,7 @@ function GrowthTrendChart({
           <button
             type="button"
             className={`growth-trend-toggle ${timeframe === "28d" ? "growth-trend-toggle-active" : ""}`}
+            aria-pressed={timeframe === "28d"}
             onClick={() => setTimeframe("28d")}
           >
             28 Days
@@ -184,7 +186,9 @@ function GrowthTrendChart({
         {displaySnapshots.length <= 1 ? (
           <div className="growth-chart-baseline-banner">
             <Activity size={15} />
-            <span>Collecting baseline data for {presenceName} ({displaySnapshots[0]?.followers.toLocaleString() ?? 0} followers recorded)</span>
+            <span>{displaySnapshots.length === 0
+              ? `No follower observations in the last ${days} days for ${presenceName}.`
+              : `Collecting baseline data for ${presenceName} (${displaySnapshots[0]?.followers.toLocaleString() ?? 0} followers recorded)`}</span>
           </div>
         ) : (
           <svg viewBox={`0 0 ${width} ${height}`} className="growth-chart-svg">

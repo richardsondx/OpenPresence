@@ -50,6 +50,11 @@ describe("Agent social decision parsing", () => {
 
     for (const system of [publicPrompt.system, rehearsalPrompt.system, privatePrompt.system]) {
       expect(system).toContain("AI-SLOP AVOIDANCE");
+      expect(system).toContain("MIXED-FEELING MOMENTS");
+      expect(system).toContain("Do not reinterpret the hard part as a lesson, gift, silver lining, proof of what they learned");
+      expect(system).toContain("Do not use an aphorism or tidy reframe such as 'the slow part is what makes it stick'");
+      expect(system).toContain("Do not give therapeutic permission or reassurance such as 'you are allowed to feel...'");
+      expect(system).toContain("Good shape: name the concrete win, acknowledge that the long or exhausting road can feel bad, and stop");
       expect(system).toContain("The demo is...");
       expect(system).toContain("This is the part people skip");
       expect(system).toContain("The interesting shift is not just...");
@@ -60,6 +65,10 @@ describe("Agent social decision parsing", () => {
       expect(system).toContain("Do not force the same opening, sentence shape, length, or rhythm onto every voice");
       expect(system).toContain("REALISTIC OPTIMISM DEFAULT: Use this stance only when BRAIN.md does not specify another one.");
       expect(system).toContain("POSITIVE SOCIAL DEFAULT");
+      expect(system).toContain("Assume good faith and meet people in the moment");
+      expect(system).toContain("SOCIAL DIRECTNESS");
+      expect(system).toContain("SOURCE-COMMENTARY OPENERS");
+      expect(system).toContain("When you choose a joke or playful riff, include one familiar emoji to signal the tone");
       expect(system).toContain("Never use a test of worth");
       expect(system).toContain("A deliberate meaning-file or style choice takes precedence");
       expect(system).toContain("Vary the choreography across turns");
@@ -498,6 +507,40 @@ describe("Agent social decision parsing", () => {
     expect(plannerMessages[0]?.content).toContain("KNOWLEDGE EVIDENCE");
     expect(plannerMessages[0]?.content).toContain("Do not use em dashes or en dashes");
     expect(normalizeRehearsalReply("one — two – three")).toBe("one, two, three");
+  });
+
+  it("repairs a source-commentary opener before returning a Rehearsal reply", async () => {
+    let state = createAgent({ name: "Genny", description: "Make useful founder observations.", mode: "agent", handle: "@genny_source_gate", accent: "#D68754" });
+    state.providerConnections.push({ id: "ollama-source-gate", provider: "ollama", label: "Ollama", status: "local", endpoint: "http://ollama.test", createdAt: new Date().toISOString() });
+    state = applyOperation(state, { type: "setModel", provider: "ollama", model: "glm-5.2:cloud", vision: false });
+    let chatCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL) => {
+      const url = String(input);
+      if (url.endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
+      chatCalls += 1;
+      const content = chatCalls === 1
+        ? JSON.stringify({ acts: [{ action: "reply", text: "I like the ‘think I could be helpful’ qualifier. It filters for founders looking for an actual partner.", rationale: "A specific phrase deserves notice." }] })
+        : JSON.stringify({ status: "ok", action: "reply", text: "The refusal boundary matters because it tells people what happens when the request gets messy.", rationale: "Joined the point directly without reviewing the wording." });
+      return new Response(JSON.stringify({ message: { content } }), { status: 200 });
+    }));
+
+    await expect(generatePresenceChatReply(state, state.presence!.id, "A useful agent needs a refusal policy as much as a task policy.", [])).resolves.toBe("The refusal boundary matters because it tells people what happens when the request gets messy.");
+    expect(chatCalls).toBe(2);
+  });
+
+  it("adds one tone cue when a playful Rehearsal reply omitted its emoji", async () => {
+    let state = createAgent({ name: "Genny", description: "Make useful founder observations.", mode: "agent", handle: "@genny_playful_gate", accent: "#D68754" });
+    state.providerConnections.push({ id: "ollama-playful-gate", provider: "ollama", label: "Ollama", status: "local", endpoint: "http://ollama.test", createdAt: new Date().toISOString() });
+    state = applyOperation(state, { type: "setModel", provider: "ollama", model: "glm-5.2:cloud", vision: false });
+    let chatCalls = 0;
+    vi.stubGlobal("fetch", vi.fn(async (input: string | URL) => {
+      if (String(input).endsWith("/api/tags")) return new Response(JSON.stringify({ models: [{ name: "glm-5.2:cloud", capabilities: ["completion"] }] }), { status: 200 });
+      chatCalls += 1;
+      return new Response(JSON.stringify({ message: { content: JSON.stringify({ acts: [{ action: "reply", text: "Nothing kills a room faster than everyone waiting for someone else to go first.", rationale: "A brief joke fits." }] }) } }), { status: 200 });
+    }));
+
+    await expect(generatePresenceChatReply(state, state.presence!.id, "I was promised networking, not a funeral.", [])).resolves.toBe("Nothing kills a room faster than everyone waiting for someone else to go first. 😭");
+    expect(chatCalls).toBe(1);
   });
 
   it("lets SOUL control the manner of safe prompt-request deflection", async () => {

@@ -15,6 +15,16 @@ describe("public social draft quality checks", () => {
     expect(socialReplyQualityIssue(target, "The first version is live. I am looking forward to seeing what people do with it.")).toBeUndefined();
   });
 
+  it("rejects tidy lessons in response to a milestone with a caveat", () => {
+    const target = "We finally crossed $10k MRR today. Took way longer than I expected.";
+
+    expect(socialReplyQualityIssue(target, "The slow part is what makes it stick.")).toContain("win with a real caveat");
+    expect(socialReplyQualityIssue(target, "The part that took longer is where you learned the most.")).toContain("win with a real caveat");
+    expect(socialReplyQualityIssue(target, "It is okay that it took longer than expected.")).toContain("win with a real caveat");
+    expect(socialReplyQualityIssue(target, "$10k MRR is a real milestone. It makes sense to feel proud and tired.")).toBeUndefined();
+    expect(socialReplyQualityIssue("What did you learn from finally crossing $10k MRR after a long road?", "The slow part is what makes it stick.")).toBeUndefined();
+  });
+
   it("does not reject a substantive reply to a question", () => {
     const target = "What is the difference between reach and a real second conversation?";
     const draft = "Reach tells you who saw the idea; a second conversation tells you whether it mattered enough for someone to respond with context.";
@@ -78,6 +88,20 @@ describe("public social draft quality checks", () => {
 
     expect(socialReplyQualityIssue(target, "I hear you. That sounds difficult, but you have got this.")).toContain("canned expression of empathy");
     expect(socialReplyQualityIssue(target, "Moving forward, let us align on the action items and unlock more impact.")).toContain("workplace jargon");
+  });
+
+  it("rejects source-commentary openers without banning phrase-specific answers", () => {
+    const target = "A useful agent needs a refusal policy as much as a task policy.";
+
+    expect(socialReplyQualityIssue(target, "I like the ‘think I could be helpful’ qualifier. It filters for founders looking for an actual partner.")).toContain("reviewing or quoting the source");
+    expect(socialReplyQualityIssue(target, "Before treating ‘700 agents’ as fact, verify the incident first.")).toContain("reviewing or quoting the source");
+    expect(socialReplyQualityIssue(target, "‘Can I do this?’ is only half the question.")).toContain("reviewing or quoting the source");
+    expect(socialReplyQualityIssue(target, "The interesting shift is not just that agents get APIs.")).toContain("reviewing or quoting the source");
+    expect(socialReplyQualityIssue(target, "I'd push back on that framing a little.")).toContain("reviewing or quoting the source");
+    expect(socialReplyQualityIssue(target, "@garrytan ‘Actually’ is doing heroic work here.")).toContain("reviewing or quoting the source");
+    expect(socialReplyQualityIssue("What do you mean by ‘the refusal policy’?", "The refusal policy is the point where the Agent decides when to stop or hand control back.")).toBeUndefined();
+    expect(socialReplyQualityIssue("I was promised networking, not a funeral.", "Nothing kills a room faster than everyone waiting for someone else to go first.")).toContain("playful");
+    expect(socialReplyQualityIssue("I was promised networking, not a funeral.", "Nothing kills a room faster than everyone waiting for someone else to go first 😭")).toBeUndefined();
   });
 
   it("rejects promotion-source attribution in a reply to another author", () => {

@@ -161,6 +161,29 @@ export function deriveActivityNow(state: OpenPresenceState, presenceId: string, 
   };
 
   if (activeRun) {
+    if (activeRun.state === "queued") {
+      const blockingIncident = (state.recoveryIncidents ?? []).find((incident) =>
+        incident.state === "needs_operator"
+        && incident.operatorActionRequired
+        && incident.rootCauseKey !== "runtime.duplicate_public_outcome"
+        && (!incident.presenceId || incident.presenceId === presenceId));
+      return {
+        presenceId,
+        state: blockingIncident ? "paused" : "recovering",
+        title: blockingIncident ? "Attention pass waiting for your review" : "Attention pass queued to resume",
+        detail: blockingIncident
+          ? `${blockingIncident.safeSummary} No cognition worker is running; the queued pass will resume after the blocking issue is resolved.`
+          : "No cognition worker is running yet. The durable recovery is queued and will resume automatically.",
+        since: activeRun.startedAt ?? activeRun.createdAt,
+        nextWakeAt: pendingWake?.wakeAt,
+        nextWakePurpose: wakePurpose(pendingWake),
+        activeRunId: activeRun.id,
+        activeEpisodeId: activeEpisode?.id,
+        steps,
+        pendingInboundCount,
+        pendingNudgeCount: pendingNudges.length,
+      };
+    }
     const progressAt = activeRun.lastHeartbeatAt ?? activeRun.lastProgressAt ?? activeRun.startedAt ?? activeRun.createdAt;
     const age = Math.max(0, now.getTime() - new Date(progressAt).getTime());
     const expected = STAGE_EXPECTATIONS_MS[activeRun.stage] ?? 120_000;

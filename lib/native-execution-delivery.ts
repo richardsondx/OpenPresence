@@ -25,6 +25,7 @@ import { isTestRuntime } from "./test-runtime";
 import { xCreditsExhausted } from "./x-credits";
 import { PublicationSecurityError, sealExecutionForDelivery } from "./publication-security";
 import { detectDuplicateVerifiedExecutionOutcomes } from "./public-action-safety";
+import { hasObservedOwnReplyForTarget } from "./duplicate-public-outcome";
 import type { OpenPresenceState } from "./types";
 import { readStateSnapshotForContext, reservePublicActionDelivery, updatePublicActionDelivery } from "./db";
 import { authorizeAssetSelection, liveAssetReuseReason } from "./asset-library";
@@ -35,6 +36,17 @@ function cancelDuplicateDelivery(state: OpenPresenceState, executionId: string, 
   execution.status = "cancelled";
   execution.failure = { code: "DUPLICATE_EXECUTION", message: `A durable delivery slot for this target is already owned by execution ${representedBy}; no second connector request was sent.`, retryable: false };
   execution.reviewReason = "This Presence already has a public action in flight or verified for the same target.";
+  execution.updatedAt = new Date().toISOString();
+  const action = state.actions.find((item) => item.executionId === execution.id);
+  if (action) action.status = "failed";
+}
+
+function cancelObservedReplyDelivery(state: OpenPresenceState, executionId: string) {
+  const execution = state.executions.find((item) => item.id === executionId);
+  if (!execution) return;
+  execution.status = "cancelled";
+  execution.failure = { code: "DUPLICATE_PUBLIC_OUTCOME", message: "The Social Mirror already contains an authored reply for this target; no second connector request was sent.", retryable: false };
+  execution.reviewReason = "An authored reply is already visible for this target in the Social Mirror.";
   execution.updatedAt = new Date().toISOString();
   const action = state.actions.find((item) => item.executionId === execution.id);
   if (action) action.status = "failed";
@@ -80,6 +92,10 @@ export async function deliverNativeExecutions(source: OpenPresenceState, executi
         const action = next.actions.find((item) => item.executionId === paused.id);
         if (action) { action.status = "skipped"; action.reason = "The source Watch was paused before delivery; no external action was attempted."; }
       }
+      continue;
+    }
+    if (execution.affordance === "x.reply" && (hasObservedOwnReplyForTarget(durable, execution) || hasObservedOwnReplyForTarget(next, execution))) {
+      cancelObservedReplyDelivery(next, execution.id);
       continue;
     }
     const duplicateOf = existingPublicActionExecution(durable, execution) ?? existingPublicActionExecution(next, execution);
