@@ -2,7 +2,7 @@ import { NextResponse } from "next/server";
 import { randomUUID } from "node:crypto";
 import { gzipSync } from "node:zlib";
 import { z } from "zod";
-import { dbSelectionSource, deleteBridgeCredential, deleteChannelSecret, deleteProviderSecret, getRecoveryIncident, listOperationalRuns, readProviderSecret, readState, readStateForContext, readStateReadToken, readStateSnapshotForContext, readStateViewForContext, resolvedDbPath, saveProviderSecret, WorkspaceConflictError, writeState } from "@/lib/db";
+import { dbSelectionSource, deleteBridgeCredential, deleteChannelSecret, deleteProviderSecret, getRecoveryIncident, listOperationalRuns, readAgentPresenceDirectory, readProviderSecret, readState, readStateForContext, readStateReadToken, readStateSnapshotForContext, readStateViewForContext, resolvedDbPath, saveProviderSecret, WorkspaceConflictError, writeState } from "@/lib/db";
 import { EvidenceVisualAssetDiscoveryProvider, materializeCandidate, previewCandidate, TavilyAssetDiscoveryProvider } from "@/lib/asset-discovery";
 import { assessVisualFit } from "@/lib/visual-fit";
 import { checkModelProviderAccess, generateAgentReply, generateAgentSocialDecision, generateAgentSocialEdit, generateAgentSocialJudgment, generateAssetPublicationReview, generateAssetResearchPlannerDecision, generateEvidenceLedDraft, generateEvidenceLedPublication, generateExplorationTriage, generateGrowthReview, generateIndependentModelText, generatePlaygroundTestStimulus, generatePresenceChatReply, generatePublishingPlan, generateTextOnlyAssignmentPublication } from "@/lib/ai";
@@ -5177,11 +5177,29 @@ export async function POST(request: Request) {
     }
     // Agent switching is the one operation that needs the complete directory;
     // all other mutations stay on the scoped workspace hot path.
+    const directoryState = parsed.type === "selectAgent"
+      ? (() => {
+          const base = readState();
+          const directory = readAgentPresenceDirectory();
+          const known = new Set(base.presences.map((presence) => presence.id));
+          return { ...base, presences: [...base.presences, ...directory.filter((item) => !known.has(item.presence.id)).map((item) => item.presence)] };
+        })()
+      : undefined;
     const current = parsed.type === "selectAgent"
-      ? stateForContext(readState(), context)
+      // Ignore the outgoing URL's Presence while resolving a new Agent. In
+      // legacy databases those Presences share one compatibility directory;
+      // carrying the old Presence into the switch can select the right Agent
+      // with the wrong channel and make the dropdown appear inert.
+      ? stateForContext(directoryState!, { agentId: context.agentId })
       : readStateForContext(context);
     const durableWorkspaceRevision = current.workspaceRevision;
-    if (context.workspaceRevision !== undefined) current.workspaceRevision = context.workspaceRevision;
+    // Selecting an Agent is a directory/context transition, not an edit to
+    // the workspace currently rendered in the browser. Resolve it from the
+    // latest durable directory snapshot so a background Activity/health poll
+    // cannot turn a harmless switch into a false stale-revision conflict.
+    if (parsed.type !== "selectAgent" && context.workspaceRevision !== undefined) {
+      current.workspaceRevision = context.workspaceRevision;
+    }
     validateRequestLineage(current, parsed as unknown as RuntimeOperation);
     if (parsed.type === "analyzeSchedulePrompt") {
       // Analysis is intentionally a read-only request. The proposal carries
@@ -6817,7 +6835,11 @@ export async function POST(request: Request) {
       if (connection) deleteProviderSecret(connection.id);
     }
     next = recordCapabilityFeedback(current, next, next.presence?.id);
-    writeState(next, parsed.type === "setAgentAccent" ? { persistAgentWorkspaces: true } : undefined);
+    writeState(next, parsed.type === "setAgentAccent"
+      ? { persistAgentWorkspaces: true }
+      : parsed.type === "selectAgent"
+        ? { force: true }
+        : undefined);
     for (const runId of liveAssignmentRunIdsToDispatch) dispatchLiveAssignmentWorker(runId);
     return stateResponse(request, next);
   } catch (error) {

@@ -5,7 +5,7 @@ import Database from "better-sqlite3";
 import { drizzle } from "drizzle-orm/better-sqlite3";
 import { sql } from "drizzle-orm";
 import { assertAssignmentPersistenceInvariant, initialState, isStateNormalized, markStateNormalized, normalizeState, preflightAssignment, stateForAgent } from "./runtime";
-import type { AgentWorkspaceSnapshot, AttentionScope, AttentionTrigger, Bridge, BridgeAdapterStatus, BrowserBody, DependencyHealth, DependencyHealthKind, DependencyHealthState, Execution, JsonValue, MirrorEvent, OpenPresenceState, OperationalRun, OperationalRunState, ProcessHeartbeat, RecoveryAttempt, RecoveryIncident, RecoveryIncidentState, ScheduledWake } from "./types";
+import type { AgentWorkspaceSnapshot, AttentionScope, AttentionTrigger, Bridge, BridgeAdapterStatus, BrowserBody, DependencyHealth, DependencyHealthKind, DependencyHealthState, Execution, JsonValue, MirrorEvent, OpenPresenceState, OperationalRun, OperationalRunState, Presence, ProcessHeartbeat, RecoveryAttempt, RecoveryIncident, RecoveryIncidentState, ScheduledWake } from "./types";
 
 const dataDir = path.join(process.cwd(), "data");
 fs.mkdirSync(dataDir, { recursive: true });
@@ -1194,7 +1194,17 @@ function hydrateAgentWorkspaces(state: OpenPresenceState): OpenPresenceState {
     try {
       const workspace = hydrateSocialDecisions(hydrateSocialIntents(hydrateEvents(hydrateExecutions(hydrateAttentionEpisodes(hydrateMirrorObjects(hydrateHighVolumeCollections(JSON.parse(row.payload) as AgentWorkspaceSnapshot, row.agent_id), row.agent_id), row.agent_id), row.agent_id), row.agent_id), row.agent_id), row.agent_id);
       stored.set(row.agent_id, { ...workspace, workspaceRevision: revisions.get(row.agent_id) ?? 0 });
-    } catch { /* retain the compatibility snapshot below */ }
+    } catch {
+      // Keep a raw legacy snapshot available to Agent switching even when a
+      // newly-added projection cannot hydrate an older workspace row. The
+      // switch path normalizes the selected snapshot before persisting it;
+      // silently dropping the row makes the Agent directory look clickable
+      // while leaving the operator on the current Agent.
+      try {
+        const rawWorkspace = JSON.parse(row.payload) as AgentWorkspaceSnapshot;
+        stored.set(row.agent_id, { ...rawWorkspace, workspaceRevision: revisions.get(row.agent_id) ?? 0 });
+      } catch { /* retain compatibility when the workspace payload is corrupt */ }
+    }
   }
   const snapshots = state.agentWorkspaces.map((workspace) => workspace.agent?.id ? stored.get(workspace.agent.id) ?? workspace : workspace);
   for (const workspace of stored.values()) {
@@ -1535,6 +1545,23 @@ export function readStateSnapshot(): OpenPresenceState {
 
 export function readState(): OpenPresenceState {
   return structuredClone(hydrateOperationalState(hydrateBridgeHealth(readStateSnapshot()))) as OpenPresenceState;
+}
+
+/**
+ * Return the durable Agent → Presence directory used to repair legacy
+ * compatibility snapshots during an Agent switch. This is intentionally
+ * read-only; normal workspace reads remain scoped to the active Agent.
+ */
+export function readAgentPresenceDirectory(): Array<{ agentId: string; presence: Presence }> {
+  const rows = sqlite.prepare("SELECT agent_id, payload FROM presences ORDER BY updated_at ASC").all() as Array<{ agent_id?: string | null; payload?: string }>;
+  return rows.flatMap((row) => {
+    if (!row.agent_id || !row.payload) return [];
+    try {
+      return [{ agentId: row.agent_id, presence: JSON.parse(row.payload) as Presence }];
+    } catch {
+      return [];
+    }
+  });
 }
 
 /** Materialize a mutable context from the cached state with one clone. */

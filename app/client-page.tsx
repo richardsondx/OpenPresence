@@ -1674,7 +1674,8 @@ function AgentSwitcher({
                   role="menuitem"
                   className={`agent-menu-item ${item.id === state.activeAgentId ? "active" : ""}`}
                   onClick={async () => {
-                    await mutate({ type: "selectAgent", id: item.id });
+                    const next = await mutate({ type: "selectAgent", id: item.id });
+                    if (next) syncBrowserWorkspaceContext(next);
                     setOpen(false);
                   }}
                 >
@@ -1768,10 +1769,25 @@ function AgentPortfolio({
   collapsed?: boolean;
 }) {
   const agents = state.agents?.length ? state.agents : state.agent ? [state.agent] : [];
+  const legacyPresenceFor = (item: Agent) => {
+    const slug = item.name.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const matching = state.presences.find((candidate) => {
+      const name = candidate.name.toLowerCase().replace(/[^a-z0-9]+/g, "");
+      const handle = candidate.handle.toLowerCase().replace(/[^a-z0-9]+/g, "");
+      return name === slug || handle.includes(slug);
+    });
+    return matching ?? (item.id === state.activeAgentId ? state.presence ?? state.presences[0] : undefined);
+  };
   const workspaceFor = (agentId: string) => state.agentWorkspaces?.find((workspace) => workspace.agent?.id === agentId);
-  const presenceFor = (agentId: string) => agentId === state.activeAgentId ? state.presence : workspaceFor(agentId)?.presence;
+  const presenceFor = (agentId: string) => {
+    const item = agents.find((candidate) => candidate.id === agentId);
+    return workspaceFor(agentId)?.presence ?? (item ? legacyPresenceFor(item) : undefined);
+  };
   const selectAgent = async (agentId: string) => {
-    if (agentId !== state.activeAgentId) await mutate({ type: "selectAgent", id: agentId });
+    if (agentId !== state.activeAgentId) {
+      const next = await mutate({ type: "selectAgent", id: agentId });
+      if (next) syncBrowserWorkspaceContext(next);
+    }
     setView("chat");
   };
   return (

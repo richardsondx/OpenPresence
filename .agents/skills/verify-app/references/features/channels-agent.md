@@ -8,7 +8,7 @@ Agent settings is one home for the selected Agent’s durable mind plus the conn
 - Configure Presence identity, public self, Ghost representation, conversational style, Channel destination, Presence brief, discovery sources, attention rhythm/intensity, publishing initiative, language/media/reuse policies, execution modes, knowledge access, and deletion.
 - Inspect the effective capability manifest and connection panels for Official X API, dedicated Chrome, and Bridge routes.
 - Edit Agent meaning files and model/provider/tool settings.
-- Preserve Agent scope when switching Presence or Agent.
+- Preserve Agent scope when switching Agent settings sections; the active channel remains contextual to the selected Agent.
 
 ## How to get to it (user POV)
 

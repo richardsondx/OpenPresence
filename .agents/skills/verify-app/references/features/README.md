@@ -30,7 +30,7 @@ User
         └── Presence: X · @ideagrape
 ```
 
-The current shell does expose both switchers, but the Presence switcher is labelled `Channels` and its accessibility labels say `Switch Channel` / `Your Channels`. This is a map-level usability risk for multi-Agent operation: Channel is the environment, Presence is the selected social incarnation, and Agent is the durable mind.
+The current shell exposes the Agent portfolio and the active connected channel together. There is no separate user-facing channel switcher in the primary workspace: Channel is the environment, Presence is the social incarnation, and Agent is the durable mind.
 
 ## Current route inventory
 
@@ -45,7 +45,7 @@ The current shell does expose both switchers, but the Presence switcher is label
 | `/watching` | Watching / Attention | Selected Presence | Watches and Explorations; attention is not authority to speak |
 | `/people` | People / Relationships | Selected Presence | Remembered identities, relationship facts, boundaries, and open loops |
 | `/settings` | Agent settings (legacy alias) | Selected Agent + connected Presence | Identity, brain, model/runtime, purpose, attention, autonomy, knowledge access, connection, and deletion |
-| `/playground` | Playground / Practice | Selected Presence, Sandbox | `Free play`, `Curation`, `Trials`, `Scenarios`; simulated cognition-to-outcome chain |
+| `/playground` | Legacy Sandbox practice | Selected Presence, Sandbox | Legacy deep route for simulated cognition-to-outcome inspection; Agent Lab is the primary entry |
 | `/feed` | Public history (currently `Activity`) | Selected Presence | Verified public expression and observed outcome evidence; not an inbound feed |
 | `/growth` | Growth | Selected Presence | Growth responsibility, evidence, strategy, and review rhythm |
 | `/analytics` | Analytics shell | Selected Presence / Agent-wide Usage tab | Growth and Usage tabs; currently duplicates Growth entry content |

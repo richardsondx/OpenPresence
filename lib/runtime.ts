@@ -4412,6 +4412,37 @@ function snapshotWorkspace(state: OpenPresenceState): import("./types").AgentWor
   return workspace as import("./types").AgentWorkspaceSnapshot;
 }
 
+function legacyPresenceForAgent(state: OpenPresenceState, agent: Agent): Presence | undefined {
+  const slug = agent.name.toLowerCase().replace(/[^a-z0-9]+/g, "");
+  const matching = state.presences.find((presence) => {
+    const presenceName = presence.name.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    const handle = presence.handle.toLowerCase().replace(/[^a-z0-9]+/g, "");
+    return presenceName === slug || handle.includes(slug);
+  });
+  return matching ?? (agent.id === state.activeAgentId ? state.presence ?? state.presences[0] : undefined);
+}
+
+function legacyWorkspaceForAgent(state: OpenPresenceState, agent: Agent): import("./types").AgentWorkspaceSnapshot | undefined {
+  const presence = legacyPresenceForAgent(state, agent);
+  if (!presence) return undefined;
+  const assignments = state.assignments.filter((assignment) => assignment.agentId === agent.id && assignment.presenceId === presence.id);
+  return snapshotWorkspace({
+    ...state,
+    agent,
+    presence,
+    presences: [presence],
+    activePresenceId: presence.id,
+    activeAgentId: agent.id,
+    // Legacy Agent rows have no independent revision counter until their
+    // first durable switch. Starting from zero lets writeState establish the
+    // target workspace revision instead of comparing it to the outgoing
+    // Agent's counter.
+    workspaceRevision: 0,
+    assignments,
+    assignmentRuns: (state.assignmentRuns ?? []).filter((run) => run.agentId === agent.id && run.presenceId === presence.id),
+  });
+}
+
 function restoreWorkspace(state: OpenPresenceState, workspace: import("./types").AgentWorkspaceSnapshot, agentWorkspaces: import("./types").AgentWorkspaceSnapshot[]): OpenPresenceState {
   return normalizeState({ ...state, ...workspace, workspaceRevision: workspace.workspaceRevision, agents: state.agents, activeAgentId: workspace.agent?.id ?? null, agentWorkspaces });
 }
@@ -8087,9 +8118,26 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
       const target = state.agents.find((item) => item.id === operation.id);
       if (!target || target.id === state.activeAgentId || !state.agent) return state;
       const currentAgentId = state.agent.id;
-      const targetWorkspace = state.agentWorkspaces.find((item) => item.agent?.id === target.id);
+      // Older local workspaces predate the AgentWorkspaceSnapshot table and
+      // still contain a real Agent directory plus unscoped Presences. Map the
+      // matching legacy Presence on first selection so the visible Agent
+      // directory remains usable instead of silently leaving the operator on
+      // the previous Agent.
+      const storedTargetWorkspace = state.agentWorkspaces.find((item) => item.agent?.id === target.id);
+      const legacyTargetWorkspace = legacyWorkspaceForAgent(state, target);
+      // Prefer the deterministic legacy Agent → Presence mapping when an old
+      // compatibility snapshot was created while the browser URL pointed at
+      // another Presence. This repairs the common pre-migration case where a
+      // Jenny workspace accidentally retained Poko's channel context.
+      const targetWorkspace = storedTargetWorkspace && (!legacyTargetWorkspace || storedTargetWorkspace.presence?.id === legacyTargetWorkspace.presence?.id)
+        ? storedTargetWorkspace
+        : legacyTargetWorkspace ?? storedTargetWorkspace;
       if (!targetWorkspace) return state;
-      const current = snapshotWorkspace(state);
+      const currentPresence = state.agent ? legacyPresenceForAgent(state, state.agent) : undefined;
+      const currentState = currentPresence && currentPresence.id !== state.presence?.id
+        ? { ...state, presence: currentPresence, activePresenceId: currentPresence.id, presences: [currentPresence], assignments: state.assignments.filter((assignment) => assignment.agentId === state.agent?.id && assignment.presenceId === currentPresence.id), assignmentRuns: (state.assignmentRuns ?? []).filter((run) => run.agentId === state.agent?.id && run.presenceId === currentPresence.id) }
+        : state;
+      const current = snapshotWorkspace(currentState);
       const workspaces = state.agentWorkspaces.filter((item) => item.agent?.id !== currentAgentId && item.agent?.id !== target.id);
       workspaces.push(current);
       return restoreWorkspace(state, targetWorkspace, workspaces);

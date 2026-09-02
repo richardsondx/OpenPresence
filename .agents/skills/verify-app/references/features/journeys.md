@@ -26,9 +26,9 @@ Follow [Playground](playground-rehearsal.md) to seed a simulated event, inspect 
 
 Follow [Channels and Manage Agent](channels-agent.md), change a Presence setting, open Chat/Watching/Activity, return to Settings, and inspect persistence. Separately open Manage Agent and confirm Agent meaning/model scope remains stable.
 
-## Portfolio Agent → Presence → Channel switching
+## Portfolio Agent → connected channel context
 
-Create or use at least two Agents, each with a distinct X Presence. Switch Agent, verify the Agent name and Agent-scoped Knowledge/Assets/meaning remain stable, then switch Presence and verify the selected social identity, Channel/environment, Activity, Review, and settings all follow the selected Presence. The current shell calls the Presence switcher `Channels`; record this label and accessibility state as evidence rather than assuming it represents the intended hierarchy.
+Create or use at least two Agents, each with its own connected channel context. Switch Agent from the portfolio rail or topbar dropdown, verify the Agent name and Agent-scoped Knowledge/Assets/meaning remain stable, then verify the active channel, Activity, Review, Chat, and unified settings all follow the selected Agent. Do not introduce a separate channel switcher into the primary workspace.
 
 ## Responsive and partial-state resilience
 
