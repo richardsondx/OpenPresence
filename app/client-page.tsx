@@ -43,6 +43,7 @@ import {
   Ghost,
   Heart,
   Info,
+  ImageIcon,
   Layers,
   LoaderCircle,
   MessageCircle,
@@ -901,7 +902,7 @@ export default function Home() {
       if (initialView === "live" || initialView === "review" || initialView === "chat" || initialView === "growth" || initialView === "analytics" || initialView === "knowledge" || initialView === "assets" || initialView === "people" || initialView === "feed" || initialView === "schedule" || initialView === "work" || initialView === "watching" || initialView === "rehearsal" || initialView === "brain" || initialView === "teach" || initialView === "presence" || initialView === "playground" || initialView === "usage") {
         const activitySurface = query.get("surface");
         const activityProjection = activitySurface === "timeline" || activitySurface === "calendar" ? "feed" : "activity";
-        query.set("projection", initialView === "live" || initialView === "review" ? activityProjection : initialView === "chat" ? "chat" : initialView === "growth" || initialView === "analytics" ? "growth" : initialView === "knowledge" ? "knowledge" : initialView === "assets" ? "assets" : initialView === "people" ? "people" : initialView === "feed" ? "feed" : initialView === "schedule" ? "schedule" : initialView === "work" ? "work" : initialView === "watching" ? "watching" : initialView === "rehearsal" ? "rehearsal" : initialView === "brain" ? "brain" : initialView === "teach" ? "teach" : initialView === "presence" ? "presence" : initialView === "playground" ? "playground" : "usage");
+        query.set("projection", initialView === "live" || initialView === "review" ? activityProjection : initialView === "chat" ? "chat" : initialView === "growth" || initialView === "analytics" ? "growth" : initialView === "knowledge" ? "knowledge" : initialView === "assets" ? "assets" : initialView === "people" ? "people" : initialView === "feed" ? "feed" : initialView === "schedule" ? "schedule" : initialView === "work" ? "work" : initialView === "watching" ? "watching" : initialView === "rehearsal" ? "rehearsal" : initialView === "brain" || initialView === "presence" ? "full" : initialView === "teach" ? "teach" : initialView === "playground" ? "playground" : "usage");
       }
     }
     const loadInitialState = async () => {
@@ -1008,7 +1009,7 @@ export default function Home() {
             ...(context?.activeAgentId ? { "x-openpresence-agent-id": context.activeAgentId } : {}),
             ...(context?.activePresenceId ? { "x-openpresence-presence-id": context.activePresenceId } : {}),
             ...(context?.workspaceRevision !== undefined ? { "x-openpresence-workspace-revision": String(context.workspaceRevision) } : {}),
-            ...(view === "live" || view === "review" ? { "x-openpresence-projection": "activity" } : view === "chat" ? { "x-openpresence-projection": "chat" } : view === "growth" || view === "analytics" ? { "x-openpresence-projection": "growth" } : view === "knowledge" ? { "x-openpresence-projection": "knowledge" } : view === "assets" ? { "x-openpresence-projection": "assets" } : view === "people" ? { "x-openpresence-projection": "people" } : view === "feed" ? { "x-openpresence-projection": "feed" } : view === "schedule" ? { "x-openpresence-projection": "schedule" } : view === "work" ? { "x-openpresence-projection": "work" } : view === "watching" ? { "x-openpresence-projection": "watching" } : view === "rehearsal" ? { "x-openpresence-projection": "rehearsal" } : view === "brain" ? { "x-openpresence-projection": "brain" } : view === "teach" ? { "x-openpresence-projection": "teach" } : view === "presence" ? { "x-openpresence-projection": "presence" } : view === "playground" ? { "x-openpresence-projection": "playground" } : view === "usage" ? { "x-openpresence-projection": "usage" } : {}),
+            ...(view === "live" || view === "review" ? { "x-openpresence-projection": "activity" } : view === "chat" ? { "x-openpresence-projection": "chat" } : view === "growth" || view === "analytics" ? { "x-openpresence-projection": "growth" } : view === "knowledge" ? { "x-openpresence-projection": "knowledge" } : view === "assets" ? { "x-openpresence-projection": "assets" } : view === "people" ? { "x-openpresence-projection": "people" } : view === "feed" ? { "x-openpresence-projection": "feed" } : view === "schedule" ? { "x-openpresence-projection": "schedule" } : view === "work" ? { "x-openpresence-projection": "work" } : view === "watching" ? { "x-openpresence-projection": "watching" } : view === "rehearsal" ? { "x-openpresence-projection": "rehearsal" } : view === "brain" || view === "presence" ? { "x-openpresence-projection": "full" } : view === "teach" ? { "x-openpresence-projection": "teach" } : view === "playground" ? { "x-openpresence-projection": "playground" } : view === "usage" ? { "x-openpresence-projection": "usage" } : {}),
           },
           keepalive: operationType === "createAgent",
           body: JSON.stringify(operation),
@@ -1088,7 +1089,7 @@ export default function Home() {
     const usePresenceProjection = currentView === "presence";
     const useUsageProjection = currentView === "usage";
     const usePlaygroundProjection = currentView === "playground";
-    const requestedProjection = useActivityProjection ? "activity" : useActivityHistoryProjection ? "feed" : useChatProjection ? "chat" : useGrowthProjection || useAnalyticsProjection ? "growth" : useKnowledgeProjection ? "knowledge" : useAssetsProjection ? "assets" : usePeopleProjection ? "people" : useFeedProjection ? "feed" : useScheduleProjection ? (currentView === "work" ? "work" : "schedule") : useWatchingProjection ? "watching" : useRehearsalProjection ? "rehearsal" : useBrainProjection ? "brain" : useTeachProjection ? "teach" : usePresenceProjection ? "presence" : usePlaygroundProjection ? "playground" : useUsageProjection ? "usage" : "full";
+    const requestedProjection = useActivityProjection ? "activity" : useActivityHistoryProjection ? "feed" : useChatProjection ? "chat" : useGrowthProjection || useAnalyticsProjection ? "growth" : useKnowledgeProjection ? "knowledge" : useAssetsProjection ? "assets" : usePeopleProjection ? "people" : useFeedProjection ? "feed" : useScheduleProjection ? (currentView === "work" ? "work" : "schedule") : useWatchingProjection ? "watching" : useRehearsalProjection ? "rehearsal" : useBrainProjection || usePresenceProjection ? "full" : useTeachProjection ? "teach" : usePlaygroundProjection ? "playground" : useUsageProjection ? "usage" : "full";
     // A navigation away from Activity must not reuse its smaller in-flight
     // response. That response deliberately omits view-specific collections
     // such as Growth history and is not a complete OpenPresenceState.
@@ -1162,6 +1163,15 @@ export default function Home() {
       url.searchParams.delete("view");
       if (nextView !== "live") url.searchParams.delete("focus");
       window.history.pushState({ ...(window.history.state ?? {}), openPresenceView: nextView }, "", `${url.pathname}${url.search}${url.hash}`);
+    }
+    // Settings contains the full Agent-owned library. Refresh immediately
+    // when entering it from Chat so Knowledge and Assets do not render the
+    // smaller Chat projection left behind by the previous surface.
+    if (nextView === "brain" || nextView === "presence") {
+      // ETags are revision-scoped, but settings also changes the projection.
+      // Do not let a valid Chat 304 suppress the full Agent library payload.
+      stateEtag.current = null;
+      void refreshState().catch(() => undefined);
     }
     const presence = state?.presence;
     if (nextView !== "playground" || !state?.onboarded || !presence || playgroundStartInFlight.current === presence.id) return;
@@ -2446,6 +2456,7 @@ function AgentWorkspaceShell({
   const [inspector, setInspector] = useState<InspectorPanel | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
   const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [resourceMenuOpen, setResourceMenuOpen] = useState(false);
   const [themeReady, setThemeReady] = useState(false);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
   const [showCreateProject, setShowCreateProject] = useState(false);
@@ -2497,13 +2508,20 @@ function AgentWorkspaceShell({
     <main className={`app-shell theme-${theme} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
         <div className="sidebar-brand-row"><div className="brand-lockup sidebar-brand"><div className="brand-mark">◉</div><span>OpenPresence</span></div><div className="sidebar-brand-actions"><button type="button" className="sidebar-theme-toggle" aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"} title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"} onClick={() => setTheme((value) => value === "light" ? "dark" : "light")}>{theme === "light" ? <Moon size={15} /> : <Sun size={15} />}</button><button type="button" className="sidebar-collapse-button" aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeft size={17} /> : <PanelLeftClose size={17} />}</button></div></div>
+        <div className="sidebar-body">
         <AgentPortfolio state={state} mutate={mutate} setView={setView} onCreateAgent={() => setShowCreateAgent(true)} collapsed={sidebarCollapsed} />
         {!sidebarCollapsed && <>
           <div className="sidebar-section-rule" />
           <section className="sidebar-projects" aria-label="Projects"><div className="portfolio-section-heading"><span className="sidebar-label">Projects</span><span className="sidebar-section-heading-actions">{state.assignments.length > 0 && <span className="sidebar-section-count">{state.assignments.length}</span>}<button type="button" className="portfolio-add sidebar-project-add" onClick={() => setShowCreateProject(true)} aria-label="Create a new project" title="Create a new project"><Plus size={13} /><span>New project</span></button></span></div>{state.assignments.filter((item) => !["completed", "cancelled"].includes(item.status)).slice(0, 3).map((assignment) => <button type="button" className="sidebar-project-row" key={assignment.id} onClick={() => setView("chat")}><span className="project-avatar-stack"><PresenceGlyph accent={agent.accent} name={agent.name} /></span><span><strong>{assignment.title}</strong><small>{assignment.environment === "sandbox" ? "Sandbox work" : "Bounded work"} · {agent.name}</small></span></button>)}{state.assignments.filter((item) => !["completed", "cancelled"].includes(item.status)).length === 0 && <p className="sidebar-empty-copy">No projects yet. Start one when you want a specific outcome pursued.</p>}</section>
-          <div className="sidebar-section-rule" />
-          <section className="sidebar-resources" aria-label="Resources"><span className="sidebar-label">Resources</span><button type="button" className={`resource-nav-row ${view === "rehearsal" ? "active" : ""}`} onClick={() => setView("rehearsal")}><FlaskConical size={17} /><span>Agent Lab</span></button><button type="button" className={`resource-nav-row ${view === "knowledge" ? "active" : ""}`} onClick={() => setView("knowledge")}><BookOpen size={17} /><span>Knowledge</span></button><button type="button" className={`resource-nav-row ${view === "assets" ? "active" : ""}`} onClick={() => setView("assets")}><Layers size={17} /><span>Assets</span></button><button type="button" className={`resource-nav-row ${view === "brain" ? "active" : ""}`} onClick={() => setView("brain")}><Brain size={17} /><span>Agent settings</span>{pendingAgentChangeCount > 0 && <span className="nav-count">{pendingAgentChangeCount}</span>}</button></section>
         </>}
+        </div>
+        <div className={`sidebar-resource-menu${resourceMenuOpen ? " is-open" : ""}`}>
+          {resourceMenuOpen && <div className="sidebar-resource-popover" role="menu" aria-label="Resources">
+            <button type="button" role="menuitem" className={`sidebar-resource-item${view === "rehearsal" ? " active" : ""}`} onClick={() => { setResourceMenuOpen(false); setView("rehearsal"); }}><FlaskConical size={16} /><span><strong>Playground</strong><small>Rehearse agent behavior safely</small></span></button>
+            <button type="button" role="menuitem" className={`sidebar-resource-item${view === "brain" || view === "presence" ? " active" : ""}`} onClick={() => { setResourceMenuOpen(false); setView("brain"); }}><Brain size={16} /><span><strong>Agent settings</strong><small>Identity, brain, and autonomy</small></span></button>
+          </div>}
+          <button type="button" className="sidebar-resource-toggle" aria-label="Resources" aria-haspopup="menu" aria-expanded={resourceMenuOpen} onClick={() => setResourceMenuOpen((open) => !open)}><Layers size={15} /><span>Resources</span><ChevronUp size={14} aria-hidden="true" /></button>
+        </div>
       </aside>
       <section className={`${view === "chat" || view === "teach" || view === "rehearsal" ? "workspace workspace-chat" : "workspace"} ${view === "knowledge" ? "workspace-knowledge" : ""} ${inspector ? "has-inspector" : ""}`}>
         <header className="topbar">
@@ -3623,12 +3641,12 @@ function AgentLabView({ state, mutate, setView }: { state: OpenPresenceState; mu
   const agent = state.agent!;
   const presence = state.presence ?? state.presences[0]!;
   return (
-    <div className="agent-lab-page" aria-label="Agent Lab">
+    <div className="agent-lab-page" aria-label="Playground">
       <header className="agent-lab-header">
-        <div className="agent-lab-heading"><div className="agent-lab-breadcrumb"><FlaskConical size={15} /> Agent Lab <ChevronRight size={14} /> <strong>{agent.name}</strong></div><h1>Test {agent.name} before it goes public.</h1><p>Rehearse social situations safely. Nothing here publishes or changes live learning.</p></div>
+        <div className="agent-lab-heading"><div className="agent-lab-breadcrumb"><FlaskConical size={15} /> Playground <ChevronRight size={14} /> <strong>{agent.name}</strong></div><h1>Test {agent.name} before it goes public.</h1><p>Rehearse social situations safely. Nothing here publishes or changes live learning.</p></div>
         <div className="agent-lab-header-actions"><span className="sandbox-badge"><ShieldCheck size={13} /> Sandbox</span><button type="button" className="lab-close-button" onClick={() => setView("chat")}>Back to Chat</button></div>
       </header>
-      <div className="agent-lab-toolbar"><div className="agent-lab-tabs" role="tablist" aria-label="Agent Lab surfaces"><button type="button" role="tab" aria-selected={surface === "rehearse"} className={surface === "rehearse" ? "active" : ""} onClick={() => setSurface("rehearse")}>Rehearse</button><button type="button" role="tab" aria-selected={surface === "scenarios"} className={surface === "scenarios" ? "active" : ""} onClick={() => setSurface("scenarios")}>Scenarios</button></div><div className="agent-lab-testing"><PresenceGlyph accent={agent.accent} name={agent.name} /><span>Testing <strong>{agent.name}</strong></span><span className="agent-lab-account">{channelLabel(presence.channel, state.channelDefinitions)} · {presence.handle}</span></div></div>
+      <div className="agent-lab-toolbar"><div className="agent-lab-tabs" role="tablist" aria-label="Playground surfaces"><button type="button" role="tab" aria-selected={surface === "rehearse"} className={surface === "rehearse" ? "active" : ""} onClick={() => setSurface("rehearse")}>Rehearse</button><button type="button" role="tab" aria-selected={surface === "scenarios"} className={surface === "scenarios" ? "active" : ""} onClick={() => setSurface("scenarios")}>Scenarios</button></div><div className="agent-lab-testing"><PresenceGlyph accent={agent.accent} name={agent.name} /><span>Testing <strong>{agent.name}</strong></span><span className="agent-lab-account">{channelLabel(presence.channel, state.channelDefinitions)} · {presence.handle}</span></div></div>
       <div className="agent-lab-boundary"><ShieldCheck size={15} /><span><strong>Safe sandbox</strong> Simulated actions stay private. Verified public outcomes only exist on the connected social network.</span></div>
       {surface === "rehearse" ? <PresenceChatView state={state} mutate={mutate} /> : <ScenarioLibrary state={state} mutate={mutate} presence={presence} creating={creating} onCreatingChange={setCreating} />}
     </div>
@@ -6507,11 +6525,17 @@ function KnowledgeCollectionLegacyView({ state, mutate, refreshState }: { state:
   </div>;
 }
 
-function AssetsView({ state, refreshState }: { state: OpenPresenceState; refreshState: () => Promise<OpenPresenceState> }) {
+function AssetsView({ state, refreshState, embedded = false }: { state: OpenPresenceState; refreshState: () => Promise<OpenPresenceState>; embedded?: boolean }) {
   const agent = state.agent;
   const presence = state.presence ?? state.presences[0];
-  const assets = state.assets.filter((asset) => asset.agentId === agent?.id && !asset.archivedAt && ["image", "gif", "video"].includes(asset.type) && (asset.sourceId || asset.sourceOccurrences?.length || asset.provenance.origin === "operator_upload"));
-  const collections = (state.assetCollections ?? []).filter((collection) => collection.agentId === agent?.id && collection.status === "active");
+  // Older workspaces stored Presence-bound visuals under the Agent that
+  // originally created the Presence. Keep that durable library visible while
+  // the Agent/Presence model is converged, without broadening access beyond
+  // the active Presence.
+  const presenceAssetOwnerIds = new Set(state.assets.filter((asset) => asset.presenceId === presence?.id).map((asset) => asset.agentId));
+  const agentScopeIds = new Set([agent?.id, ...presenceAssetOwnerIds].filter((id): id is string => Boolean(id)));
+  const assets = state.assets.filter((asset) => agentScopeIds.has(asset.agentId) && !asset.archivedAt && ["image", "gif", "video"].includes(asset.type));
+  const collections = (state.assetCollections ?? []).filter((collection) => agentScopeIds.has(collection.agentId) && collection.status === "active");
   const [selectedId, setSelectedId] = useState<string | null>(assets[0]?.id ?? null);
   const [selectedCollectionId, setSelectedCollectionId] = useState("");
   const [query, setQuery] = useState("");
@@ -6679,9 +6703,16 @@ function AssetsView({ state, refreshState }: { state: OpenPresenceState; refresh
     return firstSentence.length > 66 ? `${firstSentence.slice(0, 63).trimEnd()}…` : firstSentence;
   };
 
-  const previewFor = (asset: typeof assets[number], alt: string) => asset.type === "video"
-    ? <video src={`/api/assets/${asset.id}`} controls muted playsInline preload="metadata" aria-label={alt} />
-    : <Image src={`/api/assets/${asset.id}`} alt={alt} width={640} height={420} unoptimized />;
+  const previewSourceFor = (asset: typeof assets[number]) => asset.storage
+    ? `/api/assets/${asset.id}`
+    : asset.dataUrl ?? asset.provenance.sourceUrl;
+  const previewFor = (asset: typeof assets[number], alt: string) => {
+    const source = previewSourceFor(asset);
+    if (!source) return <><ImageIcon size={22} /><span>Preview unavailable</span></>;
+    return asset.type === "video"
+      ? <video src={source} controls muted playsInline preload="metadata" aria-label={alt} />
+      : <img src={source} alt={alt} loading="lazy" />;
+  };
   const importPercent = importProgress.phase === "uploading"
     ? importProgress.uploadPercent * 45
     : importProgress.phase === "processing"
@@ -6699,7 +6730,7 @@ function AssetsView({ state, refreshState }: { state: OpenPresenceState; refresh
       : importProgress.message ?? `${importProgress.importedCount} asset${importProgress.importedCount === 1 ? "" : "s"} added.`;
   const importProgressPanel = importProgress.fileCount > 0 && <section className={`assets-panel asset-import-progress asset-import-progress-${importProgress.phase}`} data-testid="asset-import-progress" role="status" aria-live="polite" aria-busy={importProgress.phase === "uploading" || importProgress.phase === "processing"}><div className="asset-import-progress-heading"><div><SectionEyebrow>{importProgress.phase === "complete" ? "Assets added" : importProgress.phase === "error" ? "Import needs attention" : "Adding assets"}</SectionEyebrow><strong>{importProgress.label}</strong></div><span>{Math.round(importPercent)}%</span></div><div className="asset-import-progress-track" data-testid="asset-import-progress-bar" aria-hidden="true"><span style={{ width: `${Math.max(2, Math.min(100, importPercent))}%` }} /></div><div className="asset-import-progress-footer"><span>{importStatus}</span><small>{importDetail}</small>{(importProgress.phase === "complete" || importProgress.phase === "error") && <Button type="button" variant="ghost" onClick={() => setImportProgress({ phase: "complete", label: "", fileCount: 0, uploadedFileCount: 0, importedCount: 0, processingCount: 0, processedCount: 0, failedCount: 0, uploadPercent: 0, processingPercent: 0 })}>{importProgress.phase === "complete" ? "Done" : "Dismiss"}</Button>}</div></section>;
 
-  return <div className="page assets-page">
+  return <div className={`page assets-page${embedded ? " agent-settings-embedded-view" : ""}`}>
     <PageHeader eyebrow={`${agent?.name ?? "Agent"} · Visual memory`} title="Asset library" description={`Give ${agent?.name ?? "this Agent"} the right visual for the moment. Search what an image shows, check where it may appear, and keep the useful ones ready.`} actions={<><input ref={fileInputRef} className="sandbox-file-input" type="file" accept="*/*" multiple aria-label="Upload assets" onChange={(event) => void upload(event.target.files)} /><Button type="button" variant="primary" onClick={() => fileInputRef.current?.click()} disabled={busy === "upload"}><Plus size={14} /> {busy === "upload" ? "Uploading…" : "Add assets"}</Button></>} />
     {error && <div className="toast-error" role="alert"><CircleAlert size={16} /> {error}</div>}
     <section className="asset-overview" aria-label="Asset library overview">
@@ -6727,10 +6758,14 @@ function AssetsView({ state, refreshState }: { state: OpenPresenceState; refresh
   </div>;
 }
 
-function KnowledgeView({ state, mutate }: { state: OpenPresenceState; mutate: Mutate; refreshState: () => Promise<OpenPresenceState> }) {
+function KnowledgeView({ state, mutate, embedded = false }: { state: OpenPresenceState; mutate: Mutate; refreshState?: () => Promise<OpenPresenceState>; embedded?: boolean }) {
   const agent = state.agent;
   const presence = state.presence;
-  const documents = (state.knowledgeDocuments ?? []).filter((document) => document.agentId === agent?.id && document.status === "active");
+  const legacyPresenceAgentIds = new Set([
+    ...state.assignments.filter((assignment) => assignment.presenceId === presence?.id).map((assignment) => assignment.agentId),
+    ...state.assets.filter((asset) => asset.presenceId === presence?.id).map((asset) => asset.agentId),
+  ]);
+  const documents = (state.knowledgeDocuments ?? []).filter((document) => (document.agentId === agent?.id || legacyPresenceAgentIds.has(document.agentId)) && document.status === "active");
   const [drafts, setDrafts] = useState<Record<string, { name: string; content: string }>>({});
   const [addOpen, setAddOpen] = useState(false);
   const [newName, setNewName] = useState("");
@@ -6790,7 +6825,7 @@ function KnowledgeView({ state, mutate }: { state: OpenPresenceState; mutate: Mu
     }
   };
 
-  return <div className="page knowledge-page">
+  return <div className={`page knowledge-page${embedded ? " agent-settings-embedded-view" : ""}`}>
     <PageHeader eyebrow="Agent Knowledge" title="Knowledge" description="Write and maintain the documents your Agent can use." actions={<Button type="button" variant="primary" onClick={() => setAddOpen((open) => !open)}>{addOpen ? <><X size={14} /> Close</> : <><Plus size={14} /> Add document</>}</Button>} />
     <div className="knowledge-layout">
       <main className="knowledge-main">
@@ -14663,24 +14698,37 @@ function AgentSettingsView({
   manageBridge: BridgeManage;
   manageX: XManage;
 }) {
-  const [section, setSection] = useState<"agent" | "presence">("agent");
+  const [section, setSection] = useState<"agent" | "presence" | "knowledge" | "assets">("agent");
   const presence = state.presence ?? state.presences[0];
+  const sectionDescription = section === "agent"
+    ? "Agent identity, brain, and runtime"
+    : section === "presence"
+      ? "Presence identity, access, and autonomy"
+      : section === "knowledge"
+        ? "Agent-owned source material and retrieval"
+        : "Agent-owned visual memory and evidence";
   return (
     <div className="agent-settings-shell">
       <div className="agent-settings-switcher" role="tablist" aria-label="Agent settings sections">
         <div>
           <SectionEyebrow>One settings home</SectionEyebrow>
-          <strong>{section === "agent" ? "Agent identity, brain, and runtime" : "Presence identity, access, and autonomy"}</strong>
+          <strong>{sectionDescription}</strong>
         </div>
         <div className="agent-settings-tabs">
           <button type="button" role="tab" aria-selected={section === "agent"} className={section === "agent" ? "active" : ""} onClick={() => setSection("agent")}>Identity &amp; Brain</button>
           <button type="button" role="tab" aria-selected={section === "presence"} className={section === "presence" ? "active" : ""} onClick={() => setSection("presence")} disabled={!presence}>Presence &amp; Autonomy</button>
+          <button type="button" role="tab" aria-selected={section === "knowledge"} className={section === "knowledge" ? "active" : ""} onClick={() => setSection("knowledge")}>Knowledge</button>
+          <button type="button" role="tab" aria-selected={section === "assets"} className={section === "assets" ? "active" : ""} onClick={() => setSection("assets")}>Assets</button>
         </div>
       </div>
       {section === "agent" ? (
         <BrainView state={state} mutate={mutate} selectedFile={selectedFile} setSelectedFile={setSelectedFile} setView={setView} />
-      ) : (
+      ) : section === "presence" ? (
         <PresenceView key={presence?.id} state={state} mutate={mutate} refreshState={refreshState} setView={setView} manageBridge={manageBridge} manageX={manageX} />
+      ) : section === "knowledge" ? (
+        <KnowledgeView state={state} mutate={mutate} refreshState={refreshState} embedded />
+      ) : (
+        <AssetsView state={state} refreshState={refreshState} embedded />
       )}
     </div>
   );
@@ -14720,7 +14768,11 @@ function BrainView({
     : undefined;
   const knowledgeAccessEnabled = Boolean(knowledgeAccess?.enabled && knowledgeAccess.maximumUse !== "none");
   const model = modelProfiles.find((item) => item.agentId === agent.id);
-  const activeKnowledgeDocuments = (state.knowledgeDocuments ?? []).filter((document) => document.agentId === agent.id && document.status === "active");
+  const legacyPresenceAgentIds = new Set([
+    ...state.assignments.filter((assignment) => assignment.presenceId === activePresence?.id).map((assignment) => assignment.agentId),
+    ...state.assets.filter((asset) => asset.presenceId === activePresence?.id).map((asset) => asset.agentId),
+  ]);
+  const activeKnowledgeDocuments = (state.knowledgeDocuments ?? []).filter((document) => (document.agentId === agent.id || legacyPresenceAgentIds.has(document.agentId)) && document.status === "active");
   const mindFileKnowledgeBindings = state.mindFileKnowledgeBindings ?? [];
   const boundKnowledgeDocuments = (kind: FileKind) => activeKnowledgeDocuments.filter((document) => mindFileKnowledgeBindings.some((binding) => binding.agentId === agent.id && binding.fileKind === kind && binding.knowledgeDocumentId === document.id && binding.enabled));
   const saveAgentLanguagePolicy = async () => {

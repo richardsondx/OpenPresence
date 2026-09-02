@@ -6958,3 +6958,36 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .app-shell.theme-dark .operator-chat-operational-notice p { color: #dfb9a5; }
 .app-shell.theme-dark .operator-chat-operational-notice button { border-color: #b97852; color: #ffd1b8; background: #3b2c27; }
 @media (max-width: 760px) { .operator-chat-operational-notice { grid-template-columns: auto minmax(0, 1fr); margin-left: 18px; width: calc(100% - 18px); } .operator-chat-operational-notice button { grid-column: 2; justify-self: start; } }
+
+/* Stable agent rail: only the portfolio/project body scrolls. Resource access
+   stays docked at the bottom so it remains discoverable in either rail width. */
+.sidebar { display: grid; grid-template-rows: auto minmax(0, 1fr) auto; overflow: hidden; }
+.sidebar-body { min-height: 0; overflow-x: hidden; overflow-y: auto; scrollbar-width: thin; }
+.sidebar-resource-menu { position: relative; z-index: 20; flex: 0 0 auto; margin: 10px 7px 0; padding-top: 10px; border-top: 1px solid var(--agent-rail-line); }
+.sidebar-resource-toggle { display: flex; align-items: center; gap: 8px; width: 100%; min-height: 36px; padding: 8px 9px; border: 1px solid transparent; border-radius: 8px; color: var(--agent-rail-muted); background: transparent; font-size: 11px; text-align: left; cursor: pointer; }
+.sidebar-resource-toggle:hover, .sidebar-resource-menu.is-open .sidebar-resource-toggle { border-color: var(--agent-rail-line); color: var(--agent-rail-strong); background: var(--agent-rail-hover); }
+.sidebar-resource-toggle svg:last-child { margin-left: auto; transition: transform .16s ease; }
+.sidebar-resource-menu.is-open .sidebar-resource-toggle svg:last-child { transform: rotate(180deg); }
+.sidebar-resource-popover { position: absolute; right: 0; bottom: calc(100% + 8px); left: 0; display: grid; gap: 4px; padding: 6px; border: 1px solid var(--agent-rail-line); border-radius: 10px; background: var(--agent-rail); box-shadow: 0 16px 32px rgba(0,0,0,.18); }
+.sidebar-resource-item { display: flex; align-items: center; gap: 9px; width: 100%; min-width: 0; padding: 9px; border: 0; border-radius: 7px; color: var(--agent-rail-muted); background: transparent; text-align: left; cursor: pointer; }
+.sidebar-resource-item:hover, .sidebar-resource-item.active { color: var(--agent-rail-strong); background: var(--agent-rail-hover); }
+.sidebar-resource-item > span { display: grid; gap: 2px; min-width: 0; }
+.sidebar-resource-item strong { overflow: hidden; font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-resource-item small { overflow: hidden; color: var(--agent-rail-muted); font: 8px var(--font-mono, monospace); text-overflow: ellipsis; white-space: nowrap; }
+.agent-settings-tabs { max-width: 100%; overflow-x: auto; }
+.agent-settings-tabs button { white-space: nowrap; }
+.agent-settings-embedded-view > .page-heading { margin-top: 0; padding-top: 6px; }
+.agent-settings-embedded-view > .page-heading h1 { font-size: 24px; }
+.app-shell.theme-dark .agent-settings-switcher { border-color: #353847; background: #232632; }
+.app-shell.theme-dark .agent-settings-switcher > div:first-child strong { color: #f4f4f8; }
+.app-shell.theme-dark .agent-settings-tabs { border-color: #353847; background: #1d202a; }
+.app-shell.theme-dark .agent-settings-tabs button.active { color: #171923; background: #f4f4f8; }
+.sidebar-collapsed .sidebar-resource-menu { margin-right: 0; margin-left: 0; }
+.sidebar-collapsed .sidebar-resource-toggle { justify-content: center; padding-inline: 0; }
+.sidebar-collapsed .sidebar-resource-toggle span, .sidebar-collapsed .sidebar-resource-toggle svg:last-child { display: none; }
+.sidebar-collapsed .sidebar-resource-popover { right: auto; bottom: 0; left: calc(100% + 8px); width: 220px; }
+@media (max-width: 680px) {
+  .sidebar { display: block; overflow: visible; }
+  .sidebar-body { overflow: visible; }
+  .sidebar-resource-menu { display: none; }
+}
