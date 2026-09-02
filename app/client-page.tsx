@@ -1593,7 +1593,7 @@ function AgentSwitcher({
   mutate: Mutate;
 }) {
   const [open, setOpen] = useState(false);
-  const [showCreate, setShowCreate] = useState(false);
+  const [createSeed, setCreateSeed] = useState<Partial<CreateAgentInput> | null>(null);
   const [avatarEditorAgentId, setAvatarEditorAgentId] = useState<string | null>(null);
   const [menuPosition, setMenuPosition] = useState<React.CSSProperties | null>(null);
   const switcherRef = useRef<HTMLButtonElement>(null);
@@ -1691,28 +1691,48 @@ function AgentSwitcher({
           )}
           <div className="agent-menu-divider" />
           <button
+            type="button"
             className="agent-menu-action"
             onClick={() => {
               setOpen(false);
-              setShowCreate(true);
+              setCreateSeed({});
             }}
           >
             <Plus size={14} /> Create Agent
           </button>
+          <button
+            type="button"
+            className="agent-menu-action"
+            onClick={() => {
+              setOpen(false);
+              const presence = state.presence ?? state.presences[0];
+              setCreateSeed({
+                name: `${agent.name} copy`,
+                description: agent.description,
+                audience: agent.audience,
+                handle: `@${agent.name.toLowerCase().replace(/[^a-z0-9]+/g, "_")}_copy`,
+                accent: agent.accent,
+                mode: presence?.mode ?? "agent",
+              });
+            }}
+          >
+            <Copy size={14} /> Duplicate Agent
+          </button>
         </div>,
         document.body,
       )}
-      {showCreate &&
+      {createSeed &&
         typeof document !== "undefined" &&
         createPortal(
           <CreateAgentDialog
-            onClose={() => setShowCreate(false)}
+            initialInput={Object.keys(createSeed).length > 0 ? createSeed : undefined}
+            onClose={() => setCreateSeed(null)}
             onCreate={async (input) => {
               const next = await mutate({
                 type: "createAdditionalAgent",
                 input,
               });
-              if (next) setShowCreate(false);
+              if (next) setCreateSeed(null);
             }}
           />,
           document.body,
@@ -1738,11 +1758,13 @@ function AgentPortfolio({
   state,
   mutate,
   setView,
+  onCreateAgent,
   collapsed = false,
 }: {
   state: OpenPresenceState;
   mutate: Mutate;
   setView: (view: View) => void;
+  onCreateAgent: () => void;
   collapsed?: boolean;
 }) {
   const agents = state.agents?.length ? state.agents : state.agent ? [state.agent] : [];
@@ -1754,7 +1776,7 @@ function AgentPortfolio({
   };
   return (
     <div className={`agent-portfolio ${collapsed ? "is-collapsed" : ""}`} aria-label="Agents">
-      {!collapsed && <div className="portfolio-section-heading"><span className="sidebar-label">Agents</span><button type="button" className="portfolio-add" onClick={() => setView("brain")} aria-label="Create a new Agent" title="Create a new Agent"><Plus size={14} /><span>New agent</span></button></div>}
+      {!collapsed && <div className="portfolio-section-heading"><span className="sidebar-label">Agents</span><button type="button" className="portfolio-add" onClick={onCreateAgent} aria-label="Create a new Agent" title="Create a new Agent"><Plus size={14} /><span>New agent</span></button></div>}
       <div className="portfolio-agent-list">
         {agents.map((item) => {
           const itemPresence = presenceFor(item.id);
@@ -1771,9 +1793,9 @@ function AgentPortfolio({
               <span className="portfolio-agent-avatar"><PresenceGlyph accent={item.accent} name={item.name} avatarUrl={itemPresence ? presencePlatformAvatarUrl(state, itemPresence) : undefined} look={itemPresence ? presenceAvatarLook(itemPresence) : "core"} /></span>
               <span className="portfolio-agent-copy">
                 <strong>{item.name}</strong>
-                <small>{itemPresence ? `${channelLabel(itemPresence.channel, state.channelDefinitions)} · ${itemPresence.handle}` : "Agent workspace"}</small>
+                <small>{itemPresence ? `${channelLabel(itemPresence.channel, state.channelDefinitions)} · ${itemPresence.handle}` : "No connected channel yet"}</small>
               </span>
-              <span className={`portfolio-agent-status ${itemPresence?.status === "paused" ? "is-paused" : ""}`} aria-label={itemPresence?.status === "paused" ? "Paused" : "Connected"} />
+              <span className={`portfolio-agent-status ${itemPresence?.status === "paused" ? "is-paused" : !itemPresence ? "is-unconfigured" : ""}`} aria-label={itemPresence?.status === "paused" ? "Paused" : itemPresence ? "Connected" : "No connected channel"} />
             </button>
           );
         })}
@@ -1791,7 +1813,6 @@ function ContextInspector({
   attentionCount,
   onClose,
   onNavigate,
-  onAddPresence,
 }: {
   panel: InspectorPanel;
   state: OpenPresenceState;
@@ -1799,7 +1820,6 @@ function ContextInspector({
   attentionCount: number;
   onClose: () => void;
   onNavigate: (view: View) => void;
-  onAddPresence: () => void;
 }) {
   const agent = state.agent!;
   const upcoming = state.calendar.filter((slot) => slot.enabled).slice(0, 5);
@@ -1832,7 +1852,7 @@ function ContextInspector({
       {panel === "settings" && <>
         <section className="inspector-agent-card"><PresenceGlyph accent={agent.accent} name={agent.name} size="large" /><div><h3>{agent.name}</h3><p>{presence.handle} · {channelLabel(presence.channel, state.channelDefinitions)}</p><span className="inspector-health"><span className="portfolio-agent-status" /> Connected</span></div></section>
         <section className="inspector-section"><div className="inspector-section-title"><span>Brain</span></div><div className="inspector-setting-row"><strong>{state.files.find((file) => file.kind === "BRAIN")?.title ?? "Brain"}</strong><small>{state.agentWorkspaces.length > 1 ? "Shared across linked Agents" : "Agent-owned intelligence"}</small></div><div className="inspector-setting-row"><strong>Social account</strong><small>{channelLabel(presence.channel, state.channelDefinitions)} · {presence.handle}</small></div></section>
-        <button type="button" className="inspector-link-button" onClick={() => onNavigate("brain")}>Open Agent settings <ArrowUpRight size={14} /></button><button type="button" className="inspector-secondary-button" onClick={onAddPresence}><Plus size={14} /> Add another channel</button>
+        <button type="button" className="inspector-link-button" onClick={() => onNavigate("brain")}>Open Agent settings <ArrowUpRight size={14} /></button>
       </>}
     </aside>
   );
@@ -1994,20 +2014,22 @@ function PresenceSwitcher({
 }
 
 function CreateAgentDialog({
+  initialInput,
   onClose,
   onCreate,
 }: {
+  initialInput?: Partial<CreateAgentInput>;
   onClose: () => void;
   onCreate: (input: CreateAgentInput) => Promise<void>;
 }) {
-  const [name, setName] = useState("Atlas");
+  const [name, setName] = useState(initialInput?.name ?? "Atlas");
   const [description, setDescription] = useState(
-    "A focused research personality with a distinct point of view.",
+    initialInput?.description ?? "A focused research personality with a distinct point of view.",
   );
-  const [audience, setAudience] = useState("people doing careful research");
-  const [handle, setHandle] = useState("@atlas");
-  const [accent, setAccent] = useState("#7A8FD8");
-  const [mode, setMode] = useState<PresenceMode>("agent");
+  const [audience, setAudience] = useState(initialInput?.audience ?? "people doing careful research");
+  const [handle, setHandle] = useState(initialInput?.handle ?? "@atlas");
+  const [accent, setAccent] = useState(initialInput?.accent ?? "#7A8FD8");
+  const [mode, setMode] = useState<PresenceMode>(initialInput?.mode ?? "agent");
   const [submitting, setSubmitting] = useState(false);
   const submit = async (event: React.FormEvent) => {
     event.preventDefault();
@@ -2033,8 +2055,8 @@ function CreateAgentDialog({
       >
         <div className="dialog-header">
           <div>
-            <SectionEyebrow>Another persistent mind</SectionEyebrow>
-            <h2 id="create-agent-title">Create Agent</h2>
+            <SectionEyebrow>{initialInput ? "Start from this Agent" : "Another persistent mind"}</SectionEyebrow>
+            <h2 id="create-agent-title">{initialInput ? "Duplicate Agent" : "Create Agent"}</h2>
           </div>
           <button
             type="button"
@@ -2116,9 +2138,54 @@ function CreateAgentDialog({
             Cancel
           </Button>
           <Button type="submit" variant="primary" disabled={submitting}>
-            {submitting ? "Creating…" : "Create Agent"}
+            {submitting ? "Creating…" : initialInput ? "Create duplicate" : "Create Agent"}
           </Button>
         </div>
+      </form>
+    </div>
+  );
+}
+
+function CreateProjectDialog({
+  agent,
+  presence,
+  onClose,
+  onCreate,
+}: {
+  agent: Agent;
+  presence: NonNullable<OpenPresenceState["presence"]>;
+  onClose: () => void;
+  onCreate: (input: { name: string; outcome: string; environment: "sandbox" | "live" }) => Promise<void>;
+}) {
+  const [name, setName] = useState("");
+  const [outcome, setOutcome] = useState("");
+  const [environment, setEnvironment] = useState<"sandbox" | "live">("sandbox");
+  const [submitting, setSubmitting] = useState(false);
+  const submit = async (event: React.FormEvent) => {
+    event.preventDefault();
+    if (!name.trim() || !outcome.trim() || submitting) return;
+    setSubmitting(true);
+    try {
+      await onCreate({ name, outcome, environment });
+    } finally {
+      setSubmitting(false);
+    }
+  };
+  return (
+    <div className="modal-backdrop" role="presentation" onMouseDown={(event) => { if (event.target === event.currentTarget) onClose(); }}>
+      <form className="presence-dialog create-project-dialog" role="dialog" aria-modal="true" aria-labelledby="create-project-title" onSubmit={submit}>
+        <div className="dialog-header">
+          <div>
+            <SectionEyebrow>Bounded Agent work</SectionEyebrow>
+            <h2 id="create-project-title">New project</h2>
+          </div>
+          <button type="button" className="icon-button" aria-label="Close" onClick={onClose}><X size={18} /></button>
+        </div>
+        <p className="muted">Projects are durable responsibilities for {agent.name}. They stay attached to {channelLabel(presence.channel)} · {presence.handle} and return outcomes to Chat.</p>
+        <label>Project name<input aria-label="Project name" value={name} onChange={(event) => setName(event.target.value)} placeholder="Launch announcement" maxLength={120} required /></label>
+        <label>What should the Agent accomplish?<textarea aria-label="Project outcome" value={outcome} onChange={(event) => setOutcome(event.target.value)} placeholder="Make one useful launch announcement for builders, using evidence from the launch brief." rows={4} maxLength={2000} required /></label>
+        <label>Where should work happen?<select aria-label="Project environment" value={environment} onChange={(event) => setEnvironment(event.target.value as "sandbox" | "live")}><option value="sandbox">Sandbox · review before anything public</option><option value="live">Live · use the Agent&apos;s approval envelope</option></select></label>
+        <div className="dialog-actions"><Button type="button" variant="ghost" onClick={onClose}>Cancel</Button><Button type="submit" variant="primary" disabled={submitting}>{submitting ? "Creating…" : "Create project"}</Button></div>
       </form>
     </div>
   );
@@ -2370,6 +2437,8 @@ function AgentWorkspaceShell({
   const [healthFocusKey, setHealthFocusKey] = useState(0);
   const [inspector, setInspector] = useState<InspectorPanel | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [showCreateAgent, setShowCreateAgent] = useState(false);
+  const [showCreateProject, setShowCreateProject] = useState(false);
   const createChat = async () => {
     const next = await mutate({ type: "createOperatorThread", presenceId: presence.id, title: "New conversation" });
     const created = next?.operatorThreads?.find((thread) => thread.title === "New conversation") ?? next?.operatorThreads?.[0];
@@ -2394,7 +2463,6 @@ function AgentWorkspaceShell({
       if (hadHistorySurface) void refreshState().catch(() => undefined);
     }
   };
-  const [showPresenceModal, setShowPresenceModal] = useState(false);
   const pendingExecutionCount = state.executions.filter(
     (item) =>
       item.presenceId === presence.id && item.status === "awaiting-review",
@@ -2407,18 +2475,17 @@ function AgentWorkspaceShell({
     <main className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
         <div className="sidebar-brand-row"><div className="brand-lockup sidebar-brand"><div className="brand-mark">◉</div><span>OpenPresence</span></div><button type="button" className="sidebar-collapse-button" aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeft size={17} /> : <PanelLeftClose size={17} />}</button></div>
-        <AgentPortfolio state={state} mutate={mutate} setView={setView} collapsed={sidebarCollapsed} />
+        <AgentPortfolio state={state} mutate={mutate} setView={setView} onCreateAgent={() => setShowCreateAgent(true)} collapsed={sidebarCollapsed} />
         {!sidebarCollapsed && <>
           <div className="sidebar-section-rule" />
-          <section className="sidebar-projects" aria-label="Projects"><div className="portfolio-section-heading"><span className="sidebar-label">Projects</span>{state.assignments.length > 0 && <span className="sidebar-section-count">{state.assignments.length}</span>}</div>{state.assignments.filter((item) => !["completed", "cancelled"].includes(item.status)).slice(0, 3).map((assignment) => <button type="button" className="sidebar-project-row" key={assignment.id} onClick={() => setView("chat")}><span className="project-avatar-stack"><PresenceGlyph accent={agent.accent} name={agent.name} /></span><span><strong>{assignment.title}</strong><small>{assignment.environment === "sandbox" ? "Sandbox work" : "Bounded work"} · {agent.name}</small></span></button>)}{state.assignments.filter((item) => !["completed", "cancelled"].includes(item.status)).length === 0 && <p className="sidebar-empty-copy">No bounded work yet.</p>}</section>
+          <section className="sidebar-projects" aria-label="Projects"><div className="portfolio-section-heading"><span className="sidebar-label">Projects</span><span className="sidebar-section-heading-actions">{state.assignments.length > 0 && <span className="sidebar-section-count">{state.assignments.length}</span>}<button type="button" className="portfolio-add sidebar-project-add" onClick={() => setShowCreateProject(true)} aria-label="Create a new project" title="Create a new project"><Plus size={13} /><span>New project</span></button></span></div>{state.assignments.filter((item) => !["completed", "cancelled"].includes(item.status)).slice(0, 3).map((assignment) => <button type="button" className="sidebar-project-row" key={assignment.id} onClick={() => setView("chat")}><span className="project-avatar-stack"><PresenceGlyph accent={agent.accent} name={agent.name} /></span><span><strong>{assignment.title}</strong><small>{assignment.environment === "sandbox" ? "Sandbox work" : "Bounded work"} · {agent.name}</small></span></button>)}{state.assignments.filter((item) => !["completed", "cancelled"].includes(item.status)).length === 0 && <p className="sidebar-empty-copy">No projects yet. Start one when you want a specific outcome pursued.</p>}</section>
           <div className="sidebar-section-rule" />
           <section className="sidebar-resources" aria-label="Resources"><span className="sidebar-label">Resources</span><button type="button" className={`resource-nav-row ${view === "rehearsal" ? "active" : ""}`} onClick={() => setView("rehearsal")}><FlaskConical size={17} /><span>Agent Lab</span></button><button type="button" className={`resource-nav-row ${view === "knowledge" ? "active" : ""}`} onClick={() => setView("knowledge")}><BookOpen size={17} /><span>Knowledge</span></button><button type="button" className={`resource-nav-row ${view === "assets" ? "active" : ""}`} onClick={() => setView("assets")}><Layers size={17} /><span>Assets</span></button><button type="button" className={`resource-nav-row ${view === "brain" ? "active" : ""}`} onClick={() => setView("brain")}><Brain size={17} /><span>Agent settings</span>{pendingAgentChangeCount > 0 && <span className="nav-count">{pendingAgentChangeCount}</span>}</button></section>
         </>}
-        <div className="sidebar-footer"><div className="operator-avatar" aria-label="Aaron avatar">A</div>{!sidebarCollapsed && <div><strong>Aaron</strong><small>Operator</small></div>}<span className="sidebar-footer-status" aria-label="Operator online" /></div>
       </aside>
       <section className={`${view === "chat" || view === "teach" || view === "rehearsal" ? "workspace workspace-chat" : "workspace"} ${view === "knowledge" ? "workspace-knowledge" : ""} ${inspector ? "has-inspector" : ""}`}>
         <header className="topbar">
-          <div className="topbar-agent-identity"><PresenceGlyph accent={agent.accent} name={agent.name} /><span><strong>{agent.name}</strong><small>{channelLabel(presence.channel, state.channelDefinitions)} · {presence.handle}</small></span></div>
+          <div className="topbar-agent-context"><AgentSwitcher state={state} mutate={mutate} /><span className="topbar-channel-context"><span>Active channel</span><strong>{channelLabel(presence.channel, state.channelDefinitions)} · {presence.handle}</strong></span></div>
           <div className="topbar-actions context-controls" aria-label="Agent context controls">
             <button type="button" className={`context-control ${inspector === "attention" ? "active" : ""}`} aria-label={`Open Attention${attentionCount ? `, ${attentionCount} waiting` : ""}`} aria-pressed={inspector === "attention"} title="Attention" onClick={() => setInspector((current) => current === "attention" ? null : "attention")}><Bell size={17} />{attentionCount > 0 && <span className="context-control-count">{attentionCount}</span>}</button>
             <button type="button" className={`context-control ${inspector === "calendar" ? "active" : ""}`} aria-label="Open Calendar" aria-pressed={inspector === "calendar"} title="Calendar" onClick={() => setInspector((current) => current === "calendar" ? null : "calendar")}><CalendarDays size={17} /></button>
@@ -2427,7 +2494,7 @@ function AgentWorkspaceShell({
             <OperationalHealthIndicator health={operationalHealth} onOpen={() => setInspector("attention")} />
           </div>
         </header>
-        {inspector && <ContextInspector panel={inspector} state={state} presence={presence} attentionCount={attentionCount} onClose={() => setInspector(null)} onNavigate={(nextView) => { setInspector(null); setView(nextView); }} onAddPresence={() => setShowPresenceModal(true)} />}
+        {inspector && <ContextInspector panel={inspector} state={state} presence={presence} attentionCount={attentionCount} onClose={() => setInspector(null)} onNavigate={(nextView) => { setInspector(null); setView(nextView); }} />}
         {error && (
           <div className="toast-error" role="alert">
             <CircleAlert size={16} /> {error}
@@ -2462,36 +2529,50 @@ function AgentWorkspaceShell({
             <ScheduleView state={state} mutate={mutate} setView={setView} />
           )}
           {view === "brain" && (
-            <BrainView
+            <AgentSettingsView
               key={`${state.activeAgentId}-${selectedFile}-${state.files.find((file) => file.kind === selectedFile)?.revision ?? 0}`}
               state={state}
               mutate={mutate}
               selectedFile={selectedFile}
               setSelectedFile={setSelectedFile}
               setView={setView}
+              refreshState={refreshState}
+              manageBridge={manageBridge}
+              manageX={manageX}
             />
           )}
           {view === "presence" && (
-            <PresenceView
-              key={presence.id}
+            <AgentSettingsView
+              key={`${state.activeAgentId}-presence-settings`}
               state={state}
               mutate={mutate}
-              refreshState={refreshState}
+              selectedFile={selectedFile}
+              setSelectedFile={setSelectedFile}
               setView={setView}
+              refreshState={refreshState}
               manageBridge={manageBridge}
               manageX={manageX}
             />
           )}
         </div>
       </section>
-      {showPresenceModal && (
-        <AddPresenceDialog
-          agentName={agent.name}
-          accent={agent.accent}
-          onClose={() => setShowPresenceModal(false)}
+      {showCreateAgent && (
+        <CreateAgentDialog
+          onClose={() => setShowCreateAgent(false)}
           onCreate={async (input) => {
-            const next = await mutate({ type: "createPresence", input });
-            if (next) setShowPresenceModal(false);
+            const next = await mutate({ type: "createAdditionalAgent", input });
+            if (next) setShowCreateAgent(false);
+          }}
+        />
+      )}
+      {showCreateProject && (
+        <CreateProjectDialog
+          agent={agent}
+          presence={presence}
+          onClose={() => setShowCreateProject(false)}
+          onCreate={async ({ name, outcome, environment }) => {
+            const next = await mutate({ type: "createAssignment", presenceId: presence.id, environment, instruction: `${name.trim()}: ${outcome.trim()}` });
+            if (next) setShowCreateProject(false);
           }}
         />
       )}
@@ -7498,7 +7579,7 @@ function OperatorChatView({ state, mutate, refreshState, setView, onNewChat }: {
         <div ref={endRef} />
         </div>
         {attachments.length > 0 && <div className="attachment-list operator-chat-attachments">{attachments.map((attachment, index) => <span key={`${attachment.name}-${index}`}>{attachment.name}<button type="button" aria-label={`Remove ${attachment.name}`} onClick={() => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X size={11} /></button></span>)}</div>}
-        <div className="operator-chat-composer-meta"><ChatModePicker mode="chat" setView={setView} /><span>{presence.name} · {presence.handle}</span>{sessionAssignments.some((assignment) => assignmentIsOpen(assignment)) ? <span>Steering current work</span> : <span>Public actions require review</span>}</div>
+        <div className="operator-chat-composer-meta"><ChatModePicker mode="chat" setView={setView} /></div>
         <form className="chat-composer operator-chat-composer" onSubmit={send}>
           <label className="attach-button" aria-label="Attach context"><Plus size={16} /><input type="file" hidden multiple onChange={(event) => Array.from(event.target.files ?? []).forEach(addFile)} /></label>
           <textarea ref={composerRef} aria-label={`Message ${presence.name}`} value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder={sending ? `Sending to ${presence.name}…` : sessionAssignments.some((assignment) => assignmentIsOpen(assignment)) ? `Steer current work or ask ${presence.name}…` : `Message ${presence.name}…`} rows={1} disabled={sending} />
@@ -14538,6 +14619,48 @@ function WeekCalendar({
   );
 }
 
+function AgentSettingsView({
+  state,
+  mutate,
+  selectedFile,
+  setSelectedFile,
+  setView,
+  refreshState,
+  manageBridge,
+  manageX,
+}: {
+  state: OpenPresenceState;
+  mutate: Mutate;
+  selectedFile: FileKind;
+  setSelectedFile: (file: FileKind) => void;
+  setView: (view: View) => void;
+  refreshState: () => Promise<OpenPresenceState>;
+  manageBridge: BridgeManage;
+  manageX: XManage;
+}) {
+  const [section, setSection] = useState<"agent" | "presence">("agent");
+  const presence = state.presence ?? state.presences[0];
+  return (
+    <div className="agent-settings-shell">
+      <div className="agent-settings-switcher" role="tablist" aria-label="Agent settings sections">
+        <div>
+          <SectionEyebrow>One settings home</SectionEyebrow>
+          <strong>{section === "agent" ? "Agent identity, brain, and runtime" : "Presence identity, access, and autonomy"}</strong>
+        </div>
+        <div className="agent-settings-tabs">
+          <button type="button" role="tab" aria-selected={section === "agent"} className={section === "agent" ? "active" : ""} onClick={() => setSection("agent")}>Identity &amp; Brain</button>
+          <button type="button" role="tab" aria-selected={section === "presence"} className={section === "presence" ? "active" : ""} onClick={() => setSection("presence")} disabled={!presence}>Presence &amp; Autonomy</button>
+        </div>
+      </div>
+      {section === "agent" ? (
+        <BrainView state={state} mutate={mutate} selectedFile={selectedFile} setSelectedFile={setSelectedFile} setView={setView} />
+      ) : (
+        <PresenceView key={presence?.id} state={state} mutate={mutate} refreshState={refreshState} setView={setView} manageBridge={manageBridge} manageX={manageX} />
+      )}
+    </div>
+  );
+}
+
 function BrainView({
   state,
   mutate,
@@ -15395,8 +15518,8 @@ function PresenceView({
     <div className="page presence-settings-page">
       <PageHeader
         eyebrow="One place, one envelope"
-        title="Channels"
-        description="Choose how this Agent appears in each channel and how independently it acts."
+        title="Presence settings"
+        description="Choose how this Agent appears on its connected channel and how independently it acts."
       />
 
       {/* Sleek, compact top summary bar */}

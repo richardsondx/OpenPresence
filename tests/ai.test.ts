@@ -187,6 +187,18 @@ describe("Agent social decision parsing", () => {
     });
   });
 
+  it("keeps mock operator Chat replies distinct and direct across ordinary questions", async () => {
+    vi.stubEnv("OPENPRESENCE_AI_MOCK", "1");
+    const state = createAgent({ name: "Jenny", description: "Help founders think clearly.", mode: "agent", handle: "@jenny", accent: "#D68754" });
+    const howAreYou = await generateAgentReply(state, "HOW ARE YOU", undefined, { operatorConversation: true, presence: state.presence! });
+    const capabilities = await generateAgentReply(state, "WHAT can you do", undefined, { operatorConversation: true, presence: state.presence! });
+
+    expect(howAreYou).toContain("Jenny is here and ready");
+    expect(capabilities).toContain("I can think with you");
+    expect(capabilities).not.toBe(howAreYou);
+    expect(howAreYou).not.toContain("posting plan");
+  });
+
   it("never enables deterministic AI output in production", async () => {
     vi.stubEnv("NODE_ENV", "production");
     vi.stubEnv("OPENPRESENCE_TEST_MODE", "1");

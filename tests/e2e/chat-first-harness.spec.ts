@@ -10,11 +10,11 @@ test("Chat is the default Agent workspace and a new thread survives reload", asy
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
 
   await expect(page).toHaveURL(/\/chat/);
-  if (test.info().project.name === "chromium") await expect(page.getByText("Agent workspace", { exact: true })).toBeVisible();
+  if (test.info().project.name === "chromium") await expect(page.getByText("Active channel", { exact: true })).toBeVisible();
   await expect(page.getByRole("heading", { name: "Main", exact: true })).toBeVisible();
   if (test.info().project.name === "chromium") await expect(page.getByText("Presence context", { exact: true })).toBeVisible();
 
-  await page.getByRole("button", { name: "New chat", exact: true }).click();
+  await page.getByRole("button", { name: "New conversation", exact: true }).click();
   await expect(page).toHaveURL(/threadId=/);
   await page.getByPlaceholder("Message Jenny…").fill("What are you working on?");
   await page.getByRole("button", { name: "Send", exact: true }).click();

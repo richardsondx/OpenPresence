@@ -633,14 +633,25 @@ export async function checkModelProviderAccess(state: OpenPresenceState, presenc
 export async function generateAgentReply(state: OpenPresenceState, content: string, conversationId?: string, options?: { social?: boolean; presence?: Presence; socialHistory?: Array<Pick<PresenceChatMessage, "role" | "content">>; operatorHistory?: Array<Pick<OperatorConversationMessage, "role" | "content">>; socialEvidence?: string; socialThreadContext?: string; socialGuidance?: string; autobiographicalContext?: string; knowledgeContext?: KnowledgeContextPacket; disableKnowledge?: boolean; assignmentMode?: boolean; briefOverride?: PresenceBrief; usageOrigin?: ResourceUsageEvent["originKind"]; attentionSource?: ResourceUsageEvent["attentionSource"]; operational?: boolean; runId?: string; presenceId?: string; invocationId?: string; originId?: string; operatorConversation?: boolean; maxOutputTokens?: number; peopleNote?: { presenceId: string; personId: string; markdown: string; revision: number; updatedAt: string } }) {
   if (isAiMockEnabled()) {
     if (options?.operatorConversation) {
-      const lower = content.toLowerCase();
+      const lower = content.toLowerCase().replace(/\s+/g, " ").trim();
+      const speaker = options.presence?.publicSelf?.displayName ?? options.presence?.name ?? state.agent?.name ?? "your Agent";
       if (/\b(?:recent|recently|lately|update|what did you do|what have you done)\b/.test(lower)) {
         const latest = state.events[0];
         return latest ? `Recently I was focused on ${latest.title.toLowerCase()}. ${latest.detail}` : "I am here and ready for the next thing that catches our attention.";
       }
+      if (/\b(?:what can you do|what do you do|capabilit|help me)\b/.test(lower)) {
+        return `I’m ${speaker}. I can think with you, keep durable responsibilities moving, use the Agent’s knowledge and tools, and bring back clear receipts when work is done. Give me a question or an outcome and I’ll tell you the next useful move.`;
+      }
+      if (/^(?:how are you|how's it going|how is it going|are you there|are you around)[?!\.\s]*$/i.test(lower)) {
+        return `${speaker} is here and ready. I’m keeping the conversation focused; tell me what you want to understand or move forward.`;
+      }
+      if (/\b(?:who are you|what are you)\b/.test(lower)) {
+        return `I’m ${speaker}, an Agent with a persistent point of view and a private workspace. I can help you reason, remember context, and take bounded work forward when you authorize it.`;
+      }
       if (/\bgrowth\b/.test(lower)) return "I am treating growth as a direction, not a quota. I am watching for evidence that the conversations and relationships are becoming more useful, then adjusting from what actually happened.";
       if (/\b(?:hello|hi|hey|yo|lol|haha|hilarious)\b/.test(lower)) return "I am here. What caught your eye?";
-      return "I will follow the thread of what you mean and tell you what I think. The conversation does not need to become a posting plan.";
+      const excerpt = content.trim().replace(/[\r\n]+/g, " ").slice(0, 180);
+      return `I hear you: “${excerpt}”. My read is that this is a conversation first, not automatically a posting task. I’ll respond to the point you made and keep any follow-up grounded in what you actually asked.`;
     }
     return `I read: “${content.slice(0, 160)}”.`;
   }

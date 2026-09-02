@@ -1,6 +1,6 @@
 # Playground and Rehearsal
 
-Playground is isolated social rehearsal inside the real Sandbox cognition → intent → execution → delivery → outcome path; Rehearsal is the conversational practice surface.
+Agent Lab is isolated social rehearsal inside the real Sandbox cognition → intent → execution → delivery → outcome path; Rehearsal is the conversational practice surface.
 
 ## Sub-features
 
@@ -9,11 +9,11 @@ Playground is isolated social rehearsal inside the real Sandbox cognition → in
 - Inspect media perception separately from Taste/planning.
 - Rehearse an original publication and record preference evidence.
 - Inspect a decision trace without teaching hidden expected answers.
-- Switch between Playground-level `Free play`, `Curation`, `Trials`, and `Scenarios` modes; the top-level Presence tabs also expose `Playground` and `Rehearsal`.
+- Use the two Agent Lab concepts: `Rehearse` for an ongoing sandbox conversation and `Scenarios` for repeatable behavioral tests.
 
 ## How to get to it (user POV)
 
-Choose `Playground` or open `/playground`. Use `Check now`, the event controls, object selection, and `Inspect media`. Choose the Playground `Rehearsal` tab or open `/rehearsal` for Presence conversation practice. The first Playground state currently presents Free play, Curation, Trials, and Scenarios together, with a control-room form for adding simulated events.
+Choose `Agent Lab` or open `/rehearsal` for Presence conversation practice, and use `/playground` only for the legacy route while it remains supported. Agent Lab presents `Rehearse` and `Scenarios` together; simulated output is explicitly Sandbox-only.
 
 For the direct Presence Rehearsal thread, choose `Rehearsal` from the selected Presence navigation or open `/rehearsal` with the Agent/Presence query context. The transcript is `[data-testid="rehearsal-transcript"]`; the always-available composer is `[data-testid="rehearsal-composer"]`.
 

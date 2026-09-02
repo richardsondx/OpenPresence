@@ -18,7 +18,7 @@ Every claim needs the user trigger, stable end state, side effect, and evidence.
 
 ## Product object model and scope
 
-The operator manages a portfolio of persistent Agents. Each Agent may own one or more Presences, and each Presence may exist in one Channel/environment.
+The operator manages a portfolio of persistent Agents. Each Agent owns its durable mind and its connected social incarnation; the current product creates/configures that Agent + channel together. The underlying model can retain more than one Presence, but the UI does not make “Add a Channel” a competing object-creation flow.
 
 ```text
 User
@@ -44,7 +44,7 @@ The current shell does expose both switchers, but the Presence switcher is label
 | `/rehearsal` | Agent Lab | Selected Agent with Presence context, Sandbox | Rehearse social situations or run saved Scenarios; never live delivery or durable identity mutation by default |
 | `/watching` | Watching / Attention | Selected Presence | Watches and Explorations; attention is not authority to speak |
 | `/people` | People / Relationships | Selected Presence | Remembered identities, relationship facts, boundaries, and open loops |
-| `/settings` | Presence care (currently `Channels`) | Selected Presence | Identity, purpose, attention, autonomy, knowledge access, connection, and deletion |
+| `/settings` | Agent settings (legacy alias) | Selected Agent + connected Presence | Identity, brain, model/runtime, purpose, attention, autonomy, knowledge access, connection, and deletion |
 | `/playground` | Playground / Practice | Selected Presence, Sandbox | `Free play`, `Curation`, `Trials`, `Scenarios`; simulated cognition-to-outcome chain |
 | `/feed` | Public history (currently `Activity`) | Selected Presence | Verified public expression and observed outcome evidence; not an inbound feed |
 | `/growth` | Growth | Selected Presence | Growth responsibility, evidence, strategy, and review rhythm |
@@ -53,16 +53,16 @@ The current shell does expose both switchers, but the Presence switcher is label
 | `/schedule` | Schedule / Assignments | Selected Presence | List/Week, publishing rhythm, durable Assignments, completion contracts |
 | `/work` | Agent Work index | Selected Agent | Compact cross-Presence responsibility index; links to Schedule for temporal detail |
 | `/calendar` | Schedule alias | Selected Presence | Legacy route; resolves to the canonical Schedule view |
-| `/agent` | Manage Agent | Selected Agent | Meaning files, model runtime, provider access, Skills, capabilities, deletion |
+| `/agent` | Agent settings | Selected Agent + connected Presence | One settings home with Identity & Brain and Presence & Autonomy sections |
 | `/knowledge` | Knowledge | Selected Agent | Documents, versions, retrieval/access audit |
 | `/assets` | Asset library | Selected Agent | Visual evidence, folders, perception, provenance, and reuse |
 | Activity → Developer Diagnostics | Technical audit | Selected Presence | Advanced forensic ledger; not a primary route |
 
 ## Current navigation shell
 
-The primary desktop shell is Agent-first: a memorable Agent portfolio rail, Chat, Agent Lab, Knowledge, Assets, and Agent settings. The Agents header owns `New agent`; Chat owns `New conversation`; the sidebar does not duplicate those actions as competing cards. Attention, Calendar, Analytics, and health open as contextual inspectors. Presence-scoped routes remain available for operational detail, but `Activity`, `Review`, `Watching`, and legacy `Playground` are not presented as equal primary products. `Schedule` remains the temporal detail route; `Teach`, `People`, `Growth`, `Feed`, and `Usage` remain reachable by direct route or contextual links.
+The primary desktop shell is Agent-first: a memorable Agent portfolio rail, Chat, Agent Lab, Knowledge, Assets, and one Agent settings home. The Agents header owns `New agent`; Chat owns `New conversation`; the sidebar does not duplicate those actions as competing cards. Attention, Calendar, Analytics, and health open as contextual inspectors. The active channel is shown as context on the selected Agent, not as a second top-level switcher. Presence-scoped routes remain available for operational detail, but `Activity`, `Review`, `Watching`, and legacy `Playground` are not presented as equal primary products. `Schedule` remains the temporal detail route; `Teach`, `People`, `Growth`, `Feed`, and `Usage` remain reachable by direct route or contextual links.
 
-Every loaded view repeats an Agent switcher, Presence switcher, operational health indicator, and the same navigation. The repeated shell is part of every journey and should be considered when evaluating cognitive load.
+Every loaded view repeats an Agent switcher, active-channel context, operational health indicator, and the same navigation. The repeated shell is part of every journey and should be considered when evaluating cognitive load.
 
 ## Agent-first verification contract
 

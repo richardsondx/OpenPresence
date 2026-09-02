@@ -572,7 +572,7 @@ test("Agent model selection lives in Brain and persists per Agent", async ({ pag
   await expect(page.getByRole("button", { name: "Use GPT 5.6 Sol high" })).toHaveClass(/selected/);
   await navigate(page, "Chat");
   await expect(page.getByLabel("Model")).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "New conversation", exact: true })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "New conversation", exact: true })).toHaveCount(1);
   await page.reload();
   await navigate(page, "Brain");
   await expect(page.getByRole("button", { name: "Use GPT 5.6 Sol high" })).toHaveClass(/selected/);
