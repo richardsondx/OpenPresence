@@ -81,6 +81,7 @@ test("Calendar Week marks only today’s occurrence of a recurring Assignment as
   await expect(cards).toHaveCount(7);
   await expect(page.locator(".compact-calendar-item-assignment.is-processing").filter({ hasText: instruction })).toHaveCount(1);
   await expect(page.locator(".compact-calendar-processing-pill").filter({ hasText: "Processing" })).toHaveCount(1);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 
 test("Calendar keeps a verified recurring outcome visible as Done today", async ({ page, request }) => {
@@ -122,6 +123,7 @@ test("Calendar keeps a verified recurring outcome visible as Done today", async 
   await expect(card).toBeVisible();
   await expect(card).toHaveClass(/is-completed-today/);
   await expect(card).toContainText("Done today");
+  await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 
 test("Calendar progressively discloses a long flexible-responsibility list", async ({ page, request }) => {
