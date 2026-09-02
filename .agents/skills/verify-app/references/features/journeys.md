@@ -20,7 +20,7 @@ Open the context sidebar from Chat, choose Calendar, follow `Open full calendar`
 
 ## Agent Main → work thread → reload
 
-Open `/` or `/chat` in an onboarded workspace and prove the Agent-first sidebar exposes `Main`, create a new conversation, and opens it with a durable `threadId` query. Send a non-public operator message, reload, and verify the same thread title and message remain. Rename and archive a non-Main thread; prove `Main` remains available and any linked Assignment remains in the state projection.
+Open `/` or `/chat` in an onboarded workspace and prove the Agent-first sidebar exposes the permanent `Main thread` context, create a new conversation from that sidebar card, and open it with a durable `threadId` query. Send a non-public operator message, reload, and verify the same thread title and message remain. The Main header exposes no rename, archive, or transcript-copy controls; prove the permanent Main context remains available and any linked Assignment remains in the state projection.
 
 ## Playground → decision trace → rehearsal feedback
 

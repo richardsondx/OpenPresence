@@ -6986,8 +6986,17 @@ button.compact-calendar-item:hover { border-color: #c8c0b5; background: #fffaf5;
 .sidebar-collapsed .sidebar-resource-toggle { justify-content: center; padding-inline: 0; }
 .sidebar-collapsed .sidebar-resource-toggle span, .sidebar-collapsed .sidebar-resource-toggle svg:last-child { display: none; }
 .sidebar-collapsed .sidebar-resource-popover { right: auto; bottom: 0; left: calc(100% + 8px); width: 220px; }
+.sidebar-conversation-context { display: grid; gap: 8px; margin: 16px 7px 2px; padding-top: 14px; border-top: 1px solid var(--agent-rail-line); }
+.sidebar-conversation-heading { display: flex; align-items: center; justify-content: space-between; gap: 8px; }
+.sidebar-new-conversation { display: inline-flex; align-items: center; gap: 4px; padding: 5px 7px; border: 1px solid var(--agent-rail-line); border-radius: 7px; color: var(--agent-rail-muted); background: transparent; font-size: 9px; cursor: pointer; }
+.sidebar-new-conversation:hover { color: var(--agent-rail-strong); background: var(--agent-rail-hover); }
+.sidebar-conversation-card { display: grid; gap: 4px; padding: 10px; border: 1px solid var(--agent-rail-line); border-radius: 9px; color: var(--agent-rail-muted); background: var(--agent-rail-hover); }
+.sidebar-conversation-card strong { overflow: hidden; color: var(--agent-rail-strong); font-size: 11px; text-overflow: ellipsis; white-space: nowrap; }
+.sidebar-conversation-card small, .sidebar-conversation-card span { color: var(--agent-rail-muted); font: 8px var(--font-mono, monospace); }
+.sidebar-conversation-card p { margin: 3px 0 0; color: var(--agent-rail-muted); font-size: 9px; line-height: 1.35; }
 @media (max-width: 680px) {
   .sidebar { display: block; overflow: visible; }
   .sidebar-body { overflow: visible; }
   .sidebar-resource-menu { display: none; }
+  .sidebar-conversation-context { display: none; }
 }

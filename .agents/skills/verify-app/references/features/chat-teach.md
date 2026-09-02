@@ -4,7 +4,7 @@ Chat is the Agent-first continuous operator conversation and persistent session 
 
 ## Sub-features
 
-- Land on the selected Agent's durable `Main` conversation by default and create/switch/rename/archive additional conversations without stopping Assignments.
+- Land on the selected Agent's permanent `Main thread` by default. Keep the main chat free of rename, archive, and transcript-copy controls; create a new conversation from the compact Chat context in the sidebar when needed.
 - Render active responsibility context as an Approach, semantic Work Events, Review/Approval, Working line, and verified outcome receipt; routine telemetry remains compressed or hidden. Actionable runtime boundaries appear as an in-chat notice, not a repeated global header alert.
 - Ask ordinary questions without creating public work.
 - Share a link or direction and receive a truthful receipt.
@@ -15,7 +15,7 @@ Chat is the Agent-first continuous operator conversation and persistent session 
 
 ## How to get to it (user POV)
 
-Choose `Chat` or open `/chat`; the root workspace now lands here after onboarding. The selected Agent's `Main` conversation is the default, with Agent-owned active/recent threads in the sidebar. The composer is `Message <Presence>…`; submit with the circular up-arrow, or `Queue message` when paused. Choose `Config` through the composer mode control or open `/teach`; its composer is `Message your Presence`. `/rehearsal` is a separate Presence-scoped private social thread with its own transcript and composer.
+Choose `Chat` or open `/chat`; the root workspace now lands here after onboarding. The selected Agent's permanent `Main thread` is the default. Its compact conversation context and `New conversation` action live in the sidebar; the main chat header contains only the thread identity and Presence context. The composer is `Message <Presence>…`; submit with the circular up-arrow, or `Queue message` when paused. Choose `Config` through the composer mode control or open `/teach`; its composer is `Message your Presence`. `/rehearsal` is a separate Presence-scoped private social thread with its own transcript and composer.
 
 ## Driving it with verify-app
 

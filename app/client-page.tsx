@@ -2396,27 +2396,19 @@ function AnalyticsView({ state, mutate, setView, onOpenAttention }: { state: Ope
   </div>;
 }
 
-function OperatorThreadSidebar({ state, setView }: { state: OpenPresenceState; setView: (view: View) => void }) {
+function OperatorConversationSidebarContext({ state, onNewChat }: { state: OpenPresenceState; onNewChat: () => Promise<void> }) {
+  const presence = state.presence ?? state.presences[0];
+  if (!presence) return null;
   const threads = (state.operatorThreads ?? []).filter((thread) => thread.agentId === state.agent?.id && thread.status !== "archived");
-  const assignments = state.assignments.filter((assignment) => assignment.agentId === state.agent?.id);
-  const activeAssignmentIds = new Set(assignments.filter((assignment) => assignmentIsOpen(assignment)).map((assignment) => assignment.id));
-  const main = threads.find((thread) => thread.title === "Main") ?? threads[threads.length - 1];
-  const active = threads.filter((thread) => thread.id !== main?.id && thread.assignmentIds.some((id) => activeAssignmentIds.has(id))).slice(0, 4);
-  const recent = threads.filter((thread) => thread.id !== main?.id && !active.some((item) => item.id === thread.id)).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(0, 5);
-  const openThread = (threadId: string) => {
-    const url = new URL(window.location.href);
-    url.pathname = viewPaths.chat;
-    url.searchParams.set("threadId", threadId);
-    window.history.pushState({ ...(window.history.state ?? {}), openPresenceView: "chat" }, "", url.pathname + url.search + url.hash);
-    setView("chat");
-    window.dispatchEvent(new PopStateEvent("popstate"));
-  };
-  const group = (label: string, items: typeof threads) => items.length ? <div className="operator-thread-group"><span className="sidebar-label">{label}</span>{items.map((thread) => <button type="button" key={thread.id} className="operator-thread-sidebar-row" onClick={() => openThread(thread.id)}><span className={`thread-status-dot ${thread.assignmentIds.some((id) => activeAssignmentIds.has(id)) ? "is-active" : ""}`} aria-hidden="true" /><span className="operator-thread-sidebar-title">{thread.title}</span>{thread.assignmentIds.some((id) => activeAssignmentIds.has(id)) && <span className="thread-active-label">Working</span>}</button>)}</div> : null;
-  return <div className="operator-thread-sidebar" aria-label="Agent conversations">
-    {main && group("Main", [main])}
-    {group("Active work", active)}
-    {group("Recent", recent)}
-  </div>;
+  const requestedThreadId = typeof window === "undefined" ? undefined : new URLSearchParams(window.location.search).get("threadId") ?? undefined;
+  const thread = threads.find((item) => item.id === requestedThreadId) ?? threads.find((item) => item.title === "Main") ?? threads[0];
+  const conversation = thread ? (state.operatorConversations ?? []).find((item) => item.id === thread.communicationThreadId || item.threadId === thread.id) : undefined;
+  const context = thread ? compileThreadContext(thread, conversation, state.assignments) : undefined;
+  const displayTitle = thread?.title === "Main" || thread?.title === "New conversation" || !thread ? "Main thread" : thread.title;
+  return <section className="sidebar-conversation-context" aria-label="Current conversation context">
+    <div className="sidebar-conversation-heading"><span className="sidebar-label">Conversation</span><button type="button" className="sidebar-new-conversation" onClick={() => void onNewChat()}><Plus size={13} /> New conversation</button></div>
+    <div className="sidebar-conversation-card"><strong>{displayTitle}</strong><small>Agent chat · {presence.name} · {context?.messageCount ?? conversation?.messages?.length ?? 0} message{(context?.messageCount ?? conversation?.messages?.length ?? 0) === 1 ? "" : "s"}</small><span>{context?.assignmentCount ? `${context.assignmentCount} responsibility` : "No active responsibility"}</span><p>Conversation context is scoped to {state.agent?.name ?? presence.name}; work and outcomes return here as the Agent&apos;s narrative.</p></div>
+  </section>;
 }
 
 function AgentWorkspaceShell({
@@ -2513,6 +2505,7 @@ function AgentWorkspaceShell({
         {!sidebarCollapsed && <>
           <div className="sidebar-section-rule" />
           <section className="sidebar-projects" aria-label="Projects"><div className="portfolio-section-heading"><span className="sidebar-label">Projects</span><span className="sidebar-section-heading-actions">{state.assignments.length > 0 && <span className="sidebar-section-count">{state.assignments.length}</span>}<button type="button" className="portfolio-add sidebar-project-add" onClick={() => setShowCreateProject(true)} aria-label="Create a new project" title="Create a new project"><Plus size={13} /><span>New project</span></button></span></div>{state.assignments.filter((item) => !["completed", "cancelled"].includes(item.status)).slice(0, 3).map((assignment) => <button type="button" className="sidebar-project-row" key={assignment.id} onClick={() => setView("chat")}><span className="project-avatar-stack"><PresenceGlyph accent={agent.accent} name={agent.name} /></span><span><strong>{assignment.title}</strong><small>{assignment.environment === "sandbox" ? "Sandbox work" : "Bounded work"} · {agent.name}</small></span></button>)}{state.assignments.filter((item) => !["completed", "cancelled"].includes(item.status)).length === 0 && <p className="sidebar-empty-copy">No projects yet. Start one when you want a specific outcome pursued.</p>}</section>
+          {view === "chat" && <OperatorConversationSidebarContext state={state} onNewChat={createChat} />}
         </>}
         </div>
         <div className={`sidebar-resource-menu${resourceMenuOpen ? " is-open" : ""}`}>
@@ -7440,7 +7433,6 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
   };
   const conversation = (state.operatorConversations ?? []).find((item) => item.id === operatorThread.communicationThreadId || item.threadId === operatorThread.id)
     ?? (state.operatorConversations ?? []).find((item) => item.presenceId === presence.id && item.status !== "archived");
-  const threadContext = operatorThread ? compileThreadContext(operatorThread, conversation, state.assignments) : undefined;
   const nudges = state.operatorNudges ?? [];
   const threadNudges = nudges.filter((nudge) => !conversation || nudge.conversationId === conversation.id);
   const hasUnfinishedChatRun = (state.operationalRuns ?? []).some((run) => run.presenceId === presence.id && run.kind === "operator_chat" && ["queued", "running", "recovering", "reconciling"].includes(run.state));
@@ -7475,7 +7467,6 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
   const [attachments, setAttachments] = useState<SandboxAssetInput[]>([]);
   const [sending, setSending] = useState(false);
   const sendingRef = useRef(false);
-  const [conversationCopied, setConversationCopied] = useState(false);
   const endRef = useRef<HTMLDivElement>(null);
   const composerRef = useRef<HTMLTextAreaElement>(null);
   const refreshStateRef = useRef(refreshState);
@@ -7529,61 +7520,6 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
       setSending(false);
     }
   };
-  const copyConversation = async () => {
-    const transcriptMessages = visibleMessages.length ? visibleMessages : conversation?.messages ?? [];
-    const dataTranscript = transcriptMessages.map((item) => {
-      const speaker = item.role === "operator" ? "You" : item.role === "presence" ? presence.name : "OpenPresence";
-      const attachmentLines = item.attachments?.length ? [`Attachments: ${item.attachments.map((attachment) => attachment.name).join(", ")}`] : [];
-      const actionLines = item.nudgeId && actionAnchorByNudge.get(item.nudgeId) === item.id
-        ? conversationActionEvents.filter((event) => event.nudgeId === item.nudgeId).flatMap((event) => [
-            `${event.title} — ${event.statusLabel}`,
-            ...[event.sourceUrl, event.resultUrl].filter((url): url is string => Boolean(url)),
-          ])
-        : [];
-      return [`${speaker} · ${formatHistoryTimestamp(item.timestamp)}`, item.content, ...attachmentLines, ...actionLines].join("\n");
-    }).join("\n\n");
-    const renderedTranscript = Array.from(document.querySelectorAll<HTMLElement>(".operator-chat-message")).map((messageElement) => {
-      const meta = messageElement.querySelector<HTMLElement>(".operator-chat-message-meta")?.innerText.trim();
-      const content = messageElement.querySelector<HTMLElement>("p")?.innerText.trim();
-      const attachments = Array.from(messageElement.querySelectorAll<HTMLElement>(".operator-chat-attachments span")).map((attachment) => `Attachment: ${attachment.innerText.trim()}`);
-      return [meta, content, ...attachments].filter(Boolean).join("\n");
-    }).filter(Boolean).join("\n\n");
-    const transcript = renderedTranscript || dataTranscript;
-    if (!transcript) return;
-    try {
-      if (navigator.clipboard?.writeText) {
-        try {
-          await navigator.clipboard.writeText(transcript);
-        } catch {
-          const fallback = document.createElement("textarea");
-          fallback.value = transcript;
-          fallback.setAttribute("readonly", "");
-          fallback.style.position = "fixed";
-          fallback.style.opacity = "0";
-          document.body.appendChild(fallback);
-          fallback.select();
-          const copied = document.execCommand("copy");
-          fallback.remove();
-          if (!copied) throw new Error("Clipboard copy was not available.");
-        }
-      } else {
-        const fallback = document.createElement("textarea");
-        fallback.value = transcript;
-        fallback.setAttribute("readonly", "");
-        fallback.style.position = "fixed";
-        fallback.style.opacity = "0";
-        document.body.appendChild(fallback);
-        fallback.select();
-        const copied = document.execCommand("copy");
-        fallback.remove();
-        if (!copied) throw new Error("Clipboard copy was not available.");
-      }
-      setConversationCopied(true);
-      window.setTimeout(() => setConversationCopied(false), 1800);
-    } catch {
-      setConversationCopied(false);
-    }
-  };
   const linkedAssignmentIds = new Set([...operatorThread.assignmentIds, ...threadNudges.flatMap((nudge) => nudge.assignmentId ? [nudge.assignmentId] : [])]);
   const linkedAssignments = state.assignments.filter((assignment) => linkedAssignmentIds.has(assignment.id));
   // Scheduled or operator-created work can predate the conversation index. In
@@ -7598,21 +7534,9 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
   const sessionAssignmentIds = new Set(sessionAssignments.map((assignment) => assignment.id));
   const linkedRuns = (state.assignmentRuns ?? []).filter((run) => sessionAssignmentIds.has(run.assignmentId));
   const hasActiveAssignmentRun = linkedRuns.some((run) => ["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"].includes(run.status));
-  const renameThread = async () => {
-    const nextTitle = window.prompt("Rename conversation", operatorThread.title);
-    if (nextTitle?.trim()) await mutate({ type: "renameOperatorThread", threadId: operatorThread.id, title: nextTitle.trim() });
-  };
-  const archiveThread = async () => {
-    if (operatorThread.title === "Main") return;
-    await mutate({ type: "archiveOperatorThread", threadId: operatorThread.id });
-    const url = new URL(window.location.href);
-    url.searchParams.set("threadId", mainThread?.id ?? "");
-    window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
-    setSelectedThreadId(mainThread?.id);
-  };
+  const displayThreadTitle = operatorThread.title === "Main" || operatorThread.title === "New conversation" ? "Main thread" : operatorThread.title;
   return <div className="page page-chat operator-chat-page">
-    <PageHeader className="chat-heading" eyebrow={operatorThread.title === "Main" ? "Main" : "Conversation"} title={operatorThread.title} titleAdornment={<><span className="chat-presence-context"><PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} avatarUrl={presencePlatformAvatarUrl(state, presence)} />{state.agent?.name} · {presence.name} <span>{presence.handle}</span></span>{operatorThread.title !== "Main" && <><button type="button" className="operator-chat-copy-button" aria-label="Rename conversation" title="Rename conversation" onClick={() => void renameThread()}><Pencil size={14} /></button><button type="button" className="operator-chat-copy-button" aria-label="Archive conversation" title="Archive conversation" onClick={() => void archiveThread()}><X size={14} /></button></>}<button type="button" className="operator-chat-copy-button" aria-label={conversationCopied ? "Conversation copied" : "Copy conversation"} title={conversationCopied ? "Conversation copied" : "Copy conversation"} onClick={() => void copyConversation()}>{conversationCopied ? <Check size={16} /> : <Copy size={16} />}<span className="sr-only">{conversationCopied ? "Conversation copied" : "Copy conversation"}</span></button></>} description={operatorThread.title === "Main" ? `Talk with ${presence.name} about what is happening, ask a question, or give direction. Meaningful work will return here without turning Main into an activity feed.` : `A durable conversation with ${presence.name}. Accepted work continues if you leave this chat.`} actions={<Button variant="secondary" type="button" onClick={() => void onNewChat()}><Plus size={14} /> New conversation</Button>} />
-    {threadContext && <details className="operator-thread-context"><summary><span><strong>{operatorThread.title}</strong><small>Agent chat · <span>Presence context</span> · {threadContext.messageCount} message{threadContext.messageCount === 1 ? "" : "s"}</small></span><span>{threadContext.assignmentCount ? `${threadContext.assignmentCount} responsibility` : "No active responsibility"}</span></summary><div><span>Conversation context is scoped to {state.agent?.name ?? presence.name}; work and outcomes return here as the Agent&apos;s narrative.</span>{threadContext.assignments.length > 0 && <ul>{threadContext.assignments.slice(0, 3).map((assignment) => <li key={assignment.id}>{assignment.title} · {assignment.completion}</li>)}</ul>}</div></details>}
+    <PageHeader className="chat-heading" eyebrow="Main" title={displayThreadTitle} titleAdornment={<span className="chat-presence-context"><PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} avatarUrl={presencePlatformAvatarUrl(state, presence)} />{state.agent?.name} · {presence.name} <span>{presence.handle}</span></span>} />
     <div className="chat-layout operator-chat-layout">
       <section className="chat-thread operator-chat-thread">
         {presence.status === "paused" && <div className="operator-chat-paused" role="status"><Pause size={15} /> {presence.name} is paused. Messages will be delivered and held without waking or invoking her.</div>}
