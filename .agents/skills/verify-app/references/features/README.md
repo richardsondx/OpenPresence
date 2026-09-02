@@ -60,7 +60,7 @@ The current shell does expose both switchers, but the Presence switcher is label
 
 ## Current navigation shell
 
-The primary desktop shell is Agent-first: a memorable Agent portfolio rail, Chat, Agent Lab, Knowledge, Assets, and Agent settings. Attention, Calendar, Analytics, and health open as contextual inspectors. Presence-scoped routes remain available for operational detail, but `Activity`, `Review`, `Watching`, and legacy `Playground` are not presented as equal primary products. `Schedule` remains the temporal detail route; `Teach`, `People`, `Growth`, `Feed`, and `Usage` remain reachable by direct route or contextual links.
+The primary desktop shell is Agent-first: a memorable Agent portfolio rail, Chat, Agent Lab, Knowledge, Assets, and Agent settings. The Agents header owns `New agent`; Chat owns `New conversation`; the sidebar does not duplicate those actions as competing cards. Attention, Calendar, Analytics, and health open as contextual inspectors. Presence-scoped routes remain available for operational detail, but `Activity`, `Review`, `Watching`, and legacy `Playground` are not presented as equal primary products. `Schedule` remains the temporal detail route; `Teach`, `People`, `Growth`, `Feed`, and `Usage` remain reachable by direct route or contextual links.
 
 Every loaded view repeats an Agent switcher, Presence switcher, operational health indicator, and the same navigation. The repeated shell is part of every journey and should be considered when evaluating cognitive load.
 

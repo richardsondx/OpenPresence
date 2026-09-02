@@ -1728,13 +1728,11 @@ function AgentPortfolio({
   state,
   mutate,
   setView,
-  onNewChat,
   collapsed = false,
 }: {
   state: OpenPresenceState;
   mutate: Mutate;
   setView: (view: View) => void;
-  onNewChat: () => Promise<void>;
   collapsed?: boolean;
 }) {
   const agents = state.agents?.length ? state.agents : state.agent ? [state.agent] : [];
@@ -1746,7 +1744,7 @@ function AgentPortfolio({
   };
   return (
     <div className={`agent-portfolio ${collapsed ? "is-collapsed" : ""}`} aria-label="Agents">
-      {!collapsed && <><div className="portfolio-section-heading"><span className="sidebar-label">Agents</span><button type="button" className="portfolio-add" onClick={() => setView("brain")} aria-label="Create a new Agent" title="Create a new Agent"><Plus size={15} /></button></div><span className="portfolio-workspace-label">Agent workspace</span></>}
+      {!collapsed && <div className="portfolio-section-heading"><span className="sidebar-label">Agents</span><button type="button" className="portfolio-add" onClick={() => setView("brain")} aria-label="Create a new Agent" title="Create a new Agent"><Plus size={14} /><span>New agent</span></button></div>}
       <div className="portfolio-agent-list">
         {agents.map((item) => {
           const itemPresence = presenceFor(item.id);
@@ -1770,7 +1768,6 @@ function AgentPortfolio({
           );
         })}
       </div>
-      {!collapsed && <><button type="button" className="portfolio-new-chat" onClick={() => void onNewChat()}><Plus size={15} /> New chat</button><button type="button" className="portfolio-new-agent" onClick={() => setView("brain")}><Plus size={15} /> New Agent</button></>}
     </div>
   );
 }
@@ -2400,14 +2397,14 @@ function AgentWorkspaceShell({
     <main className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
         <div className="sidebar-brand-row"><div className="brand-lockup sidebar-brand"><div className="brand-mark">◉</div><span>OpenPresence</span></div><button type="button" className="sidebar-collapse-button" aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeft size={17} /> : <PanelLeftClose size={17} />}</button></div>
-        <AgentPortfolio state={state} mutate={mutate} setView={setView} onNewChat={createChat} collapsed={sidebarCollapsed} />
+        <AgentPortfolio state={state} mutate={mutate} setView={setView} collapsed={sidebarCollapsed} />
         {!sidebarCollapsed && <>
           <div className="sidebar-section-rule" />
-          <section className="sidebar-projects" aria-label="Projects"><div className="portfolio-section-heading"><span className="sidebar-label">Projects</span><span className="sidebar-section-count">{state.assignments.filter((item) => item.environment === "live").length}</span></div>{state.assignments.filter((item) => item.environment === "live").slice(0, 3).map((assignment) => <button type="button" className="sidebar-project-row" key={assignment.id} onClick={() => setView("chat")}><span className="project-avatar-stack"><PresenceGlyph accent={agent.accent} name={agent.name} /></span><span><strong>{assignment.title}</strong><small>Bounded work · {agent.name}</small></span></button>)}{state.assignments.filter((item) => item.environment === "live").length === 0 && <p className="sidebar-empty-copy">Projects appear when you give an Agent a bounded goal.</p>}</section>
+          <section className="sidebar-projects" aria-label="Projects"><div className="portfolio-section-heading"><span className="sidebar-label">Projects</span>{state.assignments.length > 0 && <span className="sidebar-section-count">{state.assignments.length}</span>}</div>{state.assignments.filter((item) => !["completed", "cancelled"].includes(item.status)).slice(0, 3).map((assignment) => <button type="button" className="sidebar-project-row" key={assignment.id} onClick={() => setView("chat")}><span className="project-avatar-stack"><PresenceGlyph accent={agent.accent} name={agent.name} /></span><span><strong>{assignment.title}</strong><small>{assignment.environment === "sandbox" ? "Sandbox work" : "Bounded work"} · {agent.name}</small></span></button>)}{state.assignments.filter((item) => !["completed", "cancelled"].includes(item.status)).length === 0 && <p className="sidebar-empty-copy">No bounded work yet.</p>}</section>
           <div className="sidebar-section-rule" />
           <section className="sidebar-resources" aria-label="Resources"><span className="sidebar-label">Resources</span><button type="button" className={`resource-nav-row ${view === "rehearsal" ? "active" : ""}`} onClick={() => setView("rehearsal")}><FlaskConical size={17} /><span>Agent Lab</span></button><button type="button" className={`resource-nav-row ${view === "knowledge" ? "active" : ""}`} onClick={() => setView("knowledge")}><BookOpen size={17} /><span>Knowledge</span></button><button type="button" className={`resource-nav-row ${view === "assets" ? "active" : ""}`} onClick={() => setView("assets")}><Layers size={17} /><span>Assets</span></button><button type="button" className={`resource-nav-row ${view === "brain" ? "active" : ""}`} onClick={() => setView("brain")}><Brain size={17} /><span>Agent settings</span>{pendingAgentChangeCount > 0 && <span className="nav-count">{pendingAgentChangeCount}</span>}</button></section>
         </>}
-        <div className="sidebar-footer"><div className="operator-avatar">AR</div>{!sidebarCollapsed && <div><strong>Aaron</strong><small>Operator</small></div>}<span className="sidebar-footer-status" /></div>
+        <div className="sidebar-footer"><div className="operator-avatar" aria-label="Aaron avatar">A</div>{!sidebarCollapsed && <div><strong>Aaron</strong><small>Operator</small></div>}<span className="sidebar-footer-status" aria-label="Operator online" /></div>
       </aside>
       <section className={`${view === "chat" || view === "teach" || view === "rehearsal" ? "workspace workspace-chat" : "workspace"} ${view === "knowledge" ? "workspace-knowledge" : ""} ${inspector ? "has-inspector" : ""}`}>
         <header className="topbar">
@@ -2432,7 +2429,7 @@ function AgentWorkspaceShell({
           {view === "knowledge" && <KnowledgeView state={state} mutate={mutate} refreshState={refreshState} />}
           {view === "assets" && <AssetsView state={state} refreshState={refreshState} />}
           {view === "usage" && <UsageView state={state} setView={setView} mutate={mutate} />}
-          {view === "chat" && <OperatorChatView state={state} mutate={mutate} refreshState={refreshState} setView={setView} />}
+          {view === "chat" && <OperatorChatView state={state} mutate={mutate} refreshState={refreshState} setView={setView} onNewChat={createChat} />}
           {view === "rehearsal" && <AgentLabView state={state} mutate={mutate} setView={setView} />}
           {view === "watching" && <WatchingView state={state} mutate={mutate} refreshState={refreshState} setView={setView} />}
           {view === "people" && <PeopleViewLazy state={state} mutate={mutate} Button={Button} SectionEyebrow={SectionEyebrow} PageHeader={PageHeader} ChannelAvatar={ChannelAvatar} channelLabel={channelLabel} formatTime={formatTime} formatDateTime={formatDateTime} watchRelationshipPolicy={watchRelationshipPolicy} watchPolicyFromPurpose={watchPolicyFromPurpose} watchPlanSummary={watchPlanSummary} />}
@@ -7264,7 +7261,7 @@ function OperatorSessionBlocks({ state, presence, assignments, runs, actions, on
   </section>;
 }
 
-function OperatorChatView({ state, mutate, refreshState, setView }: { state: OpenPresenceState; mutate: Mutate; refreshState: () => Promise<OpenPresenceState>; setView: (view: View) => void }) {
+function OperatorChatView({ state, mutate, refreshState, setView, onNewChat }: { state: OpenPresenceState; mutate: Mutate; refreshState: () => Promise<OpenPresenceState>; setView: (view: View) => void; onNewChat: () => Promise<void> }) {
   const presence = state.presence ?? state.presences[0]!;
   const availableThreads = (state.operatorThreads ?? []).filter((item) => item.agentId === state.agent?.id && item.status !== "archived");
   const mainThread = availableThreads.find((item) => item.title === "Main") ?? availableThreads[0];
@@ -7463,7 +7460,7 @@ function OperatorChatView({ state, mutate, refreshState, setView }: { state: Ope
     setSelectedThreadId(mainThread?.id);
   };
   return <div className="page page-chat operator-chat-page">
-    <PageHeader className="chat-heading" eyebrow={operatorThread.title === "Main" ? "Main" : "Conversation"} title={operatorThread.title} titleAdornment={<><span className="chat-presence-context"><PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} avatarUrl={presencePlatformAvatarUrl(state, presence)} />{state.agent?.name} · {presence.name} <span>{presence.handle}</span></span>{operatorThread.title !== "Main" && <><button type="button" className="operator-chat-copy-button" aria-label="Rename conversation" title="Rename conversation" onClick={() => void renameThread()}><Pencil size={14} /></button><button type="button" className="operator-chat-copy-button" aria-label="Archive conversation" title="Archive conversation" onClick={() => void archiveThread()}><X size={14} /></button></>}<button type="button" className="operator-chat-copy-button" aria-label={conversationCopied ? "Conversation copied" : "Copy conversation"} title={conversationCopied ? "Conversation copied" : "Copy conversation"} onClick={() => void copyConversation()}>{conversationCopied ? <Check size={16} /> : <Copy size={16} />}<span className="sr-only">{conversationCopied ? "Conversation copied" : "Copy conversation"}</span></button></>} description={operatorThread.title === "Main" ? `Talk with ${presence.name} about what is happening, ask a question, or give direction. Meaningful work will return here without turning Main into an activity feed.` : `A durable conversation with ${presence.name}. Accepted work continues if you leave this chat.`} />
+    <PageHeader className="chat-heading" eyebrow={operatorThread.title === "Main" ? "Main" : "Conversation"} title={operatorThread.title} titleAdornment={<><span className="chat-presence-context"><PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} avatarUrl={presencePlatformAvatarUrl(state, presence)} />{state.agent?.name} · {presence.name} <span>{presence.handle}</span></span>{operatorThread.title !== "Main" && <><button type="button" className="operator-chat-copy-button" aria-label="Rename conversation" title="Rename conversation" onClick={() => void renameThread()}><Pencil size={14} /></button><button type="button" className="operator-chat-copy-button" aria-label="Archive conversation" title="Archive conversation" onClick={() => void archiveThread()}><X size={14} /></button></>}<button type="button" className="operator-chat-copy-button" aria-label={conversationCopied ? "Conversation copied" : "Copy conversation"} title={conversationCopied ? "Conversation copied" : "Copy conversation"} onClick={() => void copyConversation()}>{conversationCopied ? <Check size={16} /> : <Copy size={16} />}<span className="sr-only">{conversationCopied ? "Conversation copied" : "Copy conversation"}</span></button></>} description={operatorThread.title === "Main" ? `Talk with ${presence.name} about what is happening, ask a question, or give direction. Meaningful work will return here without turning Main into an activity feed.` : `A durable conversation with ${presence.name}. Accepted work continues if you leave this chat.`} actions={<Button variant="secondary" type="button" onClick={() => void onNewChat()}><Plus size={14} /> New conversation</Button>} />
     {threadContext && <details className="operator-thread-context"><summary><span><strong>{operatorThread.title}</strong><small>Agent chat · <span>Presence context</span> · {threadContext.messageCount} message{threadContext.messageCount === 1 ? "" : "s"}</small></span><span>{threadContext.assignmentCount ? `${threadContext.assignmentCount} responsibility` : "No active responsibility"}</span></summary><div><span>Conversation context is scoped to {state.agent?.name ?? presence.name}; work and outcomes return here as the Agent&apos;s narrative.</span>{threadContext.assignments.length > 0 && <ul>{threadContext.assignments.slice(0, 3).map((assignment) => <li key={assignment.id}>{assignment.title} · {assignment.completion}</li>)}</ul>}</div></details>}
     <div className="chat-layout operator-chat-layout">
       <section className="chat-thread operator-chat-thread">
