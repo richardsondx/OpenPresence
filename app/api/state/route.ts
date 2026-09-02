@@ -139,7 +139,7 @@ const activityProjectionKeys = new Set<keyof OpenPresenceState>([
 
 const chatProjectionKeys = new Set<keyof OpenPresenceState>([
   "agent", "agents", "activeAgentId", "activePresenceId", "presence", "presences", "onboarded", "workspaceRevision", "proposals",
-  "assignments", "actions", "executions", "outcomes", "socialIntents", "socialDecisions", "mirrorObjects", "nativeConnections", "bridges", "channelDefinitions",
+  "assignments", "actions", "executions", "outcomes", "socialIntents", "socialDecisions", "mirrorObjects", "nativeConnections", "bridges", "channelDefinitions", "metrics",
   "operationalRuns", "attentionEpisodes", "operatorThreads", "operatorConversations", "operatorNudges",
 ]);
 

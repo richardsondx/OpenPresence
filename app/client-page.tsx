@@ -467,6 +467,16 @@ function normalizeClientState<T>(payload: T): T {
   for (const key of CLIENT_STATE_ARRAY_KEYS) {
     if (!Array.isArray(next[key])) next[key] = [];
   }
+  const metrics = next.metrics && typeof next.metrics === "object" && !Array.isArray(next.metrics)
+    ? next.metrics as Record<string, unknown>
+    : {};
+  next.metrics = {
+    qualifiedFollows: 0,
+    conversations: 0,
+    opportunitiesIgnored: 0,
+    audienceHealth: 98,
+    ...metrics,
+  };
   return next as T;
 }
 
