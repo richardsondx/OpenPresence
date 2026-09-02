@@ -1,0 +1,47 @@
+import { expect, test } from "@playwright/test";
+
+test.beforeEach(async ({ request }) => {
+  expect((await request.post("/api/state", { data: { type: "reset" } })).ok()).toBeTruthy();
+});
+
+test("Chat is the default Agent workspace and a new thread survives reload", async ({ page, request }) => {
+  await page.goto("/");
+  await page.getByLabel("Agent name").fill("Jenny");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+
+  await expect(page).toHaveURL(/\/chat/);
+  if (test.info().project.name === "chromium") await expect(page.getByText("Agent workspace", { exact: true })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Main", exact: true })).toBeVisible();
+  if (test.info().project.name === "chromium") await expect(page.getByText("Presence context", { exact: true })).toBeVisible();
+
+  await page.getByRole("button", { name: "New chat", exact: true }).click();
+  await expect(page).toHaveURL(/threadId=/);
+  await page.getByPlaceholder("Message Jenny…").fill("What are you working on?");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.locator(".operator-chat-message.is-operator p").filter({ hasText: /^What are you working on\?$/ })).toBeVisible();
+  await expect.poll(async () => {
+    const snapshot = await (await request.get("/api/state?projection=chat")).json();
+    return snapshot.operatorConversations?.some((conversation: { title?: string; messages?: Array<{ content: string }> }) => conversation.title === "What are you working on?" && conversation.messages?.some((message) => message.content === "What are you working on?"));
+  }).toBe(true);
+  const threadUrl = page.url();
+
+  await page.reload();
+  await expect(page).toHaveURL(threadUrl);
+  await expect(page.locator(".operator-chat-message.is-operator p").filter({ hasText: /^What are you working on\?$/ })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "What are you working on?" })).toBeVisible();
+});
+
+test("Chat projects durable responsibility state as an Approach and Working line", async ({ page, request }) => {
+  await page.goto("/");
+  await page.getByLabel("Agent name").fill("Jenny");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  const base = await request.get("/api/state").then((response) => response.json());
+  const created = await request.post("/api/state", { data: { type: "createAssignment", presenceId: base.presence.id, environment: "sandbox", instruction: "Find one useful builder conversation.", schedule: { day: "Daily", time: "08:00", executionWindow: "08:00–11:00" } } });
+  expect(created.ok()).toBeTruthy();
+
+  await page.goto("/chat");
+  await expect(page.getByTestId("operator-approach")).toBeVisible();
+  await expect(page.getByTestId("operator-approach")).toContainText("Approach");
+  await expect(page.getByTestId("operator-work-events")).toContainText(/Responsibility accepted|Current activity/);
+  await expect(page.getByTestId("operator-working-line")).toContainText("Continuing autonomously");
+});

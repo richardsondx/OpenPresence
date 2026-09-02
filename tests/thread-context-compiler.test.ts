@@ -1,6 +1,7 @@
 import { describe, expect, it } from "vitest";
 import { compileThreadContext } from "@/lib/thread-context-compiler";
-import { cloneState, createAgent } from "@/lib/runtime";
+import { applyOperation, cloneState, createAgent } from "@/lib/runtime";
+import { recordOperatorConversationMessage } from "@/lib/operator-chat";
 import type { Assignment, OperatorConversation, OperatorThread } from "@/lib/types";
 
 const thread: OperatorThread = {
@@ -59,5 +60,24 @@ describe("ThreadContextCompiler", () => {
     expect(result.messages).toHaveLength(1);
     expect(result.messages[0].content.length).toBe(100);
     expect(result.assignments[0]).toMatchObject({ id: "assignment-1", completion: "0/1 verified" });
+  });
+
+  it("persists Main and the conversation lifecycle without touching Agent identity", () => {
+    const state = createAgent({ name: "Genny", description: "A useful Agent", mode: "agent", handle: "@genny", accent: "#d68754" });
+    const presenceId = state.presence!.id;
+    expect(state.operatorThreads?.[0]).toMatchObject({ title: "Main", status: "active" });
+    const created = applyOperation(state, { type: "createOperatorThread", presenceId });
+    const thread = created.operatorThreads?.find((item) => item.title === "New conversation");
+    expect(thread).toBeDefined();
+    const messaged = recordOperatorConversationMessage(created, { presenceId, threadId: thread!.id, content: "Promote the launch to builders" });
+    const updated = cloneState(messaged);
+    expect(updated.agent?.id).toBe(state.agent?.id);
+    expect(updated.operatorConversations?.find((item) => item.threadId === thread!.id)?.messages[0].content).toBe("Promote the launch to builders");
+    expect(updated.operatorThreads?.find((item) => item.id === thread!.id)?.title).toBe("Promote the launch to builders");
+    const renamed = applyOperation(updated, { type: "renameOperatorThread", threadId: thread!.id, title: "Launch positioning" });
+    expect(renamed.operatorThreads?.find((item) => item.id === thread!.id)?.title).toBe("Launch positioning");
+    const archived = applyOperation(renamed, { type: "archiveOperatorThread", threadId: thread!.id });
+    expect(archived.operatorThreads?.find((item) => item.id === thread!.id)?.status).toBe("archived");
+    expect(archived.operatorThreads?.find((item) => item.title === "Main")?.status).toBe("active");
   });
 });

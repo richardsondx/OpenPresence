@@ -8,7 +8,7 @@ test.beforeEach(async ({ request }) => {
 test("Calendar Week mode visualizes Assignment timing without pretending to show posts", async ({ page }) => {
   await page.goto("/");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
-  await expect(page).toHaveURL(/activity/);
+  await expect(page).toHaveURL(/chat/);
   await page.goto("/schedule");
   await page.getByRole("button", { name: "Week", exact: true }).click();
   await page.locator(".page-heading").getByRole("button", { name: "Add assignment", exact: true }).click();

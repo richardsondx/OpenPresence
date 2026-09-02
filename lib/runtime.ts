@@ -2384,17 +2384,18 @@ function normalizeOperatorThreads(
   if (!agentId) return [] as import("./types").OperatorThread[];
   const previousById = new Map((existing ?? []).filter((thread) => thread.agentId === agentId).map((thread) => [thread.id, thread]));
   return conversations.filter((conversation) => conversation.agentId === agentId).map((conversation) => {
-    const threadId = `thread:${conversation.id}`;
+    const threadId = conversation.threadId ?? `thread:${conversation.id}`;
     const previous = previousById.get(threadId);
     const assignmentIds = assignments.filter((assignment) => assignment.agentId === agentId && assignment.presenceId === conversation.presenceId).map((assignment) => assignment.id);
+    const title = conversation.title === "Main thread" ? "Main" : (conversation.title || "Main");
     return {
       id: threadId,
       agentId,
-      title: conversation.title || "Main thread",
-      scope: { kind: "presence", presenceId: conversation.presenceId } as const,
+      title,
+      scope: conversation.scope ?? { kind: "presence", presenceId: conversation.presenceId } as const,
       originThreadId: previous?.originThreadId ?? null,
       communicationThreadId: conversation.id,
-      status: previous?.status ?? "active",
+      status: conversation.status ?? previous?.status ?? "active",
       messageIds: conversation.messages.map((message) => message.id),
       assignmentIds: Array.from(new Set([...(previous?.assignmentIds ?? []), ...assignmentIds])),
       createdAt: previous?.createdAt ?? conversation.createdAt,
@@ -2426,10 +2427,14 @@ export function createAgent(input: CreateAgentInput): OpenPresenceState {
   const definitions = builtinChannelDefinitions();
   const presence = makePresence({ channel: "x", handle: input.handle.trim() || `@${agent.name.toLowerCase().replace(/[^a-z0-9]/g, "")}`, mode: input.mode, accent: input.accent, connectionMode: "sandbox" }, agent.name, definitions[0], defaultPresenceBrief(agent));
   const conversation = makeConversation();
+  const operatorConversationId = id("operator_conversation");
+  const mainThreadId = `thread:${operatorConversationId}`;
+  const operatorConversation: import("./types").OperatorConversation = { id: operatorConversationId, agentId: agent.id, presenceId: presence.id, threadId: mainThreadId, scope: { kind: "presence", presenceId: presence.id }, status: "active", title: "Main", createdAt: conversation.createdAt, updatedAt: conversation.updatedAt, messages: [] };
+  const operatorThread: import("./types").OperatorThread = { id: mainThreadId, agentId: agent.id, title: "Main", scope: { kind: "presence", presenceId: presence.id }, originThreadId: null, communicationThreadId: operatorConversationId, status: "active", messageIds: [], assignmentIds: [], createdAt: conversation.createdAt, updatedAt: conversation.updatedAt };
   const skills = defaultSkills();
   const environment = makeSandboxEnvironment(presence);
   const builtins = builtinScenarioDefinitions(agent.id, presence.channel);
-  return { ...initialState(), onboarded: true, agent, agents: [agent], activeAgentId: agent.id, presence, presences: [presence], activePresenceId: presence.id, files: makeFiles(input, presence), modelProfiles: [defaultModel(agent.id)], providerConnections: [{ id: id("connection"), provider: "openai", label: "OpenAI", status: "needs-configuration", createdAt: now() }], toolBindings: defaultBindings(agent.id), conversations: [conversation], activeConversationId: conversation.id, channelDefinitions: definitions, sandboxEnvironments: [environment], skills, agentSkills: skills.map((skill) => ({ id: id("agent-skill"), agentId: agent.id, skillId: skill.id, enabled: true })), scenarios: builtins.map((item) => item.scenario), scenarioVersions: builtins.map((item) => item.version), events: [event("system", `${agent.name} is live`, `Your ${input.mode === "ghost" ? "Ghost " : "agent-owned "}Presence is ready on X.`, "positive")] };
+  return { ...initialState(), onboarded: true, agent, agents: [agent], activeAgentId: agent.id, presence, presences: [presence], activePresenceId: presence.id, files: makeFiles(input, presence), modelProfiles: [defaultModel(agent.id)], providerConnections: [{ id: id("connection"), provider: "openai", label: "OpenAI", status: "needs-configuration", createdAt: now() }], toolBindings: defaultBindings(agent.id), conversations: [conversation], activeConversationId: conversation.id, operatorConversations: [operatorConversation], operatorThreads: [operatorThread], channelDefinitions: definitions, sandboxEnvironments: [environment], skills, agentSkills: skills.map((skill) => ({ id: id("agent-skill"), agentId: agent.id, skillId: skill.id, enabled: true })), scenarios: builtins.map((item) => item.scenario), scenarioVersions: builtins.map((item) => item.version), events: [event("system", `${agent.name} is live`, `Your ${input.mode === "ghost" ? "Ghost " : "agent-owned "}Presence is ready on X.`, "positive")] };
 }
 
 function makeSandboxEnvironment(presence: Presence): SandboxEnvironment {
@@ -8159,6 +8164,39 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     case "revokeBridge": { const bridge = state.bridges.find((item) => item.id === operation.id); if (bridge) { bridge.state = "offline"; bridge.updatedAt = now(); state.events.unshift(event("system", "Bridge disconnected", `${bridge.name} can no longer receive work.`, "warning")); } return state; }
     case "removeBridge": { const bridge = state.bridges.find((item) => item.id === operation.id); if (!bridge || bridge.state !== "offline") return state; state.bridges = state.bridges.filter((item) => item.id !== operation.id); state.bridgeSync = state.bridgeSync.filter((item) => item.bridgeId !== operation.id); state.events.unshift(event("system", "Bridge removed", `${bridge.name} was removed from the active connector list. Historical mirror data was retained.`, "warning")); return state; }
     case "selectPresence": { const selected = state.presences.find((item) => item.id === operation.id); if (!selected) return state; state.activePresenceId = selected.id; state.presence = selected; return state; }
+    case "createOperatorThread": {
+      const presence = state.presences.find((item) => item.id === (operation.presenceId ?? state.activePresenceId)) ?? state.presence;
+      if (!state.agent || !presence) return state;
+      const timestamp = now();
+      const conversationId = id("operator_conversation");
+      const threadId = `thread:${conversationId}`;
+      const title = operation.title?.trim() || "New conversation";
+      const conversation: import("./types").OperatorConversation = { id: conversationId, agentId: state.agent.id, presenceId: presence.id, threadId, scope: { kind: "presence", presenceId: presence.id }, status: "active", title, createdAt: timestamp, updatedAt: timestamp, messages: [] };
+      const thread: import("./types").OperatorThread = { id: threadId, agentId: state.agent.id, title, scope: { kind: "presence", presenceId: presence.id }, originThreadId: null, communicationThreadId: conversationId, status: "active", messageIds: [], assignmentIds: [], createdAt: timestamp, updatedAt: timestamp };
+      state.operatorConversations = [conversation, ...(state.operatorConversations ?? [])];
+      state.operatorThreads = [thread, ...(state.operatorThreads ?? [])];
+      return state;
+    }
+    case "renameOperatorThread": {
+      const thread = (state.operatorThreads ?? []).find((item) => item.id === operation.threadId && item.agentId === state.agent?.id);
+      if (!thread || !operation.title.trim()) return state;
+      const title = operation.title.trim();
+      thread.title = title;
+      thread.updatedAt = now();
+      const conversation = state.operatorConversations?.find((item) => item.id === thread.communicationThreadId);
+      if (conversation) { conversation.title = title; conversation.updatedAt = thread.updatedAt; }
+      return state;
+    }
+    case "archiveOperatorThread":
+    case "restoreOperatorThread": {
+      const thread = (state.operatorThreads ?? []).find((item) => item.id === operation.threadId && item.agentId === state.agent?.id);
+      if (!thread || thread.title === "Main" && operation.type === "archiveOperatorThread") return state;
+      thread.status = operation.type === "archiveOperatorThread" ? "archived" : "active";
+      thread.updatedAt = now();
+      const conversation = state.operatorConversations?.find((item) => item.id === thread.communicationThreadId);
+      if (conversation) { conversation.status = thread.status; conversation.updatedAt = thread.updatedAt; }
+      return state;
+    }
     case "selectConversation": { if (!state.conversations.some((conversation) => conversation.id === operation.id)) return state; state.activeConversationId = operation.id; syncMessages(state); return state; }
     case "newConversation": { const conversation = makeConversation(); state.conversations.unshift(conversation); state.activeConversationId = conversation.id; syncMessages(state); return state; }
     case "newPresenceChatSession": { if (!state.presences.some((presence) => presence.id === operation.presenceId)) return state; const session = makePresenceChatSession(operation.presenceId); state.presenceChatSessions.unshift(session); return state; }

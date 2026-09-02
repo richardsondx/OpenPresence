@@ -4813,6 +4813,10 @@ const operation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("newConversation") }),
   z.object({ type: z.literal("sendMessage"), content: z.string().trim().min(1).max(2000), conversationId: z.string().min(1).optional() }),
   z.object({ type: z.literal("newPresenceChatSession"), presenceId: z.string().min(1) }),
+  z.object({ type: z.literal("createOperatorThread"), presenceId: z.string().min(1).optional(), title: z.string().trim().min(1).max(120).optional() }),
+  z.object({ type: z.literal("renameOperatorThread"), threadId: z.string().min(1), title: z.string().trim().min(1).max(120) }),
+  z.object({ type: z.literal("archiveOperatorThread"), threadId: z.string().min(1) }),
+  z.object({ type: z.literal("restoreOperatorThread"), threadId: z.string().min(1) }),
   z.object({ type: z.literal("sendPresenceChatMessage"), presenceId: z.string().min(1), sessionId: z.string().min(1), content: z.string().trim().min(1).max(4000), attachments: z.array(presenceChatAsset).max(4).optional(), replyToMessageId: z.string().min(1).optional(), briefOverride: presenceBrief.optional(), tasteOverride: z.string().max(100_000).optional(), respond: z.boolean().optional() }),
   z.object({ type: z.literal("askPresenceChatToReply"), presenceId: z.string().min(1), sessionId: z.string().min(1), targetMessageId: z.string().min(1), briefOverride: presenceBrief.optional() }),
   z.object({ type: z.literal("saveFile"), kind: fileKind, content: z.string().max(100_000) }),
@@ -4834,7 +4838,7 @@ const operation = z.discriminatedUnion("type", [
   z.object({ type: z.literal("setExplorationStatus"), id: z.string().min(1), status: z.enum(["active", "paused", "archived"]) }),
   z.object({ type: z.literal("setExplorationEngagement"), id: z.string().min(1), mode: z.enum(["surface", "opportunistic", "objective"]), objective: z.string().trim().max(2000).optional() }),
   z.object({ type: z.literal("lookNow"), id: z.string().min(1).optional(), presenceId: z.string().min(1).optional() }),
-  z.object({ type: z.literal("sendPresenceNudge"), presenceId: z.string().min(1), content: z.string().trim().min(1).max(20_000), attachments: z.array(presenceChatAsset).max(12).optional(), clientRequestId: z.string().trim().min(1).max(160).optional() }),
+  z.object({ type: z.literal("sendPresenceNudge"), presenceId: z.string().min(1), threadId: z.string().min(1).optional(), content: z.string().trim().min(1).max(20_000), attachments: z.array(presenceChatAsset).max(12).optional(), clientRequestId: z.string().trim().min(1).max(160).optional() }),
   z.object({ type: z.literal("retryPresenceNudge"), presenceId: z.string().min(1), nudgeId: z.string().min(1) }),
   z.object({ type: z.literal("createAssignmentFromNudge"), presenceId: z.string().min(1), nudgeId: z.string().min(1), title: z.string().trim().min(1).max(240).optional() }),
   z.object({ type: z.literal("runAttentionWorker"), presenceId: z.string().min(1).optional(), scheduled: z.boolean().optional() }),
@@ -5399,7 +5403,7 @@ export async function POST(request: Request) {
     if (parsed.type === "sendPresenceNudge") {
       const conversationPresence = current.presences.find((item) => item.id === parsed.presenceId) ?? current.presence;
       const existingOperatorMessage = parsed.clientRequestId
-        ? current.operatorConversations?.find((item) => item.presenceId === parsed.presenceId)?.messages.find((item) => item.role === "operator" && item.clientRequestId === parsed.clientRequestId)
+        ? current.operatorConversations?.find((item) => item.presenceId === parsed.presenceId && (!parsed.threadId || item.threadId === parsed.threadId || item.id === parsed.threadId || (!item.threadId && `thread:${item.id}` === parsed.threadId)))?.messages.find((item) => item.role === "operator" && item.clientRequestId === parsed.clientRequestId)
         : undefined;
       // A browser retry must return the already-recorded turn without asking
       // the model or creating a second public-action opportunity.
@@ -5411,8 +5415,8 @@ export async function POST(request: Request) {
       const explicitPublicationAssignment = conversationPresence?.channel === "x" && isExplicitXPostRequest(parsed.content);
       const increaseEffort = conversationPresence?.status === "live" ? parseIncreaseEffortRequest(parsed.content) : undefined;
       if (conversationPresence && isBurstStatusQuestion(parsed.content)) {
-        let next = recordOperatorConversationMessage(current, { presenceId: conversationPresence.id, content: parsed.content, clientRequestId: parsed.clientRequestId });
-        next = recordOperatorConversationMessage(next, { presenceId: conversationPresence.id, role: "presence", content: operatorBurstStatusReply(next, conversationPresence.id) });
+        let next = recordOperatorConversationMessage(current, { presenceId: conversationPresence.id, threadId: parsed.threadId, content: parsed.content, clientRequestId: parsed.clientRequestId });
+        next = recordOperatorConversationMessage(next, { presenceId: conversationPresence.id, threadId: parsed.threadId, role: "presence", content: operatorBurstStatusReply(next, conversationPresence.id) });
         writeState(next);
         return stateResponse(request, next);
       }
@@ -5426,9 +5430,9 @@ export async function POST(request: Request) {
           ?? eligibleAssignments.find((item) => item.seed?.role === "distributable_target")
           ?? eligibleAssignments.find((item) => item.origin !== "exploration")
           ?? eligibleAssignments[0];
-        let next = recordOperatorConversationMessage(current, { presenceId: conversationPresence.id, content: parsed.content, clientRequestId: parsed.clientRequestId });
+        let next = recordOperatorConversationMessage(current, { presenceId: conversationPresence.id, threadId: parsed.threadId, content: parsed.content, clientRequestId: parsed.clientRequestId });
         if (!assignment) {
-          next = recordOperatorConversationMessage(next, { presenceId: conversationPresence.id, role: "presence", content: "I can turn up an existing distribution responsibility, but I don’t have one active yet. Give me the post or idea you want me to work on and I’ll keep the effort focused." });
+          next = recordOperatorConversationMessage(next, { presenceId: conversationPresence.id, threadId: parsed.threadId, role: "presence", content: "I can turn up an existing distribution responsibility, but I don’t have one active yet. Give me the post or idea you want me to work on and I’ll keep the effort focused." });
           writeState(next);
           return stateResponse(request, next);
         }
@@ -5440,7 +5444,7 @@ export async function POST(request: Request) {
         const queued = window ? queueLiveAssignmentRun(started, assignment.id, conversationPresence.id, window.id) : undefined;
         next = queued?.run.id ? queued.state : started;
         const endLabel = new Date(increaseEffort.deadlineAt).toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
-        next = recordOperatorConversationMessage(next, { presenceId: conversationPresence.id, role: "presence", content: isOwnTheHypePromotion ? "Starting now. I’ll build 40 verified public OwnTheHype promotions, beginning with the source post. Likes and follows are auxiliary; failed or unverified actions do not count." : `Starting now. I’ll look for up to ${increaseEffort.maxVerifiedActions} qualified opportunities until ${endLabel}. Only verified actions count, and I’ll leave weak opportunities alone.` });
+        next = recordOperatorConversationMessage(next, { presenceId: conversationPresence.id, threadId: parsed.threadId, role: "presence", content: isOwnTheHypePromotion ? "Starting now. I’ll build 40 verified public OwnTheHype promotions, beginning with the source post. Likes and follows are auxiliary; failed or unverified actions do not count." : `Starting now. I’ll look for up to ${increaseEffort.maxVerifiedActions} qualified opportunities until ${endLabel}. Only verified actions count, and I’ll leave weak opportunities alone.` });
         writeState(next);
         if (queued?.run.id) void dispatchLiveAssignmentWorker(queued.run.id);
         return stateResponse(request, next, { runId: queued?.run.id });
@@ -5460,7 +5464,7 @@ export async function POST(request: Request) {
         // Persist the operator's turn before invoking the model. The private
         // conversation should remain truthful even if the model is slow,
         // unavailable, or the process restarts while it is being generated.
-        next = recordOperatorConversationMessage(next, { presenceId: parsed.presenceId, content: parsed.content, clientRequestId: parsed.clientRequestId });
+        next = recordOperatorConversationMessage(next, { presenceId: parsed.presenceId, threadId: parsed.threadId, content: parsed.content, clientRequestId: parsed.clientRequestId });
         writeState(next);
         const operatorMessage = next.operatorConversations?.find((item) => item.presenceId === parsed.presenceId)?.messages.at(-1);
         if (!operatorMessage) throw new Error("The operator message could not be persisted.");
@@ -5485,7 +5489,7 @@ export async function POST(request: Request) {
       let next = created.state;
       const presence = next.presences.find((item) => item.id === parsed.presenceId) ?? next.presence;
       if (presence?.status === "live" && hasSharedContext) {
-        next = recordOperatorConversationMessage(next, { presenceId: parsed.presenceId, role: "presence", content: operatorNudgeReceipt(parsed.content) });
+        next = recordOperatorConversationMessage(next, { presenceId: parsed.presenceId, threadId: parsed.threadId, role: "presence", content: operatorNudgeReceipt(parsed.content) });
       }
       writeState(next);
       if (presence?.status === "live") {

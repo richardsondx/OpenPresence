@@ -2028,6 +2028,10 @@ export interface OperatorConversation {
   id: string;
   agentId: string;
   presenceId: string;
+  /** Durable Agent-first thread identity. Older records are migrated at read time. */
+  threadId?: string;
+  scope?: OperatorThreadScope;
+  status?: "active" | "archived";
   title: string;
   createdAt: string;
   updatedAt: string;
@@ -2982,7 +2986,7 @@ export type PresenceChatRehearsalOperation =
   | { type: "sendPresenceChatMessage"; presenceId: string; sessionId: string; content: string; attachments?: SandboxAssetInput[]; replyToMessageId?: string; briefOverride?: PresenceBrief; respond?: boolean }
   | { type: "askPresenceChatToReply"; presenceId: string; sessionId: string; targetMessageId: string; briefOverride?: PresenceBrief };
 export type OperatorConversationOperation =
-  | { type: "sendPresenceNudge"; presenceId: string; content: string; attachments?: SandboxAssetInput[]; clientRequestId?: string }
+  | { type: "sendPresenceNudge"; presenceId: string; content: string; threadId?: string; attachments?: SandboxAssetInput[]; clientRequestId?: string }
   | { type: "retryPresenceNudge"; presenceId: string; nudgeId: string }
   | { type: "createAssignmentFromNudge"; presenceId: string; nudgeId: string; title?: string }
   | { type: "lookNow"; presenceId?: string };
@@ -3014,11 +3018,17 @@ export type OperationalRecheckOperation =
   | { type: "syncNativeX"; presenceId?: string; manual?: boolean; reconcile?: boolean; incidentId?: string };
 
 export type PresenceSettingsOperation = { type: "setPresence"; patch: Partial<Presence> };
+export type OperatorThreadOperation =
+  | { type: "createOperatorThread"; presenceId?: string; title?: string }
+  | { type: "renameOperatorThread"; threadId: string; title: string }
+  | { type: "archiveOperatorThread"; threadId: string }
+  | { type: "restoreOperatorThread"; threadId: string };
 export type Operation = AssignmentOperation | CapabilityTrialOperation | LanguagePolicyOperation | ScenarioOperation | PublishingPlanOperation | GrowthOperation | AgentRequestOperation | FailureReviewOperation | ExplorationOperation | OperationalOperation | AttentionControlOperation | WatchRequestOperation | RelationshipStudyOperation | PeopleNoteOperation | AssetLibraryOperation | PresenceSettingsOperation
   | BrowserOperation
   | ObservabilityOperation
   | LegacyLanguageOperation
   | PresenceChatRehearsalOperation
+  | OperatorThreadOperation
   | OperatorConversationOperation
   | KnowledgeOperation
   | ConversationStyleOperation

@@ -45,27 +45,29 @@ export function operatorBurstStatusReply(source: OpenPresenceState, presenceId: 
   return `It’s active now—it started at ${start} and runs until ${deadline}. I have ${verifiedLabel}; the next pass is queued.`;
 }
 
-function conversationFor(state: OpenPresenceState, presenceId: string): OperatorConversation {
-  const existing = state.operatorConversations?.find((item) => item.presenceId === presenceId);
+function conversationFor(state: OpenPresenceState, presenceId: string, threadId?: string): OperatorConversation {
+  const existing = state.operatorConversations?.find((item) => item.presenceId === presenceId && (!threadId || item.threadId === threadId || item.id === threadId || (!item.threadId && `thread:${item.id}` === threadId)))
+    ?? (!threadId ? state.operatorConversations?.find((item) => item.presenceId === presenceId && item.status !== "archived") : undefined);
   if (existing) return existing;
   const timestamp = now();
-  const created: OperatorConversation = { id: `operator_conversation_${randomUUID()}`, agentId: state.agent?.id ?? "", presenceId, title: "Private conversation", createdAt: timestamp, updatedAt: timestamp, messages: [] };
+  const created: OperatorConversation = { id: `operator_conversation_${randomUUID()}`, agentId: state.agent?.id ?? "", presenceId, threadId: threadId ?? `thread:${presenceId}`, scope: { kind: "presence", presenceId }, status: "active", title: threadId ? "New conversation" : "Main", createdAt: timestamp, updatedAt: timestamp, messages: [] };
   state.operatorConversations = [created, ...(state.operatorConversations ?? [])];
   return created;
 }
 
 /** Record a normal private turn without creating an attention request. */
-export function recordOperatorConversationMessage(source: OpenPresenceState, input: { presenceId: string; content: string; role?: "operator" | "presence"; clientRequestId?: string }) {
+export function recordOperatorConversationMessage(source: OpenPresenceState, input: { presenceId: string; threadId?: string; content: string; role?: "operator" | "presence"; clientRequestId?: string }) {
   const state = clone(source);
   const presence = state.presences.find((item) => item.id === input.presenceId) ?? state.presence;
   if (!presence) throw new Error("That Presence is not available.");
-  const conversation = conversationFor(state, input.presenceId);
+  const conversation = conversationFor(state, input.presenceId, input.threadId);
   if (input.role !== "presence" && input.clientRequestId) {
     const existing = conversation.messages.find((message) => message.role === "operator" && message.clientRequestId === input.clientRequestId);
     if (existing) return state;
   }
   const timestamp = now();
   conversation.messages.push({ id: `${input.role === "presence" ? "presence" : "operator"}_message_${randomUUID()}`, role: input.role ?? "operator", content: input.content.trim(), timestamp, clientRequestId: input.role === "presence" ? undefined : input.clientRequestId });
+  if (conversation.title === "New conversation" && input.role !== "presence") conversation.title = input.content.replace(/\s+/g, " ").slice(0, 52) + (input.content.length > 52 ? "…" : "");
   conversation.updatedAt = timestamp;
   return state;
 }
@@ -88,12 +90,12 @@ export function directWatchQuery(content: string) {
   return match?.[1]?.replace(/^@/, "") || (operatorRequestsWatch(content) ? mentionedHandle?.replace(/^@/, "") : undefined);
 }
 
-export function createOperatorNudge(source: OpenPresenceState, input: { presenceId: string; content: string; attachments?: SandboxAssetInput[]; clientRequestId?: string }) {
+export function createOperatorNudge(source: OpenPresenceState, input: { presenceId: string; threadId?: string; content: string; attachments?: SandboxAssetInput[]; clientRequestId?: string }) {
   const state = clone(source);
   const presence = state.presences.find((item) => item.id === input.presenceId) ?? state.presence;
   if (!presence) throw new Error("That Presence is not available.");
   const timestamp = now();
-  const conversation = conversationFor(state, input.presenceId);
+  const conversation = conversationFor(state, input.presenceId, input.threadId);
   if (input.clientRequestId) {
     const existingMessage = conversation.messages.find((message) => message.role === "operator" && message.clientRequestId === input.clientRequestId);
     const existingNudge = existingMessage?.nudgeId ? state.operatorNudges?.find((nudge) => nudge.id === existingMessage.nudgeId) : undefined;
@@ -106,6 +108,7 @@ export function createOperatorNudge(source: OpenPresenceState, input: { presence
   if (presence.status === "paused") {
     conversation.messages.push({ id: `operator_system_${randomUUID()}`, role: "system", content: `${presence.name} is paused. Your note is saved and will be considered after you wake this Presence.`, timestamp, nudgeId });
   }
+  if (conversation.title === "New conversation") conversation.title = input.content.replace(/\s+/g, " ").slice(0, 52) + (input.content.length > 52 ? "…" : "");
   conversation.updatedAt = timestamp;
   const nudge: OperatorNudge = {
     id: nudgeId,

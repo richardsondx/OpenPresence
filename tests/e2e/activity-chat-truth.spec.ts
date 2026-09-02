@@ -5,6 +5,7 @@ test("Activity is truthful and paused Chat queues without waking", async ({ page
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Genny");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  await page.goto("/activity");
 
   await expect(page.getByTestId("right-now-status")).toBeVisible();
   await expect(page.getByTestId("right-now-status")).not.toContainText("Waiting to choose");
@@ -17,7 +18,7 @@ test("Activity is truthful and paused Chat queues without waking", async ({ page
   expect((await request.post("/api/state", { data: { type: "setPresence", patch: { status: "paused" } }, headers: { "x-openpresence-presence-id": presenceId } })).ok()).toBeTruthy();
 
   await page.goto("/chat");
-  await expect(page.getByRole("heading", { name: "Chat with Genny" })).toBeVisible();
+  await expect(page.getByRole("heading", { name: "Main" })).toBeVisible();
   await expect(page.getByText(/messages will be delivered and held/i)).toBeVisible();
   await page.getByPlaceholder("Message Genny…").fill("Please consider https://x.com/example/status/123");
   await page.getByRole("button", { name: "Queue message" }).click();

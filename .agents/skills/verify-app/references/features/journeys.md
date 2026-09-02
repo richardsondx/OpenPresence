@@ -14,6 +14,10 @@ From [Activity](activity.md), open `Review` when the operator queue has work or 
 
 Follow [Chat and Teach](chat-teach.md) for an explicit publication direction, then open [Schedule](schedule-assignments.md) or Activity. Prove the visible receipt, Assignment/attention state, and persisted separation between Social Intent, Execution, and Outcome.
 
+## Agent Main → work thread → reload
+
+Open `/` or `/chat` in an onboarded workspace and prove the Agent-first sidebar exposes `Main`, create a new conversation, and opens it with a durable `threadId` query. Send a non-public operator message, reload, and verify the same thread title and message remain. Rename and archive a non-Main thread; prove `Main` remains available and any linked Assignment remains in the state projection.
+
 ## Playground → decision trace → rehearsal feedback
 
 Follow [Playground](playground-rehearsal.md) to seed a simulated event, inspect it in the browser, open its trace/context, and record feedback only when requested. Prove Sandbox isolation and that feedback does not silently rewrite Agent identity.

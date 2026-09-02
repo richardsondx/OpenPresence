@@ -243,7 +243,7 @@ function viewForLocation(location: Location): View {
   // old activity links valid while rendering the canonical Schedule view.
   if (pathView) return pathView === "calendar" ? "schedule" : pathView;
   const requested = new URLSearchParams(location.search).get("view");
-  return requested && Object.prototype.hasOwnProperty.call(viewPaths, requested) ? requested as View : "live";
+  return requested && Object.prototype.hasOwnProperty.call(viewPaths, requested) ? requested as View : "chat";
 }
 const ACTIVITY_PAGE_SIZE = 20;
 const PUBLIC_HISTORY_PAGE_SIZE = 10;
@@ -469,7 +469,7 @@ async function readJsonResponse<T>(response: Response): Promise<T> {
 // from. Keep that transport boundary total so a partial response degrades to
 // an empty collection instead of taking down the whole client tree.
 const CLIENT_STATE_ARRAY_KEYS = [
-  "files", "proposals", "messages", "conversations", "presenceChatSessions", "operatorConversations", "operatorNudges", "agentRequests", "capabilityChangeEvents",
+  "files", "proposals", "messages", "conversations", "presenceChatSessions", "operatorThreads", "operatorConversations", "operatorNudges", "agentRequests", "capabilityChangeEvents",
   "presences", "agents", "events", "socialDecisions", "socialStrategyRetrievalRuns", "growthHypotheses", "growthEvidenceRecords", "legacyChannelStrategyGuidance", "autobiographicalEvents", "autobiographicalReflections", "resourceUsageEvents", "attentionEpisodes", "calendar", "assignments", "growthReviews", "growthRevisions", "growthEvidenceSnapshots", "growthFileVersions", "audienceSnapshots", "publicationMetricSnapshots", "watches", "watchSignals", "relationshipPolicies", "relationshipStudies", "relationshipInsightSets", "presenceRequestPolicies", "delegationGrants", "publicRequests", "explorations", "discoveryPlans", "explorationSessions", "explorationFindings", "actions", "publishingPlans", "modelProfiles", "providerConnections", "assetProviderConnections", "toolBindings", "changeSets", "standingIntents", "operatorDirectives", "socialIntents", "executions", "outcomes", "attentionTests", "capabilityTrials", "publications", "assetUsages", "sourceEvidence", "claimGrounding", "preferenceEvidence", "originalPostRehearsals", "librarySources", "assets", "perceptions", "assetResearchSessions", "assetCollections", "assetCollectionMemberships", "assetMetadataEdits", "assetProcessingJobs", "skills", "agentSkills", "contentDrops", "nativeConnections", "bridges", "mirrorObjects", "mirrorEvents", "bridgeSync", "conversationEpisodes", "assignmentContributions", "people", "peopleNotes", "personIdentities", "relationships", "relationshipFacts", "relationshipOpenLoops", "recommendationRecords", "introductionRecords", "sandboxEnvironments", "playgroundSessions", "sandboxActors", "networkSearches", "networkIntroductions", "scenarios", "scenarioVersions", "scenarioRuns", "scenarioRunProvenance", "scenarioEvaluations", "knowledgeDocuments", "knowledgeVersions", "knowledgeSegments", "presenceKnowledgeAccess", "mindFileKnowledgeBindings", "knowledgeRetrievalRuns", "knowledgeCitations", "knowledgeCollections", "knowledgeItems", "presenceKnowledgeBindings", "conversationStyles", "operationalRuns", "scheduledWakes", "dependencyHealth", "recoveryIncidents", "recoveryAttempts", "browserBodies", "editorialOpportunities", "editorialFeedbackEvents", "editorialReferences", "sourceAssets", "mediaPerceptions", "verificationRecords", "rightsAssessments", "editorialDecisions", "publicationPackages", "agentWorkspaces",
 ] as const;
 
@@ -1400,7 +1400,7 @@ export default function Home() {
   if (!state.onboarded)
     return (
       <Onboarding
-        onCreate={(input) => mutate({ type: "createAgent", input }).then(() => undefined)}
+        onCreate={(input) => mutate({ type: "createAgent", input }).then(() => { openView("chat"); })}
         error={error}
       />
     );
@@ -2182,6 +2182,29 @@ function AnalyticsView({ state, mutate, setView, onOpenAttention }: { state: Ope
   </div>;
 }
 
+function OperatorThreadSidebar({ state, setView }: { state: OpenPresenceState; setView: (view: View) => void }) {
+  const threads = (state.operatorThreads ?? []).filter((thread) => thread.agentId === state.agent?.id && thread.status !== "archived");
+  const assignments = state.assignments.filter((assignment) => assignment.agentId === state.agent?.id);
+  const activeAssignmentIds = new Set(assignments.filter((assignment) => assignmentIsOpen(assignment)).map((assignment) => assignment.id));
+  const main = threads.find((thread) => thread.title === "Main") ?? threads[threads.length - 1];
+  const active = threads.filter((thread) => thread.id !== main?.id && thread.assignmentIds.some((id) => activeAssignmentIds.has(id))).slice(0, 4);
+  const recent = threads.filter((thread) => thread.id !== main?.id && !active.some((item) => item.id === thread.id)).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt)).slice(0, 5);
+  const openThread = (threadId: string) => {
+    const url = new URL(window.location.href);
+    url.pathname = viewPaths.chat;
+    url.searchParams.set("threadId", threadId);
+    window.history.pushState({ ...(window.history.state ?? {}), openPresenceView: "chat" }, "", url.pathname + url.search + url.hash);
+    setView("chat");
+    window.dispatchEvent(new PopStateEvent("popstate"));
+  };
+  const group = (label: string, items: typeof threads) => items.length ? <div className="operator-thread-group"><span className="sidebar-label">{label}</span>{items.map((thread) => <button type="button" key={thread.id} className="operator-thread-sidebar-row" onClick={() => openThread(thread.id)}><span className={`thread-status-dot ${thread.assignmentIds.some((id) => activeAssignmentIds.has(id)) ? "is-active" : ""}`} aria-hidden="true" /><span className="operator-thread-sidebar-title">{thread.title}</span>{thread.assignmentIds.some((id) => activeAssignmentIds.has(id)) && <span className="thread-active-label">Working</span>}</button>)}</div> : null;
+  return <div className="operator-thread-sidebar" aria-label="Agent conversations">
+    {main && group("Main", [main])}
+    {group("Active work", active)}
+    {group("Recent", recent)}
+  </div>;
+}
+
 function AgentWorkspaceShell({
   state,
   view,
@@ -2304,24 +2327,31 @@ function AgentWorkspaceShell({
           <div className="brand-mark">◉</div>
           <span>OpenPresence</span>
         </div>
-        <div className="sidebar-label presence-label">Presence</div>
-        <PresenceSwitcher
-          state={state}
-          mutate={mutate}
-          onAddPresence={() => setShowPresenceModal(true)}
-        />
+        <div className="sidebar-agent-workspace">
+          <div className="sidebar-label">Agent workspace</div>
+          <AgentSwitcher state={state} mutate={mutate} />
+          <button type="button" className="new-chat-sidebar" onClick={() => void (async () => {
+            const next = await mutate({ type: "createOperatorThread", presenceId: presence.id });
+            const thread = next?.operatorThreads?.[0];
+            if (!thread) return;
+            const url = new URL(window.location.href);
+            url.pathname = viewPaths.chat;
+            url.searchParams.set("threadId", thread.id);
+            window.history.pushState({ ...(window.history.state ?? {}), openPresenceView: "chat" }, "", url.pathname + url.search + url.hash);
+            setView("chat");
+            window.dispatchEvent(new PopStateEvent("popstate"));
+          })()}><Plus size={15} /> New chat</button>
+          <OperatorThreadSidebar state={state} setView={setView} />
+          <div className="sidebar-context-switcher">
+            <span className="sidebar-label">Presence context</span>
+            <PresenceSwitcher state={state} mutate={mutate} onAddPresence={() => setShowPresenceModal(true)} />
+          </div>
+        </div>
         <nav className="main-nav" aria-label="Primary navigation">
-          {presenceNavItems.map(({ id, label, icon: Icon }) => (
-            <button
-              key={id}
-              onClick={() => setView(id)}
-              className={view === id ? "active" : ""}
-            >
-              <Icon size={17} />
-              <span>{label}</span>
-              {id === "live" && pendingExecutionCount > 0 && (
-                <span className="nav-count">{pendingExecutionCount}</span>
-              )}
+          {presenceNavItems.filter(({ id }) => !["chat", "presence"].includes(id)).map(({ id, label, icon: Icon }) => (
+            <button key={id} onClick={() => setView(id)} className={view === id ? "active" : ""}>
+              <Icon size={17} /><span>{label}</span>
+              {id === "live" && pendingExecutionCount > 0 && <span className="nav-count">{pendingExecutionCount}</span>}
             </button>
           ))}
         </nav>
@@ -2347,11 +2377,7 @@ function AgentWorkspaceShell({
             <span className="nav-count">{pendingAgentChangeCount}</span>
           )}
         </button>
-        <div className="sidebar-footer">
-          <div className="sidebar-footer-actions">
-            <AgentSwitcher state={state} mutate={mutate} />
-          </div>
-        </div>
+        <div className="sidebar-footer"><div className="sidebar-footer-actions"><span className="sidebar-footer-caption">Persistent Agent workspace</span></div></div>
       </aside>
       <section className={`${view === "chat" || view === "teach" || view === "rehearsal" ? "workspace workspace-chat" : "workspace"} ${view === "knowledge" ? "workspace-knowledge" : ""}`}>
         <header className="topbar">
@@ -7242,29 +7268,73 @@ function OperatorChatActionTimelineEvent({ event }: { event: OperatorConversatio
   </div>;
 }
 
+function OperatorSessionBlocks({ state, presence, assignments, runs, actions, onOpenReview }: { state: OpenPresenceState; presence: Presence; assignments: Assignment[]; runs: AssignmentRun[]; actions: OperatorConversationActionEvent[]; onOpenReview: () => void }) {
+  if (!assignments.length && !actions.length) return null;
+  const activeAssignment = assignments.find((assignment) => assignmentIsOpen(assignment));
+  const run = activeAssignment ? runs.filter((item) => item.assignmentId === activeAssignment.id).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] : undefined;
+  const reviewExecution = state.executions.find((execution) => execution.presenceId === presence.id && execution.status === "awaiting-review" && (!activeAssignment || execution.assignmentId === activeAssignment.id));
+  const stageLabel = run?.currentStage?.replaceAll("_", " ") ?? activeAssignment?.work?.phase?.replaceAll("_", " ");
+  const storiesResearched = activeAssignment?.work?.storiesResearched;
+  const planSteps = activeAssignment ? [
+    { label: "Understand the responsibility", done: activeAssignment.progress.verified > 0 },
+    { label: activeAssignment.plan?.discoveryDirections?.[0] ?? "Find the strongest relevant opening", done: Boolean(activeAssignment.work?.storiesResearched) },
+    { label: activeAssignment.plan?.relationshipFocus?.[0] ?? "Check context and relationships", done: Boolean(activeAssignment.work?.storiesResearched && activeAssignment.progress.verified > 0) },
+    { label: "Act only when the opportunity earns it", done: activeAssignment.progress.verified > 0 },
+    { label: "Verify the world outcome", done: activeAssignment.status === "completed" || activeAssignment.status === "completed_with_adaptation" },
+  ] : [];
+  return <section className="operator-session-blocks" aria-label="Agent session">
+    {activeAssignment && <div className="operator-session-card operator-approach-block" data-testid="operator-approach">
+      <div className="operator-session-block-heading"><span className="session-block-mark">◆</span><div><strong>Approach</strong><small>{activeAssignment.title ?? activeAssignment.instruction}</small></div><span className={`session-state-badge is-${activeAssignment.status}`}>{activeAssignment.status === "needs_operator" ? "Needs you" : activeAssignment.status === "completed" ? "Complete" : activeAssignment.status}</span></div>
+      <ul className="operator-approach-list">{planSteps.map((step, index) => <li key={`${step.label}-${index}`} className={step.done ? "is-done" : index === planSteps.findIndex((item) => !item.done) ? "is-current" : "is-pending"}><span aria-hidden="true">{step.done ? "✓" : index === planSteps.findIndex((item) => !item.done) ? "●" : "○"}</span>{step.label}</li>)}</ul>
+    </div>}
+    <div className="operator-session-card operator-work-events" data-testid="operator-work-events">
+      <div className="operator-session-block-heading"><span className="session-block-mark">◇</span><div><strong>Work events</strong><small>Meaningful progress from {presence.name}</small></div></div>
+      <div className="operator-work-event-list">{storiesResearched ? <div><span>◇</span><strong>Research</strong><small>{storiesResearched} conversation{storiesResearched === 1 ? "" : "s"} considered</small></div> : null}{stageLabel ? <div><span>◇</span><strong>Current activity</strong><small>{stageLabel}</small></div> : null}{!storiesResearched && !stageLabel && <div><span>◇</span><strong>Responsibility accepted</strong><small>{activeAssignment?.instruction ?? "The responsibility is ready to begin."}</small></div>}</div>
+    </div>
+    {reviewExecution && <div className="operator-session-card operator-review-block" data-testid="operator-review-required"><div className="operator-session-block-heading"><span className="session-block-mark">◆</span><div><strong>Review required</strong><small>{reviewExecution.affordance.replace(/^x\./, "")} · {reviewExecution.reviewReason ?? "The Presence is asking before acting."}</small></div><span className="session-state-badge is-review">Needs you</span></div><p>{reviewExecution.publication?.publicExpression ? "A proposed social expression is ready for your review." : "A social action is ready for your review."}</p><button type="button" className="operator-session-review-action" onClick={onOpenReview}>Open review</button></div>}
+    {actions.filter((action) => action.status === "verified").slice(-2).map((action) => <div className="operator-session-card operator-outcome-block" data-testid="operator-verified-outcome" key={`outcome-${action.id}`}><div className="operator-session-block-heading"><span className="session-block-mark">✓</span><div><strong>Verified outcome</strong><small>{action.title}</small></div><span className="session-state-badge is-verified">Verified</span></div><p>{action.statusLabel}</p>{action.resultUrl && <a href={action.resultUrl} target="_blank" rel="noreferrer">Open result <ArrowUpRight size={12} /></a>}</div>)}
+    {activeAssignment && <div className="operator-working-line" role="status" data-testid="operator-working-line"><span className="working-pulse" aria-hidden="true" />{activeAssignment.status === "completed" || activeAssignment.status === "completed_with_adaptation" ? "Responsibility complete · outcome verified" : activeAssignment.status === "needs_operator" || reviewExecution ? "Waiting for your review" : `Continuing autonomously · ${stageLabel || "working from the current evidence"}`}</div>}
+  </section>;
+}
+
 function OperatorChatView({ state, mutate, refreshState, setView }: { state: OpenPresenceState; mutate: Mutate; refreshState: () => Promise<OpenPresenceState>; setView: (view: View) => void }) {
   const presence = state.presence ?? state.presences[0]!;
-  const conversation = (state.operatorConversations ?? []).find((item) => item.presenceId === presence.id);
-  const operatorThread = (state.operatorThreads ?? []).find((item) => item.communicationThreadId === conversation?.id) ?? {
-    id: `thread:${conversation?.id ?? presence.id}`,
+  const availableThreads = (state.operatorThreads ?? []).filter((item) => item.agentId === state.agent?.id && item.status !== "archived");
+  const mainThread = availableThreads.find((item) => item.title === "Main") ?? availableThreads[0];
+  const [selectedThreadId, setSelectedThreadId] = useState<string | undefined>(() => {
+    if (typeof window === "undefined") return mainThread?.id;
+    return new URLSearchParams(window.location.search).get("threadId") ?? mainThread?.id;
+  });
+  useEffect(() => {
+    const syncThread = () => setSelectedThreadId(new URLSearchParams(window.location.search).get("threadId") ?? mainThread?.id);
+    window.addEventListener("popstate", syncThread);
+    return () => window.removeEventListener("popstate", syncThread);
+  }, [mainThread?.id]);
+  const effectiveSelectedThreadId = availableThreads.some((item) => item.id === selectedThreadId) ? selectedThreadId : mainThread?.id;
+  const operatorThread = availableThreads.find((item) => item.id === effectiveSelectedThreadId) ?? mainThread ?? {
+    id: `thread:${presence.id}`,
     agentId: state.agent?.id ?? "",
     title: "Main thread",
     scope: { kind: "presence", presenceId: presence.id } as const,
     originThreadId: null,
-    communicationThreadId: conversation?.id ?? `operator:${presence.id}`,
+    communicationThreadId: `operator:${presence.id}`,
     status: "active" as const,
-    messageIds: conversation?.messages.map((message) => message.id) ?? [],
+    messageIds: [],
     assignmentIds: state.assignments.filter((assignment) => assignment.presenceId === presence.id).map((assignment) => assignment.id),
-    createdAt: conversation?.createdAt ?? new Date().toISOString(),
-    updatedAt: conversation?.updatedAt ?? new Date().toISOString(),
+    createdAt: new Date().toISOString(),
+    updatedAt: new Date().toISOString(),
   };
+  const conversation = (state.operatorConversations ?? []).find((item) => item.id === operatorThread.communicationThreadId || item.threadId === operatorThread.id)
+    ?? (state.operatorConversations ?? []).find((item) => item.presenceId === presence.id && item.status !== "archived");
   const threadContext = operatorThread ? compileThreadContext(operatorThread, conversation, state.assignments) : undefined;
   const nudges = state.operatorNudges ?? [];
+  const threadNudges = nudges.filter((nudge) => !conversation || nudge.conversationId === conversation.id);
   const hasUnfinishedChatRun = (state.operationalRuns ?? []).some((run) => run.presenceId === presence.id && run.kind === "operator_chat" && ["queued", "running", "recovering", "reconciling"].includes(run.state));
   const [pendingMessages, setPendingMessages] = useState<OperatorConversationMessage[]>([]);
-  const conversationActionEvents = operatorConversationActionEvents(state, presence.id);
+  const threadNudgeIds = new Set(threadNudges.map((nudge) => nudge.id));
+  const conversationActionEvents = operatorConversationActionEvents(state, presence.id).filter((event) => threadNudgeIds.has(event.nudgeId));
   const terminalAssignmentStatuses = new Set<AssignmentStatus>(["completed", "completed_with_adaptation", "failed", "expired_incomplete", "cancelled"]);
-  const hasUnfinishedNudges = hasUnfinishedChatRun || conversationActionEvents.some((event) => !["verified", "failed"].includes(event.status)) || nudges.some((nudge) => nudge.presenceId === presence.id && (["queued", "acknowledged", "working"].includes(nudge.status)
+  const hasUnfinishedNudges = hasUnfinishedChatRun || conversationActionEvents.some((event) => !["verified", "failed"].includes(event.status)) || threadNudges.some((nudge) => nudge.presenceId === presence.id && (["queued", "acknowledged", "working"].includes(nudge.status)
     || nudge.status === "assignment_created" && Boolean(nudge.assignmentId && !terminalAssignmentStatuses.has(state.assignments.find((assignment) => assignment.id === nudge.assignmentId)?.status ?? "draft"))));
   const persistedVisibleMessages = (conversation?.messages ?? []).filter((item, index, messages) => {
     // Older runtimes put execution rationale and routine observation summaries
@@ -7332,7 +7402,7 @@ function OperatorChatView({ state, mutate, refreshState, setView }: { state: Ope
     setAttachments([]);
     setSending(true);
     try {
-      const result = await mutate({ type: "sendPresenceNudge", presenceId: presence.id, content: submittedContent, attachments, clientRequestId });
+      const result = await mutate({ type: "sendPresenceNudge", presenceId: presence.id, threadId: operatorThread.id, content: submittedContent, attachments, clientRequestId });
       // The server records the operator turn before it invokes the model. If
       // the browser request is interrupted after that durable write, reconcile
       // the thread so the submitted message and its current status do not
@@ -7400,9 +7470,34 @@ function OperatorChatView({ state, mutate, refreshState, setView }: { state: Ope
       setConversationCopied(false);
     }
   };
+  const linkedAssignmentIds = new Set([...operatorThread.assignmentIds, ...threadNudges.flatMap((nudge) => nudge.assignmentId ? [nudge.assignmentId] : [])]);
+  const linkedAssignments = state.assignments.filter((assignment) => linkedAssignmentIds.has(assignment.id));
+  // Scheduled or operator-created work can predate the conversation index. In
+  // Main, surface the newest open responsibility as context until a durable
+  // thread handoff exists; a named conversation stays strictly scoped.
+  const mainFallbackAssignment = operatorThread.title === "Main"
+    ? state.assignments
+      .filter((assignment) => assignment.presenceId === presence.id && assignmentIsOpen(assignment))
+      .sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0]
+    : undefined;
+  const sessionAssignments = linkedAssignments.length ? linkedAssignments : mainFallbackAssignment ? [mainFallbackAssignment] : [];
+  const sessionAssignmentIds = new Set(sessionAssignments.map((assignment) => assignment.id));
+  const linkedRuns = (state.assignmentRuns ?? []).filter((run) => sessionAssignmentIds.has(run.assignmentId));
+  const renameThread = async () => {
+    const nextTitle = window.prompt("Rename conversation", operatorThread.title);
+    if (nextTitle?.trim()) await mutate({ type: "renameOperatorThread", threadId: operatorThread.id, title: nextTitle.trim() });
+  };
+  const archiveThread = async () => {
+    if (operatorThread.title === "Main") return;
+    await mutate({ type: "archiveOperatorThread", threadId: operatorThread.id });
+    const url = new URL(window.location.href);
+    url.searchParams.set("threadId", mainThread?.id ?? "");
+    window.history.replaceState(window.history.state, "", url.pathname + url.search + url.hash);
+    setSelectedThreadId(mainThread?.id);
+  };
   return <div className="page page-chat operator-chat-page">
-    <PageHeader className="chat-heading" eyebrow="Private operator conversation" title={`Chat with ${presence.name}`} titleAdornment={<><ChatModePicker mode="chat" setView={setView} /><button type="button" className="operator-chat-copy-button" aria-label={conversationCopied ? "Conversation copied" : "Copy conversation"} title={conversationCopied ? "Conversation copied" : "Copy conversation"} onClick={() => void copyConversation()}>{conversationCopied ? <Check size={16} /> : <Copy size={16} />}<span className="sr-only">{conversationCopied ? "Conversation copied" : "Copy conversation"}</span></button></>} description={`Talk with ${presence.name} about what is happening, share something interesting, or suggest a next move. ${presence.name} will work out whether to answer, look closer, or act.`} />
-    {threadContext && <details className="operator-thread-context"><summary><span><strong>Agent thread</strong><small>{threadContext.scopeLabel} context · {threadContext.messageCount} message{threadContext.messageCount === 1 ? "" : "s"}</small></span><span>{threadContext.assignmentCount} linked responsibility{threadContext.assignmentCount === 1 ? "" : "ies"}</span></summary><div><span>OpenPresence keeps the conversation bounded and links work to canonical Assignments.</span>{threadContext.assignments.length > 0 && <ul>{threadContext.assignments.slice(0, 3).map((assignment) => <li key={assignment.id}>{assignment.title} · {assignment.completion}</li>)}</ul>}</div></details>}
+    <PageHeader className="chat-heading" eyebrow={operatorThread.title === "Main" ? "Main" : "Conversation"} title={operatorThread.title} titleAdornment={<><span className="chat-presence-context"><PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} avatarUrl={presencePlatformAvatarUrl(state, presence)} />{state.agent?.name} · {presence.name} <span>{presence.handle}</span></span>{operatorThread.title !== "Main" && <><button type="button" className="operator-chat-copy-button" aria-label="Rename conversation" title="Rename conversation" onClick={() => void renameThread()}><Pencil size={14} /></button><button type="button" className="operator-chat-copy-button" aria-label="Archive conversation" title="Archive conversation" onClick={() => void archiveThread()}><X size={14} /></button></>}<button type="button" className="operator-chat-copy-button" aria-label={conversationCopied ? "Conversation copied" : "Copy conversation"} title={conversationCopied ? "Conversation copied" : "Copy conversation"} onClick={() => void copyConversation()}>{conversationCopied ? <Check size={16} /> : <Copy size={16} />}<span className="sr-only">{conversationCopied ? "Conversation copied" : "Copy conversation"}</span></button></>} description={operatorThread.title === "Main" ? `Talk with ${presence.name} about what is happening, ask a question, or give direction. Meaningful work will return here without turning Main into an activity feed.` : `A durable conversation with ${presence.name}. Accepted work continues if you leave this chat.`} />
+    {threadContext && <details className="operator-thread-context"><summary><span><strong>{operatorThread.title}</strong><small>{threadContext.scopeLabel} · {threadContext.messageCount} message{threadContext.messageCount === 1 ? "" : "s"}</small></span><span>{threadContext.assignmentCount ? `${threadContext.assignmentCount} responsibility` : "No active responsibility"}</span></summary><div><span>Conversation context is scoped to {presence.name}; Activity remains the historical work log.</span>{threadContext.assignments.length > 0 && <ul>{threadContext.assignments.slice(0, 3).map((assignment) => <li key={assignment.id}>{assignment.title} · {assignment.completion}</li>)}</ul>}</div></details>}
     <div className="chat-layout operator-chat-layout">
       <section className="chat-thread operator-chat-thread">
         {presence.status === "paused" && <div className="operator-chat-paused" role="status"><Pause size={15} /> {presence.name} is paused. Messages will be delivered and held without waking or invoking her.</div>}
@@ -7420,6 +7515,7 @@ function OperatorChatView({ state, mutate, refreshState, setView }: { state: Ope
             {item.role === "operator" && nudge && <div className="operator-chat-message-actions">{operatorNudgeStatusLabel(nudge.status, presence.name, linkedAssignment?.status) && <span className={`operator-nudge-status is-${nudge.status}`} role="status">{operatorNudgeStatusLabel(nudge.status, presence.name, linkedAssignment?.status)}</span>}{nudge.status === "failed" && !nudge.assignmentId && <button type="button" onClick={() => void mutate({ type: "retryPresenceNudge", presenceId: presence.id, nudgeId: nudge.id })}>Retry look</button>}{!nudge.assignmentId && <button type="button" onClick={() => void mutate({ type: "createAssignmentFromNudge", presenceId: presence.id, nudgeId: nudge.id })}>Take this on</button>}</div>}
           </article>{anchoredActions.length > 0 && <div className="operator-chat-action-timeline" aria-label="Actions from this conversation">{anchoredActions.map((event) => <OperatorChatActionTimelineEvent key={event.id} event={event} />)}</div>}</Fragment>;
         })}
+        <OperatorSessionBlocks state={state} presence={presence} assignments={sessionAssignments} runs={linkedRuns} actions={conversationActionEvents} onOpenReview={() => setView("review")} />
         {(sending || hasUnfinishedChatRun) && presence.status !== "paused" && <div className="operator-chat-thinking" role="status" aria-live="polite" data-testid="operator-chat-thinking">
           <PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} avatarUrl={presencePlatformAvatarUrl(state, presence)} />
           <span>{presence.name} is thinking</span>
@@ -7428,10 +7524,11 @@ function OperatorChatView({ state, mutate, refreshState, setView }: { state: Ope
         <div ref={endRef} />
         </div>
         {attachments.length > 0 && <div className="attachment-list operator-chat-attachments">{attachments.map((attachment, index) => <span key={`${attachment.name}-${index}`}>{attachment.name}<button type="button" aria-label={`Remove ${attachment.name}`} onClick={() => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X size={11} /></button></span>)}</div>}
+        <div className="operator-chat-composer-meta"><ChatModePicker mode="chat" setView={setView} /><span>{presence.name} · {presence.handle}</span>{sessionAssignments.some((assignment) => assignmentIsOpen(assignment)) ? <span>Steering current work</span> : <span>Public actions require review</span>}</div>
         <form className="chat-composer operator-chat-composer" onSubmit={send}>
           <label className="attach-button" aria-label="Attach context"><Plus size={16} /><input type="file" hidden multiple onChange={(event) => Array.from(event.target.files ?? []).forEach(addFile)} /></label>
-          <textarea ref={composerRef} aria-label={`Message ${presence.name}`} value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder={sending || hasUnfinishedChatRun ? `Sending to ${presence.name}…` : `Message ${presence.name}…`} rows={1} disabled={sending || hasUnfinishedChatRun} />
-          <button className="send-button" aria-label={presence.status === "paused" ? "Queue message" : "Send"} type="submit" disabled={!message.trim() || sending || hasUnfinishedChatRun}>{sending || hasUnfinishedChatRun ? <LoaderCircle size={17} className="spin" /> : <Send size={17} />}</button>
+          <textarea ref={composerRef} aria-label={`Message ${presence.name}`} value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder={sending ? `Sending to ${presence.name}…` : sessionAssignments.some((assignment) => assignmentIsOpen(assignment)) ? "Steer current work or ask Jenny…" : `Message ${presence.name}…`} rows={1} disabled={sending} />
+          <button className="send-button" aria-label={presence.status === "paused" ? "Queue message" : "Send"} type="submit" disabled={!message.trim() || sending}>{sending ? <LoaderCircle size={17} className="spin" /> : <Send size={17} />}</button>
         </form>
         <div className="composer-hint">Enter to send <span>·</span> Shift + Enter for a new line{presence.status === "paused" ? <><span>·</span> Queued until Wake</> : null}</div>
       </section>
