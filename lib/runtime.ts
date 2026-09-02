@@ -2386,7 +2386,16 @@ function normalizeOperatorThreads(
   return conversations.filter((conversation) => conversation.agentId === agentId).map((conversation) => {
     const threadId = conversation.threadId ?? `thread:${conversation.id}`;
     const previous = previousById.get(threadId);
-    const assignmentIds = assignments.filter((assignment) => assignment.agentId === agentId && assignment.presenceId === conversation.presenceId).map((assignment) => assignment.id);
+    const availableAssignmentIds = assignments.filter((assignment) => assignment.agentId === agentId && assignment.presenceId === conversation.presenceId).map((assignment) => assignment.id);
+    const preservedAssignmentIds = (previous?.assignmentIds ?? []).filter((assignmentId) => availableAssignmentIds.includes(assignmentId));
+    // Older workspaces derived every responsibility into every conversation.
+    // That made a Project appear attached to an arbitrary thread. Treat that
+    // broad legacy shape as unscoped and let the Project opener create a real
+    // one-to-one link on first use.
+    const isLegacyBroadLink = preservedAssignmentIds.length > 0
+      && availableAssignmentIds.length > 1
+      && preservedAssignmentIds.length === availableAssignmentIds.length;
+    const assignmentIds = isLegacyBroadLink ? [] : preservedAssignmentIds;
     const title = conversation.title === "Main thread" ? "Main" : (conversation.title || "Main");
     return {
       id: threadId,
@@ -7324,6 +7333,7 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
   }
   if (operation.type === "createAssignment") {
     const assignment = compileAssignmentInstruction(state, operation.instruction, operation.presenceId, operation.environment ?? "sandbox", operation.sessionId, operation.schedule, operation.delegationPolicy, operation.objective);
+    assignment.projectName = operation.projectName?.trim() || undefined;
     if (operation.assetConstraint?.collectionId && !state.assetCollections?.some((collection) => collection.id === operation.assetConstraint?.collectionId && collection.agentId === state.agent?.id && collection.status === "active")) throw new Error("That Asset Collection does not belong to the active Agent.");
     assignment.assetConstraint = operation.assetConstraint;
     assignment.createdBy = "operator";
@@ -8215,12 +8225,16 @@ export function applyOperation(source: OpenPresenceState, operation: Operation |
     case "createOperatorThread": {
       const presence = state.presences.find((item) => item.id === (operation.presenceId ?? state.activePresenceId)) ?? state.presence;
       if (!state.agent || !presence) return state;
+      const assignment = operation.assignmentId
+        ? state.assignments.find((item) => item.id === operation.assignmentId && item.agentId === state.agent?.id && item.presenceId === presence.id)
+        : undefined;
+      if (operation.assignmentId && !assignment) throw new Error("That Project is no longer available for this Agent.");
       const timestamp = now();
       const conversationId = id("operator_conversation");
       const threadId = `thread:${conversationId}`;
-      const title = operation.title?.trim() || "New conversation";
+      const title = operation.title?.trim() || assignment?.title?.trim() || "New conversation";
       const conversation: import("./types").OperatorConversation = { id: conversationId, agentId: state.agent.id, presenceId: presence.id, threadId, scope: { kind: "presence", presenceId: presence.id }, status: "active", title, createdAt: timestamp, updatedAt: timestamp, messages: [] };
-      const thread: import("./types").OperatorThread = { id: threadId, agentId: state.agent.id, title, scope: { kind: "presence", presenceId: presence.id }, originThreadId: null, communicationThreadId: conversationId, status: "active", messageIds: [], assignmentIds: [], createdAt: timestamp, updatedAt: timestamp };
+      const thread: import("./types").OperatorThread = { id: threadId, agentId: state.agent.id, title, scope: { kind: "presence", presenceId: presence.id }, originThreadId: null, communicationThreadId: conversationId, status: "active", messageIds: [], assignmentIds: assignment ? [assignment.id] : [], createdAt: timestamp, updatedAt: timestamp };
       state.operatorConversations = [conversation, ...(state.operatorConversations ?? [])];
       state.operatorThreads = [thread, ...(state.operatorThreads ?? [])];
       return state;

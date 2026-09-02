@@ -2249,6 +2249,8 @@ export interface Assignment {
   agentId: string;
   presenceId: string;
   sessionId?: string;
+  /** Compact operator-facing label for a Project; instruction remains the durable contract. */
+  projectName?: string;
   channelId: ChannelId;
   environment: PresenceEnvironment;
   title?: string;
@@ -2882,7 +2884,7 @@ export type KnowledgeOperation =
   | { type: "archiveKnowledgeCollection"; collectionId: string };
 export interface CreatePresenceInput { channel: ChannelId; name?: string; handle: string; mode: PresenceMode; accent: string; avatarLook?: import("./avatars").AvatarLook; channelDefinition?: ChannelDefinition; connectionMode?: PresenceConnectionMode; }
 export type AssignmentOperation =
-  | { type: "createAssignment"; instruction: string; presenceId?: string; sessionId?: string; environment?: PresenceEnvironment; schedule?: { day: string; time: string; executionWindow: string }; objective?: string; delegationPolicy?: AssignmentDelegationPolicy; assetConstraint?: { collectionId?: string; required?: boolean } }
+  | { type: "createAssignment"; instruction: string; projectName?: string; presenceId?: string; sessionId?: string; environment?: PresenceEnvironment; schedule?: { day: string; time: string; executionWindow: string }; objective?: string; delegationPolicy?: AssignmentDelegationPolicy; assetConstraint?: { collectionId?: string; required?: boolean } }
   | { type: "updateAssignment"; id: string; instruction: string; schedule?: { day: string; time: string; executionWindow: string } | null; objective?: string; assetConstraint?: { collectionId?: string; required?: boolean } }
   | { type: "confirmSchedulePrompt"; promptId: string; presenceId: string; drafts: Array<{ instruction: string; schedule: { day: string; time: string; executionWindow: string }; objective?: string; environment?: PresenceEnvironment; delegationPolicy?: AssignmentDelegationPolicy; plan?: Omit<AssignmentPlan, "id" | "assignmentId" | "revision" | "createdAt" | "updatedAt"> }> }
   | { type: "activateAssignment"; id: string; delegationPolicy?: AssignmentDelegationPolicy }
@@ -3019,7 +3021,7 @@ export type OperationalRecheckOperation =
 
 export type PresenceSettingsOperation = { type: "setPresence"; patch: Partial<Presence> };
 export type OperatorThreadOperation =
-  | { type: "createOperatorThread"; presenceId?: string; title?: string }
+  | { type: "createOperatorThread"; presenceId?: string; title?: string; assignmentId?: string }
   | { type: "renameOperatorThread"; threadId: string; title: string }
   | { type: "archiveOperatorThread"; threadId: string }
   | { type: "restoreOperatorThread"; threadId: string };

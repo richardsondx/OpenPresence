@@ -20,7 +20,11 @@ Open the context sidebar from Chat, choose Calendar, follow `Open full calendar`
 
 ## Agent Main → work thread → reload
 
-Open `/` or `/chat` in an onboarded workspace and prove the Agent-first sidebar exposes the permanent `Main thread` context, create a new conversation from that sidebar card, and open it with a durable `threadId` query. Send a non-public operator message, reload, and verify the same thread title and message remain. The Main header exposes no rename, archive, or transcript-copy controls; prove the permanent Main context remains available and any linked Assignment remains in the state projection.
+Open `/` or `/chat` in an onboarded workspace and prove the Agent-first sidebar opens the permanent `Main thread`. Send a non-public operator message, reload, and verify the same thread title and message remain. The Main header exposes no rename, archive, or transcript-copy controls; prove the permanent Main context remains available and any linked Assignment remains in the state projection.
+
+## Project → linked Chat thread
+
+From Chat, choose `New project` in the sidebar, fill `Project name`, `What should the Agent accomplish?`, and `Project environment`, then submit `Create project`. Prove the Project persists in the sidebar, the route opens Chat with a non-Main `threadId`, the thread context contains exactly that Project responsibility, and the operator composer can submit input without creating a second Project thread. Reload and select the same Project again; prove the same thread opens. Project rows show one round avatar for the selected Agent. Multi-Agent invitations and stacked avatar controls are deferred.
 
 ## Playground → decision trace → rehearsal feedback
 

@@ -11,11 +11,14 @@ Chat is the Agent-first continuous operator conversation and persistent session 
 - Queue paused work without waking a paused Presence.
 - Teach a preference or memory proposal for review.
 - Open a Presence rehearsal from Chat when the user wants to rehearse.
+- Open a durable Project thread from the Projects section in the Agent sidebar.
 - Use the Chat mode control to switch between `Chat` and `Config`; `Config` opens the durable Agent-teaching route at `/teach`.
 
 ## How to get to it (user POV)
 
-Choose `Chat` or open `/chat`; the root workspace now lands here after onboarding. The selected Agent's permanent `Main thread` is the default. Its compact conversation context and `New conversation` action live in the sidebar; the main chat header contains only the thread identity and Presence context. The composer is `Message <Presence>…`; submit with the circular up-arrow, or `Queue message` when paused. Choose `Config` through the composer mode control or open `/teach`; its composer is `Message your Presence`. `/rehearsal` is a separate Presence-scoped private social thread with its own transcript and composer.
+Choose `Chat` or open `/chat`; the root workspace now lands here after onboarding. The selected Agent's permanent `Main thread` is the default. The main chat header contains only the thread identity; Projects in the sidebar open their own linked threads. The composer is `Message <Presence>…`; submit with the circular up-arrow, or `Queue message` when paused. Choose `Config` through the composer mode control or open `/teach`; its composer is `Message your Presence`. `/rehearsal` is a separate Presence-scoped private social thread with its own transcript and composer.
+
+Projects use the same Chat surface for their narrative input/output: selecting a Project opens its linked thread, where the operator can send direction and see durable acknowledgement, work/review state, and verified outcome receipts scoped to that Assignment.
 
 ## Driving it with verify-app
 

@@ -64,6 +64,8 @@ The primary desktop shell is Agent-first: a memorable Agent portfolio rail, Chat
 
 The persistent left rail owns Agent selection and shows each Agent's active channel inline. The main topbar owns only workspace context controls; it does not duplicate Agent selection or repeat active-channel context. The repeated shell is part of every journey and should be considered when evaluating cognitive load.
 
+Projects are the sidebar's compact representation of durable Assignments. Each Project has one selected Agent avatar and one durable Chat thread. Creating a Project captures a name, intended outcome, and Sandbox/live environment, persists the Assignment, creates its linked thread, and opens that thread. Selecting an existing Project opens the same linked thread; a legacy Project receives its link once on first open. Multi-Agent project invitations and stacked avatars are intentionally deferred until the single-Agent flow is stable.
+
 ## Agent-first verification contract
 
 - Selecting an Agent from the left rail changes the active Agent and opens Chat; the selection persists after refresh.

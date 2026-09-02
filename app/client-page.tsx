@@ -94,7 +94,6 @@ import { autobiographicalEventsForPerson } from "@/lib/autobiographical-memory";
 import { duplicatePublicOutcomeEvidence } from "@/lib/duplicate-public-outcome";
 import { ASSIGNMENT_PURSUIT_SCALE_PRESETS, assignmentIsCurrentlyProcessing, assignmentIsOpen, assignmentProgressLabel, assignmentPursuitScaleForWindow, audienceDeltas, capabilityProviderLabel, cleanUserFacingAssignmentInstruction, collapseAudienceSnapshots, compileAgendaWork, defaultSelfDirectedAttentionPolicy, deriveActivitySummary, derivePresenceCapabilityManifest, derivePublicHistory, derivePublishingPlanProjection, emptyGhostRepresentation, explorationInterpretation, externalUrlForMirrorObject, formatGhostRepresentation, intervalForPresence, isActivityDecisionEvent, isPromotionBurstWindow, pendingReviewExecutionsForCapabilities, publicHistoryMatchesPresence, relationshipPolicyFromWatchPurpose, SELF_DIRECTED_ATTENTION_PRESETS } from "@/lib/runtime";
 import { assignmentPursuitVerifiedCounts } from "@/lib/runtime";
-import { compileThreadContext } from "@/lib/thread-context-compiler";
 import type {
   CalendarSlot,
   CapabilityTrialCapability,
@@ -2226,21 +2225,6 @@ function AnalyticsView({ state, mutate, setView, onOpenAttention }: { state: Ope
   </div>;
 }
 
-function OperatorConversationSidebarContext({ state, onNewChat }: { state: OpenPresenceState; onNewChat: () => Promise<void> }) {
-  const presence = state.presence ?? state.presences[0];
-  if (!presence) return null;
-  const threads = (state.operatorThreads ?? []).filter((thread) => thread.agentId === state.agent?.id && thread.status !== "archived");
-  const requestedThreadId = typeof window === "undefined" ? undefined : new URLSearchParams(window.location.search).get("threadId") ?? undefined;
-  const thread = threads.find((item) => item.id === requestedThreadId) ?? threads.find((item) => item.title === "Main") ?? threads[0];
-  const conversation = thread ? (state.operatorConversations ?? []).find((item) => item.id === thread.communicationThreadId || item.threadId === thread.id) : undefined;
-  const context = thread ? compileThreadContext(thread, conversation, state.assignments) : undefined;
-  const displayTitle = thread?.title === "Main" || thread?.title === "New conversation" || !thread ? "Main thread" : thread.title;
-  return <section className="sidebar-conversation-context" aria-label="Current conversation context">
-    <div className="sidebar-conversation-heading"><span className="sidebar-label">Conversation</span><button type="button" className="sidebar-new-conversation" onClick={() => void onNewChat()}><Plus size={13} /> New conversation</button></div>
-    <div className="sidebar-conversation-card"><strong>{displayTitle}</strong><small>Agent chat · {presence.name} · {context?.messageCount ?? conversation?.messages?.length ?? 0} message{(context?.messageCount ?? conversation?.messages?.length ?? 0) === 1 ? "" : "s"}</small><span>{context?.assignmentCount ? `${context.assignmentCount} responsibility` : "No active responsibility"}</span><p>Conversation context is scoped to {state.agent?.name ?? presence.name}; work and outcomes return here as the Agent&apos;s narrative.</p></div>
-  </section>;
-}
-
 function AgentWorkspaceShell({
   state,
   view,
@@ -2294,17 +2278,31 @@ function AgentWorkspaceShell({
     if (!themeReady) return;
     window.localStorage.setItem("openpresence-theme", theme);
   }, [theme, themeReady]);
-  const createChat = async () => {
-    const next = await mutate({ type: "createOperatorThread", presenceId: presence.id, title: "New conversation" });
-    const created = next?.operatorThreads?.find((thread) => thread.title === "New conversation") ?? next?.operatorThreads?.[0];
-    if (!created || typeof window === "undefined") return;
+  const openThread = (threadId: string) => {
+    if (typeof window === "undefined") return;
     const url = new URL(window.location.href);
     url.pathname = viewPaths.chat;
-    url.searchParams.set("threadId", created.id);
+    url.searchParams.set("threadId", threadId);
     window.history.pushState({ ...(window.history.state ?? {}), openPresenceView: "chat" }, "", url.pathname + url.search + url.hash);
     setView("chat");
     window.dispatchEvent(new PopStateEvent("popstate"));
   };
+  const openProject = async (assignment: OpenPresenceState["assignments"][number]) => {
+    const existing = (state.operatorThreads ?? []).find((thread) =>
+      thread.agentId === agent.id
+      && thread.status !== "archived"
+      && thread.assignmentIds.includes(assignment.id),
+    );
+    if (existing) {
+      openThread(existing.id);
+      return;
+    }
+    const next = await mutate({ type: "createOperatorThread", presenceId: presence.id, title: assignment.projectName ?? assignment.title ?? "Project", assignmentId: assignment.id });
+    const created = next?.operatorThreads?.find((thread) => thread.assignmentIds.includes(assignment.id) && thread.status !== "archived");
+    if (created) openThread(created.id);
+  };
+  const visibleProjects = state.assignments
+    .filter((item) => item.presenceId === presence.id && !["completed", "cancelled"].includes(item.status))
   const openAttentionReview = () => {
     const hadHistorySurface = typeof window !== "undefined" && ["timeline", "calendar"].includes(new URLSearchParams(window.location.search).get("surface") ?? "");
     setView("review");
@@ -2334,8 +2332,7 @@ function AgentWorkspaceShell({
         <AgentPortfolio state={state} mutate={mutate} setView={setView} onCreateAgent={() => setShowCreateAgent(true)} collapsed={sidebarCollapsed} />
         {!sidebarCollapsed && <>
           <div className="sidebar-section-rule" />
-          <section className="sidebar-projects" aria-label="Projects"><div className="portfolio-section-heading"><span className="sidebar-label">Projects</span><span className="sidebar-section-heading-actions">{state.assignments.length > 0 && <span className="sidebar-section-count">{state.assignments.length}</span>}<button type="button" className="portfolio-add sidebar-project-add" onClick={() => setShowCreateProject(true)} aria-label="Create a new project" title="Create a new project"><Plus size={13} /><span>New project</span></button></span></div>{state.assignments.filter((item) => !["completed", "cancelled"].includes(item.status)).slice(0, 3).map((assignment) => <button type="button" className="sidebar-project-row" key={assignment.id} onClick={() => setView("chat")}><span className="project-avatar-stack"><PresenceGlyph accent={agent.accent} name={agent.name} /></span><span><strong>{assignment.title}</strong><small>{assignment.environment === "sandbox" ? "Sandbox work" : "Bounded work"} · {agent.name}</small></span></button>)}{state.assignments.filter((item) => !["completed", "cancelled"].includes(item.status)).length === 0 && <p className="sidebar-empty-copy">No projects yet. Start one when you want a specific outcome pursued.</p>}</section>
-          {view === "chat" && <OperatorConversationSidebarContext state={state} onNewChat={createChat} />}
+          <section className="sidebar-projects" aria-label="Projects"><div className="portfolio-section-heading"><span className="sidebar-label">Projects</span><span className="sidebar-section-heading-actions">{visibleProjects.length > 0 && <span className="sidebar-section-count">{state.assignments.filter((item) => item.presenceId === presence.id && !["completed", "cancelled"].includes(item.status)).length}</span>}<button type="button" className="portfolio-add sidebar-project-add" onClick={() => setShowCreateProject(true)} aria-label="Create a new project" title="Create a new project"><Plus size={13} /><span>New project</span></button></span></div>{visibleProjects.map((assignment) => <button type="button" className="sidebar-project-row" aria-label={`Open project ${assignment.projectName ?? assignment.title ?? "Project"}`} key={assignment.id} onClick={() => void openProject(assignment)}><span className="project-agent-avatar" style={{ "--agent-accent": agent.accent } as React.CSSProperties}><PresenceGlyph accent={agent.accent} name={agent.name} avatarUrl={presencePlatformAvatarUrl(state, presence)} look={presenceAvatarLook(presence)} /></span><span><strong>{assignment.projectName ?? assignment.title ?? assignment.instruction.slice(0, 56)}</strong><small>{assignment.environment === "sandbox" ? "Sandbox work" : "Bounded work"} · {agent.name}</small></span></button>)}{visibleProjects.length === 0 && <p className="sidebar-empty-copy">No projects yet. Start one when you want a specific outcome pursued.</p>}</section>
         </>}
         </div>
         <div className={`sidebar-resource-menu${resourceMenuOpen ? " is-open" : ""}`}>
@@ -2364,7 +2361,7 @@ function AgentWorkspaceShell({
           {view === "knowledge" && <KnowledgeView state={state} mutate={mutate} refreshState={refreshState} />}
           {view === "assets" && <AssetsView state={state} refreshState={refreshState} />}
           {view === "usage" && <UsageView state={state} setView={setView} mutate={mutate} />}
-          {view === "chat" && <OperatorChatView state={state} mutate={mutate} refreshState={refreshState} operationalHealth={operationalHealth} setView={setView} onNewChat={createChat} />}
+          {view === "chat" && <OperatorChatView state={state} mutate={mutate} refreshState={refreshState} operationalHealth={operationalHealth} setView={setView} />}
           {view === "rehearsal" && <AgentLabView state={state} mutate={mutate} setView={setView} />}
           {view === "watching" && <WatchingView state={state} mutate={mutate} refreshState={refreshState} setView={setView} />}
           {view === "people" && <PeopleViewLazy state={state} mutate={mutate} Button={Button} SectionEyebrow={SectionEyebrow} PageHeader={PageHeader} ChannelAvatar={ChannelAvatar} channelLabel={channelLabel} formatTime={formatTime} formatDateTime={formatDateTime} watchRelationshipPolicy={watchRelationshipPolicy} watchPolicyFromPurpose={watchPolicyFromPurpose} watchPlanSummary={watchPlanSummary} />}
@@ -2429,8 +2426,18 @@ function AgentWorkspaceShell({
           presence={presence}
           onClose={() => setShowCreateProject(false)}
           onCreate={async ({ name, outcome, environment }) => {
-            const next = await mutate({ type: "createAssignment", presenceId: presence.id, environment, instruction: `${name.trim()}: ${outcome.trim()}` });
-            if (next) setShowCreateProject(false);
+            const instruction = `${name.trim()}: ${outcome.trim()}`;
+            const next = await mutate({ type: "createAssignment", presenceId: presence.id, projectName: name.trim(), environment, instruction });
+            const created = next?.assignments.find((item) => item.presenceId === presence.id && item.instruction === instruction);
+            if (next && created) {
+              setShowCreateProject(false);
+              if (["ready", "ready_with_assumptions"].includes(created.preflight?.status ?? "")) {
+                await mutate({ type: "activateAssignment", id: created.id });
+              }
+              const threadState = await mutate({ type: "createOperatorThread", presenceId: presence.id, title: created.projectName ?? created.title ?? name.trim(), assignmentId: created.id });
+              const thread = threadState?.operatorThreads?.find((item) => item.assignmentIds.includes(created.id) && item.status !== "archived");
+              if (thread) openThread(thread.id);
+            }
           }}
         />
       )}
@@ -7233,7 +7240,7 @@ function OperatorSessionBlocks({ state, presence, assignments, runs, actions, sh
   </section>;
 }
 
-function OperatorChatView({ state, mutate, refreshState, operationalHealth, setView, onNewChat }: { state: OpenPresenceState; mutate: Mutate; refreshState: () => Promise<OpenPresenceState>; operationalHealth?: OperationalHealthSnapshot | null; setView: (view: View) => void; onNewChat: () => Promise<void> }) {
+function OperatorChatView({ state, mutate, refreshState, operationalHealth, setView }: { state: OpenPresenceState; mutate: Mutate; refreshState: () => Promise<OpenPresenceState>; operationalHealth?: OperationalHealthSnapshot | null; setView: (view: View) => void }) {
   const presence = state.presence ?? state.presences[0]!;
   const availableThreads = (state.operatorThreads ?? []).filter((item) => item.agentId === state.agent?.id && item.status !== "archived");
   const mainThread = availableThreads.find((item) => item.title === "Main") ?? availableThreads[0];
@@ -7363,12 +7370,17 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
   const sessionAssignmentIds = new Set(sessionAssignments.map((assignment) => assignment.id));
   const linkedRuns = (state.assignmentRuns ?? []).filter((run) => sessionAssignmentIds.has(run.assignmentId));
   const hasActiveAssignmentRun = linkedRuns.some((run) => ["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"].includes(run.status));
+  const projectAssignment = operatorThread.title !== "Main" ? sessionAssignments[0] : undefined;
+  const projectOutcome = projectAssignment?.projectName && projectAssignment.instruction.startsWith(`${projectAssignment.projectName}:`)
+    ? projectAssignment.instruction.slice(projectAssignment.projectName.length + 1).trim()
+    : projectAssignment?.instruction;
   const displayThreadTitle = operatorThread.title === "Main" || operatorThread.title === "New conversation" ? "Main thread" : operatorThread.title;
   return <div className="page page-chat operator-chat-page">
-    <PageHeader className="chat-heading" eyebrow="Main" title={displayThreadTitle} titleAdornment={<span className="chat-presence-context"><PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} avatarUrl={presencePlatformAvatarUrl(state, presence)} />{state.agent?.name} · {presence.name} <span>{presence.handle}</span></span>} />
+    <PageHeader className="chat-heading" eyebrow="Main" title={displayThreadTitle} />
     <div className="chat-layout operator-chat-layout">
       <section className="chat-thread operator-chat-thread">
         {presence.status === "paused" && <div className="operator-chat-paused" role="status"><Pause size={15} /> {presence.name} is paused. Messages will be delivered and held without waking or invoking her.</div>}
+        {projectAssignment && <section className="operator-project-context" aria-label="Project context"><div className="operator-project-context-heading"><span className="eyebrow">Project</span><span className={`session-state-badge is-${projectAssignment.status}`}>{projectAssignment.status === "active" ? "Active" : projectAssignment.status.replaceAll("_", " ")}</span></div><strong>{projectAssignment.projectName ?? projectAssignment.title ?? "Project"}</strong><p>{projectOutcome}</p><small>{projectAssignment.environment === "sandbox" ? "Sandbox · nothing public" : "Live · Presence authority applies"} · {projectAssignment.progress.verified}/{projectAssignment.progress.required} verified</small></section>}
         <div className="chat-history operator-chat-history" aria-live="polite">
         {!visibleMessages.length && <div className="operator-chat-empty"><MessageSquare size={24} /><strong>Start a private thread</strong><span>Ask a question, check in, share a post, or tell {presence.name} what caught your attention.</span></div>}
         {visibleMessages.map((item) => {
