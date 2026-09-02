@@ -66,6 +66,11 @@ test("Context sidebar owns its view controls and the workspace theme toggles", a
   await page.getByRole("button", { name: "Back to Chat", exact: true }).click();
   await expect(page).toHaveURL(/\/chat\?/);
   await expect(page.getByRole("textbox", { name: /Message/ })).toBeVisible();
+  await expect(page.getByRole("combobox", { name: "Chat mode" })).toHaveValue("chat");
+  await expect(page.getByRole("option", { name: "Chat", exact: true })).toBeAttached();
+  await expect(page.getByRole("option", { name: "Config", exact: true })).toBeAttached();
+  await expect(page.locator(".operator-chat-composer .lucide-arrow-up")).toBeVisible();
+  await expect(page.getByText("Enter to send", { exact: false })).toHaveCount(0);
 
   const shell = page.locator("main.app-shell");
   await page.getByRole("button", { name: "Switch to dark mode" }).click();

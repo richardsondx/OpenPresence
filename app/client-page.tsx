@@ -7,6 +7,7 @@ import dynamic from "next/dynamic";
 import {
   Activity,
   ArrowLeft,
+  ArrowUp,
   ArrowUpRight,
   Badge,
   BarChart2,
@@ -6830,10 +6831,9 @@ function KnowledgeView({ state, mutate }: { state: OpenPresenceState; mutate: Mu
 
 function ChatModePicker({ mode, setView }: { mode: "chat" | "teach"; setView: (view: View) => void }) {
   return <label className="chat-mode-picker">
-    <span>Mode</span>
     <select aria-label="Chat mode" value={mode} onChange={(event) => setView(event.target.value as "chat" | "teach")}>
       <option value="chat">Chat</option>
-      <option value="teach">Teach</option>
+      <option value="teach">Config</option>
     </select>
     <ChevronDown size={13} aria-hidden="true" />
   </label>;
@@ -7040,9 +7040,6 @@ function TeachView({
               {sending ? <LoaderCircle size={17} className="spin" /> : <Send size={17} />}
             </button>
           </form>
-          <div className="composer-hint">
-            Enter to send <span>·</span> Shift + Enter for a new line
-          </div>
         </section>
         {contextOpen && (
           <ContextSidebar
@@ -7233,9 +7230,6 @@ function OldChatView({
               <Send size={17} />
             </button>
           </form>
-          <div className="composer-hint">
-            Enter to send <span>·</span> Shift + Enter for a new line
-          </div>
         </section>
         {messages.length === 0 ? (
           <aside className="chat-aside">
@@ -7611,13 +7605,12 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
         <div ref={endRef} />
         </div>
         {attachments.length > 0 && <div className="attachment-list operator-chat-attachments">{attachments.map((attachment, index) => <span key={`${attachment.name}-${index}`}>{attachment.name}<button type="button" aria-label={`Remove ${attachment.name}`} onClick={() => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X size={11} /></button></span>)}</div>}
-        <div className="operator-chat-composer-meta"><ChatModePicker mode="chat" setView={setView} /></div>
         <form className="chat-composer operator-chat-composer" onSubmit={send}>
           <label className="attach-button" aria-label="Attach context"><Plus size={16} /><input type="file" hidden multiple onChange={(event) => Array.from(event.target.files ?? []).forEach(addFile)} /></label>
           <textarea ref={composerRef} aria-label={`Message ${presence.name}`} value={message} onChange={(event) => setMessage(event.target.value)} onKeyDown={(event) => { if (event.key === "Enter" && !event.shiftKey) { event.preventDefault(); void send(); } }} placeholder={sending ? `Sending to ${presence.name}…` : sessionAssignments.some((assignment) => assignmentIsOpen(assignment)) ? `Steer current work or ask ${presence.name}…` : `Message ${presence.name}…`} rows={1} disabled={sending} />
-          <button className="send-button" aria-label={presence.status === "paused" ? "Queue message" : "Send"} type="submit" disabled={!message.trim() || sending}>{sending ? <LoaderCircle size={17} className="spin" /> : <Send size={17} />}</button>
+          <ChatModePicker mode="chat" setView={setView} />
+          <button className="send-button" aria-label={presence.status === "paused" ? "Queue message" : "Send"} type="submit" disabled={!message.trim() || sending}>{sending ? <LoaderCircle size={17} className="spin" /> : <ArrowUp size={18} strokeWidth={2.2} />}</button>
         </form>
-        <div className="composer-hint">Enter to send <span>·</span> Shift + Enter for a new line{presence.status === "paused" ? <><span>·</span> Queued until Wake</> : null}</div>
       </section>
     </div>
   </div>;
@@ -7902,9 +7895,6 @@ function PresenceChatView({
               {sending ? <LoaderCircle size={17} className="spin" /> : <Send size={17} />}
             </button>
           </form>
-          <div className="composer-hint">
-            {composerMode === "reply" ? "Enter to add your reply" : "Enter to add the post"} <span>·</span> Shift + Enter for a new line <span>·</span> Private rehearsal · nothing publishes or teaches the Agent
-          </div>
         </section>
         {false && <>
         <div className="presence-chat-brief-header">

@@ -11,11 +11,11 @@ Chat is the Agent-first continuous operator conversation and persistent session 
 - Queue paused work without waking a paused Presence.
 - Teach a preference or memory proposal for review.
 - Open a Presence rehearsal from Chat when the user wants to rehearse.
-- Use the Chat mode control to switch between `Chat` and `Teach`; `/teach` is the direct Agent-teaching route.
+- Use the Chat mode control to switch between `Chat` and `Config`; `Config` opens the durable Agent-teaching route at `/teach`.
 
 ## How to get to it (user POV)
 
-Choose `Chat` or open `/chat`; the root workspace now lands here after onboarding. The selected Agent's `Main` conversation is the default, with Agent-owned active/recent threads in the sidebar. The composer is `Message <Presence>…`; submit with `Send`, or `Queue message` when paused. Choose `Teach` through the composer mode control or open `/teach`; its composer is `Message your Presence`. `/rehearsal` is a separate Presence-scoped private social thread with its own transcript and composer.
+Choose `Chat` or open `/chat`; the root workspace now lands here after onboarding. The selected Agent's `Main` conversation is the default, with Agent-owned active/recent threads in the sidebar. The composer is `Message <Presence>…`; submit with the circular up-arrow, or `Queue message` when paused. Choose `Config` through the composer mode control or open `/teach`; its composer is `Message your Presence`. `/rehearsal` is a separate Presence-scoped private social thread with its own transcript and composer.
 
 ## Driving it with verify-app
 
