@@ -31,7 +31,7 @@ test("Chat is the default Agent workspace and a new thread survives reload", asy
   await expect(page.getByRole("heading", { name: "What are you working on?" })).toBeVisible();
 });
 
-test("Chat projects durable responsibility state as an Approach and Working line", async ({ page, request }) => {
+test("Chat keeps durable responsibilities quiet until work is actually active", async ({ page, request }) => {
   await page.goto("/");
   await page.getByLabel("Agent name").fill("Jenny");
   await page.getByRole("button", { name: "Create Agent + Presence" }).click();
@@ -40,8 +40,28 @@ test("Chat projects durable responsibility state as an Approach and Working line
   expect(created.ok()).toBeTruthy();
 
   await page.goto("/chat");
-  await expect(page.getByTestId("operator-approach")).toBeVisible();
-  await expect(page.getByTestId("operator-approach")).toContainText("Approach");
-  await expect(page.getByTestId("operator-work-events")).toContainText(/Responsibility accepted|Current activity/);
-  await expect(page.getByTestId("operator-working-line")).toContainText("Continuing autonomously");
+  await expect(page.getByTestId("operator-approach")).toHaveCount(0);
+  await expect(page.getByTestId("operator-work-events")).toHaveCount(0);
+  await expect(page.getByTestId("operator-working-line")).toHaveCount(0);
+});
+
+test("Context sidebar owns its view controls and the workspace theme toggles", async ({ page }) => {
+  await page.goto("/");
+  await page.getByLabel("Agent name").fill("Jenny");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+  await page.goto("/chat");
+
+  await expect(page.getByRole("button", { name: "Open context sidebar" })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Open Calendar" })).toHaveCount(0);
+  await page.getByRole("button", { name: "Open context sidebar" }).click();
+  await expect(page.getByRole("complementary", { name: /Attention inspector/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: "Show Calendar" })).toBeVisible();
+  await page.getByRole("button", { name: "Show Calendar" }).click();
+  await expect(page.getByRole("complementary", { name: /Calendar inspector/ })).toBeVisible();
+
+  const shell = page.locator("main.app-shell");
+  await page.getByRole("button", { name: "Switch to dark mode" }).click();
+  await expect(shell).toHaveClass(/theme-dark/);
+  await page.getByRole("button", { name: "Switch to light mode" }).click();
+  await expect(shell).toHaveClass(/theme-light/);
 });

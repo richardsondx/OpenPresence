@@ -45,6 +45,7 @@ import {
   LoaderCircle,
   MessageCircle,
   MessageSquare,
+  Moon,
   Newspaper,
   PanelLeft,
   PanelLeftClose,
@@ -64,6 +65,7 @@ import {
   ShieldCheck,
   Sparkles,
   Star,
+  Sun,
   Terminal,
   ThumbsDown,
   ThumbsUp,
@@ -368,13 +370,10 @@ function useOperationalHealth(presenceId?: string, refreshKey = 0) {
   return health;
 }
 
-function OperationalHealthIndicator({ health, onOpen }: { health: OperationalHealthSnapshot | null; onOpen: () => void }) {
+function OperationalHealthIndicator({ health, onOpen }: { health: OperationalHealthSnapshot | null; onOpen?: () => void }) {
   if (!health) {
-    return (
-      <button type="button" className="global-health-indicator global-health-unknown" onClick={onOpen} aria-label="Operating health: Connecting">
-        <span aria-hidden="true">◌</span> Health connecting...
-      </button>
-    );
+    const content = <><span aria-hidden="true">◌</span> Health connecting...</>;
+    return onOpen ? <button type="button" className="global-health-indicator global-health-unknown" onClick={onOpen} aria-label="Operating health: Connecting">{content}</button> : <span className="global-health-indicator global-health-unknown" aria-label="Operating health: Connecting">{content}</span>;
   }
   const copy = health.status === "needs_you"
     ? "Needs You"
@@ -389,7 +388,8 @@ function OperationalHealthIndicator({ health, onOpen }: { health: OperationalHea
   const needsYouCount = health.status === "needs_you"
     ? (health.counts?.needsOperatorIncidents ?? health.incidents.filter((incident) => incident.state === "needs_operator" || incident.operatorActionRequired).length)
     : 0;
-  return <button type="button" className={`global-health-indicator global-health-${health.status}`} onClick={onOpen} aria-label={`Operating health: ${copy}`}><span aria-hidden="true">{symbol}</span> {copy}{needsYouCount > 0 && <span className="global-health-count" aria-hidden="true">{needsYouCount}</span>}</button>;
+  const content = <><span aria-hidden="true">{symbol}</span> {copy}{needsYouCount > 0 && <span className="global-health-count" aria-hidden="true">{needsYouCount}</span>}</>;
+  return onOpen ? <button type="button" className={`global-health-indicator global-health-${health.status}`} onClick={onOpen} aria-label={`Operating health: ${copy}`}>{content}</button> : <span className={`global-health-indicator global-health-${health.status}`} aria-label={`Operating health: ${copy}`}>{content}</span>;
 }
 const historyDisplayAt = (item: Pick<PublicHistoryItem, "occurredAt" | "observedAt" | "environment">) => item.environment === "sandbox" ? item.observedAt : item.occurredAt;
 const historyTimeTitle = (item: Pick<PublicHistoryItem, "occurredAt" | "observedAt" | "environment">) => item.environment === "sandbox"
@@ -1828,6 +1828,7 @@ function ContextInspector({
   presence,
   attentionCount,
   onClose,
+  onPanelChange,
   onNavigate,
 }: {
   panel: InspectorPanel;
@@ -1835,6 +1836,7 @@ function ContextInspector({
   presence: NonNullable<OpenPresenceState["presence"]>;
   attentionCount: number;
   onClose: () => void;
+  onPanelChange: (panel: InspectorPanel) => void;
   onNavigate: (view: View) => void;
 }) {
   const agent = state.agent!;
@@ -1843,12 +1845,21 @@ function ContextInspector({
   const pendingApprovals = state.executions.filter((execution) => execution.presenceId === presence.id && execution.status === "awaiting-review").length;
   const usageEvents = state.resourceUsageEvents.filter((event) => event.agentId === agent.id).length;
   const title = panel === "attention" ? "Attention" : panel === "calendar" ? "Calendar" : panel === "analytics" ? "Analytics" : "Agent settings";
+  const contextViews: Array<{ id: InspectorPanel; label: string; icon: React.ReactNode }> = [
+    { id: "attention", label: "Attention", icon: <Bell size={15} /> },
+    { id: "calendar", label: "Calendar", icon: <CalendarDays size={15} /> },
+    { id: "analytics", label: "Analytics", icon: <BarChart3 size={15} /> },
+    { id: "settings", label: "Agent settings", icon: <Settings2 size={15} /> },
+  ];
   return (
     <aside className="workspace-context-inspector" aria-label={`${title} inspector`}>
       <div className="inspector-heading">
         <div><span className="eyebrow">{panel === "settings" ? "Current Agent" : "Agent context"}</span><h2>{title}</h2></div>
         <button type="button" className="inspector-close" aria-label="Close inspector" onClick={onClose}><X size={17} /></button>
       </div>
+      <nav className="inspector-view-nav" aria-label="Context views">
+        {contextViews.map((item) => <button type="button" key={item.id} className={panel === item.id ? "active" : ""} aria-label={`Show ${item.label}`} aria-current={panel === item.id ? "page" : undefined} onClick={() => onPanelChange(item.id)}>{item.icon}<span>{item.label}</span>{item.id === "attention" && attentionCount > 0 && <b>{attentionCount}</b>}</button>)}
+      </nav>
       {panel === "attention" && <>
         <section className="inspector-section inspector-attention-summary"><span className="inspector-kicker">Needs you</span><strong>{attentionCount ? `${attentionCount} item${attentionCount === 1 ? "" : "s"}` : "Nothing waiting"}</strong><p>{attentionCount ? "Blocking items stay in the conversation so you can act with full context." : `${agent.name} is clear to keep moving.`}</p></section>
         <section className="inspector-section"><div className="inspector-section-title"><span>Waiting</span><small>{pendingApprovals}</small></div>{pendingApprovals > 0 ? <button type="button" className="inspector-list-row" onClick={() => onNavigate("review")}><span className="inspector-status-dot is-warn" /><span><strong>Public action needs review</strong><small>Open the inline card in Chat</small></span><ChevronRight size={14} /></button> : <p className="inspector-empty">No public actions are waiting for approval.</p>}{state.proposals.filter((proposal) => proposal.status === "pending").slice(0, 2).map((proposal) => <button type="button" className="inspector-list-row" key={proposal.id} onClick={() => onNavigate("brain")}><span className="inspector-status-dot is-warn" /><span><strong>Agent change to review</strong><small>{proposal.reason}</small></span><ChevronRight size={14} /></button>)}</section>
@@ -2453,8 +2464,22 @@ function AgentWorkspaceShell({
   const [healthFocusKey, setHealthFocusKey] = useState(0);
   const [inspector, setInspector] = useState<InspectorPanel | null>(null);
   const [sidebarCollapsed, setSidebarCollapsed] = useState(false);
+  const [theme, setTheme] = useState<"light" | "dark">("light");
+  const [themeReady, setThemeReady] = useState(false);
   const [showCreateAgent, setShowCreateAgent] = useState(false);
   const [showCreateProject, setShowCreateProject] = useState(false);
+  useEffect(() => {
+    const storedTheme = window.localStorage.getItem("openpresence-theme");
+    const frame = window.requestAnimationFrame(() => {
+      if (storedTheme === "light" || storedTheme === "dark") setTheme(storedTheme);
+      setThemeReady(true);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, []);
+  useEffect(() => {
+    if (!themeReady) return;
+    window.localStorage.setItem("openpresence-theme", theme);
+  }, [theme, themeReady]);
   const createChat = async () => {
     const next = await mutate({ type: "createOperatorThread", presenceId: presence.id, title: "New conversation" });
     const created = next?.operatorThreads?.find((thread) => thread.title === "New conversation") ?? next?.operatorThreads?.[0];
@@ -2488,9 +2513,9 @@ function AgentWorkspaceShell({
   ).length;
   const attentionCount = pendingExecutionCount + pendingAgentChangeCount + state.agentRequests.filter((item) => item.status === "open" && item.importance !== "informational").length;
   return (
-    <main className={`app-shell ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
+    <main className={`app-shell theme-${theme} ${sidebarCollapsed ? "sidebar-collapsed" : ""}`}>
       <aside className="sidebar">
-        <div className="sidebar-brand-row"><div className="brand-lockup sidebar-brand"><div className="brand-mark">◉</div><span>OpenPresence</span></div><button type="button" className="sidebar-collapse-button" aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeft size={17} /> : <PanelLeftClose size={17} />}</button></div>
+        <div className="sidebar-brand-row"><div className="brand-lockup sidebar-brand"><div className="brand-mark">◉</div><span>OpenPresence</span></div><div className="sidebar-brand-actions"><button type="button" className="sidebar-theme-toggle" aria-label={theme === "light" ? "Switch to dark mode" : "Switch to light mode"} title={theme === "light" ? "Switch to dark mode" : "Switch to light mode"} onClick={() => setTheme((value) => value === "light" ? "dark" : "light")}>{theme === "light" ? <Moon size={15} /> : <Sun size={15} />}</button><button type="button" className="sidebar-collapse-button" aria-label={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} title={sidebarCollapsed ? "Expand sidebar" : "Collapse sidebar"} onClick={() => setSidebarCollapsed((value) => !value)}>{sidebarCollapsed ? <PanelLeft size={17} /> : <PanelLeftClose size={17} />}</button></div></div>
         <AgentPortfolio state={state} mutate={mutate} setView={setView} onCreateAgent={() => setShowCreateAgent(true)} collapsed={sidebarCollapsed} />
         {!sidebarCollapsed && <>
           <div className="sidebar-section-rule" />
@@ -2502,15 +2527,12 @@ function AgentWorkspaceShell({
       <section className={`${view === "chat" || view === "teach" || view === "rehearsal" ? "workspace workspace-chat" : "workspace"} ${view === "knowledge" ? "workspace-knowledge" : ""} ${inspector ? "has-inspector" : ""}`}>
         <header className="topbar">
           <div className="topbar-agent-context"><AgentSwitcher state={state} mutate={mutate} /><span className="topbar-channel-context"><span>Active channel</span><strong>{channelLabel(presence.channel, state.channelDefinitions)} · {presence.handle}</strong></span></div>
-          <div className="topbar-actions context-controls" aria-label="Agent context controls">
-            <button type="button" className={`context-control ${inspector === "attention" ? "active" : ""}`} aria-label={`Open Attention${attentionCount ? `, ${attentionCount} waiting` : ""}`} aria-pressed={inspector === "attention"} title="Attention" onClick={() => setInspector((current) => current === "attention" ? null : "attention")}><Bell size={17} />{attentionCount > 0 && <span className="context-control-count">{attentionCount}</span>}</button>
-            <button type="button" className={`context-control ${inspector === "calendar" ? "active" : ""}`} aria-label="Open Calendar" aria-pressed={inspector === "calendar"} title="Calendar" onClick={() => setInspector((current) => current === "calendar" ? null : "calendar")}><CalendarDays size={17} /></button>
-            <button type="button" className={`context-control ${inspector === "analytics" ? "active" : ""}`} aria-label="Open Analytics" aria-pressed={inspector === "analytics"} title="Analytics" onClick={() => setInspector((current) => current === "analytics" ? null : "analytics")}><BarChart3 size={17} /></button>
-            <button type="button" className={`context-control ${inspector === "settings" ? "active" : ""}`} aria-label="Open Agent settings" aria-pressed={inspector === "settings"} title="Agent settings" onClick={() => setInspector((current) => current === "settings" ? null : "settings")}><Settings2 size={17} /></button>
-            <OperationalHealthIndicator health={operationalHealth} onOpen={() => setInspector("attention")} />
+          <div className="topbar-actions context-controls" aria-label="Workspace controls">
+            <button type="button" className="context-control context-sidebar-toggle" aria-label={inspector ? "Collapse context sidebar" : "Open context sidebar"} aria-pressed={Boolean(inspector)} title={inspector ? "Collapse context sidebar" : "Open context sidebar"} onClick={() => setInspector((current) => current ? null : "attention")}>{inspector ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}{!inspector && attentionCount > 0 && <span className="context-control-count">{attentionCount}</span>}</button>
+            <OperationalHealthIndicator health={operationalHealth} />
           </div>
         </header>
-        {inspector && <ContextInspector panel={inspector} state={state} presence={presence} attentionCount={attentionCount} onClose={() => setInspector(null)} onNavigate={(nextView) => { setInspector(null); setView(nextView); }} />}
+        {inspector && <ContextInspector panel={inspector} state={state} presence={presence} attentionCount={attentionCount} onClose={() => setInspector(null)} onPanelChange={setInspector} onNavigate={(nextView) => { setInspector(null); setView(nextView); }} />}
         {error && (
           <div className="toast-error" role="alert">
             <CircleAlert size={16} /> {error}
@@ -7339,11 +7361,15 @@ function OperatorChatActionTimelineEvent({ event }: { event: OperatorConversatio
   </div>;
 }
 
-function OperatorSessionBlocks({ state, presence, assignments, runs, actions, onOpenReview }: { state: OpenPresenceState; presence: Presence; assignments: Assignment[]; runs: AssignmentRun[]; actions: OperatorConversationActionEvent[]; onOpenReview: () => void }) {
-  if (!assignments.length && !actions.length) return null;
-  const activeAssignment = assignments.find((assignment) => assignmentIsOpen(assignment));
+function OperatorSessionBlocks({ state, presence, assignments, runs, actions, showProgress, onOpenReview }: { state: OpenPresenceState; presence: Presence; assignments: Assignment[]; runs: AssignmentRun[]; actions: OperatorConversationActionEvent[]; showProgress: boolean; onOpenReview: () => void }) {
+  const activeRun = runs.find((item) => ["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"].includes(item.status));
+  const activeAssignment = showProgress
+    ? assignments.find((assignment) => assignment.id === activeRun?.assignmentId && assignmentIsOpen(assignment)) ?? assignments.find((assignment) => assignmentIsOpen(assignment))
+    : undefined;
   const run = activeAssignment ? runs.filter((item) => item.assignmentId === activeAssignment.id).sort((left, right) => right.updatedAt.localeCompare(left.updatedAt))[0] : undefined;
   const reviewExecution = state.executions.find((execution) => execution.presenceId === presence.id && execution.status === "awaiting-review" && (!activeAssignment || execution.assignmentId === activeAssignment.id));
+  const verifiedActions = actions.filter((action) => action.status === "verified").slice(-2);
+  if (!activeAssignment && !reviewExecution && !verifiedActions.length) return null;
   const stageLabel = run?.currentStage?.replaceAll("_", " ") ?? activeAssignment?.work?.phase?.replaceAll("_", " ");
   const storiesResearched = activeAssignment?.work?.storiesResearched;
   const planSteps = activeAssignment ? [
@@ -7358,12 +7384,12 @@ function OperatorSessionBlocks({ state, presence, assignments, runs, actions, on
       <div className="operator-session-block-heading"><span className="session-block-mark">◆</span><div><strong>Approach</strong><small>{activeAssignment.title ?? activeAssignment.instruction}</small></div><span className={`session-state-badge is-${activeAssignment.status}`}>{activeAssignment.status === "needs_operator" ? "Needs you" : activeAssignment.status === "completed" ? "Complete" : activeAssignment.status}</span></div>
       <ul className="operator-approach-list">{planSteps.map((step, index) => <li key={`${step.label}-${index}`} className={step.done ? "is-done" : index === planSteps.findIndex((item) => !item.done) ? "is-current" : "is-pending"}><span aria-hidden="true">{step.done ? "✓" : index === planSteps.findIndex((item) => !item.done) ? "●" : "○"}</span>{step.label}</li>)}</ul>
     </div>}
-    <div className="operator-session-card operator-work-events" data-testid="operator-work-events">
+    {activeAssignment && <div className="operator-session-card operator-work-events" data-testid="operator-work-events">
       <div className="operator-session-block-heading"><span className="session-block-mark">◇</span><div><strong>Work events</strong><small>Meaningful progress from {presence.name}</small></div></div>
       <div className="operator-work-event-list">{storiesResearched ? <div><span>◇</span><strong>Research</strong><small>{storiesResearched} conversation{storiesResearched === 1 ? "" : "s"} considered</small></div> : null}{stageLabel ? <div><span>◇</span><strong>Current activity</strong><small>{stageLabel}</small></div> : null}{!storiesResearched && !stageLabel && <div><span>◇</span><strong>Responsibility accepted</strong><small>{activeAssignment?.instruction ?? "The responsibility is ready to begin."}</small></div>}</div>
-    </div>
+    </div>}
     {reviewExecution && <div className="operator-session-card operator-review-block" data-testid="operator-review-required"><div className="operator-session-block-heading"><span className="session-block-mark">◆</span><div><strong>Review required</strong><small>{reviewExecution.affordance.replace(/^x\./, "")} · {reviewExecution.reviewReason ?? "The Presence is asking before acting."}</small></div><span className="session-state-badge is-review">Needs you</span></div><p>{reviewExecution.publication?.publicExpression ? "A proposed social expression is ready for your review." : "A social action is ready for your review."}</p><button type="button" className="operator-session-review-action" onClick={onOpenReview}>Open review</button></div>}
-    {actions.filter((action) => action.status === "verified").slice(-2).map((action) => <div className="operator-session-card operator-outcome-block" data-testid="operator-verified-outcome" key={`outcome-${action.id}`}><div className="operator-session-block-heading"><span className="session-block-mark">✓</span><div><strong>Verified outcome</strong><small>{action.title}</small></div><span className="session-state-badge is-verified">Verified</span></div><p>{action.statusLabel}</p>{action.resultUrl && <a href={action.resultUrl} target="_blank" rel="noreferrer">Open result <ArrowUpRight size={12} /></a>}</div>)}
+    {verifiedActions.map((action) => <div className="operator-session-card operator-outcome-block" data-testid="operator-verified-outcome" key={`outcome-${action.id}`}><div className="operator-session-block-heading"><span className="session-block-mark">✓</span><div><strong>Verified outcome</strong><small>{action.title}</small></div><span className="session-state-badge is-verified">Verified</span></div><p>{action.statusLabel}</p>{action.resultUrl && <a href={action.resultUrl} target="_blank" rel="noreferrer">Open result <ArrowUpRight size={12} /></a>}</div>)}
     {activeAssignment && <div className="operator-working-line" role="status" data-testid="operator-working-line"><span className="working-pulse" aria-hidden="true" />{activeAssignment.status === "completed" || activeAssignment.status === "completed_with_adaptation" ? "Responsibility complete · outcome verified" : activeAssignment.status === "needs_operator" || reviewExecution ? "Waiting for your review" : `Continuing autonomously · ${stageLabel || "working from the current evidence"}`}</div>}
   </section>;
 }
@@ -7554,6 +7580,7 @@ function OperatorChatView({ state, mutate, refreshState, setView, onNewChat }: {
   const sessionAssignments = linkedAssignments.length ? linkedAssignments : mainFallbackAssignment ? [mainFallbackAssignment] : [];
   const sessionAssignmentIds = new Set(sessionAssignments.map((assignment) => assignment.id));
   const linkedRuns = (state.assignmentRuns ?? []).filter((run) => sessionAssignmentIds.has(run.assignmentId));
+  const hasActiveAssignmentRun = linkedRuns.some((run) => ["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"].includes(run.status));
   const renameThread = async () => {
     const nextTitle = window.prompt("Rename conversation", operatorThread.title);
     if (nextTitle?.trim()) await mutate({ type: "renameOperatorThread", threadId: operatorThread.id, title: nextTitle.trim() });
@@ -7586,7 +7613,7 @@ function OperatorChatView({ state, mutate, refreshState, setView, onNewChat }: {
             {item.role === "operator" && nudge && <div className="operator-chat-message-actions">{operatorNudgeStatusLabel(nudge.status, presence.name, linkedAssignment?.status) && <span className={`operator-nudge-status is-${nudge.status}`} role="status">{operatorNudgeStatusLabel(nudge.status, presence.name, linkedAssignment?.status)}</span>}{nudge.status === "failed" && !nudge.assignmentId && <button type="button" onClick={() => void mutate({ type: "retryPresenceNudge", presenceId: presence.id, nudgeId: nudge.id })}>Retry look</button>}{!nudge.assignmentId && <button type="button" onClick={() => void mutate({ type: "createAssignmentFromNudge", presenceId: presence.id, nudgeId: nudge.id })}>Take this on</button>}</div>}
           </article>{anchoredActions.length > 0 && <div className="operator-chat-action-timeline" aria-label="Actions from this conversation">{anchoredActions.map((event) => <OperatorChatActionTimelineEvent key={event.id} event={event} />)}</div>}</Fragment>;
         })}
-        <OperatorSessionBlocks state={state} presence={presence} assignments={sessionAssignments} runs={linkedRuns} actions={conversationActionEvents} onOpenReview={() => setView("review")} />
+        <OperatorSessionBlocks state={state} presence={presence} assignments={sessionAssignments} runs={linkedRuns} actions={conversationActionEvents} showProgress={hasActiveAssignmentRun} onOpenReview={() => setView("review")} />
         {(sending || hasUnfinishedChatRun) && presence.status !== "paused" && <div className="operator-chat-thinking" role="status" aria-live="polite" data-testid="operator-chat-thinking">
           <PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} avatarUrl={presencePlatformAvatarUrl(state, presence)} />
           <span>{presence.name} is thinking</span>
