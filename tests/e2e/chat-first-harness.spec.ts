@@ -43,6 +43,8 @@ test("Chat keeps durable responsibilities quiet until work is actually active", 
   await expect(page.getByTestId("operator-approach")).toHaveCount(0);
   await expect(page.getByTestId("operator-work-events")).toHaveCount(0);
   await expect(page.getByTestId("operator-working-line")).toHaveCount(0);
+  await expect(page.getByTestId("operator-chat-needs-you")).toHaveCount(0);
+  await expect(page.getByText("Needs You", { exact: true })).toHaveCount(0);
 });
 
 test("Context sidebar owns its view controls and the workspace theme toggles", async ({ page }) => {

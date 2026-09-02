@@ -370,27 +370,6 @@ function useOperationalHealth(presenceId?: string, refreshKey = 0) {
   return health;
 }
 
-function OperationalHealthIndicator({ health, onOpen }: { health: OperationalHealthSnapshot | null; onOpen?: () => void }) {
-  if (!health) {
-    const content = <><span aria-hidden="true">◌</span> Health connecting...</>;
-    return onOpen ? <button type="button" className="global-health-indicator global-health-unknown" onClick={onOpen} aria-label="Operating health: Connecting">{content}</button> : <span className="global-health-indicator global-health-unknown" aria-label="Operating health: Connecting">{content}</span>;
-  }
-  const copy = health.status === "needs_you"
-    ? "Needs You"
-    : health.status === "degraded"
-      ? "Degraded · capability unavailable"
-    : health.status === "recovering"
-      ? "Recovering body · no action needed"
-      : health.status === "waiting"
-        ? "Waiting · resumes automatically"
-        : "Healthy";
-  const symbol = health.status === "needs_you" || health.status === "degraded" ? "⚠" : health.status === "recovering" ? "◐" : health.status === "waiting" ? "◷" : "●";
-  const needsYouCount = health.status === "needs_you"
-    ? (health.counts?.needsOperatorIncidents ?? health.incidents.filter((incident) => incident.state === "needs_operator" || incident.operatorActionRequired).length)
-    : 0;
-  const content = <><span aria-hidden="true">{symbol}</span> {copy}{needsYouCount > 0 && <span className="global-health-count" aria-hidden="true">{needsYouCount}</span>}</>;
-  return onOpen ? <button type="button" className={`global-health-indicator global-health-${health.status}`} onClick={onOpen} aria-label={`Operating health: ${copy}`}>{content}</button> : <span className={`global-health-indicator global-health-${health.status}`} aria-label={`Operating health: ${copy}`}>{content}</span>;
-}
 const historyDisplayAt = (item: Pick<PublicHistoryItem, "occurredAt" | "observedAt" | "environment">) => item.environment === "sandbox" ? item.observedAt : item.occurredAt;
 const historyTimeTitle = (item: Pick<PublicHistoryItem, "occurredAt" | "observedAt" | "environment">) => item.environment === "sandbox"
   ? `Observed in Sandbox at ${new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.observedAt))}. Simulated world time: ${new Intl.DateTimeFormat("en", { dateStyle: "medium", timeStyle: "short" }).format(new Date(item.occurredAt))}.`
@@ -2528,8 +2507,7 @@ function AgentWorkspaceShell({
         <header className="topbar">
           <div className="topbar-agent-context"><AgentSwitcher state={state} mutate={mutate} /><span className="topbar-channel-context"><span>Active channel</span><strong>{channelLabel(presence.channel, state.channelDefinitions)} · {presence.handle}</strong></span></div>
           <div className="topbar-actions context-controls" aria-label="Workspace controls">
-            <button type="button" className="context-control context-sidebar-toggle" aria-label={inspector ? "Collapse context sidebar" : "Open context sidebar"} aria-pressed={Boolean(inspector)} title={inspector ? "Collapse context sidebar" : "Open context sidebar"} onClick={() => setInspector((current) => current ? null : "attention")}>{inspector ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}{!inspector && attentionCount > 0 && <span className="context-control-count">{attentionCount}</span>}</button>
-            <OperationalHealthIndicator health={operationalHealth} />
+            <button type="button" className="context-control context-sidebar-toggle" aria-label={inspector ? "Collapse context sidebar" : "Open context sidebar"} aria-pressed={Boolean(inspector)} title={inspector ? "Collapse context sidebar" : "Open context sidebar"} onClick={() => setInspector((current) => current ? null : "attention")}>{inspector ? <PanelRightClose size={17} /> : <PanelRightOpen size={17} />}</button>
           </div>
         </header>
         {inspector && <ContextInspector panel={inspector} state={state} presence={presence} attentionCount={attentionCount} onClose={() => setInspector(null)} onPanelChange={setInspector} onNavigate={(nextView) => { setInspector(null); setView(nextView); }} />}
@@ -2544,7 +2522,7 @@ function AgentWorkspaceShell({
           {view === "knowledge" && <KnowledgeView state={state} mutate={mutate} refreshState={refreshState} />}
           {view === "assets" && <AssetsView state={state} refreshState={refreshState} />}
           {view === "usage" && <UsageView state={state} setView={setView} mutate={mutate} />}
-          {view === "chat" && <OperatorChatView state={state} mutate={mutate} refreshState={refreshState} setView={setView} onNewChat={createChat} />}
+          {view === "chat" && <OperatorChatView state={state} mutate={mutate} refreshState={refreshState} operationalHealth={operationalHealth} setView={setView} onNewChat={createChat} />}
           {view === "rehearsal" && <AgentLabView state={state} mutate={mutate} setView={setView} />}
           {view === "watching" && <WatchingView state={state} mutate={mutate} refreshState={refreshState} setView={setView} />}
           {view === "people" && <PeopleViewLazy state={state} mutate={mutate} Button={Button} SectionEyebrow={SectionEyebrow} PageHeader={PageHeader} ChannelAvatar={ChannelAvatar} channelLabel={channelLabel} formatTime={formatTime} formatDateTime={formatDateTime} watchRelationshipPolicy={watchRelationshipPolicy} watchPolicyFromPurpose={watchPolicyFromPurpose} watchPlanSummary={watchPlanSummary} />}
@@ -7361,6 +7339,15 @@ function OperatorChatActionTimelineEvent({ event }: { event: OperatorConversatio
   </div>;
 }
 
+function OperatorChatOperationalNotice({ health, onOpenReview }: { health?: OperationalHealthSnapshot | null; onOpenReview: () => void }) {
+  if (health?.status !== "needs_you") return null;
+  return <div className="operator-chat-operational-notice" role="alert" data-testid="operator-chat-needs-you">
+    <CircleAlert size={17} aria-hidden="true" />
+    <div><strong>Action needed</strong><p>{health.summary}</p></div>
+    <button type="button" onClick={onOpenReview}>Review details</button>
+  </div>;
+}
+
 function OperatorSessionBlocks({ state, presence, assignments, runs, actions, showProgress, onOpenReview }: { state: OpenPresenceState; presence: Presence; assignments: Assignment[]; runs: AssignmentRun[]; actions: OperatorConversationActionEvent[]; showProgress: boolean; onOpenReview: () => void }) {
   const activeRun = runs.find((item) => ["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"].includes(item.status));
   const activeAssignment = showProgress
@@ -7394,7 +7381,7 @@ function OperatorSessionBlocks({ state, presence, assignments, runs, actions, sh
   </section>;
 }
 
-function OperatorChatView({ state, mutate, refreshState, setView, onNewChat }: { state: OpenPresenceState; mutate: Mutate; refreshState: () => Promise<OpenPresenceState>; setView: (view: View) => void; onNewChat: () => Promise<void> }) {
+function OperatorChatView({ state, mutate, refreshState, operationalHealth, setView, onNewChat }: { state: OpenPresenceState; mutate: Mutate; refreshState: () => Promise<OpenPresenceState>; operationalHealth?: OperationalHealthSnapshot | null; setView: (view: View) => void; onNewChat: () => Promise<void> }) {
   const presence = state.presence ?? state.presences[0]!;
   const availableThreads = (state.operatorThreads ?? []).filter((item) => item.agentId === state.agent?.id && item.status !== "archived");
   const mainThread = availableThreads.find((item) => item.title === "Main") ?? availableThreads[0];
@@ -7613,6 +7600,7 @@ function OperatorChatView({ state, mutate, refreshState, setView, onNewChat }: {
             {item.role === "operator" && nudge && <div className="operator-chat-message-actions">{operatorNudgeStatusLabel(nudge.status, presence.name, linkedAssignment?.status) && <span className={`operator-nudge-status is-${nudge.status}`} role="status">{operatorNudgeStatusLabel(nudge.status, presence.name, linkedAssignment?.status)}</span>}{nudge.status === "failed" && !nudge.assignmentId && <button type="button" onClick={() => void mutate({ type: "retryPresenceNudge", presenceId: presence.id, nudgeId: nudge.id })}>Retry look</button>}{!nudge.assignmentId && <button type="button" onClick={() => void mutate({ type: "createAssignmentFromNudge", presenceId: presence.id, nudgeId: nudge.id })}>Take this on</button>}</div>}
           </article>{anchoredActions.length > 0 && <div className="operator-chat-action-timeline" aria-label="Actions from this conversation">{anchoredActions.map((event) => <OperatorChatActionTimelineEvent key={event.id} event={event} />)}</div>}</Fragment>;
         })}
+        <OperatorChatOperationalNotice health={operationalHealth} onOpenReview={() => setView("review")} />
         <OperatorSessionBlocks state={state} presence={presence} assignments={sessionAssignments} runs={linkedRuns} actions={conversationActionEvents} showProgress={hasActiveAssignmentRun} onOpenReview={() => setView("review")} />
         {(sending || hasUnfinishedChatRun) && presence.status !== "paused" && <div className="operator-chat-thinking" role="status" aria-live="polite" data-testid="operator-chat-thinking">
           <PresenceGlyph accent={presence.accent} name={presence.name} look={presenceAvatarLook(presence)} avatarUrl={presencePlatformAvatarUrl(state, presence)} />

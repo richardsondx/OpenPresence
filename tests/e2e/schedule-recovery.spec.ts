@@ -100,7 +100,9 @@ test("today keeps current work visible and a Schedule decision is actionable in 
   });
 
   await page.reload();
-  await page.getByRole("button", { name: "Operating health: Needs You", exact: true }).click();
+  const notice = page.getByTestId("operator-chat-needs-you");
+  await expect(notice).toBeVisible();
+  await notice.getByRole("button", { name: "Review details", exact: true }).click();
   const queue = page.getByTestId("needs-you-queue");
   await expect(queue).toBeVisible();
   await expect(queue.getByRole("heading", { name: "Needs You", exact: true })).toBeVisible();
@@ -170,8 +172,10 @@ test("health alert opens the Needs You queue instead of sending the operator to 
     });
   });
 
-  await page.goto(`/activity?agentId=${base.agent.id}&presenceId=${presenceId}&surface=timeline`);
-  await page.getByRole("button", { name: "Operating health: Needs You", exact: true }).click();
+  await page.goto(`/chat?agentId=${base.agent.id}&presenceId=${presenceId}`);
+  const notice = page.getByTestId("operator-chat-needs-you");
+  await expect(notice).toBeVisible();
+  await notice.getByRole("button", { name: "Review details", exact: true }).click();
   const queue = page.getByTestId("needs-you-queue");
   await expect(queue).toBeVisible();
   await expect(queue.getByRole("heading", { name: "Needs You", exact: true })).toBeVisible();
