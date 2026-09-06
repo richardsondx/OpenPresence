@@ -5,7 +5,7 @@ Chat is the Agent-first continuous operator conversation and persistent session 
 ## Sub-features
 
 - Land on the selected Agent's single main Chat by default. Keep the main Chat free of rename, archive, transcript-copy, and new-conversation controls; do not present a second conversation context card or private-thread creator.
-- Render active responsibility context as an Approach, semantic Work Events, Review/Approval, Working line, and verified outcome receipt; routine telemetry remains compressed or hidden. Actionable runtime boundaries appear as an in-chat notice, not a repeated global header alert.
+- Render active responsibility context as an Approach, semantic Work Events, Review/Approval, Working line, and verified outcome receipt; routine telemetry remains compressed or hidden. Actionable runtime boundaries appear in Chat as a compact notice directly above the composer, not a repeated global header alert or a transcript item.
 - Ask ordinary questions without creating public work.
 - Share a link or direction and receive a truthful receipt.
 - Continue private Chat while public activity is paused; public Assignments remain held until the Presence is awake.
@@ -31,7 +31,7 @@ verify-app assert --text "What do you think about our growth right now?"
 verify-app state --projection chat
 ```
 
-For an operator boundary, use `getByTestId("operator-chat-needs-you")` or the semantic `Review details` button from Chat, then inspect the focused Review queue. For Teach, use `open teach`, `type --label "Message your Presence"`, and inspect proposals/change sets after the visible response. For paused behavior, send an ordinary question with `Send`, verify the reply, then confirm the Presence remains paused and no execution was created.
+For an operator boundary, use `getByTestId("operator-chat-needs-you")` or the semantic `Review details` button from Chat, confirm it sits immediately before `form.operator-chat-composer`, then inspect the focused Review queue. For Teach, use `open teach`, `type --label "Message your Presence"`, and inspect proposals/change sets after the visible response. For paused behavior, send an ordinary question with `Send`, verify the reply, then confirm the Presence remains paused and no execution was created.
 
 ## Proof
 

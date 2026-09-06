@@ -102,6 +102,8 @@ test("today keeps current work visible and a Schedule decision is actionable in 
   await page.reload();
   const notice = page.getByTestId("operator-chat-needs-you");
   await expect(notice).toBeVisible();
+  await expect(notice).toHaveCount(1);
+  await expect(notice.locator("xpath=following-sibling::*[1][self::form[contains(@class, 'operator-chat-composer')]]")).toHaveCount(1);
   await notice.getByRole("button", { name: "Review details", exact: true }).click();
   const queue = page.getByTestId("needs-you-queue");
   await expect(queue).toBeVisible();
@@ -192,6 +194,65 @@ test("health alert opens the Needs You queue instead of sending the operator to 
   await expect(queue.getByRole("button", { name: "Resume normal delivery", exact: true })).toBeVisible();
   expect(new URL(page.url()).pathname).toBe("/review");
   await expect(page.getByRole("heading", { name: "Presence settings", exact: true })).toHaveCount(0);
+  await page.unrouteAll({ behavior: "ignoreErrors" });
+});
+
+test("private Chat ignores X-credit-only health alerts for unrelated requests", async ({ page, request }) => {
+  await page.goto("/");
+  await page.getByLabel("Agent name").fill("Genny");
+  await page.getByLabel("Presence handle").fill("@example_agent");
+  await page.getByRole("button", { name: "Create Agent + Presence" }).click();
+
+  const base = await request.get("/api/state").then((response) => response.json());
+  const presenceId = base.presence.id as string;
+  const created = await request.post("/api/state", {
+    data: {
+      type: "createAssignment",
+      presenceId,
+      environment: "live",
+      instruction: "Keep the public responsibility available while I ask a private question.",
+    },
+  });
+  expect(created.ok()).toBeTruthy();
+
+  await page.route("**/api/runtime/health**", async (route) => {
+    await route.fulfill({
+      status: 200,
+      contentType: "application/json",
+      body: JSON.stringify({
+        now: new Date().toISOString(),
+        status: "needs_you",
+        summary: "X API credits are exhausted. The verified Chrome Bridge remains available for continuity; add credits to restore Native X reads.",
+        operatorAction: { kind: "settings", label: "Review Settings" },
+        presenceId,
+        counts: { activeIncidents: 1, recoveringIncidents: 0, waitingIncidents: 0, needsOperatorIncidents: 1, orphanRecoveringRuns: 0 },
+        dependencyHealth: [],
+        incidents: [{
+          id: "incident-x-credits-exhausted",
+          rootCauseKey: "runtime.native_x_credits_exhausted",
+          state: "needs_operator",
+          safeSummary: "X API credits are exhausted.",
+          affectedRunIds: [],
+          recoveryAttempts: 0,
+          operatorActionRequired: true,
+          requiresAuth: false,
+          lastObservedAt: new Date().toISOString(),
+        }],
+        activeRuns: [],
+        dueWakeCount: 0,
+        heartbeats: [],
+      }),
+    });
+  });
+
+  await page.goto(`/chat?agentId=${base.agent.id}&presenceId=${presenceId}`);
+  const notice = page.getByTestId("operator-chat-needs-you");
+  await expect(notice).toHaveCount(0);
+
+  await page.getByLabel("Message Genny").fill("What should we focus on for the next team meeting?");
+  await page.getByRole("button", { name: "Send", exact: true }).click();
+  await expect(page.locator(".operator-chat-message.is-operator p").filter({ hasText: /^What should we focus on for the next team meeting\?$/ })).toBeVisible();
+  await expect(notice).toHaveCount(0);
   await page.unrouteAll({ behavior: "ignoreErrors" });
 });
 

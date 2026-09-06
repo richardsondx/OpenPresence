@@ -160,7 +160,7 @@ import type {
 } from "@/lib/types";
 import { getDefaultCurationSources } from "@/lib/editorial-curation";
 import { publicExpressionText } from "@/lib/public-expression";
-import { xCreditsAlertAppliesToView, xCreditsBillingUrl, xCreditsExhausted } from "@/lib/x-credits";
+import { isXCreditsError, xCreditsAlertAppliesToView, xCreditsBillingUrl, xCreditsExhausted } from "@/lib/x-credits";
 import { runtimeTimeoutForOperation, runtimeTimeoutMessage } from "@/lib/runtime-timeout";
 import { deriveHistoricalGrowthContext } from "@/lib/growth-history";
 import { growthEvidenceIsInPresenceScope, growthPublicationIsInPresenceScope, presenceGrowthBoundary } from "@/lib/growth-scope";
@@ -7224,14 +7224,14 @@ function OperatorChatActionTimelineEvent({ event }: { event: OperatorConversatio
   </div>;
 }
 
-function OperatorChatOperationalNotice({ health, onOpenReview, hasPublicWork }: { health?: OperationalHealthSnapshot | null; onOpenReview: () => void; hasPublicWork: boolean }) {
+function OperatorChatOperationalNotice({ health, onOpenReview }: { health?: OperationalHealthSnapshot | null; onOpenReview: () => void }) {
   if (health?.status !== "needs_you") return null;
-  const nonXQuotaIncidents = health.incidents.filter((incident) => !/credits_exhausted|quota/i.test(incident.rootCauseKey));
-  const xCreditsOnly = /X API credits are exhausted/i.test(health.summary) && nonXQuotaIncidents.length === 0;
-  if (xCreditsOnly && !hasPublicWork) return null;
+  // X credit exhaustion belongs to public-channel delivery and observation.
+  // Private Chat must not imply that an ordinary conversation needs X access.
+  if (isXCreditsError(health.summary)) return null;
   return <div className="operator-chat-operational-notice" role="alert" data-testid="operator-chat-needs-you">
     <CircleAlert size={17} aria-hidden="true" />
-    <div><strong>Public work needs attention</strong><p>{health.summary}</p><p>You can still talk, plan, and draft here.</p></div>
+    <div className="operator-chat-operational-notice-copy"><strong>Public work needs attention</strong><p>{health.summary}</p><span>You can still talk, plan, and draft here.</span></div>
     <button type="button" onClick={onOpenReview}>Review details</button>
   </div>;
 }
@@ -7447,9 +7447,6 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
   const sessionAssignmentIds = new Set(sessionAssignments.map((assignment) => assignment.id));
   const linkedRuns = (state.assignmentRuns ?? []).filter((run) => sessionAssignmentIds.has(run.assignmentId));
   const hasActiveAssignmentRun = linkedRuns.some((run) => ["queued", "researching", "selecting", "writing", "delivering", "delivery_pending"].includes(run.status));
-  const pendingExecutionStatuses = new Set(["awaiting-review", "approved", "awaiting-manual", "awaiting-connector", "queued", "claimed", "executing", "verification-pending"]);
-  const hasPublicWork = state.assignments.some((assignment) => assignment.presenceId === presence.id && assignment.environment !== "sandbox" && assignmentIsOpen(assignment))
-    || state.executions.some((execution) => execution.presenceId === presence.id && execution.environment !== "sandbox" && pendingExecutionStatuses.has(execution.status));
   const activeOperatorRun = (state.operationalRuns ?? []).find((run) => run.presenceId === presence.id && run.kind === "operator_chat" && ["queued", "running", "waiting", "recovering", "reconciling"].includes(run.state));
   return <div className="page page-chat operator-chat-page">
     <PageHeader className="chat-heading" title="Chat" description={`A private conversation with ${presence.name}. Ask a question, share context, or give the Agent an outcome to pursue.`} />
@@ -7475,7 +7472,6 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
           </article>{anchoredActions.length > 0 && <div className="operator-chat-action-timeline" aria-label="Actions from this conversation">{anchoredActions.map((event) => <OperatorChatActionTimelineEvent key={event.id} event={event} />)}</div>}</Fragment>;
         })}
         <OperatorChatWorkStatus run={activeOperatorRun} presence={presence} />
-        <OperatorChatOperationalNotice health={operationalHealth} hasPublicWork={hasPublicWork} onOpenReview={() => setView("review")} />
         <OperatorSessionBlocks state={state} presence={presence} assignments={sessionAssignments} runs={linkedRuns} actions={conversationActionEvents} showProgress={hasActiveAssignmentRun} onOpenReview={() => setView("review")} />
         {(sending || hasUnfinishedChatRun) && activeOperatorRun?.state !== "waiting" && <div className="operator-chat-thinking" role="status" aria-live="polite" data-testid="operator-chat-thinking">
           <PresenceGlyph accent={presence.accent} name={presence.name} avatarVariant={state.agent?.avatarVariant} look={presenceAvatarLook(presence)} />
@@ -7484,6 +7480,7 @@ function OperatorChatView({ state, mutate, refreshState, operationalHealth, setV
         </div>}
         <div ref={endRef} />
         </div>
+        <OperatorChatOperationalNotice health={operationalHealth} onOpenReview={() => setView("review")} />
         {sendError && <p role="alert" className="operator-chat-send-error">{sendError}</p>}
         {attachments.length > 0 && <div className="attachment-list operator-chat-attachments">{attachments.map((attachment, index) => <span key={`${attachment.name}-${index}`}>{attachment.name}<button type="button" aria-label={`Remove ${attachment.name}`} onClick={() => setAttachments((items) => items.filter((_, itemIndex) => itemIndex !== index))}><X size={11} /></button></span>)}</div>}
         <form className="chat-composer operator-chat-composer" onSubmit={send}>

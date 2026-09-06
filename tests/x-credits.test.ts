@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { xCreditsAlertAppliesToView, xCreditsBillingUrl, xCreditsExhausted } from "@/lib/x-credits";
+import { isXCreditsError, xCreditsAlertAppliesToView, xCreditsBillingUrl, xCreditsExhausted } from "@/lib/x-credits";
 
 describe("X credit alert helpers", () => {
   it("detects persisted X credit exhaustion without matching unrelated failures", () => {
@@ -21,5 +21,10 @@ describe("X credit alert helpers", () => {
     expect(xCreditsAlertAppliesToView("teach")).toBe(false);
     expect(xCreditsAlertAppliesToView("rehearsal")).toBe(false);
     expect(xCreditsAlertAppliesToView("playground")).toBe(false);
+  });
+
+  it("recognizes the health summary used for exhausted X API credits", () => {
+    expect(isXCreditsError("X API credits are exhausted. The verified Chrome Bridge remains available for continuity.")).toBe(true);
+    expect(isXCreditsError("A public delivery decision needs you.")).toBe(false);
   });
 });

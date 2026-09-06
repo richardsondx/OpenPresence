@@ -1,6 +1,6 @@
 import type { NativeChannelConnection, View } from "./types";
 
-export const X_CREDITS_PATTERN = /no api credits|credits depleted|credit balance|credits remaining|billing and usage|quota exhausted/i;
+export const X_CREDITS_PATTERN = /no api credits|api credits(?: are)? exhausted|credits depleted|credit balance|credits remaining|billing and usage|quota exhausted/i;
 
 export const X_API_CONSOLE_URL = "https://console.x.com/";
 
